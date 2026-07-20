@@ -1518,38 +1518,45 @@ async function loadRoom(num: number): Promise<void> {
   endShowmode(); // a room change ends any KUFRIK demonstration
   forceRoomRedraw = true; // repaint the first frame of the new room
   roomLoading = true; // hide the stale previous room until the new one is built
-  const nnn = String(num).padStart(3, '0');
-  const [ffrRes, fftRes, ffsRes] = await Promise.all([
-    fetch(ffrUrl(num)),
-    fetch(`/data/Title/${nnn}.fft`),
-    fetch(`/data/Sound/${nnn}.ffs`),
-  ]);
-  if (!ffrRes.ok) throw new Error(`failed to load room ${num}: ${ffrRes.status}`);
-  ffr = parseFfr(new Uint8Array(await ffrRes.arrayBuffer()));
-  // WIN "Favorites" palette gag (URoom.pas:1312-1355): swap the pink placeholder colours
-  // for the Windows system theme, so the fake windows look like a real desktop.
-  if (ROOMS[num - 1]?.jmeno === 'WIN') {
-    ffr = { ...ffr, palette: applyWinDesktopPalette(ffr.palette) };
+  try {
+    const nnn = String(num).padStart(3, '0');
+    const [ffrRes, fftRes, ffsRes] = await Promise.all([
+      fetch(ffrUrl(num)),
+      fetch(`/data/Title/${nnn}.fft`),
+      fetch(`/data/Sound/${nnn}.ffs`),
+    ]);
+    if (!ffrRes.ok) throw new Error(`failed to load room ${num}: ${ffrRes.status}`);
+    ffr = parseFfr(new Uint8Array(await ffrRes.arrayBuffer()));
+    // WIN "Favorites" palette gag (URoom.pas:1312-1355): swap the pink placeholder colours
+    // for the Windows system theme, so the fake windows look like a real desktop.
+    if (ROOMS[num - 1]?.jmeno === 'WIN') {
+      ffr = { ...ffr, palette: applyWinDesktopPalette(ffr.palette) };
+    }
+    const fftBytes = fftRes.ok ? new Uint8Array(await fftRes.arrayBuffer()) : new Uint8Array(4);
+    fftEntries = fftRes.ok ? parseFft(fftBytes) : [];
+    if (fftRes.ok && ffsRes.ok) audio.setRoom(fftBytes, new Uint8Array(await ffsRes.arrayBuffer()));
+    pokus = 1; // fresh attempt on entering a room
+    buildRoom();
+    // Enhanced background art for this room (async; draw() holds the previous
+    // frame until it lands, so the room never flashes classic first).
+    curNum = num;
+    enhancedArt = null;
+    enhancedObjects = [];
+    enhancedPending = graphics === 'enhanced';
+    void ensureEnhancedArt(num);
+    // Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it.
+    const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
+    if (music) void audio.playMusic(music.name, `/data/Music/${music.name}.wav`, music.loopSample);
+    else audio.stopMusic();
+  } finally {
+    // Always drop the guard, even if a fetch/parse threw: on error we fall back to
+    // the pre-existing behaviour (the previous room stays shown) rather than leaving
+    // the stage wedged black with no recovery. On success it runs once the room is
+    // built, so the next frame paints the new room.
+    roomLoading = false;
+    forceRoomRedraw = true;
+    wake();
   }
-  const fftBytes = fftRes.ok ? new Uint8Array(await fftRes.arrayBuffer()) : new Uint8Array(4);
-  fftEntries = fftRes.ok ? parseFft(fftBytes) : [];
-  if (fftRes.ok && ffsRes.ok) audio.setRoom(fftBytes, new Uint8Array(await ffsRes.arrayBuffer()));
-  pokus = 1; // fresh attempt on entering a room
-  buildRoom();
-  roomLoading = false; // the new room is built — resume painting it
-  forceRoomRedraw = true; // paint the freshly-built room on the next frame
-  wake();
-  // Enhanced background art for this room (async; draw() holds the previous
-  // frame until it lands, so the room never flashes classic first).
-  curNum = num;
-  enhancedArt = null;
-  enhancedObjects = [];
-  enhancedPending = graphics === 'enhanced';
-  void ensureEnhancedArt(num);
-  // Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it.
-  const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
-  if (music) void audio.playMusic(music.name, `/data/Music/${music.name}.wav`, music.loopSample);
-  else audio.stopMusic();
 }
 
 /** Make a fish "talk": show the next subtitle of its colour code (M/V) and play its voice. */
