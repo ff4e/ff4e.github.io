@@ -424,14 +424,18 @@ let legImageDrawn = false;
 // case → dismiss goes to the map).
 let legImagePending: { room: number; replay?: string } | null = null;
 let mapRevealStart = 0; // wall-clock time the map reveal animation began (Depth = -3)
+
+/** Current localStorage save-data layout version (ff.schema). Bump when the shape
+ *  of any persisted `ff.*` key changes, and add a migration step in migrateSaves().
+ *  Declared before migrateSaves() runs: the call below reads SAVE_SCHEMA, so the
+ *  const must be initialized first (a later declaration would be in its temporal
+ *  dead zone → a swallowed ReferenceError that silently skips the migration). */
+const SAVE_SCHEMA = 1;
+
 migrateSaves();
 const solved = loadSet('ff.solved'); // set of solved (1-based) room numbers, persisted
 const cheated = loadSet('ff.cheated'); // rooms completed via the cheat (shown as kCheat)
 let cheatBuf = ''; // rolling buffer of typed keys, for cheat-string detection
-
-/** Current localStorage save-data layout version (ff.schema). Bump when the shape
- *  of any persisted `ff.*` key changes, and add a migration step in migrateSaves(). */
-const SAVE_SCHEMA = 1;
 
 /**
  * Version + migrate the persisted save data so a future layout change never strands

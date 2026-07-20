@@ -8,13 +8,14 @@
  */
 import { chromium } from 'playwright';
 const DIR = { up: 1, down: 2, left: 3, right: 4 };
+const PORT = process.env.FF_UI_PORT ?? '5173'; // run-ui-tests.mjs spawns the server on FF_UI_PORT (5273)
 const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 const p = await b.newPage({ viewport: { width: 1600, height: 620 } });
 const errs = [];
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 await p.addInitScript(() => { try { localStorage.setItem('ff.devEnabled', '1'); } catch {} }); // enable dev pane (room dropdown)
-await p.goto('http://127.0.0.1:5173/', { waitUntil: 'networkidle' });
+await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
 await p.selectOption('#room', '7'); // UTES
 await p.waitForFunction(() => window.__ff && window.__ff.posHash, { timeout: 5000 });
 await p.evaluate(() => window.__ff.load && localStorage.removeItem('ff.save.7'));

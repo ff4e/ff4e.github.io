@@ -898,6 +898,23 @@ export class GlScreen implements TruecolorTarget {
   }
 
   /**
+   * Like uploadRgba, but skips the (full-texture) re-upload when the exact same
+   * immutable RGBA bitmap is already resident in this texture — same rationale and
+   * identity-keying as uploadIndexCached. Used only for the enhanced (FFNG truecolor)
+   * wall/bg masters, which are parsed once per animation frame and never mutated in
+   * place, so a static wall re-blitted every frame reuses the resident texture while
+   * an animated frame (a different array) re-uploads correctly. Safe because
+   * ffngWallTex/ffngBgTex are sampled-only (never FBO targets). NOT used for the
+   * sprite texture, whose pixels change every frame.
+   */
+  private uploadRgbaCached(tex: WebGLTexture, w: number, h: number, rgba: Uint8Array): void {
+    const prev = this.lastUpload.get(tex);
+    if (prev && prev.pixels === rgba && prev.w === w && prev.h === h) return; // already resident
+    this.uploadRgba(tex, w, h, rgba);
+    this.lastUpload.set(tex, { pixels: rgba, w, h });
+  }
+
+  /**
    * Enhanced (FFNG truecolor) background — GPU counterpart of
    * `RgbaScreen.blit2Rgba`. Structure (index plane, wall-vs-bg + wobble offset)
    * from the classic bitmaps; colour from the FFNG masters. Fullscreen pass.
@@ -917,8 +934,8 @@ export class GlScreen implements TruecolorTarget {
     const u = this.bg2Uni;
     this.uploadIndexCached(this.wallTex, classicWall.w, classicWall.h, classicWall.pixels);
     this.uploadIndexCached(this.bgTex, classicBg.w, classicBg.h, classicBg.pixels);
-    this.uploadRgba(this.ffngWallTex, this.width, this.height, ffngWall);
-    this.uploadRgba(this.ffngBgTex, this.width, this.height, ffngBg);
+    this.uploadRgbaCached(this.ffngWallTex, this.width, this.height, ffngWall);
+    this.uploadRgbaCached(this.ffngBgTex, this.width, this.height, ffngBg);
     gl.useProgram(this.bg2Prog);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.wallTex);
