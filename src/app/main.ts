@@ -1517,6 +1517,7 @@ function drawCutscene(): void {
 async function loadRoom(num: number): Promise<void> {
   endShowmode(); // a room change ends any KUFRIK demonstration
   forceRoomRedraw = true; // repaint the first frame of the new room
+  roomLoading = true; // hide the stale previous room until the new one is built
   const nnn = String(num).padStart(3, '0');
   const [ffrRes, fftRes, ffsRes] = await Promise.all([
     fetch(ffrUrl(num)),
@@ -1535,6 +1536,9 @@ async function loadRoom(num: number): Promise<void> {
   if (fftRes.ok && ffsRes.ok) audio.setRoom(fftBytes, new Uint8Array(await ffsRes.arrayBuffer()));
   pokus = 1; // fresh attempt on entering a room
   buildRoom();
+  roomLoading = false; // the new room is built — resume painting it
+  forceRoomRedraw = true; // paint the freshly-built room on the next frame
+  wake();
   // Enhanced background art for this room (async; draw() holds the previous
   // frame until it lands, so the room never flashes classic first).
   curNum = num;
@@ -3005,6 +3009,13 @@ let acc = 0;
 // resize, fit-mode change, pointer interaction).
 let lastRoomSig = '';
 let forceRoomRedraw = true;
+// True while a newly-entered room's assets are still being fetched (loadRoom is
+// async, unlike the original's synchronous load). The `room`/`ffr` globals still
+// hold the *previous* room until buildRoom() swaps them, so painting the room
+// screen during this window would flash the old room (notably the boot room
+// UTES, loaded at startup) until the new one lands. The draw loop clears the
+// stage to black instead while this is set (see the room-draw branch).
+let roomLoading = false;
 // Idle-loop throttle (perf): when the room is fully idle (saver on, nothing
 // animating), stop the 60fps rAF spin and wake via a timer at the logic rate so
 // the loop's own per-frame overhead (JS + browser scheduling) stops too. Input
@@ -3169,7 +3180,7 @@ function loop(now: number): void {
   // "hold previous frame" (screen==='room' while art loads) is untouched. The
   // cutscene is left out of the hide list because drawCutscene() manages the GL
   // canvas itself (it may present a smooth-upscaled frame there).
-  if (helpOpen || screen !== 'room') glCanvas.style.display = 'none';
+  if (helpOpen || screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
   if (helpOpen) {
     clearSubOverlay();
     drawHelp();
@@ -3195,8 +3206,18 @@ function loop(now: number): void {
   } else if (cutscene) {
     drawCutscene(); // manages the GL canvas + subtitle overlay itself
     perfPaint++;
+  } else if (roomLoading) {
+    // A newly-entered room's assets are still loading (loadRoom is async). Don't
+    // paint the previous room's stale frame held in `room`/`ffr` (e.g. the boot
+    // room UTES) — clear the stage to black until buildRoom() swaps in the real
+    // room and clears roomLoading. The GL overlay is hidden above, so no stale
+    // GPU frame shows through either; the page background is black, so on a fast
+    // (cached) load this is imperceptible.
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    clearSubOverlay();
+    perfPaint++;
   } else {
-    // Render-on-dirty: repaint the room only when its frame actually changes. The
     // signature captures everything that changes on a logic tick (count → wobble/
     // anim/subtitles) plus the render-mode inputs; roomAnimating() forces 60fps
     // while motion is interpolating. forceRoomRedraw covers signature-invisible
