@@ -1,0 +1,21 @@
+640 480 2
+Intro
+help01e.BMP
+Controls 1/2
+help02e.BMP
+ 2/2
+help03e.BMP
+About the Game
+help04e.BMP
+Safe Movement 1/5
+help05e.BMP
+ 2/5
+help06e.BMP
+ 3/5
+help07e.BMP
+ 4/5
+help08e.BMP
+ 5/5
+help09e.BMP
+Altar
+help10e.BMP

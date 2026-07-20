@@ -1,0 +1,1 @@
+{"objects":[{"x":2,"y":4,"type":"item_heavy","frames":["posun-1-tmp.png"],"item":1},{"x":13,"y":4,"type":"item_light","frames":["snehulak_00.png","snehulak_01.png","snehulak_02.png"],"item":2},{"x":10,"y":15,"type":"item_light","frames":["stolekm.png"],"item":3},{"x":15,"y":15,"type":"item_light","frames":["stolekv.png"],"item":4}]}

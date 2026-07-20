@@ -1,0 +1,3 @@
+# Verbatim upstream Fish Fillets game data — preserve exact bytes.
+# These are original binary/data assets; never apply line-ending conversion.
+public/data/** -text

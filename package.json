@@ -1,0 +1,37 @@
+{
+  "name": "fish-fillets-4ever",
+  "version": "1.0.0",
+  "private": true,
+  "license": "GPL-2.0-or-later",
+  "type": "module",
+  "description": "Faithful web port of the 1998 ALTAR Fish Fillets engine, ported line-by-line from the original Delphi source.",
+  "scripts": {
+    "dump-ffr": "tsx tools/dump-ffr.ts",
+    "render-room": "tsx tools/render-room.ts",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:solutions": "vitest run test/solutions.test.ts",
+    "test:ui": "node tools/run-ui-tests.mjs",
+    "test:all": "npm run typecheck && npm run test && npm run test:ui",
+    "test-move": "tsx tools/test-move.ts",
+    "screenshot": "node tools/screenshot.mjs",
+    "test-path": "tsx tools/test-path.ts",
+    "dump-fft": "tsx tools/dump-fft.ts",
+    "render-enhanced": "tsx tools/render-enhanced.ts",
+    "stage-enhanced": "tsx tools/stage-enhanced.ts",
+    "stage-enhanced-objects": "tsx tools/stage-enhanced-objects.ts",
+    "stage-enhanced-fish": "tsx tools/stage-enhanced-fish.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "playwright": "^1.61.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.4.3",
+    "vitest": "^4.1.9"
+  }
+}

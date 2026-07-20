@@ -1,0 +1,9 @@
+node_modules
+out/
+dist/
+*.log
+public/data/Writes/
+public/data/Program/
+public/data/256col/
+.idea/
+.DS_Store

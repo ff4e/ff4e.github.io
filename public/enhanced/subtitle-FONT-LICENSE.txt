@@ -1,0 +1,6 @@
+Subtitle font: subtitle.ttf
+This is GNU FreeFont "FreeSans" (Bold), Copyright (C) 2002, 2003 Free Software
+Foundation, as shipped by Fish Fillets NG (fillets-ng) for its subtitles
+(font/font_subtitle.ttf). Licensed under the GNU GPL v3 with the font exception.
+Bundled here for the enhanced-graphics subtitle renderer.
+Source: https://www.gnu.org/software/freefont/

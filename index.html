@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Fish Fillets 4ever</title>
+    <meta name="description" content="Fish Fillets 4ever — a faithful web port of ALTAR's 1998 puzzle game Fish Fillets." />
+    <style>
+      :root { color-scheme: dark; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        background: #101018;
+        color: #cdd;
+        font: 13px/1.5 system-ui, sans-serif;
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        overflow: hidden;
+      }
+      canvas {
+        image-rendering: pixelated;
+        background: #000;
+        border: 1px solid #333;
+      }
+      /* The game area fills the remaining viewport; the stage box + panel are
+         centered and sized by the layout code (src/app/layout.ts). */
+      .stage {
+        flex: 1 1 auto;
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        overflow: hidden;
+        min-height: 0;
+      }
+      /* Fixed stage box: rooms/map/cutscene are centered inside it, letterboxed. */
+      #stagebox {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        flex: 0 0 auto;
+      }
+      #panel { cursor: pointer; flex: 0 0 auto; }
+      /* Player view = game only. Controls + info bar are dev/tuning chrome, hidden
+         by default and revealed with the `` ` `` hotkey (body.dev). */
+      .controls { display: none; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; padding: 6px 8px; }
+      select { background: #1a1a24; color: #cdd; border: 1px solid #444; padding: 4px 6px; }
+      kbd { background: #222; border: 1px solid #444; border-radius: 3px; padding: 0 4px; }
+      #info { display: none; opacity: 0.8; padding: 4px 8px; text-align: center; }
+      body.dev .controls { display: flex; }
+      body.dev #info { display: block; }
+      .hint { opacity: 0.6; }
+      /* Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen video over
+         the stage, matching the original's full-screen MCI playback. */
+      #intro-layer {
+        position: fixed;
+        inset: 0;
+        z-index: 100;
+        background: #000;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #intro-layer[hidden] { display: none; }
+      #intro-video { max-width: 100vw; max-height: 100vh; }
+      #intro-start {
+        position: absolute;
+        padding: 14px 28px;
+        font: 600 18px/1 system-ui, sans-serif;
+        color: #cdd;
+        background: #1a1a24;
+        border: 1px solid #556;
+        border-radius: 8px;
+        cursor: pointer;
+      }
+      #intro-start:hover { background: #26263a; }
+      #intro-hint {
+        position: absolute;
+        bottom: 18px;
+        opacity: 0.5;
+        font: 12px/1 system-ui, sans-serif;
+        color: #cdd;
+        pointer-events: none;
+      }
+      /* Full-screen overlays (loading / fatal error / onboarding). */
+      .overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 200;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        background: #0b0b12;
+        color: #cdd;
+        text-align: center;
+        padding: 24px;
+      }
+      .overlay[hidden] { display: none; }
+      .overlay h1 { margin: 0; font: 600 26px/1.2 system-ui, sans-serif; letter-spacing: 0.5px; }
+      .overlay p { margin: 0; max-width: 34em; opacity: 0.85; }
+      .spinner {
+        width: 44px; height: 44px; border-radius: 50%;
+        border: 4px solid #2a2a3a; border-top-color: #6cc; animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #loading-msg { opacity: 0.7; font: 13px/1.4 system-ui, sans-serif; min-height: 1.4em; }
+      #loading-credit { opacity: 0.45; font: 11px/1.5 system-ui, sans-serif; max-width: 30em; }
+      #loading-credit a { color: inherit; }
+      .btn {
+        padding: 12px 26px; font: 600 16px/1 system-ui, sans-serif;
+        color: #cdd; background: #1a2a2a; border: 1px solid #3a5a5a; border-radius: 8px; cursor: pointer;
+      }
+      .btn:hover { background: #244; }
+      /* Non-blocking toast (e.g. the software-renderer note). */
+      #webgl-note {
+        position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 150;
+        background: #1a1a28cc; color: #cdd; border: 1px solid #44445a; border-radius: 8px;
+        padding: 8px 14px; font: 12px/1.4 system-ui, sans-serif; display: flex; align-items: center; gap: 12px;
+        backdrop-filter: blur(4px);
+      }
+      #webgl-note[hidden] { display: none; }
+      #webgl-note button { background: none; border: none; color: #8cc; cursor: pointer; font: inherit; }
+      kbd.key { background: #222; border: 1px solid #556; border-radius: 4px; padding: 2px 7px; font: 600 12px/1 ui-monospace, monospace; }
+      /* Dev perf HUD — shown only in dev mode (body.dev, toggled with `). */
+      #perfhud {
+        position: fixed; top: 8px; left: 8px; z-index: 160;
+        background: #0b0b12cc; color: #9fe; border: 1px solid #2a3a3a; border-radius: 6px;
+        padding: 6px 10px; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+        white-space: pre; pointer-events: none; display: none; backdrop-filter: blur(3px);
+      }
+      body.dev #perfhud { display: block; }
+    </style>
+  </head>
+  <body>
+    <div id="perfhud"></div>
+    <!-- Shown immediately (the module is deferred), so the player never sees a blank
+         page while the game assets fetch. Hidden by the app once boot completes. -->
+    <div id="loading" class="overlay">
+      <h1>Fish Fillets 4ever</h1>
+      <div class="spinner"></div>
+      <div id="loading-msg">Loading…</div>
+      <div id="loading-credit">
+        A fan port of ALTAR's 1998 <em>Fish Fillets</em>. Not affiliated with ALTAR interactive.
+      </div>
+    </div>
+    <!-- Fatal boot error (missing/broken assets). Shown by the app on failure. -->
+    <div id="fatal" class="overlay" hidden>
+      <h1>Couldn't load the game</h1>
+      <p id="fatal-msg">Some game files failed to load. Check your connection and try again.</p>
+      <button id="fatal-reload" class="btn" type="button">Reload</button>
+    </div>
+    <!-- Non-blocking note when WebGL2 is unavailable (CPU renderer active). -->
+    <div id="webgl-note" hidden>
+      <span>Running on the software renderer (WebGL unavailable) — the game may run slower.</span>
+      <button id="webgl-note-x" type="button">Dismiss</button>
+    </div>
+    <div id="intro-layer" hidden>
+      <video id="intro-video" playsinline></video>
+      <button id="intro-start" type="button" hidden>▶ Click to start</button>
+      <div id="intro-hint" hidden>click / Esc to skip</div>
+    </div>
+    <div class="controls" id="devbar">
+      <label>Fit <select id="fitmode">
+        <option value="fixed">Fixed (faithful)</option>
+        <optgroup label="Crisp integer (no blur)">
+          <option value="native">Native (auto — largest that fits)</option>
+          <option value="x1">1× (native resolution)</option>
+          <option value="x2">2×</option>
+          <option value="x3">3×</option>
+          <option value="x4">4×</option>
+        </optgroup>
+        <optgroup label="Fit (upscaled to fill)">
+          <option value="small">Fit — small</option>
+          <option value="medium">Fit — medium</option>
+          <option value="large">Fit — large</option>
+          <option value="fill">Fit — fill box</option>
+        </optgroup>
+      </select></label>
+      <label>Renderer <select id="renderer">
+        <option value="webgl">WebGL (GPU)</option>
+        <option value="cpu">CPU</option>
+      </select></label>
+      <label title="Repaint an idle room only when it changes (~12.5fps) instead of 60fps"><input type="checkbox" id="idledirty" checked> Idle-FPS saver</label>
+      <button id="winroom" type="button" title="Genuinely win the current room (also: Shift+W). End-of-leg rooms then show their story page, unlike the solve cheat.">Win room</button>
+      <label>Room <select id="room"></select></label>
+    </div>
+    <div class="stage">
+      <canvas id="screen"></canvas>
+      <canvas id="panel" title="control panel"></canvas>
+    </div>
+    <div id="info"></div>
+    <script type="module" src="/src/app/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+640 480 2
+Úvod
+help01.BMP
+Ovládání 1/2
+help02.BMP
+ 2/2
+help03.BMP
+Principy hry
+help04.BMP
+Bezpeèný pohyb 1/5
+help05.BMP
+ 2/5
+help06.BMP
+ 3/5
+help07.BMP
+ 4/5
+help08.BMP
+ 5/5
+help09.BMP
+Altar
+help10.BMP

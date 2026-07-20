@@ -1,0 +1,62 @@
+# Deploy the public Web build to GitHub Pages.
+#
+# Runs when a version tag (v*) is pushed, and on demand (workflow_dispatch).
+# Builds the Vite site, stages the runtime assets from public/ into dist/ (vite is
+# configured with copyPublicDir:false), then publishes dist/ to GitHub Pages.
+#
+# Requires (set once, by a maintainer):
+#   - Settings → Pages → Build and deployment → Source = "GitHub Actions".
+#   - Optional secret CF_BEACON_TOKEN — the Cloudflare Web Analytics beacon token;
+#     when present it is baked into the build (VITE_CF_BEACON_TOKEN), otherwise the
+#     beacon is simply omitted.
+#
+# Release flow: bump package.json version, commit to main, then tag and push:
+#   git tag v1.0.0 && git push origin v1.0.0
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; newer pushes cancel an in-flight run.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Build
+        run: npm run build
+        env:
+          # Baked in at build time; empty when the secret is unset -> no beacon.
+          VITE_CF_BEACON_TOKEN: ${{ secrets.CF_BEACON_TOKEN }}
+      - name: Stage assets into dist/
+        run: node tools/stage-pages-assets.mjs
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
