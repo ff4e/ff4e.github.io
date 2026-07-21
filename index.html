@@ -78,7 +78,10 @@
       #intro-cover {
         position: absolute;
         inset: 0;
-        background: #000 center 38%/contain no-repeat url('/cover.webp');
+        /* Cap the displayed width so a maximized window doesn't blow the logo
+           up huge; still scales down on narrow screens (min()). auto height
+           preserves the ~4.2:1 aspect. */
+        background: #000 center 38%/min(88vw, 1100px) no-repeat url('/cover.webp');
         pointer-events: none;
       }
       #intro-cover[hidden] { display: none; }

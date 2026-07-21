@@ -44,6 +44,17 @@ await withApp(async ({ p, expect }) => {
     'the cover element uses the generated cover.webp art',
   );
 
+  // Cover size cap (v1.0.10): background-size is min(88vw, 1100px) — earlier it
+  // was `contain`, which scaled the logo up to fill the whole viewport width on a
+  // maximized window. Assert the resolved width never exceeds the 1100px cap nor
+  // the viewport, proving the cap applies (and it's no longer `contain`).
+  const coverSize = await p.evaluate(() => {
+    const w = parseFloat(getComputedStyle(document.getElementById('intro-cover')).backgroundSize);
+    return { w, cap: Math.min(1100, window.innerWidth * 0.88) };
+  });
+  expect(coverSize.w > 0 && coverSize.w <= 1101, `cover width is a capped pixel size, not \`contain\` (got ${coverSize.w}px)`);
+  expect(coverSize.w <= coverSize.cap + 1, `cover width respects the min(88vw, 1100px) cap (got ${coverSize.w}px, cap ${coverSize.cap}px)`);
+
   // Skip while the splash is up abandons the whole intro → the map, and flips the flag.
   await p.evaluate(() => window.__ff.skipIntro());
   await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
