@@ -16,6 +16,8 @@ export interface IntroElements {
   video: HTMLVideoElement;
   /** "Click to start" splash button (first-run audio gate). */
   startBtn: HTMLElement;
+  /** Title cover shown behind the splash; hidden once a movie starts. */
+  cover: HTMLElement;
   /** "click / Esc to skip" hint, shown once playback begins. */
   hint: HTMLElement;
 }
@@ -59,9 +61,11 @@ export class IntroPlayer {
     this.els.layer.hidden = false;
     if (gated) {
       this.els.startBtn.hidden = false;
+      this.els.cover.hidden = false; // show the title cover behind the splash
       this.els.hint.hidden = true;
     } else {
       this.els.startBtn.hidden = true;
+      this.els.cover.hidden = true;
       this.els.hint.hidden = false;
       this.playCurrent();
     }
@@ -71,6 +75,7 @@ export class IntroPlayer {
   private beginPlayback(): void {
     if (!this.gated) return;
     this.els.startBtn.hidden = true;
+    this.els.cover.hidden = true; // the movie takes over from the cover
     this.els.hint.hidden = false;
     this.playCurrent();
   }
@@ -113,6 +118,7 @@ export class IntroPlayer {
     this.els.video.load();
     this.els.layer.hidden = true;
     this.els.startBtn.hidden = true;
+    this.els.cover.hidden = true;
     const cb = this.onDone;
     this.onDone = null;
     cb?.();

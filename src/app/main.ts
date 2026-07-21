@@ -327,6 +327,7 @@ const intro = new IntroPlayer({
   layer: document.getElementById('intro-layer') as HTMLElement,
   video: document.getElementById('intro-video') as HTMLVideoElement,
   startBtn: document.getElementById('intro-start') as HTMLElement,
+  cover: document.getElementById('intro-cover') as HTMLElement,
   hint: document.getElementById('intro-hint') as HTMLElement,
 });
 const LOGO_MOVIE = '/data/Movie/logo.mp4';

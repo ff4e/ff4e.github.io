@@ -14,11 +14,45 @@ await withApp(async ({ p, expect }) => {
   expect(await p.evaluate(() => window.__ff.introPlaying()), 'intro is active on first run');
   expect(await p.evaluate(() => window.__ff.introSeen()) === false, 'introSeen is false before the intro is watched');
 
+  // Intro video sizing (v1.0.3): the <video> must fill the viewport and letterbox
+  // via object-fit:contain. The pre-fix CSS used only max-width/max-height:100v*,
+  // which cap but never upscale, so the video sat at its small intrinsic size.
+  const introLayerHidden = await p.evaluate(() => document.getElementById('intro-layer').hasAttribute('hidden'));
+  expect(!introLayerHidden, 'the intro layer is visible during the first-run intro');
+  const vid = await p.evaluate(() => {
+    const v = document.getElementById('intro-video');
+    return {
+      objectFit: getComputedStyle(v).objectFit,
+      cw: v.clientWidth,
+      ch: v.clientHeight,
+      iw: window.innerWidth,
+      ih: window.innerHeight,
+    };
+  });
+  expect(vid.objectFit === 'contain', `intro video letterboxes with object-fit:contain (got ${vid.objectFit})`);
+  expect(vid.cw >= vid.iw - 2, `intro video fills the viewport width — scaled up, not native size (cw ${vid.cw} vs vw ${vid.iw})`);
+  expect(vid.ch >= vid.ih - 2, `intro video fills the viewport height (ch ${vid.ch} vs vh ${vid.ih})`);
+
+  // Title cover (v1.0.6): while the first-run splash is gated (before the audio
+  // gesture), the FILLETS cover art shows behind the "Click to start" button.
+  expect(
+    await p.evaluate(() => !document.getElementById('intro-cover').hasAttribute('hidden')),
+    'the title cover is visible behind the gated first-run splash',
+  );
+  expect(
+    await p.evaluate(() => getComputedStyle(document.getElementById('intro-cover')).backgroundImage.includes('cover.webp')),
+    'the cover element uses the generated cover.webp art',
+  );
+
   // Skip while the splash is up abandons the whole intro → the map, and flips the flag.
   await p.evaluate(() => window.__ff.skipIntro());
   await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
   expect(await p.evaluate(() => window.__ff.introSeen()) === true, 'introSeen persists after the intro finishes');
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'intro is no longer active on the map');
+  expect(
+    await p.evaluate(() => document.getElementById('intro-cover').hasAttribute('hidden')),
+    'the title cover is hidden once the intro finishes',
+  );
 
   // A reload with introSeen persisted goes straight to the map — no intro.
   await p.reload({ waitUntil: 'networkidle' });
