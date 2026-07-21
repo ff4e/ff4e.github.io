@@ -36,7 +36,7 @@ import tempfile
 from pathlib import Path
 
 import numpy as np
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "public" / "data" / "Menu" / "CredStat1.bmp"
@@ -44,7 +44,8 @@ OUT = ROOT / "public" / "cover.webp"
 
 CROP = (55, 2, 585, 132)   # logo band + margin for feathering, in CredStat1.bmp
 UPSCALE = 4
-OUT_WIDTH = 1800           # final width; height follows the crop aspect
+OUT_WIDTH = 2200           # final width; height follows the crop aspect
+WEBP_QUALITY = 95
 
 
 def smoothstep(t: np.ndarray) -> np.ndarray:
@@ -95,6 +96,16 @@ def boost_contrast(img: Image.Image) -> Image.Image:
     return Image.merge("RGBA", (r, g, b, alpha))
 
 
+def sharpen(img: Image.Image) -> Image.Image:
+    """Unsharp-mask the colour channels to crisp the metallic bevel/line edges
+    (the AI upscale is faithful but a touch soft); alpha is left untouched."""
+    r, g, b, alpha = img.split()
+    rgb = Image.merge("RGB", (r, g, b))
+    rgb = rgb.filter(ImageFilter.UnsharpMask(radius=2.0, percent=80, threshold=2))
+    r, g, b = rgb.split()
+    return Image.merge("RGBA", (r, g, b, alpha))
+
+
 def main() -> None:
     src = Image.open(SRC).convert("RGB").crop(CROP)
     with tempfile.TemporaryDirectory() as td:
@@ -104,12 +115,13 @@ def main() -> None:
         upscale(crop_png, up_png)
         img = feather(Image.open(up_png))
     img = boost_contrast(img)
+    img = sharpen(img)
     img = img.crop(img.getbbox())          # trim transparent margin
     pad = 24
     canvas = Image.new("RGBA", (img.width + 2 * pad, img.height + 2 * pad), (0, 0, 0, 0))
     canvas.alpha_composite(img, (pad, pad))
     h = round(canvas.height * OUT_WIDTH / canvas.width)
-    canvas.resize((OUT_WIDTH, h), Image.LANCZOS).save(OUT, "WEBP", quality=90, method=6)
+    canvas.resize((OUT_WIDTH, h), Image.LANCZOS).save(OUT, "WEBP", quality=WEBP_QUALITY, method=6)
     print(f"wrote {OUT} ({OUT_WIDTH}x{h})")
 
 
