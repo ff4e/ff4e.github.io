@@ -78,12 +78,15 @@
       #intro-cover {
         position: absolute;
         inset: 0;
-        background: #000 center/contain no-repeat url('/cover.webp');
+        background: #000 center 38%/contain no-repeat url('/cover.webp');
         pointer-events: none;
       }
       #intro-cover[hidden] { display: none; }
       #intro-start {
         position: absolute;
+        left: 50%;
+        bottom: 20%;
+        transform: translateX(-50%);
         padding: 14px 28px;
         font: 600 18px/1 system-ui, sans-serif;
         color: #cdd;
