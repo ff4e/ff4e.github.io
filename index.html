@@ -71,8 +71,9 @@
          max-* alone only caps size and never upscales, leaving it tiny. */
       #intro-video { width: 100vw; height: 100vh; object-fit: contain; }
       /* Title cover shown behind the "click to start" splash (first-run gate):
-         the game's own FILLETS logo over the under-water map, built from GPL
-         game art by tools/build-cover.py. Hidden once a movie begins playing.
+         the game's own metallic FILLETS logo (fish emblem + under-water glow),
+         AI-upscaled from the GPL credits art and feathered onto black by
+         tools/build-cover.py. Hidden once a movie begins playing.
          pointer-events:none so a click still reaches the layer (skips to map). */
       #intro-cover {
         position: absolute;
