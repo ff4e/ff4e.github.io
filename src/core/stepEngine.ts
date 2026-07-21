@@ -39,7 +39,7 @@ export interface EngineHooks {
   /** Landing thud (dopad 1 = soft, 2 = steel). */
   onLanding?: (kind: 1 | 2) => void;
   /** Play a cheer/effect sound by name (exit cheer). */
-  playSound?: (name: string) => void;
+  playSound?: (name: string, which?: Which) => void;
   /** A blocked player push (host: KAJUTA1 screen-shove / gspec latch). */
   onBlockedMove?: (which: Which, dir: number) => void;
   /** Win bookkeeping (host: mark solved, record score). `countdown` = auto-return ticks. */
@@ -293,7 +293,7 @@ export class StepEngine {
           },
           this.hooks.random,
         );
-        if (cheer.sound) this.hooks.playSound?.(cheer.sound);
+        if (cheer.sound) this.hooks.playSound?.(cheer.sound, which);
         if (cheer.clearGum && this.script) this.script.zvykacka = false;
         this.exiting = null;
         this.phase = 'idle';

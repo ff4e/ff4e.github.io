@@ -1,10 +1,11 @@
 /**
  * UI test: the ZAVER endgame finale auto-trigger (pustitzaver, USoutez.pas:729 ->
  * av:=9 daRun, UMain.pas:948). Once every registered room (1..70) is genuinely solved,
- * the next return-to-map launches the ZAVER cutscene ("At Home", room 71) instead of
- * the map: after the leg's story page when the completing room is a leg-final, or
- * straight away otherwise. SCORE (room 72) is deliberately never auto-launched — it
- * stays a hidden secret, reachable only via the debug Room picker.
+ * the next return-to-map launches the ZAVER cutscene ("At Home", room 71) — but only when
+ * the completing win is itself a leg-final (depth-15) room, chaining out of that leg's
+ * story page (pustitzaver := (hloubka=15) and (chybi=0)). Winning an ordinary room while
+ * fully solved just returns to the map. SCORE (room 72) is deliberately never auto-launched
+ * — it stays a hidden secret, reachable only via the debug Room picker.
  */
 import { withApp } from './ui-lib.mjs';
 
@@ -61,17 +62,24 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'dismissing the final leg page enters a room');
   expect(await p.evaluate(() => window.__ff.zaverMode()), 'the ZAVER finale (room 71) auto-launches after the last leg page');
 
-  // --- Positive (non-leg-final completes the game): winning an ordinary room when the
-  //     game is already fully solved goes STRAIGHT to ZAVER, with no leg story page. ---
+  // --- Negative (non-leg-final while fully solved): winning an ordinary room when the
+  //     game is already fully solved must NOT launch the finale (pustitzaver requires
+  //     hloubka=15, USoutez.pas:729) — it just returns to the map, no ZAVER, no leg page. ---
   await p.evaluate(() => window.__ff.showMap());
   let sawLegImage = false;
   await enterAndWin(7); // Fish House room 7 (depth < 15), all 70 already solved
-  // Poll briefly: we should reach ZAVER without ever passing through a leg image.
-  await p.waitForFunction(() => window.__ff.zaverMode() || window.__ff.screen() === 'legimage', { timeout: 6000 });
+  // Give the win countdown time to return; it should reach the MAP, never ZAVER/legimage.
+  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 6000 }).catch(() => {});
   if ((await p.evaluate(() => window.__ff.screen())) === 'legimage') sawLegImage = true;
-  await p.waitForFunction(() => window.__ff.zaverMode(), { timeout: 6000 });
-  expect(!sawLegImage, 'a non-leg-final completion goes straight to ZAVER (no story page)');
-  expect(await p.evaluate(() => window.__ff.zaverMode()), 'a non-leg-final completion still launches the ZAVER finale');
+  expect(!sawLegImage, 'a non-leg-final completion shows no leg story page');
+  expect(
+    (await p.evaluate(() => window.__ff.zaverMode())) === false,
+    'a non-leg-final completion does NOT launch the ZAVER finale (needs a depth-15 leg-final)',
+  );
+  expect(
+    (await p.evaluate(() => window.__ff.screen())) === 'map',
+    'a non-leg-final completion returns to the map even when the game is fully solved',
+  );
 
   // --- SCORE (room 72) stays a hidden secret: the completion never launches it (the
   //     finale is ZAVER/zavermode, not SCORE), yet it remains reachable via debug. ---

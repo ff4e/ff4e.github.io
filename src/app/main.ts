@@ -1106,7 +1106,11 @@ function buildRoom(carryPole = false): void {
       random: (n) => Math.floor(Math.random() * n),
       onLanding: (kind) =>
         audio.playRandom(kind === 1 ? ['sp-zuch1', 'sp-zuch2'] : ['sp-ocel1', 'sp-ocel2'], EFFECT_VOL),
-      playSound: (name) => audio.play(name),
+      // Exit cheer (jo-m/jo-v): play it as a proper voice line on the exiting fish's
+      // mluvi channel — tracked (so the win auto-return can wait for `talking()` to end),
+      // lip-synced, and subtitled — matching the original's talk(...,mluvi_mala/velka)
+      // (URoom.pas:24393-24410). Without a fish, fall back to a plain effect play.
+      playSound: (name, which) => (which ? void scriptTalk(name, MLUVI_PRIOR[which]) : audio.play(name)),
       onBlockedMove: (which, dir) => wallShove(which, dir),
       onWin: (countdown) => onWinBookkeeping(countdown),
       onReturnToMap: () => returnFromRoom(),
@@ -2130,16 +2134,20 @@ function allRegisteredSolved(): boolean {
  * map. Cheat-solves bypass this (they call showMap directly), matching the intent
  * that only a genuine finish reveals the page.
  *
- * If this win completes the game (all 70 registered rooms solved, pustitzaver /
- * USoutez.pas:729 → av:=9 daRun, UMain.pas:948), the ZAVER finale auto-launches: after
- * the final leg's story page when the completing room is a leg-final, otherwise straight
- * away. SCORE (room 72) is deliberately never auto-launched — it stays a hidden secret.
+ * The ZAVER finale auto-launches only when this win is of a *leg-final* room (depth 15)
+ * AND it completes the game — pustitzaver := (hloubka=15) and (chybi=0), USoutez.pas:729
+ * → av:=9 daRun, UMain.pas:948. So it always chains out of that final leg's story page;
+ * winning an ordinary (non-leg-final) room when everything is already solved just returns
+ * to the map. SCORE (room 72) is deliberately never auto-launched — it stays a hidden secret.
  */
 function returnFromRoom(): void {
   const roomNum = Number(select.value);
-  // pustitzaver: only a genuine win of a *registered* room can complete the game (so the
-  // ZAVER win itself — room 71, unregistered — can never re-trigger the finale).
-  const finale = REGISTERED_ROOMS.includes(roomNum) && allRegisteredSolved();
+  // pustitzaver: hloubka=15 and chybi=0 — the finale fires only when a genuine win of a
+  // *registered leg-final* room (depth 15) leaves no registered room unsolved. A non-leg-
+  // final win (even with everything solved) must NOT launch it; nor can the ZAVER win
+  // itself (room 71, unregistered, depth −1) re-trigger the finale.
+  const finale =
+    REGISTERED_ROOMS.includes(roomNum) && depthOfRoom(roomNum) === 15 && allRegisteredSolved();
   if (solved.has(roomNum) && depthOfRoom(roomNum) === 15) {
     const leg = branchOfRoom(roomNum);
     if (leg >= 1 && leg <= 8) {
@@ -2882,8 +2890,16 @@ function step(): boolean {
     return false;
   }
   // After a win, hold on the solved room while the cheer plays, then auto-return
-  // to the map (countdown:=30, URoom.pas:24341/24349).
+  // to the map (countdown:=30, URoom.pas:24341/24349). Enhancement over the original's
+  // fixed timer (which would cut a long line): when the countdown lapses, if the exit
+  // line is still being said — the fish's voice still sounding or its subtitle still
+  // on screen — hold at 1 until it finishes, so the map transition never truncates it.
   if (engine.winCountdown > 0) {
+    const stillSpeaking =
+      audio.talking(MLUVI_PRIOR.little) ||
+      audio.talking(MLUVI_PRIOR.big) ||
+      (subsOn() && (subs?.active ?? false));
+    if (engine.winCountdown === 1 && stillSpeaking) return false; // hold — line still playing
     engine.winCountdown--;
     if (engine.winCountdown === 0) {
       returnFromRoom();
@@ -4096,6 +4112,9 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   subsActive: () => subs?.active ?? false,
   /** Test hook: inject a subtitle directly (deterministic, no room dialogue needed). */
   pushSubtitle: (text: string, code: string) => subs?.newSubtitle(text, code, count),
+  /** Test hooks for the win auto-return hold: read the countdown / clear subtitles. */
+  winCountdown: () => engine?.winCountdown ?? 0,
+  clearSubtitles: () => subs?.clear(),
   audioHas: (name: string) => audio.has(name),  playSound: (name: string) => audio.play(name),
   script: () => (activeScript ? { pokus: activeScript.s.pokus, dialog: activeScript.s.isDialog() } : null),
   itemState: (i: number) => {
