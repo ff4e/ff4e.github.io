@@ -208,6 +208,11 @@
         <option value="webgl">WebGL (GPU)</option>
         <option value="cpu">CPU</option>
       </select></label>
+      <label title="Graphics-quality level (also cycled with the E hotkey). classic = faithful Delphi; enhanced = FFNG truecolor; AI-upscaled = additive AI tier, falls back to enhanced where no AI asset exists.">Graphics <select id="graphics">
+        <option value="classic">Classic (Delphi)</option>
+        <option value="enhanced">Enhanced (FFNG)</option>
+        <option value="ai">AI-upscaled</option>
+      </select></label>
       <label title="Repaint an idle room only when it changes (~12.5fps) instead of 60fps"><input type="checkbox" id="idledirty" checked> Idle-FPS saver</label>
       <button id="winroom" type="button" title="Genuinely win the current room (also: Shift+W). End-of-leg rooms then show their story page, unlike the solve cheat.">Win room</button>
       <label>Room <select id="room"></select></label>

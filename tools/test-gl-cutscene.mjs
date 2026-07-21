@@ -80,11 +80,15 @@ else {
 await p.keyboard.press('r'); // back to webgl
 await p.waitForTimeout(150);
 
-// E -> classic: smooth GPU path needs enhanced, so classic also uses the 2D
-// fallback (GL canvas hidden) even in webgl mode.
+// E cycles classic → enhanced → ai → classic. The smooth GPU path needs the
+// enhanced art source (enhanced OR ai), so only the classic level uses the 2D
+// fallback (GL canvas hidden) even in webgl mode. From enhanced, two E presses
+// (enhanced → ai → classic) land on classic.
 await p.keyboard.press('e');
 await p.waitForTimeout(150);
-if ((await p.evaluate(() => window.__ff.graphics())) !== 'classic') fail('E did not switch graphics to classic during cutscene');
+await p.keyboard.press('e');
+await p.waitForTimeout(150);
+if ((await p.evaluate(() => window.__ff.graphics())) !== 'classic') fail('E did not cycle graphics to classic during cutscene');
 else {
   r = await rects();
   if (r.glDisp !== 'none') fail(`classic+webgl cutscene: #screen-gl display=${r.glDisp} (expected none — 2D fallback)`);

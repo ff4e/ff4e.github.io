@@ -243,6 +243,7 @@ const panelCtx = panelCanvas.getContext('2d')!;
 const select = document.getElementById('room') as HTMLSelectElement;
 const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null;
 const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
+const graphicsSelect = document.getElementById('graphics') as HTMLSelectElement | null;
 const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;
 const winRoomBtn = document.getElementById('winroom') as HTMLButtonElement | null;
 const perfHud = document.getElementById('perfhud') as HTMLElement | null;
@@ -338,6 +339,31 @@ const LOGO_MOVIE = '/data/Movie/logo.mp4';
 // when FFNG isn't available); if it's missing entirely, the IntroPlayer's load-
 // error handler simply skips to the map.
 const INTRO_MOVIE = '/data/Movie/intro_clean.mp4';
+// AI-upscaled movie variants (Phase A), used ONLY under the `ai` graphics level and
+// ONLY when the file actually exists (probed at boot) — otherwise the AI level
+// falls back to the faithful/clean encode above. Produced by tools/build-movies-ai.mjs.
+const LOGO_MOVIE_AI = '/data/Movie/logo_ai.mp4';
+const INTRO_MOVIE_AI = '/data/Movie/intro_ai.mp4';
+// Which AI movies are present (HEAD-probed at boot; missing ⇒ false ⇒ fall back).
+const aiMovieAvailable: Record<string, boolean> = {};
+async function probeAiMovies(): Promise<void> {
+  await Promise.all(
+    [LOGO_MOVIE_AI, INTRO_MOVIE_AI].map(async (u) => {
+      try {
+        aiMovieAvailable[u] = (await fetch(u, { method: 'HEAD' })).ok;
+      } catch {
+        aiMovieAvailable[u] = false;
+      }
+    }),
+  );
+}
+void probeAiMovies();
+/** Resolve the logo/intro movie URL for the active level: the AI upscale when the
+ * `ai` level is active AND the upscaled file exists, else the faithful/clean encode. */
+const logoMovie = (): string =>
+  graphics === 'ai' && aiMovieAvailable[LOGO_MOVIE_AI] ? LOGO_MOVIE_AI : LOGO_MOVIE;
+const introMovie = (): string =>
+  graphics === 'ai' && aiMovieAvailable[INTRO_MOVIE_AI] ? INTRO_MOVIE_AI : INTRO_MOVIE;
 
 /** Size the subtitle overlay to cover the game canvas at device resolution. */
 function syncSubOverlaySized(cssW: number, cssH: number): void {
@@ -632,12 +658,33 @@ function applyVolumeSettings(): void {
   }
 }
 
-// Enhanced (truecolor) graphics: render eligible rooms through the single
-// compositor with the FFNG fillets-ng-data masters as the art source (background
-// + object/fish sprites); index-effect rooms (mirror/darkness/ZX/bonus) stay
-// classic (see src/render/enhancedArtSource.ts). Persisted; defaults to enhanced. Toggle with E.
-let graphics: 'classic' | 'enhanced' =
-  (localStorage.getItem('ff.graphics') as 'classic' | 'enhanced' | null) ?? 'enhanced';
+// Graphics-quality level (the art source). Three tiers, persisted; defaults to
+// enhanced. Cycle with E (classic → enhanced → ai → classic) or the dev-bar combobox:
+//  - classic:  the faithful Delphi 256-colour look (FFR bitmaps + palette).
+//  - enhanced: render eligible rooms through the single compositor with the FFNG
+//    fillets-ng-data masters as the art source (background + object/fish sprites);
+//    index-effect rooms (mirror/darkness/ZX/bonus) stay classic (see
+//    src/render/enhancedArtSource.ts).
+//  - ai:       AI-upscaled tier — purely additive on top of enhanced. Where an AI
+//    asset exists (video/logo first, then world map) it is used; everywhere else it
+//    FALLS BACK to enhanced (and thence classic). In-room maps/fishes are a deferred
+//    decision, so `ai` currently delegates ALL in-room art to the enhanced source —
+//    hence enhancedArtActive() (below) treats ai like enhanced for the compositor.
+type GraphicsLevel = 'classic' | 'enhanced' | 'ai';
+let graphics: GraphicsLevel =
+  ((): GraphicsLevel => {
+    const v = localStorage.getItem('ff.graphics');
+    return v === 'classic' || v === 'enhanced' || v === 'ai' ? v : 'enhanced';
+  })();
+
+/**
+ * True when the active level uses the enhanced (truecolor) art source. The AI
+ * level delegates all in-room art to enhanced (rooms/fishes are a deferred Phase-C
+ * decision), so it counts as enhanced-art-active. This is exactly `graphics !==
+ * 'classic'`, so classic (false) and enhanced (true) keep their prior behaviour
+ * byte-for-byte; only the new `ai` level newly returns true.
+ */
+const enhancedArtActive = (): boolean => graphics !== 'classic';
 // Render backend (P3): the CPU compositor (oracle, fallback) or the WebGL2 GPU
 // compositor. Orthogonal to `graphics` (the art source) — both art sources
 // composite on either backend, and every room (incl. gspec=42 ZX) is on the GPU.
@@ -690,6 +737,27 @@ function setRenderOnDirty(v: boolean): void {
   forceRoomRedraw = true; // repaint immediately when turning the saver off
   wake();
 }
+
+// The graphics-level cycle order for the E hotkey (classic → enhanced → ai → …).
+const GRAPHICS_LEVELS: readonly GraphicsLevel[] = ['classic', 'enhanced', 'ai'];
+
+/**
+ * Set the graphics-quality level (classic/enhanced/ai). Single entry point shared
+ * by the E hotkey, the dev-bar combobox, and the ff.setGraphics hook: persists,
+ * ensures the enhanced art for the current room is loaded whenever the new level
+ * uses it (enhanced or ai), keeps the dev-bar select in sync, and forces a room
+ * repaint so the switch shows immediately under render-on-dirty.
+ */
+function setGraphics(level: GraphicsLevel): void {
+  graphics = level;
+  localStorage.setItem('ff.graphics', graphics);
+  if (enhancedArtActive() && curNum) void ensureEnhancedArt(curNum);
+  if (graphicsSelect) graphicsSelect.value = graphics;
+  forceRoomRedraw = true;
+  wake();
+  setInfo();
+}
+
 // Set once if the GPU backend throws, disabling it for the session (the CPU
 // compositor takes over) so a driver/context failure can never wedge rendering.
 let glFailed = false;
@@ -1455,13 +1523,13 @@ function drawCutscene(): void {
   // Enhanced: render the KD-* captions in the bundled Mulish font on the vector
   // overlay (like room subtitles). Classic: keep the faithful baked bitmap font
   // composited into the 256-colour frame.
-  const useVec = graphics === 'enhanced' && cutsceneSubs !== null && subFontReady;
+  const useVec = enhancedArtActive() && cutsceneSubs !== null && subFontReady;
   const frame = new IndexedScreen(w, h);
   frame.px.set(cutscene.pixels);
   if (!useVec) cutsceneSubs?.draw(frame, count); // baked bitmap captions
   // Enhanced upgrade: bilinear-upscale the 256-colour frame on the GPU so it isn't
   // blocky on hi-DPI displays. Classic stays crisp (faithful) via the 2D path.
-  const smoothGpu = graphics === 'enhanced' && renderer === 'webgl' && !glFailed;
+  const smoothGpu = enhancedArtActive() && renderer === 'webgl' && !glFailed;
   // #screen is the layout anchor of the wrap even when the GL canvas covers it, so
   // it must carry the cutscene's CSS box (native backing, SCALE-sized on screen —
   // the same box the KUFRIK room used, so entering/leaving the cutscene doesn't
@@ -1547,7 +1615,7 @@ async function loadRoom(num: number): Promise<void> {
     curNum = num;
     enhancedArt = null;
     enhancedObjects = [];
-    enhancedPending = graphics === 'enhanced';
+    enhancedPending = enhancedArtActive();
     void ensureEnhancedArt(num);
     // Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it.
     const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
@@ -2251,7 +2319,7 @@ function playIntroMovies(urls: string[], gated: boolean, onFinish: () => void): 
 
 /** The first-run intro (logo → intro), after which the flag flips so it won't auto-play again. */
 function playFirstRunIntro(): void {
-  playIntroMovies([LOGO_MOVIE, INTRO_MOVIE], true, () => {
+  playIntroMovies([logoMovie(), introMovie()], true, () => {
     settings.introSeen = true;
     saveSettings(settings);
     showMap();
@@ -2260,7 +2328,7 @@ function playFirstRunIntro(): void {
 
 /** Replay just the intro movie from the map's top-left corner (daIntro plays FilmAvi only). */
 function replayIntro(): void {
-  playIntroMovies([INTRO_MOVIE], false, () => showMap());
+  playIntroMovies([introMovie()], false, () => showMap());
 }
 
 /**
@@ -2728,7 +2796,7 @@ function draw(): void {
   // previous frame rather than painting the classic look (which would flash
   // before popping to enhanced). Cleared as soon as the art resolves (or is
   // known missing), so rooms without masters still fall back to classic.
-  if (graphics === 'enhanced' && enhancedPending) return;
+  if (enhancedArtActive() && enhancedPending) return;
   const phase = engine?.phase ?? 'idle';
   const animFrame = engine?.animFrame ?? 0;
   const exitFrames = engine?.exitFrames ?? 8;
@@ -2761,12 +2829,12 @@ function draw(): void {
   // Subtitles: in enhanced mode with the vector font ready, render them on the
   // high-res overlay (crisp, above the pixel frame) instead of baking them into
   // the frame. Otherwise (classic, or font not yet loaded) bake them in.
-  const useVecSubs = graphics === 'enhanced' && subs !== null && subFontReady;
+  const useVecSubs = enhancedArtActive() && subs !== null && subFontReady;
   // One compositor, one pass. The art source is the ONLY switch between the
   // classic (palette) and enhanced (FFNG truecolor) looks; the enhanced source
   // itself falls back to classic per element where no truecolor art exists
   // (darkness/ZX/bonus, the mirror glass, skeletons, un-mapped frames).
-  const art = graphics === 'enhanced' ? enhancedArtFor(room) : classicArtFor(room);
+  const art = enhancedArtActive() ? enhancedArtFor(room) : classicArtFor(room);
   const opts = { count, slide, fishAnim, hooks: hooks.snapshot };
   const { w: sw, h: sh } = roomScreenSize(room);
   const cs = contentScaleFor(sw, sh);
@@ -3189,7 +3257,7 @@ function loop(now: number): void {
   // was never shown — keeping logic in sync with the first visible frame (as classic
   // mode inherently is). acc keeps accumulating but the backlog guard above drops it,
   // so there's no fast-forward catch-up when the hold releases.
-  const holding = screen !== 'map' && !cutscene && graphics === 'enhanced' && enhancedPending;
+  const holding = screen !== 'map' && !cutscene && enhancedArtActive() && enhancedPending;
   while (!holding && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
     acc -= LOGIC_MS;
     steps++;
@@ -3352,11 +3420,10 @@ window.addEventListener('keydown', (e) => {
       return;
     }
     if (e.code === 'KeyE') {
-      // Toggle classic <-> enhanced (truecolor) graphics; persist + ensure art.
-      graphics = graphics === 'enhanced' ? 'classic' : 'enhanced';
-      localStorage.setItem('ff.graphics', graphics);
-      if (graphics === 'enhanced' && curNum) void ensureEnhancedArt(curNum);
-      setInfo();
+      // Cycle the graphics level classic → enhanced → ai → classic (also the
+      // dev-bar Graphics combobox). setGraphics persists + syncs the select.
+      const i = GRAPHICS_LEVELS.indexOf(graphics);
+      setGraphics(GRAPHICS_LEVELS[(i + 1) % GRAPHICS_LEVELS.length]!);
       return;
     }
     if (e.code === 'KeyR') {
@@ -3777,6 +3844,15 @@ if (rendererSelect) {
   rendererSelect.value = renderer;
   rendererSelect.addEventListener('change', () => setRenderer(rendererSelect.value === 'cpu' ? 'cpu' : 'webgl'));
 }
+// Dev-bar graphics-level combobox. Mirrors the E hotkey (setGraphics keeps the
+// select value in sync when E cycles), and is the primary point-and-click switch.
+if (graphicsSelect) {
+  graphicsSelect.value = graphics;
+  graphicsSelect.addEventListener('change', () => {
+    const v = graphicsSelect.value;
+    setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
+  });
+}
 if (idleDirtyToggle) {
   idleDirtyToggle.checked = renderOnDirty;
   idleDirtyToggle.addEventListener('change', () => setRenderOnDirty(idleDirtyToggle.checked));
@@ -4000,11 +4076,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   heads: () => ({ little: fishFrameFor('little').headFrame, big: fishFrameFor('big').headFrame }),
   music: () => audio.currentMusic,
   graphics: () => graphics,
-  setGraphics: (m: 'classic' | 'enhanced') => {
-    graphics = m;
-    localStorage.setItem('ff.graphics', graphics);
-    if (graphics === 'enhanced' && curNum) void ensureEnhancedArt(curNum);
-  },
+  setGraphics: (m: GraphicsLevel) => setGraphics(m),
   renderer: () => renderer,
   setRenderer: (m: 'cpu' | 'webgl') => {
     renderer = m;
@@ -4032,7 +4104,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   }),
   enhancedLoaded: () => enhancedArt !== null,
   enhancedActive: () =>
-    graphics === 'enhanced' &&
+    enhancedArtActive() &&
     enhancedArt !== null &&
     room !== null &&
     room.gspec === 0 &&
@@ -4255,7 +4327,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   // per frame so real GPU execution — not just async command submission — counts.
   benchRender: (mode: 'cpu' | 'webgl', frames = 120, warmup = 20) => {
     if (!room) return null;
-    const art = graphics === 'enhanced' ? enhancedArtFor(room) : classicArtFor(room);
+    const art = enhancedArtActive() ? enhancedArtFor(room) : classicArtFor(room);
     const { w: sw, h: sh } = roomScreenSize(room);
     const opts = { count };
     const samples: number[] = [];
