@@ -12,10 +12,23 @@ import { withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
 
+  // forceExit is a no-op unless the engine is idle (main.ts:4338), so a room still
+  // settling on entry would silently swallow the exit and hang the win. Wait for idle
+  // before each forced exit, and re-issue if the first attempt didn't take.
+  const exitFish = async (which) => {
+    await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 6000 });
+    await p.evaluate((w) => window.__ff.forceExit(w, 3), which);
+    await p
+      .waitForFunction((w) => window.__ff.state().venku[w], which, { timeout: 4000 })
+      .catch(async () => {
+        await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 6000 });
+        await p.evaluate((w) => window.__ff.forceExit(w, 3), which);
+        await p.waitForFunction((w) => window.__ff.state().venku[w], which, { timeout: 6000 });
+      });
+  };
   const winCurrentRoom = async () => {
-    await p.evaluate(() => window.__ff.forceExit('little', 3));
-    await p.waitForFunction(() => window.__ff.state().venku.little, { timeout: 5000 });
-    await p.evaluate(() => window.__ff.forceExit('big', 3));
+    await exitFish('little');
+    await exitFish('big');
     await p.waitForFunction(() => window.__ff.state().won, { timeout: 5000 });
   };
   const enterAndWin = async (room) => {

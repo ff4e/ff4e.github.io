@@ -65,4 +65,27 @@ await withApp(async ({ p, expect }) => {
   const v = await p.evaluate(() => window.__ff.volumes());
   expect(v.effect === 0 && v.voice === 7 && v.music === 12, `volumes persisted (${JSON.stringify(v)})`);
   expect((await p.evaluate(() => window.__ff.subtitleMode())) === 'en', 'subtitle mode persisted');
+
+  // On the world map, the Options overlay floats centred over the map. Opening Help
+  // from it must CLOSE the Options overlay first (it would otherwise render on top of
+  // the full-screen help pages, hiding them). Faithful analogue of the original where
+  // FHelp shows as its own top-level window over the panel.
+  await p.evaluate(() => window.__ff.showMap());
+  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.evaluate(() => window.__ff.openMapOptions());
+  expect((await p.evaluate(() => window.__ff.mapOverlay())) === 'options', 'map Options overlay opens');
+  expect((await p.evaluate(() => window.__ff.optionsOpen())) === true, 'panel is on the options face over the map');
+
+  await p.evaluate(() => window.__ff.panelAction(23)); // help button (oblhelp)
+  expect((await p.evaluate(() => window.__ff.helpOpen())) === true, 'help overlay opens from the map Options panel');
+  expect(
+    (await p.evaluate(() => window.__ff.mapOverlay())) === 'none',
+    'opening Help closes the map Options overlay (no longer drawn over Help)',
+  );
+  await p.keyboard.press('Escape');
+  expect((await p.evaluate(() => window.__ff.helpOpen())) === false, 'a key closes help');
+  expect(
+    (await p.evaluate(() => window.__ff.screen())) === 'map',
+    'closing Help returns to the plain map (Options was closed)',
+  );
 });

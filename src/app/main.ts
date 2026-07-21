@@ -1909,6 +1909,10 @@ function togglePanelOptions(): void {
  * uses tit_def) and show the overlay from the first page.
  */
 function openHelp(): void {
+  // On the map the Options panel floats as a fixed, centred overlay (zIndex 50) that
+  // would otherwise cover the full-screen help pages — close it first so Help isn't
+  // hidden behind it (in-room the panel sits beside the play area, so no overlap).
+  if (mapOverlay === 'options') closeMapOverlay();
   helpOpen = true;
   helpScreens.page = 0;
   void helpScreens.load(subLang());
@@ -4097,6 +4101,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   clickMapCorner: (x: number, y: number) => dispatchMapCorner(worldMap?.cornerAction(x, y) ?? null),
   mapOverlay: () => mapOverlay,
+  openMapOptions: () => openMapOptions(),
   creditMode: () => creditMode,
   closeMapOverlay: () => closeMapOverlay(),
   solvedRooms: () => [...solved],

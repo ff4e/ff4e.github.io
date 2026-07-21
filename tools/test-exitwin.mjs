@@ -13,13 +13,16 @@ await withApp(async ({ p, expect }) => {
 
   expect(!(await p.evaluate(() => window.__ff.state().won)), 'room not solved yet');
 
-  // Send the little fish out of the left edge.
+  // Send the little fish out of the left edge (wait for idle first — forceExit is a
+  // no-op unless the engine is idle, main.ts:4338).
+  await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 6000 });
   await p.evaluate(() => window.__ff.forceExit('little', 3));
   await p.waitForFunction(() => window.__ff.state().venku.little, { timeout: 5000 });
   expect(await p.evaluate(() => window.__ff.state().venku.little), 'little fish exited');
   expect(!(await p.evaluate(() => window.__ff.state().won)), 'not won with one fish still in');
 
   // Send the big fish out too -> the room is solved.
+  await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 6000 });
   await p.evaluate(() => window.__ff.forceExit('big', 3));
   await p.waitForFunction(() => window.__ff.state().won, { timeout: 5000 });
   expect(await p.evaluate(() => window.__ff.state().won), 'both fish out => room won');
