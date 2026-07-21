@@ -7,3 +7,11 @@ public/data/Program/
 public/data/256col/
 .idea/
 .DS_Store
+
+# Private / session artifacts — must never be committed to this public repo
+.copilot/
+.claude/
+*.copilot-session*
+.copilot-session-*
+BRIEFING.md
+PROGRESS.md
