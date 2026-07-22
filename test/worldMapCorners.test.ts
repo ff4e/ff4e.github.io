@@ -48,3 +48,38 @@ describe('world-map corner actions', () => {
     expect(map.cornerAction(0, MAP_H)).toBeNull();
   });
 });
+
+describe('world-map controller selection helpers', () => {
+  it('gives corner centroids for each action except exit', () => {
+    const corners = makeMap().cornerCentroids();
+    const actions = corners.map((c) => c.action).sort();
+    expect(actions).toEqual(['credits', 'intro', 'options']); // no 'exit' (no-op on web)
+    // Single-pixel mask corners → centroid is exactly that pixel.
+    expect(corners.find((c) => c.action === 'intro')).toMatchObject({ x: 10, y: 10 });
+    expect(corners.find((c) => c.action === 'options')).toMatchObject({ x: 630, y: 470 });
+  });
+
+  it('enumerates selectable nodes matching hitTest, with their centres', () => {
+    const map = makeMap();
+    const nodes = map.selectableNodes(new Set(), new Set());
+    expect(nodes.length).toBeGreaterThan(0); // at least the start room is reachable
+    for (const n of nodes) {
+      // Each selectable node is where hitTest finds it, and nodeCenter agrees.
+      expect(map.hitTest(n.x, n.y, new Set(), new Set())).toBe(n.room);
+      expect(map.nodeCenter(n.room)).toEqual({ x: n.x, y: n.y });
+    }
+  });
+
+  it('draws a selection ring around the selected node', () => {
+    const map = makeMap();
+    const room = map.selectableNodes(new Set(), new Set())[0]!.room;
+    const plain = map.render(new Set(), 0, undefined, new Set(), null, true, true, null);
+    const ringed = map.render(new Set(), 0, undefined, new Set(), null, true, true, room);
+    // The ring changes pixels near the node; the buffers must differ.
+    expect(Buffer.compare(Buffer.from(plain.buffer), Buffer.from(ringed.buffer))).not.toBe(0);
+    // A pixel on the ring circle (centre + radius 13) is the bright cyan.
+    const { x, y } = map.nodeCenter(room);
+    const i = ((y) * MAP_W + (x + 13)) * 4;
+    expect([ringed[i], ringed[i + 1], ringed[i + 2]]).toEqual([120, 230, 255]);
+  });
+});

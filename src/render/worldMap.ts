@@ -96,6 +96,7 @@ export class WorldMap {
     hoverCorner: MapAction | null = null,
     drawNodes = true,
     litRegions = true,
+    selectedNode: number | null = null,
   ): Uint8ClampedArray {
     const resena = computeResena(solved, cheated);
     // RTable[maskValue] = 1 where that branch's region is enabled AND revealed.
@@ -139,6 +140,10 @@ export class WorldMap {
         // hidden rooms (RES_HIDDEN) are not drawn (soutez mode).
       }
     }
+    // Controller (TV) mode: a persistent selection ring around the currently-selected
+    // room node (there is no mouse cursor on a console). Drawn only when nodes are
+    // visible (the record panel isn't open).
+    if (drawNodes && selectedNode !== null) this.blitRing(rgba, selectedNode);
     return rgba;
   }
 
@@ -186,5 +191,85 @@ export class WorldMap {
   cornerAction(x: number, y: number): MapAction | null {
     if (x < 0 || x >= MAP_W || y < 0 || y >= MAP_H) return null;
     return CORNER_ACTION[this.maska.pixels[y * MAP_W + x]!] ?? null;
+  }
+
+  /** The (x,y) centre of a room node in map space (KULXY), for controller selection. */
+  nodeCenter(room: number): { x: number; y: number } {
+    return { x: KULXY[(room - 1) * 2]!, y: KULXY[(room - 1) * 2 + 1]! };
+  }
+
+  /**
+   * Every currently-selectable room node (reachable or solved) with its map-space
+   * centre — the controller's spatial-navigation set (mirrors `hitTest`'s clickable
+   * set, but enumerated rather than point-tested since there is no cursor on a TV).
+   */
+  selectableNodes(
+    solved: ReadonlySet<number>,
+    cheated: ReadonlySet<number> = new Set(),
+  ): { room: number; x: number; y: number }[] {
+    const resena = computeResena(solved, cheated);
+    const out: { room: number; x: number; y: number }[] = [];
+    for (let b = 0; b < N_BRANCHES; b++) {
+      if (!branchEnabled(resena, b)) continue;
+      const br = BRANCHES[b]!;
+      for (let j = 0; j < br.length; j++) {
+        if (resena[b]![j] === 0) continue; // hidden: not selectable
+        const room = br.start + j;
+        const c = this.nodeCenter(room);
+        out.push({ room, x: c.x, y: c.y });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * The map-space centroid of each corner-button region (scanned from the mask once
+   * and cached). Drives controller selection of the corners (Intro / Options /
+   * Credits); 'exit' is a no-op on the web and is omitted.
+   */
+  cornerCentroids(): { action: MapAction; x: number; y: number }[] {
+    if (!this.cornerCentroidsCache) {
+      const sum = new Map<MapAction, { x: number; y: number; n: number }>();
+      for (let y = 0; y < MAP_H; y++) {
+        for (let x = 0; x < MAP_W; x++) {
+          const action = CORNER_ACTION[this.maska.pixels[y * MAP_W + x]!];
+          if (!action || action === 'exit') continue;
+          const s = sum.get(action) ?? { x: 0, y: 0, n: 0 };
+          s.x += x;
+          s.y += y;
+          s.n++;
+          sum.set(action, s);
+        }
+      }
+      this.cornerCentroidsCache = [...sum.entries()].map(([action, s]) => ({
+        action,
+        x: Math.round(s.x / s.n),
+        y: Math.round(s.y / s.n),
+      }));
+    }
+    return this.cornerCentroidsCache;
+  }
+  private cornerCentroidsCache: { action: MapAction; x: number; y: number }[] | null = null;
+
+  /** Draw a bright selection ring around a room node (controller highlight). */
+  private blitRing(rgba: Uint8ClampedArray, room: number): void {
+    const cx = KULXY[(room - 1) * 2]!;
+    const cy = KULXY[(room - 1) * 2 + 1]!;
+    const R = 13;
+    for (let dy = -R - 2; dy <= R + 2; dy++) {
+      const y = cy + dy;
+      if (y < 0 || y >= MAP_H) continue;
+      for (let dx = -R - 2; dx <= R + 2; dx++) {
+        const x = cx + dx;
+        if (x < 0 || x >= MAP_W) continue;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < R - 1.2 || d > R + 1.2) continue; // ~2.4px-thick ring outline
+        const i = (y * MAP_W + x) * 4;
+        rgba[i] = 120; // bright cyan, couch-legible against the dark map
+        rgba[i + 1] = 230;
+        rgba[i + 2] = 255;
+        rgba[i + 3] = 255;
+      }
+    }
   }
 }

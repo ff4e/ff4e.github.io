@@ -135,24 +135,28 @@ export interface StageLayout {
  * The scale that fits the stage box + gap + panel into the available area, as
  * large as possible. Clamped to a floor so it never collapses on tiny viewports.
  */
-export function computeStageScale(availW: number, availH: number): number {
-  const footprintW = STAGE_W + STAGE_GAP + PANEL_NATIVE_W;
+export function computeStageScale(availW: number, availH: number, withPanel = true): number {
+  // TV/console mode hides the PC control panel, so its width (and the gap) drop out
+  // of the footprint and the stage grows to use the full width (a bigger picture).
+  const footprintW = withPanel ? STAGE_W + STAGE_GAP + PANEL_NATIVE_W : STAGE_W;
   const footprintH = STAGE_H;
   const s = Math.min(availW / footprintW, availH / footprintH);
   if (!Number.isFinite(s) || s <= 0) return MIN_STAGE_SCALE;
   return Math.max(MIN_STAGE_SCALE, s);
 }
 
-/** Full stage layout (stage box + panel display sizes) for an available area. */
-export function computeStageLayout(availW: number, availH: number): StageLayout {
-  const scale = computeStageScale(availW, availH);
+/** Full stage layout (stage box + panel display sizes) for an available area.
+ *  `withPanel` false (TV mode) drops the panel from the footprint and zeroes its
+ *  display size, so the stage reflows to the full available width. */
+export function computeStageLayout(availW: number, availH: number, withPanel = true): StageLayout {
+  const scale = computeStageScale(availW, availH, withPanel);
   return {
     scale,
-    gap: STAGE_GAP * scale,
+    gap: withPanel ? STAGE_GAP * scale : 0,
     stageW: STAGE_W * scale,
     stageH: STAGE_H * scale,
-    panelW: PANEL_NATIVE_W * scale,
-    panelH: PANEL_NATIVE_H * scale,
+    panelW: withPanel ? PANEL_NATIVE_W * scale : 0,
+    panelH: withPanel ? PANEL_NATIVE_H * scale : 0,
   };
 }
 

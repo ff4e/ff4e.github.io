@@ -156,6 +156,43 @@
         white-space: pre; pointer-events: none; display: none; backdrop-filter: blur(3px);
       }
       body.dev #perfhud { display: block; }
+      /* Controller (TV/console) overlays — confirm prompt + Options menu. Big,
+         couch-legible, centered; shown by the gamepad code (never on web). */
+      .pad-overlay {
+        position: fixed; inset: 0; z-index: 180;
+        display: flex; align-items: center; justify-content: center;
+        background: #0009; backdrop-filter: blur(3px);
+      }
+      .pad-overlay[hidden] { display: none; }
+      .pad-box {
+        min-width: min(80vw, 460px);
+        background: #12121cf2; color: #dfe; border: 1px solid #3a4a6a; border-radius: 14px;
+        padding: 28px 32px; box-shadow: 0 12px 48px #000a;
+        display: flex; flex-direction: column; gap: 20px;
+      }
+      .pad-title { font: 600 26px/1.2 system-ui, sans-serif; text-align: center; letter-spacing: 0.3px; }
+      .pad-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+      .pad-list li {
+        display: flex; justify-content: space-between; align-items: center; gap: 20px;
+        padding: 10px 16px; border-radius: 8px; font: 500 19px/1.2 system-ui, sans-serif;
+        border: 1px solid transparent;
+      }
+      .pad-list li.sel { background: #21365e; border-color: #6c9cff; }
+      .pad-list li .val { opacity: 0.9; font-variant-numeric: tabular-nums; }
+      .pad-list li.sel .val { opacity: 1; }
+      .pad-bar { display: inline-block; letter-spacing: 1px; color: #6cf; }
+      .pad-bar .off { color: #445; }
+      .pad-hints {
+        display: flex; gap: 22px; justify-content: center; flex-wrap: wrap;
+        opacity: 0.75; font: 500 14px/1.3 system-ui, sans-serif;
+      }
+      .glyph {
+        display: inline-flex; align-items: center; justify-content: center;
+        min-width: 20px; height: 20px; padding: 0 5px; border-radius: 50%;
+        background: #2a2a3a; border: 1px solid #556; font: 700 12px/1 system-ui, sans-serif;
+      }
+      .glyph-a { background: #1f6f3f; border-color: #2f9f5f; }
+      .glyph-b { background: #7a2a2a; border-color: #b04040; }
     </style>
   </head>
   <body>
@@ -210,11 +247,36 @@
       </select></label>
       <label title="Repaint an idle room only when it changes (~12.5fps) instead of 60fps"><input type="checkbox" id="idledirty" checked> Idle-FPS saver</label>
       <button id="winroom" type="button" title="Genuinely win the current room (also: Shift+W). End-of-leg rooms then show their story page, unlike the solve cheat.">Win room</button>
+      <label title="Dev-only on-screen gamepad: click buttons / drag sticks to drive the controller UI without physical hardware."><input type="checkbox" id="simpad"> Gamepad sim</label>
       <label>Room <select id="room"></select></label>
     </div>
     <div class="stage">
       <canvas id="screen"></canvas>
       <canvas id="panel" title="control panel"></canvas>
+    </div>
+    <!-- Controller (TV/console) modal overlays: a Save/Load/Restart confirmation and
+         the Options menu. Hidden by default; shown/driven by the gamepad code in
+         src/app/main.ts. The plain web build (keyboard/mouse) never reveals them. -->
+    <div id="pad-confirm" class="pad-overlay" hidden>
+      <div class="pad-box">
+        <div id="pad-confirm-title" class="pad-title"></div>
+        <div class="pad-hints">
+          <span><kbd class="glyph glyph-a">A</kbd> Confirm</span>
+          <span><kbd class="glyph glyph-b">B</kbd> Cancel</span>
+        </div>
+      </div>
+    </div>
+    <div id="pad-options" class="pad-overlay" hidden>
+      <div class="pad-box">
+        <div class="pad-title">Options</div>
+        <ul id="pad-options-list" class="pad-list"></ul>
+        <div class="pad-hints">
+          <span><kbd class="glyph">↕</kbd> Select</span>
+          <span><kbd class="glyph">↔</kbd> Adjust</span>
+          <span><kbd class="glyph glyph-a">A</kbd> Choose</span>
+          <span><kbd class="glyph glyph-b">B</kbd> Close</span>
+        </div>
+      </div>
     </div>
     <div id="info"></div>
     <script type="module" src="/src/app/main.ts"></script>

@@ -57,6 +57,19 @@ describe('computeStageLayout', () => {
     expect(l.panelW).toBeCloseTo(PANEL_NATIVE_W * l.scale, 5);
     expect(l.gap).toBeCloseTo(STAGE_GAP * l.scale, 5);
   });
+
+  it('TV mode (withPanel=false) drops the panel and reflows the stage wider', () => {
+    const withP = computeStageLayout(4000, 3000, true);
+    const noP = computeStageLayout(4000, 3000, false);
+    // Panel + gap vanish from the footprint.
+    expect(noP.panelW).toBe(0);
+    expect(noP.panelH).toBe(0);
+    expect(noP.gap).toBe(0);
+    // Without the panel's width in the footprint, the stage scales up (bigger picture)
+    // — as long as width, not height, is the limiting dimension.
+    expect(noP.scale).toBeGreaterThan(withP.scale);
+    expect(noP.stageW).toBeGreaterThan(withP.stageW);
+  });
 });
 
 describe('contentScale — fixed (Approach D)', () => {

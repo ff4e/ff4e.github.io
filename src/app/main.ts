@@ -65,6 +65,9 @@ import { parseDesky, blitDeska, type DeskyData } from '../data/desky.js';
 import { IntroPlayer } from './intro.js';
 import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
 import { initAnalytics } from '../platform/analytics.js';
+import { pollPad, type PadDir, type PadSnapshot } from '../platform/gamepad.js';
+import { tvMode } from '../platform/tv.js';
+import { setVirtualGamepadEnabled } from '../platform/virtualGamepad.js';
 import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
 import { parseFfp, type FfpPanel } from '../data/ffp.js';
 import {
@@ -87,6 +90,7 @@ import {
   loadSettings,
   saveSettings,
   busMultiplier,
+  clampIndex,
   type SubtitleMode,
   type VolumeBus,
 } from '../core/settings.js';
@@ -124,6 +128,7 @@ import {
 let stage: StageLayout = computeStageLayout(
   typeof window !== 'undefined' ? window.innerWidth : 1600,
   typeof window !== 'undefined' ? window.innerHeight : 1200,
+  !tvMode,
 );
 
 /** Display px per native px for content of size w×h, per the current fit mode. */
@@ -245,6 +250,7 @@ const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null
 const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
 const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;
 const winRoomBtn = document.getElementById('winroom') as HTMLButtonElement | null;
+const simPadToggle = document.getElementById('simpad') as HTMLInputElement | null;
 const perfHud = document.getElementById('perfhud') as HTMLElement | null;
 const info = document.getElementById('info') as HTMLDivElement;
 const stageRow = document.querySelector('.stage') as HTMLElement;
@@ -313,7 +319,7 @@ function maybeShowWebglNote(): void {
 function relayout(): void {
   const availW = stageRow?.clientWidth || window.innerWidth;
   const availH = stageRow?.clientHeight || window.innerHeight;
-  stage = computeStageLayout(availW, availH);
+  stage = computeStageLayout(availW, availH, !tvMode);
   stageBox.style.width = `${Math.round(stage.stageW)}px`;
   stageBox.style.height = `${Math.round(stage.stageH)}px`;
   if (stageRow) stageRow.style.gap = `${Math.round(stage.gap)}px`;
@@ -658,12 +664,21 @@ let renderOnDirty = localStorage.getItem('ff.renderOnDirty') !== '0';
 // tuning chrome (dev bar) + perf HUD (both gated on body.dev in CSS) and arms the
 // one-key dev toggles (E/R/P/F/G). Players never see it.
 let devEnabled = localStorage.getItem('ff.devEnabled') === '1';
+// Dev-only on-screen gamepad simulator (drives the controller UI with no hardware).
+// Only ever active while the dev pane is on, so players can never surface it.
+let simPadEnabled = localStorage.getItem('ff.simpad') === '1';
+
+/** Show the virtual gamepad only when BOTH the dev pane and the sim toggle are on. */
+function applySimPad(): void {
+  setVirtualGamepadEnabled(devEnabled && simPadEnabled);
+}
 
 /** Enable/disable the developer pane; persists and mirrors the body.dev CSS hook. */
 function setDevEnabled(v: boolean): void {
   devEnabled = v;
   localStorage.setItem('ff.devEnabled', v ? '1' : '0');
   document.body.classList.toggle('dev', v);
+  applySimPad(); // hide the sim widget when leaving dev mode
 }
 
 /**
@@ -1641,6 +1656,500 @@ function dispatchHeldMove(): void {
   setInfo();
 }
 
+// ---------------------------------------------------------------------------
+// Gamepad input (platform layer wiring). The reusable Gamepad-API poller lives in
+// src/platform/gamepad.ts (no engine refs); here we map its neutral snapshot onto
+// the game's EXISTING commands, so no engine/game logic changes. Xbox/TV scheme:
+//   • Left stick (or d-pad) = little fish, Right stick = big fish — each drives the
+//     SAME beginHeldMove() the keyboard uses. Faithful "one fish at a time": the two
+//     sticks share the single held-move slot and the last-engaged stick wins.
+//   • Any button unlocks audio and skips the intro / dismisses a story or credits
+//     page; B / View exits a room to the world map.
+// Menus, the world-map selection cursor, save/load/restart and Options are P1.
+// ---------------------------------------------------------------------------
+const GP_HELD = '\u0000gamepad'; // synthetic heldKey id owned by the gamepad sticks
+const PAD_DIR_TO_DIR: Record<Exclude<PadDir, null>, number> = {
+  up: Dir.up,
+  down: Dir.down,
+  left: Dir.left,
+  right: Dir.right,
+};
+let gpWinner: 'left' | 'right' | null = null; // which stick currently owns the fish move
+let gpPrevLeft = false;
+let gpPrevRight = false;
+let gpAudioUnlocked = false;
+
+/** Drive the shared held-move slot from a stick (which fish + direction). No-op if the
+ *  keyboard already owns the slot, so keyboard + pad don't fight during desktop testing. */
+function gpDriveMove(which: 'little' | 'big', dir: number): void {
+  if (dir === Dir.no) {
+    gpReleaseMove();
+    return;
+  }
+  if (heldKey !== null && heldKey !== GP_HELD) return; // keyboard owns the held slot
+  if (heldKey === GP_HELD && heldState !== 0) {
+    heldWhich = which; // retarget fish/dir live (last-engaged stick wins)
+    heldDir = dir;
+    if (heldState === 3) heldState = 2; // cancel a pending release: keep repeating
+    return;
+  }
+  beginHeldMove(GP_HELD, false, which, dir);
+}
+
+/** Release the gamepad's held move, mirroring the keyup handler (1→3 guarantees one
+ *  dispatch for a tap; otherwise clear outright). No-op if the pad doesn't own the slot. */
+function gpReleaseMove(): void {
+  if (heldKey !== GP_HELD) return;
+  if (heldState === 1) heldState = 3;
+  else clearHeldKey();
+}
+
+/** Poll the gamepad once per frame (called at the top of loop()) and translate it to
+ *  existing commands. Runs even while the render loop is idle-throttled, so a press
+ *  wakes the game to 60fps. */
+function pollGamepadInput(): void {
+  const pad = pollPad();
+  if (!pad.connected) {
+    gpReleaseMove();
+    gpWinner = null;
+    gpPrevLeft = gpPrevRight = false;
+    return;
+  }
+  const now = performance.now();
+
+  // Any activity leaves the idle throttle immediately (movement stays smooth) and
+  // marks the pad "in use" (turns on the controller-native UI: map selection ring,
+  // confirm prompts, Options overlay).
+  if (pad.anyPressed || pad.leftDir || pad.rightDir) {
+    wake();
+    padActive = true;
+  }
+
+  // Any button unlocks audio (mirrors the once() pointerdown/keydown unlock) and
+  // skips the intro / dismisses a story or credits page so gameplay is reachable
+  // on a pad alone.
+  if (pad.anyPressed) {
+    if (!gpAudioUnlocked) {
+      unlockAudio();
+      gpAudioUnlocked = true;
+    }
+    if (intro.playing) {
+      intro.skip();
+      gpReleaseMove();
+      return;
+    }
+    if (screen === 'legimage') {
+      dismissLegImage();
+      return;
+    }
+    if (mapOverlay === 'credits') {
+      closeMapOverlay();
+      return;
+    }
+  }
+
+  // Modal controller overlays capture ALL input while open.
+  if (padConfirm !== null) {
+    if (pad.pressed('a')) runPadConfirm();
+    else if (pad.pressed('b')) closePadConfirm();
+    return;
+  }
+  if (padOptionsOpen) {
+    handlePadOptionsInput(pad, now);
+    return;
+  }
+
+  // Help viewer (opened from Options): D-pad/stick/LB/RB page, B closes.
+  if (helpOpen) {
+    const count = helpScreens.pages(subLang()).length;
+    if (pad.pressed('b') || pad.pressed('menu')) {
+      closeHelp();
+      return;
+    }
+    const step = menuStep(pad.leftDir ?? pad.rightDir, now);
+    if (pad.pressed('rb') || pad.pressed('a') || step === 'right') helpScreens.next(count);
+    else if (pad.pressed('lb') || step === 'left') helpScreens.prev(count);
+    return;
+  }
+
+  // World map: node/corner selection navigation (no cursor on a TV).
+  if (screen === 'map') {
+    handleMapPadInput(pad, now);
+    return;
+  }
+
+  // B / View: leave a room for the world map (Standard "back").
+  if ((pad.pressed('b') || pad.pressed('view')) && screen === 'room') {
+    gpReleaseMove();
+    showMap();
+    return;
+  }
+
+  // In-room dedicated action buttons (the PC panel is hidden on TV). Save/Load/Restart
+  // each raise an Ⓐ-confirm prompt so a stray press can't wipe the save or the attempt;
+  // Menu opens the Options overlay directly.
+  if (screen === 'room' && !cutscene) {
+    if (pad.pressed('menu')) {
+      openPadOptions();
+      return;
+    }
+    if (pad.pressed('lb')) {
+      openPadConfirm('save');
+      return;
+    }
+    if (pad.pressed('rb')) {
+      openPadConfirm('load');
+      return;
+    }
+    if (pad.pressed('x')) {
+      openPadConfirm('restart');
+      return;
+    }
+  }
+
+  // In-room two-stick movement, gated to the same rest conditions the keyboard fish
+  // keys are (URoom possession / finale / demo / replay / fast-load all block input).
+  const inRoomMovable =
+    screen === 'room' &&
+    !cutscene &&
+    activeScript?.s.natvrdo !== 1 &&
+    !activeScript?.s.zavermode &&
+    !inShowmode() &&
+    !inReplay() &&
+    !loadmode;
+  if (!inRoomMovable) {
+    gpReleaseMove();
+    gpWinner = null;
+    gpPrevLeft = gpPrevRight = false;
+    return;
+  }
+
+  const leftEngaged = pad.leftDir !== null;
+  const rightEngaged = pad.rightDir !== null;
+  // Last-engaged stick wins: a stick that just went from centred to a direction takes
+  // ownership; when the owner centres, the other stick (if still held) takes over.
+  if (leftEngaged && !gpPrevLeft) gpWinner = 'left';
+  if (rightEngaged && !gpPrevRight) gpWinner = 'right';
+  if (gpWinner === 'left' && !leftEngaged) gpWinner = rightEngaged ? 'right' : null;
+  if (gpWinner === 'right' && !rightEngaged) gpWinner = leftEngaged ? 'left' : null;
+  if (gpWinner === null) gpWinner = leftEngaged ? 'left' : rightEngaged ? 'right' : null;
+  gpPrevLeft = leftEngaged;
+  gpPrevRight = rightEngaged;
+
+  if (gpWinner === null) {
+    gpReleaseMove();
+    return;
+  }
+  const which = gpWinner === 'left' ? 'little' : 'big';
+  const padDir = gpWinner === 'left' ? pad.leftDir : pad.rightDir;
+  gpDriveMove(which, padDir ? PAD_DIR_TO_DIR[padDir] : Dir.no);
+}
+
+// ===========================================================================
+// Controller (TV/console) UI: the confirm prompt, Options overlay, and world-map
+// selection navigation. All driven by the gamepad; the plain web (keyboard/mouse)
+// build never shows any of it. `padActive` turns on once a pad is used so desktop
+// testing exercises the same flow; `tvMode` adds the panel-hide / stage reflow.
+// ===========================================================================
+
+let padActive = false; // any gamepad input seen this session → controller UI is live
+let lastPlayedRoom: number | null = null; // for the map's default selection
+
+// --- Menu navigation timing: turn a held stick/d-pad direction into discrete steps
+//     (initial press fires immediately, then repeats) so menus don't scroll per-frame.
+let menuHeldDir: PadDir = null;
+let menuHeldNextAt = 0;
+const MENU_REPEAT_FIRST_MS = 340;
+const MENU_REPEAT_MS = 140;
+/** One navigation step for `dir` this poll (an edge, or a repeat while held), else null. */
+function menuStep(dir: PadDir, now: number): PadDir {
+  if (dir === null) {
+    menuHeldDir = null;
+    return null;
+  }
+  if (dir !== menuHeldDir) {
+    menuHeldDir = dir;
+    menuHeldNextAt = now + MENU_REPEAT_FIRST_MS;
+    return dir;
+  }
+  if (now >= menuHeldNextAt) {
+    menuHeldNextAt = now + MENU_REPEAT_MS;
+    return dir;
+  }
+  return null;
+}
+
+// --- Save / Load / Restart confirmation prompt -----------------------------
+type ConfirmAction = 'save' | 'load' | 'restart';
+let padConfirm: ConfirmAction | null = null;
+const padConfirmEl = document.getElementById('pad-confirm') as HTMLElement | null;
+const padConfirmTitle = document.getElementById('pad-confirm-title') as HTMLElement | null;
+const CONFIRM_TITLE: Record<ConfirmAction, string> = {
+  save: 'Save game?',
+  load: 'Load saved game?',
+  restart: 'Restart room?',
+};
+
+function openPadConfirm(action: ConfirmAction): void {
+  if (action === 'load' && !saveExists()) return; // nothing to load → skip the prompt
+  padConfirm = action;
+  if (padConfirmTitle) padConfirmTitle.textContent = CONFIRM_TITLE[action];
+  if (padConfirmEl) padConfirmEl.hidden = false;
+  wake();
+}
+function closePadConfirm(): void {
+  padConfirm = null;
+  if (padConfirmEl) padConfirmEl.hidden = true;
+  wake();
+}
+function runPadConfirm(): void {
+  const action = padConfirm;
+  closePadConfirm();
+  if (action === 'save') saveGame();
+  else if (action === 'load') loadGame();
+  else if (action === 'restart') restartRoom();
+}
+
+// --- Options overlay (volumes / subtitles / help) --------------------------
+type OptRow = 'effect' | 'voice' | 'music' | 'subtitles' | 'help';
+const PAD_OPT_ROWS: readonly OptRow[] = ['effect', 'voice', 'music', 'subtitles', 'help'];
+const OPT_LABEL: Record<OptRow, string> = {
+  effect: 'Sound',
+  voice: 'Voices',
+  music: 'Music',
+  subtitles: 'Subtitles',
+  help: 'Help',
+};
+const SUB_LABEL: Record<SubtitleMode, string> = { cz: 'Čeština', en: 'English', off: 'Off' };
+const SUB_ORDER: readonly SubtitleMode[] = ['cz', 'en', 'off'];
+let padOptionsOpen = false;
+let padOptionsRow = 0;
+const padOptionsEl = document.getElementById('pad-options') as HTMLElement | null;
+const padOptionsListEl = document.getElementById('pad-options-list') as HTMLElement | null;
+
+function openPadOptions(): void {
+  padOptionsOpen = true;
+  padOptionsRow = 0;
+  menuHeldDir = null; // fresh menu-nav repeat state
+  if (padOptionsEl) padOptionsEl.hidden = false;
+  renderPadOptions();
+  wake();
+}
+function closePadOptions(): void {
+  padOptionsOpen = false;
+  if (padOptionsEl) padOptionsEl.hidden = true;
+  wake();
+}
+/** A 12-cell volume bar for a 0..12 slider index. */
+function volumeBarHtml(index: number): string {
+  const on = Math.max(0, Math.min(12, index));
+  return `<span class="pad-bar">${'█'.repeat(on)}<span class="off">${'█'.repeat(12 - on)}</span></span> ${on}`;
+}
+function renderPadOptions(): void {
+  if (!padOptionsListEl) return;
+  padOptionsListEl.textContent = '';
+  PAD_OPT_ROWS.forEach((row, i) => {
+    const li = document.createElement('li');
+    if (i === padOptionsRow) li.className = 'sel';
+    const name = document.createElement('span');
+    name.textContent = OPT_LABEL[row];
+    const val = document.createElement('span');
+    val.className = 'val';
+    if (row === 'effect' || row === 'voice' || row === 'music') val.innerHTML = volumeBarHtml(settings.volume[row]);
+    else if (row === 'subtitles') val.textContent = SUB_LABEL[settings.subtitles];
+    else val.textContent = '›';
+    li.append(name, val);
+    padOptionsListEl.appendChild(li);
+  });
+}
+function handlePadOptionsInput(pad: PadSnapshot, now: number): void {
+  if (pad.pressed('b') || pad.pressed('menu')) {
+    closePadOptions();
+    return;
+  }
+  const row = PAD_OPT_ROWS[padOptionsRow]!;
+  const step = menuStep(pad.leftDir ?? pad.rightDir, now);
+  if (step === 'up') {
+    padOptionsRow = (padOptionsRow + PAD_OPT_ROWS.length - 1) % PAD_OPT_ROWS.length;
+    renderPadOptions();
+    wake();
+  } else if (step === 'down') {
+    padOptionsRow = (padOptionsRow + 1) % PAD_OPT_ROWS.length;
+    renderPadOptions();
+    wake();
+  } else if (step === 'left' || step === 'right') {
+    const delta = step === 'right' ? 1 : -1;
+    if (row === 'effect' || row === 'voice' || row === 'music') {
+      setVolume(row, clampIndex(settings.volume[row] + delta));
+      renderPadOptions();
+      wake();
+    } else if (row === 'subtitles') {
+      const i = SUB_ORDER.indexOf(settings.subtitles);
+      setSubtitleMode(SUB_ORDER[(i + delta + SUB_ORDER.length) % SUB_ORDER.length]!);
+      renderPadOptions();
+      wake();
+    }
+  }
+  if (pad.pressed('a')) {
+    if (row === 'help') {
+      closePadOptions();
+      openHelp();
+    } else if (row === 'subtitles') {
+      const i = SUB_ORDER.indexOf(settings.subtitles);
+      setSubtitleMode(SUB_ORDER[(i + 1) % SUB_ORDER.length]!);
+      renderPadOptions();
+    }
+    wake();
+  }
+}
+
+// --- World-map selection navigation ----------------------------------------
+type MapSel = { kind: 'node'; room: number } | { kind: 'corner'; action: MapAction };
+let mapSel: MapSel | null = null;
+
+/** Current selection's map-space centre (for spatial nearest-neighbour movement). */
+function mapSelPos(): { x: number; y: number } | null {
+  if (!worldMap || !mapSel) return null;
+  if (mapSel.kind === 'node') return worldMap.nodeCenter(mapSel.room);
+  const action = mapSel.action;
+  return worldMap.cornerCentroids().find((c) => c.action === action) ?? null;
+}
+
+/** All selectable targets on the map (reachable/solved nodes + corner buttons). */
+function mapTargets(): { sel: MapSel; x: number; y: number }[] {
+  if (!worldMap) return [];
+  const nodes = worldMap.selectableNodes(solved, cheated).map((n) => ({
+    sel: { kind: 'node', room: n.room } as MapSel,
+    x: n.x,
+    y: n.y,
+  }));
+  const corners = worldMap.cornerCentroids().map((c) => ({
+    sel: { kind: 'corner', action: c.action } as MapSel,
+    x: c.x,
+    y: c.y,
+  }));
+  return [...nodes, ...corners];
+}
+
+/** Pick a sensible default selection when entering the map (never nothing selected). */
+function initMapSelection(): void {
+  const targets = mapTargets();
+  if (targets.length === 0) {
+    mapSel = null;
+    return;
+  }
+  // Last-played room if it is still selectable.
+  if (lastPlayedRoom !== null && targets.some((t) => t.sel.kind === 'node' && t.sel.room === lastPlayedRoom)) {
+    mapSel = { kind: 'node', room: lastPlayedRoom };
+  } else {
+    // Otherwise the first reachable *unsolved* node, else the first node/target.
+    const unsolved = targets.find(
+      (t) => t.sel.kind === 'node' && !solved.has(t.sel.room) && !cheated.has(t.sel.room),
+    );
+    mapSel = (unsolved ?? targets[0]!).sel;
+  }
+  syncMapHighlight();
+}
+
+/** Mirror the controller selection onto the existing hover state that drives the
+ *  map's lit corner / name plaque / record-panel highlight rendering. No-op for
+ *  mouse users (padActive false) so the plain web map hover is untouched. */
+function syncMapHighlight(): void {
+  if (!padActive) return;
+  if (mapSel?.kind === 'corner') {
+    mapHoverCorner = mapSel.action;
+    mapHoverRoom = null;
+  } else if (mapSel?.kind === 'node') {
+    mapHoverRoom = mapSel.room;
+    mapHoverCorner = null;
+  } else {
+    mapHoverCorner = null;
+    mapHoverRoom = null;
+  }
+}
+
+/** Move the selection to the nearest target in `dir` (spatial nearest-neighbour). */
+function moveMapSelection(dir: Exclude<PadDir, null>): void {
+  const cur = mapSelPos();
+  const targets = mapTargets();
+  if (!cur || targets.length === 0) return;
+  const vx = dir === 'left' ? -1 : dir === 'right' ? 1 : 0;
+  const vy = dir === 'up' ? -1 : dir === 'down' ? 1 : 0;
+  let best: { sel: MapSel; score: number } | null = null;
+  for (const t of targets) {
+    const dx = t.x - cur.x;
+    const dy = t.y - cur.y;
+    const along = dx * vx + dy * vy; // distance in the pushed direction
+    if (along <= 2) continue; // must be genuinely in that direction
+    const perp = Math.abs(dx * vy - dy * vx); // lateral offset
+    const score = along + perp * 2.5; // prefer aligned, then near
+    if (!best || score < best.score) best = { sel: t.sel, score };
+  }
+  if (best) {
+    mapSel = best.sel;
+    syncMapHighlight();
+    wake();
+  }
+}
+
+/** Activate the current map selection (Ⓐ): node → info panel / enter; corner → action. */
+function activateMapSelection(): void {
+  if (!mapSel) return;
+  if (mapSel.kind === 'node') {
+    const room = mapSel.room;
+    if (solved.has(room) || cheated.has(room)) openMapInfo(room);
+    else void enterRoom(room);
+  } else if (mapSel.action === 'options') {
+    openPadOptions(); // the map "Options" corner routes to the controller Options overlay
+  } else {
+    dispatchMapCorner(mapSel.action);
+  }
+}
+
+// Record-panel (Run / Replay / Cancel) selection while it is open.
+const INFO_BTN_ORDER: readonly InfoButton[] = ['run', 'replay', 'cancel'];
+
+function handleMapPadInput(pad: PadSnapshot, now: number): void {
+  if (pad.pressed('menu')) {
+    openPadOptions();
+    return;
+  }
+  // Record info panel open: navigate its Run / Replay / Cancel buttons.
+  if (mapInfoRoom !== null) {
+    if (pad.pressed('b')) {
+      closeMapInfo();
+      return;
+    }
+    const replayEnabled = bestRecord(mapInfoRoom) !== undefined;
+    const usable = INFO_BTN_ORDER.filter((b) => b !== 'replay' || replayEnabled);
+    if (mapInfoHover === null || !usable.includes(mapInfoHover)) {
+      mapInfoHover = usable[0]!;
+      mapSig = null;
+    }
+    const step = menuStep(pad.leftDir ?? pad.rightDir, now);
+    if (step === 'left' || step === 'right') {
+      const i = usable.indexOf(mapInfoHover);
+      const d = step === 'right' ? 1 : -1;
+      mapInfoHover = usable[(i + d + usable.length) % usable.length]!;
+      mapSig = null;
+      wake();
+    }
+    if (pad.pressed('a')) activateInfoButton(mapInfoRoom, mapInfoHover);
+    return;
+  }
+  // Plain map: B resumes the current room (mirrors Esc), else navigate + activate.
+  if (pad.pressed('b')) {
+    if (room) void enterRoom(Number(select.value));
+    return;
+  }
+  if (!mapSel) initMapSelection();
+  syncMapHighlight(); // keep the lit corner / plaque in sync with the selection
+  const step = menuStep(pad.leftDir ?? pad.rightDir, now);
+  if (step) moveMapSelection(step);
+  if (pad.pressed('a')) activateMapSelection();
+}
+
+
 /**
  * KAJUTA1 screen-shove (URoom.pas:24727-24761): a blocked big-fish left/right push
  * against a wall, while gspec is 3 or 4, slides the view and arms gspec:=4. Wired as
@@ -1941,6 +2450,13 @@ function drawHelp(): void {
 /** Composite and blit the control panel next to the play area (or as a map overlay). */
 function drawPanel(): void {
   if (!panel) return;
+  // TV/console mode: the PC control panel is PC-only chrome (fish D-pad buttons + PC
+  // key-name hints), so it is never shown — the stage reflows to full width and the
+  // panel's functions live on dedicated controller buttons + the Options overlay.
+  if (tvMode) {
+    if (panelCanvas.style.display !== 'none') panelCanvas.style.display = 'none';
+    return;
+  }
   const asMapOverlay = screen === 'map' && mapOverlay === 'options';
   const visible = screen === 'room' || asMapOverlay;
   panelCanvas.style.display = visible ? '' : 'none';
@@ -2061,9 +2577,13 @@ function drawMap(): void {
   // the odometer roll frame (capped once settled so the sig stops churning), plus
   // the hovered room node (its name plaque).
   const infoFazeKey = Math.min(mapInfoFaze, INFO_SETTLE_FAZE);
+  // Controller selection ring: the selected room node (no cursor on a TV). Only when
+  // a pad is in use, on the plain map (record panel closed).
+  const selectedNode =
+    padActive && mapInfoRoom === null && mapSel?.kind === 'node' ? mapSel.room : null;
   const sig =
     `${pulse % 6}|${Math.min(depth, worldMap.maxDepth + 1)}|${mapHoverCorner ?? ''}|${solved.size}|${cheated.size}|${cheated.size ? 1 : 0}` +
-    `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}`;
+    `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}|${selectedNode ?? ''}`;
   if (sig === mapSig) return; // nothing visibly changed — skip the redraw entirely
   mapSig = sig;
   perfPaint++; // an actual map paint (past the cache check)
@@ -2071,7 +2591,7 @@ function drawMap(): void {
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
   // only the name plaque and panel stand out. Nodes (balls) are skipped too.
-  const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !panelOpen, !panelOpen);
+  const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !panelOpen, !panelOpen, selectedNode);
   // Name plaque (KresliDesku, UMain.pas:1484): drawn for the panel's room while it
   // is open, or the hovered room node otherwise.
   const plaqueRoom = mapInfoRoom ?? mapHoverRoom;
@@ -2116,6 +2636,8 @@ function showMap(): void {
   poslMluv.little = -1;
   poslMluv.big = -1;
   startMenuMusic();
+  menuHeldDir = null; // reset menu-nav repeat state for the map
+  initMapSelection(); // controller: default the selected node (never nothing selected)
   setInfo();
 }
 
@@ -2353,6 +2875,7 @@ function drawCredits(): void {
 function enterRoom(num: number, replay?: string): Promise<void> {
   wake();
   screen = 'room';
+  lastPlayedRoom = num; // remember for the controller's default map selection
   mapHoverCorner = null; // drop any map corner hover on leaving the map
   mapHoverRoom = null;
   canvas.style.cursor = 'default';
@@ -3177,6 +3700,7 @@ function loop(now: number): void {
   const dt = now - lastTime;
   acc += dt;
   lastTime = now;
+  pollGamepadInput(); // read the controller, mapped onto existing commands (no-op with no pad)
   tickPanelScroll(dt); // advance the options open/close animation (independent of game logic)
   // Drop a backlog (slow/backgrounded frame) instead of fast-forwarding: like
   // Jedeme, we run at most one step per frame and never batch-catch-up, so under
@@ -3587,33 +4111,37 @@ canvas.addEventListener('mousedown', (e) => {
  * is open, else a solved/cheated room node → open the panel (daInfo), an unsolved
  * room → launch it (daRun), or a corner menu button (UMain.pas PaintBox1MouseDown).
  */
+/** Activate a record-panel button (Run / Replay / Cancel) for `room` — shared by the
+ *  mouse (clickMapAt) and the controller (record-panel selection). */
+function activateInfoButton(room: number, btn: InfoButton | null): void {
+  if (btn === 'run') {
+    closeMapInfo();
+    // Delphi: Run on a solved depth-15 room shows the leg story page first, then
+    // launches once dismissed (daClickAndRun, UMain.pas:958→966).
+    const leg = solved.has(room) && depthOfRoom(room) === 15 ? branchOfRoom(room) : 0;
+    if (leg >= 1 && leg <= 8) void showLegImage(leg, { room });
+    else void enterRoom(room); // daRealyRun: play the room
+  } else if (btn === 'replay') {
+    const rec = bestRecord(room);
+    if (rec !== undefined) {
+      closeMapInfo();
+      // Same story-page-first deferral for Replay (daReplay, UMain.pas:1030).
+      const leg = solved.has(room) && depthOfRoom(room) === 15 ? branchOfRoom(room) : 0;
+      if (leg >= 1 && leg <= 8) void showLegImage(leg, { room, replay: rec });
+      else void enterRoom(room, rec); // daReplay: animate the best solution
+    }
+    // no stored record → Replay is disabled; ignore (panel stays open)
+  } else {
+    closeMapInfo(); // Cancel button, or a click off the panel
+  }
+}
+
 function clickMapAt(mx: number, my: number): void {
   if (!worldMap) return;
   // Record info panel open (InfoMode>0): its Run/Replay/Cancel buttons take the
   // click; anywhere else closes it (daCancel, UMain.pas:1612/1626).
   if (mapInfoRoom !== null) {
-    const room = mapInfoRoom;
-    const btn = hitInfoButton(mx, my);
-    if (btn === 'run') {
-      closeMapInfo();
-      // Delphi: Run on a solved depth-15 room shows the leg story page first, then
-      // launches once dismissed (daClickAndRun, UMain.pas:958→966).
-      const leg = solved.has(room) && depthOfRoom(room) === 15 ? branchOfRoom(room) : 0;
-      if (leg >= 1 && leg <= 8) void showLegImage(leg, { room });
-      else void enterRoom(room); // daRealyRun: play the room
-    } else if (btn === 'replay') {
-      const rec = bestRecord(room);
-      if (rec !== undefined) {
-        closeMapInfo();
-        // Same story-page-first deferral for Replay (daReplay, UMain.pas:1030).
-        const leg = solved.has(room) && depthOfRoom(room) === 15 ? branchOfRoom(room) : 0;
-        if (leg >= 1 && leg <= 8) void showLegImage(leg, { room, replay: rec });
-        else void enterRoom(room, rec); // daReplay: animate the best solution
-      }
-      // no stored record → Replay is disabled; ignore the click (panel stays open)
-    } else {
-      closeMapInfo(); // Cancel button, or a click off the panel
-    }
+    activateInfoButton(mapInfoRoom, hitInfoButton(mx, my));
     return;
   }
   const room = worldMap.hitTest(mx, my, solved, cheated);
@@ -3787,8 +4315,17 @@ if (winRoomBtn) {
     winRoomBtn.blur(); // drop button focus so a Space/Enter dismiss doesn't re-click it
   });
 }
+if (simPadToggle) {
+  simPadToggle.checked = simPadEnabled;
+  simPadToggle.addEventListener('change', () => {
+    simPadEnabled = simPadToggle.checked;
+    localStorage.setItem('ff.simpad', simPadEnabled ? '1' : '0');
+    applySimPad();
+  });
+}
 // Apply the persisted dev-pane state on boot (Ctrl+Alt+D toggles it thereafter).
 document.body.classList.toggle('dev', devEnabled);
+applySimPad(); // restore the gamepad-sim widget if it was left on
 relayout();
 window.addEventListener('resize', relayout);
 document.addEventListener('fullscreenchange', relayout);
