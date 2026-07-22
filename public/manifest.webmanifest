@@ -1,0 +1,42 @@
+{
+  "name": "Fish Fillets 4ever",
+  "short_name": "Fish Fillets",
+  "description": "A faithful web port of ALTAR's 1998 underwater puzzle game Fish Fillets. Guide two fish through 70 rooms without letting anything crush them.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone", "minimal-ui"],
+  "orientation": "landscape",
+  "background_color": "#101018",
+  "theme_color": "#101018",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["games", "puzzle", "entertainment"],
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512-maskable.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "maskable"
+    }
+  ]
+}
