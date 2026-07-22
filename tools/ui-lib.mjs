@@ -53,7 +53,8 @@ export async function withApp(fn, opts = {}) {
     }
   });
   const port = process.env.FF_UI_PORT ?? '5173';
-  await p.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+  const query = opts.query ? (opts.query.startsWith('?') ? opts.query : `?${opts.query}`) : '';
+  await p.goto(`http://127.0.0.1:${port}/${query}`, { waitUntil: 'networkidle' });
 
   let ok = true;
   const expect = (cond, msg) => {

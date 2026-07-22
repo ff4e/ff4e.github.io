@@ -117,6 +117,7 @@ import {
   computeStageLayout,
   contentScale as fitScale,
   isFitMode,
+  safeAvail,
   type StageLayout,
   type FitMode,
 } from './layout.js';
@@ -318,8 +319,10 @@ function maybeShowWebglNote(): void {
  * cutscene canvases are sized per-frame in their draw functions from `stage`.
  */
 function relayout(): void {
-  const availW = stageRow?.clientWidth || window.innerWidth;
-  const availH = stageRow?.clientHeight || window.innerHeight;
+  const rawW = stageRow?.clientWidth || window.innerWidth;
+  const rawH = stageRow?.clientHeight || window.innerHeight;
+  // TV mode keeps a title-safe inset so nothing touches an overscanned TV edge.
+  const { availW, availH } = safeAvail(rawW, rawH, tvMode);
   stage = computeStageLayout(availW, availH, !tvMode);
   stageBox.style.width = `${Math.round(stage.stageW)}px`;
   stageBox.style.height = `${Math.round(stage.stageH)}px`;
@@ -337,6 +340,19 @@ const intro = new IntroPlayer({
   cover: document.getElementById('intro-cover') as HTMLElement,
   hint: document.getElementById('intro-hint') as HTMLElement,
 });
+
+// TV / console (10-foot) presentation. A `body.tv` class lets the CSS scale the
+// controller overlays up for couch legibility, and the intro's mouse/keyboard
+// affordances are relabelled with controller wording (there is no pointer on a
+// console). Purely presentational and gated on tvMode, so the web build is
+// untouched. See src/platform/tv.ts.
+if (tvMode) {
+  document.body.classList.add('tv');
+  const introStartBtn = document.getElementById('intro-start');
+  const introHintEl = document.getElementById('intro-hint');
+  if (introStartBtn) introStartBtn.textContent = '▶ Press Ⓐ to start';
+  if (introHintEl) introHintEl.textContent = 'Ⓐ / Ⓑ to skip';
+}
 const LOGO_MOVIE = '/data/Movie/logo.mp4';
 // The "cleaned" intro (intro_clean.mp4): identical to the faithful transcode
 // except the ~2s Cinepak block "burst" on the globe (~12–14s), which is patched
@@ -2592,7 +2608,7 @@ function drawMap(): void {
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
   // only the name plaque and panel stand out. Nodes (balls) are skipped too.
-  const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !panelOpen, !panelOpen, selectedNode);
+  const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !panelOpen, !panelOpen, selectedNode, tvMode);
   // Name plaque (KresliDesku, UMain.pas:1484): drawn for the panel's room while it
   // is open, or the hovered room node otherwise.
   const plaqueRoom = mapInfoRoom ?? mapHoverRoom;

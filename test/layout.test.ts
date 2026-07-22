@@ -19,6 +19,8 @@ import {
   FIT_MODES,
   isFitMode,
   MIN_STAGE_SCALE,
+  safeAvail,
+  TV_SAFE_INSET,
 } from '../src/app/layout.js';
 
 // A representative spread of real room sizes (measured across the 72 rooms).
@@ -278,6 +280,42 @@ describe('contentScale — fixed integer scales (x1…x4)', () => {
     for (const m of FIT_MODES) expect(isFitMode(m)).toBe(true);
     for (const bad of ['capped', 'x5', 'x0', '', 'NATIVE', 42, null, undefined]) {
       expect(isFitMode(bad)).toBe(false);
+    }
+  });
+});
+
+describe('safeAvail — TV title-safe overscan margin', () => {
+  it('is the identity on the web build (tv=false)', () => {
+    const r = safeAvail(1920, 1080, false);
+    expect(r.availW).toBe(1920);
+    expect(r.availH).toBe(1080);
+  });
+
+  it('insets both axes by TV_SAFE_INSET on each edge in TV mode', () => {
+    const r = safeAvail(1920, 1080, true);
+    const k = 1 - 2 * TV_SAFE_INSET;
+    expect(r.availW).toBeCloseTo(1920 * k, 6);
+    expect(r.availH).toBeCloseTo(1080 * k, 6);
+    // 5% each side ⇒ a 90% action-safe box.
+    expect(TV_SAFE_INSET).toBeGreaterThan(0);
+    expect(TV_SAFE_INSET).toBeLessThan(0.15);
+  });
+
+  it('keeps the whole TV stage inside a title-safe margin at 1080p and 4K', () => {
+    for (const [W, H] of [
+      [1920, 1080],
+      [3840, 2160],
+    ] as const) {
+      const { availW, availH } = safeAvail(W, H, true);
+      const lay = computeStageLayout(availW, availH, /* withPanel */ false);
+      // The stage box (full footprint in TV mode — no panel) must fit inside the
+      // inset area, so once centered there is a real margin on every physical edge.
+      expect(lay.stageW).toBeLessThanOrEqual(availW + 1e-6);
+      expect(lay.stageH).toBeLessThanOrEqual(availH + 1e-6);
+      const marginX = (W - lay.stageW) / 2;
+      const marginY = (H - lay.stageH) / 2;
+      expect(marginX).toBeGreaterThanOrEqual(W * TV_SAFE_INSET - 1e-6);
+      expect(marginY).toBeGreaterThanOrEqual(H * TV_SAFE_INSET - 1e-6);
     }
   });
 });

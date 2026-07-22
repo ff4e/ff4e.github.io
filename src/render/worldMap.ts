@@ -97,6 +97,7 @@ export class WorldMap {
     drawNodes = true,
     litRegions = true,
     selectedNode: number | null = null,
+    ringEmphasis = false,
   ): Uint8ClampedArray {
     const resena = computeResena(solved, cheated);
     // RTable[maskValue] = 1 where that branch's region is enabled AND revealed.
@@ -143,7 +144,7 @@ export class WorldMap {
     // Controller (TV) mode: a persistent selection ring around the currently-selected
     // room node (there is no mouse cursor on a console). Drawn only when nodes are
     // visible (the record panel isn't open).
-    if (drawNodes && selectedNode !== null) this.blitRing(rgba, selectedNode);
+    if (drawNodes && selectedNode !== null) this.blitRing(rgba, selectedNode, ringEmphasis);
     return rgba;
   }
 
@@ -251,24 +252,42 @@ export class WorldMap {
   }
   private cornerCentroidsCache: { action: MapAction; x: number; y: number }[] | null = null;
 
-  /** Draw a bright selection ring around a room node (controller highlight). */
-  private blitRing(rgba: Uint8ClampedArray, room: number): void {
+  /**
+   * Draw a bright selection ring around a room node (controller focus highlight).
+   * `emphasis` (TV/10-foot mode) draws a larger, thicker ring plus a soft cyan glow
+   * halo so the focused node is legible from the couch; otherwise a crisp thin ring
+   * for desktop-pad testing.
+   */
+  private blitRing(rgba: Uint8ClampedArray, room: number, emphasis = false): void {
     const cx = KULXY[(room - 1) * 2]!;
     const cy = KULXY[(room - 1) * 2 + 1]!;
-    const R = 13;
-    for (let dy = -R - 2; dy <= R + 2; dy++) {
+    const R = emphasis ? 15 : 13;
+    const half = emphasis ? 2.2 : 1.2; // half-thickness of the solid ring outline
+    const glow = emphasis ? 4 : 0; // radial falloff band outside the ring (TV only)
+    const reach = Math.ceil(R + half + glow + 1);
+    for (let dy = -reach; dy <= reach; dy++) {
       const y = cy + dy;
       if (y < 0 || y >= MAP_H) continue;
-      for (let dx = -R - 2; dx <= R + 2; dx++) {
+      for (let dx = -reach; dx <= reach; dx++) {
         const x = cx + dx;
         if (x < 0 || x >= MAP_W) continue;
         const d = Math.sqrt(dx * dx + dy * dy);
-        if (d < R - 1.2 || d > R + 1.2) continue; // ~2.4px-thick ring outline
         const i = (y * MAP_W + x) * 4;
-        rgba[i] = 120; // bright cyan, couch-legible against the dark map
-        rgba[i + 1] = 230;
-        rgba[i + 2] = 255;
-        rgba[i + 3] = 255;
+        if (d >= R - half && d <= R + half) {
+          rgba[i] = 120; // bright cyan, couch-legible against the dark map
+          rgba[i + 1] = 230;
+          rgba[i + 2] = 255;
+          rgba[i + 3] = 255;
+        } else if (glow > 0) {
+          // Soft glow: blend cyan over the map, fading out with distance from the ring.
+          const dist = d < R - half ? R - half - d : d - (R + half);
+          if (dist > glow) continue;
+          const a = (1 - dist / glow) * 0.5; // up to 50% cyan at the ring edge
+          rgba[i] = Math.round(rgba[i]! * (1 - a) + 120 * a);
+          rgba[i + 1] = Math.round(rgba[i + 1]! * (1 - a) + 230 * a);
+          rgba[i + 2] = Math.round(rgba[i + 2]! * (1 - a) + 255 * a);
+          rgba[i + 3] = 255;
+        }
       }
     }
   }

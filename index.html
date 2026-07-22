@@ -199,6 +199,21 @@
       }
       .glyph-a { background: #1f6f3f; border-color: #2f9f5f; }
       .glyph-b { background: #7a2a2a; border-color: #b04040; }
+      /* 10-foot (TV/console) mode: scale the controller overlays up and give the
+         focused Options row a brighter, larger glow so it reads from the couch. */
+      body.tv .pad-box {
+        min-width: min(70vw, 560px);
+        padding: 40px 44px; gap: 26px; border-radius: 18px;
+      }
+      body.tv .pad-title { font-size: 34px; }
+      body.tv .pad-list { gap: 10px; }
+      body.tv .pad-list li { font-size: 24px; padding: 15px 22px; border-radius: 10px; }
+      body.tv .pad-list li.sel {
+        background: #274680; border-color: #8fb4ff;
+        box-shadow: 0 0 0 2px #8fb4ff88, 0 0 18px #6c9cff66;
+      }
+      body.tv .pad-hints { font-size: 18px; gap: 30px; }
+      body.tv .glyph { min-width: 26px; height: 26px; padding: 0 7px; font-size: 15px; }
     </style>
   </head>
   <body>
