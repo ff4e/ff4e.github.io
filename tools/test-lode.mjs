@@ -9,6 +9,20 @@ await withApp(async ({ p, expect }) => {
   expect(await p.evaluate(() => window.__ff.script() !== null), 'LODE has an active script');
   expect(await p.evaluate(() => window.__ff.gspec()) === 9, 'LODE is a gspec=9 room');
   expect(await p.evaluate(() => window.__ff.vytlacit()) === 1, 'LODE vytlacit=1');
+  // A save written before gspec:=9 was restored recorded gspec=0. Loading it must NOT
+  // downgrade the room back to "fish may exit" (script.ts applySnapshot).
+  await p.evaluate(() => window.__ff.save());
+  await p.evaluate(() => {
+    const k = Object.keys(localStorage).find((x) => x.startsWith('ff.save.'));
+    if (!k) return;
+    const o = JSON.parse(localStorage.getItem(k));
+    if (!o.vars) return;
+    o.vars.gspec = 0;
+    localStorage.setItem(k, JSON.stringify(o));
+  });
+  await p.evaluate(() => window.__ff.load());
+  await p.waitForFunction(() => !window.__ff.loading(), { timeout: 10000 }).catch(() => {});
+  expect(await p.evaluate(() => window.__ff.gspec()) === 9, 'a stale gspec=0 save does not re-break LODE');
   // Run a bit so the gods' battleship theatre ticks without error.
   const start = await p.evaluate(() => window.__ff.count());
   await p.waitForFunction((s) => window.__ff.count() >= s + 40, start, { timeout: 7000 }).catch(() => {});

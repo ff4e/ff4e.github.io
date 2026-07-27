@@ -2740,7 +2740,12 @@ function draw(): void {
   if (phase === 'move') slide = sub / (engine?.cellFrames ?? MOVE_FRAMES); // jizda speed-up (locked per cell)
   else if (phase === 'fall') slide = sub / FALL_FRAMES;
   else if (phase === 'exit') slide = (sub / exitFrames) * EXIT_CELLS; // slide the fish off-screen
-  else if (phase === 'cork' && corkExit) slide = (sub / corkExit.total) * EXIT_CELLS; // slide the pushed item off
+  else if (phase === 'cork' && corkExit)
+    // gspec=9 exit-slide (KresliMistnost, URoom.pas:26267): the pushed item moves
+    // 5px per frame for its faziVen = 3*a frames, i.e. exactly its own width/height
+    // (a cells at fsize=15) — NOT the fixed EXIT_CELLS a fish swims out by. LODE's
+    // buh2 is 6 cells wide, so the old constant left it a cell short before it popped.
+    slide = sub / 3;
   const fishAnim = { little: fishFrameFor('little'), big: fishFrameFor('big') };
   // Smoothness instrumentation: record the active fish's interpolated on-screen position
   // each rendered frame, so a harness can measure per-frame motion (stalls / jumps).

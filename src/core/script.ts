@@ -194,7 +194,14 @@ export class Script {
     for (let i = 0; i < this.roompole.length; i++) this.roompole[i] = s.roompole[i] ?? 0;
     for (let i = 0; i < this.globpole.length; i++) this.globpole[i] = s.globpole[i] ?? 0;
     this.zvykacka = s.zvykacka;
-    this.room.gspec = s.gspec ?? this.room.gspec;
+    // gspec is snapshotted for the modes a room script toggles at RUNTIME (CHODBA's
+    // 0<->2 darkness, KAJUTA1's 3/4 shove, WIN's 5->0 bonus). gspec=9 is different: it
+    // is a static room declaration that no script ever leaves, so init() is
+    // authoritative and a snapshot must never downgrade it. Without this, a save
+    // written before LODE's `gspec:=9` was restored (URoom.pas:7930) would load with
+    // gspec=0 and silently re-break the room: fish could exit again and the push-out
+    // could not complete.
+    if (this.room.gspec !== 9) this.room.gspec = s.gspec ?? this.room.gspec;
   }
 
   // ----- context helpers used by the ported room programs -----

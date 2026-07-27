@@ -173,3 +173,20 @@ describe('LODE fish exits (URoom.pas:24295)', () => {
     expect(engine.won).toBe(false);
   });
 });
+
+describe('LODE save/load (script snapshot)', () => {
+  it('does not let a pre-fix save restore gspec=0 and re-break the room', () => {
+    const { s } = lodeRoom();
+    // A save written before gspec:=9 was restored: same shape, gspec captured as 0.
+    const stale = { ...s.snapshot(), gspec: 0 };
+    s.applySnapshot(stale);
+    expect(s.room.gspec, 'init() stays authoritative for the static push-out mode').toBe(9);
+  });
+
+  it('still restores a runtime gspec a script does toggle (CHODBA-style darkness)', () => {
+    const { s } = lodeRoom();
+    s.room.gspec = 0; // pretend a room whose init leaves gspec at 0
+    s.applySnapshot({ ...s.snapshot(), gspec: 2 });
+    expect(s.room.gspec).toBe(2);
+  });
+});
