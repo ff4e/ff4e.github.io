@@ -64,11 +64,20 @@ check('disintegrate skeleton', await p.evaluate(() => window.__ff.glLiveParity()
 // 5. LODE falling wreck: the logic mutates its background before both compositors.
 await p.evaluate(() => window.__ff.enterRoomAwait(19));
 await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 20, { timeout: 8000 });
-const wreckBefore = await p.evaluate(() => window.__ff.roomFrameHash('classic'));
+const wreckBefore = await p.evaluate(() => window.__ff.roomBgFrameHash('classic'));
 await p.evaluate(() => window.__ff.dropShip(0));
-await p.waitForFunction(() => (window.__ff.wreckState()?.changed ?? 0) > 0, { timeout: 3000 });
-const wreckAfter = await p.evaluate(() => window.__ff.roomFrameHash('classic'));
-if (wreckBefore === wreckAfter) { ok = false; console.log('  FAIL LODE falling wreck: no visible frame delta'); }
+// Gate on a VISIBLE background delta, not on wreckState().changed: the wreck starts at
+// lodniY=-100 (ShodLod) and its first swaps are recorded a few ticks before any of them
+// land where the wall mask lets the background show, so the swap counter fires too early.
+// The background-only hash is also immune to ambient fish/item animation, so a change to
+// it can only have come from the wreck.
+let wreckVisible = true;
+try {
+  await p.waitForFunction((h) => window.__ff.roomBgFrameHash('classic') !== h, wreckBefore, { timeout: 8000, polling: 50 });
+} catch {
+  wreckVisible = false;
+}
+if (!wreckVisible) { ok = false; console.log('  FAIL LODE falling wreck: no visible frame delta'); }
 check('LODE falling wreck', await p.evaluate(() => window.__ff.glRoomParity()));
 
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }
