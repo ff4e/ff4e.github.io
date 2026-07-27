@@ -71,6 +71,7 @@ function init(s: Script): void {
   game = new LodeGame((n) => s.random(n));
 
   const v = s.vars(R.room, 10);
+  s.room.gspec = 9;
   v[R.room_stavhry] = 0;
   v[R.room_posl] = 0;
   v[R.room_uvod] = 0;
