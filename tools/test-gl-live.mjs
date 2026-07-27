@@ -74,7 +74,8 @@ await p.evaluate(() => window.__ff.dropShip(0));
 let wreckVisible = true;
 try {
   await p.waitForFunction((h) => window.__ff.roomBgFrameHash('classic') !== h, wreckBefore, { timeout: 8000, polling: 50 });
-} catch {
+} catch (e) {
+  if (e.name !== 'TimeoutError') throw e;
   wreckVisible = false;
 }
 if (!wreckVisible) { ok = false; console.log('  FAIL LODE falling wreck: no visible frame delta'); }

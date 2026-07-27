@@ -65,11 +65,20 @@ for (let num = 1; num <= 72; num++) {
 // Exercise LODE's mutable enhanced background/sprite copies, not just its resting frame.
 await p.evaluate(() => window.__ff.enterRoomAwait(19));
 await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.enhancedActive(), { timeout: 10000 });
-const wreckBefore = await p.evaluate(() => window.__ff.roomFrameHash('enhanced'));
+const wreckBefore = await p.evaluate(() => window.__ff.roomBgFrameHash('enhanced'));
 await p.evaluate(() => window.__ff.dropShip(0));
-await p.waitForFunction(() => (window.__ff.wreckState()?.changed ?? 0) > 0, { timeout: 3000 });
-const wreckAfter = await p.evaluate(() => window.__ff.roomFrameHash('enhanced'));
-if (wreckBefore === wreckAfter) {
+// Same gate as tools/test-gl-live.mjs: poll the BACKGROUND-only hash for a real delta.
+// wreckState().changed counts recorded swaps, which start off-screen, and the full-room
+// hash moves on its own with ambient fish/item animation — either would make this pass
+// without the wreck ever rendering.
+let wreckVisible = true;
+try {
+  await p.waitForFunction((h) => window.__ff.roomBgFrameHash('enhanced') !== h, wreckBefore, { timeout: 8000, polling: 50 });
+} catch (e) {
+  if (e.name !== 'TimeoutError') throw e;
+  wreckVisible = false;
+}
+if (!wreckVisible) {
   ok = false;
   console.log('  FAIL room 19 falling wreck: no visible enhanced frame delta');
 }
