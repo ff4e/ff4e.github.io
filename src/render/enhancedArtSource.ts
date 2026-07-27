@@ -21,6 +21,19 @@ import { FFR_EXTRA, type FfrPaletteEntry, type FfrBitmap } from '../data/ffr.js'
 import type { Room, Item } from '../core/room.js';
 
 /**
+ * The gspec modes that replace the normal room render wholesale, so no truecolor
+ * background applies: 2 = darkness fill, 5 = the WIN bonus level, 42 = the ZX
+ * "emulator" band render (URoom.pas KresliMistnost / KresliZX).
+ *
+ * Every other mode draws a normal room and keeps its enhanced background —
+ * including gspec=9 (the SPUNT/MAPA/POHON/DISKETA/GRAL/ZELVA/BARELY/LODE push-out
+ * rooms) and KAJUTA1's gspec=3/4 screen-shove, which only slide the view.
+ */
+export function classicOnlyBackground(gspec: number): boolean {
+  return gspec === 2 || gspec === 5 || gspec === 42;
+}
+
+/**
  * A room's decoded FFNG truecolor background. `wall`/`bg` are frame arrays
  * indexed by the wall item's `afaze` (usually length 1; STEEL's red-alert cycles
  * multiple wall+bg frames).
@@ -110,7 +123,7 @@ export class EnhancedArtSource implements ArtSource {
     const art = this.art;
     if (
       isTruecolorTarget(screen) &&
-      room.gspec === 0 &&
+      !classicOnlyBackground(room.gspec) &&
       art !== null &&
       art.w === screen.width &&
       art.h === screen.height

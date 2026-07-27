@@ -47,6 +47,7 @@ import { HelpScreens } from '../render/help.js';
 import { IndexedScreen } from '../render/framebuffer.js';
 import {
   EnhancedArtSource,
+  classicOnlyBackground,
   type EnhancedArt,
   type EnhancedObject,
   type FishSprites,
@@ -4038,7 +4039,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     graphics === 'enhanced' &&
     enhancedArt !== null &&
     room !== null &&
-    room.gspec === 0 &&
+    !classicOnlyBackground(room.gspec) &&
     enhancedArt.w === (ffr?.width ?? 0) * FSIZE,
   playingPrior: (prior: number) => audio.playing(prior),
   voicePlaying: () => audio.playing(1) || audio.playing(2) || audio.playing(3),
