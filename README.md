@@ -154,12 +154,39 @@ GPL-2.0-or-later.
 Automated, deterministic, **non-AI** (no LLM/vision at runtime — plain assertions):
 
     npm test        # unit + physics (Vitest, headless, no browser, no game data needed)
-    npm run test:ui # browser/integration (Playwright; auto-starts the dev server)
+    npm run test:ui # browser/integration (Playwright; builds the app and serves it)
     npm run test:all # typecheck + unit + UI, in sequence, fail-fast (the full gate)
     npm run test:solutions # replay known FFNG solutions per room (needs $FFNG_DATA)
 
 `npm run test:all` chains `typecheck && test && test:ui` — the one command to run before
 considering a change done (it stops at the first failing phase).
+
+### How the UI suite runs — read this before adding a probe
+
+`tools/run-ui-tests.mjs` builds the app (`vite build`, ~2s), serves the result on a dedicated
+port, and runs the probes **concurrently**. It used to run them one at a time, each in its own
+cold Chromium, which took ~15 minutes; it now takes ~3, with the same probes and the same
+assertions.
+
+- **A worker pool** runs `FF_UI_JOBS` probes at once (default: cores−2, capped at 8 — more is
+  counterproductive, because the game clock is wall-clock driven and slows under load). Each
+  probe is still its own `node` process with its own browser context, so the isolation probes
+  rely on (localStorage, saved games) is unchanged. Output is buffered per probe.
+- **Two shared browser servers** (plain, and ANGLE for the WebGL probes) are launched once and
+  advertised over `FF_WS_PLAIN` / `FF_WS_ANGLE`. Get a browser with `launchBrowser()` from
+  `ui-lib.mjs`, never `chromium.launch()` — run a probe by hand and it launches its own.
+- **Wait on conditions, never on the clock.** Use `waitRoom()`, `waitTicks()` and
+  `selectRoom()` from `ui-lib.mjs`. A fixed `waitForTimeout` and a timeout sized just above a
+  wait's nominal duration both become races once eight probes share the machine.
+- **`screen() === 'room'` does not mean your room is up.** `enterRoom()` flips the screen
+  synchronously but loads asynchronously; act in that window and the room build landing a
+  moment later discards what you did. `waitRoom()`/`selectRoom()` gate on `__ff.roomLoading()`
+  and `__ff.roomNum()` for you.
+- **`waitForFunction(fn, { timeout })` silently ignores that timeout** — options are the
+  *third* argument; as the second it is taken as the predicate's `arg`, leaving the 30s default.
+- If a probe asserts on **wall-clock behaviour** (frame rate, tick rate, animation pacing,
+  per-frame motion), add it to `EXCLUSIVE` in the runner so it gets the machine to itself.
+  Do not relax its bounds instead.
 
 - **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test`): the
   **solvability net** — replays committed known-good FFNG solution move-strings
@@ -179,7 +206,7 @@ considering a change done (it stops at the first failing phase).
   the `setBusy` primitive, the **`StdSmrt` death commentary** (Depth-gated survivor lines, the +8-tick fire
   window), and a corpus test that parses all 72 real rooms and checks their load settle (auto-skips when the
   game data isn't present; point `$FFNG_DATA` at the extracted `MAINDIR` to run it).
-- **`npm run test:ui`** (`tools/test-*.mjs`, 17 tests): the HUD (render + hit-test + button dispatch), the
+- **`npm run test:ui`** (`tools/test-*.mjs`, 63 probes): the HUD (render + hit-test + button dispatch), the
   world map (compositing + node hit-test + branch unlock + navigation), the map/room **audio lifecycle**
   (menu music, `KillSnd` + dialogue-clear on leaving), per-room music, the fixed-timestep clock + dialogue
   pacing, lip-sync heads, save/restart determinism, the faithful **input map** (arrow keys move the active
