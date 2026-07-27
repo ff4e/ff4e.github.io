@@ -2945,35 +2945,38 @@ function step(): boolean {
       }
     }
   }
-  // Run the room script (Programky) each tick while the room is unresolved, then the
-  // host's cosmetic StdSmrt / chatter / dialogy on top of it.
-  if (activeScript && !room.won) {
+  // Run the room script (Programky) each unresolved tick. During the win hold,
+  // StepEngine still advances VyresLode so an in-flight wreck finishes falling.
+  if (activeScript) {
+    const wasWon = room.won;
     // cas_hry: elapsed session time in days (Delphi Now units) for ZAVER's finale
     // hour-count narration. Session-scoped; cross-session accumulation is deferred.
     const casHry = (Date.now() - gameStart) / 86_400_000;
     engine.runScript(count, casHry); // idle timers + scalar sync + prog + tickShodLod
-    // StdSmrt: death commentary (the survivor comments ~8 ticks after a partner dies).
-    // Gated on StdHlaskySmrti (URoom.pas:24942) — rooms like TRUP/VLADOVA disable it.
-    // Suppressed during the KUFRIK demonstration and during a best-solution replay
-    // (the original's silent loadmode replay speaks nothing): the recorded help
-    // subtitles are the demo's own narration of the deliberate death.
-    if (deathState && activeScript.s.stdHlaskySmrti && !showmode && !inReplay()) {
-      stdSmrt(activeScript.s, deathState, count, roomDepth, {
-        aliveLittle: room.alive.little,
-        aliveBig: room.alive.big,
-        venkuLittle: room.venku.little,
-        venkuBig: room.venku.big,
-      });
+    if (!wasWon) {
+      // StdSmrt: death commentary (the survivor comments ~8 ticks after a partner dies).
+      // Gated on StdHlaskySmrti (URoom.pas:24942) — rooms like TRUP/VLADOVA disable it.
+      // Suppressed during the KUFRIK demonstration and during a best-solution replay
+      // (the original's silent loadmode replay speaks nothing): the recorded help
+      // subtitles are the demo's own narration of the deliberate death.
+      if (deathState && activeScript.s.stdHlaskySmrti && !showmode && !inReplay()) {
+        stdSmrt(activeScript.s, deathState, count, roomDepth, {
+          aliveLittle: room.alive.little,
+          aliveBig: room.alive.big,
+          venkuLittle: room.venku.little,
+          venkuBig: room.venku.big,
+        });
+      }
+      // StdKecej: ambient idle chatter, gated on no active dialogue + both fish alive.
+      // No showmode special-case: the demo keeps quiet on its own because every replayed
+      // action calls hracNespi (resets casposlzmeny), exactly like the original. A replay
+      // is silent (original loadmode replay runs no Programky/chatter).
+      if (chatter && room.alive.little && room.alive.big && !inReplay()) {
+        const depth15 = roomDepth === 15;
+        tickChatter(activeScript.s, chatter, count, 1000 / LOGIC_MS, activeScript.s.isDialog(), depth15);
+      }
+      activeScript.s.dialogy(count);
     }
-    // StdKecej: ambient idle chatter, gated on no active dialogue + both fish alive.
-    // No showmode special-case: the demo keeps quiet on its own because every replayed
-    // action calls hracNespi (resets casposlzmeny), exactly like the original. A replay
-    // is silent (original loadmode replay runs no Programky/chatter).
-    if (chatter && room.alive.little && room.alive.big && !inReplay()) {
-      const depth15 = roomDepth === 15;
-      tickChatter(activeScript.s, chatter, count, 1000 / LOGIC_MS, activeScript.s.isDialog(), depth15);
-    }
-    activeScript.s.dialogy(count);
   }
   updateLipSync(); // cycle talking-mouth frames from live voice playback
   // Hacky (URoom.pas:24950): the xfisher fishing hooks. A hook can catch+kill a fish
@@ -4128,6 +4131,31 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   gspec: () => room?.gspec ?? 0,
   vytlacit: () => room?.vytlacit ?? 0,
+  /** LODE test hooks: start/read the destructive falling-wreck animation. */
+  dropShip: (phase = 0) => {
+    activeScript?.s.shodLod(phase);
+    forceRoomRedraw = true;
+    wake();
+  },
+  wreckState: () =>
+    activeScript
+      ? {
+          phase: activeScript.s.padalod,
+          x: activeScript.s.lodniX,
+          y: activeScript.s.lodniY,
+          swaps: room?.wreckSwaps.length ?? 0,
+          changed: room?.wreckSwaps.reduce((n, swap) => n + swap.pixels.length, 0) ?? 0,
+        }
+      : null,
+  /** Stable fixed-count frame hash used by browser tests to prove a visible delta. */
+  roomFrameHash: (mode: 'classic' | 'enhanced' = graphics) => {
+    if (!room) return null;
+    const art = mode === 'enhanced' ? enhancedArtFor(room) : classicArtFor(room);
+    const frame = renderRoomRgba(room, art, { count: 0 });
+    let hash = 2166136261;
+    for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
+    return hash >>> 0;
+  },
   /** Hacky (xfisher): spawn a fishing hook; read the hook count/states. */
   spawnHook: () => {
     if (room) hooks.add(room);

@@ -138,8 +138,7 @@ export class Script {
   /**
    * ShodLod state (URoom.pas:26285): a ship falls from the sky when a battleship is
    * sunk. `padalod` = -1 when idle, else kterou+100 while a ship is falling; lodni*
-   * are its position/velocity. The falling-ship RENDER is deferred (cosmetic); the
-   * state machine runs so subsequent sinks re-trigger it.
+   * are its position/velocity.
    */
   padalod = -1;
   lodniX = 0;
@@ -457,13 +456,15 @@ export class Script {
     this.lodniDX = this.random(3) - 1;
     this.lodniDY = 4 + this.random(7);
   }
-  /** Advance a falling ship each tick; clears `padalod` once it drops off-screen so
-   * the next sink can trigger another (VyresLode's motion, minus the render). */
+  /** VyresLode (URoom.pas:26295): destructively swap, move, swap, then clear off-screen. */
   tickShodLod(): void {
     if (this.padalod === -1) return;
+    if (this.padalod >= 100) this.padalod -= 100;
+    else this.room.applyWreckSwap(this.lodniX, this.lodniY, this.padalod);
     this.lodniX += this.lodniDX;
     this.lodniY += this.lodniDY;
-    if (this.lodniY > 500) this.padalod = -1;
+    if (this.lodniY > 436) this.padalod = -1;
+    else this.room.applyWreckSwap(this.lodniX, this.lodniY, this.padalod);
   }
 
   // ----- dialog scheduler -----

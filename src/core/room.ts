@@ -14,7 +14,13 @@
  * This module is pure logic (no DOM, no rendering) so it stays deterministic
  * and headless-testable, per the PLAN's logic/render split.
  */
-import { type FfrRoom, type FfrBitmap, type FfrPaletteEntry, Kind } from '../data/ffr.js';
+import {
+  type FfrRoom,
+  type FfrBitmap,
+  type FfrPaletteEntry,
+  Kind,
+  markBitmapPixelsChanged,
+} from '../data/ffr.js';
 import { Dir, DX_DIR, DY_DIR } from './dir.js';
 
 export const ITEM_WATER = 255;
@@ -67,6 +73,16 @@ export interface Item {
   readonly fields: readonly Field[];
 }
 
+/** One destructive KresliLod ship/background swap pass (URoom.pas:26296-26361). */
+export interface WreckSwap {
+  readonly x: number;
+  readonly y: number;
+  readonly phase: number;
+  readonly width: number;
+  /** Linear ship-bitmap offsets that the Delphi mask test actually swapped. */
+  readonly pixels: readonly number[];
+}
+
 /** Disintegration counter set when a fish dies (zac_rozpad, URoom.pas:439). */
 export const ZAC_ROZPAD = 400;
 
@@ -107,9 +123,9 @@ export class Room {
   readonly items: Item[];
   readonly grid: Grid;
   readonly palette: readonly FfrPaletteEntry[];
-  readonly bitmaps: readonly (FfrBitmap | null)[];
+  readonly bitmaps: (FfrBitmap | null)[];
   readonly wallItem: Item;
-  readonly bgBmp: FfrBitmap;
+  bgBmp: FfrBitmap;
   wamp: number;
   wper: number;
   readonly wspd: number;
@@ -147,6 +163,10 @@ export class Room {
     cur: 0,
     colors: null,
   };
+
+  /** Ordered destructive swaps, retained so a newly-selected enhanced art source can replay them. */
+  readonly wreckSwaps: WreckSwap[] = [];
+  private readonly mutableBitmaps = new Set<number>();
 
   /** "busy" talking state per fish (set by dialog scripts; drives the talking head). */
   busy: { little: number; big: number } = { little: 0, big: 0 };
@@ -190,7 +210,9 @@ export class Room {
     this.height = ffr.height;
     this.grid = new Grid(this.width, this.height);
     this.palette = ffr.palette;
-    this.bitmaps = ffr.bitmaps;
+    // Keep the bitmap table room-local. KresliLod mutates selected bitmap pixels,
+    // but parsed FFR data may be reused when the room is rebuilt.
+    this.bitmaps = [...ffr.bitmaps];
     this.wamp = ffr.wamp;
     this.wper = ffr.wper;
     this.wspd = ffr.wspd;
@@ -240,6 +262,59 @@ export class Room {
 
   get itemCount(): number {
     return this.items.length - 1;
+  }
+
+  /**
+   * KresliLod (URoom.pas:26296-26361): where the mask bitmap permits it, swap each
+   * non-mask ship pixel with the room background. Both buffers are deliberately
+   * mutated, which makes the wreck erode as the same sprite is moved and swapped
+   * again on later ticks.
+   */
+  applyWreckSwap(x: number, y: number, phase: number): void {
+    const shipItem = this.items[this.itemCount - 1];
+    const maskItem = this.items[this.itemCount];
+    if (!shipItem || !maskItem) return;
+
+    const shipIndex = shipItem.bmp + phase;
+    const ship = this.mutableBitmap(shipIndex);
+    const bg = this.mutableBitmap(1);
+    const mask = this.bitmaps[maskItem.bmp];
+    if (!ship || !bg || !mask) return;
+
+    const maskColor = mask.pixels[0]!;
+    const swapped: number[] = [];
+    for (let i = 0; i < ship.h; i++) {
+      const dy = y + i;
+      if (dy < 0 || dy > 436) continue;
+      const shipRow = i * ship.w;
+      const bgRow = dy * bg.w + x;
+      const maskRow = (dy > 435 ? 135 : dy < 306 ? 0 : dy - 306) * mask.w + x;
+      for (let j = 0; j < ship.w; j++) {
+        if (mask.pixels[maskRow + j] !== maskColor) continue;
+        const sp = shipRow + j;
+        const shipPixel = ship.pixels[sp]!;
+        if (shipPixel === maskColor) continue;
+        const bp = bgRow + j;
+        const bgPixel = bg.pixels[bp]!;
+        ship.pixels[sp] = bgPixel;
+        bg.pixels[bp] = shipPixel;
+        swapped.push(sp);
+      }
+    }
+    this.wreckSwaps.push({ x, y, phase, width: ship.w, pixels: swapped });
+    if (swapped.length > 0) markBitmapPixelsChanged(bg.pixels);
+  }
+
+  /** Clone a bitmap on its first destructive write so the parsed FFR stays immutable. */
+  private mutableBitmap(index: number): FfrBitmap | null {
+    const current = this.bitmaps[index];
+    if (!current) return null;
+    if (this.mutableBitmaps.has(index)) return current;
+    const clone = { ...current, pixels: current.pixels.slice() };
+    this.bitmaps[index] = clone;
+    this.mutableBitmaps.add(index);
+    if (index === 1) this.bgBmp = clone;
+    return clone;
   }
 
   /** priprav_pole (URoom.pas:26375): rebuild the occupancy grid from item positions. */

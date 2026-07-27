@@ -5,6 +5,7 @@
  *   - fishing hooks (setIndex line/glyph + caught-fish composite)
  *   - a dead fish's disintegrating skeleton (DISINT_FS randpole dither)
  *   - baked classic subtitles (setIndex text) drawn into the GPU target
+ *   - LODE's destructively-swapped falling wreck background
  * via __ff.glLiveParity (classic art), after setting up each scenario.
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
@@ -59,6 +60,16 @@ check('baked subtitle', await p.evaluate(() => window.__ff.glLiveParity()));
 await p.evaluate(() => window.__ff.killFish('little'));
 await p.waitForTimeout(50);
 check('disintegrate skeleton', await p.evaluate(() => window.__ff.glLiveParity()));
+
+// 5. LODE falling wreck: the logic mutates its background before both compositors.
+await p.evaluate(() => window.__ff.enterRoomAwait(19));
+await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 20, { timeout: 8000 });
+const wreckBefore = await p.evaluate(() => window.__ff.roomFrameHash('classic'));
+await p.evaluate(() => window.__ff.dropShip(0));
+await p.waitForFunction(() => (window.__ff.wreckState()?.changed ?? 0) > 0, { timeout: 3000 });
+const wreckAfter = await p.evaluate(() => window.__ff.roomFrameHash('classic'));
+if (wreckBefore === wreckAfter) { ok = false; console.log('  FAIL LODE falling wreck: no visible frame delta'); }
+check('LODE falling wreck', await p.evaluate(() => window.__ff.glRoomParity()));
 
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }
 console.log(ok ? 'PASS' : 'FAIL');

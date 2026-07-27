@@ -17,7 +17,7 @@ import { isTruecolorTarget } from './framebuffer.js';
 import type { ArtSource } from './artSource.js';
 import type { FishFrame } from './renderRoom.js';
 import type { CompositeTarget } from './framebuffer.js';
-import type { FfrPaletteEntry, FfrBitmap } from '../data/ffr.js';
+import { FFR_EXTRA, type FfrPaletteEntry, type FfrBitmap } from '../data/ffr.js';
 import type { Room, Item } from '../core/room.js';
 
 /**
@@ -87,6 +87,9 @@ function frameIndex(afaze: number, len: number): number {
 
 export class EnhancedArtSource implements ArtSource {
   readonly lut: Uint8Array;
+  private readonly wreckBackgrounds: Uint8Array[] | null;
+  private wreckSprites: EnhancedSprite[] | null = null;
+  private wreckCursor = 0;
 
   constructor(
     palette: readonly FfrPaletteEntry[],
@@ -95,6 +98,7 @@ export class EnhancedArtSource implements ArtSource {
     private readonly fish: FishSprites | null,
   ) {
     this.lut = buildPaletteLut(palette);
+    this.wreckBackgrounds = art ? art.bg.map((frame) => frame.slice()) : null;
   }
 
   /**
@@ -111,10 +115,12 @@ export class EnhancedArtSource implements ArtSource {
       art.w === screen.width &&
       art.h === screen.height
     ) {
+      this.syncWreck(room);
       const afaze = room.wallItem.afaze;
       const wf = frameIndex(afaze, art.wall.length);
       const bf = frameIndex(afaze, art.bg.length);
-      screen.blit2Rgba(wall, bg, art.wall[wf]!, art.bg[bf]!, room.wallItem.mask, count, room.wamp, room.wper, room.wspd);
+      const enhancedBg = this.wreckBackgrounds?.[bf] ?? art.bg[bf]!;
+      screen.blit2Rgba(wall, bg, art.wall[wf]!, enhancedBg, room.wallItem.mask, count, room.wamp, room.wper, room.wspd);
       return;
     }
     classicBackground(screen, room, wall, bg, count);
@@ -197,5 +203,48 @@ export class EnhancedArtSource implements ArtSource {
       }
     }
     classicFish(screen, room, which, item, sx, sy, frame);
+  }
+
+  /**
+   * Replay KresliLod's destructive swaps into private FFNG background/sprite
+   * copies. The classic mask still decides eligible pixels; RGBA pixels perform
+   * the same exchange, preserving the original erosion/trail in enhanced mode.
+   */
+  private syncWreck(room: Room): void {
+    const currentBg = this.wreckBackgrounds?.[0];
+    const art = this.art;
+    const swaps = room.wreckSwaps ?? [];
+    if (!currentBg || !art || this.wreckCursor >= swaps.length) return;
+
+    if (!this.wreckSprites) {
+      const wreckObject = this.objects.find((obj) => obj.item === room.itemCount - 1);
+      if (!wreckObject) return;
+      this.wreckSprites = wreckObject.frames.map((frame) => ({ ...frame, rgba: frame.rgba.slice() }));
+    }
+
+    // Publish a new immutable snapshot so GlScreen's identity cache re-uploads it.
+    const bg = currentBg.slice();
+    this.wreckBackgrounds![0] = bg;
+    for (; this.wreckCursor < swaps.length; this.wreckCursor++) {
+      const op = swaps[this.wreckCursor]!;
+      const sprite = this.wreckSprites[op.phase];
+      if (!sprite) continue;
+      for (const pixel of op.pixels) {
+        const i = Math.floor(pixel / op.width);
+        const j = pixel % op.width;
+        const dy = op.y + i;
+        if (dy < 0 || dy > 436 || dy >= art.h) continue;
+        if (i >= sprite.h || j >= sprite.w) continue;
+        const sp = (i * sprite.w + j) * 4;
+        const dx = op.x + j - FFR_EXTRA;
+        if (dx < 0 || dx >= art.w) continue;
+        const bp = (dy * art.w + dx) * 4;
+        for (let channel = 0; channel < 4; channel++) {
+          const oldBg = bg[bp + channel]!;
+          bg[bp + channel] = sprite.rgba[sp + channel]!;
+          sprite.rgba[sp + channel] = oldBg;
+        }
+      }
+    }
   }
 }

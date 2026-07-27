@@ -62,6 +62,24 @@ for (let num = 1; num <= 72; num++) {
     if (r.max !== 0) { ok = false; console.log(`  FAIL room ${num}: max=${r.max} overPct=${r.overPct.toFixed(3)}% enh=${r.enh} (expected byte-exact max=0)`); }
   } catch (e) { ok = false; console.log(`  FAIL room ${num}: ${String(e).slice(0, 60)}`); }
 }
+// Exercise LODE's mutable enhanced background/sprite copies, not just its resting frame.
+await p.evaluate(() => window.__ff.enterRoomAwait(19));
+await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.enhancedActive(), { timeout: 10000 });
+const wreckBefore = await p.evaluate(() => window.__ff.roomFrameHash('enhanced'));
+await p.evaluate(() => window.__ff.dropShip(0));
+await p.waitForFunction(() => (window.__ff.wreckState()?.changed ?? 0) > 0, { timeout: 3000 });
+const wreckAfter = await p.evaluate(() => window.__ff.roomFrameHash('enhanced'));
+if (wreckBefore === wreckAfter) {
+  ok = false;
+  console.log('  FAIL room 19 falling wreck: no visible enhanced frame delta');
+}
+const wreck = await p.evaluate(() => window.__ff.glEnhParity());
+if (!wreck?.webgl || wreck.unsupported || wreck.dimMismatch || wreck.max !== 0 || !wreck.enh) {
+  ok = false;
+  console.log(`  FAIL room 19 falling wreck: ${JSON.stringify(wreck)}`);
+} else {
+  console.log('  OK room 19 falling wreck: enhanced CPU/GPU byte-exact');
+}
 // Guard against a silent regression where the FFNG masters stop loading and the
 // whole sweep degrades to classic-vs-classic: require most rooms to have engaged
 // truecolor (a handful legitimately have no enhanced art, e.g. SCORE).
