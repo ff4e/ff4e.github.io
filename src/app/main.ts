@@ -4162,6 +4162,20 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
     return hash >>> 0;
   },
+  /**
+   * Same, but of the BACKGROUND layer only (wall + wobbled bg, no fish/items/effects).
+   * LODE's falling wreck is the only thing that mutates that layer mid-room, so this
+   * isolates its visible delta from ambient fish/item animation — and, being masked by
+   * the wall, it ignores swaps recorded where nothing can actually show.
+   */
+  roomBgFrameHash: (mode: 'classic' | 'enhanced' = graphics) => {
+    if (!room) return null;
+    const art = mode === 'enhanced' ? enhancedArtFor(room) : classicArtFor(room);
+    const frame = renderRoomBackgroundRgba(room, art, { count: 0 });
+    let hash = 2166136261;
+    for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
+    return hash >>> 0;
+  },
   /** Hacky (xfisher): spawn a fishing hook; read the hook count/states. */
   spawnHook: () => {
     if (room) hooks.add(room);
