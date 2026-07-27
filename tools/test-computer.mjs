@@ -3,7 +3,7 @@
  *   - DISKETA (70) is gspec=9 (push-out); ZX (66) is gspec=42 (emulator render mode).
  *   - ZAVER (71) locks player input (zavermode) during its finale cutscene.
  *   - WIN (68) starts in normal play (gspec=0) with the young fish controllable. */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 const ROOMS = [
   [65, 'TETRIS'], [66, 'ZX'], [67, 'WARCR2'], [68, 'WIN'],
@@ -14,10 +14,10 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   for (const [num, name] of ROOMS) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+    await waitRoom(p, 0);
     expect(await p.evaluate(() => window.__ff.script() !== null), `${name} has an active script`);
     const start = await p.evaluate(() => window.__ff.count());
-    await p.waitForFunction((s) => window.__ff.count() >= s + 40, start, { timeout: 8000 }).catch(() => {});
+    await waitTicks(p, start, 40);
     const advanced = (await p.evaluate(() => window.__ff.count())) - start;
     expect(advanced >= 40, `${name} (room ${num}) ran ${advanced} ticks without error`);
     console.log(`${name} OK (${advanced} ticks)`);
@@ -25,7 +25,7 @@ await withApp(async ({ p, expect }) => {
 
   const gspecOf = async (n) => {
     await p.evaluate((r) => window.__ff.enterRoomAwait(r), n);
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+    await waitRoom(p, 0);
     return p.evaluate(() => window.__ff.gspec());
   };
   expect((await gspecOf(70)) === 9, 'DISKETA is a gspec=9 room');
@@ -35,7 +35,7 @@ await withApp(async ({ p, expect }) => {
 
   // ZX gspec=42 render: opaque wall pixels become horizontal loading-stripe bands.
   await p.evaluate(() => window.__ff.enterRoomAwait(66));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 5, { timeout: 5000 });
+  await waitRoom(p, 5);
   const bands = await p.evaluate(() => {
     const c = document.querySelector('canvas');
     const g = c.getContext('2d');
@@ -55,7 +55,7 @@ await withApp(async ({ p, expect }) => {
   // WIN "Favorites" palette gag: the pink placeholder colours are swapped for the
   // Windows system theme, so NO pure magenta remains and the Win95 button-grey shows.
   await p.evaluate(() => window.__ff.enterRoomAwait(68));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 3, { timeout: 5000 });
+  await waitRoom(p, 3);
   const win = await p.evaluate(() => {
     const c = document.querySelector('canvas');
     const g = c.getContext('2d');

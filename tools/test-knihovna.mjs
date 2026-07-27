@@ -4,12 +4,12 @@
  * crystals, the universal agent, the PC/door animations — executes for many
  * ticks without throwing. The harness hard-fails on any console/page error.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoom(62));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
 
   expect(await p.evaluate(() => window.__ff.script() !== null), 'KNIHOVNA script is active in room 62');
 

@@ -7,11 +7,10 @@
  * Not WebGL-dependent, but lives here (tools/test-*.mjs) because it needs a real
  * browser document + document.fonts.
  */
-import { chromium } from 'playwright';
+import { launchBrowser, gotoApp } from './ui-lib.mjs';
 
-const PORT = process.env.FF_UI_PORT ?? '5173';
 
-const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser();
 let ok = true;
 const fail = (msg) => { ok = false; console.log(`  FAIL ${msg}`); };
 
@@ -27,7 +26,7 @@ async function freshPage(subfont) {
       else localStorage.setItem('ff.subfont', sf);
     } catch {}
   }, subfont ?? null);
-  await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+  await gotoApp(p);
   await p.waitForFunction(() => window.__ff && window.__ff.count);
   // Fonts load asynchronously at startup; wait for subFontReady.
   await p.waitForFunction(() => window.__ff.subFontReady && window.__ff.subFontReady(), { timeout: 8000 }).catch(() => {});

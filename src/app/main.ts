@@ -4067,6 +4067,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   helpPageCount: () => helpScreens.pages(subLang()).length,
   hasMap: () => worldMap !== null,
   screen: () => screen,
+  // Debug: true while a room's assets are still loading (loadRoom). Until this
+  // clears, the PREVIOUS room is still the live one — `screen() === 'room'` alone
+  // does NOT mean the room you asked for is up, because enterRoom() flips the
+  // screen synchronously but loads asynchronously.
+  roomLoading: () => roomLoading,
+  // Debug: the room number that is actually built and running (curNum) — not the
+  // one currently being loaded.
+  roomNum: () => curNum,
   /** ZAVER finale cutscene active (zavermode) — for the completion-trigger UI test. */
   zaverMode: () => activeScript?.s.zavermode ?? false,
   // Leg-completion story page (obrazek): the shown leg number (1..8), or null when none.

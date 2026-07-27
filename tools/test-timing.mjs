@@ -4,10 +4,10 @@
  * loop), NOT the 60fps render rate; and PRVNI's opening lines must be spaced by
  * several ticks, not fire instantly.
  */
-import { withApp } from './ui-lib.mjs';
+import { selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.selectOption('#room', '1'); // PRVNI
+  await selectRoom(p, 1); // PRVNI
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
 
   // Measure the tick rate over 3 real seconds.

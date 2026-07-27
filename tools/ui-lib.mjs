@@ -1,12 +1,65 @@
 /**
- * Shared harness for the Playwright UI tests: launches headless Chromium (audio
+ * Shared harness for the Playwright UI tests: gets a headless Chromium (audio
  * autoplay allowed), opens the app, collects console errors, and exits non-zero
  * if any assertion fails or the page logged an error. Deterministic, no AI.
  */
 import { chromium } from 'playwright';
 
+// Chromium flags. Keep in sync with run-ui-tests.mjs, which launches the shared
+// browser servers with exactly these two sets.
+const PLAIN_ARGS = ['--autoplay-policy=no-user-gesture-required'];
+const ANGLE_ARGS = ['--use-gl=angle', '--use-angle=metal', ...PLAIN_ARGS];
+
+/**
+ * Get a browser for a probe.
+ *
+ * Under `npm run test:ui` the runner has already launched two warm browser
+ * SERVERS and advertised them over FF_WS_PLAIN / FF_WS_ANGLE, so a probe just
+ * connects (milliseconds) instead of paying for a cold `chromium.launch()` —
+ * which the suite used to do 63 times per run. Isolation is unchanged: every
+ * probe still gets its own context (own localStorage/cookies/saved games), and
+ * `browser.close()` on a connected browser drops just this probe's contexts and
+ * disconnects, leaving the server up for the other workers.
+ *
+ * Run a probe by hand (`node tools/test-x.mjs`) with no server advertised and it
+ * transparently launches its own private browser, exactly as before.
+ *
+ * @param {{gl?: boolean}} opts `gl: true` selects the ANGLE/Metal browser, which
+ *   the WebGL probes need. The CPU-oracle probes must NOT get those flags: they
+ *   can change 2D rasterization, and byte-exact CPU output is what they assert.
+ */
+export async function launchBrowser(opts = {}) {
+  const ws = opts.gl ? process.env.FF_WS_ANGLE : process.env.FF_WS_PLAIN;
+  if (ws) return await chromium.connect(ws);
+  return await chromium.launch({ args: opts.gl ? ANGLE_ARGS : PLAIN_ARGS });
+}
+
+/**
+ * Wait for the app to be READY. `window.__ff` is published at the very end of
+ * boot (main.ts), after the world map, the panel and every other critical asset
+ * has loaded — so this is a strictly *stronger* condition than the
+ * `waitUntil: 'networkidle'` it replaces, and far cheaper: networkidle lingers
+ * half a second past the last request, on every one of the 63 probes.
+ */
+export async function appReady(p, timeout = 60000) {
+  await p.waitForFunction(() => window.__ff !== undefined, null, { timeout });
+}
+
+/** Open the app on the runner's port and wait until it has finished booting. */
+export async function gotoApp(p) {
+  const port = process.env.FF_UI_PORT ?? '5173';
+  await p.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
+  await appReady(p);
+}
+
+/** Reload the app and wait until it has finished booting again. */
+export async function reloadApp(p) {
+  await p.reload({ waitUntil: 'domcontentloaded' });
+  await appReady(p);
+}
+
 export async function withApp(fn, opts = {}) {
-  const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+  const b = await launchBrowser();
   const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
   const errs = [];
   p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
@@ -52,8 +105,7 @@ export async function withApp(fn, opts = {}) {
       /* storage unavailable */
     }
   });
-  const port = process.env.FF_UI_PORT ?? '5173';
-  await p.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'networkidle' });
+  await gotoApp(p);
 
   let ok = true;
   const expect = (cond, msg) => {
@@ -78,4 +130,72 @@ export async function withApp(fn, opts = {}) {
 /** Wait until a fish move settles back to the idle phase. */
 export async function idle(p) {
   await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
+}
+
+// ── Waiting on GAME time ──────────────────────────────────────────────────────
+// The game clock is wall-clock driven (LOGIC_MS ≈ 80ms per tick, ~12.5 ticks/s)
+// and deliberately never fast-forwards a backlog: under load the game simply runs
+// slower (main.ts `loop`). So a timeout sized just above a wait's nominal duration
+// is not a check, it is a race — and it is the *timeout* that loses, reporting a
+// fake failure while the assertion below it would have passed. Those tight budgets
+// (test-sloupy waited 200 ticks ≈ 16s with a 20s timeout) are exactly what broke
+// once the suite began running 8 probes at a time.
+//
+// So: budget game-time waits generously here, in one place. This weakens nothing —
+// the probes' own assertions ("advanced >= 200") still decide pass/fail; the
+// timeout only bounds a genuinely stuck clock.
+const TICK_MS = 80;
+
+/** Generous budget for `ticks` game ticks: 4× nominal, never below 10s. */
+export const tickBudget = (ticks) => Math.max(10000, Math.ceil(ticks * TICK_MS * 4));
+
+/**
+ * Wait for the game clock to advance `ticks` from `start`. Never throws — the
+ * caller asserts on how far the clock actually got.
+ */
+export async function waitTicks(p, start, ticks) {
+  await p
+    .waitForFunction(([s, n]) => window.__ff.count() >= s + n, [start, ticks], {
+      timeout: tickBudget(ticks),
+    })
+    .catch(() => {});
+}
+
+/**
+ * Wait until a room is loaded and has run more than `minCount` ticks. Throws if
+ * the room never comes up: that is a real defect, not a race. The budget adds a
+ * flat allowance for the asynchronous room load itself (assets are fetched from
+ * the dev server, which several probes are hitting at once).
+ *
+ * `!roomLoading()` is the load-complete gate, and it is not optional: enterRoom()
+ * sets `screen = 'room'` synchronously but loads the room asynchronously, so for
+ * a moment `screen() === 'room' && count() > 0` is satisfied by the PREVIOUS
+ * room. Act inside that window and the room build landing a moment later
+ * silently discards whatever you did.
+ */
+export async function waitRoom(p, minCount = 0) {
+  await p.waitForFunction(
+    (n) => window.__ff.screen() === 'room' && !window.__ff.roomLoading() && window.__ff.count() > n,
+    minCount,
+    { timeout: tickBudget(minCount) + 20000 },
+  );
+}
+
+/**
+ * Pick a room from the developer room dropdown and wait until that room really
+ * is the live one.
+ *
+ * `selectOption` only fires the change handler; the room load it starts is
+ * asynchronous and unawaited (unlike `__ff.enterRoomAwait()`, which returns the
+ * load promise). Pinning `roomNum()` as well as `roomLoading()` means a slow load
+ * can never be mistaken for the room having arrived.
+ */
+export async function selectRoom(p, num, minCount = 0) {
+  await p.selectOption('#room', String(num));
+  await p.waitForFunction(
+    (n) => window.__ff.roomNum() === n && !window.__ff.roomLoading(),
+    Number(num),
+    { timeout: 30000 },
+  );
+  if (minCount > 0) await waitRoom(p, minCount);
 }

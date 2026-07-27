@@ -4,7 +4,7 @@
  * full-screen "case file" page over a frozen map; a click or key dismisses it back
  * to the map (zrus_obrazek). Ordinary (shallower) rooms return straight to the map.
  */
-import { withApp } from './ui-lib.mjs';
+import { selectRoom, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -16,8 +16,8 @@ await withApp(async ({ p, expect }) => {
   };
 
   // --- Last room of leg 1 (Ship Wrecks): room 19, depth 15 -> shows story page 1 ---
-  await p.selectOption('#room', '19');
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big, { timeout: 5000 });
+  await selectRoom(p, 19);
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big, { timeout: 25000 });
   await p.evaluate(() => localStorage.removeItem('ff.solved'));
   await winCurrentRoom();
 
@@ -34,8 +34,8 @@ await withApp(async ({ p, expect }) => {
 
   // --- Last room of leg 8 (Computer): room 70, depth 15 -> shows story page 8 ---
   await p.evaluate(() => window.__ff.showMap());
-  await p.selectOption('#room', '70');
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big, { timeout: 5000 });
+  await selectRoom(p, 70);
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big, { timeout: 25000 });
   await winCurrentRoom();
   await p.waitForFunction(() => window.__ff.screen() === 'legimage', { timeout: 6000 });
   expect((await p.evaluate(() => window.__ff.legImage())) === 8, 'leg 8 (Computer) shows story page 8');
@@ -47,8 +47,8 @@ await withApp(async ({ p, expect }) => {
 
   // --- Control: an ordinary room (7, depth < 15) returns straight to the map ---
   await p.evaluate(() => window.__ff.showMap());
-  await p.selectOption('#room', '7');
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big, { timeout: 5000 });
+  await selectRoom(p, 7);
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big, { timeout: 25000 });
   await winCurrentRoom();
   await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 6000 });
   expect((await p.evaluate(() => window.__ff.screen())) === 'map', 'a shallow room returns straight to the map, no story page');
@@ -57,8 +57,8 @@ await withApp(async ({ p, expect }) => {
   // --- Dev "Win room" button (dev pane): genuinely wins the current room via the real
   // win path, so a leg-final room reveals its story page — a spot-check shortcut. ---
   await p.evaluate(() => window.__ff.showMap());
-  await p.selectOption('#room', '29'); // last room of leg 2
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big, { timeout: 5000 });
+  await selectRoom(p, 29); // last room of leg 2
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big, { timeout: 25000 });
   await p.click('#winroom');
   await p.waitForFunction(() => window.__ff.screen() === 'legimage', { timeout: 6000 });
   expect((await p.evaluate(() => window.__ff.legImage())) === 2, 'the dev Win-room button shows leg 2\'s story page');
@@ -81,7 +81,7 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.legImage())) === 1, 'Run on a solved leg-final room shows its story page first');
   // Dismissing the re-entry page continues into the room (not back to the map).
   await p.click('#screen');
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 6000 });
+  await waitRoom(p, 0);
   expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'dismissing the re-entry story page loads the room');
   expect((await p.evaluate(() => window.__ff.replayActive())) === false, 'the re-entry Run is a normal play, not a replay');
 

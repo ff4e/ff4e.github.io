@@ -4,7 +4,7 @@
  * and (b) makes the survivor speak a "smrt-*" line (loaded from the global x02
  * bank). Killing both fish DOES auto-restart once the skeletons disintegrate.
  */
-import { withApp, idle } from './ui-lib.mjs';
+import { idle, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -15,7 +15,7 @@ await withApp(async ({ p, expect }) => {
 
   async function enter(roomNum) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), roomNum);
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+    await waitRoom(p, 0);
     await idle(p);
   }
 

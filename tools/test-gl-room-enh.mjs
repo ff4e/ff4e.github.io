@@ -7,25 +7,24 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; skips (pass)
  * if the environment has no WebGL2.
  */
-import { chromium } from 'playwright';
+import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
-const PORT = process.env.FF_UI_PORT ?? '5173';
 // Enhanced full-room render is byte-exact vs the CPU oracle too (FFNG sprites use
 // hard 0/255 alpha, so the GL blend reproduces the CPU integer blend exactly).
 // Gate is max===0; overPct is a diagnostic only.
 
-const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=metal', '--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser({ gl: true });
 const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
 const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
-await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate(() => { window.__ff.setGraphics('enhanced'); window.__ff.setRenderer('webgl'); });
 
 await p.evaluate(() => window.__ff.enterRoomAwait(3));
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 15, { timeout: 8000 });
+await waitRoom(p, 15);
 // Ensure the FFNG masters actually load — else this whole suite would silently
 // compare classic-fallback CPU vs classic-fallback GPU and prove nothing about
 // the enhanced path. Room 3 (PRVNI) has truecolor art; require it to engage.
@@ -49,7 +48,7 @@ let tested = 0, enhRooms = 0, unsupported = 0, worstOver = 0, worstRoom = 0, wor
 for (let num = 1; num <= 72; num++) {
   try {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 15, { timeout: 8000 });
+    await waitRoom(p, 15);
     // Give the enhanced masters time to decode (or settle as classic fallback).
     await p.waitForFunction(() => window.__ff.enhancedLoaded() || window.__ff.count() > 40, { timeout: 6000 }).catch(() => {});
     const r = await p.evaluate(() => window.__ff.glEnhParity());

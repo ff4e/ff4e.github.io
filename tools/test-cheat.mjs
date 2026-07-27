@@ -3,10 +3,10 @@
  * the room completed-via-cheat, records it in the progression, and returns to the
  * map — which then unlocks the next room.
  */
-import { withApp } from './ui-lib.mjs';
+import { selectRoom, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.selectOption('#room', '7'); // UTES (Fish House room index 6 -> global 7)
+  await selectRoom(p, 7); // UTES (Fish House room index 6 -> global 7)
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => {
     localStorage.removeItem('ff.solved');
@@ -27,7 +27,7 @@ await withApp(async ({ p, expect }) => {
 
   // Also reachable via the keyboard cheat-string detector: type it while in a room.
   await p.evaluate(() => window.__ff.enterRoom(1));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   for (const ch of 'xwemaketherules') await p.keyboard.press(ch);
   await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
   expect(await p.evaluate(() => window.__ff.cheatedRooms().includes(1)), 'typed cheat solved room 1');
@@ -37,7 +37,7 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.showMap());
   await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
   for (const ch of 'xscore') await p.keyboard.press(ch);
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   expect((await p.$eval('#room', (el) => el.value)) === '72', 'xscore opens the SCORE room (72)');
   expect((await p.evaluate(() => window.__ff.zaverMode())) === false, 'SCORE is not the ZAVER finale cutscene');
 });

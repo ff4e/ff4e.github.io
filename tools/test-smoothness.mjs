@@ -7,7 +7,7 @@
  *   - no run of >=2 near-stationary frames (would be a stutter / "square by square"),
  *   - no single-frame jump bigger than ~half a cell (would be a teleport at a tier change).
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 
 const FSIZE = 15;
 
@@ -19,8 +19,17 @@ await withApp(async ({ p, expect }) => {
     });
 
   await p.evaluate(() => window.__ff.enterRoomAwait(30)); // RECYCLED — open water
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
+
+  // Measuring per-RENDERED-FRAME motion needs a quiet page. Anything still
+  // streaming or decoding (enhanced art, audio) costs a rendered frame, and a
+  // dropped frame surfaces here as a "teleport": the fish's interpolated position
+  // advances by several game ticks at once. The room load itself is awaited above;
+  // this waits for everything the boot left in flight. (The harness deliberately
+  // no longer boots via `networkidle`, which used to provide this incidentally for
+  // all 63 probes at a cost none of the others needed to pay.)
+  await p.waitForLoadState('networkidle');
 
   await p.evaluate(() => window.__ff.smoothOn());
   await key('keydown', 'KeyK'); // down through open water

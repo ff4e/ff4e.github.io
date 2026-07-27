@@ -12,11 +12,10 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { chromium } from 'playwright';
+import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
-const PORT = process.env.FF_UI_PORT ?? '5173';
 
-const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=metal', '--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser({ gl: true });
 const p = await b.newPage({ viewport: { width: 1500, height: 900 } });
 const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
@@ -31,10 +30,10 @@ await p.addInitScript(() => {
   // is display:none for players until Ctrl+Alt+D.
   localStorage.setItem('ff.devEnabled', '1');
 });
-await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate(() => window.__ff.enterRoomAwait(6)); // KOSTE (a large room)
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 25, { timeout: 8000 });
+await waitRoom(p, 25);
 await p.waitForTimeout(150);
 
 if (!(await p.evaluate(() => window.__ff.glActive()))) {
@@ -81,7 +80,7 @@ if (!onMap.glHidden) { ok = false; console.log('  FAIL: #screen-gl still visible
 if (onMap.glActive) { ok = false; console.log('  FAIL: glActive true on the map'); }
 // Re-enter a room so the GL overlay is active again for the context-loss check.
 await p.evaluate(() => window.__ff.enterRoomAwait(6));
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 25, { timeout: 8000 });
+await waitRoom(p, 25);
 await p.waitForTimeout(120);
 if (!(await p.evaluate(() => window.__ff.glActive()))) { ok = false; console.log('  FAIL: WebGL not active after re-entering the room'); }
 

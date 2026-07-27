@@ -6,7 +6,7 @@
  * (with the snapshot) preserves them, and that a legacy plain-record save (no
  * snapshot) still re-fires — proving the snapshot is what fixes it.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -26,7 +26,7 @@ await withApp(async ({ p, expect }) => {
 
   async function playUntilDialogue() {
     await p.evaluate(() => window.__ff.enterRoomAwait(1)); // PRVNI (intro dialogue)
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+    await waitRoom(p, 0);
     await p.evaluate(() => localStorage.removeItem('ff.save.1'));
     await p.waitForFunction(() => window.__ff.lines() >= 2, { timeout: 15000 }).catch(() => {});
   }
@@ -52,7 +52,7 @@ await withApp(async ({ p, expect }) => {
   // --- KUFRIK (the reported case): after the big fish has said "kuf-v-hod", a
   // save/load must not make it repeat that intro line. ---
   await p.evaluate(() => window.__ff.enterRoomAwait(2)); // KUFRIK
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   await p.evaluate(() => localStorage.removeItem('ff.save.2'));
   // Wait until kuf-v-hod has actually played (the intro is kuf-m-je -> kuf-v-noco -> kuf-v-hod).
   const said = new Set();

@@ -11,22 +11,21 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { chromium } from 'playwright';
+import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
-const PORT = process.env.FF_UI_PORT ?? '5173';
 const KUFRIK = 2; // the briefcase room — its demo is the only cutscene
 
-const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=metal', '--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser({ gl: true });
 const p = await b.newPage({ viewport: { width: 1600, height: 1000 } });
 const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); localStorage.setItem('ff.devEnabled', '1'); } catch {} }); // dev pane on: arms the r/e/f hotkeys this probe presses
-await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 
 await p.evaluate((n) => window.__ff.enterRoomAwait(n), KUFRIK);
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 5, { timeout: 8000 });
+await waitRoom(p, 5);
 await p.evaluate(() => window.__ff.setGraphics('enhanced'));
 await p.evaluate(() => window.__ff.setRenderer('webgl'));
 await p.waitForTimeout(200);
