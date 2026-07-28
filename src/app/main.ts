@@ -42,7 +42,7 @@ import { ClassicArtSource } from '../render/classicArtSource.js';
 import type { ArtSource } from '../render/artSource.js';
 import { GlScreen, webgl2Available } from '../render/glScreen.js';
 import { FontData } from '../render/font.js';
-import { SubtitleSystem } from '../render/subtitles.js';
+import { SubtitleSystem, SUB_SUBSTEPS } from '../render/subtitles.js';
 import { HelpScreens } from '../render/help.js';
 import { IndexedScreen } from '../render/framebuffer.js';
 import {
@@ -376,7 +376,7 @@ function syncSubOverlay(): void {
  * and the backing-store size — a resize wipes the canvas, so the key must change.
  */
 function subOverlaySignature(who: string, sys: SubtitleSystem, scale: number): string {
-  return `${who}|${subFontFamily}|${subFontWeight}|${subCanvas.width}x${subCanvas.height}|${scale}|${sys.vectorSignature(count)}`;
+  return `${who}|${subFontFamily}|${subFontWeight}|${subCanvas.width}x${subCanvas.height}|${scale}|${sys.vectorSignature(count, alpha)}`;
 }
 
 /** Clear the subtitle overlay (used off the room screen). */
@@ -1538,7 +1538,7 @@ function drawCutscene(): void {
       subCtx.setTransform(1, 0, 0, 1, 0, 0);
       subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
       subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-      cutsceneSubs!.drawVector(subCtx, count, subFontFamily, subFontWeight);
+      cutsceneSubs!.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
       subOverlayPaints++;
       subOverlayPainted = true;
       subOverlaySig = sig;
@@ -2853,23 +2853,32 @@ function draw(): void {
   // Enhanced subtitle overlay (drawn in native game coords via a scaled context).
   // Only touch the (large) overlay while a subtitle is actually on screen; once it
   // clears we wipe it a single time, so idle frames do no overlay work at all.
-  if (useVecSubs && subs!.active) {
+  updateRoomSubOverlay(useVecSubs, cs, xform);
+}
+
+/**
+ * Repaint the room's vector subtitle overlay if — and only if — its image would
+ * differ from what is already on it (see subOverlaySignature). Split out of draw()
+ * because the overlay is an independent layer: while a line waves in, the loop keeps
+ * this running at the sub-tick animation rate WITHOUT repainting the room behind it.
+ * `xform` is left alone when the caller has no fresh one (the room did not repaint,
+ * so the shake it encodes cannot have changed either).
+ */
+function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): void {
+  if (useVecSubs && subs?.active) {
     syncSubOverlay();
     const dpr = window.devicePixelRatio || 1;
-    // Only repaint when the overlay's content would actually differ: while the fish
-    // is moving the room redraws every rAF, but the subtitles change once per logic
-    // tick (and not at all once a line has settled).
-    const sig = subOverlaySignature('room', subs!, cs * dpr);
+    const sig = subOverlaySignature('room', subs, cs * dpr);
     if (!subOverlayGate || sig !== subOverlaySig) {
       subCtx.setTransform(1, 0, 0, 1, 0, 0);
       subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
       subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-      subs!.drawVector(subCtx, count, subFontFamily, subFontWeight);
+      subs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
       subOverlayPaints++;
       subOverlayPainted = true;
       subOverlaySig = sig;
     }
-    subCanvas.style.transform = xform; // shake/shove with the room
+    if (xform !== undefined) subCanvas.style.transform = xform; // shake/shove with the room
   } else if (subOverlayPainted) {
     clearSubOverlay();
   }
@@ -3175,6 +3184,11 @@ function loopThrottleOk(): boolean {
     return (
       !forceRoomRedraw &&
       !roomAnimating() &&
+      // An enhanced subtitle waving in / scrolling animates BETWEEN logic ticks, so
+      // it needs the full rAF rate for the ~1.5s it takes to settle (it only repaints
+      // the overlay, not the room). A settled line does not, and neither does the
+      // classic bitmap path, which is baked into the frame at the tick rate.
+      !(graphics === 'enhanced' && subFontReady && subs?.vectorAnimating(count)) &&
       heldState === 0 &&
       !inShowmode() &&
       !loadmode &&
@@ -3310,6 +3324,12 @@ function loop(now: number): void {
       perfPaint++;
       lastRoomSig = sig;
       forceRoomRedraw = false;
+    } else if (graphics === 'enhanced' && subFontReady && subs?.active) {
+      // The room is unchanged, but a subtitle may still be waving in or scrolling.
+      // The overlay is its own layer, so animate it on its own — at the sub-tick
+      // rate — without paying for a room repaint underneath.
+      const { w: sw2, h: sh2 } = roomScreenSize(room!);
+      updateRoomSubOverlay(true, contentScaleFor(sw2, sh2));
     }
   }
   drawPanel();
@@ -4196,7 +4216,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
    * the repaint gate, and report the geometry the reference implementation needs to
    * reproduce it (game-pixel screen size, the overlay backing size and its scale).
    */
-  subsPaintAt: (at: number) => {
+  subsPaintAt: (at: number, frac = 0) => {
     if (!subs?.active || !room) return null;
     const { w: sw, h: sh } = roomScreenSize(room);
     const cs = contentScaleFor(sw, sh);
@@ -4205,7 +4225,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     subCtx.setTransform(1, 0, 0, 1, 0, 0);
     subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
     subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-    subs.drawVector(subCtx, at, subFontFamily, subFontWeight);
+    subs.drawVector(subCtx, at, subFontFamily, subFontWeight, frac);
     subOverlayPainted = true;
     subOverlaySig = ''; // painted behind the gate's back — force the next real repaint
     return {
@@ -4216,6 +4236,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
       screenH: subs.vectorScreen.h,
       family: subFontFamily,
       weight: subFontWeight,
+      substeps: SUB_SUBSTEPS,
       lines: subs.debugLines(),
     };
   },

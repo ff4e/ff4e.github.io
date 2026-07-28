@@ -5,7 +5,7 @@
  * shrink are all verified deterministically without a real canvas.
  */
 import { describe, it, expect } from 'vitest';
-import { SubtitleSystem } from '../src/render/subtitles.js';
+import { SubtitleSystem, SUB_SUBSTEPS } from '../src/render/subtitles.js';
 import type { FontData } from '../src/render/font.js';
 import type { FfrPaletteEntry } from '../src/data/ffr.js';
 
@@ -275,5 +275,63 @@ describe('vectorSignature (the repaint gate)', () => {
     const b = makeSub();
     b.newSubtitle('Hi', 'V', 0);
     expect(a.vectorSignature(5)).not.toBe(b.vectorSignature(5));
+  });
+});
+
+describe('sub-tick animation (the wave is interpolated between logic ticks)', () => {
+  it('moves the glyphs within a single tick, and lands exactly on the tick states', () => {
+    const sub = makeSub();
+    sub.newSubtitle('Careful', 'M', 0);
+    const at = (count: number, alpha: number) => {
+      const m = mockCtx();
+      sub.drawVector(m.ctx, count, 'X', 700, alpha);
+      return m.fill.map((f) => f.y);
+    };
+    const t2 = at(2, 0);
+    const mid = at(2, 0.5);
+    const t3 = at(3, 0);
+    expect(mid).not.toEqual(t2); // the wave advanced inside the tick
+    expect(mid).not.toEqual(t3);
+    // alpha = 0 is exactly the state the pre-interpolation renderer drew, and the
+    // last sub-step is still short of the next tick — the animation never overshoots.
+    expect(at(2, 0.05)).toEqual(t2);
+    expect(at(2, 0.99)).not.toEqual(t3);
+    expect(at(3, 0)).toEqual(t3);
+  });
+
+  it('quantises the fraction onto the step grid (bounded repaint cost)', () => {
+    const sub = makeSub();
+    sub.newSubtitle('Careful', 'M', 0);
+    const sig = (alpha: number) => sub.vectorSignature(2, alpha);
+    const steps = new Set([0, 0.1, 0.19, 0.2, 0.35, 0.4, 0.6, 0.8, 0.99].map(sig));
+    expect(steps.size).toBe(SUB_SUBSTEPS); // five distinct images per tick, not one per frame
+    expect(sig(0.1)).toBe(sig(0.19)); // within a step: nothing to repaint
+    expect(sig(0.19)).not.toBe(sig(0.2)); // across a step boundary: repaint
+  });
+
+  it('interpolates the line scroll toward its target row, and stops when it arrives', () => {
+    const sub = makeSub();
+    sub.newSubtitle('First', 'M', 0);
+    sub.newSubtitle('Second', 'V', 0); // pushes the first line up (cilys -= ROWTITLE)
+    const yOf = (alpha: number) => {
+      const m = mockCtx();
+      sub.drawVector(m.ctx, 100, 'X', 700, alpha);
+      return m.fill[0]!.y;
+    };
+    const y0 = yOf(0);
+    expect(yOf(0.4)).toBeLessThan(y0); // scrolling up between ticks
+    expect(yOf(0.8)).toBeLessThan(yOf(0.4));
+    for (let c = 1; c <= 30; c++) sub.tick(c); // let both lines reach cilys
+    const rested = yOf(0);
+    expect(yOf(0.8)).toBe(rested); // parked: no sub-tick movement left
+  });
+
+  it('reports whether anything is still moving (drives the idle throttle)', () => {
+    const sub = makeSub();
+    sub.newSubtitle('Careful', 'M', 0);
+    expect(sub.vectorAnimating(0)).toBe(true); // wave just started
+    for (let c = 1; c <= 30; c++) sub.tick(c);
+    expect(sub.vectorAnimating(30)).toBe(false); // settled and parked
+    expect(sub.active).toBe(true); // …but still on screen
   });
 });

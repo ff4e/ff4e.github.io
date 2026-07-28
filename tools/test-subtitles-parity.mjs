@@ -20,6 +20,7 @@ const SUB_FONT_PX = 23;
 const SUB_BASELINE_OFF = -6;
 const BORDERTITLE = 20;
 const UNDERTITLE = 15;
+const SPEEDTITLE = 2;
 
 const LINE_A = 'Careful now, the whole cavern is about to collapse on top of us both!';
 const LINE_B = 'Stop shoving me around, you overgrown sardine, I can see it perfectly well!';
@@ -35,17 +36,22 @@ await withApp(async ({ p, expect }) => {
   expect(await p.evaluate(() => window.__ff.subsActive()), 'parity: subtitles are on screen');
 
   // Sweep ticks relative to each line's own start: 0-24 walks the wave-in glyph by
-  // glyph (p = cas*5 - index), 40/80 are the settled line.
+  // glyph (p = cas*5 - index), 40/80 are the settled line. Each tick is sampled at
+  // several sub-tick fractions too, which is what the overlay animates on (the wave
+  // and the scroll are interpolated between logic ticks — SUB_SUBSTEPS).
   const TICKS = [0, 1, 2, 3, 5, 8, 11, 14, 17, 20, 24, 40, 80];
+  const ALPHAS = [0, 0.15, 0.4, 0.55, 0.9];
   const results = await p.evaluate(
     ({ ticks, K }) => {
       const out = [];
       const sub = document.getElementById('subs');
       const ref = document.createElement('canvas');
-      for (const dt of ticks) {
-        // Paint the real overlay for this tick (bypasses the repaint gate).
-        const st = window.__ff.subsPaintAt(window.__ff.count() + dt);
+      for (const [dt, al] of ticks) {
+        // Paint the real overlay for this tick+fraction (bypasses the repaint gate).
+        const st = window.__ff.subsPaintAt(window.__ff.count() + dt, al);
         if (!st) return [{ tick: dt, error: 'no subtitle state' }];
+        // The overlay quantises the sub-tick fraction onto a fixed step grid.
+        const frac = al > 0 ? Math.min(Math.floor(al * st.substeps), st.substeps - 1) / st.substeps : 0;
         ref.width = st.w;
         ref.height = st.h;
         const r = ref.getContext('2d');
@@ -68,9 +74,15 @@ await withApp(async ({ p, expect }) => {
             r.font = `${st.weight} ${fs}px ${st.family}`;
             total = r.measureText(t.obsah).width;
           }
-          const baseline = t.ys + st.screenH + K.SUB_BASELINE_OFF;
-          const amp = K.UNDERTITLE - t.ys;
-          const cas = window.__ff.count() + dt - t.startcount;
+          // PosunTitulky moves the line SPEEDTITLE px per tick toward cilys, so its
+          // position part-way through a tick is exactly that fraction of the step.
+          const ys =
+            frac === 0 || t.ys <= t.cilys
+              ? t.ys
+              : t.ys + (Math.max(t.cilys, t.ys - K.SPEEDTITLE) - t.ys) * frac;
+          const baseline = ys + st.screenH + K.SUB_BASELINE_OFF;
+          const amp = K.UNDERTITLE - ys;
+          const cas = window.__ff.count() + dt - t.startcount + frac;
           let x = (st.screenW - total) / 2;
           let index = 0;
           for (const ch of t.obsah) {
@@ -109,22 +121,35 @@ await withApp(async ({ p, expect }) => {
             }
           }
         }
-        out.push({ tick: dt, diff, maxDelta, ink, px: a.length / 4 });
+        out.push({ tick: dt, alpha: al, diff, maxDelta, ink, px: a.length / 4 });
       }
       return out;
     },
-    { ticks: TICKS, K: { SUB_FONT_PX, SUB_BASELINE_OFF, BORDERTITLE, UNDERTITLE } },
+    {
+      ticks: TICKS.flatMap((t) => ALPHAS.map((a) => [t, a])),
+      K: { SUB_FONT_PX, SUB_BASELINE_OFF, BORDERTITLE, UNDERTITLE, SPEEDTITLE },
+    },
   );
 
   // The sweep must actually have drawn something (a silently blank overlay would
   // otherwise "match" the reference perfectly).
+  const samples = TICKS.length * ALPHAS.length;
   const inked = results.filter((r) => r.ink > 0);
-  expect(inked.length >= TICKS.length - 2, `parity: overlay painted on ${inked.length}/${TICKS.length} sampled ticks`);
+  expect(
+    inked.length >= samples - ALPHAS.length * 2,
+    `parity: overlay painted on ${inked.length}/${samples} sampled tick+fraction pairs`,
+  );
   expect(results.some((r) => r.ink > 2000), 'parity: a settled line covers a real number of pixels');
-  for (const r of results) {
-    expect(
-      r.diff === 0 && r.maxDelta === 0,
-      `parity: tick +${r.tick} matches the reference exactly (differing pixels ${r.diff}, max channel delta ${r.maxDelta})`,
-    );
+  const bad = results.filter((r) => r.diff !== 0 || r.maxDelta !== 0);
+  for (const r of bad) {
+    expect(false, `parity: tick +${r.tick} @${r.alpha} differs (${r.diff} pixels, max channel delta ${r.maxDelta})`);
   }
+  expect(bad.length === 0, `parity: all ${samples} tick+fraction samples match the reference byte for byte`);
+  // The sub-tick sampling must actually MOVE the image, or the sweep would be
+  // comparing the same frame against itself five times over.
+  const waving = results.filter((r) => r.tick === 5);
+  expect(
+    new Set(waving.map((r) => r.ink)).size > 1,
+    'parity: the sub-tick fractions really do animate the wave (ink varies within one tick)',
+  );
 }, { cpu: true });

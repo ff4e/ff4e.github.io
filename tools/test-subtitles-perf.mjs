@@ -2,17 +2,23 @@
  * UI test: the enhanced subtitle overlay is repainted only when its image would
  * actually change — never once per rendered frame.
  *
- * The wave-in offset (PisStringF) is a function of the LOGIC TICK (12.5/s), not of
- * the frame, so at 60-120fps the overlay used to re-shape and re-stroke every glyph
- * to produce a byte-identical image ~5-10x per tick. With a long line on screen that
- * cost enough main-thread time to drop frames (measured on a 6x-throttled CPU: 120 →
- * 83fps, mean frame time 8.3 → 12.0ms). The repaint gate removes it.
+ * The overlay used to re-shape and re-stroke every glyph on EVERY rendered frame, at
+ * 60-120fps, to produce a byte-identical image most of the time. With a long line on
+ * screen that cost enough main-thread time to drop frames (measured on a 6x-throttled
+ * CPU: 120 → 76fps, median frame time 8.3 → 16.2ms).
+ *
+ * Now it repaints only when the image changes. The wave-in and the line scroll are
+ * interpolated between logic ticks on a fixed step grid (SUB_SUBSTEPS = 5, i.e. 62.5
+ * animation updates/s) — so an animating line costs a bounded number of repaints per
+ * tick regardless of the display's refresh rate, and a settled line costs none.
  *
  * The assertions are RATIOS (repaints per logic tick, repaints vs rendered frames),
  * not milliseconds, so they hold on any machine — but both sides are sampled over
  * wall-clock windows, so this probe runs exclusively (see run-ui-tests.mjs).
  */
 import { selectRoom, withApp } from './ui-lib.mjs';
+
+const SUBSTEPS = 5; // must match SUB_SUBSTEPS in src/render/subtitles.ts
 
 const LONG = 'Careful now, the whole cavern is about to collapse on top of us both!';
 const LONG2 = 'Stop shoving me around, you overgrown sardine, I can see it perfectly well!';
@@ -69,19 +75,27 @@ await withApp(async ({ p, expect }) => {
     waving.frames >= waving.ticks * 2,
     `wave: the loop really is painting faster than the logic tick (${waving.frames} frames / ${waving.ticks} ticks)`,
   );
-  // The core invariant: at most one overlay repaint per logic tick, however many
-  // frames are rendered in between (+2 for the ticks straddling the two window
-  // edges — still an order of magnitude below the frame count).
+  // The animation really is sub-tick: more repaints than logic ticks.
   expect(
-    waving.paints <= waving.ticks + 2,
-    `wave: at most one repaint per logic tick (${waving.paints} repaints / ${waving.ticks} ticks over ${waving.frames} frames)`,
+    waving.paints > waving.ticks,
+    `wave: animates between logic ticks (${waving.paints} repaints / ${waving.ticks} ticks)`,
+  );
+  // …but bounded by the step grid, not by the display's refresh rate. (+2 slack for
+  // the ticks straddling the two window edges.)
+  expect(
+    waving.paints <= waving.ticks * SUBSTEPS + 2,
+    `wave: at most ${SUBSTEPS} repaints per logic tick (${waving.paints} repaints / ${waving.ticks} ticks over ${waving.frames} frames)`,
+  );
+  expect(
+    waving.paints < waving.frames,
+    `wave: still far fewer repaints than rendered frames (${waving.paints} / ${waving.frames})`,
   );
 
   // A settled line (wave finished, scrolled to its resting row) is a static image:
   // it must cost NOTHING per frame.
   await p.evaluate(() => window.__ff.clearSubtitles());
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), 'Watch out for the crab.');
-  await p.waitForTimeout(1600); // wave-in done (~13 ticks) and scrolled to cilys
+  await p.waitForTimeout(1800); // wave-in done (~13 ticks) and scrolled to cilys
   const settled = await sample(p, 800);
   expect(settled.frames > 10, `settled: frames really were rendered (${settled.frames})`);
   expect(settled.ticks > 5, `settled: the game really was ticking (${settled.ticks})`);

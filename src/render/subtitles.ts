@@ -24,6 +24,16 @@ const BORDERTITLE = 20;
 // Enhanced (vector) subtitle rendering.
 const SUB_FONT_PX = 23; // native-pixel font size for the FreeSans-Bold overlay
 const SUB_BASELINE_OFF = -6; // nudges the vector baseline to sit like the bitmap line
+/**
+ * Sub-tick animation steps for the enhanced overlay. The wave-in and the line scroll
+ * are functions of the 12.5/s logic tick, which on its own looks stepped; the port
+ * already interpolates fish motion between ticks, and this does the same for the
+ * vector subtitles (enhanced only — the classic bitmap path stays at the faithful
+ * tick rate). 5 steps per 80ms tick = 62.5 animation updates/s, smooth to the eye
+ * while keeping the repaint cost bounded no matter how fast the display refreshes.
+ * Every whole tick still renders exactly the state it rendered before.
+ */
+export const SUB_SUBSTEPS = 5;
 
 interface TitleLine {
   obsah: string;
@@ -48,6 +58,12 @@ interface VectorLine {
   fs: number;
   font: string;
   total: number;
+}
+
+/** Quantise a 0..1 sub-tick fraction to the overlay's animation step grid. */
+function subStep(alpha: number): number {
+  if (!(alpha > 0)) return 0; // also catches NaN
+  return Math.min(Math.floor(alpha * SUB_SUBSTEPS), SUB_SUBSTEPS - 1) / SUB_SUBSTEPS;
 }
 
 /** najdi_barvu (URoom.pas:1087): nearest palette index by weighted RGB distance. */
@@ -201,11 +217,19 @@ export class SubtitleSystem {
    * The state `drawVector` renders, for the parity probe: enough for an independent
    * reference implementation of PisStringF's wave to reproduce the overlay exactly.
    */
-  debugLines(): { obsah: string; barva: string; ys: number; startcount: number; rgb: [number, number, number] }[] {
+  debugLines(): {
+    obsah: string;
+    barva: string;
+    ys: number;
+    cilys: number;
+    startcount: number;
+    rgb: [number, number, number];
+  }[] {
     return this.titles.map((t) => ({
       obsah: t.obsah,
       barva: t.barva,
       ys: t.ys,
+      cilys: t.cilys,
       startcount: t.startcount,
       rgb: this.vectorColor(t.barva),
     }));
@@ -224,7 +248,14 @@ export class SubtitleSystem {
    * in `vectorLayout`, and the bevel gradient is shared by every glyph sitting at
    * the same wave offset — which, once the wave-in has finished, is all of them.
    */
-  drawVector(ctx: CanvasRenderingContext2D, count: number, fontFamily: string, weight: string | number = 700): void {
+  drawVector(
+    ctx: CanvasRenderingContext2D,
+    count: number,
+    fontFamily: string,
+    weight: string | number = 700,
+    alpha = 0,
+  ): void {
+    const frac = subStep(alpha);
     ctx.textAlign = 'left';
     ctx.textBaseline = 'alphabetic';
     ctx.lineJoin = 'round';
@@ -240,9 +271,10 @@ export class SubtitleSystem {
       // y here mirrors PisStringF: the line's on-screen top is ys (+screenH the
       // caller already folds into the transform origin at 0). y0 is the wave's
       // rest line; (y0 - y) == UNDERTITLE - ys drives the wave amplitude.
-      const baseline = t.ys + this.screenH + SUB_BASELINE_OFF;
-      const amp = UNDERTITLE - t.ys;
-      const cas = count - t.startcount;
+      const ys = this.renderYs(t, frac);
+      const baseline = ys + this.screenH + SUB_BASELINE_OFF;
+      const amp = UNDERTITLE - ys;
+      const cas = count - t.startcount + frac;
       const x0 = (this.screenW - line.total) / 2;
       // The gradient is anchored to the glyph's own baseline, so glyphs that share
       // a wave offset share one gradient object (all of them on a settled line).
@@ -320,18 +352,44 @@ export class SubtitleSystem {
    * has passed p >= 50 the wave is over, so a settled, fully scrolled line stops
    * changing altogether and needs no repaints at all.
    */
-  vectorSignature(count: number): string {
+  vectorSignature(count: number, alpha = 0): string {
+    const frac = subStep(alpha);
     let s = '';
     for (let i = 0; i < this.titles.length; i++) {
       const t = this.titles[i]!;
-      const cas = count - t.startcount;
+      const cas = count - t.startcount + frac;
       // p of the LAST glyph: >= 50 means every glyph has settled at dy = 0. UTF-16
       // length over-counts astral characters, which only ever delays `settled` — it
       // can never claim a still-waving line is static.
       const settled = cas * 5 - t.obsah.length >= 50;
-      s += `${i}:${t.barva}${t.obsah}|${t.ys}|${settled ? 'x' : cas};`;
+      s += `${i}:${t.barva}${t.obsah}|${this.renderYs(t, frac)}|${settled ? 'x' : cas};`;
     }
     return s;
+  }
+
+  /**
+   * True while anything on the overlay is still moving — a wave still running or a
+   * line still scrolling toward its target row. The render loop uses this to hold
+   * off the idle throttle for exactly as long as the subtitles need it (typically
+   * ~1.5s per line), and to know that repainting the overlay is worthwhile at all.
+   */
+  vectorAnimating(count: number): boolean {
+    for (const t of this.titles) {
+      if (t.ys > t.cilys) return true; // PosunTitulky is still scrolling this line
+      if ((count - t.startcount) * 5 - t.obsah.length < 50) return true; // wave still running
+    }
+    return false;
+  }
+
+  /**
+   * The line's y at a fraction `frac` into the current tick. PosunTitulky moves it
+   * SPEEDTITLE px per tick toward cilys, so the in-between position is exact rather
+   * than a guess — no need to keep a previous value, and no added latency.
+   */
+  private renderYs(t: TitleLine, frac: number): number {
+    if (frac === 0 || t.ys <= t.cilys) return t.ys;
+    const next = Math.max(t.cilys, t.ys - SPEEDTITLE);
+    return t.ys + (next - t.ys) * frac;
   }
 
   /** Speaker colour (true RGB) for a subtitle colour code: letters -> coltab,

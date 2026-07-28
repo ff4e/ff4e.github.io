@@ -131,7 +131,13 @@ for (const roomNum of ROOMS) {
     await p.evaluate(() => window.__ff.clearSubtitles());
     await p.waitForTimeout(300);
     const still0 = await frameStats(win);
-    await pushLines();
+    // Measured DURING the wave-in, which is the only phase that animates between
+    // logic ticks (and so the only phase that still repaints the overlay often).
+    await p.evaluate(() => window.__ff.clearSubtitles());
+    await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), LONG);
+    await p.evaluate((s) => window.__ff.pushSubtitle(s, 'V'), LONG2);
+    const wave = await frameStats(1500);
+    await p.waitForTimeout(1200);
     const still1 = await frameStats(win);
     // The scenario that actually stutters: the fish is SWIMMING (so the loop paints
     // every rAF, not once per logic tick) while a subtitle is on screen.
@@ -144,7 +150,7 @@ for (const roomNum of ROOMS) {
     await p.keyboard.up('ArrowRight');
     await p.waitForTimeout(300);
     await throttle(1);
-    return { still0, still1, move0, move1 };
+    return { still0, wave, still1, move0, move1 };
   }
 
   const macros = [];
@@ -179,7 +185,8 @@ for (const roomNum of ROOMS) {
     console.log(`    CPU throttle x${rate}   repaint gate ${gate ? 'ON  (this branch)' : 'off (pre-fix behaviour)'}`);
     for (const [label, r] of [
       ['still, none  ', m.still0],
-      ['still, subs  ', m.still1],
+      ['waving subs  ', m.wave],
+      ['settled subs ', m.still1],
       ['moving, none ', m.move0],
       ['moving, subs ', m.move1],
     ]) {
