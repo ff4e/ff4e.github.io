@@ -20,6 +20,14 @@ import { Room, ITEM_WATER, ITEM_WALL } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
 import { CheatEntry, pretoc, morphShrink, morphStretch, type Cheat } from '../core/cheats.js';
 import {
+  TetrisGame,
+  parseShapes,
+  type HiscoreStore,
+  type TetrisKey,
+  type TetrisShapes,
+} from '../core/tetris.js';
+import { renderTetris, tetrisRgba, type TetrisArt } from '../render/tetrisRender.js';
+import {
   zpracujInterlaced,
   interlacedSounds,
   sum,
@@ -858,7 +866,32 @@ function cheatInterlaced(): void {
 /** True while a cheat needs the whole finished frame post-processed, which the
  *  GPU path cannot do — those frames render on the CPU instead. */
 function frameEffectsActive(): boolean {
-  return megabombFlash || silentFilm || interlacedFaze !== INTERLACED_OFF;
+  return megabombFlash || silentFilm || interlacedFaze !== INTERLACED_OFF || tetris !== null;
+}
+
+/** Blit the minigame's 150x300 board into the middle of an RGBA frame. It has its
+ *  own palette, so it goes straight into the colour plane. */
+function blitTetris(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number): void {
+  if (!tetris || !tetrisArt) return;
+  const bw = tetrisArt.hole.w;
+  const bh = tetrisArt.hole.h;
+  const src = tetrisRgba(renderTetris(tetris, tetrisArt), tetrisArt);
+  const ox = Math.floor((w - bw) / 2);
+  const oy = Math.floor((h - bh) / 2);
+  for (let y = 0; y < bh; y++) {
+    const dy = oy + y;
+    if (dy < 0 || dy >= h) continue;
+    for (let x = 0; x < bw; x++) {
+      const dx = ox + x;
+      if (dx < 0 || dx >= w) continue;
+      const s = (y * bw + x) * 4;
+      const d = (dy * w + dx) * 4;
+      rgba[d] = src[s]!;
+      rgba[d + 1] = src[s + 1]!;
+      rgba[d + 2] = src[s + 2]!;
+      rgba[d + 3] = 255;
+    }
+  }
 }
 
 /**
@@ -868,6 +901,11 @@ function frameEffectsActive(): boolean {
  */
 function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean): void {
   const rnd = (n: number): number => Math.floor(Math.random() * n);
+  if (tetris && tetrisArt) {
+    // The minigame sits over the (frozen) room, as its modal window does.
+    blitTetris(screen.rgba, screen.width, screen.height);
+    return;
+  }
   if (megabombFlash) {
     // VyplnMistnost(fontcol['w',1]); KresliTitulky — one white frame, then back.
     megabombFlash = false;
@@ -897,6 +935,103 @@ function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean): void {
 }
 
 /**
+ * xtetris (URoom.pas:24564, UMain.pas:1764): the Tetris minigame. The original
+ * opens it as a modal window over the game (`Tetris.ShowModal`), which freezes
+ * the room's timer until it closes; the port has no windows, so it draws the
+ * 150x300 board centred over the frozen room and takes the keyboard until Escape.
+ */
+let tetris: TetrisGame | null = null;
+let tetrisArt: TetrisArt | null = null;
+let tetrisLoading = false;
+let tetrisAcc = 0; // ms accumulated toward the next 55ms game tick (Ttr.dfm)
+let tetrisTick = 0; // ticks run, so the map's paint cache knows the board moved
+const TETRIS_TICK_MS = 55;
+
+/** ttr.pic (Ttr.pas:339) — the persistent top-ten, in localStorage here. */
+const tetrisHiscores: HiscoreStore = {
+  load: () => {
+    try {
+      const raw = localStorage.getItem('ff.tetris');
+      return raw ? (JSON.parse(raw) as number[]) : [];
+    } catch {
+      return [];
+    }
+  },
+  save: (scores) => {
+    try {
+      localStorage.setItem('ff.tetris', JSON.stringify(scores));
+    } catch {
+      /* storage unavailable */
+    }
+  },
+};
+
+/** Load the minigame's atlas + well bitmaps and shape table (nacti, Ttr.pas:89). */
+async function ensureTetrisArt(): Promise<TetrisArt | null> {
+  if (tetrisArt || tetrisLoading) return tetrisArt;
+  tetrisLoading = true;
+  try {
+    const [all, hole, txt] = await Promise.all([
+      fetch('/data/Intro/all.BMP').then((r) => r.arrayBuffer()),
+      fetch('/data/Intro/dira.BMP').then((r) => r.arrayBuffer()),
+      fetch('/data/Intro/all.txt').then((r) => r.text()),
+    ]);
+    const shapes = parseShapes(txt);
+    tetrisArt = {
+      all: parseBmp(new Uint8Array(all)),
+      hole: parseBmp(new Uint8Array(hole)),
+      xfont: shapes.xfont,
+      yfont: shapes.yfont,
+    };
+    tetrisShapes = shapes;
+  } catch {
+    tetrisArt = null; // the data is missing: the cheat just does nothing
+  } finally {
+    tetrisLoading = false;
+  }
+  return tetrisArt;
+}
+let tetrisShapes: TetrisShapes | null = null;
+
+/** Open the minigame (Tetris.Create + ShowModal). */
+function openTetris(): void {
+  if (tetris) return;
+  void ensureTetrisArt().then(() => {
+    if (!tetrisArt || !tetrisShapes || tetris) return;
+    tetris = new TetrisGame(tetrisShapes, (n) => Math.floor(Math.random() * n), tetrisHiscores);
+    tetrisAcc = 0;
+    forceRoomRedraw = true;
+    wake();
+  });
+}
+
+/** Close it (modalresult := mrCancel): the room resumes with no key held
+ *  (gstav := stav_klid; keyroom := 0; keyovl := 0 — URoom.pas:24568). */
+function closeTetris(): void {
+  if (!tetris) return;
+  tetris = null;
+  clearHeldKey();
+  if (engine) engine.swim = null;
+  forceRoomRedraw = true;
+  wake();
+}
+
+/** Advance the minigame's own 55ms timer, independent of the game's logic tick. */
+function tickTetris(dtMs: number): void {
+  if (!tetris) return;
+  wake(); // the board animates on its own; never let the idle throttle stall it
+  tetrisAcc += dtMs;
+  let steps = 0;
+  while (tetrisAcc >= TETRIS_TICK_MS && steps < 4) {
+    tetrisAcc -= TETRIS_TICK_MS;
+    steps++;
+    tetrisTick++;
+    tetris.tick();
+  }
+  forceRoomRedraw = true;
+}
+
+/**
  * The in-room cheat dispatch (URoom.pas:24534-24690). Codes 11/12 have no case
  * here — SCORE and ULTRAVIOLENCE only work from the map (UMain.pas:1773-1780).
  */function applyRoomCheat(cheat: Cheat): void {
@@ -913,6 +1048,9 @@ function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean): void {
       break;
     case 'FISHER':
       hooks.add(room);
+      break;
+    case 'TETRIS':
+      openTetris();
       break;
     case 'STORM':
       cheatStorm();
@@ -942,6 +1080,10 @@ function applyMapCheat(cheat: Cheat): void {
       // `av:=9; am:=1; doAkce:=daRun` — run the hidden SCORE bonus room, which is
       // kept off the map and out of the finale, so this code is the only way in.
       void enterRoom(SCORE_ROOM);
+      break;
+    case 'TETRIS':
+      // The map screen launches the minigame too (UMain.pas:1764).
+      openTetris();
       break;
     case 'ULTRAVIOLENCE':
       ultraviolence = true;
@@ -1327,6 +1469,21 @@ const KEYS: Record<string, { which: 'little' | 'big'; dir: number }> = {
   KeyS: { which: 'big', dir: Dir.down },
   KeyA: { which: 'big', dir: Dir.left },
   KeyD: { which: 'big', dir: Dir.right },
+};
+
+/** The minigame's key map (Ttr.pas:458: 37/100 left, 39/102 right, 12/40/98/101
+ *  rotate, 32/45/96 slam). Down rotates; there is no soft drop. */
+const TETRIS_KEYS: Record<string, TetrisKey> = {
+  ArrowLeft: 'left',
+  Numpad4: 'left',
+  ArrowRight: 'right',
+  Numpad6: 'right',
+  ArrowDown: 'rotate',
+  Numpad2: 'rotate',
+  Numpad5: 'rotate',
+  Space: 'drop',
+  Insert: 'drop',
+  Numpad0: 'drop',
 };
 
 /** Arrow keys move the *active* fish (ZaznamenejPrikazKlavesou #37..#40, kdo:=sys). */
@@ -2483,8 +2640,11 @@ function drawMap(): void {
   const sig =
     `${pulse % 6}|${Math.min(depth, worldMap.maxDepth + 1)}|${mapHoverCorner ?? ''}|${solved.size}|${cheated.size}|${cheated.size ? 1 : 0}` +
     `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}`;
-  if (sig === mapSig) return; // nothing visibly changed — skip the redraw entirely
-  mapSig = sig;
+  // The minigame is modal over the map too (UMain.pas:1764), and animates, so its
+  // frame counter joins the cache key.
+  const sigT = tetris ? `|ttr${tetrisTick}` : '';
+  if (sig + sigT === mapSig) return; // nothing visibly changed — skip the redraw entirely
+  mapSig = sig + sigT;
   perfPaint++; // an actual map paint (past the cache check)
   const panelOpen = mapInfoRoom !== null;
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
@@ -2504,6 +2664,7 @@ function drawMap(): void {
     const replayEnabled = bestRecord(mapInfoRoom!) !== undefined;
     drawInfoPanel(rgba, MAP_W, MAP_H, infoPanelAssets, count, mapInfoHover, mapInfoFaze, replayEnabled);
   }
+  if (tetris && tetrisArt) blitTetris(rgba, MAP_W, MAP_H);
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
 }
 
@@ -3643,7 +3804,11 @@ function loop(now: number): void {
   // mode inherently is). acc keeps accumulating but the backlog guard above drops it,
   // so there's no fast-forward catch-up when the hold releases.
   const holding = screen !== 'map' && !cutscene && graphics === 'enhanced' && enhancedPending;
-  while (!holding && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
+  // The minigame is modal in the original, so the room's timer does not run while
+  // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
+  tickTetris(dt);
+  const frozen = tetris !== null;
+  while (!holding && !frozen && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
     acc -= LOGIC_MS;
     steps++;
     if (step()) {
@@ -3766,6 +3931,23 @@ window.addEventListener('keydown', (e) => {
       return;
     }
     if (e.code !== 'KeyR' && e.code !== 'KeyE' && e.code !== 'KeyF') return;
+  }
+  // While the Tetris minigame is open it owns the keyboard, as its modal window
+  // does (FormKeyDown, Ttr.pas:458). Escape closes it (modalresult := mrCancel).
+  // Note that Down ROTATES the piece here — the original has no soft drop; Space
+  // slams the piece down instead.
+  if (tetris) {
+    e.preventDefault();
+    if (e.code === 'Escape') {
+      closeTetris();
+      return;
+    }
+    const k = TETRIS_KEYS[e.code];
+    if (k) {
+      tetris.key(k);
+      forceRoomRedraw = true;
+    }
+    return;
   }
   // Typed cheat codes (ZaznamenejPrikazKlavesou, Uovl.pas:744; the map screen keeps
   // its own buffer, UMain.pas:1750). `X` arms the machine; while a code is part-typed
@@ -4705,6 +4887,29 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     lines: (subs?.silentLines ?? []).map((l) => l.s),
   }),
   interlacedFaze: () => interlacedFaze,
+  /** The Tetris minigame: null when closed, else its live state. */
+  tetris: () =>
+    tetris
+      ? {
+          score: tetris.score,
+          rychlost: tetris.rychlost,
+          gameover: tetris.gameover,
+          umisteni: tetris.umisteni,
+          hiscore: [...tetris.hiscore],
+          druh: tetris.pada.druh,
+          x: tetris.pada.x,
+          y: tetris.pada.y,
+          smer: tetris.pada.smer,
+          rychle: tetris.pada.rychle,
+          filled: tetris.pole.reduce(
+            (n, col) => n + col.reduce((m, c) => m + (c.volno ? 0 : 1), 0),
+            0,
+          ),
+        }
+      : null,
+  tetrisTick: () => (tetris ? tetris.tick() : undefined),
+  tetrisKey: (k: TetrisKey) => tetris?.key(k),
+  closeTetris: () => closeTetris(),
   /** Which backend actually painted the last room frame ('cpu' | 'webgl'). */
   roomBackend: () => lastRoomBackend,
   /** cas_hry in days, plus the raw per-room banked milliseconds behind it. */
