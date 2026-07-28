@@ -70,6 +70,9 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), LONG);
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'V'), LONG2);
   const waving = await sample(p, 1500);
+  // Guard against a vacuous pass: every ratio below is trivially satisfiable if the
+  // game clock did not advance during the window.
+  expect(waving.ticks >= 5, `wave: the game clock really advanced (${waving.ticks} logic ticks)`);
   expect(waving.paints > 0, `wave: the overlay is being repainted (${waving.paints})`);
   expect(
     waving.frames >= waving.ticks * 2,
@@ -80,22 +83,28 @@ await withApp(async ({ p, expect }) => {
     waving.paints > waving.ticks,
     `wave: animates between logic ticks (${waving.paints} repaints / ${waving.ticks} ticks)`,
   );
-  // …but bounded by the step grid, not by the display's refresh rate. (+2 slack for
-  // the ticks straddling the two window edges.)
+  // …but bounded by the step grid, not by the display's refresh rate. The sampling
+  // window straddles a partial tick at each end, hence the +2.
+  const bound = (waving.ticks + 2) * SUBSTEPS;
   expect(
-    waving.paints <= waving.ticks * SUBSTEPS + 2,
-    `wave: at most ${SUBSTEPS} repaints per logic tick (${waving.paints} repaints / ${waving.ticks} ticks over ${waving.frames} frames)`,
+    waving.paints <= bound,
+    `wave: at most ${SUBSTEPS} repaints per logic tick (${waving.paints} repaints, bound ${bound}, over ${waving.frames} frames)`,
   );
+  // On a display that outruns the animation grid, that bound must also be a real
+  // saving over repainting every frame. (Guarded so the assertion is not vacuous on
+  // a slow/60Hz host, where the frame rate itself is below the grid.)
   expect(
-    waving.paints < waving.frames,
-    `wave: still far fewer repaints than rendered frames (${waving.paints} / ${waving.frames})`,
+    waving.frames < bound || waving.paints < waving.frames,
+    `wave: fewer repaints than rendered frames (${waving.paints} / ${waving.frames})`,
   );
 
   // A settled line (wave finished, scrolled to its resting row) is a static image:
   // it must cost NOTHING per frame.
   await p.evaluate(() => window.__ff.clearSubtitles());
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), 'Watch out for the crab.');
-  await p.waitForTimeout(1800); // wave-in done (~13 ticks) and scrolled to cilys
+  // Wait on the actual state, not on a guessed timeout: the wave-in and the scroll
+  // to cilys take a different number of ticks for every line.
+  await p.waitForFunction(() => !window.__ff.subsAnimating(), { timeout: 8000 });
   const settled = await sample(p, 800);
   expect(settled.frames > 10, `settled: frames really were rendered (${settled.frames})`);
   expect(settled.ticks > 5, `settled: the game really was ticking (${settled.ticks})`);

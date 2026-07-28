@@ -137,7 +137,9 @@ for (const roomNum of ROOMS) {
     await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), LONG);
     await p.evaluate((s) => window.__ff.pushSubtitle(s, 'V'), LONG2);
     const wave = await frameStats(1500);
-    await p.waitForTimeout(1200);
+    // "Settled" must mean the state, not a guessed timeout: a 4-line stack keeps
+    // creeping upward for ~52 ticks (~4.2s) because each new line pushes cilys down.
+    await p.waitForFunction(() => !window.__ff.subsAnimating(), { timeout: 15000 }).catch(() => {});
     const still1 = await frameStats(win);
     // The scenario that actually stutters: the fish is SWIMMING (so the loop paints
     // every rAF, not once per logic tick) while a subtitle is on screen.

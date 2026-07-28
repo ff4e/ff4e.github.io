@@ -4204,6 +4204,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   lines: () => linesSpoken,
   lastLine: () => lastLine,
   subsActive: () => subs?.active ?? false,
+  /** True while a subtitle is still waving in or scrolling (perf probes/benchmarks). */
+  subsAnimating: () => subs?.vectorAnimating(count) ?? false,
   /** Perf probe: cumulative count of vector-overlay re-renders (see subOverlayPaints). */
   subPaints: () => subOverlayPaints,
   /** Perf A/B: turn the overlay repaint gate off to reproduce the pre-fix cost. */

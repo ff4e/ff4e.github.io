@@ -362,7 +362,10 @@ export class SubtitleSystem {
       // length over-counts astral characters, which only ever delays `settled` — it
       // can never claim a still-waving line is static.
       const settled = cas * 5 - t.obsah.length >= 50;
-      s += `${i}:${t.barva}${t.obsah}|${this.renderYs(t, frac)}|${settled ? 'x' : cas};`;
+      // Length-prefix the text: it is arbitrary game text and may itself contain the
+      // delimiters, which would otherwise let two different screen states encode to
+      // the same key — and a colliding key means a stale image is left on screen.
+      s += `${i}:${t.barva}${t.obsah.length}:${t.obsah}|${this.renderYs(t, frac)}|${settled ? 'x' : cas};`;
     }
     return s;
   }

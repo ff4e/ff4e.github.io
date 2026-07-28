@@ -269,6 +269,16 @@ describe('vectorSignature (the repaint gate)', () => {
     expect(sub.vectorSignature(60)).toBe(''); // nothing on screen
   });
 
+  it('cannot be collided by subtitle text containing its own delimiters', () => {
+    // Two lines "A" and "B" vs. ONE line whose text is the encoding of the second.
+    const two = makeSub();
+    two.newSubtitle('A', 'M', 0);
+    two.newSubtitle('B', 'V', 0);
+    const one = makeSub();
+    one.newSubtitle('A|-52|x;1:VB', 'M', 0);
+    expect(two.vectorSignature(100)).not.toBe(one.vectorSignature(100));
+  });
+
   it('distinguishes two lines that differ only in speaker colour', () => {
     const a = makeSub();
     a.newSubtitle('Hi', 'M', 0);
@@ -279,24 +289,50 @@ describe('vectorSignature (the repaint gate)', () => {
 });
 
 describe('sub-tick animation (the wave is interpolated between logic ticks)', () => {
-  it('moves the glyphs within a single tick, and lands exactly on the tick states', () => {
+  it('places every glyph exactly on the analytic PisStringF curve for the fractional tick', () => {
     const sub = makeSub();
-    sub.newSubtitle('Careful', 'M', 0);
-    const at = (count: number, alpha: number) => {
+    sub.newSubtitle('Careful', 'M', 0); // added at count 0 -> ys = 0, so the wave amp is UNDERTITLE
+    const draw = (count: number, alpha: number) => {
       const m = mockCtx();
       sub.drawVector(m.ctx, count, 'X', 700, alpha);
-      return m.fill.map((f) => f.y);
+      return m.fill;
     };
-    const t2 = at(2, 0);
-    const mid = at(2, 0.5);
-    const t3 = at(3, 0);
-    expect(mid).not.toEqual(t2); // the wave advanced inside the tick
-    expect(mid).not.toEqual(t3);
-    // alpha = 0 is exactly the state the pre-interpolation renderer drew, and the
-    // last sub-step is still short of the next tick — the animation never overshoots.
-    expect(at(2, 0.05)).toEqual(t2);
-    expect(at(2, 0.99)).not.toEqual(t3);
-    expect(at(3, 0)).toEqual(t3);
+    // Independent oracle: PisStringF's damped cosine evaluated at the CONTINUOUS
+    // tick, which is the whole specification of the interpolation. Anything that
+    // overshoots the next tick, lags, or mis-scales `frac` lands off this curve.
+    const UNDERTITLE = 15;
+    const SUB_BASELINE_OFF = -6;
+    const expected = (cas: number, frac: number, index: number) => {
+      const p = cas * 5 - index;
+      if (p < 0) return null; // not revealed yet
+      // The line was added at count 0 with ys = 0 and cilys = BASETITLE - ROWTITLE,
+      // and has not been ticked, so PosunTitulky's next step is ys - SPEEDTITLE.
+      const ys = 0 + (Math.max(-26, 0 - 2) - 0) * frac;
+      const amp = UNDERTITLE - ys;
+      const dy = p < 50 ? ((amp * (50 - p)) / 50) * Math.cos((3.5 * Math.PI * p) / 50) : 0;
+      return ys + SCREEN_H + SUB_BASELINE_OFF + dy;
+    };
+    for (const [count, alpha, frac] of [
+      [2, 0, 0],
+      [2, 0.25, 0.2],
+      [2, 0.5, 0.4],
+      [2, 0.99, 0.8],
+      [3, 0, 0],
+      [7, 0.45, 0.4],
+    ] as const) {
+      const fill = draw(count, alpha);
+      // Rebuild the expected set of visible glyphs and their baselines from scratch.
+      const want: number[] = [];
+      for (let i = 1; i <= 'Careful'.length; i++) {
+        if ('Careful'[i - 1] === ' ') continue;
+        const y = expected(count + frac, frac, i);
+        if (y !== null) want.push(y);
+      }
+      expect(fill.length, `visible glyph count at ${count}+${frac}`).toBe(want.length);
+      fill.forEach((f, k) => expect(f.y, `glyph ${k} at ${count}+${frac}`).toBeCloseTo(want[k]!, 9));
+    }
+    // …and the sub-steps really are distinct frames, not the same one five times.
+    expect(new Set([0, 0.25, 0.5, 0.99].map((a) => JSON.stringify(draw(2, a).map((f) => f.y)))).size).toBe(4);
   });
 
   it('quantises the fraction onto the step grid (bounded repaint cost)', () => {
@@ -321,6 +357,12 @@ describe('sub-tick animation (the wave is interpolated between logic ticks)', ()
     const y0 = yOf(0);
     expect(yOf(0.4)).toBeLessThan(y0); // scrolling up between ticks
     expect(yOf(0.8)).toBeLessThan(yOf(0.4));
+    // PosunTitulky moves SPEEDTITLE=2 px per tick, so every sub-step must stay
+    // strictly inside that one step — the projection may not run ahead of the tick.
+    for (const f of [0.2, 0.4, 0.6, 0.8, 0.99]) {
+      expect(yOf(f)).toBeLessThan(y0);
+      expect(yOf(f)).toBeGreaterThan(y0 - 2);
+    }
     for (let c = 1; c <= 30; c++) sub.tick(c); // let both lines reach cilys
     const rested = yOf(0);
     expect(yOf(0.8)).toBe(rested); // parked: no sub-tick movement left
