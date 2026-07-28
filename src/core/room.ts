@@ -128,7 +128,7 @@ export class Room {
   bgBmp: FfrBitmap;
   wamp: number;
   wper: number;
-  readonly wspd: number;
+  wspd: number;
 
   /** Item indices of the two fish (the first little/big items, as in TRoom.Start).
    *  Mutable because WIN's bonus level (ZapniBonusLevel) reassigns Little/Big to the
@@ -202,8 +202,12 @@ export class Room {
     this.idle.big = 0;
   }
 
-  readonly bodies: FfrRoom['bodies'];
-  readonly heads: FfrRoom['heads'];
+  /** Fish body/head frame tables. Not readonly: the UNDEAD and MORPH cheats swap
+   *  in transformed copies (never mutating the shared parsed FFR data, so the
+   *  effect dies with the Room — as it does in the original, whose TRoom.Create
+   *  reloads the sprites). */
+  bodies: FfrRoom['bodies'];
+  heads: FfrRoom['heads'];
 
   constructor(ffr: FfrRoom) {
     this.width = ffr.width;
@@ -803,6 +807,23 @@ export class Room {
     this.kostra[which] = true;
     this.rozpad[which] = ZAC_ROZPAD;
     this.items[idx]!.kind = Kind.light;
+  }
+
+  /**
+   * CanSave (URoom.pas:26900-26906): saving is only allowed from a recoverable
+   * position — both fish alive, or one alive with the other already out of the
+   * room (venku). A dead fish therefore blocks saving, which matters in the port
+   * because a lone survivor deliberately keeps playing. A gspec=9 push-out room
+   * additionally blocks it once the last item has been shoved out (vytlacit<=0),
+   * i.e. while the win is resolving.
+   */
+  get canSave(): boolean {
+    if (this.gspec === 9 && this.vytlacit <= 0) return false;
+    return (
+      (this.alive.big && this.alive.little) ||
+      (this.alive.big && this.venku.little) ||
+      (this.venku.big && this.alive.little)
+    );
   }
 
   /** True once both fish have exited the room — the room is solved. */

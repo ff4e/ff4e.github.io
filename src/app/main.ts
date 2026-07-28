@@ -13,11 +13,38 @@
  * Keyboard: small fish I/K/J/L, big fish W/S/A/D. Mouse: click a fish to select,
  * click water to BFS-swim there.
  */
-import { parseFfr, type FfrRoom } from '../data/ffr.js';
+import { parseFfr, type FfrRoom, type FfrBitmap } from '../data/ffr.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
 import { parseFft, indexFft, type FftEntry } from '../data/fft.js';
 import { Room, ITEM_WATER, ITEM_WALL } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
+import {
+  CheatEntry,
+  pretoc,
+  morphShrink,
+  morphStretch,
+  pretocRgba,
+  morphShrinkRgba,
+  morphStretchRgba,
+  type Cheat,
+} from '../core/cheats.js';
+import {
+  TetrisGame,
+  parseShapes,
+  type HiscoreStore,
+  type TetrisKey,
+  type TetrisShapes,
+} from '../core/tetris.js';
+import { renderTetris, tetrisRgba, type TetrisArt } from '../render/tetrisRender.js';
+import {
+  zpracujInterlaced,
+  interlacedSounds,
+  sum,
+  zcernobilit,
+  INTERLACED_OFF,
+  INTERLACED_STOP,
+  INTERLACED_START,
+} from '../render/filmEffects.js';
 import { Dir } from '../core/dir.js';
 import {
   FSIZE,
@@ -38,6 +65,7 @@ import {
   HL_MRK,
   HL_MLUVI,
 } from '../render/renderRoom.js';
+import type { RgbaScreen } from '../render/rgbaScreen.js';
 import { ClassicArtSource } from '../render/classicArtSource.js';
 import type { ArtSource } from '../render/artSource.js';
 import { GlScreen, webgl2Available } from '../render/glScreen.js';
@@ -50,6 +78,7 @@ import {
   classicOnlyBackground,
   type EnhancedArt,
   type EnhancedObject,
+  type EnhancedSprite,
   type FishSprites,
 } from '../render/enhancedArtSource.js';
 import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
@@ -88,6 +117,7 @@ import {
   loadSettings,
   saveSettings,
   busMultiplier,
+  VOLUMES,
   type SubtitleMode,
   type VolumeBus,
 } from '../core/settings.js';
@@ -459,7 +489,6 @@ const SAVE_SCHEMA = 1;
 migrateSaves();
 const solved = loadSet('ff.solved'); // set of solved (1-based) room numbers, persisted
 const cheated = loadSet('ff.cheated'); // rooms completed via the cheat (shown as kCheat)
-let cheatBuf = ''; // rolling buffer of typed keys, for cheat-string detection
 
 /**
  * Version + migrate the persisted save data so a future layout change never strands
@@ -504,7 +533,81 @@ const saveSolved = (): void => saveSet('ff.solved', solved);
 const saveCheated = (): void => saveSet('ff.cheated', cheated);
 
 const scores = loadScores(); // room number -> best (lowest) move count on a genuine solve
-const gameStart = Date.now(); // session start, for ZAVER's cas_hry playtime narration
+
+/**
+ * cascisty (USoutez.pas:697): milliseconds spent INSIDE each room, accumulated
+ * across every visit and every session. The original keeps this per room in its
+ * competition records and adds the visit's elapsed time when the room closes
+ * (zaznamenej_zmeny, UMain.pas:283), then persists the records; ZAVER's finale
+ * narrates the total as an hour count. Map/menu/intro time never counts, and a
+ * restart does not split a visit (TRoom.Restart leaves casstartu alone).
+ */
+const playTime = loadPlayTime();
+/** Date.now() when the current room visit began, or 0 when not in a room. */
+let roomEnterAt = 0;
+/** The room that visit belongs to. */
+let roomClockNum = 0;
+
+/** Load the persisted per-room play time (ms). */
+function loadPlayTime(): Map<number, number> {
+  try {
+    const raw = localStorage.getItem('ff.playtime');
+    if (raw) {
+      const obj = JSON.parse(raw) as Record<string, number>;
+      return new Map(
+        Object.entries(obj)
+          .map(([k, v]) => [Number(k), Number(v)] as [number, number])
+          .filter(([k, v]) => Number.isFinite(k) && Number.isFinite(v) && v >= 0),
+      );
+    }
+  } catch {
+    /* storage unavailable */
+  }
+  return new Map<number, number>();
+}
+
+/** Start timing a visit to room `num` (TRoom.Start: casstartu := Date+Time). Armed
+ *  by the player entering a room, not by loadRoom — the boot room is pre-loaded
+ *  behind the world map and must not accrue play time. The room number is captured
+ *  here rather than read from `curNum` at the end, because `curNum` only updates
+ *  once the (async) room load succeeds: leaving during the load would otherwise
+ *  bank the time against the room the player just came from. */
+function startRoomClock(num: number): void {
+  roomEnterAt = Date.now();
+  roomClockNum = num;
+}
+
+/**
+ * Close a room visit and bank its elapsed time (zaznamenej_zmeny, UMain.pas:283 ->
+ * USoutez.pas:695). Called whenever the room is left, for any reason; time in a
+ * visit that is never closed is lost, exactly as it is in the original.
+ */
+function stopRoomClock(): void {
+  if (!roomEnterAt) return;
+  const elapsed = Date.now() - roomEnterAt;
+  roomEnterAt = 0;
+  const n = roomClockNum;
+  roomClockNum = 0;
+  if (!n || elapsed <= 0) return;
+  playTime.set(n, (playTime.get(n) ?? 0) + elapsed);
+  try {
+    localStorage.setItem('ff.playtime', JSON.stringify(Object.fromEntries(playTime)));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/**
+ * cas_hry (USoutez.pas:263): the whole game's play time, in Delphi day units —
+ * the sum over all rooms of their banked time. The visit in progress is NOT
+ * included, matching the original, whose current room has not been recorded yet
+ * when ZAVER reads it.
+ */
+function casHry(): number {
+  let ms = 0;
+  for (const v of playTime.values()) ms += v;
+  return ms / 86_400_000;
+}
 
 /** Load the persisted per-room best move counts (RoomVysl). */
 function loadScores(): Map<number, number> {
@@ -584,7 +687,7 @@ function recordBest(roomNum: number, rec: string, moves: number): void {
 }
 
 /**
- * xwemaketherules (URoom.pas:24666): the original's "solve this room" cheat. Marks
+ * xwemaketherulez (URoom.pas:24666): the original's "solve this room" cheat. Marks
  * the current room completed-via-cheat, records it in the progression, and returns
  * to the map (konec:=1). Handy for testing.
  */
@@ -599,7 +702,7 @@ function cheatSolveRoom(): void {
 }
 
 /** Dev-only: genuinely win the current room (dev-bar "Win room" button / the W hotkey).
- *  Unlike cheatSolveRoom (xwemaketherules), which jumps straight to the map and marks the
+ *  Unlike cheatSolveRoom (xwemaketherulez), which jumps straight to the map and marks the
  *  room "cheated", this drives the real win path — engine.triggerWin -> onWin bookkeeping
  *  (marks the room solved) -> the auto-return countdown -> returnFromRoom — so an
  *  end-of-leg room reveals its story page exactly as a real solve would. Meant purely as a
@@ -607,6 +710,488 @@ function cheatSolveRoom(): void {
 function devWinRoom(): void {
   if (!devEnabled || screen !== 'room' || !engine || !room || engine.phase !== 'idle' || room.won) return;
   engine.triggerWin();
+}
+
+// ---------------------------------------------------------------------------
+// Typed cheat codes (Uovl.pas:744 in a room, UMain.pas:1750 on the map).
+// ---------------------------------------------------------------------------
+
+/** `cheatstring` — the room's entry buffer. Armed by X, parked between codes. */
+const roomCheats = new CheatEntry();
+/** `dircheat` (UMain.pas:1727) — the map's own buffer; the two never share state. */
+const mapCheats = new CheatEntry();
+
+/** ultraviolence (USoutez.pas:24): every room entered from now on spawns a hook
+ *  (TRoom.Start, URoom.pas:1503). Armed from the map and never cleared. */
+let ultraviolence = false;
+/** oldamp/oldper/oldspd (URoom.pas:24607): the water params xstorm displaced. */
+let oldWater: { amp: number; per: number; spd: number } | null = null;
+/**
+ * The sprite cheats currently applied, in the order they were typed. Both are
+ * toggles that rewrite the fish head/body frames, and both survive a restart in
+ * the original (TRoom.Restart does not reload the sprites), so the port keeps the
+ * state and recomputes the frames from the pristine parsed data whenever the Room
+ * is rebuilt. The original's xmorph instead restores the bitmaps it saved when it
+ * was switched on (Hlavy1/Tela1, URoom.pas:23832) — indistinguishable unless the
+ * two cheats are interleaved, where recomputing is the better-behaved of the two.
+ */
+let spriteCheats: ('UNDEAD' | 'MORPH')[] = [];
+/** megabomb (URoom.pas:26192): blank the room white for exactly one painted frame. */
+let megabombFlash = false;
+/** silentfilm (URoom.pas:181): the xsilent cheat's black-and-white movie mode. */
+let silentFilm = false;
+/** interlacedfaze (URoom.pas:195): -1 off, -2 winding down, >=0 the collapse phase. */
+let interlacedFaze = INTERLACED_OFF;
+/** The hidden SCORE bonus room (branch 9, `av:=9; am:=1` — UMain.pas:1774). */
+const SCORE_ROOM = 72;
+
+/**
+ * xmegabomb (URoom.pas:24534): kill both fish where they float — light-kind
+ * skeletons that erode away — then blank the room white for a frame. The original
+ * counts both deaths, kills any speech, and drops whatever the fish were holding.
+ */
+function cheatMegabomb(): void {
+  if (!room || !engine) return;
+  for (const which of ['little', 'big'] as const) {
+    if (room.alive[which]) room.killFish(which);
+  }
+  audio.snd('sp-smrt1', 3, false, EFFECT_VOL);
+  audio.snd('sp-smrt2', 3, false, EFFECT_VOL);
+  audio.killVoice(MLUVI_PRIOR.little); // KSnd(mluvi_mala)
+  audio.killVoice(MLUVI_PRIOR.big); // KSnd(mluvi_velka)
+  activeScript?.s.clearDialog(); // Zrus_dialogy
+  room.clearAllDirs();
+  if (room.padani()) {
+    engine.phase = 'fall'; // gstav := stav_ma_padat
+    engine.animFrame = 0;
+  }
+  megabombFlash = true;
+  forceRoomRedraw = true;
+}
+
+/** A head/body frame table, as both `Room.heads` and `Room.bodies` are shaped. */
+type FrameSet = { big: readonly (FfrBitmap | null)[]; small: readonly (FfrBitmap | null)[] };
+/** One facing of the enhanced truecolor fish sprites (both sizes). */
+type FishFacing = { small: Map<string, EnhancedSprite>; big: Map<string, EnhancedSprite> };
+/** The reshaped enhanced sprites while a sprite cheat is on, else null. */
+let cheatFishSprites: FishSprites | null = null;
+
+/** pretoc (URoom.pas:23892) over a whole frame table — the xundead flip. */
+function undeadSet(set: FrameSet): FrameSet {
+  const flip = (frames: readonly (FfrBitmap | null)[]): (FfrBitmap | null)[] =>
+    frames.map((bm) => (bm ? pretoc(bm) : bm));
+  return { big: flip(set.big), small: flip(set.small) };
+}
+
+/** morph (URoom.pas:23832) over a whole frame table — each fish takes the other's
+ *  shape. Both halves derive from the ORIGINALS, as the Delphi does via
+ *  bmmala1/bmvelka1, so the swap is a genuine exchange rather than a chain. */
+function morphSet(set: FrameSet): FrameSet {
+  return {
+    small: set.small.map((bm, i) => (bm && set.big[i] ? morphShrink(set.big[i]!) : bm)),
+    big: set.big.map((bm, i) => (bm && set.small[i] ? morphStretch(set.small[i]!) : bm)),
+  };
+}
+
+/** The same two transforms over one facing of the enhanced truecolor fish, which
+ *  the enhanced art source blits instead of the FFR frames. Sprites are paired by
+ *  filename, so a frame present for only one fish is left alone. */
+function undeadFacing(set: FishFacing): FishFacing {
+  const out: FishFacing = { small: new Map(), big: new Map() };
+  for (const size of ['small', 'big'] as const) {
+    for (const [k, v] of set[size]) out[size].set(k, pretocRgba(v));
+  }
+  return out;
+}
+
+function morphFacing(set: FishFacing): FishFacing {
+  const out: FishFacing = { small: new Map(set.small), big: new Map(set.big) };
+  for (const [k, small] of set.small) {
+    const big = set.big.get(k);
+    if (!big) continue;
+    out.small.set(k, morphShrinkRgba(big));
+    out.big.set(k, morphStretchRgba(small));
+  }
+  return out;
+}
+
+/**
+ * Recompute the fish sprites: the pristine art, then every active sprite cheat in
+ * the order it was typed. Both art sources are covered — the FFR head/body frames
+ * the classic renderer uses, and the enhanced truecolor set, which is a wholly
+ * separate path (EnhancedArtSource.drawFish) that would otherwise ignore the
+ * cheats entirely in the mode the game ships in. Nothing shared is mutated.
+ */
+function applySpriteCheats(): void {
+  if (room && ffr) {
+    let heads: FrameSet = ffr.heads;
+    let bodies: FrameSet = ffr.bodies;
+    for (const c of spriteCheats) {
+      const f = c === 'UNDEAD' ? undeadSet : morphSet;
+      heads = f(heads);
+      bodies = f(bodies);
+    }
+    room.heads = heads;
+    room.bodies = bodies;
+  }
+  if (!fishSprites || spriteCheats.length === 0) {
+    cheatFishSprites = null;
+    return;
+  }
+  let left: FishFacing = { small: fishSprites.small.left, big: fishSprites.big.left };
+  let right: FishFacing = { small: fishSprites.small.right, big: fishSprites.big.right };
+  for (const c of spriteCheats) {
+    const f = c === 'UNDEAD' ? undeadFacing : morphFacing;
+    left = f(left);
+    right = f(right);
+  }
+  cheatFishSprites = {
+    small: { left: left.small, right: right.small },
+    big: { left: left.big, right: right.big },
+  };
+}
+
+/** Toggle one of the two sprite cheats (xundead URoom.pas:24573, xmorph :24588). */
+function toggleSpriteCheat(which: 'UNDEAD' | 'MORPH'): void {
+  spriteCheats = spriteCheats.includes(which)
+    ? spriteCheats.filter((c) => c !== which)
+    : [...spriteCheats, which];
+  applySpriteCheats();
+  forceRoomRedraw = true;
+}
+
+/** xstorm (URoom.pas:24607): whip the water up (wamp/wspd/wper = 10/4/6), or put
+ *  it back if it is already storming — the original toggles on those exact values. */
+function cheatStorm(): void {
+  if (!room) return;
+  if (room.wamp === 10 && room.wspd === 4 && room.wper === 6 && oldWater) {
+    room.wamp = oldWater.amp;
+    room.wper = oldWater.per;
+    room.wspd = oldWater.spd;
+    oldWater = null;
+  } else {
+    oldWater = { amp: room.wamp, per: room.wper, spd: room.wspd };
+    room.wamp = 10;
+    room.wspd = 4;
+    room.wper = 6;
+  }
+  forceRoomRedraw = true;
+}
+
+/**
+ * xsilent (URoom.pas:24641): silent-movie mode — the sound is cut, the picture
+ * goes sepia, film grain scratches over it, and every spoken line becomes an
+ * intertitle card instead of a subtitle. Typing it again restores the volumes and
+ * the colour; so does leaving the room (TRoom.Done, URoom.pas:1513).
+ */
+function cheatSilent(): void {
+  if (silentFilm) {
+    endSilentFilm();
+    return;
+  }
+  for (const bus of ['effect', 'voice', 'music'] as const) audio.setBusGain(bus, 0);
+  silentFilm = true;
+  syncScriptMusicVolume(); // music_volume := 0, which room scripts can see (VES)
+  if (subs) {
+    subs.silentFilm = true;
+    subs.silentTime = 0; // cassilenttit := 0
+  }
+  forceRoomRedraw = true;
+}
+
+/**
+ * Undo silent-film mode — on a second xsilent, and on leaving the room, which is
+ * where the original does it (TRoom.Done, URoom.pas:1513-1518).
+ *
+ * The original restores its `oldmusic`/`oldsnd`/`oldtalk` snapshot; the port
+ * restores the persisted settings instead. They are the same thing unless the
+ * player moved a slider while the film was running, in which case restoring the
+ * snapshot would leave what you HEAR disagreeing with where the slider SITS —
+ * the original re-derives its slider from the volume, so it has no such split.
+ */
+function endSilentFilm(): void {
+  if (!silentFilm) return;
+  silentFilm = false;
+  applyVolumeSettings();
+  syncScriptMusicVolume();
+  if (subs) {
+    subs.silentFilm = false;
+    subs.silentTime = 0;
+  }
+  forceRoomRedraw = true;
+}
+
+/** xinterlaced (URoom.pas:24627): start the screen collapsing in on itself, or —
+ *  if it already is — ask it to wind down (faze -2 runs one last frame). */
+function cheatInterlaced(): void {
+  interlacedFaze = interlacedFaze >= 0 ? INTERLACED_STOP : INTERLACED_START;
+  forceRoomRedraw = true;
+}
+
+/**
+ * Advance the film effects' own counters, once per game tick.
+ *
+ * These live in `KresliMistnost` in the original (URoom.pas:26200-26205, 26079),
+ * which is driven from `Jedeme` — i.e. once per ~80ms logic tick, not once per
+ * painted frame. The port paints at up to 60fps, so running them from the render
+ * path made the intertitle cards and the interlaced collapse play roughly five
+ * times too fast.
+ */
+function tickFrameEffects(): void {
+  if (silentFilm && subs && subs.silentTime > 0) subs.silentTime--;
+  if (interlacedFaze !== INTERLACED_OFF) {
+    // `sp-smrt` fires on the phase whose shift passes -10 (URoom.pas:26058).
+    if (interlacedSounds(interlacedFaze)) audio.snd('sp-smrt', -10, false, EFFECT_VOL);
+    interlacedFaze++;
+  }
+}
+
+/** True while a cheat needs the whole finished frame post-processed, which the
+ *  GPU path cannot do — those frames render on the CPU instead. */
+function frameEffectsActive(): boolean {
+  return megabombFlash || silentFilm || interlacedFaze !== INTERLACED_OFF || tetris !== null;
+}
+
+/** Blit the minigame's 150x300 board into the middle of an RGBA frame. It has its
+ *  own palette, so it goes straight into the colour plane. */
+function blitTetris(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number): void {
+  if (!tetris || !tetrisArt) return;
+  const bw = tetrisArt.hole.w;
+  const bh = tetrisArt.hole.h;
+  const src = tetrisRgba(renderTetris(tetris, tetrisArt), tetrisArt);
+  const ox = Math.floor((w - bw) / 2);
+  const oy = Math.floor((h - bh) / 2);
+  for (let y = 0; y < bh; y++) {
+    const dy = oy + y;
+    if (dy < 0 || dy >= h) continue;
+    for (let x = 0; x < bw; x++) {
+      const dx = ox + x;
+      if (dx < 0 || dx >= w) continue;
+      const s = (y * bw + x) * 4;
+      const d = (dy * w + dx) * 4;
+      rgba[d] = src[s]!;
+      rgba[d + 1] = src[s + 1]!;
+      rgba[d + 2] = src[s + 2]!;
+      rgba[d + 3] = 255;
+    }
+  }
+}
+
+/**
+ * The tail of KresliMistnost (URoom.pas:26192-26281): the megabomb flash, the
+ * silent-film intertitle card, the grain, and the interlaced collapse — in the
+ * original's order, over the finished frame.
+ */
+function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean, grain = true): void {
+  const rnd = (n: number): number => Math.floor(Math.random() * n);
+  const scratch = (s: RgbaScreen): void => {
+    if (grain) sum(s, rnd); // probes disable the random grain to get a stable hash
+  };
+  if (tetris && tetrisArt) {
+    // The minigame sits over the (frozen) room, as its modal window does.
+    blitTetris(screen.rgba, screen.width, screen.height);
+    return;
+  }
+  if (megabombFlash) {
+    // VyplnMistnost(fontcol['w',1]); KresliTitulky — one white frame, then back.
+    megabombFlash = false;
+    forceRoomRedraw = true;
+    screen.fillIndex(subs?.fontcolIndex('w', 1) ?? 255);
+    subs?.draw(screen, count);
+    return;
+  }
+  if (silentFilm && subs?.silentActive) {
+    // The card replaces the room entirely while it runs.
+    screen.fillIndex(subs.fontcolIndex('w', 4));
+    subs.drawSilentTitle(screen);
+    scratch(screen);
+    zcernobilit(screen.rgba);
+    return;
+  }
+  if (!useVecSubs) subs?.draw(screen, count); // baked subtitles (palette-coloured, on top)
+  if (silentFilm) scratch(screen);
+  if (interlacedFaze !== INTERLACED_OFF) {
+    zpracujInterlaced(screen, interlacedFaze, subs?.fontcolIndex('w', 4) ?? 255);
+  }
+  if (silentFilm) zcernobilit(screen.rgba);
+}
+
+/**
+ * xtetris (URoom.pas:24564, UMain.pas:1764): the Tetris minigame. The original
+ * opens it as a modal window over the game (`Tetris.ShowModal`), which freezes
+ * the room's timer until it closes; the port has no windows, so it draws the
+ * 150x300 board centred over the frozen room and takes the keyboard until Escape.
+ */
+let tetris: TetrisGame | null = null;
+let tetrisArt: TetrisArt | null = null;
+let tetrisLoading = false;
+let tetrisAcc = 0; // ms accumulated toward the next 55ms game tick (Ttr.dfm)
+let tetrisTick = 0; // ticks run, so the map's paint cache knows the board moved
+let tetrisPending = false; // the cheat fired and the board art is still loading
+const TETRIS_TICK_MS = 55;
+
+/** ttr.pic (Ttr.pas:339) — the persistent top-ten, in localStorage here. */
+const tetrisHiscores: HiscoreStore = {
+  load: () => {
+    try {
+      const raw = localStorage.getItem('ff.tetris');
+      return raw ? (JSON.parse(raw) as number[]) : [];
+    } catch {
+      return [];
+    }
+  },
+  save: (scores) => {
+    try {
+      localStorage.setItem('ff.tetris', JSON.stringify(scores));
+    } catch {
+      /* storage unavailable */
+    }
+  },
+};
+
+/** Load the minigame's atlas + well bitmaps and shape table (nacti, Ttr.pas:89). */
+async function ensureTetrisArt(): Promise<TetrisArt | null> {
+  if (tetrisArt || tetrisLoading) return tetrisArt;
+  tetrisLoading = true;
+  try {
+    const [all, hole, txt] = await Promise.all([
+      fetch('/data/Intro/all.BMP').then((r) => r.arrayBuffer()),
+      fetch('/data/Intro/dira.BMP').then((r) => r.arrayBuffer()),
+      fetch('/data/Intro/all.txt').then((r) => r.text()),
+    ]);
+    const shapes = parseShapes(txt);
+    tetrisArt = {
+      all: parseBmp(new Uint8Array(all)),
+      hole: parseBmp(new Uint8Array(hole)),
+      xfont: shapes.xfont,
+      yfont: shapes.yfont,
+    };
+    tetrisShapes = shapes;
+  } catch {
+    tetrisArt = null; // the data is missing: the cheat just does nothing
+  } finally {
+    tetrisLoading = false;
+  }
+  return tetrisArt;
+}
+let tetrisShapes: TetrisShapes | null = null;
+
+/**
+ * Open the minigame (Tetris.Create + ShowModal). The original's launch is
+ * synchronous; the port has to fetch the board art first, so `tetrisPending`
+ * makes the game modal from the instant the code fires — otherwise the room kept
+ * running and taking input during the fetch, and the board could pop open on a
+ * screen the player had since moved to.
+ */
+function openTetris(): void {
+  if (tetris || tetrisPending) return;
+  const screenAtLaunch = screen;
+  tetrisPending = true;
+  wake();
+  void ensureTetrisArt().then(() => {
+    if (!tetrisPending) return; // cancelled (Escape) while the art was loading
+    tetrisPending = false;
+    if (!tetrisArt || !tetrisShapes || tetris || screen !== screenAtLaunch) return;
+    tetris = new TetrisGame(tetrisShapes, (n) => Math.floor(Math.random() * n), tetrisHiscores);
+    tetrisAcc = 0;
+    forceRoomRedraw = true;
+    wake();
+  });
+}
+
+/** Close it (modalresult := mrCancel): the room resumes with no key held
+ *  (gstav := stav_klid; keyroom := 0; keyovl := 0 — URoom.pas:24568). */
+function closeTetris(): void {
+  if (!tetris && !tetrisPending) return;
+  tetris = null;
+  tetrisPending = false;
+  clearHeldKey();
+  if (engine) engine.swim = null;
+  forceRoomRedraw = true;
+  wake();
+}
+
+/** True while the minigame owns the game — including the moment between the cheat
+ *  firing and its art arriving. */
+function tetrisModal(): boolean {
+  return tetris !== null || tetrisPending;
+}
+
+/** Advance the minigame's own 55ms timer, independent of the game's logic tick. */
+function tickTetris(dtMs: number): void {
+  if (!tetris) return;
+  wake(); // the board animates on its own; never let the idle throttle stall it
+  tetrisAcc += dtMs;
+  let steps = 0;
+  while (tetrisAcc >= TETRIS_TICK_MS && steps < 4) {
+    tetrisAcc -= TETRIS_TICK_MS;
+    steps++;
+    tetrisTick++;
+    tetris.tick();
+  }
+  forceRoomRedraw = true;
+}
+
+/**
+ * The in-room cheat dispatch (URoom.pas:24534-24690). Codes 11/12 have no case
+ * here — SCORE and ULTRAVIOLENCE only work from the map (UMain.pas:1773-1780).
+ */function applyRoomCheat(cheat: Cheat): void {
+  if (screen !== 'room' || !room) return;
+  switch (cheat) {
+    case 'MEGABOMB':
+      cheatMegabomb();
+      break;
+    case 'UNDEAD':
+      toggleSpriteCheat('UNDEAD');
+      break;
+    case 'MORPH':
+      toggleSpriteCheat('MORPH');
+      break;
+    case 'FISHER':
+      hooks.add(room);
+      break;
+    case 'TETRIS':
+      openTetris();
+      break;
+    case 'STORM':
+      cheatStorm();
+      break;
+    case 'INTERLACED':
+      cheatInterlaced();
+      break;
+    case 'SILENT':
+      cheatSilent();
+      break;
+    case 'WEMAKETHERULEZ':
+      cheatSolveRoom();
+      break;
+    case 'IAMACHEATER':
+      // Deliberately nothing: the original's body is `{soutez:=not soutez;}` —
+      // commented out, so the retail build just swallows the code.
+      break;
+    default:
+      break;
+  }
+}
+
+/** The map-screen cheat dispatch (UMain.pas:1760-1782). Only three codes act here. */
+function applyMapCheat(cheat: Cheat): void {
+  switch (cheat) {
+    case 'SCORE':
+      // `av:=9; am:=1; doAkce:=daRun` — run the hidden SCORE bonus room, which is
+      // kept off the map and out of the finale, so this code is the only way in.
+      void enterRoom(SCORE_ROOM);
+      break;
+    case 'TETRIS':
+      // The map screen launches the minigame too (UMain.pas:1764).
+      openTetris();
+      break;
+    case 'ULTRAVIOLENCE':
+      ultraviolence = true;
+      break;
+    default:
+      break;
+  }
 }
 
 
@@ -622,9 +1207,15 @@ let deathFft: FftEntry[] = []; // global x02 death-commentary subtitles (smrt-*)
 // `titDef` remembers the last cz/en pick — the one language used for the titles,
 // room-name plaques and help (and the subtitles when on). subLang() resolves it.
 const settings = loadSettings();
-/** True while subtitles should be shown (titles <> tit_no). */
+/**
+ * True while dialogue text should be shown (titles <> tit_no).
+ *
+ * Silent-film mode overrides the "off" setting: `Talk` swaps `titles` to `tit_def`
+ * for the duration (URoom.pas:630-635), because the cheat has muted every voice
+ * and the intertitle cards are all the player has left.
+ */
 function subsOn(): boolean {
-  return settings.subtitles !== 'off';
+  return settings.subtitles !== 'off' || silentFilm;
 }
 /** The language to render dialogue text in (falls back to tit_def when off). */
 function subLang(): 'cz' | 'en' {
@@ -646,8 +1237,25 @@ function setSubtitleMode(mode: SubtitleMode): void {
 function setVolume(bus: VolumeBus, index: number): void {
   settings.volume[bus] = index;
   audio.setBusGain(bus, busMultiplier(bus, index));
+  syncScriptMusicVolume();
   saveSettings(settings);
 }
+
+/**
+ * music_volume (RSound.pas:36) on the original's 0..64 scale — the level the
+ * player's 0..12 slider index maps to through Volumes[]. Room scripts (VES's
+ * quiet-music easter egg, URoom.pas:12190) compare against this, not the index.
+ */
+function musicLevel(): number {
+  if (silentFilm) return 0; // xsilent sets music_volume := 0 (URoom.pas:24647)
+  return VOLUMES[Math.max(0, Math.min(VOLUMES.length - 1, settings.volume.music))]!;
+}
+
+/** Push the effective music_volume at the running room script. */
+function syncScriptMusicVolume(): void {
+  if (activeScript) activeScript.s.musicVolume = musicLevel();
+}
+
 /** Push all persisted volume levels into the audio buses (NastavZvuk, on boot). */
 function applyVolumeSettings(): void {
   for (const bus of ['effect', 'voice', 'music'] as const) {
@@ -877,6 +1485,7 @@ async function loadFishSprites(): Promise<void> {
       small: { left: await build('small', 'left'), right: await build('small', 'right') },
       big: { left: await build('big', 'left'), right: await build('big', 'right') },
     };
+    applySpriteCheats(); // a sprite cheat typed before the art landed still applies
   } catch {
     fishSprites = null;
   }
@@ -974,6 +1583,21 @@ const KEYS: Record<string, { which: 'little' | 'big'; dir: number }> = {
   KeyS: { which: 'big', dir: Dir.down },
   KeyA: { which: 'big', dir: Dir.left },
   KeyD: { which: 'big', dir: Dir.right },
+};
+
+/** The minigame's key map (Ttr.pas:458: 37/100 left, 39/102 right, 12/40/98/101
+ *  rotate, 32/45/96 slam). Down rotates; there is no soft drop. */
+const TETRIS_KEYS: Record<string, TetrisKey> = {
+  ArrowLeft: 'left',
+  Numpad4: 'left',
+  ArrowRight: 'right',
+  Numpad6: 'right',
+  ArrowDown: 'rotate',
+  Numpad2: 'rotate',
+  Numpad5: 'rotate',
+  Space: 'drop',
+  Insert: 'drop',
+  Numpad0: 'drop',
 };
 
 /** Arrow keys move the *active* fish (ZaznamenejPrikazKlavesou #37..#40, kdo:=sys). */
@@ -1074,10 +1698,34 @@ function buildRoom(carryPole = false): void {
   // on CountDown=0 without clearing showmode (URoom.pas:26911-26920). The room-change
   // and player-restart paths call endShowmode() explicitly instead.
   hooks.clear(); // nhacku := 0 (URoom.pas:1502)
+  // ultraviolence (URoom.pas:1503): once the code is typed on the map, every room
+  // opens with a hook already descending.
+  if (ultraviolence) hooks.add(room);
+  // The room-scoped cheats die with the room, exactly as in the original — a fresh
+  // TRoom.Create reloads the sprites and resets silentfilm/interlacedfaze
+  // (URoom.pas:1430-1431). The new Room already carries pristine sprites and water.
+  // The room-scoped cheats survive a RESTART but die on a room CHANGE — exactly
+  // like roompole above, because TRoom.Init clears them in the very same block
+  // (URoom.pas:1430-1433), while TRoom.Restart leaves them alone.
+  if (!carryPole) {
+    spriteCheats = [];
+    oldWater = null;
+    endSilentFilm(); // TRoom.Done also restores the volumes on the way out
+    interlacedFaze = INTERLACED_OFF;
+    roomCheats.reset();
+  }
+  // Re-apply whatever survived (a restart), onto the freshly built Room.
+  applySpriteCheats();
+  if (oldWater) {
+    room.wamp = 10;
+    room.wspd = 4;
+    room.wper = 6;
+  }
   screenShoveX = 0; // reset the KAJUTA1 screen-shove offset
   count = 0;
   const wall = room.bitmaps[room.wallItem.bmp];
   subs = font && wall ? new SubtitleSystem(font, ffr.palette, ffr.width, wall.w, wall.h) : null;
+  if (subs) subs.silentFilm = silentFilm; // a restart keeps silent-film mode running
   talkIdx.little = 0;
   talkIdx.big = 0;
   poslMluv.little = -1;
@@ -1119,6 +1767,7 @@ function buildRoom(carryPole = false): void {
       (prior) => audio.talking(prior),
     );
     s.pokus = pokus;
+    s.musicVolume = musicLevel();
     if (savedPole) for (let i = 0; i < s.roompole.length; i++) s.roompole[i] = savedPole[i] ?? 0;
     s.musName = roomMusic?.name ?? '';
     s.onKufrDemo = () => void startCutscene();
@@ -1613,6 +2262,14 @@ function talk(which: 'little' | 'big'): void {
 const idle = (): boolean =>
   room !== null && engine !== null && engine.phase === 'idle' && !room.anyFishDead && !room.won;
 
+/**
+ * gstav in [stav_nic, stav_klid] (URoom.pas:24432): the original only dequeues a
+ * command — including save and load — while the room is at rest, so neither can
+ * land mid-animation. Looser than `idle()`, which also excludes a dead fish and a
+ * won room; this is only the animation gate.
+ */
+const atRest = (): boolean => engine !== null && engine.phase === 'idle';
+
 /** DalsiPrikaz busy gate (URoom.pas:27002-27016): a fish command is dropped while that
  *  fish is busy (mid-dialogue, turned to face the player). */
 function fishBusy(which: 'little' | 'big'): boolean {
@@ -1725,7 +2382,10 @@ function restore(
 ): void {
   if (!preserveShowmode) endShowmode(); // loading a saved game ends any KUFRIK demonstration
   loadmode = null;
-  buildRoom(); // fresh room (resets srecord); may leave pending fall dirs
+  // Rebuild with carryPole, i.e. the RESTART flavour: TRoom.Load runs InitItems +
+  // InitProgramky (URoom.pas:1905-1948), never TRoom.Init, so loading a save must
+  // not clear the room-scoped cheats (or roompole) the way a room change does.
+  buildRoom(true); // fresh room (resets srecord); may leave pending fall dirs
   if (!room || !engine) return;
   room.clearAllDirs();
   room.fallToRest(); // settle the initial gravity instantly
@@ -1801,8 +2461,17 @@ function restartRoom(): void {
 
 const saveKey = (): string => `ff.save.${select.value}`;
 
+/**
+ * CanSave (URoom.pas:26900-26906) for the current room, or false with no room
+ * loaded. The rule itself lives on `Room` — see `Room.canSave`.
+ */
+function canSave(): boolean {
+  return !!room && room.canSave;
+}
+
 /** Save the current move record + script state to localStorage. */
 function saveGame(): void {
+  if (!canSave()) return; // DalsiPrikaz: `if not CanSave then kdo:=0` (URoom.pas:27010)
   try {
     const snapshot = activeScript?.s.snapshot() ?? null;
     localStorage.setItem(saveKey(), JSON.stringify({ rec: engine?.srecord ?? '', vars: snapshot }));
@@ -1814,6 +2483,7 @@ function saveGame(): void {
 
 /** Load and re-simulate the saved move record for this room, restoring script state. */
 function loadGame(): void {
+  if (!saveExists()) return; // CanLoad (URoom.pas:27012) — nothing to load
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(saveKey());
@@ -1879,7 +2549,7 @@ function panelState(): PanelState {
     velka: bigDead ? SEDY : engine?.active === 'big' ? ZLUTY : ORANZOVY,
     mala: littleDead ? SEDY : engine?.active === 'little' ? ZLUTY : ORANZOVY,
     space: p === 11 ? SVITICI : bothAlive ? ORANZOVY : SEDY,
-    save: p === 12 ? SVITICI : ORANZOVY, // a record always exists to save
+    save: p === 12 ? SVITICI : canSave() ? ORANZOVY : SEDY,
     load: p === 13 ? SVITICI : saveExists() ? ORANZOVY : SEDY,
     abort: p === 14 ? SVITICI : ORANZOVY,
     restart: p === 15 ? SVITICI : ORANZOVY,
@@ -2095,8 +2765,11 @@ function drawMap(): void {
   const sig =
     `${pulse % 6}|${Math.min(depth, worldMap.maxDepth + 1)}|${mapHoverCorner ?? ''}|${solved.size}|${cheated.size}|${cheated.size ? 1 : 0}` +
     `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}`;
-  if (sig === mapSig) return; // nothing visibly changed — skip the redraw entirely
-  mapSig = sig;
+  // The minigame is modal over the map too (UMain.pas:1764), and animates, so its
+  // frame counter joins the cache key.
+  const sigT = tetris ? `|ttr${tetrisTick}` : '';
+  if (sig + sigT === mapSig) return; // nothing visibly changed — skip the redraw entirely
+  mapSig = sig + sigT;
   perfPaint++; // an actual map paint (past the cache check)
   const panelOpen = mapInfoRoom !== null;
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
@@ -2116,6 +2789,7 @@ function drawMap(): void {
     const replayEnabled = bestRecord(mapInfoRoom!) !== undefined;
     drawInfoPanel(rgba, MAP_W, MAP_H, infoPanelAssets, count, mapInfoHover, mapInfoFaze, replayEnabled);
   }
+  if (tetris && tetrisArt) blitTetris(rgba, MAP_W, MAP_H);
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
 }
 
@@ -2132,6 +2806,8 @@ function startMenuMusic(): void {
  * voices, clear the dialogue queue and subtitles, then start the menu music.
  */
 function showMap(): void {
+  stopRoomClock(); // bank this visit's play time before the room goes away
+  endSilentFilm(); // TRoom.Done (URoom.pas:1513): leaving the room un-mutes the game
   screen = 'map';
   select.value = 'map'; // keep the dev-bar Room picker in sync with the screen
   clearHeldKey(); // drop any held movement key when leaving the room
@@ -2383,7 +3059,9 @@ function drawCredits(): void {
  *  `replay` is the best-solution move record to play back animated (map "Replay"). */
 function enterRoom(num: number, replay?: string): Promise<void> {
   wake();
+  stopRoomClock(); // bank the outgoing room's time before the switch
   screen = 'room';
+  startRoomClock(num); // TRoom.Start: casstartu := Date+Time
   mapHoverCorner = null; // drop any map corner hover on leaving the map
   mapHoverRoom = null;
   canvas.style.cursor = 'default';
@@ -2437,10 +3115,10 @@ function panelAction(region: number, panelX = 0): void {
       swapActive();
       break;
     case 12:
-      saveGame();
+      if (atRest()) saveGame();
       break;
     case 13:
-      loadGame();
+      if (atRest()) loadGame();
       break;
     case 14: // exit to the world map
       showMap();
@@ -2634,15 +3312,16 @@ function enableWebgl(): void {
 let enhArt: EnhancedArtSource | null = null;
 let enhKey: [Room | null, EnhancedArt | null, EnhancedObject[], FishSprites | null] = [null, null, [], null];
 function enhancedArtFor(r: Room): EnhancedArtSource {
+  const fish = cheatFishSprites ?? fishSprites; // xundead/xmorph reshape these
   if (
     enhArt === null ||
     enhKey[0] !== r ||
     enhKey[1] !== enhancedArt ||
     enhKey[2] !== enhancedObjects ||
-    enhKey[3] !== fishSprites
+    enhKey[3] !== fish
   ) {
-    enhArt = new EnhancedArtSource(r.palette, enhancedArt, enhancedObjects, fishSprites);
-    enhKey = [r, enhancedArt, enhancedObjects, fishSprites];
+    enhArt = new EnhancedArtSource(r.palette, enhancedArt, enhancedObjects, fish);
+    enhKey = [r, enhancedArt, enhancedObjects, fish];
   }
   return enhArt;
 }
@@ -2822,7 +3501,7 @@ function draw(): void {
   // (GlScreen) — both composite either art source, every room on the GPU. Any GL
   // error falls back to the CPU path for that frame (and disables WebGL for the
   // session).
-  const wantGpu = renderer === 'webgl' && !glFailed;
+  const wantGpu = renderer === 'webgl' && !glFailed && !frameEffectsActive();
   const gpuOk = wantGpu && drawGpu(sw, sh, art, opts, useVecSubs);
   lastRoomBackend = gpuOk ? 'webgl' : 'cpu'; // the backend that ACTUALLY painted this frame (for the HUD)
   // #screen (the 2D canvas) is the flow anchor for the wrap that also holds the
@@ -2846,7 +3525,7 @@ function draw(): void {
     // CPU path (default + fallback): render RGBA and blit into the 2D canvas.
     glCanvas.style.display = 'none';
     const screen = renderRoomRgba(room, art, opts);
-    if (!useVecSubs) subs?.draw(screen, count); // baked subtitles (palette-coloured, on top)
+    applyFrameEffects(screen, useVecSubs);
     ctx.putImageData(new ImageData(new Uint8ClampedArray(screen.rgba), sw, sh), 0, 0);
     canvas.style.transform = xform;
   }
@@ -2928,6 +3607,7 @@ function step(): boolean {
     return false;
   }
   tickBlink();
+  tickFrameEffects();
   subs?.tick(count);
   // Death cry when a fish is first crushed (sp-smrt1/2, URoom.pas:26767/26773).
   if (room) {
@@ -3002,10 +3682,7 @@ function step(): boolean {
   // StepEngine still advances VyresLode so an in-flight wreck finishes falling.
   if (activeScript) {
     const wasWon = room.won;
-    // cas_hry: elapsed session time in days (Delphi Now units) for ZAVER's finale
-    // hour-count narration. Session-scoped; cross-session accumulation is deferred.
-    const casHry = (Date.now() - gameStart) / 86_400_000;
-    engine.runScript(count, casHry); // idle timers + scalar sync + prog + tickShodLod
+    engine.runScript(count, casHry()); // idle timers + scalar sync + prog + tickShodLod
     if (!wasWon) {
       // StdSmrt: death commentary (the survivor comments ~8 ticks after a partner dies).
       // Gated on StdHlaskySmrti (URoom.pas:24942) — rooms like TRUP/VLADOVA disable it.
@@ -3255,7 +3932,11 @@ function loop(now: number): void {
   // mode inherently is). acc keeps accumulating but the backlog guard above drops it,
   // so there's no fast-forward catch-up when the hold releases.
   const holding = screen !== 'map' && !cutscene && graphics === 'enhanced' && enhancedPending;
-  while (!holding && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
+  // The minigame is modal in the original, so the room's timer does not run while
+  // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
+  tickTetris(dt);
+  const frozen = tetrisModal();
+  while (!holding && !frozen && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
     acc -= LOGIC_MS;
     steps++;
     if (step()) {
@@ -3323,7 +4004,10 @@ function loop(now: number): void {
       draw();
       perfPaint++;
       lastRoomSig = sig;
-      forceRoomRedraw = false;
+      // Clear the one-shot force, but keep repainting while a cheat effect is live:
+      // the grain, the interlaced collapse and the minigame all animate on their own,
+      // and `sig` cannot see them, so render-on-dirty would otherwise freeze them.
+      forceRoomRedraw = frameEffectsActive();
     } else if (graphics === 'enhanced' && subFontReady && subs?.active) {
       // The room is unchanged, but a subtitle may still be waving in or scrolling.
       // The overlay is its own layer, so animate it on its own — at the sub-tick
@@ -3379,27 +4063,41 @@ window.addEventListener('keydown', (e) => {
     }
     if (e.code !== 'KeyR' && e.code !== 'KeyE' && e.code !== 'KeyF') return;
   }
-  // Cheat-string detector (URoom.pas: xwemaketherules solves the current room).
-  if (e.key.length === 1 && /[a-z]/i.test(e.key)) {
-    cheatBuf = (cheatBuf + e.key.toLowerCase()).slice(-20);
-    if (cheatBuf.endsWith('xwemaketherules')) {
-      cheatBuf = '';
-      cheatSolveRoom();
+  // While the Tetris minigame is open it owns the keyboard, as its modal window
+  // does (FormKeyDown, Ttr.pas:458). Escape closes it (modalresult := mrCancel).
+  // Note that Down ROTATES the piece here — the original has no soft drop; Space
+  // slams the piece down instead.
+  if (tetrisModal()) {
+    e.preventDefault();
+    if (e.code === 'Escape') {
+      closeTetris();
       return;
     }
-    // xfisher (URoom.pas:24597): drop a fishing hook into the current room.
-    if (cheatBuf.endsWith('xfisher')) {
-      cheatBuf = '';
-      if (screen === 'room' && room) hooks.add(room);
+    const k = tetris ? TETRIS_KEYS[e.code] : undefined;
+    if (k && tetris) {
+      tetris.key(k);
+      forceRoomRedraw = true;
+    }
+    return;
+  }
+  // Typed cheat codes (ZaznamenejPrikazKlavesou, Uovl.pas:744; the map screen keeps
+  // its own buffer, UMain.pas:1750). `X` arms the machine; while a code is part-typed
+  // the letters are swallowed, and the first letter that cannot continue any code
+  // parks it and falls through to the normal handler below.
+  {
+    // The original feeds EVERY key through the buffer, so an arrow, Space or
+    // Backspace breaks the prefix and parks the machine before doing its normal
+    // job (Uovl.pas:748-769). Only letters can extend a code, so anything else is
+    // fed as a cancelling key and then handled normally below.
+    const entry = screen === 'map' ? mapCheats : roomCheats;
+    const letter = e.key.length === 1 && /[a-z]/i.test(e.key);
+    const r = letter ? entry.press(e.key) : entry.cancel();
+    if (r.cheat) {
+      if (screen === 'map') applyMapCheat(r.cheat);
+      else applyRoomCheat(r.cheat);
       return;
     }
-    // xscore (easter egg): open the hidden SCORE bonus room (room 72). It is kept
-    // off the map and out of the finale, so this typed code is the only way in.
-    if (cheatBuf.endsWith('xscore')) {
-      cheatBuf = '';
-      void enterRoom(72);
-      return;
-    }
+    if (r.swallowed) return;
   }
   // Ctrl+Alt+D: enable/disable the developer pane (persisted). This is the ONLY
   // way in/out of dev mode; while enabled it shows the tuning chrome + perf HUD and
@@ -3457,14 +4155,15 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'F2') {
     e.preventDefault();
-    saveGame();
+    if (atRest()) saveGame();
     return;
   }
   if (e.code === 'F3') {
     e.preventDefault();
-    loadGame();
+    if (atRest()) loadGame();
     return;
   }
+
   if (e.code === 'Escape') {
     e.preventDefault();
     if (screen === 'map') {
@@ -3572,6 +4271,13 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // allow righ
 
 canvas.addEventListener('mousedown', (e) => {
   wake();
+  // The Tetris minigame is modal (ShowModal), so it owns the pointer as well as the
+  // keyboard: without this, a click behind the board still moved a fish, opened a
+  // room from the map, or dismissed an overlay.
+  if (tetrisModal()) {
+    e.preventDefault();
+    return;
+  }
   // While the help screens are open, a click advances to the next page (Image1Click);
   // a right-click closes the viewer.
   if (helpOpen) {
@@ -3763,6 +4469,10 @@ panelCanvas.addEventListener('contextmenu', (e) => e.preventDefault()); // right
 panelCanvas.addEventListener('mousedown', (e) => {
   wake();
   if (!panel) return;
+  if (tetrisModal()) {
+    e.preventDefault(); // modal minigame: the control panel is inert behind it
+    return;
+  }
   if (inReplay()) {
     e.preventDefault(); // map "Replay" playback: the control panel is inert
     return;
@@ -4025,6 +4735,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     const b = room.items[room.bigIdx];
     return {
       dead: room.anyFishDead,
+      alive: { ...room.alive },
       won: room.won,
       venku: room.venku,
       active: engine?.active ?? 'little',
@@ -4058,6 +4769,10 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   save: () => saveGame(),
   load: () => loadGame(),
   hasSave: () => saveExists(),
+  /** CanSave (URoom.pas:26900): whether the current position may be saved at all. */
+  canSave: () => canSave(),
+  /** The panel's per-element colour state (for asserting the greyed save button). */
+  panelState: () => panelState(),
   posHash: () => {
     if (!room) return '';
     // A stable snapshot of every item's position + fish facing/exit, for
@@ -4121,6 +4836,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   toggleOptions: () => togglePanelOptions(),
   optionsOpen: () => ostav === O_OPTIONS,
   volumes: () => ({ ...settings.volume }),
+  /** music_volume as the room scripts see it (0..64), i.e. Volumes[slider index]. */
+  scriptMusicVolume: () => activeScript?.s.musicVolume ?? null,
   subtitleMode: () => settings.subtitles,
   titDef: () => settings.titDef,
   // Help overlay (for UI probes): open/close + page state.
@@ -4281,6 +4998,30 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     return hash >>> 0;
   },
   /**
+   * The same frame, but put through the cheat post-processing the real paint path
+   * applies (`applyFrameEffects`) — the ONLY way to observe the silent-film tint,
+   * the grain and the intertitle card as pixels. `roomFrameHash` above renders the
+   * room directly and structurally cannot see them.
+   *
+   * `grain` selects whether the (deliberately random) film grain is included; leave
+   * it off to get a hash that is stable between calls.
+   */
+  roomEffectFrameHash: (mode: 'classic' | 'enhanced' = graphics, grain = false) => {
+    if (!room) return null;
+    const art = mode === 'enhanced' ? enhancedArtFor(room) : classicArtFor(room);
+    const frame = renderRoomRgba(room, art, { count: 0 });
+    // Snapshot the one-shot state applyFrameEffects consumes, so merely ASKING for
+    // the hash cannot swallow a megabomb flash the player is owed.
+    const flash = megabombFlash;
+    const force = forceRoomRedraw;
+    applyFrameEffects(frame, true, grain);
+    megabombFlash = flash;
+    forceRoomRedraw = force;
+    let hash = 2166136261;
+    for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
+    return hash >>> 0;
+  },
+  /**
    * Same, but of the BACKGROUND layer only (wall + wobbled bg, no fish/items/effects).
    * LODE's falling wreck is the only thing that mutates that layer mid-room, so this
    * isolates its visible delta from ambient fish/item animation — and, being masked by
@@ -4299,6 +5040,80 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     if (room) hooks.add(room);
   },
   hookCount: () => hooks.count,
+  /** Type a cheat code as the player would (the leading X arms the machine). */
+  typeCheat: (code: string) => {
+    const entry = screen === 'map' ? mapCheats : roomCheats;
+    for (const ch of code) {
+      const r = entry.press(ch);
+      if (r.cheat) {
+        if (screen === 'map') applyMapCheat(r.cheat);
+        else applyRoomCheat(r.cheat);
+      }
+    }
+  },
+  ultraviolence: () => ultraviolence,
+  /** xsilent / xinterlaced state (silentfilm, cassilenttit, interlacedfaze). */
+  silentFilm: () => ({
+    on: silentFilm,
+    time: subs?.silentTime ?? 0,
+    lines: (subs?.silentLines ?? []).map((l) => l.s),
+  }),
+  interlacedFaze: () => interlacedFaze,
+  /** The Tetris minigame: null when closed, else its live state. */
+  tetris: () =>
+    tetris
+      ? {
+          score: tetris.score,
+          rychlost: tetris.rychlost,
+          gameover: tetris.gameover,
+          umisteni: tetris.umisteni,
+          hiscore: [...tetris.hiscore],
+          druh: tetris.pada.druh,
+          x: tetris.pada.x,
+          y: tetris.pada.y,
+          smer: tetris.pada.smer,
+          rychle: tetris.pada.rychle,
+          filled: tetris.pole.reduce(
+            (n, col) => n + col.reduce((m, c) => m + (c.volno ? 0 : 1), 0),
+            0,
+          ),
+        }
+      : null,
+  tetrisTick: () => (tetris ? tetris.tick() : undefined),
+  /** Hash of the minigame's 150x300 board as it is actually composed and coloured
+   *  — the only way a probe can tell the board is really being painted. */
+  tetrisBoardHash: () => {
+    if (!tetris || !tetrisArt) return null;
+    const rgba = tetrisRgba(renderTetris(tetris, tetrisArt), tetrisArt);
+    let hash = 2166136261;
+    for (const byte of rgba) hash = Math.imul(hash ^ byte, 16777619);
+    return { hash: hash >>> 0, w: tetrisArt.hole.w, h: tetrisArt.hole.h };
+  },
+  tetrisKey: (k: TetrisKey) => tetris?.key(k),
+  closeTetris: () => closeTetris(),
+  /** Which backend actually painted the last room frame ('cpu' | 'webgl'). */
+  roomBackend: () => lastRoomBackend,
+  /** cas_hry in days, plus the raw per-room banked milliseconds behind it. */
+  casHry: () => casHry(),
+  playTime: () => Object.fromEntries(playTime),
+  water: () => (room ? { wamp: room.wamp, wper: room.wper, wspd: room.wspd } : null),
+  /** The ENHANCED (truecolor) fish body sprite actually in use, for the sprite
+   *  cheats — a separate art path from the FFR frames below. */
+  enhancedFishSprite: (which: 'little' | 'big') => {
+    const set = (cheatFishSprites ?? fishSprites)?.[which === 'little' ? 'small' : 'big'].left;
+    const bm = set?.get('body_rest_00.png');
+    if (!bm) return null;
+    let hash = 2166136261;
+    for (const byte of bm.rgba) hash = Math.imul(hash ^ byte, 16777619);
+    return { w: bm.w, h: bm.h, hash: hash >>> 0 };
+  },
+  fishSpriteSize: (which: 'little' | 'big') => {
+    const bm = room?.bodies[which === 'little' ? 'small' : 'big'][1] ?? null;
+    if (!bm) return null;
+    let hash = 2166136261;
+    for (const byte of bm.pixels) hash = Math.imul(hash ^ byte, 16777619);
+    return { w: bm.w, h: bm.h, hash: hash >>> 0 };
+  },
   hookStates: () => hooks.snapshot.map((h) => ({ stav: h.stav, cil: h.cil, x: h.x, y: h.y })),
   /** Debug: teleport an item (used to test gspec=9 push-out rooms). */
   moveItem: (i: number, x: number, y: number) => {
@@ -4542,6 +5357,10 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   roomDepth: () => roomDepth,
   killFish: (which: 'little' | 'big') => {
     room?.killFish(which);
+  },
+  /** Send a fish out of the room (stav_ven end): zije:=false, venku:=true. */
+  exitFish: (which: 'little' | 'big') => {
+    room?.exitFish(which);
   },
   setTrepat: (v: number) => {
     if (activeScript) activeScript.s.trepat = v;

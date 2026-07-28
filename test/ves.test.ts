@@ -23,6 +23,7 @@ interface Spy {
   ksnd: number[];
   snd: Array<{ name: string; prior: number }>;
   talkNow: Array<{ name: string; prior: number }>;
+  talk: Array<{ name: string; prior: number }>;
 }
 
 function ves(isPlaying: (p: number) => boolean = () => false): { s: Script; spy: Spy } {
@@ -33,16 +34,24 @@ function ves(isPlaying: (p: number) => boolean = () => false): { s: Script; spy:
     else items.push({ kind: 'static', x: (i % 10) + 1, y: 4 });
   }
   const room = makeRoom({ w: 40, h: 30, items });
-  const spy: Spy = { musiccyc: [], ksnd: [], snd: [], talkNow: [] };
-  const s = new Script(room, () => 0, isPlaying, {
-    musiccyc: (name, prior) => spy.musiccyc.push({ name, prior }),
-    ksnd: (prior) => spy.ksnd.push(prior),
-    snd: (name, prior) => spy.snd.push({ name, prior }),
-    talkNow: (name, prior) => {
-      spy.talkNow.push({ name, prior });
+  const spy: Spy = { musiccyc: [], ksnd: [], snd: [], talkNow: [], talk: [] };
+  const s = new Script(
+    room,
+    (name, prior) => {
+      spy.talk.push({ name, prior });
       return 0;
     },
-  });
+    isPlaying,
+    {
+      musiccyc: (name, prior) => spy.musiccyc.push({ name, prior }),
+      ksnd: (prior) => spy.ksnd.push(prior),
+      snd: (name, prior) => spy.snd.push({ name, prior }),
+      talkNow: (name, prior) => {
+        spy.talkNow.push({ name, prior });
+        return 0;
+      },
+    },
+  );
   VES.init(s);
   s.room.alive.little = false; // close the story-dialogue gate for object tests
   return { s, spy };
@@ -156,5 +165,67 @@ describe('VES crab', () => {
       expect(s.item(R.krabik).afaze).not.toBe(1); // the 1->5 guard keeps it off frame 1
       expect(s.item(R.krabik).afaze! <= 5).toBe(true);
     }
+  });
+});
+
+/**
+ * The music-volume easter egg (URoom.pas:12190): the room records `music_volume`
+ * on entry (roompole[0]) and the fish thank the player once the level has been
+ * turned DOWN and is below 16. Both conditions matter — a quiet-from-the-start
+ * setting must not trigger it. `s.musicVolume` is the live 0..64 level the host
+ * mirrors from the options slider.
+ */
+describe('VES music-volume easter egg', () => {
+  /** Open the story-dialogue gate and silence the two random-chatter branches. */
+  function ready(isPlaying: (p: number) => boolean = (p) => p === 50): ReturnType<typeof ves> {
+    const r = ves(isPlaying);
+    r.s.room.alive.little = true;
+    const v = r.s.vars(0);
+    v[1] = 1; // hlaskam already said
+    v[2] = 1; // hlaskav already said
+    return r;
+  }
+
+  it('records the entry music level in roompole[0]', () => {
+    const items: ItemSpec[] = [];
+    for (let i = 1; i <= 13; i++) {
+      if (i === 11) items.push({ kind: 'little', x: 2, y: 20 });
+      else if (i === 12) items.push({ kind: 'big', x: 6, y: 20 });
+      else items.push({ kind: 'static', x: (i % 10) + 1, y: 4 });
+    }
+    const s = new Script(makeRoom({ w: 40, h: 30, items }), () => 0);
+    s.musicVolume = 48; // the player entered with the music up
+    VES.init(s);
+    expect(s.roompole[0]).toBe(48);
+  });
+
+  it('thanks the player after the music is turned down below 16', () => {
+    const { s, spy } = ready();
+    expect(s.roompole[0]).toBe(27); // entry level (RSound.pas:36 default)
+    s.musicVolume = 11; // slider index 6 -> Volumes[6] = 11
+    VES.prog(s);
+    expect(s.roompole[0]).toBe(0); // branch fired, and disarms itself
+    for (let t = 0; t < 60; t++) s.dialogy(t);
+    expect(spy.talk.map((l) => l.name)).toContain('ves-m-dik');
+    expect(spy.talk.map((l) => l.name)).toContain('ves-v-stejne');
+  });
+
+  it('stays silent when the music is merely lowered but still loud', () => {
+    const { s, spy } = ready();
+    s.musicVolume = 20; // below the entry 27, but not below 16
+    for (let t = 0; t < 10; t++) VES.prog(s);
+    expect(s.roompole[0]).toBe(27);
+    for (let t = 0; t < 60; t++) s.dialogy(t);
+    expect(spy.talk.map((l) => l.name)).not.toContain('ves-m-dik');
+  });
+
+  it('stays silent when the music was already quiet on entry', () => {
+    const { s, spy } = ready();
+    s.roompole[0] = 8; // entered with the slider already down
+    s.musicVolume = 8;
+    for (let t = 0; t < 10; t++) VES.prog(s);
+    expect(s.roompole[0]).toBe(8);
+    for (let t = 0; t < 60; t++) s.dialogy(t);
+    expect(spy.talk.map((l) => l.name)).not.toContain('ves-m-dik');
   });
 });
