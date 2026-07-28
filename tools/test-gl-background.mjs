@@ -9,7 +9,7 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; if the
  * environment has no WebGL2 it skips (pass), so CI without a GPU still passes.
  */
-import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 const MAX_OVER_PCT = 0.5; // < 0.5% of channels may differ by > 2 (sin-precision scanline shifts)
 
@@ -33,7 +33,7 @@ if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 for (let num = 1; num <= 72; num++) {
@@ -53,4 +53,4 @@ if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)
 console.log(`  gspec=0 rooms tested=${tested} skipped(gspec!=0)=${skipped} worstOverPct=${worstOver.toFixed(3)}% (room ${worstRoom})`);
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

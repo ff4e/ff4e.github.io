@@ -40,9 +40,21 @@ export async function launchBrowser(opts = {}) {
  * has loaded — so this is a strictly *stronger* condition than the
  * `waitUntil: 'networkidle'` it replaces, and far cheaper: networkidle lingers
  * half a second past the last request, on every one of the 63 probes.
+ *
+ * Boot failure is handled explicitly: `showFatal()` reveals #fatal and `__ff` is
+ * never published, so waiting on `__ff` alone would burn the whole timeout and
+ * then report a bare "timeout exceeded" instead of the actual problem.
  */
 export async function appReady(p, timeout = 60000) {
-  await p.waitForFunction(() => window.__ff !== undefined, null, { timeout });
+  await p.waitForFunction(
+    () => window.__ff !== undefined || document.getElementById('fatal')?.hidden === false,
+    null,
+    { timeout },
+  );
+  if (await p.evaluate(() => window.__ff === undefined)) {
+    const msg = await p.evaluate(() => document.getElementById('fatal-msg')?.textContent ?? '');
+    throw new Error(`the app failed to boot: ${msg.trim()}`);
+  }
 }
 
 /** Open the app on the runner's port and wait until it has finished booting. */
@@ -56,6 +68,20 @@ export async function gotoApp(p) {
 export async function reloadApp(p) {
   await p.reload({ waitUntil: 'domcontentloaded' });
   await appReady(p);
+}
+
+/**
+ * Exit a probe with its verdict, flushing stdout first.
+ *
+ * `process.exit()` discards whatever is still queued on the pipe to the runner —
+ * measured: a child writing 500 kB then exiting delivers only the first 8 kB. The
+ * runner captures probe output through that pipe, so on a mass failure (say a GL
+ * parity probe reporting all 72 rooms) plain `process.exit()` would throw away
+ * exactly the diagnostics you need. Writes are ordered, so a zero-length write's
+ * completion callback fires only once everything before it has drained.
+ */
+export function exitProbe(code) {
+  process.stdout.write('', () => process.exit(code));
 }
 
 export async function withApp(fn, opts = {}) {
@@ -105,14 +131,16 @@ export async function withApp(fn, opts = {}) {
       /* storage unavailable */
     }
   });
-  await gotoApp(p);
-
   let ok = true;
   const expect = (cond, msg) => {
     if (!cond) ok = false;
     console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${msg}`);
   };
   try {
+    // Inside the try: a boot failure is a probe failure like any other, and this
+    // way it is reported with the console/page errors collected above rather than
+    // escaping as an unhandled rejection with no context.
+    await gotoApp(p);
     await fn({ p, expect });
   } catch (e) {
     ok = false;
@@ -122,14 +150,23 @@ export async function withApp(fn, opts = {}) {
     ok = false;
     console.log('  console errors:', errs);
   }
-  await b.close();
+  await b.close().catch(() => {});
   console.log(ok ? 'PASS' : 'FAIL');
-  process.exit(ok ? 0 : 1);
+  exitProbe(ok ? 0 : 1);
 }
 
-/** Wait until a fish move settles back to the idle phase. */
+/**
+ * Wait until a fish move settles back to the idle phase.
+ *
+ * The options object is the THIRD argument. Passed as the second — as this call
+ * used to be — it is taken as the predicate's `arg` and silently ignored, so the
+ * "5000" here was never in force and every caller was really getting Playwright's
+ * 30s default. Keeping 30s rather than "fixing" it down to 5s: a move settles in
+ * ~10 game ticks, but the clock slows under an 8-way parallel run, and a timeout
+ * is a backstop, not an assertion.
+ */
 export async function idle(p) {
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: 30000 });
 }
 
 // ── Waiting on GAME time ──────────────────────────────────────────────────────
@@ -165,7 +202,7 @@ export async function waitTicks(p, start, ticks) {
  * Wait until a room is loaded and has run more than `minCount` ticks. Throws if
  * the room never comes up: that is a real defect, not a race. The budget adds a
  * flat allowance for the asynchronous room load itself (assets are fetched from
- * the dev server, which several probes are hitting at once).
+ * the shared preview server, which several probes are hitting at once).
  *
  * `!roomLoading()` is the load-complete gate, and it is not optional: enterRoom()
  * sets `screen = 'room'` synchronously but loads the room asynchronously, so for
@@ -187,14 +224,27 @@ export async function waitRoom(p, minCount = 0) {
  *
  * `selectOption` only fires the change handler; the room load it starts is
  * asynchronous and unawaited (unlike `__ff.enterRoomAwait()`, which returns the
- * load promise). Pinning `roomNum()` as well as `roomLoading()` means a slow load
- * can never be mistaken for the room having arrived.
+ * load promise).
+ *
+ * Waiting on `roomNum()` alone is NOT enough, which is subtle enough to spell
+ * out: boot itself loads room 7, so for the many probes whose first act is
+ * `selectRoom(p, 7)` the condition "we are in room 7" is already true while the
+ * app still sits on the map — the wait would return before the change handler had
+ * even run. So we anchor on `roomLoads()`, the count of COMPLETED loads: waiting
+ * for it to exceed the value we sampled *before* selecting means we are looking
+ * at a load this call caused, not one that had already happened. That also covers
+ * re-selecting the room you are already in.
  */
 export async function selectRoom(p, num, minCount = 0) {
+  const seq = await p.evaluate(() => window.__ff.roomLoads());
   await p.selectOption('#room', String(num));
   await p.waitForFunction(
-    (n) => window.__ff.roomNum() === n && !window.__ff.roomLoading(),
-    Number(num),
+    ([n, before]) =>
+      window.__ff.roomLoads() > before &&
+      !window.__ff.roomLoading() &&
+      window.__ff.roomNum() === n &&
+      window.__ff.screen() === 'room',
+    [Number(num), seq],
     { timeout: 30000 },
   );
   if (minCount > 0) await waitRoom(p, minCount);

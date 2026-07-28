@@ -8,7 +8,7 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; skips (pass)
  * if the environment has no WebGL2.
  */
-import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 
 const b = await launchBrowser({ gl: true });
@@ -31,7 +31,7 @@ if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 let ok = true;
@@ -61,4 +61,4 @@ if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)
 console.log(`  runtime switch: ${ok ? 'CPU<->WebGL OK (all rooms GPU, incl. ZX), clean toggle, no errors' : 'see failures'}`);
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

@@ -6,7 +6,7 @@
  * the saved posHash. (The 1998 game has no single-move undo: Backspace = Restart.)
  * Launched with autoplay allowed so the game clock runs headless.
  */
-import { gotoApp, launchBrowser, selectRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, selectRoom } from './ui-lib.mjs';
 const DIR = { up: 1, down: 2, left: 3, right: 4 };
 const b = await launchBrowser();
 const p = await b.newPage({ viewport: { width: 1600, height: 620 } });
@@ -74,4 +74,4 @@ const pass =
 console.log('errors:', errs.length ? errs : 'none');
 console.log(pass ? '\nALL PASS' : '\nFAIL');
 await b.close();
-process.exit(pass ? 0 : 1);
+exitProbe(pass ? 0 : 1);

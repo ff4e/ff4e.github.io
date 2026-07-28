@@ -7,7 +7,7 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; if the
  * environment has no WebGL2 it skips (pass), so CI without a GPU still passes.
  */
-import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 // Full-room classic render is byte-exact vs the CPU oracle: items/fish/effects/
 // mirror/ropes/ZX bands are all integer, and the background wobble has matched
@@ -37,7 +37,7 @@ if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 for (let num = 1; num <= 72; num++) {
@@ -57,4 +57,4 @@ if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)
 console.log(`  full-GPU rooms tested=${tested} unsupported=${unsupported}${unsupported ? ' [' + unsupportedRooms.join(',') + ']' : ''} skipped=${skipped} worstMax=${worstMax} worstOverPct=${worstOver.toFixed(3)}% (room ${worstRoom})`);
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

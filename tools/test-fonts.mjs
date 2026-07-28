@@ -7,7 +7,7 @@
  * Not WebGL-dependent, but lives here (tools/test-*.mjs) because it needs a real
  * browser document + document.fonts.
  */
-import { launchBrowser, gotoApp } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser } from './ui-lib.mjs';
 
 
 const b = await launchBrowser();
@@ -83,4 +83,4 @@ async function freshPage(subfont) {
 
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

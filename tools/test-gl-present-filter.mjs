@@ -9,7 +9,7 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 
 const b = await launchBrowser({ gl: true });
@@ -28,7 +28,7 @@ if (!res || res.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 let ok = true;
@@ -44,4 +44,4 @@ else console.log('  OK   crisp present after smooth is NEAREST again — no filt
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

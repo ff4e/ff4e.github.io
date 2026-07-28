@@ -168,7 +168,7 @@ port, and runs the probes **concurrently**. It used to run them one at a time, e
 cold Chromium, which took ~15 minutes; it now takes ~3, with the same probes and the same
 assertions.
 
-- **A worker pool** runs `FF_UI_JOBS` probes at once (default: cores−2, capped at 8 — more is
+- **A worker pool** runs `FF_UI_JOBS` probes at once (default: `max(2, cores−2)`, capped at 8 — more is
   counterproductive, because the game clock is wall-clock driven and slows under load). Each
   probe is still its own `node` process with its own browser context, so the isolation probes
   rely on (localStorage, saved games) is unchanged. Output is buffered per probe.
@@ -177,13 +177,18 @@ assertions.
   `ui-lib.mjs`, never `chromium.launch()` — run a probe by hand and it launches its own.
 - **Wait on conditions, never on the clock.** Use `waitRoom()`, `waitTicks()` and
   `selectRoom()` from `ui-lib.mjs`. A fixed `waitForTimeout` and a timeout sized just above a
-  wait's nominal duration both become races once eight probes share the machine.
+  wait's nominal duration both become races once eight probes share the machine: the game clock
+  is wall-clock driven and never fast-forwards, so under load a fixed sleep silently buys fewer
+  game ticks than it did when it was written. Legacy `waitForTimeout` calls still exist in older
+  probes; prefer `waitTicks()` in anything you touch.
 - **`screen() === 'room'` does not mean your room is up.** `enterRoom()` flips the screen
   synchronously but loads asynchronously; act in that window and the room build landing a
   moment later discards what you did. `waitRoom()`/`selectRoom()` gate on `__ff.roomLoading()`
   and `__ff.roomNum()` for you.
 - **`waitForFunction(fn, { timeout })` silently ignores that timeout** — options are the
   *third* argument; as the second it is taken as the predicate's `arg`, leaving the 30s default.
+  Most existing probes still use the two-argument form (harmlessly, since 30s is more generous
+  than what they ask for); new and touched code should use the three-argument form.
 - If a probe asserts on **wall-clock behaviour** (frame rate, tick rate, animation pacing,
   per-frame motion), add it to `EXCLUSIVE` in the runner so it gets the machine to itself.
   Do not relax its bounds instead.

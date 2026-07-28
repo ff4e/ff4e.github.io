@@ -1560,6 +1560,7 @@ async function loadRoom(num: number): Promise<void> {
     // the stage wedged black with no recovery. On success it runs once the room is
     // built, so the next frame paints the new room.
     roomLoading = false;
+    roomLoadSeq++;
     forceRoomRedraw = true;
     wake();
   }
@@ -3053,6 +3054,10 @@ let forceRoomRedraw = true;
 // UTES, loaded at startup) until the new one lands. The draw loop clears the
 // stage to black instead while this is set (see the room-draw branch).
 let roomLoading = false;
+// Monotonic count of COMPLETED room loads — the tests' only race-free way to tell
+// "the room I asked for has finished loading" apart from "the room I asked for was
+// already the current one". Debug-only (exposed as __ff.roomLoads).
+let roomLoadSeq = 0;
 // Idle-loop throttle (perf): when the room is fully idle (saver on, nothing
 // animating), stop the 60fps rAF spin and wake via a timer at the logic rate so
 // the loop's own per-frame overhead (JS + browser scheduling) stops too. Input
@@ -4075,6 +4080,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   // Debug: the room number that is actually built and running (curNum) — not the
   // one currently being loaded.
   roomNum: () => curNum,
+  // Debug: how many room loads have COMPLETED (see roomLoadSeq).
+  roomLoads: () => roomLoadSeq,
+  // Debug: the signature of the most recently PAINTED room frame
+  // (`count|enhancedPending|graphics|renderer|glFailed`, see the room-draw branch
+  // of loop()). Lets a test tell "a frame has been drawn in this graphics mode"
+  // apart from "the art happens to have animated", which a frame-hash comparison
+  // cannot distinguish in a room whose art animates every tick.
+  paintedRoomSig: () => lastRoomSig,
   /** ZAVER finale cutscene active (zavermode) — for the completion-trigger UI test. */
   zaverMode: () => activeScript?.s.zavermode ?? false,
   // Leg-completion story page (obrazek): the shown leg number (1..8), or null when none.

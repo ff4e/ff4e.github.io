@@ -7,7 +7,7 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; skips (pass)
  * if the environment has no WebGL2.
  */
-import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 // Enhanced full-room render is byte-exact vs the CPU oracle too (FFNG sprites use
 // hard 0/255 alpha, so the GL blend reproduces the CPU integer blend exactly).
@@ -34,13 +34,13 @@ if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 if (!(await p.evaluate(() => window.__ff.enhancedActive()))) {
   console.log('  FAIL: enhanced (FFNG) art did not engage on room 3 — cannot validate the enhanced GPU path');
   console.log('FAIL');
   await b.close();
-  process.exit(1);
+  exitProbe(1);
 }
 
 let ok = true;
@@ -96,4 +96,4 @@ if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)
 console.log(`  enhanced rooms tested=${tested} (truecolor-engaged=${enhRooms}) unsupported=${unsupported} worstMax=${worstMax} worstOverPct=${worstOver.toFixed(3)}% (room ${worstRoom})`);
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

@@ -23,61 +23,54 @@ async function canvasColors(p) {
 }
 
 /**
- * Install a cheap canvas signature in the page — sparse enough to poll a few
- * times a second, dense enough that any repaint changes it.
+ * Install a cheap canvas "is anything actually drawn here" probe. While a room
+ * loads, the loop paints the stage solid black (main.ts, `roomLoading`), so a
+ * flat canvas means "no art yet" — which is how an early version of this probe
+ * once sampled `enh=1` colour.
  */
 async function installSig(p) {
   await p.evaluate(() => {
-    window.__sig = () => {
+    window.__uniform = () => {
       const c = document.getElementById('screen');
       const g = c.getContext('2d');
       const d = g.getImageData(0, 0, c.width, c.height).data;
-      let h = 2166136261;
-      let uniform = true;
       for (let i = 0; i < d.length; i += 4 * 149) {
-        h = Math.imul(h ^ d[i], 16777619);
-        h = Math.imul(h ^ d[i + 1], 16777619);
-        h = Math.imul(h ^ d[i + 2], 16777619);
-        if (d[i] !== d[0] || d[i + 1] !== d[1] || d[i + 2] !== d[2]) uniform = false;
+        if (d[i] !== d[0] || d[i + 1] !== d[1] || d[i + 2] !== d[2]) return false;
       }
-      return { h: h >>> 0, uniform };
+      return true;
     };
   });
 }
 
-const sigNow = (p) => p.evaluate(() => window.__sig().h);
-
 /**
- * Wait until the room canvas holds a real, newly painted frame: different from
- * `prev` AND not a flat fill.
+ * Wait until the room canvas actually holds a frame drawn in `mode`.
  *
- * Both halves matter. The renderer skips repaints for an unchanged idle room, so
- * without the "different" half we would read the previous room's frame. And while
- * a room loads, the loop paints the stage solid black (main.ts, `roomLoading`) —
- * that black IS a repaint and satisfies "different", which is how a parallel run
- * read `enh=1` colours off a blank canvas. Requiring a non-uniform frame skips
- * past the clear to the first frame that actually has art in it.
+ * Sampling pixels after a fixed sleep is a guess, and comparing frame hashes is
+ * not good enough either: STEEL's red-alert art animates every tick, so "the
+ * frame changed" is satisfied by the animation rather than by the mode switch —
+ * that is how a classic sample once came back with 4218 colours (i.e. still the
+ * enhanced frame). So ask the renderer directly. `paintedRoomSig()` is the
+ * signature of the last frame the room-draw path actually painted; we require it
+ * to name `mode` with no enhanced-art hold outstanding, plus a non-flat canvas.
  *
- * This is only a "the new frame is on the canvas" gate — it says nothing about
- * WHICH art was drawn, so the truecolor assertions below still do all the
- * judging: a silent fallback to classic paints a non-uniform frame too, and
- * would still fail them.
+ * This is only a "the right frame is up" gate — it never looks at pixel CONTENT,
+ * so the truecolor assertions below still do all the judging: a silent fallback
+ * to classic paints a perfectly good frame here and still fails them.
  */
-async function waitRepaint(p, prev) {
+async function waitPainted(p, mode) {
   await p.waitForFunction(
-    (old) => {
-      const s = window.__sig();
-      return !s.uniform && s.h !== old;
+    (m) => {
+      const [, pending, graphics] = window.__ff.paintedRoomSig().split('|');
+      return graphics === m && pending === '0' && !window.__uniform();
     },
-    prev,
+    mode,
     { polling: 100, timeout: 30000 },
   );
 }
 
 async function setMode(p, mode) {
-  const before = await sigNow(p);
   await p.evaluate((m) => window.__ff.setGraphics(m), mode);
-  await waitRepaint(p, before);
+  await waitPainted(p, mode);
 }
 
 await withApp(async ({ p, expect }) => {
@@ -95,7 +88,6 @@ await withApp(async ({ p, expect }) => {
   ];
 
   for (const [num, name] of rooms) {
-    const before = await sigNow(p);
     await selectRoom(p, num);
     await p.evaluate((m) => window.__ff.setGraphics(m), 'enhanced');
     // Wait for the art to load (fails loudly if it never does — the fallback bug).
@@ -106,7 +98,7 @@ await withApp(async ({ p, expect }) => {
       .then(() => true)
       .catch(() => false);
     expect(loaded, `${name}: enhanced active (art loaded)`);
-    await waitRepaint(p, before);
+    await waitPainted(p, 'enhanced');
     const enh = await canvasColors(p);
 
     await setMode(p, 'classic');
@@ -125,8 +117,7 @@ await withApp(async ({ p, expect }) => {
   }
 
   // Default-on: a freshly entered room boots in enhanced.
-  const before = await sigNow(p);
   await selectRoom(p, 3);
-  await waitRepaint(p, before);
+  await waitPainted(p, 'enhanced');
   expect((await p.evaluate(() => window.__ff.graphics())) === 'enhanced', 'defaults to enhanced');
 }, { cpu: true });

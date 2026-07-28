@@ -12,7 +12,7 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 
 const b = await launchBrowser({ gl: true });
@@ -40,7 +40,7 @@ if (!(await p.evaluate(() => window.__ff.glActive()))) {
   console.log('  SKIP: WebGL2 not active in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 let ok = true;
@@ -115,4 +115,4 @@ if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)
 console.log(`  layout-on-webgl-boot + context-loss fallback: ${ok ? 'OK' : 'see failures'}`);
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);
