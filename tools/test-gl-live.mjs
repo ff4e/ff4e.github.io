@@ -10,7 +10,7 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom, tickSleep } from './ui-lib.mjs';
 
 const ROOM = 6; // KOSTE — two fish, several items, normal (gspec=0)
 
@@ -47,17 +47,17 @@ check('fish swim+head', await p.evaluate(() => window.__ff.glLiveParity()));
 
 // 2. Fishing hook (line/glyph via setIndex).
 await p.evaluate(() => window.__ff.spawnHook());
-await p.waitForTimeout(50);
+await tickSleep(p, 1);
 check('fishing hook', await p.evaluate(() => window.__ff.glLiveParity()));
 
 // 3. Baked classic subtitle (setIndex text into the GPU target).
 await p.evaluate(() => window.__ff.pushSubtitle('Test subtitle line for GPU parity', '@'));
-await p.waitForTimeout(50);
+await tickSleep(p, 1);
 check('baked subtitle', await p.evaluate(() => window.__ff.glLiveParity()));
 
 // 4. Dead fish disintegrate (skeleton dither via DISINT_FS).
 await p.evaluate(() => window.__ff.killFish('little'));
-await p.waitForTimeout(50);
+await tickSleep(p, 1);
 check('disintegrate skeleton', await p.evaluate(() => window.__ff.glLiveParity()));
 
 // 5. LODE falling wreck: the logic mutates its background before both compositors.

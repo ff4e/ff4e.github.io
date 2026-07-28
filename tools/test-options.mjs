@@ -3,12 +3,12 @@
  * scroll open/close state machine, the three volume sliders, the subtitle
  * cz/en/off buttons, the help overlay, and cross-reload persistence.
  */
-import { reloadApp, selectRoom, withApp } from './ui-lib.mjs';
+import { reloadApp, selectRoom, withApp, tickSleep } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // enter UTES
   await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), { timeout: 8000 });
-  await p.waitForTimeout(200);
+  await tickSleep(p, 3);
 
   // Starts on the normal panel (o_normal).
   expect((await p.evaluate(() => window.__ff.panelOstav())) === 0, 'starts in o_normal');

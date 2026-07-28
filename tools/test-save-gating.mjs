@@ -4,7 +4,7 @@
  * one is alive with the other already out — and greys the panel button when it
  * refuses. The port used to save unconditionally from F2 and the panel.
  */
-import { selectRoom, withApp } from './ui-lib.mjs';
+import { selectRoom, withApp, tickSleep } from './ui-lib.mjs';
 
 const SEDY = 0; // grey / disabled
 const ORANZOVY = 1; // orange / available
@@ -13,7 +13,7 @@ await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => localStorage.removeItem('ff.save.7'));
-  await p.waitForTimeout(200);
+  await tickSleep(p, 3);
 
   // ---- both fish alive: saving is allowed, and the button is orange -----------
   expect((await p.evaluate(() => window.__ff.canSave())) === true, 'both fish alive -> CanSave');
@@ -28,7 +28,7 @@ await withApp(async ({ p, expect }) => {
   // ---- a dead fish blocks saving ---------------------------------------------
   await p.evaluate(() => localStorage.removeItem('ff.save.7'));
   await p.evaluate(() => window.__ff.killFish('little'));
-  await p.waitForTimeout(100);
+  await tickSleep(p, 2);
   expect((await p.evaluate(() => window.__ff.canSave())) === false, 'a dead fish blocks CanSave');
   expect(
     (await p.evaluate(() => window.__ff.panelState())).save === SEDY,
@@ -41,7 +41,7 @@ await withApp(async ({ p, expect }) => {
   );
   // The keyboard entry point is gated too, not just the panel button.
   await p.keyboard.press('F2');
-  await p.waitForTimeout(100);
+  await tickSleep(p, 2);
   expect((await p.evaluate(() => window.__ff.hasSave())) === false, 'F2 is refused as well');
 
   // ---- a fish that has swum OUT does not block saving -------------------------
@@ -49,7 +49,7 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count() > 0, { timeout: 5000 });
   await p.evaluate(() => localStorage.removeItem('ff.save.7'));
   await p.evaluate(() => window.__ff.exitFish && window.__ff.exitFish('little'));
-  await p.waitForTimeout(100);
+  await tickSleep(p, 2);
   expect(
     (await p.evaluate(() => window.__ff.canSave())) === true,
     'one fish out + one alive still allows saving',

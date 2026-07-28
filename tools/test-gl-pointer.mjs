@@ -24,7 +24,7 @@ await p.evaluate((n) => window.__ff.enterRoomAwait(n), ROOM);
 await waitRoom(p, 20);
 
 await p.evaluate(() => window.__ff.setRenderer('webgl'));
-await p.waitForTimeout(300);
+await p.waitForFunction(() => window.__ff.glActive(), { timeout: 10000 }).catch(() => {});
 if (!(await p.evaluate(() => window.__ff.glActive()))) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
@@ -65,7 +65,9 @@ else {
   const cx = target.left + nx * (target.rw / target.cw);
   const cy = target.top + ny * (target.rh / target.ch);
   await p.mouse.click(cx, cy);
-  await p.waitForTimeout(150);
+  await p
+    .waitForFunction((w) => window.__ff.state().active === w, other, { timeout: 10000 })
+    .catch(() => {});
   const active = await p.evaluate(() => window.__ff.state().active);
   if (active !== other) { ok = false; console.log(`  FAIL: click on ${other} fish did not select it (active=${active})`); }
   else console.log(`  OK   real click selected the ${other} fish in webgl mode`);

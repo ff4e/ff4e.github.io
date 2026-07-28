@@ -181,10 +181,30 @@ export async function idle(p) {
 // So: budget game-time waits generously here, in one place. This weakens nothing —
 // the probes' own assertions ("advanced >= 200") still decide pass/fail; the
 // timeout only bounds a genuinely stuck clock.
-const TICK_MS = 80;
+//
+// The same reasoning applies one level up, to the WAIT ITSELF: `waitForTimeout(N)`
+// as a stand-in for "let the game run a while" is a race with the machine, because
+// the game time it buys is whatever is left over after the load. Use `tickSleep` /
+// `forTicks` below instead — they wait on the clock the assertion is really about.
+// Wall-clock sleeps are legitimate only for things that genuinely run on wall time
+// (CSS transitions, the play-time odometer, an HTTP throttle) and for the handful
+// of EXCLUSIVE probes that measure a rate.
+export const TICK_MS = 80;
 
-/** Generous budget for `ticks` game ticks: 4× nominal, never below 10s. */
-export const tickBudget = (ticks) => Math.max(10000, Math.ceil(ticks * TICK_MS * 4));
+/**
+ * Generous budget for `ticks` game ticks: 12× nominal, never below 30s.
+ *
+ * Sized from measurement, not taste. On a deliberately loaded machine (4 CPU hogs
+ * + the 8-way probe pool) the observed clock ran at 1.5-3 ticks/s against a
+ * nominal 12.5 — a 4-8x slowdown — and the old 4x/10s budget turned that into
+ * fake failures (`ZDVIZ1 ran 28 ticks` where 30 were asked for). 12x covers it
+ * with headroom.
+ *
+ * Being generous is free: every wait below returns the moment the clock reaches
+ * its target, so a fast machine never pays the budget. It is only spent when the
+ * clock is genuinely stuck — which is a real defect, and worth waiting to prove.
+ */
+export const tickBudget = (ticks) => Math.max(30000, Math.ceil(ticks * TICK_MS * 12));
 
 /**
  * Wait for the game clock to advance `ticks` from `start`. Never throws — the
@@ -196,6 +216,94 @@ export async function waitTicks(p, start, ticks) {
       timeout: tickBudget(ticks),
     })
     .catch(() => {});
+}
+
+/**
+ * Wait for `n` RENDERED frames.
+ *
+ * The right unit when the assertion is about what is ON SCREEN — a canvas' pixels or
+ * an element's display — after a state change. Those land on the next paint, not with
+ * the state write, so waiting on the state alone races the compositor (and waiting a
+ * fixed number of milliseconds races the machine). This waits exactly as long as the
+ * machine needs to deliver the frames, and no longer.
+ */
+export async function waitFrames(p, n = 2, timeout = 30000) {
+  await p.evaluate(
+    ([want, ms]) =>
+      new Promise((done) => {
+        let seen = 0;
+        // rAF stops being delivered on a hidden or occluded page (test-idlefps fakes
+        // exactly that), so the frame chain alone can wedge a probe until the runner's
+        // 10-minute backstop. Bound it here and let the caller's assertion be the
+        // verdict, as everywhere else in this file.
+        const bail = setTimeout(done, ms);
+        const step = () => {
+          if (++seen >= want) {
+            clearTimeout(bail);
+            done();
+          } else requestAnimationFrame(step);
+        };
+        requestAnimationFrame(step);
+      }),
+    [n, timeout],
+  );
+}
+
+/**
+ * Sleep `ticks` of GAME time — the load-independent replacement for
+ * `waitForTimeout(ticks * 80)`.
+ *
+ * A wall-clock sleep buys a number of game ticks that depends on how busy the
+ * machine is, so every assertion about what the game did during it is really an
+ * assertion about the machine. Under load such a sleep either fails (the game did
+ * not get far enough) or silently weakens (a "nothing happened in this window"
+ * check observes a window with almost no game time in it). Waiting on the clock
+ * itself removes both, and is faster on an idle machine.
+ *
+ * Returns the ticks actually elapsed, so a caller that cares can assert on it.
+ *
+ * THROWS if the clock does not get there inside the budget. That is deliberate: most
+ * callers use this before a "nothing happened" assertion, and a stuck clock would let
+ * every one of them pass vacuously — the same silent weakening this helper exists to
+ * remove, just caused by a real defect instead of by load. The budget is generous
+ * enough (12x nominal) that only a genuinely stalled clock reaches this.
+ */
+export async function tickSleep(p, ticks) {
+  const start = await p.evaluate(() => window.__ff.count());
+  const t0 = Date.now();
+  await waitTicks(p, start, ticks);
+  const advanced = (await p.evaluate(() => window.__ff.count())) - start;
+  if (advanced < ticks) {
+    const where = await p.evaluate(() => window.__ff.screen());
+    throw new Error(
+      `the game clock advanced only ${advanced} of ${ticks} ticks in ${Date.now() - t0}ms ` +
+        `(screen=${where}) — it is stalled, or this wait ran outside a room (count only ` +
+        `advances while screen === 'room')`,
+    );
+  }
+  return advanced;
+}
+
+/**
+ * Sample repeatedly until the game clock has advanced `ticks` from now — the
+ * load-independent replacement for `for (i < N) { waitForTimeout(ms); sample() }`.
+ *
+ * Those loops observe `N * ms` of WALL time, i.e. a variable and (under load,
+ * badly) shrinking amount of GAME time; this one observes exactly the game time
+ * asked for. `sample` may return `false` to stop early (condition met). Returns
+ * the ticks actually elapsed.
+ */
+export async function forTicks(p, ticks, sample, everyMs = 60) {
+  const start = await p.evaluate(() => window.__ff.count());
+  const deadline = Date.now() + tickBudget(ticks);
+  let n = start;
+  for (;;) {
+    const more = await sample();
+    n = await p.evaluate(() => window.__ff.count());
+    if (more === false || n - start >= ticks || Date.now() >= deadline) break;
+    await p.waitForTimeout(everyMs);
+  }
+  return n - start;
 }
 
 /**

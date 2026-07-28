@@ -34,7 +34,7 @@ await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate(() => window.__ff.enterRoomAwait(6)); // KOSTE (a large room)
 await waitRoom(p, 25);
-await p.waitForTimeout(150);
+await p.waitForFunction(() => window.__ff.glActive(), { timeout: 10000 }).catch(() => {});
 
 if (!(await p.evaluate(() => window.__ff.glActive()))) {
   console.log('  SKIP: WebGL2 not active in this environment');
@@ -69,7 +69,9 @@ if (!layout.glTall) { ok = false; console.log('  FAIL: GL canvas collapsed (anch
 //  showing the last GPU frame on top of the 2D map.)
 await p.keyboard.press('Escape');
 await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 4000 }).catch(() => {});
-await p.waitForTimeout(120);
+await p
+  .waitForFunction(() => document.getElementById('screen-gl').style.display === 'none', { timeout: 10000 })
+  .catch(() => {});
 const onMap = await p.evaluate(() => ({
   screen: window.__ff.screen(),
   glHidden: document.getElementById('screen-gl').style.display === 'none',
@@ -81,7 +83,7 @@ if (onMap.glActive) { ok = false; console.log('  FAIL: glActive true on the map'
 // Re-enter a room so the GL overlay is active again for the context-loss check.
 await p.evaluate(() => window.__ff.enterRoomAwait(6));
 await waitRoom(p, 25);
-await p.waitForTimeout(120);
+await p.waitForFunction(() => window.__ff.glActive(), { timeout: 10000 }).catch(() => {});
 if (!(await p.evaluate(() => window.__ff.glActive()))) { ok = false; console.log('  FAIL: WebGL not active after re-entering the room'); }
 
 // --- Check 3: context loss auto-falls back to CPU (no white screen) ---

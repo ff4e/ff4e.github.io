@@ -63,18 +63,19 @@ const PLAIN_ARGS = ['--autoplay-policy=no-user-gesture-required'];
 const ANGLE_ARGS = ['--use-gl=angle', '--use-angle=metal', ...PLAIN_ARGS];
 
 // Probes that assert on wall-clock behaviour — they must not share the machine.
+// This lane is for probes that measure a RATE (something per second of real time).
+// A probe that measures how the game evolves per GAME TICK does not belong here:
+// normalising by the tick count makes it immune to a loaded machine outright, which
+// is both cheaper (it goes back in the pool) and stronger than a quiet lane.
+// test-smoothness used to sit here for exactly that reason and flaked anyway — the
+// lane guarantees no other PROBE, not a quiet machine — so it was reworked instead.
 const EXCLUSIVE = new Set([
-  'test-timing.mjs', // asserts the game clock runs at ~12.5 ticks/s (8 < rate < 16)
+  'test-timing.mjs', // asserts the game clock keeps up with wall clock, frame budget permitting
   'test-idlefps.mjs', // asserts the render loop drops to the idle timer
   // Counts vector-subtitle overlay repaints against logic ticks and rendered
   // frames — a ratio, but both sides are sampled over wall-clock windows.
   'test-subtitles-perf.mjs',
   'test-mapinfo.mjs', // world-map animation pacing, measured over rAF frames
-  // Measures the fish's displacement in every RENDERED frame and fails a jump of
-  // more than half a cell. A loaded machine drops rAF frames, so each surviving
-  // frame covers more game ticks and the per-frame delta grows — a false
-  // "teleport". The assertion is right; it just needs the machine to itself.
-  'test-smoothness.mjs',
 ]);
 
 const jobs = Math.max(1, Number(process.env.FF_UI_JOBS) || Math.min(8, Math.max(2, cpus().length - 2)));

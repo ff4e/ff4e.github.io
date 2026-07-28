@@ -3466,6 +3466,9 @@ function draw(): void {
       const dys = fit.dir === Dir.up ? -1 : fit.dir === Dir.down ? 1 : 0;
       smoothLog.push({
         t: performance.now(),
+        n: count,
+        a: alpha,
+        cf: engine?.cellFrames ?? MOVE_FRAMES,
         x: (fit.x + slide * dxs) * FSIZE,
         y: (fit.y + slide * dys) * FSIZE,
         ph: phase,
@@ -3829,7 +3832,11 @@ function updatePerfHud(now: number): void {
   }
 }
 // Smoothness harness: null = off; an array = recording per-frame fish positions.
-let smoothLog: { t: number; x: number; y: number; ph: string }[] | null = null;
+// `n`+`a` are the GAME-TIME coordinate of the sample (count + alpha, the exact
+// value the interpolated position below is a function of) and `cf` the speed tier
+// in force, so a harness can express motion in px per game tick — independent of
+// how many rAF frames the machine managed to deliver.
+let smoothLog: { t: number; n: number; a: number; cf: number; x: number; y: number; ph: string }[] | null = null;
 
 /**
  * True when the room's frame changes BETWEEN logic ticks and so needs a 60fps
@@ -5073,6 +5080,12 @@ window.addEventListener('keydown', unlockAudio, { once: true });
           y: tetris.pada.y,
           smer: tetris.pada.smer,
           rychle: tetris.pada.rychle,
+          // The minigame's own clocks: `tick` counts 55ms ticks actually run and
+          // `blikani` is the game-over hiscore blink phase (0..17). A probe needs
+          // them to assert the blink runs on this clock rather than on the paint
+          // rate — without them it can only sleep and hope the machine kept up.
+          tick: tetrisTick,
+          blikani: tetris.blikani,
           filled: tetris.pole.reduce(
             (n, col) => n + col.reduce((m, c) => m + (c.volno ? 0 : 1), 0),
             0,

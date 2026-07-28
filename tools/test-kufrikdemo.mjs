@@ -3,7 +3,7 @@
  * with the demo and *persists* after it ends (InitKufrDemo/DoneKufrDemo), and the
  * demo is skippable by clicking or pressing Escape (zrus_kufr).
  */
-import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp, tickSleep } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -26,7 +26,7 @@ await withApp(async ({ p, expect }) => {
   );
   await p.waitForFunction(() => !window.__ff.cutsceneActive(), { timeout: 5000 }).catch(() => {});
   expect(!(await p.evaluate(() => window.__ff.cutsceneActive())), 'clicking skips the demo');
-  await p.waitForTimeout(300);
+  await tickSleep(p, 4);
   expect((await p.evaluate(() => window.__ff.music())) === 'kufrik', 'the music keeps playing after the demo is skipped');
 
   // 3) Escape also skips the demo.

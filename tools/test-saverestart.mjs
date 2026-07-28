@@ -6,7 +6,7 @@
  * the saved posHash. (The 1998 game has no single-move undo: Backspace = Restart.)
  * Launched with autoplay allowed so the game clock runs headless.
  */
-import { exitProbe, gotoApp, launchBrowser, selectRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, selectRoom, tickSleep } from './ui-lib.mjs';
 const DIR = { up: 1, down: 2, left: 3, right: 4 };
 const b = await launchBrowser();
 const p = await b.newPage({ viewport: { width: 1600, height: 620 } });
@@ -18,7 +18,7 @@ await gotoApp(p);
 await selectRoom(p, 7); // UTES
 await p.waitForFunction(() => window.__ff && window.__ff.posHash, { timeout: 5000 });
 await p.evaluate(() => window.__ff.load && localStorage.removeItem('ff.save.7'));
-await p.waitForTimeout(300);
+await tickSleep(p, 4);
 
 async function idle() {
   await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });

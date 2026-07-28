@@ -15,6 +15,17 @@ async function typeCode(p, code) {
 }
 
 await withApp(async ({ p, expect }) => {
+  /** Wait for `n` of the minigame's own 55ms ticks. Returns the ticks that elapsed. */
+  const tetrisTicks = async (n) => {
+    const t0 = await p.evaluate(() => window.__ff.tetris().tick);
+    await p
+      .waitForFunction(([s, k]) => window.__ff.tetris() && window.__ff.tetris().tick >= s + k, [t0, n], {
+        timeout: 30000,
+      })
+      .catch(() => {});
+    return (await p.evaluate(() => window.__ff.tetris().tick)) - t0;
+  };
+
   await p.evaluate(() => localStorage.removeItem('ff.tetris'));
   await selectRoom(p, 7); // UTES
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -31,7 +42,10 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff.tetris().druh > 0, { timeout: 5000 });
   const spawned = await p.evaluate(() => window.__ff.tetris());
   expect(spawned.filled === 4, 'a four-cell piece is on the board');
-  await p.waitForTimeout(900);
+  // Wait for the minigame's OWN clock to run, not for 900ms of wall time — on a
+  // loaded machine the two are not the same thing, and it is the ticks the piece
+  // falls on.
+  await tetrisTicks(16);
   const fell = await p.evaluate(() => window.__ff.tetris());
   expect(fell.y > spawned.y || fell.score > spawned.score, 'the piece falls on its own');
 
@@ -55,11 +69,15 @@ await withApp(async ({ p, expect }) => {
   expect(withBoard !== roomOnly, 'the board is composited over the room frame');
 
   // ---- the room is frozen underneath (ShowModal blocks TRoom's timer) ---------
+  // Anchored on the MINIGAME's clock: it keeps running while the room's is frozen, so
+  // waiting for it proves real game time passed. A wall-clock sleep proves nothing —
+  // under load it can contain almost no game time at all, and the room's clock would
+  // "not advance" for the wrong reason.
   const roomCount = await p.evaluate(() => window.__ff.count());
-  await p.waitForTimeout(500);
+  const modalTicks = await tetrisTicks(9);
   expect(
     (await p.evaluate(() => window.__ff.count())) === roomCount,
-    "the room's clock does not advance while the minigame is modal",
+    `the room's clock does not advance while the minigame is modal (over ${modalTicks} minigame ticks)`,
   );
 
   // ---- controls ---------------------------------------------------------------
@@ -82,7 +100,7 @@ await withApp(async ({ p, expect }) => {
   // Game keys must not leak through to the fish while the minigame owns them.
   const roomBefore = await p.evaluate(() => window.__ff.state());
   await p.keyboard.press('KeyI');
-  await p.waitForTimeout(150);
+  await tetrisTicks(4);
   const roomAfter = await p.evaluate(() => window.__ff.state());
   expect(
     roomAfter.little.x === roomBefore.little.x && roomAfter.little.y === roomBefore.little.y,
@@ -94,7 +112,9 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff.tetris() === null, { timeout: 5000 });
   expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'Escape returns to the room');
   const resumed = await p.evaluate(() => window.__ff.count());
-  await p.waitForTimeout(400);
+  await p
+    .waitForFunction((n) => window.__ff.count() > n, resumed, { timeout: 30000 })
+    .catch(() => {});
   expect(
     (await p.evaluate(() => window.__ff.count())) > resumed,
     "the room's clock runs again after closing",
@@ -162,13 +182,71 @@ await withApp(async ({ p, expect }) => {
       window.__ff.tetrisTick();
     }
   });
-  const blinkA = await p.evaluate(() => window.__ff.tetrisBoardHash().hash);
-  await p.waitForTimeout(120); // ~2 game ticks: too few to complete a blink phase
-  const blinkB = await p.evaluate(() => window.__ff.tetrisBoardHash().hash);
-  await p.waitForTimeout(700); // ~13 ticks: crosses the 9-tick blink boundary
-  const blinkC = await p.evaluate(() => window.__ff.tetrisBoardHash().hash);
-  expect(blinkA === blinkB, 'the hiscore blink does not run at paint rate');
-  expect(blinkC !== blinkB, 'but it does blink on the 55ms game clock');
+  // Not at paint rate: the board may only change when the minigame's OWN 55ms tick
+  // counter moves. Sampling `{tick, hash}` together (one evaluate, so the pair is
+  // atomic) and comparing consecutive samples checks that pairing directly.
+  //
+  // Deliberately NOT sampled per rendered frame: consecutive rAF frames only share a
+  // minigame tick while the paint rate is above ~18fps, so under load that sampler
+  // collects nothing — the check would go vacuous and its own "did we sample enough"
+  // guard would fail, for a machine reason. Polling on a timer is independent of the
+  // paint rate, while the rAF counter alongside it confirms the page really was
+  // painting during the window (which is what makes "not at paint rate" meaningful).
+  const paint = await p.evaluate(
+    (ms) =>
+      new Promise((done) => {
+        const t0 = performance.now();
+        let frames = 0;
+        let samples = 0;
+        let sameTick = 0;
+        let changedWithoutTick = 0;
+        let prev = null;
+        const raf = () => {
+          frames++;
+          if (performance.now() - t0 < ms) requestAnimationFrame(raf);
+        };
+        requestAnimationFrame(raf);
+        const poll = () => {
+          const s = window.__ff.tetris();
+          const h = window.__ff.tetrisBoardHash();
+          if (s && h) {
+            samples++;
+            if (prev && s.tick === prev.tick) {
+              sameTick++;
+              if (h.hash !== prev.hash) changedWithoutTick++;
+            }
+            prev = { tick: s.tick, hash: h.hash };
+          }
+          if (performance.now() - t0 < ms) setTimeout(poll, 1);
+          else done({ frames, samples, sameTick, changedWithoutTick });
+        };
+        poll();
+      }),
+    1000,
+  );
+  expect(paint.sameTick >= 8, `sampled the board within a minigame tick (${paint.sameTick} of ${paint.samples} samples)`);
+  expect(paint.frames >= 2, `the page was painting during the sample window (${paint.frames} frames)`);
+  expect(
+    paint.changedWithoutTick === 0,
+    `the hiscore blink does not run at paint rate (${paint.changedWithoutTick} board changes with no tick)`,
+  );
+  // But it does blink on the 55ms clock: the phase counter cycles 0..17 and the earned
+  // row is drawn while `blikani % 18 < 9` (tetrisRender.ts:136), so the board must
+  // change as that predicate flips. Waiting for the flip itself — rather than for
+  // 700ms and assuming ~13 ticks fit in it — is exact at any frame rate.
+  const blinkState = () =>
+    p.evaluate(() => ({ hash: window.__ff.tetrisBoardHash().hash, blik: window.__ff.tetris().blikani }));
+  const blinkA = await blinkState();
+  await p
+    .waitForFunction((b) => window.__ff.tetris() && (window.__ff.tetris().blikani % 18 < 9) !== (b % 18 < 9), blinkA.blik, {
+      timeout: 30000,
+    })
+    .catch(() => {});
+  const blinkC = await blinkState();
+  expect(
+    blinkC.hash !== blinkA.hash,
+    `but it does blink on the 55ms game clock (blikani ${blinkA.blik} -> ${blinkC.blik})`,
+  );
   await p.keyboard.press('Escape');
   await p.waitForFunction(() => window.__ff.tetris() === null, { timeout: 5000 });
 

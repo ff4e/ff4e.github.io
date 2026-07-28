@@ -23,7 +23,9 @@ await withApp(async ({ p, expect }) => {
 
   // Leave to the map: voices killed, dialogue queue cleared, menu music restored.
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForTimeout(300);
+  await p
+    .waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.music() === 'menu', { timeout: 10000 })
+    .catch(() => {});
   expect(!(await p.evaluate(() => window.__ff.voicePlaying())), 'voices killed on leaving');
   expect(!(await p.evaluate(() => window.__ff.script()?.dialog)), 'dialogue queue cleared on leaving');
   expect((await p.evaluate(() => window.__ff.music())) === 'menu', 'menu music restored on the map');

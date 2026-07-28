@@ -19,7 +19,7 @@
  * This is the guard for any future rewrite of the renderer (glyph atlas, WebGL,
  * CSS): if it changes what is on screen, this fails.
  */
-import { selectRoom, withApp } from './ui-lib.mjs';
+import { selectRoom, withApp, forTicks } from './ui-lib.mjs';
 
 // Layout constants — must match src/render/subtitles.ts.
 const K = {
@@ -130,7 +130,7 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.clearSubtitles());
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), LINE_A);
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'V'), LINE_B);
-  await p.waitForTimeout(120);
+  await p.waitForFunction(() => window.__ff.subsActive(), { timeout: 10000 }).catch(() => {});
   expect(await p.evaluate(() => window.__ff.subsActive()), 'parity: subtitles are on screen');
 
   // ── Phase 1: frozen line state, swept over ticks x sub-tick fractions.
@@ -169,13 +169,17 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.clearSubtitles());
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), LINE_A);
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'V'), LINE_B);
+  // The scroll advances on the GAME tick, so sample over a window of ticks. As
+  // 24 x 300ms of wall time this both flaked and weakened: fewer ticks in the window
+  // means fewer distinct scroll positions to compare.
   const live = [];
-  for (let i = 0; i < 24; i++) {
+  let i = 0;
+  await forTicks(p, 90, async () => {
     const r = await p.evaluate((al) => window.__subsCheck(0, al), (i % 5) / 5 + 0.05);
     if (r) live.push(r);
-    await p.waitForTimeout(300);
     if (i === 11) await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), 'And there it goes again.');
-  }
+    i++;
+  }, 300);
 
   expect(live.length > 12, `live: collected ${live.length} samples while the game ran`);
   expect(new Set(live.map((r) => r.ys)).size > 3, 'live: the lines really scrolled (ys changed over time)');
