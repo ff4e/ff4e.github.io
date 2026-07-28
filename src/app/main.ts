@@ -239,6 +239,17 @@ let subFontReady = false;
 // True while the overlay currently shows a subtitle, so idle frames skip the
 // (large) clear/redraw entirely and we wipe it exactly once when it clears.
 let subOverlayPainted = false;
+// Diagnostics: how many times the vector overlay has actually been re-rendered
+// (perf probes read the rate — every redraw between two logic ticks is waste).
+let subOverlayPaints = 0;
+// What the overlay currently SHOWS (SubtitleSystem.vectorSignature + the inputs
+// outside it: which system, the font, the backing size). The wave offset only
+// advances on a logic tick and stops entirely once a line has settled, so at 60fps
+// most frames would repaint the identical image — this skips them.
+let subOverlaySig = '';
+// Perf A/B switch (tools/bench-subtitles.mjs): false replays the pre-gate behaviour,
+// repainting the overlay on every frame that draws it.
+let subOverlayGate = true;
 const panelCanvas = document.getElementById('panel') as HTMLCanvasElement;
 const panelCtx = panelCanvas.getContext('2d')!;
 const select = document.getElementById('room') as HTMLSelectElement;
@@ -358,8 +369,19 @@ function syncSubOverlay(): void {
   syncSubOverlaySized(canvas.width * cs, canvas.height * cs);
 }
 
+/**
+ * Key for what the vector overlay currently shows. Beyond the subtitle system's own
+ * signature it covers everything else the drawn image depends on: which system owns
+ * the overlay (room vs cutscene), the selected face (F cycles it), the display scale
+ * and the backing-store size — a resize wipes the canvas, so the key must change.
+ */
+function subOverlaySignature(who: string, sys: SubtitleSystem, scale: number): string {
+  return `${who}|${subFontFamily}|${subFontWeight}|${subCanvas.width}x${subCanvas.height}|${scale}|${sys.vectorSignature(count)}`;
+}
+
 /** Clear the subtitle overlay (used off the room screen). */
 function clearSubOverlay(): void {
+  subOverlaySig = ''; // whatever the overlay held is gone: never match a stale key
   if (!subOverlayPainted) return; // already clear — skip the (large) clearRect
   subCtx.setTransform(1, 0, 0, 1, 0, 0);
   subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
@@ -1509,11 +1531,18 @@ function drawCutscene(): void {
   // scaled by SCALE*dpr so drawVector positions in native (720×555) game pixels.
   if (useVec && cutsceneSubs!.active) {
     syncSubOverlaySized(cssW, cssH);
-    subCtx.setTransform(1, 0, 0, 1, 0, 0);
-    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-    subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-    cutsceneSubs!.drawVector(subCtx, count, subFontFamily, subFontWeight);
-    subOverlayPainted = true;
+    // The cutscene paints on every rAF (it has no dirty check), so without this
+    // gate the captions were re-shaped ~60x a second to produce the same image.
+    const sig = subOverlaySignature('cut', cutsceneSubs!, cs * dpr);
+    if (!subOverlayGate || sig !== subOverlaySig) {
+      subCtx.setTransform(1, 0, 0, 1, 0, 0);
+      subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
+      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+      cutsceneSubs!.drawVector(subCtx, count, subFontFamily, subFontWeight);
+      subOverlayPaints++;
+      subOverlayPainted = true;
+      subOverlaySig = sig;
+    }
     subCanvas.style.transform = '';
   } else if (subOverlayPainted) {
     clearSubOverlay();
@@ -2827,11 +2856,19 @@ function draw(): void {
   if (useVecSubs && subs!.active) {
     syncSubOverlay();
     const dpr = window.devicePixelRatio || 1;
-    subCtx.setTransform(1, 0, 0, 1, 0, 0);
-    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-    subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-    subs!.drawVector(subCtx, count, subFontFamily, subFontWeight);
-    subOverlayPainted = true;
+    // Only repaint when the overlay's content would actually differ: while the fish
+    // is moving the room redraws every rAF, but the subtitles change once per logic
+    // tick (and not at all once a line has settled).
+    const sig = subOverlaySignature('room', subs!, cs * dpr);
+    if (!subOverlayGate || sig !== subOverlaySig) {
+      subCtx.setTransform(1, 0, 0, 1, 0, 0);
+      subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
+      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+      subs!.drawVector(subCtx, count, subFontFamily, subFontWeight);
+      subOverlayPaints++;
+      subOverlayPainted = true;
+      subOverlaySig = sig;
+    }
     subCanvas.style.transform = xform; // shake/shove with the room
   } else if (subOverlayPainted) {
     clearSubOverlay();
@@ -4044,6 +4081,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     ostav,
     forceRoomRedraw,
   }),
+  /** Dev/perf hook: mirror of the dev bar's idle-saver checkbox (P). */
+  setRenderOnDirty: (v: boolean) => setRenderOnDirty(v),
   enhancedLoaded: () => enhancedArt !== null,
   enhancedActive: () =>
     graphics === 'enhanced' &&
@@ -4145,6 +4184,41 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   lines: () => linesSpoken,
   lastLine: () => lastLine,
   subsActive: () => subs?.active ?? false,
+  /** Perf probe: cumulative count of vector-overlay re-renders (see subOverlayPaints). */
+  subPaints: () => subOverlayPaints,
+  /** Perf A/B: turn the overlay repaint gate off to reproduce the pre-fix cost. */
+  setSubsGate: (v: boolean) => {
+    subOverlayGate = v;
+    subOverlaySig = '';
+  },
+  /**
+   * Parity probe: repaint the vector overlay for an arbitrary logic tick, bypassing
+   * the repaint gate, and report the geometry the reference implementation needs to
+   * reproduce it (game-pixel screen size, the overlay backing size and its scale).
+   */
+  subsPaintAt: (at: number) => {
+    if (!subs?.active || !room) return null;
+    const { w: sw, h: sh } = roomScreenSize(room);
+    const cs = contentScaleFor(sw, sh);
+    const dpr = window.devicePixelRatio || 1;
+    syncSubOverlay();
+    subCtx.setTransform(1, 0, 0, 1, 0, 0);
+    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
+    subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+    subs.drawVector(subCtx, at, subFontFamily, subFontWeight);
+    subOverlayPainted = true;
+    subOverlaySig = ''; // painted behind the gate's back — force the next real repaint
+    return {
+      w: subCanvas.width,
+      h: subCanvas.height,
+      scale: cs * dpr,
+      screenW: subs.vectorScreen.w,
+      screenH: subs.vectorScreen.h,
+      family: subFontFamily,
+      weight: subFontWeight,
+      lines: subs.debugLines(),
+    };
+  },
   /** Test hook: inject a subtitle directly (deterministic, no room dialogue needed). */
   pushSubtitle: (text: string, code: string) => subs?.newSubtitle(text, code, count),
   /** Test hooks for the win auto-return hold: read the countdown / clear subtitles. */
@@ -4379,6 +4453,65 @@ window.addEventListener('keydown', unlockAudio, { once: true });
       mean,
       p95,
       fps: 1000 / mean,
+    };
+  },
+  /**
+   * Perf probe for the enhanced subtitle overlay: times the exact work draw()
+   * does per frame for the vector subtitles (full-overlay clear + scaled
+   * drawVector), isolated from the room render and the rAF vsync cap. `at` pins
+   * the tick so the wave state can't drift mid-measurement; pass a rising count
+   * to model the animating case. Each iteration ends with a 1x1 readback so the
+   * 2D commands are actually rasterized inside the timed window instead of being
+   * batched away.
+   */
+  benchSubs: (frames = 120, warmup = 20, at = count, advance = false) => {
+    if (!subs?.active || !room) return null;
+    const { w: sw, h: sh } = roomScreenSize(room);
+    const cs = contentScaleFor(sw, sh);
+    syncSubOverlay();
+    const dpr = window.devicePixelRatio || 1;
+    let tick = at;
+    const run = (draw: boolean, flush: boolean): number[] => {
+      const one = (): void => {
+        subCtx.setTransform(1, 0, 0, 1, 0, 0);
+        subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
+        if (draw) {
+          subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+          subs!.drawVector(subCtx, advance ? tick++ : at, subFontFamily, subFontWeight);
+        }
+        if (flush) {
+          subCtx.setTransform(1, 0, 0, 1, 0, 0);
+          subCtx.getImageData(0, 0, 1, 1); // force rasterization inside the timed window
+        }
+      };
+      for (let i = 0; i < warmup; i++) one();
+      const s: number[] = [];
+      for (let i = 0; i < frames; i++) {
+        const t0 = performance.now();
+        one();
+        s.push(performance.now() - t0);
+      }
+      return s.sort((a, b) => a - b);
+    };
+    const stat = (s: number[]): { min: number; median: number; mean: number; p95: number } => ({
+      min: s[0]!,
+      median: s[Math.floor(s.length / 2)]!,
+      mean: s.reduce((a, b) => a + b, 0) / s.length,
+      p95: s[Math.floor(s.length * 0.95)]!,
+    });
+    const full = stat(run(true, true));
+    const clearOnly = stat(run(false, true));
+    const noFlush = stat(run(true, false));
+    subOverlayPainted = true;
+    subOverlaySig = ''; // the probe painted behind the gate's back — force a repaint
+    return {
+      frames,
+      chars: subs.lineChars,
+      lines: subs.lineCount,
+      overlay: `${subCanvas.width}x${subCanvas.height}`,
+      ...full,
+      clearOnly,
+      noFlush,
     };
   },
   chatCount: () => chatFft.length,

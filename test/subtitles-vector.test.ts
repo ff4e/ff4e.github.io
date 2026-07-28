@@ -38,6 +38,7 @@ function mockCtx(charW = CHAR_W) {
   const fonts: string[] = [];
   const fill: FillCall[] = [];
   const stroke: { ch: string; x: number }[] = [];
+  const counts = { measure: 0, gradient: 0 };
   let curTop: string | null = null;
   const ctx = {
     textAlign: '',
@@ -63,8 +64,12 @@ function mockCtx(charW = CHAR_W) {
     get fillStyle(): unknown {
       return this._fill;
     },
-    measureText: (s: string) => ({ width: [...s].length * charW }),
+    measureText: (s: string) => {
+      counts.measure++;
+      return { width: [...s].length * charW };
+    },
     createLinearGradient: () => {
+      counts.gradient++;
       const g: { topColor: string | null; addColorStop: (o: number, c: string) => void } = {
         topColor: null,
         addColorStop: (o: number, c: string) => {
@@ -76,7 +81,7 @@ function mockCtx(charW = CHAR_W) {
     strokeText: (ch: string, x: number) => stroke.push({ ch, x }),
     fillText: (ch: string, x: number, y: number) => fill.push({ ch, x, y, topColor: curTop }),
   };
-  return { ctx: ctx as unknown as CanvasRenderingContext2D, fonts, fill, stroke };
+  return { ctx: ctx as unknown as CanvasRenderingContext2D, fonts, fill, stroke, counts };
 }
 
 const SCREEN_W = 300;
@@ -180,5 +185,95 @@ describe('drawVector (enhanced subtitle overlay)', () => {
     const m = mockCtx();
     sub.drawVector(m.ctx, 100, 'X');
     expect(m.fonts.every((f) => /^700 \d/.test(f))).toBe(true);
+  });
+});
+
+describe('drawVector cost model (the per-frame work it must NOT redo)', () => {
+  it('shapes a line once and reuses the measurements on later frames', () => {
+    const sub = makeSub();
+    sub.newSubtitle('Fillet', 'M', 0);
+    const m = mockCtx();
+    sub.drawVector(m.ctx, 100, 'X');
+    const first = m.counts.measure;
+    // A settled 6-glyph line: the fit measurement, the re-measure guard and one
+    // advance per glyph — all of it invariant for the life of the line.
+    expect(first).toBeGreaterThan(0);
+    m.counts.measure = 0;
+    for (let f = 0; f < 10; f++) sub.drawVector(m.ctx, 100 + f, 'X');
+    expect(m.counts.measure).toBe(0); // ten more frames, zero re-shaping
+    // …and the glyphs are still drawn, at the same places.
+    expect(m.fill.length).toBe('Fillet'.length * 11);
+    expect(m.fill[0]!.x).toBe(m.fill['Fillet'.length]!.x);
+  });
+
+  it('re-measures when the font changes (F cycles the face)', () => {
+    const sub = makeSub();
+    sub.newSubtitle('Fillet', 'M', 0);
+    const m = mockCtx();
+    sub.drawVector(m.ctx, 100, 'Mulish', '500');
+    m.counts.measure = 0;
+    sub.drawVector(m.ctx, 100, 'Mulish', '500');
+    expect(m.counts.measure).toBe(0); // same face: cached
+    sub.drawVector(m.ctx, 100, 'Jost', '500');
+    expect(m.counts.measure).toBeGreaterThan(0); // different family: re-measured
+    m.counts.measure = 0;
+    sub.drawVector(m.ctx, 100, 'Jost', '700');
+    expect(m.counts.measure).toBeGreaterThan(0); // different weight: re-measured
+  });
+
+  it('shares one bevel gradient per line once the wave has settled', () => {
+    const sub = makeSub();
+    sub.newSubtitle('Fillet', 'M', 0);
+    const m = mockCtx();
+    sub.drawVector(m.ctx, 100, 'X'); // settled: every glyph sits at dy = 0
+    expect(m.counts.gradient).toBe(1);
+    expect(m.fill.length).toBe('Fillet'.length); // still one fill per glyph
+    // Mid-wave the glyphs are at different offsets, so they cannot share one — but
+    // there is still at most one gradient per distinct offset, never one per glyph.
+    const w = mockCtx();
+    sub.drawVector(w.ctx, 2, 'X');
+    expect(w.counts.gradient).toBeGreaterThan(0);
+    expect(w.counts.gradient).toBeLessThanOrEqual(w.fill.length);
+  });
+});
+
+describe('vectorSignature (the repaint gate)', () => {
+  it('is stable within a logic tick and changes while the wave runs', () => {
+    const sub = makeSub();
+    sub.newSubtitle('Careful', 'M', 0);
+    const a = sub.vectorSignature(3);
+    expect(sub.vectorSignature(3)).toBe(a); // same tick -> same image -> no repaint
+    expect(sub.vectorSignature(4)).not.toBe(a); // the wave advanced
+  });
+
+  it('stops changing once the line has settled and finished scrolling', () => {
+    const sub = makeSub();
+    sub.newSubtitle('Careful', 'M', 0);
+    for (let c = 1; c <= 30; c++) sub.tick(c); // scroll to cilys, wave-in completes
+    const s30 = sub.vectorSignature(30);
+    expect(sub.vectorSignature(31)).toBe(s30);
+    expect(sub.vectorSignature(35)).toBe(s30); // a static line needs no repaints at all
+  });
+
+  it('changes when a new line arrives, when lines scroll, and when one expires', () => {
+    const sub = makeSub();
+    sub.newSubtitle('First', 'M', 0);
+    const one = sub.vectorSignature(0);
+    sub.newSubtitle('Second', 'V', 0);
+    expect(sub.vectorSignature(0)).not.toBe(one); // a line was added (and pushed up)
+    const before = sub.vectorSignature(1);
+    sub.tick(1); // lines scroll toward cilys
+    expect(sub.vectorSignature(1)).not.toBe(before);
+    for (let c = 2; c <= 60; c++) sub.tick(c); // outlive killcount
+    expect(sub.active).toBe(false);
+    expect(sub.vectorSignature(60)).toBe(''); // nothing on screen
+  });
+
+  it('distinguishes two lines that differ only in speaker colour', () => {
+    const a = makeSub();
+    a.newSubtitle('Hi', 'M', 0);
+    const b = makeSub();
+    b.newSubtitle('Hi', 'V', 0);
+    expect(a.vectorSignature(5)).not.toBe(b.vectorSignature(5));
   });
 });
