@@ -94,11 +94,11 @@ await withApp(async ({ p, expect }) => {
   });
   const moveFrac = (fx, fy) => p.mouse.move(canvasBox.x + canvasBox.w * fx, canvasBox.y + canvasBox.h * fy);
   await moveFrac(0.06, 0.06); // top-left → intro
-  await p.waitForTimeout(120);
+  await p.waitForFunction(() => window.__ff.mapHover() === 'intro', { timeout: 10000 }).catch(() => {});
   expect(await p.evaluate(() => window.__ff.mapHover()) === 'intro', 'hovering the top-left corner lights intro');
   expect(await p.evaluate(() => document.getElementById('screen').style.cursor) === 'pointer', 'a corner shows a pointer cursor');
   await moveFrac(0.5, 0.5); // interior → no corner
-  await p.waitForTimeout(120);
+  await p.waitForFunction(() => window.__ff.mapHover() === null, { timeout: 10000 }).catch(() => {});
   expect(await p.evaluate(() => window.__ff.mapHover()) === null, 'the map interior clears the corner highlight');
 
   // Top-left corner replays the intro (just intro.avi, not gated).

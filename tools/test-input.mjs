@@ -5,13 +5,13 @@
  * active fish toward the click — and that clicking a fish only *selects* it (no
  * talk trigger). Drives real DOM key/mouse events plus the __ff hooks.
  */
-import { idle, selectRoom, withApp } from './ui-lib.mjs';
+import { idle, selectRoom, withApp, tickSleep } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.state, { timeout: 5000 });
   await selectRoom(p, 7); // UTES — both fish alive, open water
   await p.waitForFunction(() => window.__ff.state() && window.__ff.count() > 0, { timeout: 5000 });
-  await p.waitForTimeout(200);
+  await tickSleep(p, 3);
   const state = () => p.evaluate(() => window.__ff.state());
 
   // --- 1/2 select a fish (akce_set) ---
@@ -46,7 +46,9 @@ await withApp(async ({ p, expect }) => {
     const s = window.__ff.state();
     window.__ff.click(s.big.x, s.big.y); // click the big fish
   });
-  await p.waitForTimeout(150);
+  // Ticks, not milliseconds: "no dialogue line fired" is only a real claim if the
+  // dialogue scheduler actually got some game time to fire one in.
+  await tickSleep(p, 3);
   const lines1 = await p.evaluate(() => window.__ff.lines());
   expect((await state()).active === 'big', 'clicking the big fish selects it');
   expect(lines1 === lines0, 'selecting a fish does not trigger a dialogue line');

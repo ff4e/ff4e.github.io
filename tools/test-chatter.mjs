@@ -9,7 +9,7 @@
  * chatter bank (subtitles + voices) actually loaded, a chatter timer is wired up in a
  * live room, and the TrepatRoom shake jitters the real canvas.
  */
-import { idle, waitRoom, withApp } from './ui-lib.mjs';
+import { idle, waitRoom, withApp, forTicks, tickSleep } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -28,13 +28,13 @@ await withApp(async ({ p, expect }) => {
   // TrepatRoom shake: setting the flag jitters the canvas; clearing it restores it.
   await p.evaluate(() => window.__ff.setTrepat(1));
   let shook = false;
-  for (let i = 0; i < 12 && !shook; i++) {
-    await p.waitForTimeout(60);
+  await forTicks(p, 10, async () => {
     const t = await p.evaluate(() => window.__ff.canvasTransform());
     if (t && t.includes('translate(')) shook = true;
-  }
+    return !shook;
+  }, 60);
   expect(shook, 'TrepatRoom shake jitters the canvas while set');
   await p.evaluate(() => window.__ff.setTrepat(0));
-  await p.waitForTimeout(300);
+  await tickSleep(p, 4);
   expect(!(await p.evaluate(() => window.__ff.canvasTransform())).includes('translate('), 'the shake clears when TrepatRoom resets');
 });

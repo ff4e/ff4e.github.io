@@ -17,6 +17,9 @@ await withApp(async ({ p, expect }) => {
   await waitTicks(p, start, 30);
   const advanced = (await p.evaluate(() => window.__ff.count())) - start;
   expect(advanced >= 30, `ZDVIZ1 Programky ran ${advanced} ticks without error`);
+  // ...and the script survived them. `advanced` alone only says the CLOCK moved;
+  // a Programka that threw itself off the dispatch list would leave it moving.
+  expect(await p.evaluate(() => window.__ff.script() !== null), 'ZDVIZ1 script still active after 30 ticks');
 
   const match = await p.evaluate(() => {
     const st = window.__ff.state();

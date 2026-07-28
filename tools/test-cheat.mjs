@@ -4,7 +4,7 @@
  * covers the entry machine (X arms it, a dead-end letter parks it), the room
  * codes, and the two codes that only work from the map.
  */
-import { selectRoom, waitRoom, withApp } from './ui-lib.mjs';
+import { selectRoom, waitRoom, withApp, tickSleep } from './ui-lib.mjs';
 
 /** Type a code as a player would — the leading X arms the machine. */
 async function typeCode(p, code) {
@@ -214,16 +214,21 @@ await withApp(async ({ p, expect }) => {
   const tinted = await p.evaluate(() => window.__ff.roomEffectFrameHash('classic'));
   expect(cardFrame === tinted, 'the card frame is stable while it holds');
   expect(cardFrame !== plainFrame.classic, 'the intertitle card is actually drawn');
-  // It counts down on the GAME tick (~12.5/s), not the paint rate (~60/s): over
-  // ~400ms it must lose roughly 5 frames, not 25.
+  // It counts down on the GAME tick (~12.5/s), not the paint rate (~60/s): the card
+  // must lose exactly one frame per tick. Waiting on the clock rather than on 400ms of
+  // wall time makes that exact rather than a one-sided "fewer than 25" guess — and it
+  // is the tick count, not the elapsed milliseconds, that the counter is defined in.
   const t1 = (await p.evaluate(() => window.__ff.silentFilm())).time;
-  await p.waitForTimeout(400);
+  const ticked = await tickSleep(p, 5);
   const t2 = (await p.evaluate(() => window.__ff.silentFilm())).time;
   const spent = t1 - t2;
   expect(spent > 0, `the card counts down (${t1} -> ${t2})`);
-  expect(spent < 15, `on the game clock, not the paint rate (spent ${spent} in 400ms)`);
+  expect(
+    spent >= ticked - 1 && spent <= ticked + 1,
+    `one card frame per game tick, not per paint (spent ${spent} over ${ticked} ticks)`,
+  );
   // The effects force the CPU renderer, since they post-process the whole frame.
-  await p.waitForTimeout(200);
+  await tickSleep(p, 3);
   expect(
     (await p.evaluate(() => window.__ff.roomBackend())) !== 'webgl',
     'silent film renders on the CPU path (the frame is post-processed)',
@@ -250,18 +255,26 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.interlacedFaze())) === -1, 'interlaced starts off (-1)');
   const beforeCollapse = await p.evaluate(() => window.__ff.roomEffectFrameHash('classic'));
   await typeCode(p, 'xinterlaced');
-  await p.waitForTimeout(300);
+  const ran = await tickSleep(p, 4);
   const faze = await p.evaluate(() => window.__ff.interlacedFaze());
   expect(faze > 0, `the collapse advances its phase (got ${faze})`);
-  // ~300ms on the ~12.5fps game clock is ~4 phases, not ~18 as it would be if the
-  // counter were still being advanced from the render path.
-  expect(faze < 12, `on the game clock, not the paint rate (phase ${faze} after 300ms)`);
+  // One phase per GAME tick, not one per painted frame (which ran it ~5x too fast).
+  // Asserting against the ticks that actually elapsed pins the ratio at 1 instead of
+  // bounding it by a number derived from an assumed frame rate.
+  expect(
+    faze >= ran - 1 && faze <= ran + 1,
+    `one collapse phase per game tick, not per paint (phase ${faze} over ${ran} ticks)`,
+  );
   expect(
     (await p.evaluate(() => window.__ff.roomEffectFrameHash('classic'))) !== beforeCollapse,
     'the collapse reaches the frame',
   );
   await typeCode(p, 'xinterlaced');
-  await p.waitForTimeout(300);
+  // The wind-down takes faze back through -2 to -1 (INTERLACED_OFF); wait for the
+  // state, not for a duration that assumes how fast the clock is running.
+  await p
+    .waitForFunction(() => window.__ff.interlacedFaze() === -1, null, { timeout: 30000 })
+    .catch(() => {});
   expect(
     (await p.evaluate(() => window.__ff.interlacedFaze())) === -1,
     'typing it again winds the collapse down to -1',
@@ -297,7 +310,7 @@ await withApp(async ({ p, expect }) => {
 
   // (a) a RESTART keeps them all.
   await p.evaluate(() => window.__ff.restart());
-  await p.waitForTimeout(300);
+  await tickSleep(p, 4);
   const afterRestart = await cheatState();
   expect(afterRestart.sprite === armed.sprite, 'the sprite cheats survive a restart');
   expect(afterRestart.storming, 'the storm survives a restart');
@@ -307,7 +320,7 @@ await withApp(async ({ p, expect }) => {
   // (b) a ROOM CHANGE clears them all.
   await p.evaluate(() => window.__ff.enterRoomAwait(1));
   await waitRoom(p, 0);
-  await p.waitForTimeout(200);
+  await tickSleep(p, 3);
   const afterChange = await cheatState();
   expect(afterChange.sprite === pristine.sprite, 'the sprite cheats die with the room');
   expect(!afterChange.storming, 'the storm dies with the room');

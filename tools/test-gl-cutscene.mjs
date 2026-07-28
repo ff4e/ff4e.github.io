@@ -11,7 +11,7 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom, tickSleep, waitFrames } from './ui-lib.mjs';
 
 const KUFRIK = 2; // the briefcase room — its demo is the only cutscene
 
@@ -28,11 +28,11 @@ await p.evaluate((n) => window.__ff.enterRoomAwait(n), KUFRIK);
 await waitRoom(p, 5);
 await p.evaluate(() => window.__ff.setGraphics('enhanced'));
 await p.evaluate(() => window.__ff.setRenderer('webgl'));
-await p.waitForTimeout(200);
+await p.waitForFunction(() => window.__ff.renderer() === 'webgl', { timeout: 10000 }).catch(() => {});
 
 await p.evaluate(() => window.__ff.startCutscene());
 await p.waitForFunction(() => window.__ff.cutsceneActive(), { timeout: 8000 });
-await p.waitForTimeout(400); // let a couple of demo frames play
+await tickSleep(p, 5); // let a couple of demo frames play (they advance on the tick)
 
 // Capability gate: if WebGL2 is unavailable the parity probe reports {webgl:false}.
 const first = await p.evaluate(() => window.__ff.glCutsceneParity());
@@ -67,7 +67,8 @@ else console.log(`  OK   #screen/#screen-gl/#subs share one box, GL shown (${r.g
 // --- GAP 3: live toggles ----------------------------------------------------
 // R -> cpu: the cutscene must switch to the 2D fallback (GL canvas hidden).
 await p.keyboard.press('r');
-await p.waitForTimeout(150);
+await p.waitForFunction(() => window.__ff.renderer() === 'cpu', { timeout: 10000 }).catch(() => {});
+await waitFrames(p, 3); // the GL canvas is hidden by the next PAINT, not by the state write
 if ((await p.evaluate(() => window.__ff.renderer())) !== 'cpu') fail('R did not switch renderer to cpu during cutscene');
 else if (!(await p.evaluate(() => window.__ff.cutsceneActive()))) fail('cutscene ended after pressing R');
 else {
@@ -77,12 +78,14 @@ else {
   else console.log('  OK   R -> cpu: 2D fallback, #screen-gl hidden, still playing');
 }
 await p.keyboard.press('r'); // back to webgl
-await p.waitForTimeout(150);
+await p.waitForFunction(() => window.__ff.renderer() === 'webgl', { timeout: 10000 }).catch(() => {});
+await waitFrames(p, 3);
 
 // E -> classic: smooth GPU path needs enhanced, so classic also uses the 2D
 // fallback (GL canvas hidden) even in webgl mode.
 await p.keyboard.press('e');
-await p.waitForTimeout(150);
+await p.waitForFunction(() => window.__ff.graphics() === 'classic', { timeout: 10000 }).catch(() => {});
+await waitFrames(p, 3);
 if ((await p.evaluate(() => window.__ff.graphics())) !== 'classic') fail('E did not switch graphics to classic during cutscene');
 else {
   r = await rects();
@@ -90,7 +93,9 @@ else {
   else console.log('  OK   E -> classic: baked-font 2D fallback, #screen-gl hidden');
 }
 await p.keyboard.press('e'); // back to enhanced
-await p.waitForTimeout(150);
+await p
+  .waitForFunction(() => document.getElementById('screen-gl').style.display === 'block', { timeout: 10000 })
+  .catch(() => {});
 r = await rects();
 if (r.glDisp !== 'block') fail(`back to enhanced: #screen-gl display=${r.glDisp} (expected block)`);
 else console.log('  OK   E -> enhanced: GPU present restored');
@@ -98,20 +103,21 @@ else console.log('  OK   E -> enhanced: GPU present restored');
 // F -> font cycles.
 const f0 = await p.evaluate(() => window.__ff.subFont().idx);
 await p.keyboard.press('f');
-await p.waitForTimeout(100);
+await p.waitForFunction((n) => window.__ff.subFont().idx !== n, f0, { timeout: 10000 }).catch(() => {});
 const f1 = await p.evaluate(() => window.__ff.subFont().idx);
 if (f1 === f0) fail(`F did not cycle the font during cutscene (stayed ${f0})`);
 else console.log(`  OK   F -> font cycled (${f0} -> ${f1})`);
 
 // Escape still skips.
 await p.keyboard.press('Escape');
-await p.waitForTimeout(150);
+await p.waitForFunction(() => !window.__ff.cutsceneActive(), { timeout: 10000 }).catch(() => {});
+await waitFrames(p, 3);
 if (await p.evaluate(() => window.__ff.cutsceneActive())) fail('Escape did not skip the cutscene');
 else console.log('  OK   Escape skipped the cutscene');
 
 // After skipping, the room resumes cleanly: no stuck cutscene-sized box; the GL
 // canvas (webgl room) still shares #screen's box.
-await p.waitForTimeout(200);
+await tickSleep(p, 3);
 r = await rects();
 if (!same(r.screen, r.gl)) fail(`after skip: #screen/#screen-gl box drift: ${JSON.stringify(r)}`);
 else console.log('  OK   room resumed cleanly after skip');

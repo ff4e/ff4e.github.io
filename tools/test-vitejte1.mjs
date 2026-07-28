@@ -2,7 +2,7 @@
  *  scheduler to fire (delay ~80-160) and the crab audience to react, without
  *  error; confirms items exist, malar(9)=little, velkar(10)=big, and that the
  *  ruler eventually speaks (playing 302) or animates its face. */
-import { waitRoom, withApp } from './ui-lib.mjs';
+import { waitRoom, withApp, forTicks } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoomAwait(21));
@@ -10,16 +10,14 @@ await withApp(async ({ p, expect }) => {
   expect(await p.evaluate(() => window.__ff.script() !== null), 'VITEJTE1 has an active script');
   for (const i of [1, 9, 10, 11, 17])
     expect(await p.evaluate((n) => window.__ff.itemState(n) !== null, i), `VITEJTE1 item ${i} exists`);
-  const start = await p.evaluate(() => window.__ff.count());
-  // Watch ~250 ticks (~20s); track whether the ruler ever speaks.
+  // Watch 250 GAME ticks (the announcement scheduler's delay is counted in ticks, so
+  // the window must be too); track whether the ruler ever speaks.
   let everSpoke = false, maxAfaze = 0;
-  while ((await p.evaluate(() => window.__ff.count())) < start + 250) {
+  const advanced = await forTicks(p, 250, async () => {
     if (await p.evaluate(() => window.__ff.playingPrior(302) || window.__ff.playingPrior(303))) everSpoke = true;
     const a = await p.evaluate(() => window.__ff.itemState(1)?.afaze ?? 0);
     if (a > maxAfaze) maxAfaze = a;
-    await p.waitForTimeout(60);
-  }
-  const advanced = (await p.evaluate(() => window.__ff.count())) - start;
+  });
   expect(advanced >= 250, `VITEJTE1 ran ${advanced} ticks without error`);
   const m = await p.evaluate(() => {
     const st = window.__ff.state(), a = window.__ff.itemState(9), b = window.__ff.itemState(10);

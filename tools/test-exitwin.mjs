@@ -3,13 +3,13 @@
  * animation solves the room (venku -> won) and records it in the solved-set
  * progression (which lights the map + unlocks branches).
  */
-import { selectRoom, withApp } from './ui-lib.mjs';
+import { selectRoom, withApp, tickSleep } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => localStorage.removeItem('ff.solved'));
-  await p.waitForTimeout(300);
+  await tickSleep(p, 4);
 
   expect(!(await p.evaluate(() => window.__ff.state().won)), 'room not solved yet');
 
@@ -43,13 +43,18 @@ await withApp(async ({ p, expect }) => {
   // The room holds on-screen while the line is still showing — well past the ~2.4s
   // (30-tick @ 80ms) countdown — re-pushing so the subtitle never expires mid-check.
   // Without the hold, the room would have auto-returned to the map by ~2.4s.
+  // Counted in TICKS, because the countdown being outlasted is counted in ticks. As
+  // wall-clock sleeps this check quietly evaporates under load: 8 x 400ms can contain
+  // far fewer than the 30 ticks it is supposed to outlast, so it would "hold" for the
+  // wrong reason. 8 rounds x 5 ticks = 40 ticks, comfortably past the countdown.
+  let held = 0;
   for (let i = 0; i < 8; i++) {
     await p.evaluate(() => window.__ff.pushSubtitle('The fish is delivering a long farewell line', 'M'));
-    await p.waitForTimeout(400);
+    held += await tickSleep(p, 5);
     expect(await p.evaluate(() => window.__ff.subsActive()), `subtitle still showing (round ${i})`);
     expect(
       await p.evaluate(() => window.__ff.screen() === 'room'),
-      `room holds while the line is on screen (round ${i}, ${400 * (i + 1)}ms > 2.4s countdown)`,
+      `room holds while the line is on screen (round ${i}, ${held} ticks > the 30-tick countdown)`,
     );
   }
   // The countdown lapsed but was held at 1 rather than returning to the map.
