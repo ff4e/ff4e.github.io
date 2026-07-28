@@ -4,7 +4,7 @@
  * persisted introSeen flag, the corner hit-test, and the credits/options
  * overlays — all without actually playing the (large) MP4s (we skip through).
  */
-import { withApp } from './ui-lib.mjs';
+import { reloadApp, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap(), { timeout: 8000 });
@@ -66,7 +66,7 @@ await withApp(async ({ p, expect }) => {
   );
 
   // A reload with introSeen persisted goes straight to the map — no intro.
-  await p.reload({ waitUntil: 'networkidle' });
+  await reloadApp(p);
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap(), { timeout: 8000 });
   expect(await p.evaluate(() => window.__ff.screen()) === 'map', 'second boot skips straight to the map');
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'no intro on the second boot');

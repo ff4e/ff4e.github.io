@@ -5,11 +5,11 @@
  * active fish toward the click — and that clicking a fish only *selects* it (no
  * talk trigger). Drives real DOM key/mouse events plus the __ff hooks.
  */
-import { withApp, idle } from './ui-lib.mjs';
+import { idle, selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.state, { timeout: 5000 });
-  await p.selectOption('#room', '7'); // UTES — both fish alive, open water
+  await selectRoom(p, 7); // UTES — both fish alive, open water
   await p.waitForFunction(() => window.__ff.state() && window.__ff.count() > 0, { timeout: 5000 });
   await p.waitForTimeout(200);
   const state = () => p.evaluate(() => window.__ff.state());

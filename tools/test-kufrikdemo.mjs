@@ -3,14 +3,14 @@
  * with the demo and *persists* after it ends (InitKufrDemo/DoneKufrDemo), and the
  * demo is skippable by clicking or pressing Escape (zrus_kufr).
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
 
   async function startDemo() {
     await p.evaluate(() => window.__ff.enterRoomAwait(2)); // KUFRIK
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+    await waitRoom(p, 0);
     await p.evaluate(() => window.__ff.startCutscene());
     await p.waitForFunction(() => window.__ff.cutsceneActive(), { timeout: 5000 });
   }
@@ -39,7 +39,7 @@ await withApp(async ({ p, expect }) => {
   // 4) The idle-chatter timer does NOT accrue during the demo, so the fish don't
   // immediately "call you" the moment it ends (StdKecej sync).
   await startDemo();
-  await p.waitForTimeout(2000); // ~25 ticks of demo
+  await waitTicks(p, await p.evaluate(() => window.__ff.count()), 25); // 25 ticks of demo
   const info = await p.evaluate(() => window.__ff.chatterInfo());
   const cnt = await p.evaluate(() => window.__ff.count());
   expect(

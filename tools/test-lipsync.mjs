@@ -3,11 +3,11 @@
  * mouth frames (0/5/6); both click-to-talk (UTES) and scripted dialogue (PRVNI)
  * animate the talking head.
  */
-import { withApp } from './ui-lib.mjs';
+import { selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   // Click-to-talk on UTES.
-  await p.selectOption('#room', '7');
+  await selectRoom(p, 7);
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.waitForTimeout(300);
   await p.evaluate(() => window.__ff.talk('little'));
@@ -19,7 +19,7 @@ await withApp(async ({ p, expect }) => {
   expect(heads.has(5) || heads.has(6), `UTES click-talk shows an open-mouth frame (saw ${[...heads].sort()})`);
 
   // Scripted dialogue on PRVNI.
-  await p.selectOption('#room', '1');
+  await selectRoom(p, 1);
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   const h2 = new Set();
   for (let i = 0; i < 120; i++) {

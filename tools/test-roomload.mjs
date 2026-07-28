@@ -18,7 +18,7 @@
  * instead (line-shared code path, plus the test-gl-* parity suite). We drive a
  * throttled / failed FFR fetch via page routing to open the async window on demand.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 
 // Fraction of non-black pixels on #screen: ~0 while the stage is cleared black,
 // large once a room's tiles are painted. Reads the whole frame once and samples a
@@ -50,7 +50,7 @@ await withApp(
 
     // --- Establish a bright, fully-loaded "previous" room (ZDVIZ1, gold). ---
     await p.evaluate(() => window.__ff.enterRoomAwait(20));
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 8000 });
+    await waitRoom(p, 0);
     await p.waitForTimeout(300);
     const prevFill = await stageFill(p);
     expect(prevFill > 0.1, `previous room paints visible content on #screen (fill ${prevFill.toFixed(3)})`);
@@ -76,7 +76,7 @@ await withApp(
 
     // Let the throttled load finish: the freshly-built room now paints.
     expect((await p.evaluate(() => window.__rp)) === 'ok', 'the throttled room load resolves');
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 8000 });
+    await waitRoom(p, 0);
     await p.waitForTimeout(300);
     const loadedFill = await stageFill(p);
     expect(loadedFill > 0.1, `the newly-loaded room paints once its assets arrive (fill ${loadedFill.toFixed(3)})`);

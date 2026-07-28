@@ -3,7 +3,7 @@
  * nodes are clickable; branch rooms unlock strictly in order; solving a feeder
  * room opens the next branch; clicking a reachable node enters the room.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap(), { timeout: 8000 });
@@ -36,6 +36,6 @@ await withApp(async ({ p, expect }) => {
 
   // Entering a reachable room from the map switches screens.
   await p.evaluate(() => window.__ff.enterRoom(7));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'entered a room from the map');
 });

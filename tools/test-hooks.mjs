@@ -2,11 +2,11 @@
  *  verifies one descends and catches a fish (control passes to the survivor), and
  *  that catching BOTH fish restarts the room (count resets). Also checks hooks
  *  clear on room change. */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoomAwait(7)); // UTES
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 3, { timeout: 5000 });
+  await waitRoom(p, 3);
 
   // One hook: descends (stav 1) and catches (stav 3); the active fish's death passes
   // control to the survivor.
@@ -24,7 +24,7 @@ await withApp(async ({ p, expect }) => {
 
   // Hooks clear when the room changes (nhacku := 0 on enter).
   await p.evaluate(() => window.__ff.enterRoomAwait(1));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 3, { timeout: 5000 });
+  await waitRoom(p, 3);
   expect(await p.evaluate(() => window.__ff.hookCount()) === 0, 'hooks clear on room enter');
 
   // Spawn several hooks; catching BOTH fish restarts the room (count resets low).

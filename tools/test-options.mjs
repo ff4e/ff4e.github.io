@@ -3,10 +3,10 @@
  * scroll open/close state machine, the three volume sliders, the subtitle
  * cz/en/off buttons, the help overlay, and cross-reload persistence.
  */
-import { withApp } from './ui-lib.mjs';
+import { reloadApp, selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.selectOption('#room', '7'); // enter UTES
+  await selectRoom(p, 7); // enter UTES
   await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), { timeout: 8000 });
   await p.waitForTimeout(200);
 
@@ -59,8 +59,8 @@ await withApp(async ({ p, expect }) => {
 
   // Persistence: settings survive a reload.
   await p.evaluate(() => window.__ff.panelAction ? window.__ff.toggleOptions() : null);
-  await p.reload({ waitUntil: 'networkidle' });
-  await p.selectOption('#room', '7');
+  await reloadApp(p);
+  await selectRoom(p, 7);
   await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), { timeout: 8000 });
   const v = await p.evaluate(() => window.__ff.volumes());
   expect(v.effect === 0 && v.voice === 7 && v.music === 12, `volumes persisted (${JSON.stringify(v)})`);

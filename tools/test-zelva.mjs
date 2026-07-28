@@ -1,7 +1,7 @@
 /** UI probe: ZELVA (room 37) telepathic possession (natvrdo). Forcing a possession
  *  makes the host auto-swim the seized fish toward the target and ignore player
  *  input, releasing the fish (natvrdo -> 0) once it arrives. */
-import { withApp } from './ui-lib.mjs';
+import { waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -22,7 +22,7 @@ await withApp(async ({ p, expect }) => {
   // retries): the possession must persist across the multi-step walk, not clear on
   // the first non-arrival tick. Sample it a few ticks in while the fish is still en route.
   const startCount = await p.evaluate(() => window.__ff.count());
-  await p.waitForFunction((c) => window.__ff.count() >= c + 3, startCount, { timeout: 5000 }).catch(() => {});
+  await waitTicks(p, startCount, 3);
   const midNatvrdo = await p.evaluate(() => window.__ff.natvrdo());
   const midCell = await p.evaluate(() => window.__ff.fishCell('little'));
   // Either still possessed mid-journey, or already arrived at the target (both valid).

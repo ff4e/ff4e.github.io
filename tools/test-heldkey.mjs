@@ -5,7 +5,7 @@
  * keydown does NOT OS-auto-repeat, so a single held keydown that travels several cells
  * can only be the engine's own repeat; a tap moves at most one cell.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   const key = (type, code) =>
@@ -18,7 +18,7 @@ await withApp(async ({ p, expect }) => {
   const dist = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
   await p.evaluate(() => window.__ff.enterRoomAwait(30)); // RECYCLED — open water
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   await waitIdle();
 
   // Hold each little-fish direction (one keydown, no repeat); the best open direction

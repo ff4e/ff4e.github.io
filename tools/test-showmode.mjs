@@ -15,13 +15,13 @@
  *  spawn, showmode preserved) at the recorded restart, then fire help7 ("Nyní
  *  začínáme znovu"). This is the bug the user hit: previously the restart cleared
  *  showmode and the fish spoke the normal pokus>1 intro instead of continuing. */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
 
   await p.evaluate(() => window.__ff.enterRoomAwait(2));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 3, { timeout: 5000 });
+  await waitRoom(p, 3);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'KUFRIK has an active script');
 
   const realSpawn = await p.evaluate(() => ({
@@ -91,10 +91,21 @@ await withApp(async ({ p, expect }) => {
 
   // The replay keeps advancing while the fish are dead (idle even in death) and
   // reaches the recorded restart run (idx ~289).
-  await p.waitForFunction(() => window.__ff.showmodeState().active && window.__ff.showmodeState().idx >= 289, { timeout: 40000 });
+  // NB: the options object must be the THIRD argument — as the second it is taken
+  // as the predicate's `arg` and silently ignored, leaving Playwright's 30s default
+  // (which this wait, ~290 replayed actions at ~12.5/s, outgrows under a parallel run).
+  await p.waitForFunction(
+    () => window.__ff.showmodeState().active && window.__ff.showmodeState().idx >= 289,
+    null,
+    { timeout: 90000 },
+  );
   // Past the restart run: the room was rebuilt (fish back to spawn) and the demo
   // continues — help7 ("Nyní začínáme znovu") fires (helptext >= 7).
-  await p.waitForFunction(() => window.__ff.showmodeState().active && window.__ff.showmodeState().helptext >= 7, { timeout: 15000 });
+  await p.waitForFunction(
+    () => window.__ff.showmodeState().active && window.__ff.showmodeState().helptext >= 7,
+    null,
+    { timeout: 60000 },
+  );
   expect(await p.evaluate(() => window.__ff.showmodeState().active), 'demo survived + stayed synced through the death-restart');
   const afterRestart = await p.evaluate(() => window.__ff.fishCell('little'));
   expect(

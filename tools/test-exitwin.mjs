@@ -3,10 +3,10 @@
  * animation solves the room (venku -> won) and records it in the solved-set
  * progression (which lights the map + unlocks branches).
  */
-import { withApp } from './ui-lib.mjs';
+import { selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.selectOption('#room', '7'); // UTES
+  await selectRoom(p, 7); // UTES
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => localStorage.removeItem('ff.solved'));
   await p.waitForTimeout(300);
