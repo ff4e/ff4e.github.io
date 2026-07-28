@@ -19,6 +19,15 @@ import { parseFft, indexFft, type FftEntry } from '../data/fft.js';
 import { Room, ITEM_WATER, ITEM_WALL } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
 import { CheatEntry, pretoc, morphShrink, morphStretch, type Cheat } from '../core/cheats.js';
+import {
+  zpracujInterlaced,
+  interlacedSounds,
+  sum,
+  zcernobilit,
+  INTERLACED_OFF,
+  INTERLACED_STOP,
+  INTERLACED_START,
+} from '../render/filmEffects.js';
 import { Dir } from '../core/dir.js';
 import {
   FSIZE,
@@ -39,6 +48,7 @@ import {
   HL_MRK,
   HL_MLUVI,
 } from '../render/renderRoom.js';
+import type { RgbaScreen } from '../render/rgbaScreen.js';
 import { ClassicArtSource } from '../render/classicArtSource.js';
 import type { ArtSource } from '../render/artSource.js';
 import { GlScreen, webgl2Available } from '../render/glScreen.js';
@@ -624,10 +634,24 @@ const mapCheats = new CheatEntry();
 let ultraviolence = false;
 /** oldamp/oldper/oldspd (URoom.pas:24607): the water params xstorm displaced. */
 let oldWater: { amp: number; per: number; spd: number } | null = null;
-/** Hlavy1/Tela1 (URoom.pas:23832): the sprites xmorph displaced, for the toggle back. */
-let morphSaved: { heads: Room['heads']; bodies: Room['bodies'] } | null = null;
+/**
+ * The sprite cheats currently applied, in the order they were typed. Both are
+ * toggles that rewrite the fish head/body frames, and both survive a restart in
+ * the original (TRoom.Restart does not reload the sprites), so the port keeps the
+ * state and recomputes the frames from the pristine parsed data whenever the Room
+ * is rebuilt. The original's xmorph instead restores the bitmaps it saved when it
+ * was switched on (Hlavy1/Tela1, URoom.pas:23832) — indistinguishable unless the
+ * two cheats are interleaved, where recomputing is the better-behaved of the two.
+ */
+let spriteCheats: ('UNDEAD' | 'MORPH')[] = [];
 /** megabomb (URoom.pas:26192): blank the room white for exactly one painted frame. */
 let megabombFlash = false;
+/** silentfilm (URoom.pas:181): the xsilent cheat's black-and-white movie mode. */
+let silentFilm = false;
+/** The volume slider indices xsilent zeroed (oldmusic/oldsnd/oldtalk). */
+let oldVolumes: Record<VolumeBus, number> | null = null;
+/** interlacedfaze (URoom.pas:195): -1 off, -2 winding down, >=0 the collapse phase. */
+let interlacedFaze = INTERLACED_OFF;
 /** The hidden SCORE bonus room (branch 9, `av:=9; am:=1` — UMain.pas:1774). */
 const SCORE_ROOM = 72;
 
@@ -655,35 +679,48 @@ function cheatMegabomb(): void {
   forceRoomRedraw = true;
 }
 
-/** xundead (URoom.pas:24573): flip every fish head and body frame — zombie fish.
- *  `pretoc` is its own inverse, so typing it twice puts the fish back up again. */
-function cheatUndead(): void {
-  if (!room) return;
+/** A head/body frame table, as both `Room.heads` and `Room.bodies` are shaped. */
+type FrameSet = { big: readonly (FfrBitmap | null)[]; small: readonly (FfrBitmap | null)[] };
+
+/** pretoc (URoom.pas:23892) over a whole frame table — the xundead flip. */
+function undeadSet(set: FrameSet): FrameSet {
   const flip = (frames: readonly (FfrBitmap | null)[]): (FfrBitmap | null)[] =>
     frames.map((bm) => (bm ? pretoc(bm) : bm));
-  room.heads = { big: flip(room.heads.big), small: flip(room.heads.small) };
-  room.bodies = { big: flip(room.bodies.big), small: flip(room.bodies.small) };
+  return { big: flip(set.big), small: flip(set.small) };
 }
 
-/** xmorph (URoom.pas:24588): each fish takes the other's shape — the little one a
- *  squashed big fish, the big one a blown-up little fish. Typing it again restores
- *  the saved originals (the Hlavy1/Tela1 slots). */
-function cheatMorph(): void {
-  if (!room) return;
-  if (morphSaved) {
-    room.heads = morphSaved.heads;
-    room.bodies = morphSaved.bodies;
-    morphSaved = null;
-    return;
-  }
-  morphSaved = { heads: room.heads, bodies: room.bodies };
-  const swap = (set: { big: readonly (FfrBitmap | null)[]; small: readonly (FfrBitmap | null)[] }) => ({
-    // Both halves derive from the ORIGINALS, as the Delphi does via bmmala1/bmvelka1.
+/** morph (URoom.pas:23832) over a whole frame table — each fish takes the other's
+ *  shape. Both halves derive from the ORIGINALS, as the Delphi does via
+ *  bmmala1/bmvelka1, so the swap is a genuine exchange rather than a chain. */
+function morphSet(set: FrameSet): FrameSet {
+  return {
     small: set.small.map((bm, i) => (bm && set.big[i] ? morphShrink(set.big[i]!) : bm)),
     big: set.big.map((bm, i) => (bm && set.small[i] ? morphStretch(set.small[i]!) : bm)),
-  });
-  room.heads = swap(room.heads);
-  room.bodies = swap(room.bodies);
+  };
+}
+
+/** Recompute the room's fish sprites: pristine parsed frames, then every active
+ *  sprite cheat in the order it was typed. Never mutates the shared FFR data. */
+function applySpriteCheats(): void {
+  if (!room || !ffr) return;
+  let heads: FrameSet = ffr.heads;
+  let bodies: FrameSet = ffr.bodies;
+  for (const c of spriteCheats) {
+    const f = c === 'UNDEAD' ? undeadSet : morphSet;
+    heads = f(heads);
+    bodies = f(bodies);
+  }
+  room.heads = heads;
+  room.bodies = bodies;
+}
+
+/** Toggle one of the two sprite cheats (xundead URoom.pas:24573, xmorph :24588). */
+function toggleSpriteCheat(which: 'UNDEAD' | 'MORPH'): void {
+  spriteCheats = spriteCheats.includes(which)
+    ? spriteCheats.filter((c) => c !== which)
+    : [...spriteCheats, which];
+  applySpriteCheats();
+  forceRoomRedraw = true;
 }
 
 /** xstorm (URoom.pas:24607): whip the water up (wamp/wspd/wper = 10/4/6), or put
@@ -705,26 +742,119 @@ function cheatStorm(): void {
 }
 
 /**
+ * xsilent (URoom.pas:24641): silent-movie mode — the sound is cut, the picture
+ * goes sepia, film grain scratches over it, and every spoken line becomes an
+ * intertitle card instead of a subtitle. Typing it again restores the volumes and
+ * the colour; so does leaving the room (TRoom.Done, URoom.pas:1513).
+ */
+function cheatSilent(): void {
+  if (silentFilm) {
+    endSilentFilm();
+    return;
+  }
+  oldVolumes = { ...settings.volume }; // oldmusic / oldsnd / oldtalk
+  for (const bus of ['effect', 'voice', 'music'] as const) audio.setBusGain(bus, 0);
+  silentFilm = true;
+  if (subs) {
+    subs.silentFilm = true;
+    subs.silentTime = 0; // cassilenttit := 0
+  }
+  forceRoomRedraw = true;
+}
+
+/** Undo silent-film mode — on a second xsilent, and on leaving the room. */
+function endSilentFilm(): void {
+  if (!silentFilm) return;
+  silentFilm = false;
+  if (oldVolumes) {
+    for (const bus of ['effect', 'voice', 'music'] as const) {
+      audio.setBusGain(bus, busMultiplier(bus, oldVolumes[bus]));
+    }
+    oldVolumes = null;
+  } else {
+    applyVolumeSettings();
+  }
+  if (subs) {
+    subs.silentFilm = false;
+    subs.silentTime = 0;
+  }
+  forceRoomRedraw = true;
+}
+
+/** xinterlaced (URoom.pas:24627): start the screen collapsing in on itself, or —
+ *  if it already is — ask it to wind down (faze -2 runs one last frame). */
+function cheatInterlaced(): void {
+  interlacedFaze = interlacedFaze >= 0 ? INTERLACED_STOP : INTERLACED_START;
+  forceRoomRedraw = true;
+}
+
+/** True while a cheat needs the whole finished frame post-processed, which the
+ *  GPU path cannot do — those frames render on the CPU instead. */
+function frameEffectsActive(): boolean {
+  return megabombFlash || silentFilm || interlacedFaze !== INTERLACED_OFF;
+}
+
+/**
+ * The tail of KresliMistnost (URoom.pas:26192-26281): the megabomb flash, the
+ * silent-film intertitle card, the grain, and the interlaced collapse — in the
+ * original's order, over the finished frame.
+ */
+function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean): void {
+  const rnd = (n: number): number => Math.floor(Math.random() * n);
+  if (megabombFlash) {
+    // VyplnMistnost(fontcol['w',1]); KresliTitulky — one white frame, then back.
+    megabombFlash = false;
+    forceRoomRedraw = true;
+    screen.fillIndex(subs?.fontcolIndex('w', 1) ?? 255);
+    subs?.draw(screen, count);
+    return;
+  }
+  if (silentFilm && subs?.silentActive) {
+    // The card replaces the room entirely while it runs.
+    screen.fillIndex(subs.fontcolIndex('w', 4));
+    subs.drawSilentTitle(screen);
+    subs.silentTime--;
+    sum(screen, rnd);
+    zcernobilit(screen.rgba);
+    forceRoomRedraw = true;
+    return;
+  }
+  if (!useVecSubs) subs?.draw(screen, count); // baked subtitles (palette-coloured, on top)
+  if (silentFilm) sum(screen, rnd);
+  if (interlacedFaze !== INTERLACED_OFF) {
+    if (interlacedSounds(interlacedFaze)) audio.snd('sp-smrt', -10, false, EFFECT_VOL);
+    interlacedFaze = zpracujInterlaced(screen, interlacedFaze, subs?.fontcolIndex('w', 4) ?? 255);
+  }
+  if (silentFilm) zcernobilit(screen.rgba);
+  if (frameEffectsActive()) forceRoomRedraw = true; // keep animating while an effect runs
+}
+
+/**
  * The in-room cheat dispatch (URoom.pas:24534-24690). Codes 11/12 have no case
  * here — SCORE and ULTRAVIOLENCE only work from the map (UMain.pas:1773-1780).
- */
-function applyRoomCheat(cheat: Cheat): void {
+ */function applyRoomCheat(cheat: Cheat): void {
   if (screen !== 'room' || !room) return;
   switch (cheat) {
     case 'MEGABOMB':
       cheatMegabomb();
       break;
     case 'UNDEAD':
-      cheatUndead();
+      toggleSpriteCheat('UNDEAD');
       break;
     case 'MORPH':
-      cheatMorph();
+      toggleSpriteCheat('MORPH');
       break;
     case 'FISHER':
       hooks.add(room);
       break;
     case 'STORM':
       cheatStorm();
+      break;
+    case 'INTERLACED':
+      cheatInterlaced();
+      break;
+    case 'SILENT':
+      cheatSilent();
       break;
     case 'WEMAKETHERULEZ':
       cheatSolveRoom();
@@ -1236,13 +1366,28 @@ function buildRoom(carryPole = false): void {
   // The room-scoped cheats die with the room, exactly as in the original — a fresh
   // TRoom.Create reloads the sprites and resets silentfilm/interlacedfaze
   // (URoom.pas:1430-1431). The new Room already carries pristine sprites and water.
-  morphSaved = null;
-  oldWater = null;
-  roomCheats.reset();
+  // The room-scoped cheats survive a RESTART but die on a room CHANGE — exactly
+  // like roompole above, because TRoom.Init clears them in the very same block
+  // (URoom.pas:1430-1433), while TRoom.Restart leaves them alone.
+  if (!carryPole) {
+    spriteCheats = [];
+    oldWater = null;
+    endSilentFilm(); // TRoom.Done also restores the volumes on the way out
+    interlacedFaze = INTERLACED_OFF;
+    roomCheats.reset();
+  }
+  // Re-apply whatever survived (a restart), onto the freshly built Room.
+  applySpriteCheats();
+  if (oldWater) {
+    room.wamp = 10;
+    room.wspd = 4;
+    room.wper = 6;
+  }
   screenShoveX = 0; // reset the KAJUTA1 screen-shove offset
   count = 0;
   const wall = room.bitmaps[room.wallItem.bmp];
   subs = font && wall ? new SubtitleSystem(font, ffr.palette, ffr.width, wall.w, wall.h) : null;
+  if (subs) subs.silentFilm = silentFilm; // a restart keeps silent-film mode running
   talkIdx.little = 0;
   talkIdx.big = 0;
   poslMluv.little = -1;
@@ -2998,7 +3143,7 @@ function draw(): void {
   // (GlScreen) — both composite either art source, every room on the GPU. Any GL
   // error falls back to the CPU path for that frame (and disables WebGL for the
   // session).
-  const wantGpu = renderer === 'webgl' && !glFailed;
+  const wantGpu = renderer === 'webgl' && !glFailed && !frameEffectsActive();
   const gpuOk = wantGpu && drawGpu(sw, sh, art, opts, useVecSubs);
   lastRoomBackend = gpuOk ? 'webgl' : 'cpu'; // the backend that ACTUALLY painted this frame (for the HUD)
   // #screen (the 2D canvas) is the flow anchor for the wrap that also holds the
@@ -3014,20 +3159,6 @@ function draw(): void {
   // (the display scale can change while the room — and thus sw/sh — stays the same).
   if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
   if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
-  if (megabombFlash) {
-    // megabomb (URoom.pas:26192): the blast blanks the room to white for a single
-    // frame (VyplnMistnost(fontcol['w',1]); KresliTitulky) before the normal room
-    // comes back with two fresh skeletons in it. The GL overlay is hidden for this
-    // one frame so the flash is visible on both render paths.
-    megabombFlash = false;
-    forceRoomRedraw = true; // repaint the room properly next frame
-    glCanvas.style.display = 'none';
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(0, 0, sw, sh);
-    canvas.style.transform = xform;
-    updateRoomSubOverlay(useVecSubs, cs, xform);
-    return;
-  }
   if (gpuOk) {
     glCanvas.style.display = 'block';
     glCanvas.style.transform = xform;
@@ -3036,7 +3167,7 @@ function draw(): void {
     // CPU path (default + fallback): render RGBA and blit into the 2D canvas.
     glCanvas.style.display = 'none';
     const screen = renderRoomRgba(room, art, opts);
-    if (!useVecSubs) subs?.draw(screen, count); // baked subtitles (palette-coloured, on top)
+    applyFrameEffects(screen, useVecSubs);
     ctx.putImageData(new ImageData(new Uint8ClampedArray(screen.rgba), sw, sh), 0, 0);
     canvas.style.transform = xform;
   }
@@ -4500,6 +4631,15 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     }
   },
   ultraviolence: () => ultraviolence,
+  /** xsilent / xinterlaced state (silentfilm, cassilenttit, interlacedfaze). */
+  silentFilm: () => ({
+    on: silentFilm,
+    time: subs?.silentTime ?? 0,
+    lines: (subs?.silentLines ?? []).map((l) => l.s),
+  }),
+  interlacedFaze: () => interlacedFaze,
+  /** Which backend actually painted the last room frame ('cpu' | 'webgl'). */
+  roomBackend: () => lastRoomBackend,
   water: () => (room ? { wamp: room.wamp, wper: room.wper, wspd: room.wspd } : null),
   fishSpriteSize: (which: 'little' | 'big') => {
     const bm = room?.bodies[which === 'little' ? 'small' : 'big'][1] ?? null;

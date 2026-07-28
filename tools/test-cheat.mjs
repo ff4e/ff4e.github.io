@@ -137,7 +137,56 @@ await withApp(async ({ p, expect }) => {
     'ultraviolence spawns a hook on room entry',
   );
 
+  // ---- xsilent: silent-movie mode -------------------------------------------
+  await p.evaluate(() => window.__ff.enterRoomAwait(7));
+  await waitRoom(p, 0);
+  expect((await p.evaluate(() => window.__ff.silentFilm())).on === false, 'silent film starts off');
+  const loudVolumes = await p.evaluate(() => window.__ff.volumes());
+  await typeCode(p, 'xsilent');
+  expect((await p.evaluate(() => window.__ff.silentFilm())).on === true, 'xsilent turns the film on');
+  // A spoken line becomes an intertitle card instead of a scrolling subtitle.
+  await p.evaluate(() => window.__ff.pushSubtitle('Ahoj rybicko', 'M'));
+  const card = await p.evaluate(() => window.__ff.silentFilm());
+  expect(card.time > 0, 'a spoken line starts an intertitle card');
+  expect(card.lines.length > 0, 'the card holds the wrapped line(s)');
+  // The effects force the CPU renderer, since they post-process the whole frame.
+  await p.waitForTimeout(200);
+  expect(
+    (await p.evaluate(() => window.__ff.roomBackend())) !== 'webgl',
+    'silent film renders on the CPU path (the frame is post-processed)',
+  );
+  await typeCode(p, 'xsilent');
+  expect((await p.evaluate(() => window.__ff.silentFilm())).on === false, 'xsilent typed again ends it');
+  const afterVolumes = await p.evaluate(() => window.__ff.volumes());
+  expect(
+    afterVolumes.music === loudVolumes.music && afterVolumes.voice === loudVolumes.voice,
+    'the volume sliders come back',
+  );
+
+  // Leaving the room ends silent film too (TRoom.Done / TRoom.Init).
+  await typeCode(p, 'xsilent');
+  expect((await p.evaluate(() => window.__ff.silentFilm())).on === true, 'silent film on again');
+  await p.evaluate(() => window.__ff.enterRoomAwait(1));
+  await waitRoom(p, 0);
+  expect(
+    (await p.evaluate(() => window.__ff.silentFilm())).on === false,
+    'silent film dies with the room',
+  );
+
+  // ---- xinterlaced: the screen collapses in on itself -------------------------
+  expect((await p.evaluate(() => window.__ff.interlacedFaze())) === -1, 'interlaced starts off (-1)');
+  await typeCode(p, 'xinterlaced');
+  await p.waitForTimeout(300);
+  const faze = await p.evaluate(() => window.__ff.interlacedFaze());
+  expect(faze > 0, `the collapse advances its phase (got ${faze})`);
+  await typeCode(p, 'xinterlaced');
+  await p.waitForTimeout(300);
+  expect(
+    (await p.evaluate(() => window.__ff.interlacedFaze())) === -1,
+    'typing it again winds the collapse down to -1',
+  );
+
   console.log(
-    'cheats OK: entry machine, fisher/storm/undead/morph/megabomb/wemaketherulez, map score+ultraviolence',
+    'cheats OK: entry machine, fisher/storm/undead/morph/megabomb/wemaketherulez, silent+interlaced, map score+ultraviolence',
   );
 });

@@ -20,6 +20,8 @@ const TIMEPERCHARTITLE = 2;
 const MINTIMETITLE = 40;
 const MINYTITLE = BASETITLE - ROWTITLE * 5;
 const BORDERTITLE = 20;
+/** siltitborder (URoom.pas:26125): the intertitle card's frame inset. */
+const SILTITBORDER = 15;
 
 // Enhanced (vector) subtitle rendering.
 const SUB_FONT_PX = 23; // native-pixel font size for the FreeSans-Bold overlay
@@ -135,6 +137,7 @@ export class SubtitleSystem {
   newSubtitle(text: string, color: string, count: number): void {
     const maxW = this.screenW - BORDERTITLE * 2;
     let obsah = text;
+    let prvni = true; // the outer call; the original recurses with prvni=false
     for (;;) {
       let s = obsah;
       let i = s.length;
@@ -145,7 +148,9 @@ export class SubtitleSystem {
         if (i === 0) i = s.length; // a single word wider than the line: keep it whole
         s = s.slice(0, i - 1); // delete(s, i, ..) -> s[1..i-1]
       }
-      this.addLine(s, color, count);
+      if (this.silentFilm) this.addSilentLine(s, color, prvni);
+      else this.addLine(s, color, count);
+      prvni = false;
       if (s.length >= obsah.length) return; // whole string fit on this line
       obsah = obsah.slice(i); // delete(obsah, 1, i) -> obsah[i+1..], dropping the break space
     }
@@ -190,6 +195,76 @@ export class SubtitleSystem {
 
   clear(): void {
     this.titles.length = 0;
+    this.silent.length = 0;
+    this.silentTime = 0;
+  }
+
+  // ---- silent-film intertitles (the xsilent cheat) -------------------------
+
+  /**
+   * silentfilm (URoom.pas:604): while set, a spoken line becomes an intertitle
+   * card instead of a scrolling subtitle — the room is replaced by the card for
+   * `silentTime` frames, as in a silent movie.
+   */
+  silentFilm = false;
+  /** silenttit[] — the lines on the current card. */
+  private readonly silent: { s: string; c: string }[] = [];
+  /** cassilenttit — frames the card still has to run. */
+  silentTime = 0;
+
+  /** True while a card is showing (the room is not drawn underneath it). */
+  get silentActive(): boolean {
+    return this.silentTime > 0;
+  }
+
+  /** URoom.pas:604-615: a new card starts at 10 frames, each line adding len/2. */
+  private addSilentLine(s: string, c: string, prvni: boolean): void {
+    if (prvni) {
+      this.silent.length = 0;
+      this.silentTime = 10;
+    }
+    this.silentTime += Math.floor(s.length / 2);
+    this.silent.push({ s, c });
+  }
+
+  /** Palette index for a font colour code + shade (fontcol), for the film effects. */
+  fontcolIndex(code: string, shade: number): number {
+    return this.fontcol.get(code)?.[shade] ?? 0;
+  }
+
+  /**
+   * KresliSilentTit (URoom.pas:26126): the intertitle card — a two-pixel frame
+   * inset 15px, with the wrapped lines centred as a block. The original's vertical
+   * edges land two pixels past the horizontal rules on the right; kept as it is.
+   */
+  drawSilentTitle(screen: PixelTarget): void {
+    const b = SILTITBORDER;
+    const col = this.fontcolIndex('M', 0);
+    const w = screen.width;
+    const h = screen.height;
+    for (const y of [b, b + 1, h - 1 - b, h - 1 - b - 1]) {
+      for (let x = b; x < b + (w - 2 * b); x++) screen.setIndex(x, y, col);
+    }
+    for (let y = b; y <= h - 1 - b; y++) {
+      screen.setIndex(b, y, col);
+      screen.setIndex(b + 1, y, col);
+      screen.setIndex(w - b, y, col);
+      screen.setIndex(w - b + 1, y, col);
+    }
+    if (this.silent.length === 0) return;
+    const y0 = Math.floor((h - this.silent.length * 20) / 2);
+    for (let i = 0; i < this.silent.length; i++) {
+      const line = this.silent[i]!;
+      const x = Math.floor((w - this.font.textWidth(line.s)) / 2);
+      // PisString, not PisStringF: a card does not wave in, so pass a `cas` big
+      // enough that every glyph is already settled.
+      this.drawText(screen, x, y0 + i * 20, 0, line.s, line.c, 1000);
+    }
+  }
+
+  /** The card's lines (debug/probes). */
+  get silentLines(): readonly { s: string; c: string }[] {
+    return this.silent;
   }
 
   get active(): boolean {
