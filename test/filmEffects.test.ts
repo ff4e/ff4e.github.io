@@ -48,11 +48,6 @@ describe('zpracujInterlaced', () => {
   /** Rows numbered 1..H so row 0 is distinguishable from the blank fill. */
   const frame = (): FrameTarget => target(3, H, (_x, y) => y + 1);
 
-  it('advances the phase by one and reports the next value', () => {
-    expect(zpracujInterlaced(frame(), 0, WHITE)).toBe(1);
-    expect(zpracujInterlaced(frame(), 40, WHITE)).toBe(41);
-  });
-
   it('at phase 0 the shift is clamped to 0 and every odd row blanks out', () => {
     // posun = (0-35)*5 = -175 -> clamped to 0. For each row i (bar the last),
     // source = i when i is even, else nothing.
@@ -84,8 +79,26 @@ describe('zpracujInterlaced', () => {
     }
   });
 
-  it('winds down from the stop phase straight to off', () => {
-    expect(zpracujInterlaced(frame(), INTERLACED_STOP, WHITE)).toBe(INTERLACED_OFF);
+  it('renders the wind-down phase, which the caller then steps to off', () => {
+    // INTERLACED_STOP (-2) gives a hugely negative shift, so it clamps to 0 and
+    // draws one last odd-lines-blanked frame; the caller's +1 takes it to OFF.
+    const t = frame();
+    zpracujInterlaced(t, INTERLACED_STOP, WHITE);
+    expect(rows(t)).toEqual([1, WHITE, 3, WHITE, 5, WHITE, 7, 8]);
+    expect(INTERLACED_STOP + 1).toBe(INTERLACED_OFF);
+  });
+
+  it('draws only — the same phase always yields the same frame, twice running', () => {
+    // Regression guard: the effect used to advance its own counter from the render
+    // path, which ran the collapse at paint rate instead of the game's ~12.5fps
+    // logic tick. It must now hold no state of its own, so painting the same phase
+    // onto a fresh frame is reproducible. (It is deliberately destructive on the
+    // frame it is given, so this is two fresh frames, not two passes over one.)
+    const a = frame();
+    const b = frame();
+    zpracujInterlaced(a, 36, WHITE);
+    zpracujInterlaced(b, 36, WHITE);
+    expect(rows(b)).toEqual(rows(a));
   });
 
   it('fires the collapse sound exactly on the phase whose shift is -10', () => {

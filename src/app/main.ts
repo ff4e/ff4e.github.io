@@ -545,6 +545,8 @@ const scores = loadScores(); // room number -> best (lowest) move count on a gen
 const playTime = loadPlayTime();
 /** Date.now() when the current room visit began, or 0 when not in a room. */
 let roomEnterAt = 0;
+/** The room that visit belongs to. */
+let roomClockNum = 0;
 
 /** Load the persisted per-room play time (ms). */
 function loadPlayTime(): Map<number, number> {
@@ -564,11 +566,15 @@ function loadPlayTime(): Map<number, number> {
   return new Map<number, number>();
 }
 
-/** Start timing a room visit (TRoom.Start: casstartu := Date+Time). Armed by the
- *  player entering a room, not by loadRoom — the boot room is pre-loaded behind
- *  the world map and must not accrue play time. */
-function startRoomClock(): void {
+/** Start timing a visit to room `num` (TRoom.Start: casstartu := Date+Time). Armed
+ *  by the player entering a room, not by loadRoom — the boot room is pre-loaded
+ *  behind the world map and must not accrue play time. The room number is captured
+ *  here rather than read from `curNum` at the end, because `curNum` only updates
+ *  once the (async) room load succeeds: leaving during the load would otherwise
+ *  bank the time against the room the player just came from. */
+function startRoomClock(num: number): void {
   roomEnterAt = Date.now();
+  roomClockNum = num;
 }
 
 /**
@@ -580,7 +586,8 @@ function stopRoomClock(): void {
   if (!roomEnterAt) return;
   const elapsed = Date.now() - roomEnterAt;
   roomEnterAt = 0;
-  const n = curNum;
+  const n = roomClockNum;
+  roomClockNum = 0;
   if (!n || elapsed <= 0) return;
   playTime.set(n, (playTime.get(n) ?? 0) + elapsed);
   try {
@@ -733,8 +740,6 @@ let spriteCheats: ('UNDEAD' | 'MORPH')[] = [];
 let megabombFlash = false;
 /** silentfilm (URoom.pas:181): the xsilent cheat's black-and-white movie mode. */
 let silentFilm = false;
-/** The volume slider indices xsilent zeroed (oldmusic/oldsnd/oldtalk). */
-let oldVolumes: Record<VolumeBus, number> | null = null;
 /** interlacedfaze (URoom.pas:195): -1 off, -2 winding down, >=0 the collapse phase. */
 let interlacedFaze = INTERLACED_OFF;
 /** The hidden SCORE bonus room (branch 9, `av:=9; am:=1` — UMain.pas:1774). */
@@ -884,9 +889,9 @@ function cheatSilent(): void {
     endSilentFilm();
     return;
   }
-  oldVolumes = { ...settings.volume }; // oldmusic / oldsnd / oldtalk
   for (const bus of ['effect', 'voice', 'music'] as const) audio.setBusGain(bus, 0);
   silentFilm = true;
+  syncScriptMusicVolume(); // music_volume := 0, which room scripts can see (VES)
   if (subs) {
     subs.silentFilm = true;
     subs.silentTime = 0; // cassilenttit := 0
@@ -894,18 +899,21 @@ function cheatSilent(): void {
   forceRoomRedraw = true;
 }
 
-/** Undo silent-film mode — on a second xsilent, and on leaving the room. */
+/**
+ * Undo silent-film mode — on a second xsilent, and on leaving the room, which is
+ * where the original does it (TRoom.Done, URoom.pas:1513-1518).
+ *
+ * The original restores its `oldmusic`/`oldsnd`/`oldtalk` snapshot; the port
+ * restores the persisted settings instead. They are the same thing unless the
+ * player moved a slider while the film was running, in which case restoring the
+ * snapshot would leave what you HEAR disagreeing with where the slider SITS —
+ * the original re-derives its slider from the volume, so it has no such split.
+ */
 function endSilentFilm(): void {
   if (!silentFilm) return;
   silentFilm = false;
-  if (oldVolumes) {
-    for (const bus of ['effect', 'voice', 'music'] as const) {
-      audio.setBusGain(bus, busMultiplier(bus, oldVolumes[bus]));
-    }
-    oldVolumes = null;
-  } else {
-    applyVolumeSettings();
-  }
+  applyVolumeSettings();
+  syncScriptMusicVolume();
   if (subs) {
     subs.silentFilm = false;
     subs.silentTime = 0;
@@ -918,6 +926,24 @@ function endSilentFilm(): void {
 function cheatInterlaced(): void {
   interlacedFaze = interlacedFaze >= 0 ? INTERLACED_STOP : INTERLACED_START;
   forceRoomRedraw = true;
+}
+
+/**
+ * Advance the film effects' own counters, once per game tick.
+ *
+ * These live in `KresliMistnost` in the original (URoom.pas:26200-26205, 26079),
+ * which is driven from `Jedeme` — i.e. once per ~80ms logic tick, not once per
+ * painted frame. The port paints at up to 60fps, so running them from the render
+ * path made the intertitle cards and the interlaced collapse play roughly five
+ * times too fast.
+ */
+function tickFrameEffects(): void {
+  if (silentFilm && subs && subs.silentTime > 0) subs.silentTime--;
+  if (interlacedFaze !== INTERLACED_OFF) {
+    // `sp-smrt` fires on the phase whose shift passes -10 (URoom.pas:26058).
+    if (interlacedSounds(interlacedFaze)) audio.snd('sp-smrt', -10, false, EFFECT_VOL);
+    interlacedFaze++;
+  }
 }
 
 /** True while a cheat needs the whole finished frame post-processed, which the
@@ -956,8 +982,11 @@ function blitTetris(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number):
  * silent-film intertitle card, the grain, and the interlaced collapse — in the
  * original's order, over the finished frame.
  */
-function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean): void {
+function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean, grain = true): void {
   const rnd = (n: number): number => Math.floor(Math.random() * n);
+  const scratch = (s: RgbaScreen): void => {
+    if (grain) sum(s, rnd); // probes disable the random grain to get a stable hash
+  };
   if (tetris && tetrisArt) {
     // The minigame sits over the (frozen) room, as its modal window does.
     blitTetris(screen.rgba, screen.width, screen.height);
@@ -975,20 +1004,16 @@ function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean): void {
     // The card replaces the room entirely while it runs.
     screen.fillIndex(subs.fontcolIndex('w', 4));
     subs.drawSilentTitle(screen);
-    subs.silentTime--;
-    sum(screen, rnd);
+    scratch(screen);
     zcernobilit(screen.rgba);
-    forceRoomRedraw = true;
     return;
   }
   if (!useVecSubs) subs?.draw(screen, count); // baked subtitles (palette-coloured, on top)
-  if (silentFilm) sum(screen, rnd);
+  if (silentFilm) scratch(screen);
   if (interlacedFaze !== INTERLACED_OFF) {
-    if (interlacedSounds(interlacedFaze)) audio.snd('sp-smrt', -10, false, EFFECT_VOL);
-    interlacedFaze = zpracujInterlaced(screen, interlacedFaze, subs?.fontcolIndex('w', 4) ?? 255);
+    zpracujInterlaced(screen, interlacedFaze, subs?.fontcolIndex('w', 4) ?? 255);
   }
   if (silentFilm) zcernobilit(screen.rgba);
-  if (frameEffectsActive()) forceRoomRedraw = true; // keep animating while an effect runs
 }
 
 /**
@@ -1002,6 +1027,7 @@ let tetrisArt: TetrisArt | null = null;
 let tetrisLoading = false;
 let tetrisAcc = 0; // ms accumulated toward the next 55ms game tick (Ttr.dfm)
 let tetrisTick = 0; // ticks run, so the map's paint cache knows the board moved
+let tetrisPending = false; // the cheat fired and the board art is still loading
 const TETRIS_TICK_MS = 55;
 
 /** ttr.pic (Ttr.pas:339) — the persistent top-ten, in localStorage here. */
@@ -1050,11 +1076,22 @@ async function ensureTetrisArt(): Promise<TetrisArt | null> {
 }
 let tetrisShapes: TetrisShapes | null = null;
 
-/** Open the minigame (Tetris.Create + ShowModal). */
+/**
+ * Open the minigame (Tetris.Create + ShowModal). The original's launch is
+ * synchronous; the port has to fetch the board art first, so `tetrisPending`
+ * makes the game modal from the instant the code fires — otherwise the room kept
+ * running and taking input during the fetch, and the board could pop open on a
+ * screen the player had since moved to.
+ */
 function openTetris(): void {
-  if (tetris) return;
+  if (tetris || tetrisPending) return;
+  const screenAtLaunch = screen;
+  tetrisPending = true;
+  wake();
   void ensureTetrisArt().then(() => {
-    if (!tetrisArt || !tetrisShapes || tetris) return;
+    if (!tetrisPending) return; // cancelled (Escape) while the art was loading
+    tetrisPending = false;
+    if (!tetrisArt || !tetrisShapes || tetris || screen !== screenAtLaunch) return;
     tetris = new TetrisGame(tetrisShapes, (n) => Math.floor(Math.random() * n), tetrisHiscores);
     tetrisAcc = 0;
     forceRoomRedraw = true;
@@ -1065,12 +1102,19 @@ function openTetris(): void {
 /** Close it (modalresult := mrCancel): the room resumes with no key held
  *  (gstav := stav_klid; keyroom := 0; keyovl := 0 — URoom.pas:24568). */
 function closeTetris(): void {
-  if (!tetris) return;
+  if (!tetris && !tetrisPending) return;
   tetris = null;
+  tetrisPending = false;
   clearHeldKey();
   if (engine) engine.swim = null;
   forceRoomRedraw = true;
   wake();
+}
+
+/** True while the minigame owns the game — including the moment between the cheat
+ *  firing and its art arriving. */
+function tetrisModal(): boolean {
+  return tetris !== null || tetrisPending;
 }
 
 /** Advance the minigame's own 55ms timer, independent of the game's logic tick. */
@@ -1163,9 +1207,15 @@ let deathFft: FftEntry[] = []; // global x02 death-commentary subtitles (smrt-*)
 // `titDef` remembers the last cz/en pick — the one language used for the titles,
 // room-name plaques and help (and the subtitles when on). subLang() resolves it.
 const settings = loadSettings();
-/** True while subtitles should be shown (titles <> tit_no). */
+/**
+ * True while dialogue text should be shown (titles <> tit_no).
+ *
+ * Silent-film mode overrides the "off" setting: `Talk` swaps `titles` to `tit_def`
+ * for the duration (URoom.pas:630-635), because the cheat has muted every voice
+ * and the intertitle cards are all the player has left.
+ */
 function subsOn(): boolean {
-  return settings.subtitles !== 'off';
+  return settings.subtitles !== 'off' || silentFilm;
 }
 /** The language to render dialogue text in (falls back to tit_def when off). */
 function subLang(): 'cz' | 'en' {
@@ -1187,7 +1237,7 @@ function setSubtitleMode(mode: SubtitleMode): void {
 function setVolume(bus: VolumeBus, index: number): void {
   settings.volume[bus] = index;
   audio.setBusGain(bus, busMultiplier(bus, index));
-  if (activeScript) activeScript.s.musicVolume = musicLevel();
+  syncScriptMusicVolume();
   saveSettings(settings);
 }
 
@@ -1197,7 +1247,13 @@ function setVolume(bus: VolumeBus, index: number): void {
  * quiet-music easter egg, URoom.pas:12190) compare against this, not the index.
  */
 function musicLevel(): number {
+  if (silentFilm) return 0; // xsilent sets music_volume := 0 (URoom.pas:24647)
   return VOLUMES[Math.max(0, Math.min(VOLUMES.length - 1, settings.volume.music))]!;
+}
+
+/** Push the effective music_volume at the running room script. */
+function syncScriptMusicVolume(): void {
+  if (activeScript) activeScript.s.musicVolume = musicLevel();
 }
 
 /** Push all persisted volume levels into the audio buses (NastavZvuk, on boot). */
@@ -2206,6 +2262,14 @@ function talk(which: 'little' | 'big'): void {
 const idle = (): boolean =>
   room !== null && engine !== null && engine.phase === 'idle' && !room.anyFishDead && !room.won;
 
+/**
+ * gstav in [stav_nic, stav_klid] (URoom.pas:24432): the original only dequeues a
+ * command — including save and load — while the room is at rest, so neither can
+ * land mid-animation. Looser than `idle()`, which also excludes a dead fish and a
+ * won room; this is only the animation gate.
+ */
+const atRest = (): boolean => engine !== null && engine.phase === 'idle';
+
 /** DalsiPrikaz busy gate (URoom.pas:27002-27016): a fish command is dropped while that
  *  fish is busy (mid-dialogue, turned to face the player). */
 function fishBusy(which: 'little' | 'big'): boolean {
@@ -2318,7 +2382,10 @@ function restore(
 ): void {
   if (!preserveShowmode) endShowmode(); // loading a saved game ends any KUFRIK demonstration
   loadmode = null;
-  buildRoom(); // fresh room (resets srecord); may leave pending fall dirs
+  // Rebuild with carryPole, i.e. the RESTART flavour: TRoom.Load runs InitItems +
+  // InitProgramky (URoom.pas:1905-1948), never TRoom.Init, so loading a save must
+  // not clear the room-scoped cheats (or roompole) the way a room change does.
+  buildRoom(true); // fresh room (resets srecord); may leave pending fall dirs
   if (!room || !engine) return;
   room.clearAllDirs();
   room.fallToRest(); // settle the initial gravity instantly
@@ -2740,6 +2807,7 @@ function startMenuMusic(): void {
  */
 function showMap(): void {
   stopRoomClock(); // bank this visit's play time before the room goes away
+  endSilentFilm(); // TRoom.Done (URoom.pas:1513): leaving the room un-mutes the game
   screen = 'map';
   select.value = 'map'; // keep the dev-bar Room picker in sync with the screen
   clearHeldKey(); // drop any held movement key when leaving the room
@@ -2993,7 +3061,7 @@ function enterRoom(num: number, replay?: string): Promise<void> {
   wake();
   stopRoomClock(); // bank the outgoing room's time before the switch
   screen = 'room';
-  startRoomClock(); // TRoom.Start: casstartu := Date+Time
+  startRoomClock(num); // TRoom.Start: casstartu := Date+Time
   mapHoverCorner = null; // drop any map corner hover on leaving the map
   mapHoverRoom = null;
   canvas.style.cursor = 'default';
@@ -3047,10 +3115,10 @@ function panelAction(region: number, panelX = 0): void {
       swapActive();
       break;
     case 12:
-      saveGame();
+      if (atRest()) saveGame();
       break;
     case 13:
-      loadGame();
+      if (atRest()) loadGame();
       break;
     case 14: // exit to the world map
       showMap();
@@ -3539,6 +3607,7 @@ function step(): boolean {
     return false;
   }
   tickBlink();
+  tickFrameEffects();
   subs?.tick(count);
   // Death cry when a fish is first crushed (sp-smrt1/2, URoom.pas:26767/26773).
   if (room) {
@@ -3866,7 +3935,7 @@ function loop(now: number): void {
   // The minigame is modal in the original, so the room's timer does not run while
   // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
   tickTetris(dt);
-  const frozen = tetris !== null;
+  const frozen = tetrisModal();
   while (!holding && !frozen && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
     acc -= LOGIC_MS;
     steps++;
@@ -3935,7 +4004,10 @@ function loop(now: number): void {
       draw();
       perfPaint++;
       lastRoomSig = sig;
-      forceRoomRedraw = false;
+      // Clear the one-shot force, but keep repainting while a cheat effect is live:
+      // the grain, the interlaced collapse and the minigame all animate on their own,
+      // and `sig` cannot see them, so render-on-dirty would otherwise freeze them.
+      forceRoomRedraw = frameEffectsActive();
     } else if (graphics === 'enhanced' && subFontReady && subs?.active) {
       // The room is unchanged, but a subtitle may still be waving in or scrolling.
       // The overlay is its own layer, so animate it on its own — at the sub-tick
@@ -3995,14 +4067,14 @@ window.addEventListener('keydown', (e) => {
   // does (FormKeyDown, Ttr.pas:458). Escape closes it (modalresult := mrCancel).
   // Note that Down ROTATES the piece here — the original has no soft drop; Space
   // slams the piece down instead.
-  if (tetris) {
+  if (tetrisModal()) {
     e.preventDefault();
     if (e.code === 'Escape') {
       closeTetris();
       return;
     }
-    const k = TETRIS_KEYS[e.code];
-    if (k) {
+    const k = tetris ? TETRIS_KEYS[e.code] : undefined;
+    if (k && tetris) {
       tetris.key(k);
       forceRoomRedraw = true;
     }
@@ -4012,9 +4084,14 @@ window.addEventListener('keydown', (e) => {
   // its own buffer, UMain.pas:1750). `X` arms the machine; while a code is part-typed
   // the letters are swallowed, and the first letter that cannot continue any code
   // parks it and falls through to the normal handler below.
-  if (e.key.length === 1 && /[a-z]/i.test(e.key)) {
+  {
+    // The original feeds EVERY key through the buffer, so an arrow, Space or
+    // Backspace breaks the prefix and parks the machine before doing its normal
+    // job (Uovl.pas:748-769). Only letters can extend a code, so anything else is
+    // fed as a cancelling key and then handled normally below.
     const entry = screen === 'map' ? mapCheats : roomCheats;
-    const r = entry.press(e.key);
+    const letter = e.key.length === 1 && /[a-z]/i.test(e.key);
+    const r = letter ? entry.press(e.key) : entry.cancel();
     if (r.cheat) {
       if (screen === 'map') applyMapCheat(r.cheat);
       else applyRoomCheat(r.cheat);
@@ -4078,14 +4155,15 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'F2') {
     e.preventDefault();
-    saveGame();
+    if (atRest()) saveGame();
     return;
   }
   if (e.code === 'F3') {
     e.preventDefault();
-    loadGame();
+    if (atRest()) loadGame();
     return;
   }
+
   if (e.code === 'Escape') {
     e.preventDefault();
     if (screen === 'map') {
@@ -4193,6 +4271,13 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // allow righ
 
 canvas.addEventListener('mousedown', (e) => {
   wake();
+  // The Tetris minigame is modal (ShowModal), so it owns the pointer as well as the
+  // keyboard: without this, a click behind the board still moved a fish, opened a
+  // room from the map, or dismissed an overlay.
+  if (tetrisModal()) {
+    e.preventDefault();
+    return;
+  }
   // While the help screens are open, a click advances to the next page (Image1Click);
   // a right-click closes the viewer.
   if (helpOpen) {
@@ -4384,6 +4469,10 @@ panelCanvas.addEventListener('contextmenu', (e) => e.preventDefault()); // right
 panelCanvas.addEventListener('mousedown', (e) => {
   wake();
   if (!panel) return;
+  if (tetrisModal()) {
+    e.preventDefault(); // modal minigame: the control panel is inert behind it
+    return;
+  }
   if (inReplay()) {
     e.preventDefault(); // map "Replay" playback: the control panel is inert
     return;
@@ -4909,6 +4998,30 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     return hash >>> 0;
   },
   /**
+   * The same frame, but put through the cheat post-processing the real paint path
+   * applies (`applyFrameEffects`) — the ONLY way to observe the silent-film tint,
+   * the grain and the intertitle card as pixels. `roomFrameHash` above renders the
+   * room directly and structurally cannot see them.
+   *
+   * `grain` selects whether the (deliberately random) film grain is included; leave
+   * it off to get a hash that is stable between calls.
+   */
+  roomEffectFrameHash: (mode: 'classic' | 'enhanced' = graphics, grain = false) => {
+    if (!room) return null;
+    const art = mode === 'enhanced' ? enhancedArtFor(room) : classicArtFor(room);
+    const frame = renderRoomRgba(room, art, { count: 0 });
+    // Snapshot the one-shot state applyFrameEffects consumes, so merely ASKING for
+    // the hash cannot swallow a megabomb flash the player is owed.
+    const flash = megabombFlash;
+    const force = forceRoomRedraw;
+    applyFrameEffects(frame, true, grain);
+    megabombFlash = flash;
+    forceRoomRedraw = force;
+    let hash = 2166136261;
+    for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
+    return hash >>> 0;
+  },
+  /**
    * Same, but of the BACKGROUND layer only (wall + wobbled bg, no fish/items/effects).
    * LODE's falling wreck is the only thing that mutates that layer mid-room, so this
    * isolates its visible delta from ambient fish/item animation — and, being masked by
@@ -4967,6 +5080,15 @@ window.addEventListener('keydown', unlockAudio, { once: true });
         }
       : null,
   tetrisTick: () => (tetris ? tetris.tick() : undefined),
+  /** Hash of the minigame's 150x300 board as it is actually composed and coloured
+   *  — the only way a probe can tell the board is really being painted. */
+  tetrisBoardHash: () => {
+    if (!tetris || !tetrisArt) return null;
+    const rgba = tetrisRgba(renderTetris(tetris, tetrisArt), tetrisArt);
+    let hash = 2166136261;
+    for (const byte of rgba) hash = Math.imul(hash ^ byte, 16777619);
+    return { hash: hash >>> 0, w: tetrisArt.hole.w, h: tetrisArt.hole.h };
+  },
   tetrisKey: (k: TetrisKey) => tetris?.key(k),
   closeTetris: () => closeTetris(),
   /** Which backend actually painted the last room frame ('cpu' | 'webgl'). */

@@ -75,6 +75,17 @@ export class CheatEntry {
   }
 
   /**
+   * Feed a key that cannot extend any code (an arrow, Space, Backspace, a function
+   * key...). The original runs every key through the buffer, so such a key breaks
+   * the prefix and parks the machine, then falls through to its normal action —
+   * which is why you cannot type half a code, press Backspace, and finish it.
+   */
+  cancel(): CheatKeyResult {
+    this.buf = NOCHEAT;
+    return MISS;
+  }
+
+  /**
    * Feed one key. `key` is a single character; letters are matched
    * case-insensitively (the original sees the uppercase VK char).
    */

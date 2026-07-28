@@ -44,13 +44,16 @@ function fillRow(s: FrameTarget, y: number, a: number): void {
 /**
  * ZpracujInterlaced (URoom.pas:26053): one frame of the screen collapsing in on
  * itself — the bottom of the picture folds up over its own mirror image while the
- * rest is pulled down `posun` rows with every other line blanked. Returns the next
- * `interlacedfaze` (the caller stops when it reaches INTERLACED_OFF).
+ * rest is pulled down `posun` rows with every other line blanked.
+ *
+ * Draws only. The original advances `interlacedfaze` in here because it is called
+ * once per game tick; the port paints far more often than it ticks, so the caller
+ * advances the phase on the logic tick instead (see `tickFrameEffects`).
  *
  * Rows are walked bottom-up so a row is only ever read before it is overwritten,
  * exactly as the Delphi does.
  */
-export function zpracujInterlaced(s: FrameTarget, faze: number, fillIdx: number): number {
+export function zpracujInterlaced(s: FrameTarget, faze: number, fillIdx: number): void {
   let posun = (faze - 35) * 5;
   if (posun < 0) posun = 0;
   if (posun >= s.height) posun = s.height - 1;
@@ -66,7 +69,6 @@ export function zpracujInterlaced(s: FrameTarget, faze: number, fillIdx: number)
     if (source === null) fillRow(s, i, fillIdx);
     else copyRow(s, i, source);
   }
-  return faze + 1;
 }
 
 /** True on the frame whose `posun` is -10 — the original fires 'sp-smrt' there. */

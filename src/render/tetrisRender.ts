@@ -113,6 +113,10 @@ function blitTile(
  * `priprav` (Ttr.pas:238): compose the whole frame — the well, every settled
  * block, the score (top right) and the level (top left), plus the hiscore table
  * once the game is over, with the row just earned blinking.
+ *
+ * Draws only: `blikani` is advanced by the game's own 55ms tick, not here. The
+ * original can fold it into `priprav` because `priprav` runs exactly once per
+ * tick; the port paints far more often than that.
  */
 export function renderTetris(game: TetrisGame, art: TetrisArt): Uint8Array {
   const w = art.hole.w;
@@ -135,8 +139,6 @@ export function renderTetris(game: TetrisGame, art: TetrisArt): Uint8Array {
         pisCislo(out, w, h, art, 130, 30 + i * 25, game.hiscore[i - 1]!);
       }
     }
-    game.blikani++;
-    if (game.blikani === 18) game.blikani = 0;
   }
   return out;
 }

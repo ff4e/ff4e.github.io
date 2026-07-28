@@ -264,7 +264,14 @@ export class TetrisGame {
    * next piece, or drop the current one by a cell.
    */
   tick(): void {
-    if (this.gameover) return;
+    if (this.gameover) {
+      // `priprav` runs at the tail of every timer tick, and blinks the earned
+      // hiscore row as it draws it (Ttr.pas:313-321). Advancing it here keeps the
+      // blink on the game's 55ms clock rather than the host's paint rate.
+      this.blikani++;
+      if (this.blikani === 18) this.blikani = 0;
+      return;
+    }
     if (this.pada.druh === 0) {
       if (this.mizi >= 0) {
         // The blanked row collapses and everything above it slides down.

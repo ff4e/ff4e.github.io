@@ -35,6 +35,25 @@ await withApp(async ({ p, expect }) => {
   const fell = await p.evaluate(() => window.__ff.tetris());
   expect(fell.y > spawned.y || fell.score > spawned.score, 'the piece falls on its own');
 
+  // ---- the board is actually PAINTED, not just simulated ----------------------
+  // Without this the whole render path (tile orientations, digit atlas, the well)
+  // could be broken or blank and every state assertion above would still pass.
+  const board = await p.evaluate(() => window.__ff.tetrisBoardHash());
+  expect(board !== null && board.w === 150 && board.h === 300, 'the 150x300 board composes');
+  const boardBefore = await p.evaluate(() => window.__ff.tetrisBoardHash());
+  await p.evaluate(() => {
+    window.__ff.tetrisKey('left');
+    window.__ff.tetrisKey('left');
+  });
+  expect(
+    (await p.evaluate(() => window.__ff.tetrisBoardHash())).hash !== boardBefore.hash,
+    'moving the piece changes the painted board',
+  );
+  // And it reaches the canvas: the room frame carries the board over its middle.
+  const withBoard = await p.evaluate(() => window.__ff.roomEffectFrameHash('classic'));
+  const roomOnly = await p.evaluate(() => window.__ff.roomFrameHash('classic'));
+  expect(withBoard !== roomOnly, 'the board is composited over the room frame');
+
   // ---- the room is frozen underneath (ShowModal blocks TRoom's timer) ---------
   const roomCount = await p.evaluate(() => window.__ff.count());
   await p.waitForTimeout(500);
@@ -132,5 +151,26 @@ await withApp(async ({ p, expect }) => {
   await p.keyboard.press('Escape');
   await p.waitForFunction(() => window.__ff.tetris() === null, { timeout: 5000 });
 
-  console.log('Tetris OK: launch from room + map, own clock, room frozen, controls, hiscore, close');
+  // ---- the game-over blink runs on the 55ms game clock, not the paint rate ----
+  await typeCode(p, 'xtetris');
+  await p.waitForFunction(() => window.__ff.tetris() !== null, { timeout: 5000 });
+  await p.evaluate(() => {
+    for (let i = 0; i < 20000; i++) {
+      const s = window.__ff.tetris();
+      if (!s || s.gameover) break;
+      window.__ff.tetrisKey('drop');
+      window.__ff.tetrisTick();
+    }
+  });
+  const blinkA = await p.evaluate(() => window.__ff.tetrisBoardHash().hash);
+  await p.waitForTimeout(120); // ~2 game ticks: too few to complete a blink phase
+  const blinkB = await p.evaluate(() => window.__ff.tetrisBoardHash().hash);
+  await p.waitForTimeout(700); // ~13 ticks: crosses the 9-tick blink boundary
+  const blinkC = await p.evaluate(() => window.__ff.tetrisBoardHash().hash);
+  expect(blinkA === blinkB, 'the hiscore blink does not run at paint rate');
+  expect(blinkC !== blinkB, 'but it does blink on the 55ms game clock');
+  await p.keyboard.press('Escape');
+  await p.waitForFunction(() => window.__ff.tetris() === null, { timeout: 5000 });
+
+  console.log('Tetris OK: launch from room + map, own clock, room frozen, controls, painting, hiscore, close');
 });
