@@ -12,9 +12,11 @@
  * (krabik, 13) bops while any track plays. Introduces the `musiccyc` primitive
  * (looping music-channel track).
  *
- * The `music_volume` easter egg (fish thank you if you turn the music slider down)
- * is ported faithfully but stays inert: the port has no in-game volume slider, so
- * music_volume is the fixed default (27) and the branch never triggers.
+ * The `music_volume` easter egg: the room records the music level on entry
+ * (roompole[0], URoom.pas:5769) and the fish thank the player for the quiet once
+ * it has been turned down below 16 (URoom.pas:12190). It reads the live level off
+ * `s.musicVolume`, which the host mirrors from the options slider on the original's
+ * 0..64 scale (the slider itself is a 0..12 index into `VOLUMES`).
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
@@ -37,9 +39,6 @@ const R = {
 // Per-amp Vars: stav (state) / faze (dance-pattern cursor).
 const STAV = 1;
 const FAZE = 2;
-/** music_volume default (RSound.pas:36); the port has no volume slider so it is fixed. */
-const MUSIC_VOLUME = 27;
-
 /** odd(count div 2): a slow two-frame toggle used by the head's bobbing. */
 const slowToggle = (count: number): boolean => Math.floor(count / 2) % 2 === 1;
 
@@ -120,7 +119,7 @@ function init(s: Script): void {
   const v = s.vars(R.room, 3);
   v[R.room_hlaskam] = 0;
   v[R.room_hlaskav] = 0;
-  if (s.roompole[0] === 0) s.roompole[0] = MUSIC_VOLUME;
+  if (s.roompole[0] === 0) s.roompole[0] = s.musicVolume;
   v[R.room_rozbito] = 0;
 
   s.vars(R.amp1, 2)[STAV] = 0;
@@ -158,8 +157,7 @@ function prog(s: Script): void {
             s.addv(10, 'ves-v-vyp');
             break;
         }
-      } else if (s.roompole[0]! > MUSIC_VOLUME && MUSIC_VOLUME < 16) {
-        // inert in the port (no volume slider) — see file header.
+      } else if (s.roompole[0]! > s.musicVolume && s.musicVolume < 16) {
         s.roompole[0] = 0;
         s.addm(15, 'ves-m-dik');
         s.addv(s.random(20) + 10, 'ves-v-stejne');

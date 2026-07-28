@@ -805,6 +805,23 @@ export class Room {
     this.items[idx]!.kind = Kind.light;
   }
 
+  /**
+   * CanSave (URoom.pas:26900-26906): saving is only allowed from a recoverable
+   * position — both fish alive, or one alive with the other already out of the
+   * room (venku). A dead fish therefore blocks saving, which matters in the port
+   * because a lone survivor deliberately keeps playing. A gspec=9 push-out room
+   * additionally blocks it once the last item has been shoved out (vytlacit<=0),
+   * i.e. while the win is resolving.
+   */
+  get canSave(): boolean {
+    if (this.gspec === 9 && this.vytlacit <= 0) return false;
+    return (
+      (this.alive.big && this.alive.little) ||
+      (this.alive.big && this.venku.little) ||
+      (this.venku.big && this.alive.little)
+    );
+  }
+
   /** True once both fish have exited the room — the room is solved. */
   get won(): boolean {
     return this.venku.little && this.venku.big;

@@ -133,6 +133,14 @@ export class Script {
    *  elapsed session time; exact cross-session accumulation is deferred. */
   casHry = 0;
 
+  /**
+   * music_volume (RSound.pas:36): the live music level on the original's 0..64
+   * scale, mirrored from the player's slider by the host each frame. VES's easter
+   * egg (URoom.pas:12190) reads it to notice the player turning the music down.
+   * Defaults to the original's boot level so headless tests match the Delphi.
+   */
+  musicVolume = 27;
+
   /** globtit (URoom.pas:164): a text fragment substituted for `@` in the next subtitle. */
   globtit = '';
   /**

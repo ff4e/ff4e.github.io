@@ -88,6 +88,7 @@ import {
   loadSettings,
   saveSettings,
   busMultiplier,
+  VOLUMES,
   type SubtitleMode,
   type VolumeBus,
 } from '../core/settings.js';
@@ -646,8 +647,19 @@ function setSubtitleMode(mode: SubtitleMode): void {
 function setVolume(bus: VolumeBus, index: number): void {
   settings.volume[bus] = index;
   audio.setBusGain(bus, busMultiplier(bus, index));
+  if (activeScript) activeScript.s.musicVolume = musicLevel();
   saveSettings(settings);
 }
+
+/**
+ * music_volume (RSound.pas:36) on the original's 0..64 scale — the level the
+ * player's 0..12 slider index maps to through Volumes[]. Room scripts (VES's
+ * quiet-music easter egg, URoom.pas:12190) compare against this, not the index.
+ */
+function musicLevel(): number {
+  return VOLUMES[Math.max(0, Math.min(VOLUMES.length - 1, settings.volume.music))]!;
+}
+
 /** Push all persisted volume levels into the audio buses (NastavZvuk, on boot). */
 function applyVolumeSettings(): void {
   for (const bus of ['effect', 'voice', 'music'] as const) {
@@ -1119,6 +1131,7 @@ function buildRoom(carryPole = false): void {
       (prior) => audio.talking(prior),
     );
     s.pokus = pokus;
+    s.musicVolume = musicLevel();
     if (savedPole) for (let i = 0; i < s.roompole.length; i++) s.roompole[i] = savedPole[i] ?? 0;
     s.musName = roomMusic?.name ?? '';
     s.onKufrDemo = () => void startCutscene();
@@ -1801,8 +1814,17 @@ function restartRoom(): void {
 
 const saveKey = (): string => `ff.save.${select.value}`;
 
+/**
+ * CanSave (URoom.pas:26900-26906) for the current room, or false with no room
+ * loaded. The rule itself lives on `Room` — see `Room.canSave`.
+ */
+function canSave(): boolean {
+  return !!room && room.canSave;
+}
+
 /** Save the current move record + script state to localStorage. */
 function saveGame(): void {
+  if (!canSave()) return; // DalsiPrikaz: `if not CanSave then kdo:=0` (URoom.pas:27010)
   try {
     const snapshot = activeScript?.s.snapshot() ?? null;
     localStorage.setItem(saveKey(), JSON.stringify({ rec: engine?.srecord ?? '', vars: snapshot }));
@@ -1814,6 +1836,7 @@ function saveGame(): void {
 
 /** Load and re-simulate the saved move record for this room, restoring script state. */
 function loadGame(): void {
+  if (!saveExists()) return; // CanLoad (URoom.pas:27012) — nothing to load
   let raw: string | null = null;
   try {
     raw = localStorage.getItem(saveKey());
@@ -1879,7 +1902,7 @@ function panelState(): PanelState {
     velka: bigDead ? SEDY : engine?.active === 'big' ? ZLUTY : ORANZOVY,
     mala: littleDead ? SEDY : engine?.active === 'little' ? ZLUTY : ORANZOVY,
     space: p === 11 ? SVITICI : bothAlive ? ORANZOVY : SEDY,
-    save: p === 12 ? SVITICI : ORANZOVY, // a record always exists to save
+    save: p === 12 ? SVITICI : canSave() ? ORANZOVY : SEDY,
     load: p === 13 ? SVITICI : saveExists() ? ORANZOVY : SEDY,
     abort: p === 14 ? SVITICI : ORANZOVY,
     restart: p === 15 ? SVITICI : ORANZOVY,
@@ -4058,6 +4081,10 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   save: () => saveGame(),
   load: () => loadGame(),
   hasSave: () => saveExists(),
+  /** CanSave (URoom.pas:26900): whether the current position may be saved at all. */
+  canSave: () => canSave(),
+  /** The panel's per-element colour state (for asserting the greyed save button). */
+  panelState: () => panelState(),
   posHash: () => {
     if (!room) return '';
     // A stable snapshot of every item's position + fish facing/exit, for
