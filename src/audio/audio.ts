@@ -148,11 +148,21 @@ export class AudioEngine {
   }
 
   /** Play a sound by name (no-op if unknown). `volume` is a 0..1 gain. `bus`
-   *  selects the category output (effects by default; voices for dialogue). */
+   *  selects the category output (effects by default; voices for dialogue).
+   *
+   *  With a `prior` the sound goes through the same priority-tracked path as `snd`
+   *  (startTracked). The original has a single mixer and `KSnd(prior)` (RSound.pas:946)
+   *  kills every channel of that priority regardless of how it was started, so a voice
+   *  (Talk) must be as killable as an effect (Snd) — otherwise a scripted shush like
+   *  MIKRO's `KSnd(101..104)` clears only the bookkeeping and the sample plays on. */
   play(name: string, volume = 1, prior?: number, bus: VolumeBus = 'effect'): void {
     const buf = this.buffer(name);
     if (!buf) return;
     this.logSound(name, volume);
+    if (prior !== undefined) {
+      this.startTracked(buf, prior, false, volume, bus);
+      return;
+    }
     const ctx = this.ensureCtx();
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -164,7 +174,6 @@ export class AudioEngine {
     // Track the source so KillSnd can stop it when leaving a room.
     this.voices.add(src);
     src.addEventListener('ended', () => this.voices.delete(src));
-    if (prior !== undefined) this.activeUntil.set(prior, performance.now() + buf.duration * 1000);
   }
 
   /**
@@ -257,13 +266,12 @@ export class AudioEngine {
     this.startTracked(buf, prior, loop, volume, 'music');
   }
 
-  /** KSnd (RSound.pas): stop only the effect(s) of a given priority. */
+  /** KSnd (RSound.pas:946): stop every channel of a given priority — effect or voice.
+   *  The original has one mixer, so anything sounding at `prior` dies here. */
   killVoice(prior: number): void {
-    // KSnd(-999) targets the looping room music (a distinct source, not a voice).
-    if (prior === MUSIC_PRIOR) {
-      this.stopMusic();
-      return;
-    }
+    // KSnd(-999) targets the looping room music (a distinct source, not a voice) —
+    // plus any tracked source that was started on that priority (a packaged band track).
+    if (prior === MUSIC_PRIOR) this.stopMusic();
     const set = this.priorSources.get(prior);
     if (set) {
       for (const src of set) {
