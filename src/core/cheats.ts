@@ -160,3 +160,70 @@ export function morphStretch(little: FfrBitmap): FfrBitmap {
   }
   return { w, h, pixels, padded: 0 };
 }
+
+// ---------------------------------------------------------------------------
+// The same transforms over truecolor sprites.
+//
+// In enhanced (truecolor) mode the fish are not drawn from the FFR head/body
+// frames at all — the enhanced art source blits its own RGBA sprites — so
+// UNDEAD and MORPH have to reshape those too, or they do nothing in the mode the
+// game ships in. Same arithmetic, four bytes per pixel instead of one.
+// ---------------------------------------------------------------------------
+
+/** A truecolor sprite (structurally `EnhancedSprite`). */
+export interface RgbaSprite {
+  readonly w: number;
+  readonly h: number;
+  readonly rgba: Uint8Array;
+}
+
+/** Copy the 4-byte pixel at source offset `s` to destination offset `d`. */
+function copyPx(dst: Uint8Array, d: number, src: Uint8Array, s: number): void {
+  dst[d] = src[s]!;
+  dst[d + 1] = src[s + 1]!;
+  dst[d + 2] = src[s + 2]!;
+  dst[d + 3] = src[s + 3]!;
+}
+
+/** `pretoc` over a truecolor sprite: flip it vertically. */
+export function pretocRgba(bm: RgbaSprite): RgbaSprite {
+  const rgba = new Uint8Array(bm.rgba.length);
+  const stride = bm.w * 4;
+  for (let y = 0; y < bm.h; y++) {
+    const src = (bm.h - 1 - y) * stride;
+    rgba.set(bm.rgba.subarray(src, src + stride), y * stride);
+  }
+  return { w: bm.w, h: bm.h, rgba };
+}
+
+/** `morph` shrink half over a truecolor sprite: 3/4 width, half height. */
+export function morphShrinkRgba(big: RgbaSprite): RgbaSprite {
+  const w = big.w - Math.floor(big.w / 4);
+  const h = Math.floor(big.h / 2);
+  const rgba = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    let s = y * 2 * big.w;
+    let d = y * w;
+    for (let x = 1; x <= w; x++) {
+      copyPx(rgba, d++ * 4, big.rgba, s++ * 4);
+      if (x % 3 === 0) s++;
+    }
+  }
+  return { w, h, rgba };
+}
+
+/** `morph` stretch half over a truecolor sprite: 4/3 width, double height. */
+export function morphStretchRgba(little: RgbaSprite): RgbaSprite {
+  const w = little.w + Math.floor(little.w / 3);
+  const h = little.h * 2;
+  const rgba = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) {
+    let s = Math.floor(y / 2) * little.w;
+    let d = y * w;
+    for (let x = 1; x <= w; x++) {
+      copyPx(rgba, d++ * 4, little.rgba, s * 4);
+      if (x % 4 !== 1) s++;
+    }
+  }
+  return { w, h, rgba };
+}

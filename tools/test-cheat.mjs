@@ -54,6 +54,49 @@ await withApp(async ({ p, expect }) => {
   const fresh = await p.evaluate(() => window.__ff.water());
   expect(fresh.wamp === calm.wamp && fresh.wper === calm.wper, 'the storm dies with the room');
 
+  // ---- the sprite cheats must show in BOTH art paths --------------------------
+  // Enhanced (truecolor) mode draws the fish from its own RGBA sprites, not from
+  // the FFR head/body frames, so a cheat that only rewrote the latter would be
+  // invisible in the mode the game ships in. Assert the rendered frame itself.
+  for (const mode of ['classic', 'enhanced']) {
+    const plain = await p.evaluate((m) => window.__ff.roomFrameHash(m), mode);
+    await typeCode(p, 'xmorph');
+    expect(
+      (await p.evaluate((m) => window.__ff.roomFrameHash(m), mode)) !== plain,
+      `xmorph changes the ${mode} picture`,
+    );
+    await typeCode(p, 'xmorph');
+    await typeCode(p, 'xundead');
+    expect(
+      (await p.evaluate((m) => window.__ff.roomFrameHash(m), mode)) !== plain,
+      `xundead changes the ${mode} picture`,
+    );
+    await typeCode(p, 'xundead');
+  }
+  // The enhanced sprite set itself: reshaped on, restored off. (The whole-frame
+  // hash above cannot check the restore — the room animates between samples.)
+  const encPlain = await p.evaluate(() => window.__ff.enhancedFishSprite('little'));
+  const encBig = await p.evaluate(() => window.__ff.enhancedFishSprite('big'));
+  expect(encPlain !== null, 'the enhanced fish sprites are loaded');
+  await typeCode(p, 'xmorph');
+  const encMorph = await p.evaluate(() => window.__ff.enhancedFishSprite('little'));
+  expect(encMorph.hash !== encPlain.hash, 'xmorph reshapes the enhanced little fish');
+  expect(encMorph.h === Math.floor(encBig.h / 2), 'to half the enhanced big fish height');
+  await typeCode(p, 'xmorph');
+  expect(
+    (await p.evaluate(() => window.__ff.enhancedFishSprite('little'))).hash === encPlain.hash,
+    'and puts the enhanced sprites back',
+  );
+  await typeCode(p, 'xundead');
+  const encUndead = await p.evaluate(() => window.__ff.enhancedFishSprite('little'));
+  expect(encUndead.hash !== encPlain.hash, 'xundead flips the enhanced sprite');
+  expect(encUndead.h === encPlain.h && encUndead.w === encPlain.w, 'keeping its size');
+  await typeCode(p, 'xundead');
+  expect(
+    (await p.evaluate(() => window.__ff.enhancedFishSprite('little'))).hash === encPlain.hash,
+    'and flips it back',
+  );
+
   // ---- xundead: flip the sprites (same size, different pixels) ---------------
   const size0 = await p.evaluate(() => window.__ff.fishSpriteSize('little'));
   await typeCode(p, 'xundead');

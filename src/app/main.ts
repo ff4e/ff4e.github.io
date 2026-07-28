@@ -18,7 +18,16 @@ import { applyWinDesktopPalette } from '../data/winPalette.js';
 import { parseFft, indexFft, type FftEntry } from '../data/fft.js';
 import { Room, ITEM_WATER, ITEM_WALL } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
-import { CheatEntry, pretoc, morphShrink, morphStretch, type Cheat } from '../core/cheats.js';
+import {
+  CheatEntry,
+  pretoc,
+  morphShrink,
+  morphStretch,
+  pretocRgba,
+  morphShrinkRgba,
+  morphStretchRgba,
+  type Cheat,
+} from '../core/cheats.js';
 import {
   TetrisGame,
   parseShapes,
@@ -69,6 +78,7 @@ import {
   classicOnlyBackground,
   type EnhancedArt,
   type EnhancedObject,
+  type EnhancedSprite,
   type FishSprites,
 } from '../render/enhancedArtSource.js';
 import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
@@ -756,6 +766,10 @@ function cheatMegabomb(): void {
 
 /** A head/body frame table, as both `Room.heads` and `Room.bodies` are shaped. */
 type FrameSet = { big: readonly (FfrBitmap | null)[]; small: readonly (FfrBitmap | null)[] };
+/** One facing of the enhanced truecolor fish sprites (both sizes). */
+type FishFacing = { small: Map<string, EnhancedSprite>; big: Map<string, EnhancedSprite> };
+/** The reshaped enhanced sprites while a sprite cheat is on, else null. */
+let cheatFishSprites: FishSprites | null = null;
 
 /** pretoc (URoom.pas:23892) over a whole frame table — the xundead flip. */
 function undeadSet(set: FrameSet): FrameSet {
@@ -774,19 +788,62 @@ function morphSet(set: FrameSet): FrameSet {
   };
 }
 
-/** Recompute the room's fish sprites: pristine parsed frames, then every active
- *  sprite cheat in the order it was typed. Never mutates the shared FFR data. */
-function applySpriteCheats(): void {
-  if (!room || !ffr) return;
-  let heads: FrameSet = ffr.heads;
-  let bodies: FrameSet = ffr.bodies;
-  for (const c of spriteCheats) {
-    const f = c === 'UNDEAD' ? undeadSet : morphSet;
-    heads = f(heads);
-    bodies = f(bodies);
+/** The same two transforms over one facing of the enhanced truecolor fish, which
+ *  the enhanced art source blits instead of the FFR frames. Sprites are paired by
+ *  filename, so a frame present for only one fish is left alone. */
+function undeadFacing(set: FishFacing): FishFacing {
+  const out: FishFacing = { small: new Map(), big: new Map() };
+  for (const size of ['small', 'big'] as const) {
+    for (const [k, v] of set[size]) out[size].set(k, pretocRgba(v));
   }
-  room.heads = heads;
-  room.bodies = bodies;
+  return out;
+}
+
+function morphFacing(set: FishFacing): FishFacing {
+  const out: FishFacing = { small: new Map(set.small), big: new Map(set.big) };
+  for (const [k, small] of set.small) {
+    const big = set.big.get(k);
+    if (!big) continue;
+    out.small.set(k, morphShrinkRgba(big));
+    out.big.set(k, morphStretchRgba(small));
+  }
+  return out;
+}
+
+/**
+ * Recompute the fish sprites: the pristine art, then every active sprite cheat in
+ * the order it was typed. Both art sources are covered — the FFR head/body frames
+ * the classic renderer uses, and the enhanced truecolor set, which is a wholly
+ * separate path (EnhancedArtSource.drawFish) that would otherwise ignore the
+ * cheats entirely in the mode the game ships in. Nothing shared is mutated.
+ */
+function applySpriteCheats(): void {
+  if (room && ffr) {
+    let heads: FrameSet = ffr.heads;
+    let bodies: FrameSet = ffr.bodies;
+    for (const c of spriteCheats) {
+      const f = c === 'UNDEAD' ? undeadSet : morphSet;
+      heads = f(heads);
+      bodies = f(bodies);
+    }
+    room.heads = heads;
+    room.bodies = bodies;
+  }
+  if (!fishSprites || spriteCheats.length === 0) {
+    cheatFishSprites = null;
+    return;
+  }
+  let left: FishFacing = { small: fishSprites.small.left, big: fishSprites.big.left };
+  let right: FishFacing = { small: fishSprites.small.right, big: fishSprites.big.right };
+  for (const c of spriteCheats) {
+    const f = c === 'UNDEAD' ? undeadFacing : morphFacing;
+    left = f(left);
+    right = f(right);
+  }
+  cheatFishSprites = {
+    small: { left: left.small, right: right.small },
+    big: { left: left.big, right: right.big },
+  };
 }
 
 /** Toggle one of the two sprite cheats (xundead URoom.pas:24573, xmorph :24588). */
@@ -1372,6 +1429,7 @@ async function loadFishSprites(): Promise<void> {
       small: { left: await build('small', 'left'), right: await build('small', 'right') },
       big: { left: await build('big', 'left'), right: await build('big', 'right') },
     };
+    applySpriteCheats(); // a sprite cheat typed before the art landed still applies
   } catch {
     fishSprites = null;
   }
@@ -3186,15 +3244,16 @@ function enableWebgl(): void {
 let enhArt: EnhancedArtSource | null = null;
 let enhKey: [Room | null, EnhancedArt | null, EnhancedObject[], FishSprites | null] = [null, null, [], null];
 function enhancedArtFor(r: Room): EnhancedArtSource {
+  const fish = cheatFishSprites ?? fishSprites; // xundead/xmorph reshape these
   if (
     enhArt === null ||
     enhKey[0] !== r ||
     enhKey[1] !== enhancedArt ||
     enhKey[2] !== enhancedObjects ||
-    enhKey[3] !== fishSprites
+    enhKey[3] !== fish
   ) {
-    enhArt = new EnhancedArtSource(r.palette, enhancedArt, enhancedObjects, fishSprites);
-    enhKey = [r, enhancedArt, enhancedObjects, fishSprites];
+    enhArt = new EnhancedArtSource(r.palette, enhancedArt, enhancedObjects, fish);
+    enhKey = [r, enhancedArt, enhancedObjects, fish];
   }
   return enhArt;
 }
@@ -4916,6 +4975,16 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   casHry: () => casHry(),
   playTime: () => Object.fromEntries(playTime),
   water: () => (room ? { wamp: room.wamp, wper: room.wper, wspd: room.wspd } : null),
+  /** The ENHANCED (truecolor) fish body sprite actually in use, for the sprite
+   *  cheats — a separate art path from the FFR frames below. */
+  enhancedFishSprite: (which: 'little' | 'big') => {
+    const set = (cheatFishSprites ?? fishSprites)?.[which === 'little' ? 'small' : 'big'].left;
+    const bm = set?.get('body_rest_00.png');
+    if (!bm) return null;
+    let hash = 2166136261;
+    for (const byte of bm.rgba) hash = Math.imul(hash ^ byte, 16777619);
+    return { w: bm.w, h: bm.h, hash: hash >>> 0 };
+  },
   fishSpriteSize: (which: 'little' | 'big') => {
     const bm = room?.bodies[which === 'little' ? 'small' : 'big'][1] ?? null;
     if (!bm) return null;
