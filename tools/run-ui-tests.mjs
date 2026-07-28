@@ -66,6 +66,9 @@ const ANGLE_ARGS = ['--use-gl=angle', '--use-angle=metal', ...PLAIN_ARGS];
 const EXCLUSIVE = new Set([
   'test-timing.mjs', // asserts the game clock runs at ~12.5 ticks/s (8 < rate < 16)
   'test-idlefps.mjs', // asserts the render loop drops to the idle timer
+  // Counts vector-subtitle overlay repaints against logic ticks and rendered
+  // frames — a ratio, but both sides are sampled over wall-clock windows.
+  'test-subtitles-perf.mjs',
   'test-mapinfo.mjs', // world-map animation pacing, measured over rAF frames
   // Measures the fish's displacement in every RENDERED frame and fails a jump of
   // more than half a cell. A loaded machine drops rAF frames, so each surviving
