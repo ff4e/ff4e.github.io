@@ -227,15 +227,25 @@ export async function waitTicks(p, start, ticks) {
  * fixed number of milliseconds races the machine). This waits exactly as long as the
  * machine needs to deliver the frames, and no longer.
  */
-export async function waitFrames(p, n = 2) {
+export async function waitFrames(p, n = 2, timeout = 30000) {
   await p.evaluate(
-    (want) =>
+    ([want, ms]) =>
       new Promise((done) => {
         let seen = 0;
-        const step = () => (++seen >= want ? done() : requestAnimationFrame(step));
+        // rAF stops being delivered on a hidden or occluded page (test-idlefps fakes
+        // exactly that), so the frame chain alone can wedge a probe until the runner's
+        // 10-minute backstop. Bound it here and let the caller's assertion be the
+        // verdict, as everywhere else in this file.
+        const bail = setTimeout(done, ms);
+        const step = () => {
+          if (++seen >= want) {
+            clearTimeout(bail);
+            done();
+          } else requestAnimationFrame(step);
+        };
         requestAnimationFrame(step);
       }),
-    n,
+    [n, timeout],
   );
 }
 
@@ -251,11 +261,27 @@ export async function waitFrames(p, n = 2) {
  * itself removes both, and is faster on an idle machine.
  *
  * Returns the ticks actually elapsed, so a caller that cares can assert on it.
+ *
+ * THROWS if the clock does not get there inside the budget. That is deliberate: most
+ * callers use this before a "nothing happened" assertion, and a stuck clock would let
+ * every one of them pass vacuously — the same silent weakening this helper exists to
+ * remove, just caused by a real defect instead of by load. The budget is generous
+ * enough (12x nominal) that only a genuinely stalled clock reaches this.
  */
 export async function tickSleep(p, ticks) {
   const start = await p.evaluate(() => window.__ff.count());
+  const t0 = Date.now();
   await waitTicks(p, start, ticks);
-  return (await p.evaluate(() => window.__ff.count())) - start;
+  const advanced = (await p.evaluate(() => window.__ff.count())) - start;
+  if (advanced < ticks) {
+    const where = await p.evaluate(() => window.__ff.screen());
+    throw new Error(
+      `the game clock advanced only ${advanced} of ${ticks} ticks in ${Date.now() - t0}ms ` +
+        `(screen=${where}) — it is stalled, or this wait ran outside a room (count only ` +
+        `advances while screen === 'room')`,
+    );
+  }
+  return advanced;
 }
 
 /**
@@ -272,9 +298,9 @@ export async function forTicks(p, ticks, sample, everyMs = 60) {
   const deadline = Date.now() + tickBudget(ticks);
   let n = start;
   for (;;) {
-    if ((await sample()) === false) break;
+    const more = await sample();
     n = await p.evaluate(() => window.__ff.count());
-    if (n - start >= ticks || Date.now() >= deadline) break;
+    if (more === false || n - start >= ticks || Date.now() >= deadline) break;
     await p.waitForTimeout(everyMs);
   }
   return n - start;

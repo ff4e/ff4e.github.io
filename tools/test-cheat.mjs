@@ -218,14 +218,19 @@ await withApp(async ({ p, expect }) => {
   // must lose exactly one frame per tick. Waiting on the clock rather than on 400ms of
   // wall time makes that exact rather than a one-sided "fewer than 25" guess — and it
   // is the tick count, not the elapsed milliseconds, that the counter is defined in.
-  const t1 = (await p.evaluate(() => window.__ff.silentFilm())).time;
-  const ticked = await tickSleep(p, 5);
-  const t2 = (await p.evaluate(() => window.__ff.silentFilm())).time;
-  const spent = t1 - t2;
-  expect(spent > 0, `the card counts down (${t1} -> ${t2})`);
+  // The counter and the tick count are read in the SAME evaluate, so the two deltas
+  // cover exactly the same window and the ratio is exact — read separately, a tick
+  // landing in either round-trip would make it off by one and need a tolerance.
+  const cardState = () => p.evaluate(() => ({ time: window.__ff.silentFilm().time, n: window.__ff.count() }));
+  const c1 = await cardState();
+  await tickSleep(p, 5);
+  const c2 = await cardState();
+  const spent = c1.time - c2.time;
+  const ticked = c2.n - c1.n;
+  expect(spent > 0, `the card counts down (${c1.time} -> ${c2.time})`);
   expect(
-    spent >= ticked - 1 && spent <= ticked + 1,
-    `one card frame per game tick, not per paint (spent ${spent} over ${ticked} ticks)`,
+    spent === ticked,
+    `exactly one card frame per game tick, not per paint (spent ${spent} over ${ticked} ticks)`,
   );
   // The effects force the CPU renderer, since they post-process the whole frame.
   await tickSleep(p, 3);
@@ -255,15 +260,16 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.interlacedFaze())) === -1, 'interlaced starts off (-1)');
   const beforeCollapse = await p.evaluate(() => window.__ff.roomEffectFrameHash('classic'));
   await typeCode(p, 'xinterlaced');
-  const ran = await tickSleep(p, 4);
-  const faze = await p.evaluate(() => window.__ff.interlacedFaze());
-  expect(faze > 0, `the collapse advances its phase (got ${faze})`);
+  const collapse = () => p.evaluate(() => ({ faze: window.__ff.interlacedFaze(), n: window.__ff.count() }));
+  const k1 = await collapse();
+  await tickSleep(p, 4);
+  const k2 = await collapse();
+  expect(k2.faze > 0, `the collapse advances its phase (got ${k2.faze})`);
   // One phase per GAME tick, not one per painted frame (which ran it ~5x too fast).
-  // Asserting against the ticks that actually elapsed pins the ratio at 1 instead of
-  // bounding it by a number derived from an assumed frame rate.
+  // Both deltas come from the same pair of atomic reads, so the ratio is exactly 1.
   expect(
-    faze >= ran - 1 && faze <= ran + 1,
-    `one collapse phase per game tick, not per paint (phase ${faze} over ${ran} ticks)`,
+    k2.faze - k1.faze === k2.n - k1.n,
+    `exactly one collapse phase per game tick, not per paint (${k2.faze - k1.faze} phases over ${k2.n - k1.n} ticks)`,
   );
   expect(
     (await p.evaluate(() => window.__ff.roomEffectFrameHash('classic'))) !== beforeCollapse,

@@ -182,35 +182,50 @@ await withApp(async ({ p, expect }) => {
       window.__ff.tetrisTick();
     }
   });
-  // Not at paint rate: over a stretch of RENDERED FRAMES, the board may only change
-  // on frames where the minigame's own 55ms tick counter moved. Checking the pairing
-  // directly is both load-independent and far stronger than sleeping ~2 ticks' worth
-  // of wall time and hoping the machine delivered exactly that.
+  // Not at paint rate: the board may only change when the minigame's OWN 55ms tick
+  // counter moves. Sampling `{tick, hash}` together (one evaluate, so the pair is
+  // atomic) and comparing consecutive samples checks that pairing directly.
+  //
+  // Deliberately NOT sampled per rendered frame: consecutive rAF frames only share a
+  // minigame tick while the paint rate is above ~18fps, so under load that sampler
+  // collects nothing — the check would go vacuous and its own "did we sample enough"
+  // guard would fail, for a machine reason. Polling on a timer is independent of the
+  // paint rate, while the rAF counter alongside it confirms the page really was
+  // painting during the window (which is what makes "not at paint rate" meaningful).
   const paint = await p.evaluate(
-    (want) =>
+    (ms) =>
       new Promise((done) => {
-        let prev = null;
+        const t0 = performance.now();
         let frames = 0;
-        let sameTickFrames = 0;
+        let samples = 0;
+        let sameTick = 0;
         let changedWithoutTick = 0;
-        const step = () => {
+        let prev = null;
+        const raf = () => {
+          frames++;
+          if (performance.now() - t0 < ms) requestAnimationFrame(raf);
+        };
+        requestAnimationFrame(raf);
+        const poll = () => {
           const s = window.__ff.tetris();
           const h = window.__ff.tetrisBoardHash();
           if (s && h) {
+            samples++;
             if (prev && s.tick === prev.tick) {
-              sameTickFrames++;
+              sameTick++;
               if (h.hash !== prev.hash) changedWithoutTick++;
             }
             prev = { tick: s.tick, hash: h.hash };
           }
-          if (++frames >= want) done({ frames, sameTickFrames, changedWithoutTick });
-          else requestAnimationFrame(step);
+          if (performance.now() - t0 < ms) setTimeout(poll, 1);
+          else done({ frames, samples, sameTick, changedWithoutTick });
         };
-        requestAnimationFrame(step);
+        poll();
       }),
-    60,
+    1000,
   );
-  expect(paint.sameTickFrames > 3, `saw frames without a minigame tick (${paint.sameTickFrames}/${paint.frames})`);
+  expect(paint.sameTick >= 8, `sampled the board within a minigame tick (${paint.sameTick} of ${paint.samples} samples)`);
+  expect(paint.frames >= 2, `the page was painting during the sample window (${paint.frames} frames)`);
   expect(
     paint.changedWithoutTick === 0,
     `the hiscore blink does not run at paint rate (${paint.changedWithoutTick} board changes with no tick)`,
