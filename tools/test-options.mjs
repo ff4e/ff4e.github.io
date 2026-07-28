@@ -28,6 +28,18 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.volumes().voice)) === 7, 'voices slider -> 7 at x=82');
   await p.evaluate(() => window.__ff.panelAction(19, 141)); // music slider far right
   expect((await p.evaluate(() => window.__ff.volumes().music)) === 12, 'music slider -> 12');
+  // The slider index is mapped back to the original's 0..64 music_volume for room
+  // scripts (VES's quiet-music easter egg reads it — URoom.pas:12190).
+  expect(
+    (await p.evaluate(() => window.__ff.scriptMusicVolume())) === 64,
+    'music_volume tracks the slider (index 12 -> Volumes[12] = 64)',
+  );
+  await p.evaluate(() => window.__ff.panelAction(19, 72)); // music slider -> index 6
+  expect(
+    (await p.evaluate(() => window.__ff.scriptMusicVolume())) === 11,
+    'music_volume follows a drag down (index 6 -> Volumes[6] = 11)',
+  );
+  await p.evaluate(() => window.__ff.panelAction(19, 141)); // restore for the persistence check
 
   // Subtitle buttons switch / turn off subtitles (obltitcz/eng/no).
   await p.evaluate(() => window.__ff.panelAction(22)); // off

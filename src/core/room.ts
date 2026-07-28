@@ -128,7 +128,7 @@ export class Room {
   bgBmp: FfrBitmap;
   wamp: number;
   wper: number;
-  readonly wspd: number;
+  wspd: number;
 
   /** Item indices of the two fish (the first little/big items, as in TRoom.Start).
    *  Mutable because WIN's bonus level (ZapniBonusLevel) reassigns Little/Big to the
@@ -202,8 +202,12 @@ export class Room {
     this.idle.big = 0;
   }
 
-  readonly bodies: FfrRoom['bodies'];
-  readonly heads: FfrRoom['heads'];
+  /** Fish body/head frame tables. Not readonly: the UNDEAD and MORPH cheats swap
+   *  in transformed copies (never mutating the shared parsed FFR data, so the
+   *  effect dies with the Room — as it does in the original, whose TRoom.Create
+   *  reloads the sprites). */
+  bodies: FfrRoom['bodies'];
+  heads: FfrRoom['heads'];
 
   constructor(ffr: FfrRoom) {
     this.width = ffr.width;

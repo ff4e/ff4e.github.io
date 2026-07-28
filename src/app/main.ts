@@ -13,11 +13,12 @@
  * Keyboard: small fish I/K/J/L, big fish W/S/A/D. Mouse: click a fish to select,
  * click water to BFS-swim there.
  */
-import { parseFfr, type FfrRoom } from '../data/ffr.js';
+import { parseFfr, type FfrRoom, type FfrBitmap } from '../data/ffr.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
 import { parseFft, indexFft, type FftEntry } from '../data/fft.js';
 import { Room, ITEM_WATER, ITEM_WALL } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
+import { CheatEntry, pretoc, morphShrink, morphStretch, type Cheat } from '../core/cheats.js';
 import { Dir } from '../core/dir.js';
 import {
   FSIZE,
@@ -460,7 +461,6 @@ const SAVE_SCHEMA = 1;
 migrateSaves();
 const solved = loadSet('ff.solved'); // set of solved (1-based) room numbers, persisted
 const cheated = loadSet('ff.cheated'); // rooms completed via the cheat (shown as kCheat)
-let cheatBuf = ''; // rolling buffer of typed keys, for cheat-string detection
 
 /**
  * Version + migrate the persisted save data so a future layout change never strands
@@ -585,7 +585,7 @@ function recordBest(roomNum: number, rec: string, moves: number): void {
 }
 
 /**
- * xwemaketherules (URoom.pas:24666): the original's "solve this room" cheat. Marks
+ * xwemaketherulez (URoom.pas:24666): the original's "solve this room" cheat. Marks
  * the current room completed-via-cheat, records it in the progression, and returns
  * to the map (konec:=1). Handy for testing.
  */
@@ -600,7 +600,7 @@ function cheatSolveRoom(): void {
 }
 
 /** Dev-only: genuinely win the current room (dev-bar "Win room" button / the W hotkey).
- *  Unlike cheatSolveRoom (xwemaketherules), which jumps straight to the map and marks the
+ *  Unlike cheatSolveRoom (xwemaketherulez), which jumps straight to the map and marks the
  *  room "cheated", this drives the real win path — engine.triggerWin -> onWin bookkeeping
  *  (marks the room solved) -> the auto-return countdown -> returnFromRoom — so an
  *  end-of-leg room reveals its story page exactly as a real solve would. Meant purely as a
@@ -608,6 +608,150 @@ function cheatSolveRoom(): void {
 function devWinRoom(): void {
   if (!devEnabled || screen !== 'room' || !engine || !room || engine.phase !== 'idle' || room.won) return;
   engine.triggerWin();
+}
+
+// ---------------------------------------------------------------------------
+// Typed cheat codes (Uovl.pas:744 in a room, UMain.pas:1750 on the map).
+// ---------------------------------------------------------------------------
+
+/** `cheatstring` — the room's entry buffer. Armed by X, parked between codes. */
+const roomCheats = new CheatEntry();
+/** `dircheat` (UMain.pas:1727) — the map's own buffer; the two never share state. */
+const mapCheats = new CheatEntry();
+
+/** ultraviolence (USoutez.pas:24): every room entered from now on spawns a hook
+ *  (TRoom.Start, URoom.pas:1503). Armed from the map and never cleared. */
+let ultraviolence = false;
+/** oldamp/oldper/oldspd (URoom.pas:24607): the water params xstorm displaced. */
+let oldWater: { amp: number; per: number; spd: number } | null = null;
+/** Hlavy1/Tela1 (URoom.pas:23832): the sprites xmorph displaced, for the toggle back. */
+let morphSaved: { heads: Room['heads']; bodies: Room['bodies'] } | null = null;
+/** megabomb (URoom.pas:26192): blank the room white for exactly one painted frame. */
+let megabombFlash = false;
+/** The hidden SCORE bonus room (branch 9, `av:=9; am:=1` — UMain.pas:1774). */
+const SCORE_ROOM = 72;
+
+/**
+ * xmegabomb (URoom.pas:24534): kill both fish where they float — light-kind
+ * skeletons that erode away — then blank the room white for a frame. The original
+ * counts both deaths, kills any speech, and drops whatever the fish were holding.
+ */
+function cheatMegabomb(): void {
+  if (!room || !engine) return;
+  for (const which of ['little', 'big'] as const) {
+    if (room.alive[which]) room.killFish(which);
+  }
+  audio.snd('sp-smrt1', 3, false, EFFECT_VOL);
+  audio.snd('sp-smrt2', 3, false, EFFECT_VOL);
+  audio.killVoice(MLUVI_PRIOR.little); // KSnd(mluvi_mala)
+  audio.killVoice(MLUVI_PRIOR.big); // KSnd(mluvi_velka)
+  activeScript?.s.clearDialog(); // Zrus_dialogy
+  room.clearAllDirs();
+  if (room.padani()) {
+    engine.phase = 'fall'; // gstav := stav_ma_padat
+    engine.animFrame = 0;
+  }
+  megabombFlash = true;
+  forceRoomRedraw = true;
+}
+
+/** xundead (URoom.pas:24573): flip every fish head and body frame — zombie fish.
+ *  `pretoc` is its own inverse, so typing it twice puts the fish back up again. */
+function cheatUndead(): void {
+  if (!room) return;
+  const flip = (frames: readonly (FfrBitmap | null)[]): (FfrBitmap | null)[] =>
+    frames.map((bm) => (bm ? pretoc(bm) : bm));
+  room.heads = { big: flip(room.heads.big), small: flip(room.heads.small) };
+  room.bodies = { big: flip(room.bodies.big), small: flip(room.bodies.small) };
+}
+
+/** xmorph (URoom.pas:24588): each fish takes the other's shape — the little one a
+ *  squashed big fish, the big one a blown-up little fish. Typing it again restores
+ *  the saved originals (the Hlavy1/Tela1 slots). */
+function cheatMorph(): void {
+  if (!room) return;
+  if (morphSaved) {
+    room.heads = morphSaved.heads;
+    room.bodies = morphSaved.bodies;
+    morphSaved = null;
+    return;
+  }
+  morphSaved = { heads: room.heads, bodies: room.bodies };
+  const swap = (set: { big: readonly (FfrBitmap | null)[]; small: readonly (FfrBitmap | null)[] }) => ({
+    // Both halves derive from the ORIGINALS, as the Delphi does via bmmala1/bmvelka1.
+    small: set.small.map((bm, i) => (bm && set.big[i] ? morphShrink(set.big[i]!) : bm)),
+    big: set.big.map((bm, i) => (bm && set.small[i] ? morphStretch(set.small[i]!) : bm)),
+  });
+  room.heads = swap(room.heads);
+  room.bodies = swap(room.bodies);
+}
+
+/** xstorm (URoom.pas:24607): whip the water up (wamp/wspd/wper = 10/4/6), or put
+ *  it back if it is already storming — the original toggles on those exact values. */
+function cheatStorm(): void {
+  if (!room) return;
+  if (room.wamp === 10 && room.wspd === 4 && room.wper === 6 && oldWater) {
+    room.wamp = oldWater.amp;
+    room.wper = oldWater.per;
+    room.wspd = oldWater.spd;
+    oldWater = null;
+  } else {
+    oldWater = { amp: room.wamp, per: room.wper, spd: room.wspd };
+    room.wamp = 10;
+    room.wspd = 4;
+    room.wper = 6;
+  }
+  forceRoomRedraw = true;
+}
+
+/**
+ * The in-room cheat dispatch (URoom.pas:24534-24690). Codes 11/12 have no case
+ * here — SCORE and ULTRAVIOLENCE only work from the map (UMain.pas:1773-1780).
+ */
+function applyRoomCheat(cheat: Cheat): void {
+  if (screen !== 'room' || !room) return;
+  switch (cheat) {
+    case 'MEGABOMB':
+      cheatMegabomb();
+      break;
+    case 'UNDEAD':
+      cheatUndead();
+      break;
+    case 'MORPH':
+      cheatMorph();
+      break;
+    case 'FISHER':
+      hooks.add(room);
+      break;
+    case 'STORM':
+      cheatStorm();
+      break;
+    case 'WEMAKETHERULEZ':
+      cheatSolveRoom();
+      break;
+    case 'IAMACHEATER':
+      // Deliberately nothing: the original's body is `{soutez:=not soutez;}` —
+      // commented out, so the retail build just swallows the code.
+      break;
+    default:
+      break;
+  }
+}
+
+/** The map-screen cheat dispatch (UMain.pas:1760-1782). Only three codes act here. */
+function applyMapCheat(cheat: Cheat): void {
+  switch (cheat) {
+    case 'SCORE':
+      // `av:=9; am:=1; doAkce:=daRun` — run the hidden SCORE bonus room, which is
+      // kept off the map and out of the finale, so this code is the only way in.
+      void enterRoom(SCORE_ROOM);
+      break;
+    case 'ULTRAVIOLENCE':
+      ultraviolence = true;
+      break;
+    default:
+      break;
+  }
 }
 
 
@@ -1086,6 +1230,15 @@ function buildRoom(carryPole = false): void {
   // on CountDown=0 without clearing showmode (URoom.pas:26911-26920). The room-change
   // and player-restart paths call endShowmode() explicitly instead.
   hooks.clear(); // nhacku := 0 (URoom.pas:1502)
+  // ultraviolence (URoom.pas:1503): once the code is typed on the map, every room
+  // opens with a hook already descending.
+  if (ultraviolence) hooks.add(room);
+  // The room-scoped cheats die with the room, exactly as in the original — a fresh
+  // TRoom.Create reloads the sprites and resets silentfilm/interlacedfaze
+  // (URoom.pas:1430-1431). The new Room already carries pristine sprites and water.
+  morphSaved = null;
+  oldWater = null;
+  roomCheats.reset();
   screenShoveX = 0; // reset the KAJUTA1 screen-shove offset
   count = 0;
   const wall = room.bitmaps[room.wallItem.bmp];
@@ -2861,6 +3014,20 @@ function draw(): void {
   // (the display scale can change while the room — and thus sw/sh — stays the same).
   if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
   if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
+  if (megabombFlash) {
+    // megabomb (URoom.pas:26192): the blast blanks the room to white for a single
+    // frame (VyplnMistnost(fontcol['w',1]); KresliTitulky) before the normal room
+    // comes back with two fresh skeletons in it. The GL overlay is hidden for this
+    // one frame so the flash is visible on both render paths.
+    megabombFlash = false;
+    forceRoomRedraw = true; // repaint the room properly next frame
+    glCanvas.style.display = 'none';
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, sw, sh);
+    canvas.style.transform = xform;
+    updateRoomSubOverlay(useVecSubs, cs, xform);
+    return;
+  }
   if (gpuOk) {
     glCanvas.style.display = 'block';
     glCanvas.style.transform = xform;
@@ -3402,27 +3569,19 @@ window.addEventListener('keydown', (e) => {
     }
     if (e.code !== 'KeyR' && e.code !== 'KeyE' && e.code !== 'KeyF') return;
   }
-  // Cheat-string detector (URoom.pas: xwemaketherules solves the current room).
+  // Typed cheat codes (ZaznamenejPrikazKlavesou, Uovl.pas:744; the map screen keeps
+  // its own buffer, UMain.pas:1750). `X` arms the machine; while a code is part-typed
+  // the letters are swallowed, and the first letter that cannot continue any code
+  // parks it and falls through to the normal handler below.
   if (e.key.length === 1 && /[a-z]/i.test(e.key)) {
-    cheatBuf = (cheatBuf + e.key.toLowerCase()).slice(-20);
-    if (cheatBuf.endsWith('xwemaketherules')) {
-      cheatBuf = '';
-      cheatSolveRoom();
+    const entry = screen === 'map' ? mapCheats : roomCheats;
+    const r = entry.press(e.key);
+    if (r.cheat) {
+      if (screen === 'map') applyMapCheat(r.cheat);
+      else applyRoomCheat(r.cheat);
       return;
     }
-    // xfisher (URoom.pas:24597): drop a fishing hook into the current room.
-    if (cheatBuf.endsWith('xfisher')) {
-      cheatBuf = '';
-      if (screen === 'room' && room) hooks.add(room);
-      return;
-    }
-    // xscore (easter egg): open the hidden SCORE bonus room (room 72). It is kept
-    // off the map and out of the finale, so this typed code is the only way in.
-    if (cheatBuf.endsWith('xscore')) {
-      cheatBuf = '';
-      void enterRoom(72);
-      return;
-    }
+    if (r.swallowed) return;
   }
   // Ctrl+Alt+D: enable/disable the developer pane (persisted). This is the ONLY
   // way in/out of dev mode; while enabled it shows the tuning chrome + perf HUD and
@@ -4048,6 +4207,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     const b = room.items[room.bigIdx];
     return {
       dead: room.anyFishDead,
+      alive: { ...room.alive },
       won: room.won,
       venku: room.venku,
       active: engine?.active ?? 'little',
@@ -4148,6 +4308,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   toggleOptions: () => togglePanelOptions(),
   optionsOpen: () => ostav === O_OPTIONS,
   volumes: () => ({ ...settings.volume }),
+  /** music_volume as the room scripts see it (0..64), i.e. Volumes[slider index]. */
+  scriptMusicVolume: () => activeScript?.s.musicVolume ?? null,
   subtitleMode: () => settings.subtitles,
   titDef: () => settings.titDef,
   // Help overlay (for UI probes): open/close + page state.
@@ -4326,6 +4488,26 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     if (room) hooks.add(room);
   },
   hookCount: () => hooks.count,
+  /** Type a cheat code as the player would (the leading X arms the machine). */
+  typeCheat: (code: string) => {
+    const entry = screen === 'map' ? mapCheats : roomCheats;
+    for (const ch of code) {
+      const r = entry.press(ch);
+      if (r.cheat) {
+        if (screen === 'map') applyMapCheat(r.cheat);
+        else applyRoomCheat(r.cheat);
+      }
+    }
+  },
+  ultraviolence: () => ultraviolence,
+  water: () => (room ? { wamp: room.wamp, wper: room.wper, wspd: room.wspd } : null),
+  fishSpriteSize: (which: 'little' | 'big') => {
+    const bm = room?.bodies[which === 'little' ? 'small' : 'big'][1] ?? null;
+    if (!bm) return null;
+    let hash = 2166136261;
+    for (const byte of bm.pixels) hash = Math.imul(hash ^ byte, 16777619);
+    return { w: bm.w, h: bm.h, hash: hash >>> 0 };
+  },
   hookStates: () => hooks.snapshot.map((h) => ({ stav: h.stav, cil: h.cil, x: h.x, y: h.y })),
   /** Debug: teleport an item (used to test gspec=9 push-out rooms). */
   moveItem: (i: number, x: number, y: number) => {
@@ -4569,6 +4751,10 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   roomDepth: () => roomDepth,
   killFish: (which: 'little' | 'big') => {
     room?.killFish(which);
+  },
+  /** Send a fish out of the room (stav_ven end): zije:=false, venku:=true. */
+  exitFish: (which: 'little' | 'big') => {
+    room?.exitFish(which);
   },
   setTrepat: (v: number) => {
     if (activeScript) activeScript.s.trepat = v;
