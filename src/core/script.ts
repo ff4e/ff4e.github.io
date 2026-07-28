@@ -128,9 +128,14 @@ export class Script {
    *  except system restart/exit while its finale cutscene plays. Set in ZAVER's init. */
   zavermode = false;
 
-  /** cas_hry (URoom.pas:23472): total play time in days (Delphi Now units). ZAVER's
-   *  finale narrates round(cas_hry*24) as a spoken hour count. The host sets it to the
-   *  elapsed session time; exact cross-session accumulation is deferred. */
+  /**
+   * cas_hry (USoutez.pas:263, consumed at URoom.pas:23472): total play time in days
+   * (Delphi Now units), which ZAVER's finale narrates as a spoken hour count. It is
+   * the sum over all rooms of the time spent INSIDE them, banked when each visit
+   * ends and carried across sessions — so map, menu and intro time never count, and
+   * the figure survives finishing the game over several sittings. The host keeps it
+   * in sync each tick.
+   */
   casHry = 0;
 
   /**

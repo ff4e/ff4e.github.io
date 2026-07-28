@@ -515,7 +515,74 @@ const saveSolved = (): void => saveSet('ff.solved', solved);
 const saveCheated = (): void => saveSet('ff.cheated', cheated);
 
 const scores = loadScores(); // room number -> best (lowest) move count on a genuine solve
-const gameStart = Date.now(); // session start, for ZAVER's cas_hry playtime narration
+
+/**
+ * cascisty (USoutez.pas:697): milliseconds spent INSIDE each room, accumulated
+ * across every visit and every session. The original keeps this per room in its
+ * competition records and adds the visit's elapsed time when the room closes
+ * (zaznamenej_zmeny, UMain.pas:283), then persists the records; ZAVER's finale
+ * narrates the total as an hour count. Map/menu/intro time never counts, and a
+ * restart does not split a visit (TRoom.Restart leaves casstartu alone).
+ */
+const playTime = loadPlayTime();
+/** Date.now() when the current room visit began, or 0 when not in a room. */
+let roomEnterAt = 0;
+
+/** Load the persisted per-room play time (ms). */
+function loadPlayTime(): Map<number, number> {
+  try {
+    const raw = localStorage.getItem('ff.playtime');
+    if (raw) {
+      const obj = JSON.parse(raw) as Record<string, number>;
+      return new Map(
+        Object.entries(obj)
+          .map(([k, v]) => [Number(k), Number(v)] as [number, number])
+          .filter(([k, v]) => Number.isFinite(k) && Number.isFinite(v) && v >= 0),
+      );
+    }
+  } catch {
+    /* storage unavailable */
+  }
+  return new Map<number, number>();
+}
+
+/** Start timing a room visit (TRoom.Start: casstartu := Date+Time). Armed by the
+ *  player entering a room, not by loadRoom — the boot room is pre-loaded behind
+ *  the world map and must not accrue play time. */
+function startRoomClock(): void {
+  roomEnterAt = Date.now();
+}
+
+/**
+ * Close a room visit and bank its elapsed time (zaznamenej_zmeny, UMain.pas:283 ->
+ * USoutez.pas:695). Called whenever the room is left, for any reason; time in a
+ * visit that is never closed is lost, exactly as it is in the original.
+ */
+function stopRoomClock(): void {
+  if (!roomEnterAt) return;
+  const elapsed = Date.now() - roomEnterAt;
+  roomEnterAt = 0;
+  const n = curNum;
+  if (!n || elapsed <= 0) return;
+  playTime.set(n, (playTime.get(n) ?? 0) + elapsed);
+  try {
+    localStorage.setItem('ff.playtime', JSON.stringify(Object.fromEntries(playTime)));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
+/**
+ * cas_hry (USoutez.pas:263): the whole game's play time, in Delphi day units —
+ * the sum over all rooms of their banked time. The visit in progress is NOT
+ * included, matching the original, whose current room has not been recorded yet
+ * when ZAVER reads it.
+ */
+function casHry(): number {
+  let ms = 0;
+  for (const v of playTime.values()) ms += v;
+  return ms / 86_400_000;
+}
 
 /** Load the persisted per-room best move counts (RoomVysl). */
 function loadScores(): Map<number, number> {
@@ -2453,6 +2520,7 @@ function startMenuMusic(): void {
  * voices, clear the dialogue queue and subtitles, then start the menu music.
  */
 function showMap(): void {
+  stopRoomClock(); // bank this visit's play time before the room goes away
   screen = 'map';
   select.value = 'map'; // keep the dev-bar Room picker in sync with the screen
   clearHeldKey(); // drop any held movement key when leaving the room
@@ -2704,7 +2772,9 @@ function drawCredits(): void {
  *  `replay` is the best-solution move record to play back animated (map "Replay"). */
 function enterRoom(num: number, replay?: string): Promise<void> {
   wake();
+  stopRoomClock(); // bank the outgoing room's time before the switch
   screen = 'room';
+  startRoomClock(); // TRoom.Start: casstartu := Date+Time
   mapHoverCorner = null; // drop any map corner hover on leaving the map
   mapHoverRoom = null;
   canvas.style.cursor = 'default';
@@ -3323,10 +3393,7 @@ function step(): boolean {
   // StepEngine still advances VyresLode so an in-flight wreck finishes falling.
   if (activeScript) {
     const wasWon = room.won;
-    // cas_hry: elapsed session time in days (Delphi Now units) for ZAVER's finale
-    // hour-count narration. Session-scoped; cross-session accumulation is deferred.
-    const casHry = (Date.now() - gameStart) / 86_400_000;
-    engine.runScript(count, casHry); // idle timers + scalar sync + prog + tickShodLod
+    engine.runScript(count, casHry()); // idle timers + scalar sync + prog + tickShodLod
     if (!wasWon) {
       // StdSmrt: death commentary (the survivor comments ~8 ticks after a partner dies).
       // Gated on StdHlaskySmrti (URoom.pas:24942) — rooms like TRUP/VLADOVA disable it.
@@ -4640,6 +4707,9 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   interlacedFaze: () => interlacedFaze,
   /** Which backend actually painted the last room frame ('cpu' | 'webgl'). */
   roomBackend: () => lastRoomBackend,
+  /** cas_hry in days, plus the raw per-room banked milliseconds behind it. */
+  casHry: () => casHry(),
+  playTime: () => Object.fromEntries(playTime),
   water: () => (room ? { wamp: room.wamp, wper: room.wper, wspd: room.wspd } : null),
   fishSpriteSize: (which: 'little' | 'big') => {
     const bm = room?.bodies[which === 'little' ? 'small' : 'big'][1] ?? null;
