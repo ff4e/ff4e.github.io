@@ -26,6 +26,7 @@ interface FakeSource {
   started: boolean;
   stopped: number;
   connect(): void;
+  disconnect(): void;
   start(): void;
   stop(): void;
   addEventListener(type: string, fn: () => void): void;
@@ -43,6 +44,7 @@ function makeSource(): FakeSource {
     started: false,
     stopped: 0,
     connect: () => {},
+    disconnect: () => {},
     start() {
       this.started = true;
     },
@@ -70,6 +72,9 @@ class FakeAudioContext {
   createBufferSource(): FakeSource {
     return makeSource();
   }
+  decodeAudioData(): Promise<AudioBuffer> {
+    return Promise.resolve({ duration: 60 } as unknown as AudioBuffer);
+  }
 }
 
 /** A stand-in AudioBuffer; only `duration` is read by the engine. */
@@ -86,15 +91,22 @@ function priorSources(engine: AudioEngine): Map<number, Set<unknown>> {
 }
 
 let prevCtx: unknown;
+let prevFetch: unknown;
 
 beforeEach(() => {
   sources.length = 0;
   prevCtx = (globalThis as { AudioContext?: unknown }).AudioContext;
+  prevFetch = globalThis.fetch;
   (globalThis as { AudioContext?: unknown }).AudioContext = FakeAudioContext;
+  // playMusic fetches Music/<name>.wav and reads the sample rate from the header
+  // (offset 24); a zeroed buffer makes it fall back to 22050.
+  (globalThis as { fetch?: unknown }).fetch = () =>
+    Promise.resolve({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) });
 });
 
 afterEach(() => {
   (globalThis as { AudioContext?: unknown }).AudioContext = prevCtx;
+  (globalThis as { fetch?: unknown }).fetch = prevFetch;
 });
 
 function newEngine(): AudioEngine {
@@ -193,6 +205,24 @@ describe('bookkeeping stays clean', () => {
     engine.play('x', 1, MUSIC_PRIOR, 'music');
     engine.killVoice(MUSIC_PRIOR);
     expect(sources[0]!.stopped).toBe(1);
+    expect(engine.playing(MUSIC_PRIOR)).toBe(false);
+  });
+
+  // KANKAN (kankan.ts:204) shushes the band with ksnd(-999) and re-cues the track
+  // afterwards, so the looping MusicCycle source itself must stop — it lives outside
+  // priorSources, so only the stopMusic() branch of killVoice can reach it.
+  it('KSnd(-999) stops the looping MusicCycle source (KANKAN)', async () => {
+    const engine = newEngine();
+    await engine.playMusic('rybky05', '/data/Music/rybky05.wav', 1000);
+    expect(engine.currentMusic).toBe('rybky05');
+    expect(engine.playing(MUSIC_PRIOR)).toBe(true);
+    const music = sources[0]!;
+    expect(music.loop).toBe(true);
+
+    engine.killVoice(MUSIC_PRIOR);
+
+    expect(music.stopped).toBe(1);
+    expect(engine.currentMusic).toBe('');
     expect(engine.playing(MUSIC_PRIOR)).toBe(false);
   });
 });
