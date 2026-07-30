@@ -76,6 +76,11 @@ const EXCLUSIVE = new Set([
   // frames — a ratio, but both sides are sampled over wall-clock windows.
   'test-subtitles-perf.mjs',
   'test-mapinfo.mjs', // world-map animation pacing, measured over rAF frames
+  // Subtitle overlay repaints and loop rAF ticks, both per second of real time.
+  'test-aisubs.mjs',
+  // Samples loopThrottleOk() over wall-clock windows to catch a line while it is
+  // still animating; a loaded machine can settle the line before it samples.
+  'test-tierperf.mjs',
 ]);
 
 const jobs = Math.max(1, Number(process.env.FF_UI_JOBS) || Math.min(8, Math.max(2, cpus().length - 2)));
