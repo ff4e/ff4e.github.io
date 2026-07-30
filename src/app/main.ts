@@ -4779,8 +4779,15 @@ document.addEventListener('visibilitychange', () => {
 
 function cellFromEvent(e: MouseEvent): { cx: number; cy: number } {
   const rect = canvas.getBoundingClientRect();
-  const px = (e.clientX - rect.left) * (canvas.width / rect.width);
-  const py = (e.clientY - rect.top) * (canvas.height / rect.height);
+  // Convert to NATIVE game pixels, not backing-store pixels. FSIZE below is a native
+  // cell size, so the two must agree — and they stopped agreeing in the ai tier, whose
+  // backing store is ×scale: scaling by canvas.width put every click four times too far
+  // right and down, which broke mouse control of the fish entirely in that tier.
+  const g = room ? roomGeometry(room) : null;
+  const nativeW = g ? g.nativeW : canvas.width;
+  const nativeH = g ? g.nativeH : canvas.height;
+  const px = (e.clientX - rect.left) * (nativeW / rect.width);
+  const py = (e.clientY - rect.top) * (nativeH / rect.height);
   return { cx: Math.floor(px / FSIZE), cy: Math.floor(py / FSIZE) };
 }
 
@@ -5323,6 +5330,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   talk: (which: 'little' | 'big') => talk(which),
   count: () => count,
   fsize: () => FSIZE,
+  /** The room's resolved geometry (see roomGeometry): native/css/backing sizes. */
+  roomGeom: () => (room ? roomGeometry(room) : null),
   phase: () => engine?.phase ?? 'idle',
   moveFrames: () => engine?.moveFrames() ?? MOVE_FRAMES, // current ticks/cell (jizda speed-up)
   jizda: () => engine?.jizda ?? 0,
