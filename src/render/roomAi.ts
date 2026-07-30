@@ -235,6 +235,9 @@ export class AiRoom {
   private readonly glassCache = new WeakMap<ImageBitmap, Float32Array>();
   /** Scratch canvas reused by the skeleton dissolve (see drawDisintegrating). */
   private dissolveCanvas: HTMLCanvasElement | null = null;
+  /** Cached background+wall composite, and the state it was built for. */
+  private bgCanvas: HTMLCanvasElement | null = null;
+  private bgSig = '';
   /** ×S palette sprites for items with no staged art (see drawClassicItem). */
   private readonly classicCache = new Map<string, HTMLCanvasElement>();
 
@@ -258,11 +261,54 @@ export class AiRoom {
     for (const b of this.owned) b.close();
     this.classicCache.clear();
     this.dissolveCanvas = null;
+    this.bgCanvas = null;
+    this.bgSig = '';
   }
 
   /** Native room pixel size the caller must scale the framebuffer from (×scale). */
   get nativeWidth(): number { return Math.round(this.bg[0]!.width / this.scale); }
   get nativeHeight(): number { return Math.round(this.bg[0]!.height / this.scale); }
+
+  /**
+   * Draw the background+wall composite, reusing a cached copy when it has not changed.
+   *
+   * The composite depends only on the wall's animation phase and — when the room has
+   * water wobble — the logic tick, both of which advance at 12.5Hz. The fish, however,
+   * interpolate between ticks, so the room repaints at the display rate; without this
+   * cache every one of those frames re-ran the whole banded wobble.
+   *
+   * Measured on a 435×405 room at ×4: 85 drawImage calls and 5.98 Mpx blitted per
+   * frame, against a canvas of only 2.82 Mpx. The AI tier could not hold 60fps and its
+   * subtitles visibly juddered while the enhanced tier (which composites on the GPU)
+   * stayed smooth. Cached, a repeat frame is a single full-canvas blit.
+   *
+   * With wamp === 0 the composite does not depend on `count` at all, so a still room
+   * builds it exactly once.
+   */
+  private paintBackgroundCached(ctx: CanvasRenderingContext2D, room: Room, bg: ImageBitmap, wall: ImageBitmap, count: number, faze: number): void {
+    const W = ctx.canvas.width;
+    const H = ctx.canvas.height;
+    // No DOM (unit tests drive this with a recording context) ⇒ paint straight through.
+    // The cache is a rendering optimisation, not behaviour: the composite it produces is
+    // identical either way, so the uncached path is the correct fallback.
+    if (typeof document === 'undefined') { this.paintBackground(ctx, room, bg, wall, count); return; }
+    const sig = `${faze}|${room.wamp === 0 ? 0 : count}|${W}x${H}`;
+    if (!this.bgCanvas || this.bgSig !== sig) {
+      if (!this.bgCanvas) this.bgCanvas = document.createElement('canvas');
+      if (this.bgCanvas.width !== W || this.bgCanvas.height !== H) {
+        this.bgCanvas.width = W;
+        this.bgCanvas.height = H;
+      }
+      const bctx = this.bgCanvas.getContext('2d');
+      if (!bctx) { this.bgCanvas = null; this.paintBackground(ctx, room, bg, wall, count); return; }
+      bctx.setTransform(1, 0, 0, 1, 0, 0);
+      bctx.imageSmoothingEnabled = false;
+      bctx.clearRect(0, 0, W, H);
+      this.paintBackground(bctx, room, bg, wall, count);
+      this.bgSig = sig;
+    }
+    ctx.drawImage(this.bgCanvas, 0, 0);
+  }
 
   /**
    * Composite the wall-over-wobbled background + all sprites for `room`+`f` into
@@ -285,7 +331,7 @@ export class AiRoom {
       ctx.fillStyle = d ? `rgb(${d.r},${d.g},${d.b})` : '#000';
       ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
     } else {
-      this.paintBackground(ctx, room, bg, wall, f.count);
+      this.paintBackgroundCached(ctx, room, bg, wall, f.count, faze);
     }
 
     // gspec=5 (WIN bonus level): the fish BODY is drawn for the YOUNG fish

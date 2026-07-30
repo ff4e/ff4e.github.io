@@ -4307,11 +4307,17 @@ function loopThrottleOk(): boolean {
     return (
       !forceRoomRedraw &&
       !roomAnimating() &&
-      // An enhanced subtitle waving in / scrolling animates BETWEEN logic ticks, so
-      // it needs the full rAF rate for the ~1.5s it takes to settle (it only repaints
+      // A vector subtitle waving in / scrolling animates BETWEEN logic ticks, so it
+      // needs the full rAF rate for the ~1.5s it takes to settle (it only repaints
       // the overlay, not the room). A settled line does not, and neither does the
       // classic bitmap path, which is baked into the frame at the tick rate.
-      !(graphics === 'enhanced' && subFontReady && subs?.vectorAnimating(count)) &&
+      //
+      // Gated on enhancedArtActive() — every tier that USES the vector overlay (see
+      // useVecSubs in drawRoom), not the literal 'enhanced' tier. Checking
+      // `graphics === 'enhanced'` left the ai tier idle-throttled at 12.5fps for the
+      // whole line: measured rAF 12fps in ai against 121fps in enhanced, which is
+      // exactly the juddering-subtitle report.
+      !(enhancedArtActive() && subFontReady && subs?.vectorAnimating(count)) &&
       heldState === 0 &&
       !inShowmode() &&
       !loadmode &&
@@ -4459,7 +4465,16 @@ function loop(now: number): void {
     // rate for it. When skipped, the last painted frame persists on the canvas.
     const zxAnim = room?.gspec === 42;
     const sig = `${count}|${enhancedPending ? 1 : 0}|${graphics}|${renderer}|${glFailed ? 1 : 0}`;
-    if (!renderOnDirty || forceRoomRedraw || roomAnimating() || zxAnim || sig !== lastRoomSig) {
+    // The AI compositor repaints a ×S backing store (1740×1620 for a 435×405 room).
+    // Doing that on every refresh when NOTHING changed is work the browser cannot
+    // absorb: measured 35fps idle and 20fps with a subtitle on screen, against 62fps
+    // in the enhanced tier — and the cost is in compositing, not JS (the frame
+    // callback itself is 0.1ms in both). Its content only changes on a logic tick or
+    // while motion interpolates, both of which are covered below, so honour
+    // render-on-dirty in this tier even when the saver is off.
+    const aiFrame = room !== null && aiRoomRenderActive(room);
+    const dirtyOnly = renderOnDirty || aiFrame;
+    if (!dirtyOnly || forceRoomRedraw || roomAnimating() || zxAnim || sig !== lastRoomSig) {
       draw();
       perfPaint++;
       lastRoomSig = sig;
@@ -4467,10 +4482,16 @@ function loop(now: number): void {
       // the grain, the interlaced collapse and the minigame all animate on their own,
       // and `sig` cannot see them, so render-on-dirty would otherwise freeze them.
       forceRoomRedraw = frameEffectsActive();
-    } else if (graphics === 'enhanced' && subFontReady && subs?.active) {
+    } else if (enhancedArtActive() && subFontReady && subs?.active) {
       // The room is unchanged, but a subtitle may still be waving in or scrolling.
       // The overlay is its own layer, so animate it on its own — at the sub-tick
       // rate — without paying for a room repaint underneath.
+      //
+      // Gated on enhancedArtActive(), i.e. exactly the tiers that USE the vector
+      // overlay (see useVecSubs in drawRoom), not on the literal 'enhanced' tier.
+      // Checking `graphics === 'enhanced'` excluded the `ai` tier, whose subtitles
+      // then only advanced when the room itself repainted — measured at 22 overlay
+      // repaints/sec against enhanced's 40.7, which reads as juddering text.
       const { w: sw2, h: sh2 } = roomScreenSize(room!);
       updateRoomSubOverlay(true, contentScaleFor(sw2, sh2));
     }
