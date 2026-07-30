@@ -18,7 +18,7 @@
  * instead (line-shared code path, plus the test-gl-* parity suite). We drive a
  * throttled / failed FFR fetch via page routing to open the async window on demand.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp, tickSleep, waitFrames } from './ui-lib.mjs';
 
 // Fraction of non-black pixels on #screen: ~0 while the stage is cleared black,
 // large once a room's tiles are painted. Reads the whole frame once and samples a
@@ -50,8 +50,8 @@ await withApp(
 
     // --- Establish a bright, fully-loaded "previous" room (ZDVIZ1, gold). ---
     await p.evaluate(() => window.__ff.enterRoomAwait(20));
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 8000 });
-    await p.waitForTimeout(300);
+    await waitRoom(p, 0);
+    await tickSleep(p, 4);
     const prevFill = await stageFill(p);
     expect(prevFill > 0.1, `previous room paints visible content on #screen (fill ${prevFill.toFixed(3)})`);
 
@@ -66,7 +66,11 @@ await withApp(
         () => 'err',
       );
     });
-    await p.waitForTimeout(500); // 500ms into a 2000ms throttle: definitely still loading
+    // Wait for the loading STATE rather than for a slice of the 2000ms throttle — the
+    // condition the sample below depends on is `roomLoading`, so wait on that — and then
+    // for the frames that clear the stage, since the sample reads pixels.
+    await p.waitForFunction(() => window.__ff.roomLoading(), { timeout: 10000 }).catch(() => {});
+    await waitFrames(p, 3);
     expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'screen switches to room synchronously on enter');
     const loadingFill = await stageFill(p);
     expect(
@@ -76,8 +80,8 @@ await withApp(
 
     // Let the throttled load finish: the freshly-built room now paints.
     expect((await p.evaluate(() => window.__rp)) === 'ok', 'the throttled room load resolves');
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 8000 });
-    await p.waitForTimeout(300);
+    await waitRoom(p, 0);
+    await tickSleep(p, 4);
     const loadedFill = await stageFill(p);
     expect(loadedFill > 0.1, `the newly-loaded room paints once its assets arrive (fill ${loadedFill.toFixed(3)})`);
     await p.unroute(ffrGlob(30));
@@ -96,7 +100,7 @@ await withApp(
       ),
     );
     expect(failRes === 'err', 'a failed room load rejects (loadRoom rethrows after finally)');
-    await p.waitForTimeout(300);
+    await tickSleep(p, 4);
     const recoveredFill = await stageFill(p);
     expect(
       recoveredFill > 0.1,

@@ -7,7 +7,7 @@
  * fully solved just returns to the map. SCORE (room 72) is deliberately never auto-launched
  * — it stays a hidden secret, reachable only via the debug Room picker.
  */
-import { withApp } from './ui-lib.mjs';
+import { selectRoom, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -32,7 +32,7 @@ await withApp(async ({ p, expect }) => {
     await p.waitForFunction(() => window.__ff.state().won, { timeout: 5000 });
   };
   const enterAndWin = async (room) => {
-    await p.selectOption('#room', String(room));
+    await selectRoom(p, room);
     await p.waitForFunction(
       () =>
         window.__ff.screen() === 'room' &&
@@ -97,7 +97,7 @@ await withApp(async ({ p, expect }) => {
   // --- SCORE (room 72) stays a hidden secret: the completion never launches it (the
   //     finale is ZAVER/zavermode, not SCORE), yet it remains reachable via debug. ---
   await p.evaluate(() => window.__ff.enterRoom(72));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   expect(
     (await p.evaluate(() => window.__ff.zaverMode())) === false,
     'SCORE (room 72) is not the finale cutscene — it stays a separate secret room',

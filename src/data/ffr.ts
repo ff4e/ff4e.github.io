@@ -47,6 +47,18 @@ export interface FfrBitmap {
   readonly padded: number;
 }
 
+const bitmapPixelRevisions = new WeakMap<Uint8Array, number>();
+
+/** Revision used by GPU texture caches for the few Delphi effects that mutate bitmap pixels. */
+export function bitmapPixelRevision(pixels: Uint8Array): number {
+  return bitmapPixelRevisions.get(pixels) ?? 0;
+}
+
+/** Mark a bitmap's existing pixel array as changed without replacing its identity. */
+export function markBitmapPixelsChanged(pixels: Uint8Array): void {
+  bitmapPixelRevisions.set(pixels, bitmapPixelRevision(pixels) + 1);
+}
+
 /** One placed object/item. Item 0 is the room wall (URoom.pas const wall=0). */
 export interface FfrItem {
   readonly xStart: number;

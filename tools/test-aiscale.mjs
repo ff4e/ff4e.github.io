@@ -103,5 +103,32 @@ await withApp(async ({ p, expect }) => {
     expect(fish !== null && fish > 25, `${room.name} draws the big fish (contrast ${fish?.toFixed?.(1)})`);
   }
 
+  // The CPU-only frame effects (interlaced/silent-film/megabomb/Tetris) are applied by
+  // the faithful compositor while it builds the frame. The AI path bypasses that
+  // compositor, so it MUST yield for those frames or the effect silently does nothing —
+  // and nothing errors, the room just renders without it. Detect via the backing store:
+  // the AI path is native×scale, the faithful one is native.
+  await p.evaluate((id) => window.__ff.enterRoomAwait(id), ROOMS[0].id);
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 8000 });
+  const hi = await p.waitForFunction(() => {
+    const c = document.querySelector('#screen');
+    return c && c.width > 800 ? c.width : null;
+  }, undefined, { timeout: 20000 }).then((h) => h.jsonValue()).catch(() => null);
+  expect(hi !== null, `AI room is hi-res before the effect (${hi}px)`);
+
+  await p.evaluate(() => window.__ff.typeCheat('XINTERLACED'));
+  const lo = await p.waitForFunction((was) => {
+    const c = document.querySelector('#screen');
+    return c && c.width < was ? c.width : null;
+  }, hi, { timeout: 8000 }).then((h) => h.jsonValue()).catch(() => null);
+  expect(lo !== null, `AI path yields to a frame effect (${hi} -> ${lo})`);
+
+  await p.evaluate(() => window.__ff.typeCheat('XINTERLACED'));
+  const restored = await p.waitForFunction((was) => {
+    const c = document.querySelector('#screen');
+    return c && c.width === was ? c.width : null;
+  }, hi, { timeout: 8000 }).then((h) => h.jsonValue()).catch(() => null);
+  expect(restored !== null, `AI path resumes once the effect ends (${restored}px)`);
+
   expect(errors.length === 0, `no page errors (${errors.slice(0, 3).join(' | ')})`);
 });

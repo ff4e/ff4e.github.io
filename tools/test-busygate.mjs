@@ -4,7 +4,7 @@
  * input for that fish is dropped: it must not move. Once busy clears, input works again.
  * This drives the actual DOM keydown handler (not just __ff.press) end-to-end.
  */
-import { withApp } from './ui-lib.mjs';
+import { withApp, forTicks, tickSleep } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   const press = (code) =>
@@ -24,12 +24,13 @@ await withApp(async ({ p, expect }) => {
 
   // Mark the little fish busy, then hammer every little-fish input surface.
   await p.evaluate(() => window.__ff.setBusy('little', 1));
-  for (let i = 0; i < 6; i++) {
+  // Hammered over a window of GAME ticks: the busy gate is checked once per dispatch
+  // tick, so "the fish did not move" is only meaningful if dispatch ticks happened.
+  await forTicks(p, 12, async () => {
     await press('KeyJ'); // IJKL left
     await press('KeyL'); // IJKL right
     await press('ArrowLeft'); // active-fish arrow
-    await p.waitForTimeout(40);
-  }
+  }, 40);
   const during = await p.evaluate(() => window.__ff.fishCell('little'));
   expect(
     during.x === before.x && during.y === before.y,
@@ -39,7 +40,7 @@ await withApp(async ({ p, expect }) => {
   // Clear busy: input must now take effect (facing flips and/or it moves).
   await p.evaluate(() => window.__ff.setBusy('little', 0));
   await press('KeyJ');
-  await p.waitForTimeout(120);
+  await tickSleep(p, 2);
   await press('KeyJ');
   await p.waitForFunction(
     (b) => {

@@ -6,20 +6,19 @@
  * the saved posHash. (The 1998 game has no single-move undo: Backspace = Restart.)
  * Launched with autoplay allowed so the game clock runs headless.
  */
-import { chromium } from 'playwright';
+import { exitProbe, gotoApp, launchBrowser, selectRoom, tickSleep } from './ui-lib.mjs';
 const DIR = { up: 1, down: 2, left: 3, right: 4 };
-const PORT = process.env.FF_UI_PORT ?? '5173'; // run-ui-tests.mjs spawns the server on FF_UI_PORT (5273)
-const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser();
 const p = await b.newPage({ viewport: { width: 1600, height: 620 } });
 const errs = [];
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 await p.addInitScript(() => { try { localStorage.setItem('ff.devEnabled', '1'); } catch {} }); // enable dev pane (room dropdown)
-await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
-await p.selectOption('#room', '7'); // UTES
+await gotoApp(p);
+await selectRoom(p, 7); // UTES
 await p.waitForFunction(() => window.__ff && window.__ff.posHash, { timeout: 5000 });
 await p.evaluate(() => window.__ff.load && localStorage.removeItem('ff.save.7'));
-await p.waitForTimeout(300);
+await tickSleep(p, 4);
 
 async function idle() {
   await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
@@ -75,4 +74,4 @@ const pass =
 console.log('errors:', errs.length ? errs : 'none');
 console.log(pass ? '\nALL PASS' : '\nFAIL');
 await b.close();
-process.exit(pass ? 0 : 1);
+exitProbe(pass ? 0 : 1);

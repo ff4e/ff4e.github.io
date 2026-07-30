@@ -4,7 +4,7 @@
  * persisted introSeen flag, the corner hit-test, and the credits/options
  * overlays — all without actually playing the (large) MP4s (we skip through).
  */
-import { withApp } from './ui-lib.mjs';
+import { reloadApp, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap(), { timeout: 8000 });
@@ -78,7 +78,7 @@ await withApp(async ({ p, expect }) => {
   );
 
   // A reload with introSeen persisted goes straight to the map — no intro.
-  await p.reload({ waitUntil: 'networkidle' });
+  await reloadApp(p);
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap(), { timeout: 8000 });
   expect(await p.evaluate(() => window.__ff.screen()) === 'map', 'second boot skips straight to the map');
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'no intro on the second boot');
@@ -106,11 +106,11 @@ await withApp(async ({ p, expect }) => {
   });
   const moveFrac = (fx, fy) => p.mouse.move(canvasBox.x + canvasBox.w * fx, canvasBox.y + canvasBox.h * fy);
   await moveFrac(0.06, 0.06); // top-left → intro
-  await p.waitForTimeout(120);
+  await p.waitForFunction(() => window.__ff.mapHover() === 'intro', { timeout: 10000 }).catch(() => {});
   expect(await p.evaluate(() => window.__ff.mapHover()) === 'intro', 'hovering the top-left corner lights intro');
   expect(await p.evaluate(() => document.getElementById('screen').style.cursor) === 'pointer', 'a corner shows a pointer cursor');
   await moveFrac(0.5, 0.5); // interior → no corner
-  await p.waitForTimeout(120);
+  await p.waitForFunction(() => window.__ff.mapHover() === null, { timeout: 10000 }).catch(() => {});
   expect(await p.evaluate(() => window.__ff.mapHover()) === null, 'the map interior clears the corner highlight');
 
   // Top-left corner replays the intro (just intro.avi, not gated).

@@ -218,11 +218,17 @@ export class StepEngine {
    */
   runScript(count: number, casHry: number): void {
     const room = this.room;
-    if (!this.script || !this.def || room.won) return;
+    if (!this.script || !this.def) return;
+    const s = this.script;
+    // Priprav/VyresLode continues during the win hold in Delphi even though the
+    // room's Programky no longer needs to advance.
+    if (room.won) {
+      s.tickShodLod();
+      return;
+    }
     room.idle.little++; // inc(delay[r]) — idle timers
     room.idle.big++;
     room.aktivni = this.active; // keep the room's active-fish in sync for Programky
-    const s = this.script;
     s.count = count;
     s.casHry = casHry;
     s.gfaze = this.phase === 'move' ? this.animFrame : 0;
@@ -235,7 +241,7 @@ export class StepEngine {
       s.gstav = this.phase === 'fall' ? 1 : this.phase === 'turn' ? 6 : this.phase === 'exit' ? 7 : this.phase === 'kuk' ? 8 : 0;
     }
     this.def.prog(s);
-    s.tickShodLod(); // advance any falling ship (ShodLod/VyresLode motion)
+    s.tickShodLod(); // advance and destructively render any falling ship (ShodLod/VyresLode)
   }
 
   /**

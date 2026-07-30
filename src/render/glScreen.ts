@@ -26,7 +26,7 @@
  * computed CPU-side and uploaded). ZX's band width is `Math.random`-driven per
  * frame, so only the byte-exact TEST re-seeds it — the live render stays random.
  */
-import { FFR_EXTRA } from '../data/ffr.js';
+import { FFR_EXTRA, bitmapPixelRevision } from '../data/ffr.js';
 import { RANDPOLE, cpuDrawRope } from './framebuffer.js';
 import type { FfrBitmap, FfrPaletteEntry } from '../data/ffr.js';
 import type { CompositeTarget, TruecolorTarget } from './framebuffer.js';
@@ -421,9 +421,12 @@ export class GlScreen implements TruecolorTarget {
 
   private readonly wallTex: WebGLTexture;
   private readonly bgTex: WebGLTexture;
-  // Last (immutable) index bitmap uploaded to each texture, so a frame that re-blits
-  // the same static wall/bg (the common case at 60fps) skips the texImage2D re-upload.
-  private readonly lastUpload = new WeakMap<WebGLTexture, { pixels: Uint8Array; w: number; h: number }>();
+  // Last bitmap uploaded to each texture, so unchanged frames skip texImage2D.
+  // LODE's background is mutable, hence the explicit pixel revision.
+  private readonly lastUpload = new WeakMap<
+    WebGLTexture,
+    { pixels: Uint8Array; w: number; h: number; revision: number }
+  >();
   private readonly itemTex: WebGLTexture;
   private readonly cutTex: WebGLTexture;
   private readonly bodyTex: WebGLTexture;
@@ -534,16 +537,16 @@ export class GlScreen implements TruecolorTarget {
    * wall/bg index textures — which are re-blitted every frame at 60fps while their
    * pixels only change on a room change / wall-animation frame (12.5fps). The wobble
    * itself is a per-frame `uCount` uniform, so the textures don't need re-uploading
-   * between those changes. Keyed on the pixels array IDENTITY (FFR bitmaps are parsed
-   * once and never mutated in place), so an animated wall frame — a different array —
-   * re-uploads correctly. Safe because wallTex/bgTex are sampled-only (never FBO
-   * targets), so uploadIndex is the sole way their content changes.
+   * between those changes. Keyed on array identity plus a revision for the one
+   * destructive bitmap effect (LODE's falling wreck), so mutations re-upload while
+   * static/animated frames retain the fast path.
    */
   private uploadIndexCached(tex: WebGLTexture, w: number, h: number, pixels: Uint8Array): void {
     const prev = this.lastUpload.get(tex);
-    if (prev && prev.pixels === pixels && prev.w === w && prev.h === h) return; // already resident
+    const revision = bitmapPixelRevision(pixels);
+    if (prev && prev.pixels === pixels && prev.w === w && prev.h === h && prev.revision === revision) return;
     this.uploadIndex(tex, w, h, pixels);
-    this.lastUpload.set(tex, { pixels, w, h });
+    this.lastUpload.set(tex, { pixels, w, h, revision });
   }
 
   private uploadLut(palette: readonly FfrPaletteEntry[]): void {
@@ -911,7 +914,7 @@ export class GlScreen implements TruecolorTarget {
     const prev = this.lastUpload.get(tex);
     if (prev && prev.pixels === rgba && prev.w === w && prev.h === h) return; // already resident
     this.uploadRgba(tex, w, h, rgba);
-    this.lastUpload.set(tex, { pixels: rgba, w, h });
+    this.lastUpload.set(tex, { pixels: rgba, w, h, revision: 0 });
   }
 
   /**
