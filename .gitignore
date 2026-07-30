@@ -37,3 +37,9 @@ tools/map-matrix/
 tools/map-contest/
 tools/fish-outline/
 .DS_Store
+
+# The briefcase cutscene's materialised animation frames (285 PNGs, ~19 MB).
+# Purely derived from public/data/Intro/demo.pck, which IS committed — regenerate with
+# `npx tsx tools/studio/stage-kufr.ts`. The two curated cards beside them
+# (base.png, anim.png) and the playback order (frames.json) are NOT ignored.
+public/enhanced/_kufr/frames/

@@ -198,9 +198,10 @@ function scalesForPicture(p) {
   for (const u of p.uses || []) {
     // _fish/_menu aren't rooms: fish ship at EVERY room scale, menu art only at ×4.
     if (u.room === '_fish') { for (const r of Object.keys(index.rooms)) set.add(roomScaleOf(r)); continue; }
-    // UI art (menu / control panel / credits) is drawn at the stage scale, not a
-    // room scale, so it is always built at the base factor.
-    if (u.room === '_menu' || u.room === '_panel' || u.room === '_credits') { set.add(SCALE); continue; }
+    // UI art (menu / control panel / credits / story pages / the briefcase cutscene) is
+    // drawn at the stage scale, not a room scale, so it is always built at the base factor.
+    if (u.room === '_menu' || u.room === '_panel' || u.room === '_credits'
+      || u.room === '_story' || u.room === '_kufr') { set.add(SCALE); continue; }
     if (index.rooms[u.room]) set.add(roomScaleOf(u.room));
   }
   if (!set.size) set.add(SCALE);
@@ -545,6 +546,10 @@ const server = createServer(async (req, res) => {
       const panelSel = panelAll.filter((h) => selections[h]).length;
       const creditsAll = index.credits || [];
       const creditsSel = creditsAll.filter((h) => selections[h]).length;
+      const storyAll = index.story || [];
+      const storySel = storyAll.filter((h) => selections[h]).length;
+      const kufrAll = index.kufr || [];
+      const kufrSel = kufrAll.filter((h) => selections[h]).length;
       return sendJson(res, {
         rooms,
         shared: {
@@ -553,6 +558,8 @@ const server = createServer(async (req, res) => {
           menu: { total: menuAll.length, selected: menuSel },
           panel: { total: panelAll.length, selected: panelSel },
           credits: { total: creditsAll.length, selected: creditsSel },
+          story: { total: storyAll.length, selected: storySel },
+          kufr: { total: kufrAll.length, selected: kufrSel },
         },
         totals: { pictures: Object.keys(index.pictures).length, selected: Object.keys(selections).length },
         models: AVAILABLE_MODELS,
@@ -574,7 +581,9 @@ const server = createServer(async (req, res) => {
       const which = path.slice('/api/shared/'.length); // 'fish' | 'objects' | 'menu'
       if (which === 'fish') return sendJson(res, { which, pictures: fishCards() });
       if (which === 'menu') return sendJson(res, { which, pictures: menuCards() });
-      if (which === 'panel' || which === 'credits') return sendJson(res, { which, pictures: flatCards(which) });
+      if (which === 'panel' || which === 'credits' || which === 'story' || which === 'kufr') {
+        return sendJson(res, { which, pictures: flatCards(which) });
+      }
       // NB: `.map(picMeta)` would pass the ARRAY INDEX as picMeta's `scale` argument.
       const pics = index.sharedObjects.map((h) => picMeta(h)).filter(Boolean)
         .sort((a, b) => b.roomCount - a.roomCount);

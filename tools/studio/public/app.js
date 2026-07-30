@@ -46,6 +46,8 @@ function renderNav(s) {
   if (s.shared.menu) nav.append(navItem('🗺 Menu / map', s.shared.menu, () => selectShared('menu'), 'shared:menu'));
   if (s.shared.panel) nav.append(navItem('🎛 Panel / options', s.shared.panel, () => selectShared('panel'), 'shared:panel'));
   if (s.shared.credits) nav.append(navItem('🎬 Credits', s.shared.credits, () => selectShared('credits'), 'shared:credits'));
+  if (s.shared.story) nav.append(navItem('📖 Story pages', s.shared.story, () => selectShared('story'), 'shared:story'));
+  if (s.shared.kufr) nav.append(navItem('💼 Briefcase intro', s.shared.kufr, () => selectShared('kufr'), 'shared:kufr'));
   nav.append(el('div', { className: 'nav-group', textContent: `Rooms (${s.rooms.length})` }));
   const filter = $('#filter').value.trim().toUpperCase();
   for (const r of s.rooms) {
@@ -137,6 +139,8 @@ async function selectShared(which) {
     menu: 'Shared — Menu / world map  ·  ships ×4',
     panel: 'Shared — Control panel & options  ·  16 colour variants of one panel + the slider handle',
     credits: 'Shared — End credits  ·  static frame + the scrolling strip',
+    story: 'Shared — Leg story pages  ·  the nine full-screen pages shown after each leg (text-heavy: check the lettering)',
+    kufr: 'Shared — Briefcase intro  ·  base = the suitcase/TV canvas, anim = ONE pick for all 285 animation frames',
     objects: 'Shared — Objects (used in >1 room, so possibly at several scales)',
   };
   $('#viewtitle').textContent = TITLES[which] || TITLES.objects;

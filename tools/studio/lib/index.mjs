@@ -40,6 +40,8 @@ function classify(relPath) {
   if (relPath.includes('/_menu/')) return 'menu';
   if (relPath.includes('/_panel/')) return 'panel';
   if (relPath.includes('/_credits/')) return 'credits';
+  if (relPath.includes('/_story/')) return 'story';
+  if (relPath.includes('/_kufr/')) return 'kufr';
   const b = basename(relPath);
   if (b === 'p.png') return 'bg';
   if (b === 'w.png') return 'wall';
@@ -145,6 +147,13 @@ export function buildIndex(root) {
   //   _menu    world map / menu art        (stage-menu.mjs)
   //   _panel   control panel + options     (stage-ui.mjs, from panel.ffp)
   //   _credits end-credits frame + strip   (stage-ui.mjs, from CredStat1/CredMov)
+  //   _story   the nine leg story pages    (stage-story.mjs, from Menu/00N.$dv)
+  //   _kufr    briefcase cutscene          (stage-kufr.ts, from kufr256.BMP + demo.pck)
+  //
+  // NOTE this reads only the TOP LEVEL of each directory, which is what keeps _kufr to
+  // two decisions: its 285 materialised animation frames live in _kufr/frames/ and are
+  // deliberately not indexed. An animation must use ONE model for every frame or it
+  // flickers, so the Studio curates it through the single representative anim.png.
   const flatShared = (dirName) => {
     const out = [];
     const dir = join(enhancedDir, dirName);
@@ -162,12 +171,14 @@ export function buildIndex(root) {
   const menu = flatShared('_menu');
   const panel = flatShared('_panel');
   const credits = flatShared('_credits');
+  const story = flatShared('_story');
+  const kufr = flatShared('_kufr');
 
   const sharedObjects = Object.values(pictures)
     .filter((p) => p.kind === 'object' && new Set(p.uses.map((u) => u.room)).size > 1)
     .map((p) => p.hash);
 
-  return { builtAt: new Date().toISOString(), enhancedDir, pictures, rooms, sharedObjects, fish, menu, panel, credits };
+  return { builtAt: new Date().toISOString(), enhancedDir, pictures, rooms, sharedObjects, fish, menu, panel, credits, story, kufr };
 }
 
 /**
