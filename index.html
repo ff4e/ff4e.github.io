@@ -53,6 +53,17 @@
       #info { display: none; opacity: 0.8; padding: 4px 8px; text-align: center; }
       body.dev .controls { display: flex; }
       body.dev #info { display: block; }
+      /* While the intro overlay is up (z-index:100), lift the dev chrome above it so
+         the tuning controls stay usable during the movies — e.g. arm dev mode and
+         pick the graphics level on the very first intro page. Keyed off the overlay's
+         own visibility, so it needs no JS. (The Room picker is meaningless during the
+         intro but harmless.) */
+      body.dev:has(#intro-layer:not([hidden])) #devbar,
+      body.dev:has(#intro-layer:not([hidden])) #info {
+        position: relative;
+        z-index: 101;
+        background: #101018;
+      }
       .hint { opacity: 0.6; }
       /* Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen video over
          the stage, matching the original's full-screen MCI playback. */

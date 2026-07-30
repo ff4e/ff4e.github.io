@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Upscaler Studio — Fish Fillets AI</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="rail">
+    <h1>Upscaler Studio</h1>
+    <div id="totals" class="totals"></div>
+    <input id="filter" type="search" placeholder="filter rooms…" autocomplete="off">
+    <nav id="nav"></nav>
+  </aside>
+  <main id="main">
+    <header id="viewhead">
+      <h2 id="viewtitle">Loading…</h2>
+      <label id="thumbctrl" title="Thumbnail size">🔍 <input id="thumb-size" type="range" min="88" max="420" step="8" value="88"></label>
+      <div id="viewactions"></div>
+    </header>
+    <div id="queuebar" class="queuebar hidden">
+      <span id="queuebar-text"></span>
+      <button id="queuebar-cancel">Cancel queued</button>
+    </div>
+    <div id="cards"></div>
+  </main>
+</div>
+
+<div id="compare" class="compare hidden">
+  <div class="cmp-bar">
+    <span id="cmp-title" class="cmp-title"></span>
+    <span id="cmp-applies" class="cmp-applies"></span>
+    <span class="cmp-ctrl" title="Render the candidates at the scale this picture SHIPS at. ×4 is the cached browsing baseline; higher scales render on demand.">scale <span id="cmp-scales" class="scale-pick"></span></span>
+    <span class="cmp-ctrl">zoom <input id="cmp-zoom" type="range" min="0.25" max="24" step="0.25" value="6"><span id="cmp-zoomval">6×</span></span>
+    <span class="cmp-ctrl">tile <input id="cmp-size" type="range" min="200" max="1000" step="20" value="240"></span>
+    <span class="cmp-ctrl" title="Thin the dark outline by fading it into transparency — 0 = untouched model">contour <input id="cmp-blend" type="range" min="0" max="100" step="5" value="0"><span id="cmp-blendval">0%</span></span>
+    <span class="cmp-ctrl" title="Supersample→downscale: render at ×4 then shrink to a lower net scale so contours get proportionally thinner and cleanly anti-aliased. 4× = AI native.">net scale <input id="cmp-super" type="range" min="1" max="4" step="0.25" value="4"><span id="cmp-superval">4.0×</span></span>
+    <span class="cmp-ctrl" title="Edge smoother blur radius — rounds the jagged staircase left by contour thinning. 0 = off. Only active when contour > 0.">smooth <input id="cmp-smooth" type="range" min="0" max="3" step="0.25" value="1"><span id="cmp-smoothval">1.0</span></span>
+    <span class="cmp-ctrl" title="Edge crispness — re-sharpens the smoothed alpha back toward binary to remove semi-transparent fringe pixels. 0 = soft AA, 1 = near-binary (no translucency).">crisp <input id="cmp-crisp" type="range" min="0" max="100" step="5" value="50"><span id="cmp-crispval">50%</span></span>
+    <button id="cmp-fit">fit</button>
+    <button id="cmp-order" title="Reorder the algorithms — saved globally for the whole app">⇅ order</button>
+    <button id="cmp-finder" title="Reveal in Finder">📂 Finder</button>
+    <label class="cmp-ctrl"><input id="cmp-2up" type="checkbox"> 2-up vs original</label>
+    <span id="cmp-sel" class="cmp-sel"></span>
+    <span class="cmp-hint">drag to pan · wheel to zoom · click a tile to pick · 1–9/0 keys · Esc</span>
+    <button id="cmp-close">✕</button>
+  </div>
+  <div id="cmp-grid" class="cmp-grid"></div>
+  <div id="order-panel" class="order-panel hidden">
+    <div class="order-head">Algorithm order <span class="order-hint">drag or use ↑↓ · saved globally</span></div>
+    <div id="order-list" class="order-list"></div>
+    <div class="order-foot"><button id="order-reset">reset to default</button><button id="order-done">done</button></div>
+  </div>
+</div>
+
+<div id="preview" class="compare hidden">
+  <div class="cmp-bar">
+    <span id="pv-title" class="cmp-title"></span>
+    <span class="cmp-ctrl" title="Which upscale factor to compose. The room ships at the highlighted one; ×4 is the baseline.">scale <span id="pv-scales" class="scale-pick"></span></span>
+    <span class="cmp-ctrl">zoom <input id="pv-zoom" type="range" min="10" max="200" step="5" value="50"><span id="pv-zoomval">50%</span></span>
+    <span class="cmp-ctrl" title="Seam fill — fills the background sliver that contour-thinning opens between two objects that originally touched, using body colour, up to N original px from the contact. Free outer edges stay thin. Affects the AI composite only.">seam fill <input id="pv-seam" type="range" min="0" max="6" step="0.5" value="0"><span id="pv-seamval">0px</span></span>
+  <label class="cmp-ctrl"><input id="pv-sync" type="checkbox" checked> sync scroll</label>
+  <button id="pv-finder" title="Reveal composed AI PNG in Finder">📂 Finder</button>
+  <button id="pv-build" title="Build this room's shipped AI art (public/enhanced-ai/) from the current picks">🔨 build room</button>
+  <button id="pv-build-all" title="Build the shipped AI art for EVERY room + fish from the current picks">🔨 build all</button>
+  <span id="pv-buildstat" class="cmp-sel"></span>
+  <span id="pv-missing" class="cmp-sel"></span>
+  <span class="cmp-hint">AI (picked/default) vs original · scroll to pan · Esc</span>
+  <button id="pv-close">✕</button>
+</div>
+<div class="pv-split">
+  <div class="pv-pane"><div class="pv-label">AI upscaled</div><div id="pv-wrap-ai" class="pv-wrap"><img id="pv-img-ai" alt="AI room preview"></div></div>
+  <div class="pv-pane"><div class="pv-label">Original</div><div id="pv-wrap-orig" class="pv-wrap"><img id="pv-img-orig" alt="original room preview"></div></div>
+</div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -52,6 +52,10 @@ export class AudioEngine {
   private musicSrc: AudioBufferSourceNode | null = null;
   private musicGain: GainNode | null = null;
   private musicName = '';
+  /** Name of the track whose async decode/start is currently in flight, if any.
+   *  Guards against a second concurrent start for the same track spawning a second
+   *  overlapping loop that stopMusic() can't fully cancel (see playMusic). */
+  private musicStarting: string | null = null;
   private musicBufs = new Map<string, AudioBuffer>();
   /** Debug: recent play names with a timestamp (ring buffer) + a console line so the
    *  source of any glitch can be identified live in the browser console. */
@@ -336,34 +340,45 @@ export class AudioEngine {
       this.activeUntil.set(MUSIC_PRIOR, Infinity); // ensure playing(-999) reflects it
       return; // already playing this track
     }
+    // A start for this exact track is already mid-decode: a second concurrent call
+    // (e.g. the keyboard-skip that reaches the map fires BOTH showMap()'s
+    // startMenuMusic and the once-per-session unlockAudio's in the same keydown)
+    // would otherwise start a second overlapping loop that phases against the first
+    // and survives stopMusic(). Bail — the in-flight start will produce the track.
+    if (this.musicStarting === name) return;
     this.stopMusic();
     this.musicName = name;
-    const ctx = this.ensureCtx();
-    let buf = this.musicBufs.get(name);
-    if (!buf) {
-      const bytes = await fetch(url).then((r) => r.arrayBuffer());
-      // WAV loop point is in samples at the file's native rate (header @ offset 24).
-      const nativeRate = new DataView(bytes).getUint32(24, true) || 22050;
-      buf = await ctx.decodeAudioData(bytes.slice(0));
-      (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
-      this.musicBufs.set(name, buf);
+    this.musicStarting = name;
+    try {
+      const ctx = this.ensureCtx();
+      let buf = this.musicBufs.get(name);
+      if (!buf) {
+        const bytes = await fetch(url).then((r) => r.arrayBuffer());
+        // WAV loop point is in samples at the file's native rate (header @ offset 24).
+        const nativeRate = new DataView(bytes).getUint32(24, true) || 22050;
+        buf = await ctx.decodeAudioData(bytes.slice(0));
+        (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
+        this.musicBufs.set(name, buf);
+      }
+      if (this.musicName !== name) return; // room changed while decoding
+      this.logSound(name + ' (music-loop)', 1);
+      const nativeRate = (buf as AudioBuffer & { _rate?: number })._rate ?? 22050;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.loopStart = loopSample > 0 ? loopSample / nativeRate : 0;
+      src.loopEnd = buf.duration;
+      const g = ctx.createGain();
+      g.gain.value = 0.45; // music sits under the voices/effects
+      src.connect(g);
+      g.connect(this.busNode('music'));
+      src.start();
+      this.musicSrc = src;
+      this.musicGain = g;
+      this.activeUntil.set(MUSIC_PRIOR, Infinity); // MusicCycle(-999): playing(-999) true
+    } finally {
+      if (this.musicStarting === name) this.musicStarting = null;
     }
-    if (this.musicName !== name) return; // room changed while decoding
-    this.logSound(name + ' (music-loop)', 1);
-    const nativeRate = (buf as AudioBuffer & { _rate?: number })._rate ?? 22050;
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
-    src.loopStart = loopSample > 0 ? loopSample / nativeRate : 0;
-    src.loopEnd = buf.duration;
-    const g = ctx.createGain();
-    g.gain.value = 0.45; // music sits under the voices/effects
-    src.connect(g);
-    g.connect(this.busNode('music'));
-    src.start();
-    this.musicSrc = src;
-    this.musicGain = g;
-    this.activeUntil.set(MUSIC_PRIOR, Infinity); // MusicCycle(-999): playing(-999) true
   }
 
   /** The currently-looping room-music track name (debug/verification), or '' if none. */

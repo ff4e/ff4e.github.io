@@ -146,6 +146,30 @@ export interface InfoPanelAssets {
 }
 
 /**
+ * Blit only the five odometer digits of `count` (zero-padded, rolling in per `faze`)
+ * onto an RGBA buffer — the crisp/legible part of the panel, kept separate so the AI
+ * map can render it nearest-neighbour-scaled (sharp numerals) over the AI panel art.
+ * A null `count` (cheat-only room, no genuine best) draws nothing.
+ */
+export function drawInfoDigits(
+  rgba: Uint8ClampedArray,
+  mapW: number,
+  mapH: number,
+  cisla: Bmp,
+  count: number | null,
+  faze: number,
+): void {
+  if (count === null) return;
+  let cis = count;
+  for (let i = INFO_DIGITS - 1; i >= 0; i--) {
+    const cif = cis % 10;
+    cis = Math.floor(cis / 10);
+    const y = digitRollY(faze, cif);
+    blitRegion(rgba, mapW, mapH, cisla, DIGIT_X0 + DIGIT_W * i, DIGIT_Y, 0, y, DIGIT_W, DIGIT_H);
+  }
+}
+
+/**
  * Composite the record panel onto an RGBA map buffer: the `krokomer` background,
  * the hovered button's highlighted icon, and the five odometer digits of `count`
  * (or a blank slot when `count` is null — e.g. a cheat-only room with no genuine
@@ -173,13 +197,42 @@ export function drawInfoPanel(
     darkenRect(rgba, mapW, mapH, INFO_BUTTONS.replay.x, ICON_Y, ICON_W, ICON_H, 0.45);
   }
   // Odometer digits (five, zero-padded), rolling in per `faze`.
-  if (count !== null) {
-    let cis = count;
-    for (let i = INFO_DIGITS - 1; i >= 0; i--) {
-      const cif = cis % 10;
-      cis = Math.floor(cis / 10);
-      const y = digitRollY(faze, cif);
-      blitRegion(rgba, mapW, mapH, assets.cisla, DIGIT_X0 + DIGIT_W * i, DIGIT_Y, 0, y, DIGIT_W, DIGIT_H);
-    }
+  drawInfoDigits(rgba, mapW, mapH, assets.cisla, count, faze);
+}
+
+/**
+ * Draw the record panel's *artwork* (background frame + hovered button highlight +
+ * disabled-Replay greying) onto a 2D context at `scale`, sourcing the AI-upscaled
+ * krokomer/ikonky ImageBitmaps (already `scale`× the native size). The odometer
+ * digits are NOT drawn here — the caller overlays them crisply (see drawInfoDigits)
+ * so numerals stay legible. Mirrors drawInfoPanel's bg/icon logic exactly.
+ */
+export function drawInfoPanelArtAi(
+  ctx: CanvasRenderingContext2D,
+  scale: number,
+  krokomer: CanvasImageSource,
+  ikonky: CanvasImageSource,
+  hover: InfoButton | null,
+  replayEnabled: boolean,
+): void {
+  ctx.imageSmoothingEnabled = false;
+  // Panel background (the AI bitmap is the whole 268×186 region at `scale`×).
+  ctx.drawImage(krokomer, PANEL_X * scale, PANEL_Y * scale, PANEL_W * scale, PANEL_H * scale);
+  // Hovered button highlight (Replay only if enabled).
+  if (hover && !(hover === 'replay' && !replayEnabled)) {
+    const b = INFO_BUTTONS[hover];
+    ctx.drawImage(
+      ikonky,
+      b.srcX * scale, 0, ICON_W * scale, ICON_H * scale,
+      b.x * scale, ICON_Y * scale, ICON_W * scale, ICON_H * scale,
+    );
+  }
+  // Grey out a disabled Replay icon (same 0.45 factor as darkenRect → 55% black wash).
+  if (!replayEnabled) {
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(INFO_BUTTONS.replay.x * scale, ICON_Y * scale, ICON_W * scale, ICON_H * scale);
+    ctx.restore();
   }
 }

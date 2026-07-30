@@ -53,9 +53,13 @@ import {
 } from '../render/enhancedArtSource.js';
 import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
 import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
+import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
+import { loadAiRoom, AiRoom } from '../render/roomAi.js';
 import {
   hitInfoButton,
   drawInfoPanel,
+  drawInfoDigits,
+  drawInfoPanelArtAi,
   INFO_SETTLE_FAZE,
   INFO_FAZE_MS,
   type InfoButton,
@@ -64,6 +68,8 @@ import {
 import { parseDesky, blitDeska, type DeskyData } from '../data/desky.js';
 import { IntroPlayer } from './intro.js';
 import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
+import { loadAiPanel, type AiPanel } from '../render/panelAi.js';
+import { loadAiCredits, type AiCredits } from '../render/creditsAi.js';
 import { initAnalytics } from '../platform/analytics.js';
 import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
 import { parseFfp, type FfpPanel } from '../data/ffp.js';
@@ -415,6 +421,22 @@ let panelDragBus: VolumeBus | null = null; // the slider currently being dragged
 // Options panel or the scrolling credits, shown over the world map.
 let mapOverlay: 'none' | 'options' | 'credits' = 'none';
 let credits: Credits | null = null; // the parsed credits assets (lazily loaded)
+// Hi-res AI art for the two UI surfaces. Loaded once, lazily, only while graphics==='ai';
+// null means "not available" and the faithful indexed path is used instead.
+let aiPanel: AiPanel | null = null;
+let aiCredits: AiCredits | null = null;
+let aiPanelTried = false;
+let aiCreditsTried = false;
+// Last display box the AI credit layers were sized for, so layout() runs on resize
+// rather than every frame.
+let creditsLayoutW = 0;
+let creditsLayoutH = 0;
+
+/** Put the game canvas back after the GPU credits overlay was shown. */
+function hideAiCredits(): void {
+  if (aiCredits) aiCredits.hide();
+  if (canvas.style.display === 'none') canvas.style.display = '';
+}
 let creditMode = -1; // scroll offset while the credits roll (CreditMode); -1 = idle
 let creditsStart = 0; // wall-clock time the roll began (drives the scroll)
 // The map corner button under the cursor (dAkce, UMain.pas:1636), lit on hover.
@@ -437,6 +459,14 @@ let deskyLang: 'cz' | 'en' | null = null;
 let helpOpen = false; // true while the help-screens overlay is shown (akce_help / ToggleHelp)
 const helpScreens = new HelpScreens(); // the control-help pages (Help.pas), lazily loaded
 let worldMap: WorldMap | null = null; // the branch-map screen
+// AI-upscaled world-map compositor (Phase B), lazily loaded when the map assets
+// load; used ONLY under the `ai` graphics level and only when every AI asset is
+// present (else the map falls back to the faithful CPU composite). The overlay
+// canvas draws the record panel + name plaques at native res, nearest-neighbour-
+// scaled over the hi-res map so digits/text stay crisp.
+let aiWorldMap: AiWorldMap | null = null;
+let mapOverlayCanvas: HTMLCanvasElement | null = null;
+let mapOverlayCtx: CanvasRenderingContext2D | null = null;
 let screen: 'map' | 'room' | 'intro' | 'legimage' = 'room'; // which screen is showing
 // Leg-completion story image (obrazek, UMain.pas:831 zobraz_obrazek): the full-screen
 // "case file" page shown over a frozen map when the last room of a leg (depth 15) is
@@ -752,8 +782,11 @@ function setGraphics(level: GraphicsLevel): void {
   graphics = level;
   localStorage.setItem('ff.graphics', graphics);
   if (enhancedArtActive() && curNum) void ensureEnhancedArt(curNum);
+  if (graphics === 'ai' && curNum) void ensureAiRoom(curNum);
+  else aiRoom = null;
   if (graphicsSelect) graphicsSelect.value = graphics;
   forceRoomRedraw = true;
+  mapSig = null; // repaint the map so switching to/from the AI level shows immediately
   wake();
   setInfo();
 }
@@ -768,6 +801,11 @@ let curNum = 0; // current room number, for enhanced-art lookup
 // resolved. While true, draw() holds the previous frame instead of painting the
 // classic look, so a room never flashes classic before popping to enhanced.
 let enhancedPending = false;
+// AI room art (Phase C): the S× upscaled masters for the current room, when the ai
+// level is on and every asset loaded. null ⇒ the room falls back to enhanced/classic.
+let aiRoom: AiRoom | null = null;
+let aiRoomNum = 0; // room number aiRoom belongs to (guards async races)
+const aiRoomCache = new Map<string, AiRoom | null>(); // jmeno -> AiRoom (null = no AI art / failed)
 interface RoomEnhanced {
   art: EnhancedArt | null;
   objects: EnhancedObject[];
@@ -897,6 +935,56 @@ async function loadEnhancedObjects(jmeno: string): Promise<EnhancedObject[]> {
     if (valid.length > 0) out.push({ item: e.item, frames: valid });
   }
   return out;
+}
+
+/**
+ * Load (and cache) the AI-upscaled art for a room (public/enhanced-ai/<JMENO>/),
+ * for the `ai` graphics level. A missing set caches null so the room silently falls
+ * back to the enhanced render. Applies to `num` iff it is still current when resolved.
+ */
+/** Load the hi-res panel art once (see panelAi.ts); null ⇒ keep the faithful path. */
+async function ensureAiPanel(): Promise<void> {
+  aiPanel = await loadAiPanel('/');
+  if (aiPanel) panelSig = null;   // force a repaint at the new resolution
+}
+
+/** Load the hi-res credits art once (see creditsAi.ts). */
+async function ensureAiCredits(): Promise<void> {
+  aiCredits = await loadAiCredits('/');
+}
+
+async function ensureAiRoom(num: number): Promise<void> {
+  const jmeno = ROOMS[num - 1]?.jmeno;
+  if (!jmeno) return;
+  if (aiRoomCache.has(jmeno)) {
+    if (curNum === num) { aiRoom = aiRoomCache.get(jmeno)!; aiRoomNum = num; }
+    return;
+  }
+  const loaded = await loadAiRoom('/', jmeno);
+  aiRoomCache.set(jmeno, loaded);
+  if (curNum === num) { aiRoom = loaded; aiRoomNum = num; }
+}
+
+/**
+ * Whether the current frame should render through the hi-res AI room compositor:
+ * the ai level is on and the room's AI art loaded.
+ *
+ * The compositor now covers everything the faithful path draws from index
+ * read-back except the ZX render: the spec=1 mirror (drawMirror), the spec=3/4
+ * elevator double rope (drawRope), the gspec=5 bonus fish swap and the gspec=2
+ * darkness fill + lit-item filter. gspec=3/4 (the KAJUTA1 screen shove) needs
+ * nothing here at all — the shove is a CSS transform on the canvas, applied
+ * outside the compositor — and gspec=9 is only a win condition.
+ *
+ * Still excluded: gspec=42, the ZX-Spectrum band render (its per-scanline bands
+ * are an index effect, and the low-fi look is the point), and any frame with an
+ * active fishing hook, which the faithful path draws on top from the palette.
+ */
+function aiRoomRenderActive(r: Room): boolean {
+  if (graphics !== 'ai' || aiRoom === null || aiRoomNum !== curNum) return false;
+  if (r.gspec === 42) return false;
+  if (hooks.snapshot.some((h) => h.stav !== 0)) return false;
+  return true;
 }
 
 // Enhanced fish sprites are shared across all rooms, so they load once.
@@ -1617,6 +1705,8 @@ async function loadRoom(num: number): Promise<void> {
     enhancedObjects = [];
     enhancedPending = enhancedArtActive();
     void ensureEnhancedArt(num);
+    aiRoom = null;
+    if (graphics === 'ai') void ensureAiRoom(num);
     // Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it.
     const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
     if (music) void audio.playMusic(music.name, `/data/Music/${music.name}.wav`, music.loopSample);
@@ -1956,10 +2046,19 @@ function tickPanelScroll(dtMs: number): void {
     return;
   }
   scrollAcc += dtMs;
-  while (scrollAcc >= PANEL_SCROLL_MS) {
-    scrollAcc -= PANEL_SCROLL_MS;
-    advancePanelScroll();
-  }
+  if (scrollAcc < PANEL_SCROLL_MS) return;
+  // Advance at most ONE frame per rendered frame and DROP the rest of the backlog —
+  // the same rule the game logic uses (see the MAX_STEPS_PER_FRAME guard in loop()).
+  //
+  // This used to `while`-loop, which fast-forwarded the whole 10-frame animation
+  // inside a single long frame: opening the options right after entering a room, while
+  // the tier's art was still decoding, burned the entire roll-down in one tick and the
+  // panel appeared to snap open with no animation at all. (Closing it, and every later
+  // open, looked fine because nothing was loading by then.) A dropped backlog just
+  // makes the animation take marginally longer under load, which is invisible; a
+  // batched one skips it entirely.
+  scrollAcc = 0;
+  advancePanelScroll();
 }
 
 /**
@@ -2031,26 +2130,39 @@ function drawPanel(): void {
   // Composing the panel (155×395) + palette→RGBA + putImageData is pure per-frame
   // waste while nothing on it changes (idle in a room). Compute a signature from the
   // state FIRST and bail before the (allocating) compose+blit when it's unchanged.
-  if (panelCanvas.width !== PANEL_W) {
-    panelCanvas.width = PANEL_W;
-    panelCanvas.height = PANEL_H;
+  if (graphics === 'ai' && !aiPanelTried) { aiPanelTried = true; void ensureAiPanel(); }
+  // The AI panel composites at ×scale into a bigger backing store; the CSS size below
+  // is unchanged, so this is purely a resolution increase. Falls back the moment the
+  // art is missing or the tier is switched away.
+  const ai = graphics === 'ai' ? aiPanel : null;
+  const wantW = ai ? ai.width : PANEL_W;
+  const wantH = ai ? ai.height : PANEL_H;
+  if (panelCanvas.width !== wantW || panelCanvas.height !== wantH) {
+    panelCanvas.width = wantW;
+    panelCanvas.height = wantH;
     panelSig = null; // resize cleared the backing store — force a repaint
   }
   let sig: string;
-  let compose: () => Uint8Array;
+  let paint: () => void;
   if (ostav === O_NORMAL) {
     const st = panelState();
     sig = `n|${st.velka}|${st.mala}|${st.space}|${st.save}|${st.load}|${st.abort}|${st.restart}|${st.pressedDir}`;
-    compose = () => composePanel(panel!.images, st);
+    paint = ai
+      ? () => ai.drawPanel(panelCtx, st)
+      : () => panelCtx.putImageData(new ImageData(new Uint8ClampedArray(panelToRgba(composePanel(panel!.images, st), panel!.palette)), PANEL_W, PANEL_H), 0, 0);
   } else {
     const st = optionsState();
     sig = `o|${st.volume.effect}|${st.volume.voice}|${st.volume.music}|${st.subtitles}|${st.helpActive ? 1 : 0}|${st.scrollFrame}`;
-    compose = () => composeOptions(panel!.images, panel!.cudl, st);
+    paint = ai
+      ? () => ai.drawOptions(panelCtx, st)
+      : () => panelCtx.putImageData(new ImageData(new Uint8ClampedArray(panelToRgba(composeOptions(panel!.images, panel!.cudl, st), panel!.palette)), PANEL_W, PANEL_H), 0, 0);
   }
+  // The signature must include which renderer produced the pixels, or switching tiers
+  // with an otherwise-identical panel state would leave the old resolution on screen.
+  sig = `${ai ? 'a' : 'f'}|${sig}`;
   if (sig !== panelSig) {
     panelSig = sig;
-    const rgba = panelToRgba(compose(), panel.palette);
-    panelCtx.putImageData(new ImageData(new Uint8ClampedArray(rgba), PANEL_W, PANEL_H), 0, 0);
+    paint();
   }
   // Fixed panel size at the stage scale — constant across all rooms (no longer
   // tracks the room height, so it stops resizing room-to-room). Only touch the DOM
@@ -2112,9 +2224,14 @@ function drawMap(): void {
   // the start; once it passes the deepest room the whole enabled map is shown.
   const depth = Math.floor((performance.now() - mapRevealStart) / 60) - 3;
   const cs = contentScaleFor(MAP_W, MAP_H);
-  if (canvas.width !== MAP_W || canvas.height !== MAP_H) {
-    canvas.width = MAP_W;
-    canvas.height = MAP_H;
+  // The `ai` graphics level draws the map from AI-upscaled art re-composited at 4x,
+  // so the backing store is 4x larger (still CSS-scaled to the same display box).
+  const useAi = graphics === 'ai' && aiWorldMap !== null;
+  const cw = useAi ? AI_MAP_W : MAP_W;
+  const ch = useAi ? AI_MAP_H : MAP_H;
+  if (canvas.width !== cw || canvas.height !== ch) {
+    canvas.width = cw;
+    canvas.height = ch;
     mapSig = null; // backing store was cleared by the resize — force a repaint
   }
   const cssW = `${MAP_W * cs}px`;
@@ -2127,10 +2244,11 @@ function drawMap(): void {
   // solved/cheated sets (which only ever grow, so their size is a sufficient key).
   // The record info panel adds its own inputs: the open room, hovered button, and
   // the odometer roll frame (capped once settled so the sig stops churning), plus
-  // the hovered room node (its name plaque).
+  // the hovered room node (its name plaque). The AI flag is in the key so toggling
+  // the graphics level repaints.
   const infoFazeKey = Math.min(mapInfoFaze, INFO_SETTLE_FAZE);
   const sig =
-    `${pulse % 6}|${Math.min(depth, worldMap.maxDepth + 1)}|${mapHoverCorner ?? ''}|${solved.size}|${cheated.size}|${cheated.size ? 1 : 0}` +
+    `${useAi ? 'ai' : 'n'}|${pulse % 6}|${Math.min(depth, worldMap.maxDepth + 1)}|${mapHoverCorner ?? ''}|${solved.size}|${cheated.size}|${cheated.size ? 1 : 0}` +
     `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}`;
   if (sig === mapSig) return; // nothing visibly changed — skip the redraw entirely
   mapSig = sig;
@@ -2139,21 +2257,75 @@ function drawMap(): void {
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
   // only the name plaque and panel stand out. Nodes (balls) are skipped too.
+  if (useAi) {
+    // Hi-res AI base + nodes, then the record panel / name plaque overlaid at native
+    // resolution and nearest-neighbour-scaled up (keeps digits + names crisp).
+    aiWorldMap!.draw(ctx, {
+      solved,
+      pulse,
+      depth,
+      cheated,
+      hoverCorner: mapHoverCorner,
+      drawNodes: !panelOpen,
+      litRegions: !panelOpen,
+    });
+    // Record-panel *artwork* (krokoměr bg + hovered icon + disabled-Replay grey) is
+    // drawn straight onto the hi-res ctx from the AI-upscaled bitmaps; the odometer
+    // digits + name plaque still ride the crisp NN overlay below so text stays sharp.
+    if (panelOpen && infoPanelAssets && mapInfoRoom !== null) {
+      const replayEnabled = bestRecord(mapInfoRoom) !== undefined;
+      drawInfoPanelArtAi(ctx, AI_MAP_SCALE, aiWorldMap!.krokomer, aiWorldMap!.ikonky, mapInfoHover, replayEnabled);
+    }
+    const overlay = new Uint8ClampedArray(MAP_W * MAP_H * 4); // transparent; only drawn cells become opaque
+    if (drawMapOverlays(overlay, true)) {
+      if (!mapOverlayCanvas) {
+        mapOverlayCanvas = document.createElement('canvas');
+        mapOverlayCanvas.width = MAP_W;
+        mapOverlayCanvas.height = MAP_H;
+        mapOverlayCtx = mapOverlayCanvas.getContext('2d');
+      }
+      mapOverlayCtx!.putImageData(new ImageData(overlay, MAP_W, MAP_H), 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(mapOverlayCanvas, 0, 0, cw, ch);
+    }
+    return;
+  }
   const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !panelOpen, !panelOpen);
-  // Name plaque (KresliDesku, UMain.pas:1484): drawn for the panel's room while it
-  // is open, or the hovered room node otherwise.
+  drawMapOverlays(rgba);
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
+}
+
+/**
+ * Composite the record panel + name plaque onto a map-sized RGBA buffer (the faithful
+ * path passes the base map; the AI path passes a transparent buffer to overlay). The
+ * name plaque (KresliDesku, UMain.pas:1484) is drawn for the open panel's room or the
+ * hovered room node; the record panel (krokoměr) is drawn when a room panel is open.
+ * `aiDigitsOnly` (the AI path) draws only the panel's odometer digits, not its bg/icon
+ * artwork — that is drawn straight on the hi-res ctx from the AI bitmaps instead.
+ * Returns whether anything was drawn.
+ */
+function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false): boolean {
+  if (!worldMap) return false;
+  let drew = false;
   const plaqueRoom = mapInfoRoom ?? mapHoverRoom;
   if (plaqueRoom !== null && deskyData) {
     const deska = deskyData.byRoom.get(plaqueRoom);
-    if (deska) blitDeska(rgba, MAP_W, MAP_H, deska, deskyData.atlas, worldMap.palette);
+    if (deska) {
+      blitDeska(rgba, MAP_W, MAP_H, deska, deskyData.atlas, worldMap.palette);
+      drew = true;
+    }
   }
-  // The record panel (krokoměr) over the map, with the best move count + buttons.
-  if (panelOpen && infoPanelAssets) {
-    const count = scores.get(mapInfoRoom!) ?? null; // best (nej) count; null = cheat-only
-    const replayEnabled = bestRecord(mapInfoRoom!) !== undefined;
-    drawInfoPanel(rgba, MAP_W, MAP_H, infoPanelAssets, count, mapInfoHover, mapInfoFaze, replayEnabled);
+  if (mapInfoRoom !== null && infoPanelAssets) {
+    const count = scores.get(mapInfoRoom) ?? null; // best (nej) count; null = cheat-only
+    if (aiDigitsOnly) {
+      drawInfoDigits(rgba, MAP_W, MAP_H, infoPanelAssets.cisla, count, mapInfoFaze);
+    } else {
+      const replayEnabled = bestRecord(mapInfoRoom) !== undefined;
+      drawInfoPanel(rgba, MAP_W, MAP_H, infoPanelAssets, count, mapInfoHover, mapInfoFaze, replayEnabled);
+    }
+    drew = true;
   }
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
+  return drew;
 }
 
 /** The menu/map music (SpustHudbu, UMain.pas:217): menu.wav, looped at sample 419772. */
@@ -2309,17 +2481,19 @@ function drawLegImage(): void {
  * original's daLogo/daIntro chain, UMain.pas:1064-1112). `gated` shows the
  * "click to start" splash first (first-run auto-play). The game audio is torn
  * down before playback (KillSnd/FinishSound) — the movie carries its own sound.
+ * Each `resolver` is called at the moment its movie starts, so the source tracks
+ * the graphics level chosen right then (e.g. AI-upscaled picked on the splash).
  */
-function playIntroMovies(urls: string[], gated: boolean, onFinish: () => void): void {
+function playIntroMovies(resolvers: Array<() => string>, gated: boolean, onFinish: () => void): void {
   if (intro.playing) return;
   screen = 'intro';
   audio.killAll();
-  intro.start(urls, onFinish, gated);
+  intro.start(resolvers, onFinish, gated);
 }
 
 /** The first-run intro (logo → intro), after which the flag flips so it won't auto-play again. */
 function playFirstRunIntro(): void {
-  playIntroMovies([logoMovie(), introMovie()], true, () => {
+  playIntroMovies([logoMovie, introMovie], true, () => {
     settings.introSeen = true;
     saveSettings(settings);
     showMap();
@@ -2328,7 +2502,7 @@ function playFirstRunIntro(): void {
 
 /** Replay just the intro movie from the map's top-left corner (daIntro plays FilmAvi only). */
 function replayIntro(): void {
-  playIntroMovies([introMovie()], false, () => showMap());
+  playIntroMovies([introMovie], false, () => showMap());
 }
 
 /**
@@ -2362,6 +2536,7 @@ function openMapOptions(): void {
 
 /** Close whichever menu overlay is open over the map, back to the plain map. */
 function closeMapOverlay(): void {
+  hideAiCredits();   // the credits overlay replaces the canvas — always restore it
   mapOverlay = 'none';
   ostav = O_NORMAL;
   panelDragBus = null;
@@ -2377,15 +2552,18 @@ function closeMapOverlay(): void {
 async function openCredits(): Promise<void> {
   if (mapOverlay !== 'none') return;
   if (!credits) {
+    const bmp = async (f: string): Promise<Bmp> => {
+      const r = await fetch(`/data/Menu/${f}`);
+      if (!r.ok) throw new Error(`${f}: ${r.status}`);
+      return parseBmp(new Uint8Array(await r.arrayBuffer()));
+    };
     try {
-      const [stat, mov] = await Promise.all(
-        ['CredStat1.BMP', 'CredMov.BMP'].map((f) =>
-          fetch(`/data/Menu/${f}`)
-            .then((r) => r.arrayBuffer())
-            .then((b) => parseBmp(new Uint8Array(b))),
-        ),
-      );
-      credits = new Credits(stat!, mov!);
+      // CredMov_port is the shipped strip with the web-port card prepended
+      // (tools/build-credits-port.py). It is a drop-in in the same palette, and since
+      // the strip's height defines `delka`, the roll extends to cover it by itself.
+      // Falls back to the untouched original when the port variant isn't built.
+      const mov = await bmp('CredMov_port.BMP').catch(() => bmp('CredMov.BMP'));
+      credits = new Credits(await bmp('CredStat1.BMP'), mov);
     } catch {
       return; // credits assets missing — leave the map as-is
     }
@@ -2401,18 +2579,56 @@ function drawCredits(): void {
   mapSig = null; // credits paint #screen — invalidate the map cache
   // Advance the scroll off wall-clock (CreditMode += CreditSpeed every 100ms);
   // auto-close once it has settled and held (UMain.pas:867-869).
-  creditMode = Math.floor((performance.now() - creditsStart) / CREDIT_TICK_MS) * CREDIT_SPEED;
+  // The original advances in whole CREDIT_SPEED steps once per CREDIT_TICK_MS, which is
+  // a 4px jump at 10Hz. `creditMode` keeps that stepped value because it drives game
+  // logic (the auto-close) and is exposed for tests; `creditScroll` is the same ramp
+  // left CONTINUOUS, so the AI renderer — which positions a bitmap rather than indexing
+  // pixels — can roll smoothly. Same speed, same total duration, just not quantised.
+  const creditElapsed = (performance.now() - creditsStart) / CREDIT_TICK_MS;
+  creditMode = Math.floor(creditElapsed) * CREDIT_SPEED;
+  const creditScroll = creditElapsed * CREDIT_SPEED;
   if (creditMode > credits.closeAt) {
     closeMapOverlay();
     return;
   }
-  const rgba = credits.render(creditMode);
+  if (graphics === 'ai' && !aiCreditsTried) { aiCreditsTried = true; void ensureAiCredits(); }
+  const ai = graphics === 'ai' ? aiCredits : null;
+  // Display size follows the SAME fit rule as the map and the story pages
+  // (contentScaleFor on the NATIVE size). It used to be pinned at 640x480 CSS px, so
+  // the credits stayed a small window in the middle of a large viewport while every
+  // other screen filled it.
+  const cs = contentScaleFor(credits.w, credits.h);
+  const dispW = Math.round(credits.w * cs);
+  const dispH = Math.round(credits.h * cs);
+
+  if (ai) {
+    // GPU path: two stacked <img> layers replace the canvas, and the roll is a CSS
+    // transform the compositor animates. Per frame this is one style write — the
+    // canvas version cost ~2.4ms of JS for the same picture (see creditsAi.ts).
+    // #screen lives inside `wrap` (centred in the stage box); mount the overlay there
+    // so it inherits the same centring and letterboxing the canvas gets.
+    if (!ai.el.isConnected) wrap.appendChild(ai.el);
+    if (creditsLayoutW !== dispW || creditsLayoutH !== dispH) {
+      creditsLayoutW = dispW;
+      creditsLayoutH = dispH;
+      ai.layout(dispW, dispH);
+    }
+    canvas.style.display = 'none';
+    ai.show();
+    ai.setScroll(creditScroll);
+    return;
+  }
+
+  hideAiCredits();
   if (canvas.width !== credits.w || canvas.height !== credits.h) {
     canvas.width = credits.w;
     canvas.height = credits.h;
-    canvas.style.width = `${credits.w}px`;
-    canvas.style.height = `${credits.h}px`;
   }
+  const cssW = `${dispW}px`;
+  const cssH = `${dispH}px`;
+  if (canvas.style.width !== cssW) canvas.style.width = cssW;
+  if (canvas.style.height !== cssH) canvas.style.height = cssH;
+  const rgba = credits.render(creditMode);
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), credits.w, credits.h), 0, 0);
 }
 
@@ -2850,10 +3066,38 @@ function draw(): void {
   const oy = (off?.y ?? 0) * cs;
   const xform = ox || oy ? `translate(${ox}px, ${oy}px)` : '';
 
-  // Backend dispatch: same renderInto compositor, CPU (RgbaScreen) or GPU
-  // (GlScreen) — both composite either art source, every room on the GPU. Any GL
-  // error falls back to the CPU path for that frame (and disables WebGL for the
-  // session).
+  // Backend dispatch. The hi-res AI room compositor (ai level, art loaded, and not
+  // a ZX/active-hook frame — see aiRoomRenderActive)
+  // takes precedence: it paints the S×-scaled #screen canvas directly with canvas-2D
+  // and the browser scales it down to the room's CSS box. Otherwise the same
+  // renderInto compositor runs on the GPU (GlScreen) or CPU (RgbaScreen); any GL
+  // error falls back to the CPU path for that frame (and disables WebGL for the session).
+  const aiActive = aiRoomRenderActive(room);
+  if (aiActive) {
+    const S = aiRoom!.scale;
+    const aw = sw * S;
+    const ah = sh * S;
+    glCanvas.style.display = 'none';
+    if (canvas.width !== aw || canvas.height !== ah) { canvas.width = aw; canvas.height = ah; }
+    if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
+    if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
+    // The ×S backing store is almost always DISPLAYED SMALLER than it is (e.g.
+    // 3060px shown in a 1139px box). The stylesheet's global `image-rendering:
+    // pixelated` point-samples on the way down, which throws most of the AI detail
+    // away and aliases badly — the reason the enhanced tier could look sharper than
+    // the AI one. Use smooth filtering whenever we're minifying so the browser
+    // averages instead; keep pixelated if it ever ends up magnified.
+    const wantSmooth = cssW < aw ? 'auto' : 'pixelated';
+    if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, aw, ah);
+    aiRoom!.draw(ctx, room, { count, slide, fishAnim });
+    canvas.style.transform = xform;
+    lastRoomBackend = 'cpu';
+  } else {
+  // Back on a native-resolution tier: restore the stylesheet's crisp scaling
+  // (the AI branch switches this to smooth minification).
+  if (canvas.style.imageRendering) canvas.style.imageRendering = '';
   const wantGpu = renderer === 'webgl' && !glFailed;
   const gpuOk = wantGpu && drawGpu(sw, sh, art, opts, useVecSubs);
   lastRoomBackend = gpuOk ? 'webgl' : 'cpu'; // the backend that ACTUALLY painted this frame (for the HUD)
@@ -2881,6 +3125,7 @@ function draw(): void {
     if (!useVecSubs) subs?.draw(screen, count); // baked subtitles (palette-coloured, on top)
     ctx.putImageData(new ImageData(new Uint8ClampedArray(screen.rgba), sw, sh), 0, 0);
     canvas.style.transform = xform;
+  }
   }
   // Enhanced subtitle overlay (drawn in native game coords via a scaled context).
   // Only touch the (large) overlay while a subtitle is actually on screen; once it
@@ -3127,6 +3372,20 @@ const IDLE_LOOP_MS = LOGIC_MS;
 // ~2.4x the original — smoother than 12.5fps, far cheaper than 60fps.
 const ZX_ANIM_MS = 33; // ~30fps
 let rafId = 0;
+/**
+ * Paint-rate cap. requestAnimationFrame fires at the DISPLAY refresh — 120Hz+ on
+ * current Macs — but this game steps its logic at 12.5Hz (LOGIC_MS) and interpolates,
+ * so painting above 60 costs GPU/battery for no visible gain. The AI tier makes that
+ * worse: it composites 4x-resolution rooms every paint.
+ *
+ * The threshold is deliberately a bit under 1000/60. rAF timestamps jitter, and at an
+ * exact 16.67ms gate a 120Hz display (8.33ms frames) lands at 16.66 — just short —
+ * and skips to the NEXT frame, yielding 40fps instead of 60. Allowing a small margin
+ * makes it paint on every second frame as intended.
+ */
+const MAX_PAINT_FPS = 60;
+const PAINT_MIN_MS = 1000 / MAX_PAINT_FPS - 2;
+let lastPaint = 0;
 let idleTimer: ReturnType<typeof setTimeout> | 0 = 0;
 // Perf HUD counters (dev mode): rAF ticks vs actual screen paints, sampled ~2×/sec.
 let perfRaf = 0;
@@ -3210,7 +3469,7 @@ function loopThrottleOk(): boolean {
   return false;
 }
 
-/** Schedule the next loop iteration: 60fps rAF normally, a timer when idle. */
+/** Schedule the next loop iteration: rAF (capped to MAX_PAINT_FPS) normally, a timer when idle. */
 function scheduleNext(): void {
   if (loopThrottleOk()) {
     // A ZX room keeps animating its bands, so it wakes at ~30fps; any other idle
@@ -3226,21 +3485,32 @@ function scheduleNext(): void {
 }
 
 /**
- * Return to 60fps immediately. Called from input handlers so a keypress/click never
- * waits out a throttled timer (movement stays smooth from its first frame). No-op if
- * we're already on rAF.
+ * Return to the full paint rate immediately. Called from input handlers so a
+ * keypress/click never waits out a throttled timer (movement stays smooth from its
+ * first frame). No-op if we're already on rAF.
  */
 function wake(): void {
   if (idleTimer) {
     clearTimeout(idleTimer);
     idleTimer = 0;
     lastTime = 0; // avoid a large dt from the idle gap
+    lastPaint = 0; // ...and don't let the cap swallow the first frame after idling
     rafId = requestAnimationFrame(loop);
   }
 }
 
-/** The render loop: steps the game at a fixed timestep, then draws once per RAF. */
+/** The render loop: steps the game at a fixed timestep, then draws (capped, see
+ *  MAX_PAINT_FPS) once per RAF. */
 function loop(now: number): void {
+  // Skip this refresh entirely when it would exceed the paint cap. lastTime is left
+  // alone so the skipped interval still accumulates into `acc` — the simulation sees
+  // real elapsed time either way, so capping paint cannot change game speed.
+  if (lastPaint !== 0 && now - lastPaint < PAINT_MIN_MS) {
+    perfRaf++;            // still a real refresh — the HUD's rAF number must show it,
+    rafId = requestAnimationFrame(loop);   // otherwise it just mirrors the paint rate
+    return;
+  }
+  lastPaint = now;
   if (lastTime === 0) lastTime = now;
   const dt = now - lastTime;
   acc += dt;
@@ -3337,8 +3607,18 @@ function loop(now: number): void {
 window.addEventListener('keydown', (e) => {
   wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
   // While the intro movie plays, swallow input; any key skips the current movie
-  // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603).
+  // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603). Two exceptions:
+  // a bare modifier keydown must NOT skip (otherwise arming Ctrl+Alt+D during the
+  // intro fires three skips — Ctrl, Alt, D — and blows through the whole sequence),
+  // and Ctrl+Alt+D itself toggles the dev pane in place so it can be armed before
+  // the game proper without abandoning the movies.
   if (intro.playing) {
+    if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') return;
+    if (e.ctrlKey && e.altKey && e.code === 'KeyD') {
+      e.preventDefault();
+      setDevEnabled(!devEnabled);
+      return;
+    }
     e.preventDefault();
     intro.skip();
     return;
@@ -3930,6 +4210,13 @@ try {
     files.map((f) => fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b)))),
   );
   worldMap = new WorldMap(bmps[0]!, bmps[1]!, bmps[2]!, bmps.slice(3));
+  // Kick off the AI-upscaled map load (Phase B) in the background; it self-cancels
+  // to null on any missing/undecodable asset, so the `ai` level cleanly falls back
+  // to the faithful CPU composite when the *_ai art isn't present.
+  void loadAiWorldMap('/data/', worldMap).then((m) => {
+    aiWorldMap = m;
+    mapSig = null; // force a repaint so the map switches to the AI art once ready
+  });
 } catch {
   /* map optional */
 }
@@ -4077,6 +4364,10 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   music: () => audio.currentMusic,
   graphics: () => graphics,
   setGraphics: (m: GraphicsLevel) => setGraphics(m),
+  // The movie URL that would be played for the active graphics level right now
+  // (reflects the `ai` upscale once its HEAD probe has resolved). Debug/test only.
+  logoMovieUrl: () => logoMovie(),
+  introMovieUrl: () => introMovie(),
   renderer: () => renderer,
   setRenderer: (m: 'cpu' | 'webgl') => {
     renderer = m;
@@ -4174,7 +4465,11 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   clickMapCorner: (x: number, y: number) => dispatchMapCorner(worldMap?.cornerAction(x, y) ?? null),
   mapOverlay: () => mapOverlay,
   openMapOptions: () => openMapOptions(),
+  openCredits: () => openCredits(),
   creditMode: () => creditMode,
+  // Debug/test only: jump the roll to a scroll offset by back-dating its start.
+  creditSeek: (posun: number) => { creditsStart = performance.now() - (posun / CREDIT_SPEED) * CREDIT_TICK_MS; },
+  creditLength: () => (credits ? credits.delka : 0),
   closeMapOverlay: () => closeMapOverlay(),
   solvedRooms: () => [...solved],
   scores: () => Object.fromEntries(scores),
