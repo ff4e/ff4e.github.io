@@ -84,7 +84,7 @@ import {
 import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
 import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
 import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
-import { loadAiRoom, AiRoom } from '../render/roomAi.js';
+import { loadAiRoom, aiRoomGateAllows, AiRoom } from '../render/roomAi.js';
 import {
   hitInfoButton,
   drawInfoPanel,
@@ -162,6 +162,25 @@ let stage: StageLayout = computeStageLayout(
   typeof window !== 'undefined' ? window.innerWidth : 1600,
   typeof window !== 'undefined' ? window.innerHeight : 1200,
 );
+
+/**
+ * Pick the scaling filter for a canvas whose BACKING STORE is `backingW` wide while it
+ * is displayed `cssW` wide.
+ *
+ * The stylesheet sets `image-rendering: pixelated` on every canvas, which is right for
+ * native-resolution art (crisp 1998 pixels) but wrong for the ai tier: a ×4 backing
+ * store shown smaller gets point-sampled on the way down, which throws most of the
+ * upscaled detail away and aliases.
+ *
+ * Smooth-filter only when the store is genuinely UPSCALED (>= 1.5× the displayed size),
+ * not merely minified: a native 155px panel shown at 145px is also "minifying", and
+ * smoothing that would soften the faithful tiers, which must keep their exact pixels.
+ * Returns the value for style.imageRendering ('' = inherit the stylesheet).
+ */
+const UPSCALED_STORE_RATIO = 1.5;
+function scalingFilterFor(backingW: number, cssW: number): string {
+  return backingW >= cssW * UPSCALED_STORE_RATIO ? 'auto' : '';
+}
 
 /** Display px per native px for content of size w×h, per the current fit mode. */
 function contentScaleFor(w: number, h: number): number {
@@ -1326,11 +1345,12 @@ function applyVolumeSettings(): void {
 //    fillets-ng-data masters as the art source (background + object/fish sprites);
 //    index-effect rooms (mirror/darkness/ZX/bonus) stay classic (see
 //    src/render/enhancedArtSource.ts).
-//  - ai:       AI-upscaled tier — purely additive on top of enhanced. Where an AI
-//    asset exists (video/logo first, then world map) it is used; everywhere else it
-//    FALLS BACK to enhanced (and thence classic). In-room maps/fishes are a deferred
-//    decision, so `ai` currently delegates ALL in-room art to the enhanced source —
-//    hence enhancedArtActive() (below) treats ai like enhanced for the compositor.
+//  - ai:       AI-upscaled tier layered on top of enhanced. AI art is used wherever
+//    it exists (intro/logo video, world map, control panel, credits, and rooms +
+//    fish via roomAi); anything missing or excluded falls back to enhanced, and
+//    thence to classic. enhancedArtActive() (below) still treats ai like enhanced
+//    because enhanced IS that fallback, and supplies the shared truecolor-mode
+//    behaviour (vector subtitles, the anti-flash load hold).
 type GraphicsLevel = 'classic' | 'enhanced' | 'ai';
 let graphics: GraphicsLevel =
   ((): GraphicsLevel => {
@@ -1339,9 +1359,9 @@ let graphics: GraphicsLevel =
   })();
 
 /**
- * True when the active level uses the enhanced (truecolor) art source. The AI
- * level delegates all in-room art to enhanced (rooms/fishes are a deferred Phase-C
- * decision), so it counts as enhanced-art-active. This is exactly `graphics !==
+ * True when the active level may use the enhanced (truecolor) art source. The AI
+ * level counts too: enhanced is its per-element fallback and supplies the shared
+ * truecolor-mode behaviour, so the art must be loaded either way. This is exactly `graphics !==
  * 'classic'`, so classic (false) and enhanced (true) keep their prior behaviour
  * byte-for-byte; only the new `ai` level newly returns true.
  */
@@ -1568,11 +1588,6 @@ async function loadEnhancedObjects(jmeno: string): Promise<EnhancedObject[]> {
   return out;
 }
 
-/**
- * Load (and cache) the AI-upscaled art for a room (public/enhanced-ai/<JMENO>/),
- * for the `ai` graphics level. A missing set caches null so the room silently falls
- * back to the enhanced render. Applies to `num` iff it is still current when resolved.
- */
 /** Load the hi-res panel art once (see panelAi.ts); null ⇒ keep the faithful path. */
 async function ensureAiPanel(): Promise<void> {
   aiPanel = await loadAiPanel('/');
@@ -1584,6 +1599,11 @@ async function ensureAiCredits(): Promise<void> {
   aiCredits = await loadAiCredits('/');
 }
 
+/**
+ * Load (and cache) the AI-upscaled art for a room (public/enhanced-ai/<JMENO>/), for the
+ * `ai` graphics level. A missing set caches null so the room falls back to the enhanced
+ * render. Applies to `num` iff it is still the current room when the load resolves.
+ */
 async function ensureAiRoom(num: number): Promise<void> {
   const jmeno = ROOMS[num - 1]?.jmeno;
   if (!jmeno) return;
@@ -1614,14 +1634,9 @@ async function ensureAiRoom(num: number): Promise<void> {
  */
 function aiRoomRenderActive(r: Room): boolean {
   if (graphics !== 'ai' || aiRoom === null || aiRoomNum !== curNum) return false;
-  if (r.gspec === 42) return false;
-  if (hooks.snapshot.some((h) => h.stav !== 0)) return false;
-  // The frame effects (megabomb flash, silent film, interlaced scanlines, the Tetris
-  // overlay) are applied by the CPU compositor as it builds the frame. This path
-  // bypasses that compositor entirely, so it would silently drop them — fall back for
-  // those frames instead, exactly as the GPU path does (see wantGpu in draw()).
-  if (frameEffectsActive()) return false;
-  return true;
+  // The rest of the rule lives in roomAi.ts so there is ONE definition tests can import
+  // — the hand-copied duplicate in test/roomAi.test.ts had already drifted out of date.
+  return aiRoomGateAllows(r.gspec, hooks.snapshot.map((h) => h.stav), frameEffectsActive());
 }
 
 // Enhanced fish sprites are shared across all rooms, so they load once.
@@ -2878,6 +2893,10 @@ function drawPanel(): void {
   const ph = `${Math.round(stage.panelH)}px`;
   if (panelCanvas.style.width !== pw) panelCanvas.style.width = pw;
   if (panelCanvas.style.height !== ph) panelCanvas.style.height = ph;
+  // The ai panel composites at ×4 into a 620×1580 store shown at ~145px wide, so
+  // without this it is point-sampled and loses the detail it was upscaled for.
+  const pFilter = scalingFilterFor(panelCanvas.width, Math.round(stage.panelW));
+  if (panelCanvas.style.imageRendering !== pFilter) panelCanvas.style.imageRendering = pFilter;
 }
 
 /**
@@ -2945,6 +2964,12 @@ function drawMap(): void {
   const cssH = `${MAP_H * cs}px`;
   if (canvas.style.width !== cssW) canvas.style.width = cssW;
   if (canvas.style.height !== cssH) canvas.style.height = cssH;
+  // #screen is shared with the room, which sets its own filter — set ours explicitly
+  // rather than inheriting whatever the last room left behind (an AI room left 'auto',
+  // which blurred a FALLBACK map; a fresh boot straight to the map left 'pixelated',
+  // which aliased the AI one).
+  const mFilter = scalingFilterFor(cw, Math.round(MAP_W * cs));
+  if (canvas.style.imageRendering !== mFilter) canvas.style.imageRendering = mFilter;
   // The 640×480 palette conversion + node compositing is the map's whole cost, and
   // it only changes when its inputs do: the pulse frame (6-phase, ~140ms), the
   // reveal depth (until it passes maxDepth, then frozen), the hover corner, and the
@@ -3776,7 +3801,8 @@ function draw(): void {
   // high-res overlay (crisp, above the pixel frame) instead of baking them into
   // the frame. Otherwise (classic, or font not yet loaded) bake them in.
   const useVecSubs = enhancedArtActive() && subs !== null && subFontReady;
-  // One compositor, one pass. The art source is the ONLY switch between the
+  // Native/fallback path (the AI room compositor above bypasses it entirely):
+  // one compositor, one pass. The art source is the ONLY switch between the
   // classic (palette) and enhanced (FFNG truecolor) looks; the enhanced source
   // itself falls back to classic per element where no truecolor art exists
   // (darkness/ZX/bonus, the mirror glass, skeletons, un-mapped frames).
@@ -3811,12 +3837,9 @@ function draw(): void {
     if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
     if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
     // The ×S backing store is almost always DISPLAYED SMALLER than it is (e.g.
-    // 3060px shown in a 1139px box). The stylesheet's global `image-rendering:
-    // pixelated` point-samples on the way down, which throws most of the AI detail
-    // away and aliases badly — the reason the enhanced tier could look sharper than
-    // the AI one. Use smooth filtering whenever we're minifying so the browser
-    // averages instead; keep pixelated if it ever ends up magnified.
-    const wantSmooth = cssW < aw ? 'auto' : 'pixelated';
+    // 3060px shown in a 1139px box), where the stylesheet's global pixelated rule
+    // would point-sample and throw the AI detail away — see scalingFilterFor.
+    const wantSmooth = scalingFilterFor(aw, cssW);
     if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, aw, ah);
@@ -4180,11 +4203,13 @@ function updatePerfHud(now: number): void {
 let smoothLog: { t: number; n: number; a: number; cf: number; x: number; y: number; ph: string }[] | null = null;
 
 /**
- * True when the room's frame changes BETWEEN logic ticks and so needs a 60fps
- * repaint — i.e. interpolated fish motion. Everything else (wobble, blink, heads,
- * subtitles, darkness, and the ZX "loading" bands) advances on the 12.5fps logic
- * tick and is caught by the `count` change in the render signature, so it animates
- * correctly at the throttled rate — matching the original's 12.5fps render.
+ * True when the room's frame changes BETWEEN logic ticks and so needs the full
+ * (capped, see MAX_PAINT_FPS) paint rate — i.e. interpolated fish motion. Wobble,
+ * blink, heads, subtitles and darkness advance on the 12.5fps logic tick and are
+ * caught by the `count` change in the render signature, so they animate correctly at
+ * the throttled rate — matching the original's 12.5fps render. The ZX "loading" bands
+ * are the exception: they advance per PAINT, so the loop wakes them separately via
+ * zxAnim / ZX_ANIM_MS rather than through this predicate.
  */
 function roomAnimating(): boolean {
   if (engine && engine.phase !== 'idle') return true; // fish sliding/falling/turning/exiting/cork

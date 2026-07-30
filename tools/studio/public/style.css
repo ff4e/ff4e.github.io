@@ -141,10 +141,9 @@ button.primary { background: var(--accent); color: #06201d; border-color: var(--
 }
 
 
-/* --- adaptive per-room scale ------------------------------------------- */
-/* The factor a room is built at (×4..×8). Small rooms are magnified most on
-   stage, so they ship at the highest factors — `hi` marks anything above the
-   ×4 baseline so the exceptions stand out while scanning the room list. */
+/* --- room scale chip ---------------------------------------------------- */
+/* The factor a room is built at. Currently uniform ×4; `hi` marks anything above
+   that baseline, which only appears if ADAPTIVE_SCALE is re-enabled. */
 .scale-chip {
   flex: 0 0 auto;
   margin-left: auto;

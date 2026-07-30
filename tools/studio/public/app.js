@@ -61,8 +61,8 @@ function navItem(name, prog, onClick, id, num = null, scale = null) {
   // Level number in its own fixed-width cell so the room names stay aligned.
   if (num != null) parts.push(el('span', { className: 'lvl', textContent: String(num) }));
   parts.push(el('span', { className: 'name', textContent: name }));
-  // The scale this room SHIPS at. Small rooms are magnified most on stage, so they
-  // are built at up to ×8 — highlighted, because that is where the extra work went.
+  // The scale this room SHIPS at. Currently uniform ×4; if ADAPTIVE_SCALE is
+  // re-enabled, smaller rooms ship above ×4 and get the highlighted chip.
   if (scale != null) {
     parts.push(el('span', {
       className: 'scale-chip' + (scale > 4 ? ' hi' : ''),
@@ -694,9 +694,11 @@ function refreshCompareVariants(p) {
     if (!have.has(t.model) || t.kind === 'canvas') continue;
     // A previously-"generating…" tile now has its variant → make it a canvas.
     const genLbl = t.view.querySelector('.cmp-gen'); if (genLbl) genLbl.remove();
-    const cv = el('canvas', {}); cv._natW = M.p.w * 4; t.view.append(cv);
+    // Must follow the popup's CURRENT scale, not a hardcoded ×4: at a higher scale this
+    // would load the ×4 file and label it as the higher one.
+    const cv = el('canvas', {}); cv._natW = M.p.w * (M.scale || SCALE_RANGE.min); t.view.append(cv);
     t.disp = cv; t.kind = 'canvas';
-    loadCanvasTile(t, `/cache/${M.p.hash}/${t.model}.png`);
+    loadCanvasTile(t, `/cache/${M.p.hash}/${variantFile(t.model, M.scale)}`);
   }
 }
 

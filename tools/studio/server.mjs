@@ -8,7 +8,7 @@
  *      (optional PORT, default 8109). Then open http://localhost:8109/.
  */
 import { createServer } from 'node:http';
-import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSync, renameSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname, resolve, sep } from 'node:path';
@@ -67,7 +67,20 @@ try { AVAILABLE_MODELS = availableModels(requireBins()); } catch { /* esrgan mis
 const orderFile = join(studioDir, 'modelorder.json');
 let modelOrder = [];
 if (existsSync(orderFile)) { try { const o = JSON.parse(readFileSync(orderFile, 'utf8')); if (Array.isArray(o.order)) modelOrder = o.order; } catch { /* ignore */ } }
-function saveModelOrder() { writeFileSync(orderFile, JSON.stringify({ order: modelOrder })); }
+/**
+ * Write JSON state atomically: temp file in the SAME directory, then rename (which is
+ * atomic on the same filesystem). These files hold hand-curated work — selections.json
+ * alone is ~2000 per-picture decisions that cannot be regenerated — and a plain
+ * writeFileSync truncates the real file first, so a crash or a full disk mid-write
+ * destroys all of it.
+ */
+function saveJsonAtomic(file, value) {
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value));
+  renameSync(tmp, file);
+}
+
+function saveModelOrder() { saveJsonAtomic(orderFile, { order: modelOrder }); }
 function applyModelOrder() {
   const rank = new Map(modelOrder.map((id, i) => [id, i]));
   const base = availableBase();
@@ -98,7 +111,7 @@ function loadOrBuildIndex() {
   console.log(`Index: ${Object.keys(idx.pictures).length} distinct pictures, ${Object.keys(idx.rooms).length} rooms.`);
   return idx;
 }
-function saveSelections() { writeFileSync(selFile, JSON.stringify(selections, null, 0)); }
+function saveSelections() { saveJsonAtomic(selFile, selections); }
 // Rooms deliberately EXCLUDED from the ai tier. Some rooms (TETRIS, ZX, SCHODY…)
 // are built from FFNG's original indexed pixel art, which no upscaler improves —
 // they read better in the enhanced render. The runtime already falls back to
@@ -109,7 +122,7 @@ let roomSkip = new Set();
 if (existsSync(skipFile)) {
   try { const j = JSON.parse(readFileSync(skipFile, 'utf8')); if (Array.isArray(j.rooms)) roomSkip = new Set(j.rooms); } catch { /* ignore */ }
 }
-function saveRoomSkip() { writeFileSync(skipFile, JSON.stringify({ rooms: [...roomSkip] })); }
+function saveRoomSkip() { saveJsonAtomic(skipFile, { rooms: [...roomSkip] }); }
 // Level numbers for the nav, read from the game's own room table so the Studio
 // lists rooms in play order instead of alphabetically. Rooms absent from the
 // table (or if it can't be read) sort last, alphabetically.
@@ -120,7 +133,7 @@ const ROOM_NUM = (() => {
     for (const m of src.matchAll(/num:\s*(\d+)\s*,\s*jmeno:\s*"([A-Z0-9_]+)"/g)) map.set(m[2], Number(m[1]));
   } catch { /* nav just falls back to alphabetical */ }
   return map;
-})();function saveContours() { writeFileSync(contourFile, JSON.stringify(contour, null, 0)); }
+})();function saveContours() { saveJsonAtomic(contourFile, contour); }
 // Effective contour-fade strength: per-hash override, else global default.
 function effContour(hash) { const v = contour.byHash[hash]; return typeof v === 'number' ? v : contour.global; }
 

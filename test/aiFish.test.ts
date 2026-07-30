@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { FISH_BODY_FILE, FISH_HEAD_FILE } from '../src/render/enhancedArtSource.js';
+import { aiFishKey, aiFishUrl } from '../src/render/roomAi.js';
 
 /**
  * The AI tier ships WebP, but fish frames are looked up through FISH_BODY_FILE /
@@ -40,8 +41,11 @@ describe.skipIf(scales.length === 0)('AI fish manifests', () => {
       ) as Manifest;
 
       // What loadAiFish will end up keying its Map on.
+      // aiFishKey is the LOADER's own rule, imported rather than re-implemented: a copy
+      // here would still pass if the loader dropped the mapping, which is exactly the
+      // bug this file exists to catch.
       const keys = (size: 'small' | 'big', facing: 'left' | 'right'): Set<string> =>
-        new Set((man[size]?.[facing] ?? []).map((f) => f.replace(/\.webp$/i, '.png')));
+        new Set((man[size]?.[facing] ?? []).map(aiFishKey));
 
       it('normalises to the .png names the renderer looks up', () => {
         for (const size of ['small', 'big'] as const) {
@@ -67,7 +71,10 @@ describe.skipIf(scales.length === 0)('AI fish manifests', () => {
         for (const size of ['small', 'big'] as const) {
           for (const facing of ['left', 'right'] as const) {
             for (const f of man[size]?.[facing] ?? []) {
-              expect(existsSync(join(FISH_DIR, scale, size, facing, f)), f).toBe(true);
+              // Built with the LOADER's path rule, so a change there fails here rather
+              // than shipping a set the runtime cannot find.
+              const url = aiFishUrl(`${FISH_DIR}/${scale}/`, size, facing, f);
+              expect(existsSync(url), url).toBe(true);
             }
           }
         }

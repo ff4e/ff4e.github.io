@@ -1,6 +1,6 @@
 /**
  * Hi-res "AI" room compositor logic (src/render/roomAi.ts) + its activation gate
- * aiRoomRenderActive (src/app/main.ts:954).
+ * aiRoomRenderActive (src/app/main.ts).
  *
  * roomAi.ts is a canvas-2D compositor: its per-sprite methods (drawMirror,
  * drawRope, drawDisintegrating, drawClassicItem, draw) all need a real
@@ -39,7 +39,7 @@ import { RgbaScreen } from '../src/render/rgbaScreen.js';
 import type { ArtSource } from '../src/render/artSource.js';
 import { buildPaletteLut } from '../src/render/artSource.js';
 import { darkestIndex } from '../src/render/renderRoom.js';
-import { AI_ROOM_SCALE } from '../src/render/roomAi.js';
+import { AI_ROOM_SCALE, aiRoomGateAllows } from '../src/render/roomAi.js';
 import { FISH_BODY_FILE, frameIndex } from '../src/render/enhancedArtSource.js';
 import type { FfrBitmap } from '../src/data/ffr.js';
 
@@ -297,19 +297,15 @@ describe('glassMask chroma-key scoring (roomAi.ts:331)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. aiRoomRenderActive gate rule (main.ts:954-958). The predicate depends on
-//    module-level state (graphics/aiRoom/aiRoomNum/curNum/hooks) and is not
-//    exported, so the DOCUMENTED rule is pinned here: once the AI art is loaded
-//    for the current room, ONLY gspec===42 (ZX band render) and frames with an
-//    active fishing hook (h.stav !== 0) are excluded.
+// 6. The aiRoomRenderActive gate rule. This used to be a hand-copy of the predicate,
+//    which is worthless as a test (it asserted the copy against itself) AND had already
+//    drifted: it still claimed only gspec=42 and hooks were excluded after a third
+//    exclusion, frame effects, was added. The real predicate now lives in roomAi.ts as
+//    aiRoomGateAllows and is imported here, so drift is impossible.
 // ---------------------------------------------------------------------------
 
-/** The documented gate, verbatim from main.ts:956-958 (preconditions assumed met). */
-function aiGateAllows(gspec: number, hookStates: number[]): boolean {
-  if (gspec === 42) return false;
-  if (hookStates.some((s) => s !== 0)) return false;
-  return true;
-}
+const aiGateAllows = (gspec: number, hookStates: number[], frameEffects = false): boolean =>
+  aiRoomGateAllows(gspec, hookStates, frameEffects);
 
 describe('aiRoomRenderActive gate rule (main.ts:954)', () => {
   it('allows every gspec the compositor covers (0/2/3/4/5/9) and excludes only 42', () => {
@@ -321,6 +317,15 @@ describe('aiRoomRenderActive gate rule (main.ts:954)', () => {
     expect(aiGateAllows(0, [0, 0])).toBe(true);   // all hooks idle
     expect(aiGateAllows(0, [0, 1])).toBe(false);  // one hook active
     expect(aiGateAllows(9, [2])).toBe(false);
+  });
+
+  it('excludes frames with a CPU-only frame effect running', () => {
+    // megabomb flash / silent film / interlaced / the Tetris overlay are applied by the
+    // faithful compositor while it builds the frame; this path bypasses it, so it must
+    // stand down or the effect renders as nothing at all.
+    expect(aiGateAllows(0, [], true)).toBe(false);
+    expect(aiGateAllows(9, [0], true)).toBe(false);
+    expect(aiGateAllows(0, [], false)).toBe(true);
   });
 });
 

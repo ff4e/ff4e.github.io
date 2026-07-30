@@ -2,7 +2,8 @@
  * One-off experiment (not part of the build): render the same picture to its target
  * scale by three different routes and measure invented grain.
  *
- *   A  current  — picked model ×4, then a generic av3-x2, then resample to target
+ *   A  former   — picked model ×4, then a GENERIC av3-x2, then resample (abandoned:
+ *                  generateVariantAt now composes the picked model's own passes)
  *   B  pure2x4  — picked model ×4 twice (→×16), then resample to target
  *   C  pure2f   — picked model ×2 first, then ×4 (→×8), then resample   [×2-capable models only]
  *

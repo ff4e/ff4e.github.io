@@ -11,10 +11,10 @@
  * source PNG the index doesn't cover (e.g. STEEL's animated p1/p2/w1 layers, which
  * the indexer skips) is generated on demand with the default model.
  *
- * Scale is per room, not global: roomScale() picks ×4..×8 so that small rooms —
- * which the stage magnifies most — carry proportionally more detail. The chosen
- * scale is written to each room's ai.json and read back by src/render/roomAi.ts,
- * which no longer assumes ×4. Menu assets stay at ×4. contours.json `superscale`
+ * Room scale comes from scaleForRoomSize(). With ADAPTIVE_SCALE off (the current
+ * setting) every room ships at ×4; re-enabling it makes small rooms — which the stage
+ * magnifies most — ship finer. Either way the chosen scale is written to each room's
+ * ai.json and read back by src/render/roomAi.ts. Menu assets stay at ×4. contours.json `superscale`
  * is a STUDIO-PREVIEW-ONLY setting and is NOT applied here (warned about).
  *
  * Output is WebP (lossy q92 + lossless alpha): visually indistinguishable from the
@@ -109,11 +109,14 @@ const hashFile = (abs) => createHash('md5').update(readFileSync(abs)).digest('he
  * picked model isn't cached yet.
  *
  * NOTE this deliberately differs from the server's preview fallback: a preview may
- * happily substitute another cached variant, but the SHIPPED tier must honour the
- * pick exactly. Substituting per-file would otherwise give an object's animation
- * frames different models (picks apply to all frames, but only the frame the user
- * opened was generated) — which flickers as the animation plays. So: generate
- * first, and only substitute if no backend is available to generate with.
+ * happily substitute another cached variant, but the shipped tier tries hard to honour
+ * the pick. Substituting per-file would otherwise give an object's animation frames
+ * different models (picks apply to all frames, but only the frame the user opened was
+ * generated) — which flickers as the animation plays. So: GENERATE first, and only fall
+ * back to another cached variant if generating fails for ANY reason (no backend, or the
+ * upscaler erroring/crashing on this input). That fallback is counted in
+ * `report.substituted`, warned about per file, and recorded in the build stamp as the
+ * model actually used, so the next build retries the real pick rather than settling.
  */
 /** Cache file for a model at a given scale (×SCALE keeps the bare legacy name). */
 const variantPath = (dir, model, scale) => join(dir, variantName(model, scale));
@@ -412,10 +415,14 @@ const WEBP_Q = String(process.env.WEBP_Q || 92);
  * into the room's own ×S composite, so the set must exist at every scale in use —
  * one subdir per scale (_fish/x4, x5, …). Cheap: the whole set is ~2.8 MB at ×4.
  */
-function buildFish(byRoom, report, list) {
+function buildFish(byRoom, report) {
   const srcDir = join(srcRoot, '_fish');
   if (!existsSync(srcDir)) { console.error('  ! no source art for _fish'); return false; }
-  const rooms = list.filter((r) => r !== '_fish' && r !== '_menu' && index.rooms[r] && !roomSkip.has(r));
+  // Scales come from EVERY indexed room, not just the ones being built: the fish set is
+  // shared, so a partial build (`--fish`, or one room) must still cover every scale the
+  // game can ask for. Deriving them from `list` meant `--fish` saw no rooms at all, so
+  // the stale-set cleanup below deleted every x<N> directory and wrote nothing back.
+  const rooms = Object.keys(index.rooms).filter((r) => !roomSkip.has(r));
   const scales = [...new Set(rooms.map(roomScale))].sort();
   const files = listPngs(srcDir);
   const covered = byRoom.get('_fish') || new Map();
@@ -556,12 +563,16 @@ function main() {
   for (const r of list) {
     const ok = r === '_menu' ? buildMenu(byRoom, report)
       : r === '_panel' || r === '_credits' ? buildUi(r.slice(1), report)
-        : r === '_fish' ? buildFish(byRoom, report, list)
+        : r === '_fish' ? buildFish(byRoom, report)
           : buildRoom(r, byRoom, report);
     if (ok) okCount++;
   }
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`Done: ${okCount}/${list.length} targets in ${secs}s · contour-thinned ${report.thinned} · substituted ${report.substituted} · generated ${report.generated} · unindexed ${report.unindexed} · skipped ${report.skipped}`);
+  // A failed target must FAIL the process. The Studio's build endpoint reports success
+  // purely from the exit status, so returning 0 here made a build with missing art look
+  // like a clean run.
+  if (okCount !== list.length) process.exitCode = 1;
 }
 
 main();

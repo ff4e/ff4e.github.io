@@ -19,8 +19,10 @@
  * FFNG art (un-mapped items, the skeleton and the darkness silhouette) falls back
  * to the room's own palette bitmaps via classicSprite(), mirroring what the
  * enhanced source does. Used whenever `graphics === 'ai'` and the room's AI assets
- * loaded; the caller (aiRoomRenderActive) only withholds it for gspec=42 (the ZX
- * band render) and frames with an active fishing hook. classic/enhanced never
+ * loaded; the caller (aiRoomRenderActive) withholds it for gspec=42 (the ZX band
+ * render), frames with an active fishing hook, and frames with a CPU-only frame
+ * effect running (megabomb flash / silent film / interlaced / the Tetris overlay),
+ * all of which the faithful compositor must draw instead. classic/enhanced never
  * touch it.
  */
 import { Dir, DX_DIR, DY_DIR } from '../core/dir.js';
@@ -33,6 +35,26 @@ import type { FfrBitmap } from '../data/ffr.js';
 
 /** Upscale factor of the committed AI room art (must match tools/build-room-ai.mjs AI_SCALE). */
 export const AI_ROOM_SCALE = 4;
+
+/**
+ * The purely-data half of the "may the AI compositor draw this frame?" rule, split out
+ * of main.ts's aiRoomRenderActive so it has ONE definition that tests can import. The
+ * caller supplies the module state it cannot see (tier, loaded art, current room).
+ *
+ * A frame is withheld when:
+ *  - gspec 42, the ZX-Spectrum band render — its per-scanline bands are an index effect
+ *    and the low-fi look is the point;
+ *  - any fishing hook is active — the faithful path draws hooks on top from the palette;
+ *  - a CPU-only frame effect is running (megabomb flash / silent film / interlaced /
+ *    the Tetris overlay) — those are applied by the faithful compositor as it builds the
+ *    frame, so this path would silently render without them.
+ */
+export function aiRoomGateAllows(gspec: number, hookStates: readonly number[], frameEffects: boolean): boolean {
+  if (gspec === 42) return false;
+  if (hookStates.some((s) => s !== 0)) return false;
+  if (frameEffects) return false;
+  return true;
+}
 
 const BASE_FRAME: FishFrame = { bodyFrame: TL_ZAKLAD[0], headFrame: 0 };
 /** Staged skeleton body (FFR frame TL_KOSTRA=19, absent from FISH_BODY_FILE). */
@@ -77,10 +99,10 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
       return createImageBitmap(await res.blob());
     };
     const dir = `${base}enhanced-ai/${jmeno}/`;
-    // ai.json carries the room's ADAPTIVE SCALE and the shipped filenames. The scale
-    // is NOT assumable any more (small rooms ship finer than ×4 because they are
-    // magnified more), and the tier ships WebP, so the loader can no longer guess
-    // "p.png"/"w.png" — it reads what the build actually wrote.
+    // ai.json carries the room's scale and the shipped filenames. The shipped tier is
+    // uniform ×4 today (ADAPTIVE_SCALE is off in tools/studio/lib/upscale.mjs), but the
+    // scale is read rather than assumed so re-enabling it needs no runtime change — and
+    // the filenames must be read regardless, since the tier ships WebP, not PNG.
     const res = await fetch(`${dir}ai.json`);
     if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
     const man = (await res.json()) as AiManifest;
@@ -93,8 +115,10 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
       if (typeof e.item !== 'number' || !Array.isArray(e.frames) || e.frames.length === 0) continue;
       objects.push({ item: e.item, frames: await Promise.all(e.frames.map((f) => bmp(dir + f))) });
     }
-    // The fish set exists per scale, since the fish are drawn into this room's ×S composite.
-    const fish = await loadAiFish(`${base}enhanced-ai/_fish/x${scale}/`, bmp);
+    // The fish set exists per scale, since the fish are drawn into this room's ×S
+    // composite — but it is the SAME art for every room at that scale, so it is shared
+    // rather than decoded per room (see fishCache).
+    const fish = await sharedAiFish(base, scale, bmp);
     return new AiRoom(bg, wall, objects, fish, scale);
   } catch (e) {
     // Returning null falls back to the enhanced tier, which is the right behaviour for
@@ -105,17 +129,51 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
   }
 }
 
+/**
+ * The fish set is shared by every room at a given scale, so it is decoded ONCE and
+ * cached by scale. Loading it per room meant ~133 extra asset fetches and another 132
+ * retained ImageBitmaps for every room entered — the same art over and over, since
+ * AiRoom instances are cached for the session and never release their bitmaps.
+ *
+ * Keyed on the PROMISE so two rooms loading concurrently share one decode.
+ */
+/**
+ * Map a SHIPPED fish filename to the key the renderer looks it up by.
+ *
+ * Frames are resolved through FISH_BODY_FILE / FISH_HEAD_FILE, which are shared with the
+ * enhanced tier and therefore name PNGs, while this tier ships WebP. Keying the map by
+ * the shipped name made every lookup miss and silently drew NO fish in any room — no
+ * error, no 404, correct canvas size. Exported so tests assert this exact rule instead
+ * of re-implementing it (a re-implementation cannot catch the bug it guards).
+ */
+export const aiFishKey = (shipped: string): string => shipped.replace(/\.webp$/i, '.png');
+
+/** Where a shipped fish frame lives, given the per-scale set directory. */
+export const aiFishUrl = (dir: string, size: 'small' | 'big', facing: 'left' | 'right', file: string): string =>
+  `${dir}${size}/${facing}/${file}`;
+
+const fishCache = new Map<string, Promise<AiFish>>();
+
+function sharedAiFish(base: string, scale: number, bmp: (u: string) => Promise<ImageBitmap>): Promise<AiFish> {
+  const dir = `${base}enhanced-ai/_fish/x${scale}/`;
+  let p = fishCache.get(dir);
+  if (!p) {
+    p = loadAiFish(dir, bmp);
+    // Don't cache a rejection: a transient failure would otherwise poison every later
+    // room at this scale for the rest of the session.
+    p.catch(() => fishCache.delete(dir));
+    fishCache.set(dir, p);
+  }
+  return p;
+}
+
 async function loadAiFish(dir: string, bmp: (u: string) => Promise<ImageBitmap>): Promise<AiFish> {
   const res = await fetch(`${dir}manifest.json`);
   const m = (await res.json()) as Record<'small' | 'big', Record<'left' | 'right', string[]>>;
   const side = async (size: 'small' | 'big', facing: 'left' | 'right'): Promise<AiFishSide> => {
     const map: AiFishSide = new Map();
     await Promise.all((m[size]?.[facing] ?? []).map(async (f) =>
-      // KEY BY THE .png NAME, load from the actual (.webp) file. Frames are looked up
-      // through FISH_BODY_FILE / FISH_HEAD_FILE, which are shared with the enhanced
-      // tier and therefore name PNGs; this tier ships WebP. Keying by the shipped name
-      // would make every lookup miss and silently draw no fish at all.
-      map.set(f.replace(/\.webp$/i, '.png'), await bmp(`${dir}${size}/${facing}/${f}`))));
+      map.set(aiFishKey(f), await bmp(aiFishUrl(dir, size, facing, f)))));
     return map;
   };
   return {
@@ -125,7 +183,7 @@ async function loadAiFish(dir: string, bmp: (u: string) => Promise<ImageBitmap>)
 }
 
 export class AiRoom {
-  /** This room's upscale factor, from ai.json — ×4 for big rooms up to ×8 for the smallest. */
+  /** This room's upscale factor, from ai.json — ×4 unless ADAPTIVE_SCALE is re-enabled. */
   readonly scale: number;
   /** Per-sprite glass masks for the spec=1 mirror (see glassMask). */
   private readonly glassCache = new WeakMap<ImageBitmap, Float32Array>();
@@ -401,8 +459,9 @@ export class AiRoom {
    * An item's AI sprite(s) at its slid hi-res position. Matches the enhanced
    * spec=10 flip (statically-spec=10 art is pre-mirrored ⇒ drawn as-is; a runtime
    * spec=10 toggle mirrors the base art), and draws every sprite bound to this item
-   * index in manifest order (stacked cabins etc.). Missing AI art ⇒ nothing (the
-   * caller only enables this path for rooms whose items are all AI-covered).
+   * index in manifest order (stacked cabins etc.). Missing AI art falls back to
+   * drawClassicItem(): the room's own FFR bitmap nearest-scaled ×S, mirroring
+   * EnhancedArtSource's per-element fallback.
    */
   private drawItem(ctx: CanvasRenderingContext2D, item: Item, index: number, x0: number, y0: number, room: Room): void {
     const preMirrored = (item.initSpec ?? item.spec) === 10;
@@ -552,7 +611,6 @@ export class AiRoom {
     ctx.drawImage(cv, x0, y0);
   }
 
-  /** drawImage a sprite at (x,y), optionally mirrored within its own width. */
   /** blit() for a canvas source (the classic ×S sprites). */
   private blit2(ctx: CanvasRenderingContext2D, spr: HTMLCanvasElement, x: number, y: number, mirror: boolean): void {
     if (!mirror) { ctx.drawImage(spr, x, y); return; }

@@ -115,8 +115,13 @@ function binFor(engine, bins) {
  *  simply doesn't appear instead of failing every generation). */
 export function availableModels(bins) {
   return MODELS.filter((m) => {
+    // `orig` is nearest-neighbour via ffmpeg, so it needs no upscaler binary at all.
+    if (m.model === null) return true;
     const e = m.engine || 'esrgan';
-    return e === 'esrgan' ? true : !!(bins[e] && existsSync(bins[e]));
+    // esrgan used to be assumed present. On a machine with only Real-CUGAN installed
+    // that made the worker start with an esrgan model, fail, and exit before reaching
+    // the models it COULD have produced.
+    return !!(bins[e] && existsSync(bins[e]));
   });
 }
 function probe(png) {
@@ -328,19 +333,6 @@ export function generateVariant(srcPng, dstPng, spec, alpha, bins, scale = SCALE
 }
 
 /**
- * Generate a variant at an ARBITRARY net scale (4…8), used by the adaptive
- * per-room scale: small rooms are displayed at a higher content scale, so their
- * art must be rendered finer than ×4 or it gets interpolated on screen.
- *
- * The ncnn models are fixed-factor (×4 for most; Real-CUGAN also has ×2/×3), so
- * anything above ×4 is reached by SUPERSAMPLING and downscaling: run the picked
- * model to ×4, run a second AI pass to ×8, then box-downscale ×8 → target. The
- * second pass prefers Real-CUGAN ×2 — it keeps the intermediate at ×8 (a few tens
- * of MP) whereas a second ×4 pass would balloon to ×16 (~0.34 GB on the largest
- * room that needs this). Falls back to the picked model at ×4 + downscale when
- * CUGAN is unavailable. The picked model still shapes the image: it runs first and
- * at the larger step.
- */
 /**
  * The scales the model can produce ITSELF. Scale is baked into the network weights, so
  * this is a property of the files on disk, not a parameter: `4xNomos8kSC`, `4xLSDIR`,

@@ -58,7 +58,11 @@ export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorl
       ...NODE_FILES.map(load),
     ]);
     return new AiWorldMap(wm, mapa0!, mapa1!, nodes, krokomer!, ikonky!);
-  } catch {
+  } catch (e) {
+    // Returning null falls back to the faithful CPU map, which is right for a partial
+    // download — but it would also hide a broken build, so say why (the other three AI
+    // loaders warn identically).
+    console.warn('AI world map unavailable:', e);
     return null;
   }
 }
