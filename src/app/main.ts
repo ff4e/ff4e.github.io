@@ -446,9 +446,28 @@ function syncSubOverlaySized(cssW: number, cssH: number): void {
   subCanvas.style.height = `${cssH}px`;
 }
 
+/**
+ * Size the subtitle overlay to the ROOM's on-screen box.
+ *
+ * Derived from the room's NATIVE size, not from `canvas.width`. Those were the same
+ * thing until the `ai` tier arrived: its backing store is ×scale, so sizing from it
+ * ran the ×4 dimensions back through contentScaleFor and produced an overlay that did
+ * not match the room — 595px against the room's 435px in the integer-snap fit modes,
+ * and 1607px against 595px in `fill`. Nothing moved on screen (the text is positioned
+ * in native coordinates from a shared origin), but the overlay's backing store was up
+ * to 2.7x wider than needed and was cleared and composited on every subtitle frame.
+ */
 function syncSubOverlay(): void {
-  const cs = contentScaleFor(canvas.width, canvas.height);
-  syncSubOverlaySized(canvas.width * cs, canvas.height * cs);
+  if (!room) {
+    // No room (shouldn't happen on the room-subtitle paths): keep the old behaviour
+    // rather than leaving the overlay at a stale size.
+    const cs = contentScaleFor(canvas.width, canvas.height);
+    syncSubOverlaySized(canvas.width * cs, canvas.height * cs);
+    return;
+  }
+  const { w, h } = roomScreenSize(room);
+  const cs = contentScaleFor(w, h);
+  syncSubOverlaySized(w * cs, h * cs);
 }
 
 /**

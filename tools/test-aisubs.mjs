@@ -48,8 +48,33 @@ await withApp(async ({ p, expect }) => {
     return { fps: (b.n - a.n) / secs, raf: (b.r - a.r) / secs, active: b.active };
   };
 
+  /**
+   * The overlay must occupy exactly the room's on-screen box.
+   *
+   * It is a separate DOM layer, so its size comes from its own calculation rather than
+   * from the room canvas — and that calculation used to run off `canvas.width`, which is
+   * NATIVE in enhanced but xSCALE in ai. The ai overlay came out 595px against a 435px
+   * room (and 1607px against 595px in `fill`): invisible, because the text is positioned
+   * in native coordinates from a shared origin, but a backing store up to 2.7x wider than
+   * needed, cleared and composited on every subtitle frame.
+   */
+  const overlayBox = async (tier) => {
+    await p.evaluate((t) => window.__ff.setGraphics(t), tier);
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier, { timeout: 15000 });
+    return p.evaluate(() => {
+      const c = document.querySelector('#screen');
+      const s = document.querySelector('#subs');
+      return { room: c.style.width, sub: s ? s.style.width : null, subBacking: s ? s.width : 0, backing: c.width };
+    });
+  };
+
   const enh = await measure('enhanced');
   const ai = await measure('ai');
+
+  for (const tier of ['enhanced', 'ai']) {
+    const b = await overlayBox(tier);
+    expect(b.sub === b.room, `[${tier}] the subtitle overlay matches the room box (room ${b.room}, subs ${b.sub}, room backing ${b.backing})`);
+  }
 
   expect(enh.active, 'the enhanced line is still on screen for the whole sample');
   expect(ai.active, 'the ai line is still on screen for the whole sample');
