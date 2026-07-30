@@ -42,6 +42,7 @@ function classify(relPath) {
   if (relPath.includes('/_credits/')) return 'credits';
   if (relPath.includes('/_story/')) return 'story';
   if (relPath.includes('/_kufr/')) return 'kufr';
+  if (relPath.includes('/_desky/')) return 'desky';
   const b = basename(relPath);
   if (b === 'p.png') return 'bg';
   if (b === 'w.png') return 'wall';
@@ -149,6 +150,7 @@ export function buildIndex(root) {
   //   _credits end-credits frame + strip   (stage-ui.mjs, from CredStat1/CredMov)
   //   _story   the nine leg story pages    (stage-story.mjs, from Menu/00N.$dv)
   //   _kufr    briefcase cutscene          (stage-kufr.ts, from kufr256.BMP + demo.pck)
+  //   _desky   world-map room-name plaques (stage-desky.ts, from desky<n>.dat, 2 languages)
   //
   // NOTE this reads only the TOP LEVEL of each directory, which is what keeps _kufr to
   // two decisions: its 285 materialised animation frames live in _kufr/frames/ and are
@@ -173,12 +175,13 @@ export function buildIndex(root) {
   const credits = flatShared('_credits');
   const story = flatShared('_story');
   const kufr = flatShared('_kufr');
+  const desky = flatShared('_desky');
 
   const sharedObjects = Object.values(pictures)
     .filter((p) => p.kind === 'object' && new Set(p.uses.map((u) => u.room)).size > 1)
     .map((p) => p.hash);
 
-  return { builtAt: new Date().toISOString(), enhancedDir, pictures, rooms, sharedObjects, fish, menu, panel, credits, story, kufr };
+  return { builtAt: new Date().toISOString(), enhancedDir, pictures, rooms, sharedObjects, fish, menu, panel, credits, story, kufr, desky };
 }
 
 /**

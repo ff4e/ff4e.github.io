@@ -201,7 +201,7 @@ function scalesForPicture(p) {
     // UI art (menu / control panel / credits / story pages / the briefcase cutscene) is
     // drawn at the stage scale, not a room scale, so it is always built at the base factor.
     if (u.room === '_menu' || u.room === '_panel' || u.room === '_credits'
-      || u.room === '_story' || u.room === '_kufr') { set.add(SCALE); continue; }
+      || u.room === '_story' || u.room === '_kufr' || u.room === '_desky') { set.add(SCALE); continue; }
     if (index.rooms[u.room]) set.add(roomScaleOf(u.room));
   }
   if (!set.size) set.add(SCALE);
@@ -550,6 +550,8 @@ const server = createServer(async (req, res) => {
       const storySel = storyAll.filter((h) => selections[h]).length;
       const kufrAll = index.kufr || [];
       const kufrSel = kufrAll.filter((h) => selections[h]).length;
+      const deskyAll = index.desky || [];
+      const deskySel = deskyAll.filter((h) => selections[h]).length;
       return sendJson(res, {
         rooms,
         shared: {
@@ -560,6 +562,7 @@ const server = createServer(async (req, res) => {
           credits: { total: creditsAll.length, selected: creditsSel },
           story: { total: storyAll.length, selected: storySel },
           kufr: { total: kufrAll.length, selected: kufrSel },
+          desky: { total: deskyAll.length, selected: deskySel },
         },
         totals: { pictures: Object.keys(index.pictures).length, selected: Object.keys(selections).length },
         models: AVAILABLE_MODELS,
@@ -581,7 +584,7 @@ const server = createServer(async (req, res) => {
       const which = path.slice('/api/shared/'.length); // 'fish' | 'objects' | 'menu'
       if (which === 'fish') return sendJson(res, { which, pictures: fishCards() });
       if (which === 'menu') return sendJson(res, { which, pictures: menuCards() });
-      if (which === 'panel' || which === 'credits' || which === 'story' || which === 'kufr') {
+      if (which === 'panel' || which === 'credits' || which === 'story' || which === 'kufr' || which === 'desky') {
         return sendJson(res, { which, pictures: flatCards(which) });
       }
       // NB: `.map(picMeta)` would pass the ARRAY INDEX as picMeta's `scale` argument.
