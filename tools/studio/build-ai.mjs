@@ -130,7 +130,11 @@ function variantFor(hash, srcAbs, alpha, report, scale = SCALE) {
     if (existsSync(o)) return { png: o, model: 'orig' };
   }
   const spec = MODEL_BY_ID[want] || MODEL_BY_ID[defaultModelId];
-  if (DRY) { report.generated++; return { png: wantPng, model: spec.id }; } // report only, never write
+  // Dry-run reports what WOULD be generated and never writes. The returned path does not
+  // exist yet, so it is flagged `planned` — callers must not try to read it (assertScaled
+  // used to open it unconditionally, so --dry-run crashed with ENOENT on exactly the
+  // missing-cache case it exists to report).
+  if (DRY) { report.generated++; return { png: wantPng, model: spec.id, planned: true }; }
   try {
     mkdirSync(dir, { recursive: true });
     const tmp = join(dir, `.${spec.id}@${scale}.build.png`);
@@ -237,8 +241,8 @@ function toWebp(srcPng, outAbs) {
 /** Write one output file as WebP, post-processing the cached variant if needed. */
 function emit(srcAbs, outAbs, hash, alpha, report, scale) {
   const s = alpha ? effContour(hash) : 0;
-  const { png, model } = variantFor(hash, srcAbs, alpha, report, scale);
-  assertScaled(srcAbs, png, hash, scale);
+  const { png, model, planned } = variantFor(hash, srcAbs, alpha, report, scale);
+  if (!planned) assertScaled(srcAbs, png, hash, scale);
   const stamp = stampFor(hash, alpha, model, scale);   // records the model ACTUALLY used
   if (DRY) return stamp;
   mkdirSync(dirname(outAbs), { recursive: true });
@@ -501,16 +505,20 @@ function buildMenu(byRoom, report) {
     const want = stampFor(hash, alpha, selections[hash] || defaultModelId) + `:q${WEBP_Q}`;
     if (!FORCE && existsSync(outAbs) && prev[a.out] === want) { next[a.out] = want; skipped++; continue; }
     if (DRY) { report.generated += 0; next[a.out] = want; wrote++; continue; }
-    const { png, model } = variantFor(hash, srcAbs, alpha, report);
-    assertScaled(srcAbs, png, hash);
+    const { png, model, planned } = variantFor(hash, srcAbs, alpha, report);
+    if (!planned) assertScaled(srcAbs, png, hash);
     if (a.kind === 'layer') {
       // A failed encode must FAIL the target: silently continuing would leave the
       // previous (or no) asset shipped while the build still reported success.
+      // It must NOT delete the previous asset, though — toWebp publishes via rename, so
+      // on failure the old file is still intact and valid. Removing it turned a loud,
+      // recoverable build failure into a MISSING asset, which at runtime is the silent
+      // tier-fallback bug class. `next[a.out]` is left unset either way, so the next
+      // build retries this target.
       try {
         toWebp(png, outAbs);
       } catch (e) {
         console.error(`  ! ${a.out}: ${e.message}`);
-        rmSync(outAbs, { force: true });
         failed++;
         continue;
       }
@@ -534,13 +542,16 @@ function main() {
   const menuOnly = flag('menu') && rooms.length === 0 && !all;
   const uiOnly = flag('ui') && rooms.length === 0 && !all;
 
-  // The default must be generatable/available, else fall back like the server does.
+  // The default must be generatable — but only if we would actually have to GENERATE
+  // with it. Downgrading purely because the binary is absent rebuilt already-cached
+  // cugan_c pictures as nearest-neighbour `orig` art, silently changing the shipped
+  // tier on any machine without the upscaler backends configured. variantFor already
+  // falls back per-picture when a variant is genuinely missing and cannot be made, so
+  // the safe rule here is: keep the configured default, and only warn.
   try {
     const av = availableModels(getBins());
     if (!av.some((m) => m.id === defaultModelId)) {
-      const fb = av.find((m) => m.id === 'av3') || av.find((m) => m.id !== 'orig');
-      console.warn(`Default model "${defaultModelId}" unavailable → using "${fb ? fb.id : 'orig'}".`);
-      defaultModelId = fb ? fb.id : 'orig';
+      console.warn(`Default model "${defaultModelId}" has no configured backend; cached variants will be used, and any picture that needs generating will fall back per-picture.`);
     }
   } catch { /* no backend configured: fine as long as everything is cached */ }
 

@@ -16,6 +16,7 @@ import {
   smoothEdges,
   seamFill,
   compositeOver,
+  resampleAreaTo,
 } from '../tools/studio/lib/upscale.mjs';
 
 /** Allocate a transparent w*h RGBA buffer. */
@@ -208,6 +209,27 @@ describe('seamFill (composite-level gap restore)', () => {
     // x=2 is a seam pixel where A's original art is restored (no longer black).
     expect(getPx(base, W, 2, 0)).not.toEqual([0, 0, 0, 255]);
   });
+
+  it('does NOT fill where only ONE participant is near (needs the SECOND-nearest)', () => {
+    // The seam rule is `min2 <= R`: a gap counts only when it is close to TWO different
+    // participants. Relaxing it to `min1 <= R` would fill the open space around every
+    // lone sprite, painting a halo of un-thinned art back over the composite. A single
+    // isolated layer therefore has min2 = Infinity everywhere and must fill nothing.
+    const W = 6, H = 1;
+    const base = rgba(W, H);
+    fillSolid(base, 0, 0, 0, 255);
+    const lone = { orig: rgba(W, H), rgba: rgba(W, H), w: W, h: H, dx: 0, dy: 0 };
+    setPx(lone.orig, W, 1, 0, 200, 0, 0, 255);
+    setPx(lone.orig, W, 2, 0, 200, 0, 0, 255);
+    setPx(lone.rgba, W, 1, 0, 200, 0, 0, 255); // x=2 receded, and nothing else is nearby
+    // A second participant exists but is far away (x=5), beyond R from the x=2 gap.
+    const far = { orig: rgba(W, H), rgba: rgba(W, H), w: W, h: H, dx: 0, dy: 0 };
+    setPx(far.orig, W, 5, 0, 0, 200, 0, 255);
+    setPx(far.rgba, W, 5, 0, 0, 200, 0, 255);
+    seamFill(base, W, H, [lone, far], 1);
+    // Nothing is within R of two participants, so the background stays untouched.
+    for (let x = 0; x < W; x++) expect(getPx(base, W, x, 0)).toEqual([0, 0, 0, 255]);
+  });
 });
 
 describe('compositeOver (alpha-over blit)', () => {
@@ -236,5 +258,47 @@ describe('compositeOver (alpha-over blit)', () => {
     compositeOver(base, W, H, { rgba: spr, w: 2, h: 1, dx: 1, dy: 0 }); // shifted right by 1
     expect(getPx(base, W, 0, 0)).toEqual([0, 0, 0, 255]); // untouched
     expect(getPx(base, W, 1, 0)).toEqual([255, 0, 0, 255]); // only the in-bounds column
+  });
+
+  it('carries the BASE colour through a partial alpha (exact blend on a non-black base)', () => {
+    // Every other case here composites onto black, where the base term contributes 0 and
+    // a wrong (or missing) `base * (1 - fa)` is invisible. Room backgrounds are not black,
+    // so pin the exact arithmetic against a saturated non-black base.
+    const W = 1, H = 1;
+    const base = rgba(W, H);
+    fillSolid(base, 40, 80, 200, 255);
+    const spr = rgba(1, 1);
+    setPx(spr, 1, 0, 0, 255, 0, 0, 64); // red at 25.1% alpha
+    compositeOver(base, W, H, { rgba: spr, w: 1, h: 1, dx: 0, dy: 0 });
+    const fa = 64 / 255;
+    expect(getPx(base, W, 0, 0)).toEqual([
+      Math.round(255 * fa + 40 * (1 - fa)),
+      Math.round(0 * fa + 80 * (1 - fa)),
+      Math.round(0 * fa + 200 * (1 - fa)),
+      255,
+    ]);
+  });
+});
+
+describe('resampleAreaTo (area-average downscale)', () => {
+  it('weights colour by ALPHA, so a transparent pixel cannot bleed its RGB into the result', () => {
+    // Averaging straight RGB pulls in the colour stored UNDER transparent pixels. That
+    // colour is arbitrary — encoders routinely leave non-zero RGB beneath alpha=0 — so a
+    // sprite edge resampled without premultiplication picks up a fringe of whatever
+    // happens to be in the invisible pixels, with nothing reporting an error.
+    //
+    // A transparent BLACK neighbour cannot detect this (its RGB is 0, so weighting by
+    // alpha changes nothing), which is exactly why the obvious version of this test
+    // passes against the broken implementation. Use a transparent BLUE neighbour.
+    const src = rgba(2, 1);
+    setPx(src, 2, 0, 0, 255, 0, 0, 255); // opaque red — the only visible pixel
+    setPx(src, 2, 1, 0, 0, 0, 255, 0);   // fully transparent, but blue underneath
+    const out = resampleAreaTo(src, 2, 1, 1, 1) as { rgba: Uint8Array; w: number; h: number };
+    const [r, g, b, a] = getPx(out.rgba, 1, 0, 0);
+    // Pure red: the invisible blue contributes nothing. Without premultiplication this
+    // comes out magenta (b = 255).
+    expect([r, g, b]).toEqual([255, 0, 0]);
+    // Coverage still halves, which is what carries the softness at the edge.
+    expect(a).toBe(128);
   });
 });

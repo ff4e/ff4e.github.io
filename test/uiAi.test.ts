@@ -39,8 +39,9 @@ function recorder(imgIds: Map<unknown, number>) {
   return { ctx: ctx as unknown as CanvasRenderingContext2D, draws };
 }
 
-/** Replay recorded draws onto an indexed buffer, honouring per-image transparency. */
-function replay(draws: Draw[], sources: Uint8Array[], w: number, h: number, transparentOf: (i: number) => number | null): Uint8Array {
+/** Replay recorded draws onto an indexed buffer, honouring per-image transparency.
+ *  `srcStride` is the source images' row width — PANEL_W at scale 1, PANEL_W*S at ×S. */
+function replay(draws: Draw[], sources: Uint8Array[], w: number, h: number, transparentOf: (i: number) => number | null, srcStride: number = PANEL_W): Uint8Array {
   const out = new Uint8Array(w * h);
   for (const d of draws) {
     const src = sources[d.img];
@@ -52,7 +53,7 @@ function replay(draws: Draw[], sources: Uint8Array[], w: number, h: number, tran
       for (let col = 0; col < d.sw; col++) {
         const sx = d.sx + col, dx = d.dx + col;
         if (dx < 0 || dx >= w) continue;
-        const px = src[sy * PANEL_W + sx];
+        const px = src[sy * srcStride + sx];
         if (px === undefined || px === key) continue;   // baked-alpha pixels don't draw
         out[dy * w + dx] = px;
       }
@@ -106,6 +107,82 @@ describe('AiPanel matches the faithful composer', () => {
     panel.drawPanel(ctx, st);
     const mine = replay(draws, images, PANEL_W, PANEL_H, () => null);
     expect(Array.from(mine)).toEqual(Array.from(composePanel(images, st)));
+  });
+});
+
+/**
+ * The same parity, but at the scale the tier ACTUALLY SHIPS AT (×4).
+ *
+ * Everything above runs the compositor at scale 1, where every `* S` in panelAi.ts is a
+ * no-op — so the scale factor itself, which is the entire point of this tier, was
+ * untested: breaking `width = PANEL_W * scale` or a `top * S` offset passed the suite.
+ *
+ * Method: build the fake art nearest-neighbour-upscaled by S, run the compositor at S,
+ * replay onto an S× buffer, then point-sample every S-th pixel back down. A correct ×S
+ * compositor is exactly the ×1 composite magnified, so the downsample must equal the
+ * faithful ×1 output. A wrong offset, a wrong band height or a wrong source rect all
+ * shift pixels across cell boundaries and show up here.
+ */
+describe('AiPanel matches the faithful composer AT THE SHIPPED SCALE (×4)', () => {
+  const S = 4;
+  const base = fakeImages();
+  /** Nearest-neighbour ×S of a PANEL_W×PANEL_H indexed image. */
+  const up = (src: Uint8Array): Uint8Array => {
+    const w = PANEL_W * S, h = PANEL_H * S;
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) out[y * w + x] = src[(y / S | 0) * PANEL_W + (x / S | 0)]!;
+    return out;
+  };
+  const bigImages = base.map(up);
+  const ids = new Map<unknown, number>(bigImages.map((im, i) => [im, i]));
+  const panel = new AiPanel(bigImages as unknown as ImageBitmap[], bigImages[0] as unknown as ImageBitmap, S);
+
+  it('reports a backing store of exactly PANEL_W×S by PANEL_H×S', () => {
+    expect(panel.width).toBe(PANEL_W * S);
+    expect(panel.height).toBe(PANEL_H * S);
+  });
+
+  const states: PanelState[] = [
+    ...Array.from({ length: 9 }, (_, d) => ({
+      velka: d % 4, space: (d + 1) % 4, mala: (d + 2) % 4, save: (d + 3) % 4,
+      load: d % 4, abort: (d + 1) % 4, restart: (d + 2) % 4, pressedDir: d,
+    })),
+    ...Array.from({ length: 9 }, (_, d) => ({
+      velka: 0, space: 0, mala: 0, save: 0, load: 0, abort: 0, restart: 0, pressedDir: d,
+    })),
+  ];
+
+  for (const [i, st] of states.entries()) {
+    it(`×${S} panel, pressedDir ${st.pressedDir} (${i < 9 ? 'mixed' : 'flat'})`, () => {
+      const { ctx, draws } = recorder(ids);
+      panel.drawPanel(ctx, st);
+      const big = replay(draws, bigImages, PANEL_W * S, PANEL_H * S, () => null, PANEL_W * S);
+      // Point-sample the top-left pixel of every S×S cell back to native resolution.
+      const down = new Uint8Array(PANEL_W * PANEL_H);
+      for (let y = 0; y < PANEL_H; y++) for (let x = 0; x < PANEL_W; x++) down[y * PANEL_W + x] = big[y * S * PANEL_W * S + x * S]!;
+      expect(Array.from(down)).toEqual(Array.from(composePanel(base, st)));
+    });
+  }
+
+  it('fills every pixel of each S×S cell uniformly (no sub-pixel drift)', () => {
+    // Downsampling by one corner would hide a half-cell offset; this checks the whole
+    // cell is the single native colour, which only holds if every rect is an exact
+    // multiple of S.
+    const st: PanelState = { velka: 1, space: 2, mala: 3, save: 0, load: 1, abort: 2, restart: 3, pressedDir: 5 };
+    const { ctx, draws } = recorder(ids);
+    panel.drawPanel(ctx, st);
+    const big = replay(draws, bigImages, PANEL_W * S, PANEL_H * S, () => null, PANEL_W * S);
+    const want = composePanel(base, st);
+    let bad = 0;
+    for (let y = 0; y < PANEL_H; y++) {
+      for (let x = 0; x < PANEL_W; x++) {
+        const expected = want[y * PANEL_W + x];
+        for (let dy = 0; dy < S; dy++) for (let dx = 0; dx < S; dx++) {
+          if (big[(y * S + dy) * PANEL_W * S + (x * S + dx)] !== expected) bad++;
+        }
+      }
+    }
+    expect(bad).toBe(0);
   });
 });
 

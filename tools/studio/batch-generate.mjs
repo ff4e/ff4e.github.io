@@ -93,3 +93,6 @@ for (let i = 0; i < list.length; i++) {
   }
 }
 console.log(`[shard ${shardI}] done: ok=${ok} failed=${failed} in ${((Date.now() - t0) / 1000 / 60).toFixed(1)}min`);
+// Exit non-zero on any failure: this is driven by shard scripts, and a silent 0 let a
+// partially-generated batch look like a complete one.
+if (failed > 0) process.exitCode = 1;

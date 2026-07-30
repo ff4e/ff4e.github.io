@@ -97,6 +97,7 @@ import {
 } from '../render/mapInfo.js';
 import { parseDesky, blitDeska, type DeskyData } from '../data/desky.js';
 import { IntroPlayer } from './intro.js';
+import { advancePaintDeadline, shouldSkipPaint } from './paintClock.js';
 import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
 import { loadAiPanel, type AiPanel } from '../render/panelAi.js';
 import { loadAiCredits, type AiCredits } from '../render/creditsAi.js';
@@ -1456,7 +1457,30 @@ let enhancedPending = false;
 // level is on and every asset loaded. null ⇒ the room falls back to enhanced/classic.
 let aiRoom: AiRoom | null = null;
 let aiRoomNum = 0; // room number aiRoom belongs to (guards async races)
-const aiRoomCache = new Map<string, AiRoom | null>(); // jmeno -> AiRoom (null = no AI art / failed)
+/**
+ * jmeno -> loaded AI room (null = no AI art / failed). Keyed on the PROMISE so a second
+ * request while a load is in flight joins it instead of starting a duplicate: the entry
+ * used to be written only after the await, so cycling tiers with E fired up to five
+ * concurrent loads of the same room (590 fetches for 71 distinct URLs).
+ *
+ * LRU-bounded because each room retains ~50 MB of ×4 pixels; unbounded, a full
+ * playthrough held ~4 GB of decoded bitmaps that were never closed.
+ */
+const aiRoomCache = new Map<string, Promise<AiRoom | null>>();
+const AI_ROOM_CACHE_MAX = 3; // current room + the two most recently visited
+async function evictAiRooms(keep: string): Promise<void> {
+  while (aiRoomCache.size > AI_ROOM_CACHE_MAX) {
+    // Map iterates in insertion order, so the first key that is not the room we are
+    // about to show is the least recently loaded.
+    const oldest = [...aiRoomCache.keys()].find((k) => k !== keep);
+    if (oldest === undefined) return;
+    const pending = aiRoomCache.get(oldest)!;
+    aiRoomCache.delete(oldest);
+    const room = await pending.catch(() => null);
+    // Never free the art the current frame is drawing from.
+    if (room !== null && room !== aiRoom) room.dispose();
+  }
+}
 interface RoomEnhanced {
   art: EnhancedArt | null;
   objects: EnhancedObject[];
@@ -1594,9 +1618,34 @@ async function ensureAiPanel(): Promise<void> {
   if (aiPanel) panelSig = null;   // force a repaint at the new resolution
 }
 
+/**
+ * Load the hi-res world-map art once, on first use in the `ai` tier.
+ *
+ * Deliberately lazy, unlike the eager call this replaced: that one ran at boot in EVERY
+ * tier, so a player on `classic` (the default) still downloaded 2.54 MB of *_ai art and
+ * retained ~43 MB of decoded bitmaps plus two 2560×1920 canvases, concurrently with the
+ * intro's own media. It self-cancels to null on any missing/undecodable asset, so the
+ * `ai` level cleanly falls back to the faithful CPU composite.
+ */
+let aiMapTried = false;
+async function ensureAiWorldMap(): Promise<void> {
+  if (!worldMap) return;
+  aiWorldMap = await loadAiWorldMap('/data/', worldMap);
+  mapSig = null; // force a repaint so the map switches to the AI art once ready
+}
+
 /** Load the hi-res credits art once (see creditsAi.ts). */
 async function ensureAiCredits(): Promise<void> {
   aiCredits = await loadAiCredits('/');
+  // The pointer handlers live on #screen, which this path hides (display:none) while
+  // its own overlay is up — a hidden element gets no pointer events, so "click anywhere
+  // to dismiss" silently stopped working in the ai tier while the keyboard still did.
+  // Bind on the overlay itself; listeners survive detach/re-attach, so bind once here.
+  aiCredits?.el.addEventListener('mousedown', (e) => {
+    if (e.button !== 0 || mapOverlay !== 'credits') return;
+    e.preventDefault();
+    closeMapOverlay();
+  });
 }
 
 /**
@@ -1607,13 +1656,18 @@ async function ensureAiCredits(): Promise<void> {
 async function ensureAiRoom(num: number): Promise<void> {
   const jmeno = ROOMS[num - 1]?.jmeno;
   if (!jmeno) return;
-  if (aiRoomCache.has(jmeno)) {
-    if (curNum === num) { aiRoom = aiRoomCache.get(jmeno)!; aiRoomNum = num; }
-    return;
+  let pending = aiRoomCache.get(jmeno);
+  if (pending === undefined) {
+    pending = loadAiRoom('/', jmeno);
+    // Registered BEFORE the first await so a concurrent caller joins this load rather
+    // than starting its own. Don't cache a rejection — loadAiRoom resolves null on
+    // failure, but a throw would otherwise poison the room for the session.
+    pending.catch(() => aiRoomCache.delete(jmeno));
+    aiRoomCache.set(jmeno, pending);
   }
-  const loaded = await loadAiRoom('/', jmeno);
-  aiRoomCache.set(jmeno, loaded);
+  const loaded = await pending;
   if (curNum === num) { aiRoom = loaded; aiRoomNum = num; }
+  await evictAiRooms(jmeno);
 }
 
 /**
@@ -1629,14 +1683,24 @@ async function ensureAiRoom(num: number): Promise<void> {
  *
  * Still excluded: gspec=42, the ZX-Spectrum band render (its per-scanline bands
  * are an index effect, and the low-fi look is the point), any frame with an active
- * fishing hook, which the faithful path draws on top from the palette, and any frame
- * with a CPU-only frame effect running (frameEffectsActive).
+ * fishing hook, which the faithful path draws on top from the palette, any frame
+ * with a CPU-only frame effect running (frameEffectsActive), the LODE shipwreck
+ * while it is destroying the background, and any frame with a sprite cheat active.
  */
 function aiRoomRenderActive(r: Room): boolean {
   if (graphics !== 'ai' || aiRoom === null || aiRoomNum !== curNum) return false;
   // The rest of the rule lives in roomAi.ts so there is ONE definition tests can import
   // — the hand-copied duplicate in test/roomAi.test.ts had already drifted out of date.
-  return aiRoomGateAllows(r.gspec, hooks.snapshot.map((h) => h.stav), frameEffectsActive());
+  return aiRoomGateAllows({
+    gspec: r.gspec,
+    hookStates: hooks.snapshot.map((h) => h.stav),
+    frameEffects: frameEffectsActive(),
+    wreckActive: r.wreckSwaps.length > 0,
+    spriteCheatsActive: spriteCheats.length > 0,
+    // Mirrors useVecSubs (drawRoom): in this tier enhancedArtActive() is always true, so
+    // the vector overlay is available iff a subtitle font loaded.
+    bakedSubsNeeded: (subs?.active ?? false) && !subFontReady,
+  });
 }
 
 // Enhanced fish sprites are shared across all rooms, so they load once.
@@ -2952,6 +3016,7 @@ function drawMap(): void {
   const cs = contentScaleFor(MAP_W, MAP_H);
   // The `ai` graphics level draws the map from AI-upscaled art re-composited at 4x,
   // so the backing store is 4x larger (still CSS-scaled to the same display box).
+  if (graphics === 'ai' && !aiMapTried) { aiMapTried = true; void ensureAiWorldMap(); }
   const useAi = graphics === 'ai' && aiWorldMap !== null;
   const cw = useAi ? AI_MAP_W : MAP_W;
   const ch = useAi ? AI_MAP_H : MAP_H;
@@ -4155,14 +4220,22 @@ let rafId = 0;
  * so painting above 60 costs GPU/battery for no visible gain. The AI tier makes that
  * worse: it composites 4x-resolution rooms every paint.
  *
- * The threshold is deliberately a bit under 1000/60. rAF timestamps jitter, and at an
- * exact 16.67ms gate a 120Hz display (8.33ms frames) lands at 16.66 — just short —
- * and skips to the NEXT frame, yielding 40fps instead of 60. Allowing a small margin
- * makes it paint on every second frame as intended.
+ * PHASE-LOCKED, not free-running. The obvious form — skip while `now - lastPaint <
+ * PAINT_MIN_MS`, then set `lastPaint = now` — re-phases the gate to each painted frame,
+ * so it only yields 60fps when the refresh rate is an exact multiple of 60. Everything
+ * else aliases badly: 144Hz gave 48fps, 75Hz gave 37.5, 90Hz gave 45, 165Hz gave 55.
+ * (A margin under 1000/60 hides this at 120Hz, which is why it went unnoticed.)
+ *
+ * Instead we keep a `nextPaint` deadline advanced by exactly PAINT_MIN_MS, so the
+ * accumulated remainder carries into the next interval and the long-run average is the
+ * cap regardless of refresh rate. When we fall far behind (a stall, or a backgrounded
+ * tab) the deadline snaps forward to `now` rather than bursting to catch up.
  */
 const MAX_PAINT_FPS = 60;
-const PAINT_MIN_MS = 1000 / MAX_PAINT_FPS - 2;
-let lastPaint = 0;
+const PAINT_MIN_MS = 1000 / MAX_PAINT_FPS;
+/** Rounding/jitter slack: a refresh landing a hair early still counts for this period. */
+const PAINT_EPSILON_MS = 1;
+let nextPaint = 0;
 let idleTimer: ReturnType<typeof setTimeout> | 0 = 0;
 // Perf HUD counters (dev mode): rAF ticks vs actual screen paints, sampled ~2×/sec.
 let perfRaf = 0;
@@ -4282,7 +4355,7 @@ function wake(): void {
     clearTimeout(idleTimer);
     idleTimer = 0;
     lastTime = 0; // avoid a large dt from the idle gap
-    lastPaint = 0; // ...and don't let the cap swallow the first frame after idling
+    nextPaint = 0; // ...and don't let the cap swallow the first frame after idling
     rafId = requestAnimationFrame(loop);
   }
 }
@@ -4293,12 +4366,12 @@ function loop(now: number): void {
   // Skip this refresh entirely when it would exceed the paint cap. lastTime is left
   // alone so the skipped interval still accumulates into `acc` — the simulation sees
   // real elapsed time either way, so capping paint cannot change game speed.
-  if (lastPaint !== 0 && now - lastPaint < PAINT_MIN_MS) {
+  if (shouldSkipPaint(now, nextPaint, PAINT_EPSILON_MS)) {
     perfRaf++;            // still a real refresh — the HUD's rAF number must show it,
     rafId = requestAnimationFrame(loop);   // otherwise it just mirrors the paint rate
     return;
   }
-  lastPaint = now;
+  nextPaint = advancePaintDeadline(now, nextPaint, PAINT_MIN_MS);
   if (lastTime === 0) lastTime = now;
   const dt = now - lastTime;
   acc += dt;
@@ -5039,13 +5112,8 @@ try {
     files.map((f) => fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b)))),
   );
   worldMap = new WorldMap(bmps[0]!, bmps[1]!, bmps[2]!, bmps.slice(3));
-  // Kick off the AI-upscaled map load (Phase B) in the background; it self-cancels
-  // to null on any missing/undecodable asset, so the `ai` level cleanly falls back
-  // to the faithful CPU composite when the *_ai art isn't present.
-  void loadAiWorldMap('/data/', worldMap).then((m) => {
-    aiWorldMap = m;
-    mapSig = null; // force a repaint so the map switches to the AI art once ready
-  });
+  // The AI-upscaled map (Phase B) is NOT loaded here: it is fetched lazily on the first
+  // map draw in the `ai` tier (ensureAiWorldMap), so other tiers pay nothing for it.
 } catch {
   /* map optional */
 }

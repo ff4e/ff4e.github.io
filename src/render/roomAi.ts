@@ -41,18 +41,48 @@ export const AI_ROOM_SCALE = 4;
  * of main.ts's aiRoomRenderActive so it has ONE definition that tests can import. The
  * caller supplies the module state it cannot see (tier, loaded art, current room).
  *
+ * Named fields rather than positional flags on purpose: this gate has grown to six
+ * inputs, five of them boolean, and this codebase has already shipped a bug where an
+ * argument slid into the wrong positional slot and failed silently.
+ *
  * A frame is withheld when:
  *  - gspec 42, the ZX-Spectrum band render — its per-scanline bands are an index effect
  *    and the low-fi look is the point;
  *  - any fishing hook is active — the faithful path draws hooks on top from the palette;
  *  - a CPU-only frame effect is running (megabomb flash / silent film / interlaced /
  *    the Tetris overlay) — those are applied by the faithful compositor as it builds the
- *    frame, so this path would silently render without them.
+ *    frame, so this path would silently render without them;
+ *  - the LODE shipwreck is falling — the faithful and enhanced paths replay destructive
+ *    per-pixel wreck swaps into the background, which this path's static ×4 bitmaps
+ *    cannot represent, so it would show a stale, undamaged room;
+ *  - a sprite cheat (xundead / xmorph) is reshaping the fish — those transform the
+ *    classic sprite sheet that the enhanced tier re-derives from, while this path blits
+ *    pre-baked AI fish frames that no cheat can reach;
+ *  - a subtitle is on screen that has to be BAKED into the frame (the vector overlay is
+ *    unavailable because no subtitle font loaded). The faithful compositor bakes it in
+ *    applyFrameEffects; this path has no equivalent, so it would drop the line entirely.
+ *    Falling back costs resolution for those frames, which is far better than losing
+ *    dialogue — and it only happens when every bundled font failed to load.
  */
-export function aiRoomGateAllows(gspec: number, hookStates: readonly number[], frameEffects: boolean): boolean {
-  if (gspec === 42) return false;
-  if (hookStates.some((s) => s !== 0)) return false;
-  if (frameEffects) return false;
+export interface AiRoomGateInput {
+  gspec: number;
+  hookStates: readonly number[];
+  frameEffects: boolean;
+  /** LODE: room.wreckSwaps is non-empty, i.e. the ship has damaged the background. */
+  wreckActive: boolean;
+  /** xundead / xmorph active — the AI fish cache cannot reflect them. */
+  spriteCheatsActive: boolean;
+  /** A subtitle is showing and must be baked into the frame rather than overlaid. */
+  bakedSubsNeeded: boolean;
+}
+
+export function aiRoomGateAllows(g: AiRoomGateInput): boolean {
+  if (g.gspec === 42) return false;
+  if (g.hookStates.some((s) => s !== 0)) return false;
+  if (g.frameEffects) return false;
+  if (g.wreckActive) return false;
+  if (g.spriteCheatsActive) return false;
+  if (g.bakedSubsNeeded) return false;
   return true;
 }
 
@@ -93,10 +123,15 @@ interface AiManifest {
 
 export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | null> {
   try {
-    const bmp = async (url: string): Promise<ImageBitmap> => {
-      const res = await fetch(url);
-      if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${url}: ${res.status}`);
-      return createImageBitmap(await res.blob());
+    // Decoded bitmaps are memoised BY URL for the duration of this load. Manifests bind
+    // the same sprite file to several item indices (7019 frame references across the
+    // shipped tier resolve to only 2397 distinct files), and without this each reference
+    // produced its own ImageBitmap that the room then retained for the session.
+    const decoded = new Map<string, Promise<ImageBitmap>>();
+    const bmp = (url: string): Promise<ImageBitmap> => {
+      let p = decoded.get(url);
+      if (!p) { p = bmpShared(url); decoded.set(url, p); }
+      return p;
     };
     const dir = `${base}enhanced-ai/${jmeno}/`;
     // ai.json carries the room's scale and the shipped filenames. The shipped tier is
@@ -118,8 +153,11 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
     // The fish set exists per scale, since the fish are drawn into this room's ×S
     // composite — but it is the SAME art for every room at that scale, so it is shared
     // rather than decoded per room (see fishCache).
-    const fish = await sharedAiFish(base, scale, bmp);
-    return new AiRoom(bg, wall, objects, fish, scale);
+    const fish = await sharedAiFish(base, scale, bmpShared);
+    // Only the room's OWN bitmaps are disposable; the shared fish set outlives any one
+    // room and must never be closed from here.
+    const owned = await Promise.all([...decoded.values()]);
+    return new AiRoom(bg, wall, objects, fish, scale, owned);
   } catch (e) {
     // Returning null falls back to the enhanced tier, which is the right behaviour for
     // a user with a partial download — but it also hides a genuinely broken build, so
@@ -127,6 +165,14 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
     console.warn(`AI tier unavailable for ${jmeno}:`, e);
     return null;
   }
+}
+
+/** Fetch + decode one asset. Used directly for assets SHARED between rooms (the fish
+ *  set), which therefore must not be owned — or disposed — by any single AiRoom. */
+async function bmpShared(url: string): Promise<ImageBitmap> {
+  const res = await fetch(url);
+  if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${url}: ${res.status}`);
+  return createImageBitmap(await res.blob());
 }
 
 /**
@@ -198,7 +244,21 @@ export class AiRoom {
     private readonly objects: readonly AiObject[],
     private readonly fish: AiFish,
     scale: number = AI_ROOM_SCALE,
+    /** Bitmaps this room OWNS (bg/wall/objects, deduped by URL) — not the shared fish. */
+    private readonly owned: readonly ImageBitmap[] = [],
   ) { this.scale = scale; }
+
+  /**
+   * Release this room's decoded pixels. At ×4 a single room retains ~50 MB, so keeping
+   * every visited room alive grew without bound (~430 MB after 7 rooms, ~4 GB over a
+   * full playthrough). Closes only `owned`: the fish set is shared by every room at this
+   * scale and is owned by fishCache. Idempotent — safe to call on an already-evicted room.
+   */
+  dispose(): void {
+    for (const b of this.owned) b.close();
+    this.classicCache.clear();
+    this.dissolveCanvas = null;
+  }
 
   /** Native room pixel size the caller must scale the framebuffer from (×scale). */
   get nativeWidth(): number { return Math.round(this.bg[0]!.width / this.scale); }

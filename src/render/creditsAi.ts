@@ -137,8 +137,10 @@ export class AiCredits {
 
   /**
    * Position the roll at scroll offset `posun`, in NATIVE pixels as the faithful
-   * renderer counts it. Fractional values are fine and are what make the scroll smooth
-   * — the compositor interpolates, so this is not tied to the paint rate.
+   * renderer counts it. Fractional values are fine and are what make the scroll smooth:
+   * the transform is written once per painted frame and the compositor rasterises it on
+   * the GPU, so a fractional offset costs nothing extra (unlike the canvas path, which
+   * re-blitted the strip in JS every frame).
    *
    * Clamped to maxScroll exactly like the faithful renderer, so both tiers settle in the
    * same place instead of the AI one sliding on through the hold before auto-close.
@@ -149,7 +151,16 @@ export class AiCredits {
   }
 
   show(): void { this.el.style.display = ''; }
-  hide(): void { this.el.style.display = 'none'; }
+
+  /**
+   * Hide AND detach. The scroll strip decodes to ~135 MB (2560×13140 RGBA) and the
+   * backdrop to ~20 MB; merely setting display:none kept both resident for the rest of
+   * the session after a one-time ~90s roll. main.ts re-appends on the next open.
+   */
+  hide(): void {
+    this.el.style.display = 'none';
+    this.el.remove();
+  }
 }
 
 /** The image's top-left pixel as a CSS colour (one 1×1 draw, once). */

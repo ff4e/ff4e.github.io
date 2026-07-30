@@ -12,7 +12,7 @@ import { readFileSync, writeFileSync, existsSync, statSync, readdirSync, mkdirSy
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, extname, resolve, sep } from 'node:path';
-import { buildAndSave } from './lib/index.mjs';
+import { buildAndSave, writeJsonAtomic } from './lib/index.mjs';
 import { MODELS, requireBins, availableModels, decodePngRgba, encodePngRgba, compositeOver, thinOutline, stretchToBBox, seamFill, smoothEdges, downscaleRgba, FSIZE, SCALE, MAX_SCALE, scaleForRoomSize, variantName } from './lib/upscale.mjs';
 
 const studioDir = dirname(fileURLToPath(import.meta.url));
@@ -73,12 +73,11 @@ if (existsSync(orderFile)) { try { const o = JSON.parse(readFileSync(orderFile, 
  * alone is ~2000 per-picture decisions that cannot be regenerated — and a plain
  * writeFileSync truncates the real file first, so a crash or a full disk mid-write
  * destroys all of it.
+ *
+ * Re-exported from lib/index.mjs so the build tooling and the server share ONE
+ * implementation (index.json used to be written non-atomically by the other path).
  */
-function saveJsonAtomic(file, value) {
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, JSON.stringify(value));
-  renameSync(tmp, file);
-}
+const saveJsonAtomic = writeJsonAtomic;
 
 function saveModelOrder() { saveJsonAtomic(orderFile, { order: modelOrder }); }
 function applyModelOrder() {
@@ -163,6 +162,21 @@ function variantStatus(hash, scale = SCALE) {
 }
 
 // ---- picture / room shaping ---------------------------------------------
+/**
+ * Record an abnormal worker termination in the same `.status.json` the worker itself
+ * writes, so the client poller sees an error and stops. Without this, a killed or
+ * crashed worker just vanished: `running` went false via isPending but no error was
+ * ever published, and the card polled forever.
+ */
+function setWorkerError(hash, scale, message) {
+  const dir = join(cacheDir, hash);
+  if (!existsSync(dir)) return;
+  const sf = join(dir, scale === SCALE ? '.status.json' : `.status@${scale}.json`);
+  let prev = {};
+  if (existsSync(sf)) { try { prev = JSON.parse(readFileSync(sf, 'utf8')); } catch { /* ignore */ } }
+  try { writeJsonAtomic(sf, { ...prev, running: false, error: message }); } catch { /* cache may be gone */ }
+}
+
 /**
  * The scale this room actually ships at. Same rule and same source dimensions as
  * build-ai.mjs (the room background's native size), via the shared helper, so the
@@ -442,9 +456,19 @@ function pumpQueue() {
       [join(studioDir, 'lib', 'gen-worker.mjs'), indexFile, cacheDir, hash, String(scale)],
       { stdio: ['ignore', 'inherit', 'inherit'], env: process.env, detached: true });
     childProcs.set(key, child);
-    const finish = () => { runningJobs.delete(key); queued.delete(key); childProcs.delete(key); pumpQueue(); };
-    child.on('exit', finish);
-    child.on('error', finish);
+    // A worker that is killed or crashes before writing its own error status must still
+    // resolve the job, otherwise the client's poller (public/app.js) waits for a
+    // completion or an error that never arrives and the card spins "generating" forever.
+    const finish = (code, signal) => {
+      if (typeof code === 'number' && code !== 0) {
+        setWorkerError(hash, scale, `worker exited with code ${code}`);
+      } else if (signal) {
+        setWorkerError(hash, scale, `worker killed (${signal})`);
+      }
+      runningJobs.delete(key); queued.delete(key); childProcs.delete(key); pumpQueue();
+    };
+    child.on('exit', (code, signal) => finish(code, signal));
+    child.on('error', (err) => { setWorkerError(hash, scale, String(err?.message || err)); finish(null, null); });
   }
 }
 function cancelQueued() {
@@ -478,15 +502,23 @@ function killWorkerTree(rootPid) {
   for (const pid of victims.reverse()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
   try { process.kill(rootPid, 'SIGKILL'); } catch { /* gone */ }
 }
-/** Kill every running worker together with its ncnn/ffmpeg children. */
+/** Kill every running generation worker together with its ncnn/ffmpeg children. */
 function killAllWorkers() {
   for (const [, child] of childProcs) killWorkerTree(child.pid);
-  // The build writes into public/ — leaving it running after shutdown would let a
-  // second build start on restart and race it.
+}
+
+/**
+ * Shutdown-only: also stop the build. Leaving it running past shutdown would let a
+ * second build start on restart and race it — but this must NOT be reachable from
+ * /api/cancel, which cancels *generation*: doing so killed a build mid-write into
+ * public/ and left a partially-rewritten tier behind.
+ */
+function killAllWorkersAndBuild() {
+  killAllWorkers();
   if (buildChild) { killWorkerTree(buildChild.pid); buildChild = null; }
 }
 let shuttingDown = false;
-function shutdown() { if (shuttingDown) return; shuttingDown = true; killAllWorkers(); setTimeout(() => process.exit(0), 300); }
+function shutdown() { if (shuttingDown) return; shuttingDown = true; killAllWorkersAndBuild(); setTimeout(() => process.exit(0), 300); }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 /** True if the hash is running or waiting in the queue. */

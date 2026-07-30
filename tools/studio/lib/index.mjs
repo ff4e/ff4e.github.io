@@ -11,7 +11,7 @@
  *   IHDR: width@16, height@20, colortype@25 (2=RGB,6=RGBA,4=greyA,3=palette,0=grey);
  *   palette transparency = a tRNS chunk present.
  */
-import { readFileSync, readdirSync, statSync, existsSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync, writeFileSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join, basename } from 'node:path';
 
@@ -170,9 +170,22 @@ export function buildIndex(root) {
   return { builtAt: new Date().toISOString(), enhancedDir, pictures, rooms, sharedObjects, fish, menu, panel, credits };
 }
 
+/**
+ * Write JSON by temp-file + rename, so a crash, a full disk or a kill mid-write can
+ * never leave a truncated file behind. Every persisted Studio state file goes through
+ * this: they hold hours of hand curation, and rename(2) is atomic within a directory.
+ */
+export function writeJsonAtomic(file, value) {
+  const tmp = `${file}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value));
+  renameSync(tmp, file);
+}
+
 /** Build the index and write it to `file` (also returns it). */
 export function buildAndSave(root, file) {
   const idx = buildIndex(root);
-  writeFileSync(file, JSON.stringify(idx));
+  // 1.2 MB and rebuilt from /api/reindex while the Studio is live — truncating it in
+  // place would lose the picture catalogue the whole UI reads.
+  writeJsonAtomic(file, idx);
   return idx;
 }
