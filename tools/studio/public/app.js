@@ -142,7 +142,7 @@ async function selectShared(which) {
     credits: 'Shared — End credits  ·  static frame + the scrolling strip',
     story: 'Shared — Leg story pages  ·  the nine full-screen pages shown after each leg (text-heavy: check the lettering)',
     kufr: 'Shared — Briefcase intro  ·  base = the suitcase/TV canvas, anim = ONE pick for all 285 animation frames',
-    desky: 'Shared — World-map name plaques  ·  72 rooms × cz/en, blitted OPAQUELY (background baked in) — pure lettering, so check legibility',
+    desky: 'Shared — World-map name plaques  ·  72 rooms × cz/en. Blitted OPAQUELY, so each carries a slice of MAP BACKGROUND — keep these on the same model as mapa-0/mapa-1 or the patch will not match the map around it.',
     objects: 'Shared — Objects (used in >1 room, so possibly at several scales)',
   };
   $('#viewtitle').textContent = TITLES[which] || TITLES.objects;

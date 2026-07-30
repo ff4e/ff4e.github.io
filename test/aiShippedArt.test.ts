@@ -150,3 +150,44 @@ describe.skipIf(!existsSync(join(AI, '_credits/ai.json')))('shipped credits art'
     expect(mov.h, `${src} is ${nativeH} rows`).toBe(nativeH * S);
   });
 });
+
+/**
+ * Curation invariants — properties of the Studio's PICKS (tools/studio/selections.json),
+ * not of the shipped bytes.
+ *
+ * These encode design decisions that a later curation pass could silently undo. The
+ * Studio deliberately allows a different model per picture, which is right for
+ * independent art but wrong where two pictures must agree.
+ */
+describe('curation invariants (tools/studio/selections.json)', () => {
+  const idxFile = join(process.cwd(), 'tools/studio/index.json');
+  const selFile = join(process.cwd(), 'tools/studio/selections.json');
+  const have = existsSync(idxFile) && existsSync(selFile);
+  const index = have ? (JSON.parse(readFileSync(idxFile, 'utf8')) as Record<string, never>) : null;
+  const selections = have ? (JSON.parse(readFileSync(selFile, 'utf8')) as Record<string, string>) : {};
+
+  /** The model picked for a picture whose staged path ends with `suffix`. */
+  const modelForSample = (suffix: string): string | undefined => {
+    const pics = (index as unknown as { pictures: Record<string, { sample: string }> } | null)?.pictures ?? {};
+    for (const [hash, p] of Object.entries(pics)) if (p.sample.endsWith(suffix)) return selections[hash];
+    return undefined;
+  };
+
+  it.runIf(have)('name plaques use the SAME model as the world map', () => {
+    // The plaques are blitted OPAQUELY and carry a slice of the map background baked
+    // into the rectangle (see tools/studio/stage-desky.ts). Upscaling them with a
+    // different model than the map itself leaves that patch with different texture and
+    // grain than the map around it — a visible rectangle on the world map, which no
+    // asset check would catch because every file is present and correctly sized.
+    const mapModel = modelForSample('_menu/mapa-0.png');
+    expect(mapModel, 'the world map itself has a pick').toBeTruthy();
+    const desky = (index as unknown as { desky?: string[] } | null)?.desky ?? [];
+    expect(desky.length, 'plaques are staged').toBeGreaterThan(0);
+    const wrong = desky.filter((h) => selections[h] !== mapModel);
+    expect(wrong.length, `every plaque must use ${mapModel} (${wrong.length} of ${desky.length} differ)`).toBe(0);
+  });
+
+  it.runIf(have)('mapa-0 and mapa-1 agree, since the map cross-fades between them', () => {
+    expect(modelForSample('_menu/mapa-1.png')).toBe(modelForSample('_menu/mapa-0.png'));
+  });
+});

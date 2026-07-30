@@ -22,8 +22,11 @@
  *
  * The palette is `mapa-0.BMP`'s, the shared menu palette blitDeska resolves against.
  *
- * NOTE these are TEXT. Upscalers are at their worst on lettering, so compare models on
- * a few plaques before batch-applying one to all 144.
+ * NOTE these are TEXT, and upscalers are at their worst on lettering. But do NOT pick a
+ * model for legibility alone: because the blit is opaque, each rectangle also carries a
+ * slice of the MAP BACKGROUND, so the plaques must use the SAME model as mapa-0/mapa-1
+ * or that patch will differ in texture and grain from the map around it — a visible
+ * rectangle on the world map. test/aiShippedArt.test.ts enforces this.
  *
  * Idempotent: only rewrites a PNG when the bytes differ, so the Studio's content-hash
  * index and its generated variants stay stable across runs.
