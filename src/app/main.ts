@@ -191,6 +191,57 @@ function contentScaleFor(w: number, h: number): number {
   return fitScale(w, h, stage.scale, settings.fitMode, dpr);
 }
 
+/**
+ * Everything about where and how big the current room is drawn — the single source of
+ * truth for the room's geometry.
+ *
+ * It exists because "the room canvas's backing store is the native game resolution" was
+ * true for classic and enhanced, so the two were used interchangeably in half a dozen
+ * independently-derived places. The `ai` tier falsifies it (its backing store is ×scale)
+ * and every one of those places became a chance to conflate them. That produced a real
+ * bug — the subtitle overlay was sized from the backing store and came out up to 2.7×
+ * wider than the room — and would have produced more.
+ *
+ * So the two are named separately here and derived once:
+ *   native   the resolution the SIMULATION uses; all game coordinates are in these px
+ *   css      the on-screen box; every layer stacked over the room must match this
+ *   backing  the room canvas's pixel buffer, which is native×upscale in the ai tier
+ *
+ * `scale` converts native → css, which is what any overlay drawing in game coordinates
+ * needs; it is deliberately NOT derived from the backing store.
+ */
+interface RoomGeometry {
+  nativeW: number;
+  nativeH: number;
+  /** CSS px per NATIVE px (never per backing-store px). */
+  scale: number;
+  cssW: number;
+  cssH: number;
+  backingW: number;
+  backingH: number;
+  /** Backing-store px per native px: 1, or the AI room's upscale factor. */
+  upscale: number;
+}
+
+function roomGeometry(r: Room): RoomGeometry {
+  const { w: nativeW, h: nativeH } = roomScreenSize(r);
+  const scale = contentScaleFor(nativeW, nativeH);
+  // Only the AI compositor renders above native resolution, and only when it is the
+  // path that will actually draw this frame (aiRoomRenderActive covers the gate, the
+  // loaded art and the current room).
+  const upscale = aiRoomRenderActive(r) && aiRoom ? aiRoom.scale : 1;
+  return {
+    nativeW,
+    nativeH,
+    scale,
+    cssW: nativeW * scale,
+    cssH: nativeH * scale,
+    backingW: nativeW * upscale,
+    backingH: nativeH * upscale,
+    upscale,
+  };
+}
+
 // The original advances ALL game logic on a fixed WALL-CLOCK timestep, not the
 // display refresh and not per audio buffer. The shipped game loop is TRoom.Jedeme
 // (URoom.pas:23952, called from UMain.pas:266): a manual busy-wait that spins on
@@ -465,9 +516,8 @@ function syncSubOverlay(): void {
     syncSubOverlaySized(canvas.width * cs, canvas.height * cs);
     return;
   }
-  const { w, h } = roomScreenSize(room);
-  const cs = contentScaleFor(w, h);
-  syncSubOverlaySized(w * cs, h * cs);
+  const g = roomGeometry(room);
+  syncSubOverlaySized(g.cssW, g.cssH);
 }
 
 /**
@@ -3740,8 +3790,7 @@ function enhancedArtFor(r: Room): EnhancedArtSource {
  * the compositor ever flags a frame `unsupported`. Never throws.
  */
 function drawGpu(
-  sw: number,
-  sh: number,
+  geom: RoomGeometry,
   art: ArtSource,
   opts: RenderOptions,
   useVecSubs: boolean,
@@ -3749,14 +3798,14 @@ function drawGpu(
   const gl = glCompositor();
   if (!gl || !room) return false;
   try {
-    gl.begin(sw, sh, room.palette);
+    gl.begin(geom.nativeW, geom.nativeH, room.palette);
     renderRoomInto(gl, room, art, opts);
     if (gl.unsupported) return false; // defensive: an un-ported primitive → CPU this frame
     if (!useVecSubs) subs?.draw(gl, opts.count ?? 0); // baked subtitles via GPU setIndex
     const dpr = window.devicePixelRatio || 1;
-    const cs = contentScaleFor(sw, sh);
-    const cssW = sw * cs;
-    const cssH = sh * cs;
+    // The room's CSS box comes from roomGeometry — the GL canvas is an overlay stacked
+    // on #screen, so it must match that box exactly rather than recompute it.
+    const { cssW, cssH } = geom;
     const bw = Math.round(cssW * dpr);
     const bh = Math.round(cssH * dpr);
     if (glCanvas.width !== bw || glCanvas.height !== bh) {
@@ -3892,10 +3941,8 @@ function draw(): void {
   // (darkness/ZX/bonus, the mirror glass, skeletons, un-mapped frames).
   const art = enhancedArtActive() ? enhancedArtFor(room) : classicArtFor(room);
   const opts = { count, slide, fishAnim, hooks: hooks.snapshot };
-  const { w: sw, h: sh } = roomScreenSize(room);
-  const cs = contentScaleFor(sw, sh);
-  const cssW = sw * cs;
-  const cssH = sh * cs;
+  const geom = roomGeometry(room);
+  const { nativeW: sw, nativeH: sh, scale: cs, cssW, cssH } = geom;
   // TrepatRoom (URoom.pas:24955): a chatter line can shake the room — jitter the
   // active canvas left/right by 10px on alternating multiples of 3 ticks.
   const trepat = activeScript?.s.trepat ?? 0;
@@ -3913,9 +3960,10 @@ function draw(): void {
   // error falls back to the CPU path for that frame (and disables WebGL for the session).
   const aiActive = aiRoomRenderActive(room);
   if (aiActive) {
-    const S = aiRoom!.scale;
-    const aw = sw * S;
-    const ah = sh * S;
+    // roomGeometry already resolved the backing store for this frame, including the
+    // AI upscale — deriving it a second time here is how the two drifted apart before.
+    const aw = geom.backingW;
+    const ah = geom.backingH;
     glCanvas.style.display = 'none';
     if (canvas.width !== aw || canvas.height !== ah) { canvas.width = aw; canvas.height = ah; }
     if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
@@ -3938,16 +3986,17 @@ function draw(): void {
   // are applied by the CPU compositor only, so they force that path — same reason
   // aiRoomRenderActive() bails on them.
   const wantGpu = renderer === 'webgl' && !glFailed && !frameEffectsActive();
-  const gpuOk = wantGpu && drawGpu(sw, sh, art, opts, useVecSubs);
+  const gpuOk = wantGpu && drawGpu(geom, art, opts, useVecSubs);
   lastRoomBackend = gpuOk ? 'webgl' : 'cpu'; // the backend that ACTUALLY painted this frame (for the HUD)
   // #screen (the 2D canvas) is the flow anchor for the wrap that also holds the
   // absolutely-positioned #screen-gl + #subs overlays and sits left of #panel, so
   // it must ALWAYS carry the room's CSS box — even in WebGL mode where we don't
   // draw into it. Otherwise it stays at the default 300×150, the wrap collapses,
   // the GL canvas overflows over the panel and #info crosses the frame.
-  if (canvas.width !== sw || canvas.height !== sh) {
-    canvas.width = sw;
-    canvas.height = sh;
+  // (backingW/H is the native size here: only the AI branch above upscales.)
+  if (canvas.width !== geom.backingW || canvas.height !== geom.backingH) {
+    canvas.width = geom.backingW;
+    canvas.height = geom.backingH;
   }
   // Keep the CSS box in sync every frame so it also tracks resize / fit-mode change
   // (the display scale can change while the room — and thus sw/sh — stays the same).
@@ -4511,8 +4560,7 @@ function loop(now: number): void {
       // Checking `graphics === 'enhanced'` excluded the `ai` tier, whose subtitles
       // then only advanced when the room itself repainted — measured at 22 overlay
       // repaints/sec against enhanced's 40.7, which reads as juddering text.
-      const { w: sw2, h: sh2 } = roomScreenSize(room!);
-      updateRoomSubOverlay(true, contentScaleFor(sw2, sh2));
+      updateRoomSubOverlay(true, roomGeometry(room!).scale);
     }
   }
   drawPanel();
@@ -5460,8 +5508,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
    */
   subsPaintAt: (at: number, frac = 0) => {
     if (!subs?.active || !room) return null;
-    const { w: sw, h: sh } = roomScreenSize(room);
-    const cs = contentScaleFor(sw, sh);
+    const { scale: cs } = roomGeometry(room);
     const dpr = window.devicePixelRatio || 1;
     syncSubOverlay();
     subCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -5766,7 +5813,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   benchRender: (mode: 'cpu' | 'webgl', frames = 120, warmup = 20) => {
     if (!room) return null;
     const art = enhancedArtActive() ? enhancedArtFor(room) : classicArtFor(room);
-    const { w: sw, h: sh } = roomScreenSize(room);
+    const { nativeW: sw, nativeH: sh, scale: benchCs } = roomGeometry(room);
     const opts = { count };
     const samples: number[] = [];
     // The ZX room's blitZX advances room.zx every render; snapshot it so the
@@ -5776,9 +5823,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
       const comp = glCompositor();
       if (!comp) return { mode, webgl: false };
       const dpr = window.devicePixelRatio || 1;
-      const cs = contentScaleFor(sw, sh);
-      const bw = Math.round(sw * cs * dpr);
-      const bh = Math.round(sh * cs * dpr);
+      const bw = Math.round(sw * benchCs * dpr);
+      const bh = Math.round(sh * benchCs * dpr);
       const one = (): void => {
         comp.begin(sw, sh, room!.palette);
         renderRoomInto(comp, room!, art, opts);
@@ -5833,8 +5879,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
    */
   benchSubs: (frames = 120, warmup = 20, at = count, advance = false) => {
     if (!subs?.active || !room) return null;
-    const { w: sw, h: sh } = roomScreenSize(room);
-    const cs = contentScaleFor(sw, sh);
+    const { scale: cs } = roomGeometry(room);
     syncSubOverlay();
     const dpr = window.devicePixelRatio || 1;
     let tick = at;
