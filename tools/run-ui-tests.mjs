@@ -216,7 +216,16 @@ async function cleanup() {
   await plainServer?.close().catch(() => {});
   await angleServer?.close().catch(() => {});
   plainServer = angleServer = null;
-  if (server && server.exitCode === null) server.kill();
+  if (server && server.exitCode === null) {
+    // Kill the whole process GROUP: `npx` is only a wrapper and the real vite runs as
+    // its child, so server.kill() left that child holding the port. Fall back to a
+    // plain kill if the group is already gone.
+    try {
+      process.kill(-server.pid, 'SIGTERM');
+    } catch {
+      try { server.kill(); } catch { /* already gone */ }
+    }
+  }
   server = null;
 }
 
@@ -266,9 +275,15 @@ for (const entry of readdirSync(join(root, 'public'))) {
 }
 
 console.log('[test:ui] starting fresh vite preview server…');
+// `detached` puts vite in its own PROCESS GROUP so cleanup can kill the whole group.
+// `npx` spawns the real vite as a CHILD, so killing only the npx wrapper orphaned it —
+// the orphan kept holding port 5273 and, with --strictPort, the next run's own vite
+// then failed to bind while waitUp happily connected to the ORPHAN (serving a stale
+// build). When that orphan later died, probes mid-run saw ERR_CONNECTION_REFUSED.
 server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', HOST], {
   cwd: root,
   stdio: 'ignore',
+  detached: true,
 });
 if (!(await waitUp(30000))) await die('preview server did not come up');
 
