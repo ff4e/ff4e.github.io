@@ -40,6 +40,11 @@ namespace Ff4eXbox
         Gamepad _pad;
         string _lastPadJson;
         CoreWebView2 _core;
+        int _posts;                       // web messages actually sent
+        string _lastReading = "(none)";   // last raw Windows.Gaming.Input reading
+        readonly System.Collections.Generic.HashSet<string> _keysSeen =
+            new System.Collections.Generic.HashSet<string>();
+        DispatcherTimer _diagTimer;
 
         public MainPage()
         {
@@ -261,10 +266,60 @@ namespace Ff4eXbox
                 Gamepad.GamepadRemoved += (s, g) => { if (ReferenceEquals(_pad, g)) _pad = Gamepad.Gamepads.FirstOrDefault(); };
                 Windows.UI.Xaml.Media.CompositionTarget.Rendering += OnFrame;
                 App.Log("gamepad bridge started (pads: " + Gamepad.Gamepads.Count + ")");
+
+                // Second, independent input path. On Xbox the pad also arrives as
+                // VirtualKey.Gamepad* key events; logging them tells us whether the shell
+                // sees the controller at all when Windows.Gaming.Input enumerates nothing.
+                try
+                {
+                    var cw = Windows.UI.Core.CoreWindow.GetForCurrentThread();
+                    cw.KeyDown += (s2, a2) => { lock (_keysSeen) _keysSeen.Add("down:" + a2.VirtualKey); };
+                    cw.KeyUp += (s2, a2) => { lock (_keysSeen) _keysSeen.Add("up:" + a2.VirtualKey); };
+                    App.Log("CoreWindow key hooks installed");
+                }
+                catch (Exception kex)
+                {
+                    App.Log("CoreWindow key hooks failed: " + kex.Message);
+                }
+
+                // Rolling diagnostics file, pulled over Device Portal while testing.
+                _diagTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+                _diagTimer.Tick += (s3, e3) => WritePadDiag();
+                _diagTimer.Start();
             }
             catch (Exception ex)
             {
                 App.Log("gamepad bridge FAILED: " + ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// Write a snapshot of what the native shell can see of the controller, so the
+        /// input path can be diagnosed remotely (Device Portal file explorer -> pad.log).
+        /// </summary>
+        async void WritePadDiag()
+        {
+            try
+            {
+                int count;
+                try { count = Gamepad.Gamepads.Count; } catch { count = -1; }
+                string keys;
+                lock (_keysSeen) keys = _keysSeen.Count == 0 ? "(none)" : string.Join(", ", _keysSeen);
+
+                var sb = new StringBuilder();
+                sb.AppendLine("Gamepad.Gamepads.Count = " + count);
+                sb.AppendLine("_pad set             = " + (_pad != null));
+                sb.AppendLine("web messages posted  = " + _posts);
+                sb.AppendLine("last reading         = " + _lastReading);
+                sb.AppendLine("CoreWindow keys seen = " + keys);
+
+                var file = await Windows.Storage.ApplicationData.Current.LocalFolder.CreateFileAsync(
+                    "pad.log", Windows.Storage.CreationCollisionOption.ReplaceExisting);
+                await Windows.Storage.FileIO.WriteTextAsync(file, sb.ToString());
+            }
+            catch
+            {
+                /* diagnostics must never break the game */
             }
         }
 
@@ -294,6 +349,8 @@ namespace Ff4eXbox
                 try { r = pad.GetCurrentReading(); }
                 catch { return; }
                 var b = r.Buttons;
+                _lastReading = b + " LX=" + N(r.LeftThumbstickX) + " LY=" + N(r.LeftThumbstickY) +
+                               " RX=" + N(r.RightThumbstickX) + " RY=" + N(r.RightThumbstickY);
 
                 // W3C Standard Gamepad order. Thumbstick Y is inverted: Windows reports up
                 // as positive, the Gamepad API reports down as positive.
@@ -323,7 +380,7 @@ namespace Ff4eXbox
 
             if (json == _lastPadJson) return; // nothing changed — don't spam the page
             _lastPadJson = json;
-            try { _core.PostWebMessageAsJson(json); }
+            try { _core.PostWebMessageAsJson(json); _posts++; }
             catch { /* page not ready yet */ }
         }
 
