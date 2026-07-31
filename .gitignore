@@ -8,6 +8,17 @@ public/data/256col/
 .idea/
 .DS_Store
 
+# Xbox (UWP) package build artifacts. wwwroot is the staged copy of dist/ (~386 MB,
+# produced by tools/stage-xbox-wwwroot.mjs); the rest is MSBuild/NuGet output.
+xbox/Ff4eXbox/wwwroot/
+xbox/**/bin/
+xbox/**/obj/
+xbox/**/BundleArtifacts/
+xbox/**/AppPackages/
+xbox/packages/
+*.pfx
+*.cer
+
 # Private / session artifacts — must never be committed to this public repo
 .copilot/
 .claude/

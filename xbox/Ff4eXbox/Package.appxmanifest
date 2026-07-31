@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fish Fillets 4ever — Xbox (UWP + WebView2) host package manifest.
+
+  Runs the *packaged* web build: every asset ships inside the MSIX under wwwroot and is
+  served to WebView2 from a local virtual host, so the app never touches the network.
+
+  Notes:
+   - Publisher must match the signing certificate subject exactly. CI generates a
+     self-signed cert with subject CN=FF4E for Dev Mode sideloading; a Store submission
+     would replace both with the identity assigned by Partner Center.
+   - TargetDeviceFamily is Windows.Universal so the same package installs on Xbox and
+     on a Windows PC (handy for debugging the host without a console).
+   - MinVersion 10.0.17763.0 (1809) is the floor for WebView2 in a UWP app; Xbox needs
+     OS 2310 (Oct 2023) or newer for the WebView2 runtime to be present.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:mp="http://schemas.microsoft.com/appx/2014/phone/manifest"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  IgnorableNamespaces="uap mp">
+
+  <Identity
+    Name="FF4E.FishFillets4ever"
+    Publisher="CN=FF4E"
+    Version="1.0.12.0" />
+
+  <mp:PhoneIdentity PhoneProductId="7d1b9f6c-6a1e-4d5f-9c2e-0a3b5d8e1f42" PhonePublisherId="00000000-0000-0000-0000-000000000000" />
+
+  <Properties>
+    <DisplayName>Fish Fillets 4ever</DisplayName>
+    <PublisherDisplayName>FF4E</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Universal" MinVersion="10.0.17763.0" MaxVersionTested="10.0.22621.0" />
+  </Dependencies>
+
+  <Resources>
+    <Resource Language="x-generate" />
+  </Resources>
+
+  <Applications>
+    <Application Id="App"
+      Executable="$targetnametoken$.exe"
+      EntryPoint="Ff4eXbox.App">
+      <uap:VisualElements
+        DisplayName="Fish Fillets 4ever"
+        Description="A fan port of ALTAR's 1998 puzzle game Fish Fillets."
+        BackgroundColor="#101018"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png">
+        <uap:DefaultTile Wide310x150Logo="Assets\Wide310x150Logo.png" Square310x310Logo="Assets\Square310x310Logo.png" />
+        <uap:SplashScreen Image="Assets\SplashScreen.png" BackgroundColor="#101018" />
+        <uap:InitialRotationPreference>
+          <uap:Rotation Preference="landscape" />
+        </uap:InitialRotationPreference>
+      </uap:VisualElements>
+    </Application>
+  </Applications>
+
+  <Capabilities>
+    <Capability Name="internetClient" />
+  </Capabilities>
+</Package>
