@@ -55,8 +55,20 @@ await withApp(async ({ p, expect }) => {
   expect(coverSize.w > 0 && coverSize.w <= 1101, `cover width is a capped pixel size, not \`contain\` (got ${coverSize.w}px)`);
   expect(coverSize.w <= coverSize.cap + 1, `cover width respects the min(88vw, 1100px) cap (got ${coverSize.w}px, cap ${coverSize.cap}px)`);
 
-  // Skip while the splash is up abandons the whole intro → the map, and flips the flag.
+  // The gated splash is sticky (v1.0.13): a stray skip off the button — a click
+  // elsewhere on the overlay or a keypress — must NOT abandon the intro to the map.
+  // Only "Click to start" proceeds.
   await p.evaluate(() => window.__ff.skipIntro());
+  await p.waitForTimeout(150);
+  expect(await p.evaluate(() => window.__ff.screen()) === 'intro', 'a stray skip on the gated splash does not jump to the map');
+  expect(await p.evaluate(() => window.__ff.introPlaying()), 'the intro is still active after a stray skip on the splash');
+
+  // Click "Click to start" to begin, then skip through the movies (logo → intro) to
+  // the map — now that playback has begun, skipping advances as usual.
+  await p.click('#intro-start');
+  await p.waitForFunction(() => !window.__ff.introSeen() && window.__ff.screen() === 'intro', { timeout: 5000 });
+  await p.evaluate(() => window.__ff.skipIntro()); // skip the logo → intro
+  await p.evaluate(() => window.__ff.skipIntro()); // skip the intro → map
   await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
   expect(await p.evaluate(() => window.__ff.introSeen()) === true, 'introSeen persists after the intro finishes');
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'intro is no longer active on the map');

@@ -76,6 +76,11 @@ export class WorldMap {
     return this.mapa0.palette;
   }
 
+  /** The raw mask indices (per-pixel branch/corner selector), for the AI compositor. */
+  get maskPixels(): Uint8Array {
+    return this.maska.pixels;
+  }
+
   /**
    * Compose the map + nodes to an RGBA buffer for the given solved rooms.
    * `pulse` advances the reachable-node pulse (kPul); `depth` is the reveal
@@ -97,19 +102,7 @@ export class WorldMap {
     drawNodes = true,
     litRegions = true,
   ): Uint8ClampedArray {
-    const resena = computeResena(solved, cheated);
-    // RTable[maskValue] = 1 where that branch's region is enabled AND revealed.
-    const rtable = new Uint8Array(16);
-    // While the record panel is open Delphi zeroes RTable entirely (InfoMode>0,
-    // UMain.pas:1446), so the base map draws fully unlit — no lit branches, no
-    // corner highlight, no painted node artwork.
-    if (litRegions) {
-      for (let b = 0; b < N_BRANCHES; b++) {
-        if (branchEnabled(resena, b) && depth + 1 >= this.hloubka[b]![0]!) rtable[BRANCH_MASK[b]!] = 1;
-      }
-      // Light the hovered corner button (the same lit-layer mechanism as branches).
-      if (hoverCorner) rtable[ACTION_MASK[hoverCorner]] = 1;
-    }
+    const rtable = this.computeRtable(solved, depth, cheated, hoverCorner, litRegions);
     // Per-pixel layer select, then palette to RGBA (both maps share the menu palette).
     const n = MAP_W * MAP_H;
     const rgba = new Uint8ClampedArray(n * 4);
@@ -125,27 +118,72 @@ export class WorldMap {
     // Room nodes: solved (n0) or the reachable "next" room pulsing (n1..n4),
     // revealed from the start outward as `depth` rises (Hloubka gate). Skipped while
     // the info panel is open (InfoMode>0, UMain.pas:1494 draws only the panel).
-    const pulseSprite = PULSE_FRAMES[pulse % PULSE_FRAMES.length]!;
     if (drawNodes)
+      for (const nd of this.nodeDrawList(solved, pulse, depth, cheated)) {
+        this.blitNode(rgba, this.nodes[nd.sprite]!, nd.x0, nd.y0);
+      }
+    return rgba;
+  }
+
+  /**
+   * The 16-entry RTable: `rtable[maskIndex] = 1` where that branch's region is
+   * enabled AND revealed (plus the hovered corner button). Shared verbatim by the
+   * faithful CPU composite and the hi-res AI compositor so both light identically.
+   * While the record panel is open Delphi zeroes RTable entirely (litRegions=false,
+   * InfoMode>0, UMain.pas:1446), so the base map draws fully unlit.
+   */
+  computeRtable(
+    solved: ReadonlySet<number>,
+    depth = Number.MAX_SAFE_INTEGER,
+    cheated: ReadonlySet<number> = new Set(),
+    hoverCorner: MapAction | null = null,
+    litRegions = true,
+  ): Uint8Array {
+    const resena = computeResena(solved, cheated);
+    const rtable = new Uint8Array(16);
+    if (litRegions) {
       for (let b = 0; b < N_BRANCHES; b++) {
+        if (branchEnabled(resena, b) && depth + 1 >= this.hloubka[b]![0]!) rtable[BRANCH_MASK[b]!] = 1;
+      }
+      if (hoverCorner) rtable[ACTION_MASK[hoverCorner]] = 1;
+    }
+    return rtable;
+  }
+
+  /**
+   * The list of room-node sprites to draw for the given state: the sprite index
+   * (into nodes[] = n0..n4) and its top-left map position. Shared by the CPU
+   * composite and the AI compositor so nodes appear identically (same reveal gate,
+   * same pulse frame, hidden rooms omitted).
+   */
+  nodeDrawList(
+    solved: ReadonlySet<number>,
+    pulse = 0,
+    depth = Number.MAX_SAFE_INTEGER,
+    cheated: ReadonlySet<number> = new Set(),
+  ): { sprite: number; x0: number; y0: number }[] {
+    const resena = computeResena(solved, cheated);
+    const pulseSprite = PULSE_FRAMES[pulse % PULSE_FRAMES.length]!;
+    const out: { sprite: number; x0: number; y0: number }[] = [];
+    for (let b = 0; b < N_BRANCHES; b++) {
       if (!branchEnabled(resena, b)) continue;
       const br = BRANCHES[b]!;
       for (let j = 0; j < br.length; j++) {
         if (this.hloubka[b]![j]! > depth) continue; // not yet revealed
         const state = resena[b]![j]!;
-        if (state === RES_SOLVED) this.blitNode(rgba, this.nodes[NODE_SOLVED]!, b, j);
-        else if (state === RES_CHEAT) this.blitNode(rgba, this.nodes[NODE_CHEAT]!, b, j);
-        else if (state === RES_REACHABLE) this.blitNode(rgba, this.nodes[pulseSprite]!, b, j);
-        // hidden rooms (RES_HIDDEN) are not drawn (soutez mode).
+        let sprite = -1;
+        if (state === RES_SOLVED) sprite = NODE_SOLVED;
+        else if (state === RES_CHEAT) sprite = NODE_CHEAT;
+        else if (state === RES_REACHABLE) sprite = pulseSprite;
+        else continue; // hidden rooms (RES_HIDDEN) are not drawn (soutez mode)
+        const room = br.start + j;
+        out.push({ sprite, x0: KULXY[(room - 1) * 2]! - 9, y0: KULXY[(room - 1) * 2 + 1]! - 9 });
       }
     }
-    return rgba;
+    return out;
   }
 
-  private blitNode(rgba: Uint8ClampedArray, sprite: Bmp, branch: number, j: number): void {
-    const room = BRANCHES[branch]!.start + j;
-    const x0 = KULXY[(room - 1) * 2]! - 9;
-    const y0 = KULXY[(room - 1) * 2 + 1]! - 9;
+  private blitNode(rgba: Uint8ClampedArray, sprite: Bmp, x0: number, y0: number): void {
     const transparent = sprite.pixels[0]!; // Vykul: top-left pixel is the transparent colour
     for (let sy = 0; sy < sprite.h; sy++) {
       const dy = y0 + sy;

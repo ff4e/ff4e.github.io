@@ -53,6 +53,17 @@
       #info { display: none; opacity: 0.8; padding: 4px 8px; text-align: center; }
       body.dev .controls { display: flex; }
       body.dev #info { display: block; }
+      /* While the intro overlay is up (z-index:100), lift the dev chrome above it so
+         the tuning controls stay usable during the movies — e.g. arm dev mode and
+         pick the graphics level on the very first intro page. Keyed off the overlay's
+         own visibility, so it needs no JS. (The Room picker is meaningless during the
+         intro but harmless.) */
+      body.dev:has(#intro-layer:not([hidden])) #devbar,
+      body.dev:has(#intro-layer:not([hidden])) #info {
+        position: relative;
+        z-index: 101;
+        background: #101018;
+      }
       .hint { opacity: 0.6; }
       /* Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen video over
          the stage, matching the original's full-screen MCI playback. */
@@ -207,6 +218,11 @@
       <label>Renderer <select id="renderer">
         <option value="webgl">WebGL (GPU)</option>
         <option value="cpu">CPU</option>
+      </select></label>
+      <label title="Graphics-quality level (also cycled with the E hotkey). classic = faithful Delphi; enhanced = FFNG truecolor; AI-upscaled = additive AI tier, falls back to enhanced where no AI asset exists.">Graphics <select id="graphics">
+        <option value="classic">Classic (Delphi)</option>
+        <option value="enhanced">Enhanced (FFNG)</option>
+        <option value="ai">AI-upscaled</option>
       </select></label>
       <label title="Repaint an idle room only when it changes (~12.5fps) instead of 60fps"><input type="checkbox" id="idledirty" checked> Idle-FPS saver</label>
       <button id="winroom" type="button" title="Genuinely win the current room (also: Shift+W). End-of-leg rooms then show their story page, unlike the solve cheat.">Win room</button>

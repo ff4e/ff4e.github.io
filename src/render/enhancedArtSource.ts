@@ -73,7 +73,7 @@ export interface FishSprites {
  * NAHORU/DOLU/MLUVI_NA). The skeleton (19) and darkness silhouette (23) are
  * intentionally absent - those fall back to the classic pixels.
  */
-const FISH_BODY_FILE: Record<number, string> = {
+export const FISH_BODY_FILE: Record<number, string> = {
   1: 'body_rest_00.png', 2: 'body_rest_01.png', 3: 'body_rest_02.png',
   4: 'body_swam_00.png', 5: 'body_swam_01.png', 6: 'body_swam_02.png',
   7: 'body_swam_03.png', 8: 'body_swam_04.png', 9: 'body_swam_05.png',
@@ -84,7 +84,7 @@ const FISH_BODY_FILE: Record<number, string> = {
 };
 
 /** Port Hlavy head-frame index -> FFNG head overlay file (HL_TLACI/MRK/MLUVI). */
-const FISH_HEAD_FILE: Record<number, string> = {
+export const FISH_HEAD_FILE: Record<number, string> = {
   1: 'head_pushing.png',
   2: 'head_blink.png',
   5: 'head_talking_01.png',
@@ -92,7 +92,7 @@ const FISH_HEAD_FILE: Record<number, string> = {
 };
 
 /** Clamp an animation-frame index into a frame array's bounds. */
-function frameIndex(afaze: number, len: number): number {
+export function frameIndex(afaze: number, len: number): number {
   if (afaze < 0) return 0;
   if (afaze >= len) return len - 1;
   return afaze;

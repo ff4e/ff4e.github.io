@@ -15,3 +15,31 @@ public/data/256col/
 .copilot-session-*
 BRIEFING.md
 PROGRESS.md
+
+# Upscaler Studio working cache: every picture × every model at ×4 (~9 GB).
+# Purely derived — regenerate with tools/studio/batch-generate.mjs. The curation
+# that MUST be kept (selections/contours/modelorder/roomskip .json) lives beside
+# it and is intentionally not ignored.
+tools/studio/cache/
+
+# Upscaler experiment galleries: side-by-side comparison sheets used to CHOOSE the
+# models (room-matrix, map-contest, …). ~430 MB of derived PNGs — the generators
+# (tools/build-room-matrix.mjs and friends) are committed, so these are reproducible
+# and only the resulting picks in tools/studio/selections.json matter.
+tools/room-matrix/
+tools/room-gallery/
+tools/room-detex/
+tools/room-algo/
+tools/room-refine/
+tools/room-contest/
+tools/room-compare/
+tools/map-matrix/
+tools/map-contest/
+tools/fish-outline/
+.DS_Store
+
+# The briefcase cutscene's materialised animation frames (285 PNGs, ~19 MB).
+# Purely derived from public/data/Intro/demo.pck, which IS committed — regenerate with
+# `npx tsx tools/studio/stage-kufr.ts`. The two curated cards beside them
+# (base.png, anim.png) and the playback order (frames.json) are NOT ignored.
+public/enhanced/_kufr/frames/

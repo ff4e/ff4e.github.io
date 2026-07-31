@@ -23,7 +23,7 @@ export interface IntroElements {
 }
 
 export class IntroPlayer {
-  private queue: string[] = [];
+  private queue: Array<() => string> = [];
   private onDone: (() => void) | null = null;
   private active = false;
 
@@ -49,13 +49,16 @@ export class IntroPlayer {
   }
 
   /**
-   * Play a list of movie URLs in order, then call `onDone`. When `gated`, show
-   * the "click to start" splash before the first movie (first-run auto-play,
-   * no prior user gesture); otherwise start immediately (a replay from the map,
-   * where the click itself is the gesture).
+   * Play a list of movies in order, then call `onDone`. Each entry is a URL
+   * *resolver* called at the moment its movie starts — so the source reflects the
+   * graphics level selected right then (e.g. switching to the AI upscale on the
+   * gated splash before clicking "Click to start"), not the level at queue time.
+   * When `gated`, show the "click to start" splash before the first movie (first-
+   * run auto-play, no prior user gesture); otherwise start immediately (a replay
+   * from the map, where the click itself is the gesture).
    */
-  start(urls: string[], onDone: () => void, gated: boolean): void {
-    this.queue = urls.slice();
+  start(resolvers: Array<() => string>, onDone: () => void, gated: boolean): void {
+    this.queue = resolvers.slice();
     this.onDone = onDone;
     this.active = true;
     this.els.layer.hidden = false;
@@ -81,12 +84,12 @@ export class IntroPlayer {
   }
 
   private playCurrent(): void {
-    const url = this.queue[0];
-    if (url === undefined) {
+    const resolve = this.queue[0];
+    if (resolve === undefined) {
       this.finish();
       return;
     }
-    this.els.video.src = url;
+    this.els.video.src = resolve(); // resolve the URL now, at play time
     this.els.video.currentTime = 0;
     void this.els.video.play().catch(() => this.next());
   }
@@ -99,15 +102,13 @@ export class IntroPlayer {
   }
 
   /**
-   * Skip: at the splash, Esc/click abandons the whole intro (straight to the
-   * caller); during playback, it stops the current movie and advances.
+   * Skip: during playback it stops the current movie and advances (logo→intro→
+   * caller). On the gated "click to start" splash it does NOTHING — the splash is a
+   * deliberate first-run gate, so a stray click/keypress off the button must not
+   * abandon the intro to the map. Only the start button proceeds from the splash.
    */
   skip(): void {
-    if (!this.active) return;
-    if (this.gated) {
-      this.finish();
-      return;
-    }
+    if (!this.active || this.gated) return;
     this.next();
   }
 
