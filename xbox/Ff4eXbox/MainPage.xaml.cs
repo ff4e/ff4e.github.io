@@ -1,4 +1,5 @@
 using System;
+using System.Threading.Tasks;
 using Microsoft.Web.WebView2.Core;
 using Windows.ApplicationModel;
 using Windows.System.Display;
@@ -30,6 +31,7 @@ namespace Ff4eXbox
         readonly DisplayRequest _displayRequest = new DisplayRequest();
         bool _displayRequested;
         Microsoft.UI.Xaml.Controls.WebView2 _web;
+        TaskCompletionSource<bool> _webLoaded;
 
         public MainPage()
         {
@@ -83,6 +85,9 @@ namespace Ff4eXbox
             try
             {
                 _web = new Microsoft.UI.Xaml.Controls.WebView2();
+                _webLoaded = new TaskCompletionSource<bool>();
+                _web.Loaded += (s2, e2) => _webLoaded.TrySetResult(true);
+                _web.CoreWebView2Initialized += (s2, e2) => App.Log("CoreWebView2Initialized fired");
                 RootGrid.Children.Insert(0, _web);
                 Step("WebView2 control created");
             }
@@ -93,10 +98,26 @@ namespace Ff4eXbox
                 return;
             }
 
+            // The control has to be in the visual tree AND loaded before its browser
+            // process can be attached. Calling EnsureCoreWebView2Async() straight after
+            // adding it completes happily but leaves CoreWebView2 null, which then NREs on
+            // the very next line — measured on an Xbox Series X.
+            var loadedInTime = await Task.WhenAny(_webLoaded.Task, Task.Delay(10000)) == _webLoaded.Task;
+            Step("WebView2 Loaded event: " + (loadedInTime ? "yes" : "TIMED OUT"));
+
+            CoreWebView2 core = null;
             try
             {
                 await _web.EnsureCoreWebView2Async();
-                Step("CoreWebView2 ready");
+                core = _web.CoreWebView2;
+                // Belt and braces: if the core is still not published, give it a few UI
+                // ticks rather than dying on a null reference.
+                for (var i = 0; i < 20 && core == null; i++)
+                {
+                    await Task.Delay(100);
+                    core = _web.CoreWebView2;
+                }
+                Step("CoreWebView2 ready: " + (core != null));
             }
             catch (Exception ex)
             {
@@ -109,7 +130,12 @@ namespace Ff4eXbox
                 return;
             }
 
-            var core = _web.CoreWebView2;
+            if (core == null)
+            {
+                Step("CoreWebView2 is still NULL after EnsureCoreWebView2Async — cannot continue.");
+                App.SaveLog();
+                return;
+            }
 
             try
             {
