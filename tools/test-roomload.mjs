@@ -6,9 +6,10 @@
  * hold the PREVIOUS room. Two regressions this pins:
  *
  *  1) Stale-room flash (v1.0.4): while the new room's assets are in flight the stage
- *     must be cleared to black, NOT show the previous room's frame (the reported bug
- *     was the boot room UTES flashing for 1-2s on a slow first click).
- *  2) Wedged-black hardening (v1.0.5): if the load THROWS after boot, the guard must
+ *     must be cleared to black, NOT show the previous room's frame.
+ *  2) Explained wait: once the short no-flash threshold passes, the existing loading
+ *     overlay must cover that black stage and name the room.
+ *  3) Wedged-black hardening (v1.0.5): if the load THROWS after boot, the guard must
  *     still clear (loadRoom's finally), so the stage recovers to the previous room
  *     rather than staying black forever (the global unhandledrejection recovery only
  *     runs during boot).
@@ -72,21 +73,63 @@ await withApp(
     await p.waitForFunction(() => window.__ff.roomLoading(), { timeout: 10000 }).catch(() => {});
     await waitFrames(p, 3);
     expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'screen switches to room synchronously on enter');
+    await p.waitForFunction(() => window.__ff.loadingVisible(), null, { timeout: 1500 });
+    expect(await p.evaluate(() => window.__ff.loadingVisible()), 'a delayed room load shows the loading overlay');
+    expect(
+      (await p.locator('#loading-msg').textContent())?.includes('First Bizarre Things'),
+      'the loading overlay names the requested room',
+    );
     const loadingFill = await stageFill(p);
     expect(
       loadingFill < 0.02,
-      `stage is cleared black while the new room loads — no stale-room flash (fill ${loadingFill.toFixed(3)})`,
+      `the covered stage is black while the new room loads — no stale-room flash (fill ${loadingFill.toFixed(3)})`,
     );
 
     // Let the throttled load finish: the freshly-built room now paints.
     expect((await p.evaluate(() => window.__rp)) === 'ok', 'the throttled room load resolves');
     await waitRoom(p, 0);
     await tickSleep(p, 4);
+    expect(!(await p.evaluate(() => window.__ff.loadingVisible())), 'the overlay hides once the room is presented');
     const loadedFill = await stageFill(p);
     expect(loadedFill > 0.1, `the newly-loaded room paints once its assets arrive (fill ${loadedFill.toFixed(3)})`);
     await p.unroute(ffrGlob(30));
 
-    // === 2) Hardening: a FAILED load must clear the guard (finally), not wedge black. ===
+    // === Fast path: a cached room entry must not flash the delayed overlay. ===
+    await p.evaluate(() => {
+      window.__loadingShown = false;
+      const el = document.getElementById('loading');
+      window.__loadingObserver = new MutationObserver(() => {
+        if (el?.hidden === false) window.__loadingShown = true;
+      });
+      window.__loadingObserver.observe(el, { attributes: true, attributeFilter: ['hidden'] });
+    });
+    await p.evaluate(() => window.__ff.enterRoomAwait(30));
+    await waitRoom(p, 0);
+    await p.waitForTimeout(300);
+    expect(!(await p.evaluate(() => window.__loadingShown)), 'a cached room entry does not flash the loading overlay');
+    await p.evaluate(() => window.__loadingObserver.disconnect());
+
+    // === Overlap: an older slow entry must not replace or unblock a newer room. ===
+    let releaseOldRoom;
+    const oldRoomGate = new Promise((resolve) => {
+      releaseOldRoom = resolve;
+    });
+    await p.route(ffrGlob(31), async (route) => {
+      await oldRoomGate;
+      await route.continue();
+    });
+    await p.evaluate(() => {
+      window.__oldRoomEntry = window.__ff.enterRoomAwait(31);
+    });
+    await p.waitForFunction(() => window.__ff.roomLoading(), null, { timeout: 5000 });
+    await p.evaluate(() => window.__ff.enterRoomAwait(32));
+    releaseOldRoom();
+    await p.evaluate(() => window.__oldRoomEntry);
+    expect((await p.evaluate(() => window.__ff.roomNum())) === 32, 'a stale room load cannot replace the newer room');
+    expect(!(await p.evaluate(() => window.__ff.loadingVisible())), 'the newer room owns and dismisses the overlay');
+    await p.unroute(ffrGlob(31));
+
+    // === 3) Hardening: a FAILED load must clear the guard (finally), not wedge black. ===
     // Serve room 40's FFR as a 200 with a garbage body so parseFfr() throws inside
     // loadRoom's try (a realistic corrupt/truncated-asset path). A 200 avoids the
     // browser console error a failed resource load would otherwise emit.
@@ -106,7 +149,8 @@ await withApp(
       recoveredFill > 0.1,
       `after a failed load the stage recovers to the previous room, not wedged black (fill ${recoveredFill.toFixed(3)})`,
     );
+    expect(!(await p.evaluate(() => window.__ff.loadingVisible())), 'a failed room load dismisses the overlay');
     await p.unroute(ffrGlob(40));
   },
-  { cpu: true },
+  { cpu: true, graphics: 'classic' },
 );
