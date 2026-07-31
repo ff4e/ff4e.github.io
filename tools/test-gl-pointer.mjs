@@ -18,6 +18,11 @@ const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
+// Pin the art tier: this probe asserts the WebGL pointer LAYERING, which is orthogonal
+// to which art is drawn. Under the default `ai` tier the GL compositor only reports
+// glActive() once the room's AI art has loaded, which can exceed the 10s wait below and
+// make the probe skip itself with a misleading "WebGL2 not available".
+await p.addInitScript(() => { try { localStorage.setItem('ff.graphics', 'enhanced'); } catch {} });
 await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate((n) => window.__ff.enterRoomAwait(n), ROOM);

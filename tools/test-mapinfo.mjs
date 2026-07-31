@@ -157,4 +157,4 @@ await withApp(async ({ p, expect }) => {
   const nodeDiff =
     Math.abs(nodeClosed[0] - nodeOpen[0]) + Math.abs(nodeClosed[1] - nodeOpen[1]) + Math.abs(nodeClosed[2] - nodeOpen[2]);
   expect(nodeDiff > 30, `opening the record panel hides the lit map/node (closed ${nodeClosed} vs open ${nodeOpen}, diff ${nodeDiff})`);
-});
+}, { graphics: 'enhanced' });

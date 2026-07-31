@@ -1431,7 +1431,9 @@ type GraphicsLevel = 'classic' | 'enhanced' | 'ai';
 let graphics: GraphicsLevel =
   ((): GraphicsLevel => {
     const v = localStorage.getItem('ff.graphics');
-    return v === 'classic' || v === 'enhanced' || v === 'ai' ? v : 'enhanced';
+    // Default: the AI-upscaled tier. Each element falls back to enhanced (and thence
+    // to classic) when it has no AI asset, so this is safe even for anything unbuilt.
+    return v === 'classic' || v === 'enhanced' || v === 'ai' ? v : 'ai';
   })();
 
 /**

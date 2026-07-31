@@ -21,21 +21,21 @@ await withApp(async ({ p, expect }) => {
   expect((await rendVal()) === 'webgl', `Renderer picker defaults to WebGL (got "${await rendVal()}")`);
   expect((await p.evaluate(() => window.__ff.renderer())) === 'webgl', 'renderer backend is webgl by default');
 
-  // Graphics picker defaults to enhanced and matches the live level.
-  expect((await gfxVal()) === 'enhanced', `Graphics picker defaults to enhanced (got "${await gfxVal()}")`);
-  expect((await p.evaluate(() => window.__ff.graphics())) === 'enhanced', 'graphics level is enhanced by default');
+  // Graphics picker defaults to the AI tier and matches the live level.
+  expect((await gfxVal()) === 'ai', `Graphics picker defaults to ai (got "${await gfxVal()}")`);
+  expect((await p.evaluate(() => window.__ff.graphics())) === 'ai', 'graphics level is ai by default');
 
   // The E hotkey cycles classic → enhanced → ai → classic, and the picker mirrors it.
-  await p.keyboard.press('e'); // enhanced -> ai
-  await p.waitForTimeout(50);
-  expect((await p.evaluate(() => window.__ff.graphics())) === 'ai', 'E cycles enhanced -> ai');
-  expect((await gfxVal()) === 'ai', `Graphics picker mirrors the E hotkey (got "${await gfxVal()}")`);
   await p.keyboard.press('e'); // ai -> classic
   await p.waitForTimeout(50);
   expect((await p.evaluate(() => window.__ff.graphics())) === 'classic', 'E cycles ai -> classic');
-  await p.keyboard.press('e'); // classic -> enhanced (back to default)
+  expect((await gfxVal()) === 'classic', `Graphics picker mirrors the E hotkey (got "${await gfxVal()}")`);
+  await p.keyboard.press('e'); // classic -> enhanced
   await p.waitForTimeout(50);
   expect((await p.evaluate(() => window.__ff.graphics())) === 'enhanced', 'E cycles classic -> enhanced');
+  await p.keyboard.press('e'); // enhanced -> ai (back to default)
+  await p.waitForTimeout(50);
+  expect((await p.evaluate(() => window.__ff.graphics())) === 'ai', 'E cycles enhanced -> ai');
 
   // Changing the picker drives the graphics level.
   await p.evaluate(() => {

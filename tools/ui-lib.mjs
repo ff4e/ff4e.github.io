@@ -119,6 +119,20 @@ export async function withApp(fn, opts = {}) {
       }
     });
   }
+  // Probes that assert on a SPECIFIC art tier must pin it rather than inherit the
+  // default (which is `ai`). Anything comparing pixels against the enhanced/classic
+  // art, or measuring a redraw region, needs the tier it was written for — the AI
+  // tier substitutes different (upscaled) art for the same elements.
+  if (opts.graphics) {
+    const g = opts.graphics;
+    await p.addInitScript((lvl) => {
+      try {
+        localStorage.setItem('ff.graphics', lvl);
+      } catch {
+        /* storage unavailable */
+      }
+    }, g);
+  }
   // The tuning chrome (room dropdown + fit/renderer/saver controls) and the one-key
   // dev toggles (E/R/P/F/G) are gated behind the developer pane, which is off for
   // players and enabled with Ctrl+Alt+D (persisted as ff.devEnabled). Enable it for

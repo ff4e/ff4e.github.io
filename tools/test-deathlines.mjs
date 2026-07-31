@@ -84,4 +84,4 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff.count() < 5, null, { timeout: 6000 }).catch(() => {});
   const restarted = await p.evaluate(() => window.__ff.count() < 20 && window.__ff.screen() === 'room');
   expect(restarted, 'both fish dead auto-restarts the room');
-}, { cpu: true });
+}, { cpu: true, graphics: 'enhanced' });
