@@ -391,6 +391,12 @@ function buildUi(which, report) {
   if (!DRY) {
     mkdirSync(dstDir, { recursive: true });
     writeFileSync(join(dstDir, 'ai.json'), JSON.stringify({ scale: SCALE, files: written.sort() }));
+    // Carry the group's geometry sidecar (e.g. _desky/plaques.json: where each plaque
+    // sits on the map) into the tier, so the runtime does not have to parse the
+    // original .dat files a second time to place upscaled art.
+    for (const f of readdirSync(srcDir)) {
+      if (f.endsWith('.json')) copyFileSync(join(srcDir, f), join(dstDir, f));
+    }
     writeFileSync(stampFile, JSON.stringify(next));
     // Drop art from an earlier staging that no longer exists upstream.
     for (const f of readdirSync(dstDir)) {
@@ -399,6 +405,83 @@ function buildUi(which, report) {
   }
   console.log(`  _${which}: ${wrote} written, ${skipped} unchanged (${written.length} files, x${SCALE})`);
   return true;
+}
+
+/**
+ * The briefcase cutscene: the static canvas plus every materialised animation frame.
+ *
+ * Separate from buildUi because the frames live in a subdirectory and are deliberately
+ * NOT indexed — an animation must use ONE model for all of them or it flickers between
+ * styles, so the Studio curates it through the single representative `anim.png` and
+ * every frame inherits that pick.
+ */
+function buildKufr(report) {
+  const srcDir = join(srcRoot, '_kufr');
+  const dstDir = join(outRoot, '_kufr');
+  const framesSrc = join(srcDir, 'frames');
+  if (!existsSync(framesSrc)) {
+    console.warn('  ! no staged briefcase frames (run: npx tsx tools/studio/stage-kufr.ts)');
+    return false;
+  }
+  // Resolve the two curated cards to their picks.
+  const cardModel = (file) => {
+    for (const h of index.kufr || []) {
+      for (const u of index.pictures[h]?.uses || []) {
+        if (u.room === '_kufr' && u.file === file) return { hash: h, model: selections[h] || defaultModelId };
+      }
+    }
+    return null;
+  };
+  const base = cardModel('base.png');
+  const anim = cardModel('anim.png');
+  if (!base || !anim) { console.warn('  ! _kufr: base.png/anim.png are not indexed'); return false; }
+
+  const stampFile = join(dstDir, '.build-stamp.json');
+  const prev = existsSync(stampFile) ? JSON.parse(readFileSync(stampFile, 'utf8')) : {};
+  const next = {};
+  let wrote = 0, skipped = 0, failed = 0;
+
+  const one = (srcAbs, outAbs, key, hash, model) => {
+    const want = stampFor(hash, false, model, SCALE);
+    if (!FORCE && existsSync(outAbs) && prev[key] === want) { next[key] = prev[key]; skipped++; return; }
+    // The frames are not in selections (they are not indexed), and emit() resolves the
+    // model through it — so pin this frame's model in memory for the call. NEVER saved:
+    // selections.json is hand-curated state and the build only reads it.
+    const had = Object.prototype.hasOwnProperty.call(selections, hash);
+    const before = selections[hash];
+    selections[hash] = model;
+    try {
+      next[key] = emit(srcAbs, outAbs, hash, false, report, SCALE);
+      wrote++;
+    } catch (e) {
+      console.error(`  ! ${key}: ${e.message}`);
+      failed++;
+    } finally {
+      if (had) selections[hash] = before; else delete selections[hash];
+    }
+  };
+
+  if (!DRY) mkdirSync(join(dstDir, 'frames'), { recursive: true });
+  one(join(srcDir, 'base.png'), join(dstDir, 'base.webp'), 'base.webp', base.hash, base.model);
+  const frames = listPngs(framesSrc).sort();
+  for (const f of frames) {
+    const srcAbs = join(framesSrc, f);
+    one(srcAbs, join(dstDir, 'frames', webpName(f)), `frames/${webpName(f)}`, hashFile(srcAbs), anim.model);
+  }
+  if (!DRY) {
+    // The playback order + region geometry the runtime replays.
+    const meta = JSON.parse(readFileSync(join(srcDir, 'frames.json'), 'utf8'));
+    writeFileSync(join(dstDir, 'ai.json'), JSON.stringify({
+      scale: SCALE,
+      region: meta.region,
+      base: meta.base,
+      order: meta.order.map(webpName),
+      frames: frames.map(webpName),
+    }));
+    writeFileSync(stampFile, JSON.stringify(next));
+  }
+  console.log(`  _kufr: ${wrote} written, ${skipped} unchanged${failed ? `, ${failed} FAILED` : ''} (base=${base.model}, frames=${anim.model}, x${SCALE})`);
+  return failed === 0;
 }
 
 const MENU_ASSETS = [
@@ -561,11 +644,11 @@ function main() {
 
   let list;
   if (menuOnly) list = ['_menu'];
-  else if (uiOnly) list = ['_panel', '_credits'];
+  else if (uiOnly) list = ['_panel', '_credits', '_story', '_desky', '_kufr'];
   else if (fishOnly) list = ['_fish'];
-  else if (all) list = [...Object.keys(index.rooms), '_fish', '_menu', '_panel', '_credits'];
+  else if (all) list = [...Object.keys(index.rooms), '_fish', '_menu', '_panel', '_credits', '_story', '_desky', '_kufr'];
   else if (rooms.length) list = rooms;
-  else { console.error('Usage: node tools/studio/build-ai.mjs <ROOM…> | --all | --fish | --menu | --ui  [--force] [--dry-run]'); process.exit(1); }
+  else { console.error('Usage: node tools/studio/build-ai.mjs <ROOM…> | --all | --fish | --menu | --ui  [--force] [--dry-run]\n  --ui builds _panel, _credits, _story, _desky and _kufr'); process.exit(1); }
 
   const report = { substituted: 0, generated: 0, thinned: 0, unindexed: 0, skipped: 0 };
   const t0 = Date.now();
@@ -573,9 +656,10 @@ function main() {
   let okCount = 0;
   for (const r of list) {
     const ok = r === '_menu' ? buildMenu(byRoom, report)
-      : r === '_panel' || r === '_credits' ? buildUi(r.slice(1), report)
-        : r === '_fish' ? buildFish(byRoom, report)
-          : buildRoom(r, byRoom, report);
+      : r === '_kufr' ? buildKufr(report)
+        : r === '_panel' || r === '_credits' || r === '_story' || r === '_desky' ? buildUi(r.slice(1), report)
+          : r === '_fish' ? buildFish(byRoom, report)
+            : buildRoom(r, byRoom, report);
     if (ok) okCount++;
   }
   const secs = ((Date.now() - t0) / 1000).toFixed(1);

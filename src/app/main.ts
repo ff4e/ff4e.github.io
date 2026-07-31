@@ -84,7 +84,7 @@ import {
 import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
 import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
 import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
-import { loadAiRoom, aiRoomGateAllows, AiRoom } from '../render/roomAi.js';
+import { loadAiRoom, aiRoomGateAllows, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
 import {
   hitInfoButton,
   drawInfoPanel,
@@ -95,7 +95,7 @@ import {
   type InfoButton,
   type InfoPanelAssets,
 } from '../render/mapInfo.js';
-import { parseDesky, blitDeska, type DeskyData } from '../data/desky.js';
+import { parseDesky, blitDeska, DESKA_X_OFFSET, DESKA_Y_OFFSET, type DeskyData } from '../data/desky.js';
 import { IntroPlayer } from './intro.js';
 import { advancePaintDeadline, shouldSkipPaint } from './paintClock.js';
 import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
@@ -617,6 +617,12 @@ let screen: 'map' | 'room' | 'intro' | 'legimage' = 'room'; // which screen is s
 let legImage: { w: number; h: number; rgba: Uint8ClampedArray } | null = null;
 let legImageNum = -1;
 let legImageDrawn = false;
+/**
+ * The AI-upscaled page for the story image currently on screen, when the `ai` tier is
+ * selected and its art loaded. null ⇒ draw the original 640×480 page (every other tier,
+ * and any tier if the upscaled file is missing).
+ */
+let legImageAi: ImageBitmap | null = null;
 // When the page is shown on re-entry (Run/Replay of an already-solved depth-15 room,
 // UMain.pas:958/1030 daClickAndRun), dismissing it must continue into that room rather
 // than return to the map. `legImagePending` holds the deferred launch (null = after-win
@@ -2409,6 +2415,7 @@ function skipCutscene(): void {
   if (!cutscene) return;
   cutscene = null;
   cutsceneSubs = null;
+  disposeAiKufr(); // release the upscaled frames (~37 MB at x4) on an early skip
   audio.killVoices(); // KSnd(-1): drop the narration; music (playMusic) is untouched
 }
 
@@ -2425,6 +2432,105 @@ function cutsceneCaption(name: string): number {
   return dur > 0 ? Math.max(1, Math.round(dur / LOGIC_SEC)) : DEFAULT_LINE_TICKS;
 }
 
+/**
+ * Paint the cutscene's KD-* captions on the vector overlay.
+ *
+ * Shared by the faithful and the AI cutscene paths: the captions are their own DOM
+ * layer, so they are identical in both and must not be duplicated per path.
+ */
+function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number, dpr: number): void {
+  if (!cutsceneSubs?.active) return;
+  syncSubOverlaySized(cssW, cssH);
+  // The cutscene paints on every rAF (it has no dirty check), so without this
+  // gate the captions were re-shaped ~60x a second to produce the same image.
+  const sig = subOverlaySignature('cut', cutsceneSubs, cs * dpr);
+  if (!subOverlayGate || sig !== subOverlaySig) {
+    subCtx.setTransform(1, 0, 0, 1, 0, 0);
+    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
+    subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+    cutsceneSubs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
+    subOverlayPaints++;
+    subOverlayPainted = true;
+    subOverlaySig = sig;
+  }
+  subCanvas.style.transform = '';
+}
+
+/**
+ * The AI-upscaled briefcase cutscene: the static suitcase/TV canvas plus one upscaled
+ * image per DECODED animation frame (see tools/studio/stage-kufr.ts).
+ *
+ * The deltas in demo.pck cannot be upscaled — they are per-pixel palette writes — so the
+ * frames are materialised offline. The script still drives playback: this only swaps the
+ * PIXEL SOURCE, so the audio-dependent timeline, the KD-* narration, the captions and
+ * the Escape skip are all untouched.
+ */
+interface AiKufr {
+  base: ImageBitmap;
+  scale: number;
+  region: { x: number; y: number; w: number; h: number };
+  order: string[];
+}
+let aiKufr: AiKufr | null = null;
+let aiKufrTried = false;
+/** Decoded frames, bounded — all 284 at ×4 would be ~37 MB resident. */
+const aiKufrFrames = new Map<string, ImageBitmap>();
+const AI_KUFR_CACHE_MAX = 24;
+const aiKufrLoading = new Set<string>();
+
+async function ensureAiKufr(): Promise<void> {
+  if (aiKufrTried) return;
+  aiKufrTried = true;
+  try {
+    const res = await fetch('/enhanced-ai/_kufr/ai.json');
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
+    const man = (await res.json()) as { scale: number; region: AiKufr['region']; order: string[] };
+    const bres = await fetch('/enhanced-ai/_kufr/base.webp');
+    if (!bres.ok || !(bres.headers.get('content-type') ?? '').startsWith('image/')) return;
+    aiKufr = {
+      base: await createImageBitmap(await bres.blob()),
+      scale: Number(man.scale) || AI_ROOM_SCALE,
+      region: man.region,
+      order: man.order ?? [],
+    };
+  } catch (e) {
+    console.warn('AI briefcase cutscene unavailable:', e);
+  }
+}
+
+/** Fetch a cutscene frame (and prefetch the next few, since playback is linear). */
+function loadAiKufrFrame(name: string): void {
+  if (!name || aiKufrFrames.has(name) || aiKufrLoading.has(name)) return;
+  aiKufrLoading.add(name);
+  void (async () => {
+    try {
+      const res = await fetch(`/enhanced-ai/_kufr/frames/${name}`);
+      if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
+      const bmp = await createImageBitmap(await res.blob());
+      aiKufrFrames.set(name, bmp);
+      while (aiKufrFrames.size > AI_KUFR_CACHE_MAX) {
+        const oldest = aiKufrFrames.keys().next().value as string | undefined;
+        if (oldest === undefined || oldest === name) break;
+        aiKufrFrames.get(oldest)?.close();
+        aiKufrFrames.delete(oldest);
+      }
+    } catch {
+      /* this frame stays on the faithful path */
+    } finally {
+      aiKufrLoading.delete(name);
+    }
+  })();
+}
+
+/** Release the cutscene's decoded art (~37 MB of frames at ×4). */
+function disposeAiKufr(): void {
+  for (const b of aiKufrFrames.values()) b.close();
+  aiKufrFrames.clear();
+  aiKufr?.base.close();
+  aiKufr = null;
+  aiKufrTried = false;
+}
+
 function drawCutscene(): void {
   if (!cutscene) return;
   mapSig = null; // cutscene paints #screen — invalidate the map cache
@@ -2438,6 +2544,33 @@ function drawCutscene(): void {
   // overlay (like room subtitles). Classic: keep the faithful baked bitmap font
   // composited into the 256-colour frame.
   const useVec = enhancedArtActive() && cutsceneSubs !== null && subFontReady;
+  // The hi-res path draws bitmaps, so it cannot composite BAKED captions into the
+  // indexed frame. When the vector overlay is unavailable (no subtitle font) it stands
+  // down entirely rather than drop the narration text — same rule as the room gate.
+  if (graphics === 'ai' && !aiKufrTried) void ensureAiKufr();
+  const aiFrameName = aiKufr ? aiKufr.order[Math.max(0, cutscene.framesDrawn - 1)] ?? '' : '';
+  if (aiKufr && aiFrameName) {
+    loadAiKufrFrame(aiFrameName);
+    for (let i = 1; i <= 4; i++) loadAiKufrFrame(aiKufr.order[cutscene.framesDrawn - 1 + i] ?? '');
+  }
+  const aiBmp = graphics === 'ai' && useVec && aiKufr ? aiKufrFrames.get(aiFrameName) ?? null : null;
+  if (aiBmp && aiKufr) {
+    const S = aiKufr.scale;
+    glCanvas.style.display = 'none';
+    if (canvas.width !== w * S || canvas.height !== h * S) { canvas.width = w * S; canvas.height = h * S; }
+    canvas.style.width = `${cssW}px`;
+    canvas.style.height = `${cssH}px`;
+    canvas.style.transform = '';
+    const wantSmooth = scalingFilterFor(w * S, cssW);
+    if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(aiKufr.base, 0, 0);
+    ctx.drawImage(aiBmp, aiKufr.region.x * S, aiKufr.region.y * S);
+    updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
+    perfPaint++;
+    return;
+  }
+  if (canvas.style.imageRendering) canvas.style.imageRendering = '';
   const frame = new IndexedScreen(w, h);
   frame.px.set(cutscene.pixels);
   if (!useVec) cutsceneSubs?.draw(frame, count); // baked bitmap captions
@@ -2489,20 +2622,7 @@ function drawCutscene(): void {
   // as room subtitles: the overlay spans the on-screen box and its context is
   // scaled by SCALE*dpr so drawVector positions in native (720×555) game pixels.
   if (useVec && cutsceneSubs!.active) {
-    syncSubOverlaySized(cssW, cssH);
-    // The cutscene paints on every rAF (it has no dirty check), so without this
-    // gate the captions were re-shaped ~60x a second to produce the same image.
-    const sig = subOverlaySignature('cut', cutsceneSubs!, cs * dpr);
-    if (!subOverlayGate || sig !== subOverlaySig) {
-      subCtx.setTransform(1, 0, 0, 1, 0, 0);
-      subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-      cutsceneSubs!.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
-      subOverlayPaints++;
-      subOverlayPainted = true;
-      subOverlaySig = sig;
-    }
-    subCanvas.style.transform = '';
+    updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
   } else if (subOverlayPainted) {
     clearSubOverlay();
   }
@@ -3145,8 +3265,16 @@ function drawMap(): void {
       const replayEnabled = bestRecord(mapInfoRoom) !== undefined;
       drawInfoPanelArtAi(ctx, AI_MAP_SCALE, aiWorldMap!.krokomer, aiWorldMap!.ikonky, mapInfoHover, replayEnabled);
     }
+    // Name plaque from the upscaled art, drawn straight on the hi-res ctx. Falls back
+    // to the native overlay below whenever its art is missing or still loading.
+    const plaqueRoom = mapInfoRoom ?? mapHoverRoom;
+    const plaque = plaqueRoom !== null ? aiPlaqueFor(plaqueRoom) : null;
+    if (plaque) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(plaque.bmp, plaque.x * AI_MAP_SCALE, plaque.y * AI_MAP_SCALE);
+    }
     const overlay = new Uint8ClampedArray(MAP_W * MAP_H * 4); // transparent; only drawn cells become opaque
-    if (drawMapOverlays(overlay, true)) {
+    if (drawMapOverlays(overlay, true, plaque !== null)) {
       if (!mapOverlayCanvas) {
         mapOverlayCanvas = document.createElement('canvas');
         mapOverlayCanvas.width = MAP_W;
@@ -3173,11 +3301,75 @@ function drawMap(): void {
  * artwork — that is drawn straight on the hi-res ctx from the AI bitmaps instead.
  * Returns whether anything was drawn.
  */
-function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false): boolean {
+/**
+ * AI-upscaled world-map name plaques (_desky).
+ *
+ * KresliDesku blits the plaque OPAQUELY, and the rectangle carries a slice of the map
+ * background baked in with the lettering. Drawn at native resolution over the ×4 AI map
+ * that pastes a 640×480-resolution patch into an upscaled picture — a visibly pixelated
+ * band around the name. So the plaque gets upscaled like everything else, with the SAME
+ * model as the map (enforced by test/aiShippedArt.test.ts) so the patch matches.
+ */
+let aiDeskyGeom: Record<string, { room: number; x: number; y: number; w: number; h: number }> | null = null;
+let aiDeskyTried = false;
+/** Decoded plaques, bounded: 140 of them at ×4 would be ~30 MB held for hovering. */
+const aiDeskyCache = new Map<string, ImageBitmap>();
+const AI_DESKY_CACHE_MAX = 12;
+
+async function ensureAiDeskyGeom(): Promise<void> {
+  if (aiDeskyTried) return;
+  aiDeskyTried = true;
+  try {
+    const res = await fetch('/enhanced-ai/_desky/plaques.json');
+    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
+    aiDeskyGeom = ((await res.json()) as { plaques: typeof aiDeskyGeom }).plaques ?? null;
+    mapSig = null; // repaint now that plaques can be drawn hi-res
+  } catch (e) {
+    console.warn('AI name plaques unavailable:', e);
+  }
+}
+
+/** The upscaled plaque for `room` in the current subtitle language, if decoded. */
+function aiPlaqueFor(room: number): { bmp: ImageBitmap; x: number; y: number } | null {
+  if (graphics !== 'ai') return null;
+  if (!aiDeskyGeom) { void ensureAiDeskyGeom(); return null; }
+  const key = `${deskyLang ?? subLang()}${String(room).padStart(2, '0')}.png`;
+  const g = aiDeskyGeom[key];
+  if (!g) return null;
+  const bmp = aiDeskyCache.get(key);
+  if (!bmp) { void loadAiPlaque(key); return null; }
+  return { bmp, x: g.x + DESKA_X_OFFSET, y: g.y + DESKA_Y_OFFSET };
+}
+
+const aiPlaqueLoading = new Set<string>();
+async function loadAiPlaque(key: string): Promise<void> {
+  if (aiPlaqueLoading.has(key)) return;
+  aiPlaqueLoading.add(key);
+  try {
+    const res = await fetch(`/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`);
+    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
+    const bmp = await createImageBitmap(await res.blob());
+    aiDeskyCache.set(key, bmp);
+    while (aiDeskyCache.size > AI_DESKY_CACHE_MAX) {
+      const oldest = aiDeskyCache.keys().next().value as string | undefined;
+      if (oldest === undefined || oldest === key) break;
+      aiDeskyCache.get(oldest)?.close();
+      aiDeskyCache.delete(oldest);
+    }
+    mapSig = null; // the plaque can now be drawn hi-res
+    wake();
+  } catch {
+    /* leave the native plaque in place */
+  } finally {
+    aiPlaqueLoading.delete(key);
+  }
+}
+
+function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, skipPlaque = false): boolean {
   if (!worldMap) return false;
   let drew = false;
   const plaqueRoom = mapInfoRoom ?? mapHoverRoom;
-  if (plaqueRoom !== null && deskyData) {
+  if (plaqueRoom !== null && deskyData && !skipPlaque) {
     const deska = deskyData.byRoom.get(plaqueRoom);
     if (deska) {
       blitDeska(rgba, MAP_W, MAP_H, deska, deskyData.atlas, worldMap.palette);
@@ -3307,6 +3499,10 @@ async function showLegImage(leg: number, pending?: { room: number; replay?: stri
   legImageNum = leg;
   legImageDrawn = false;
   screen = 'legimage';
+  // Swap in the upscaled page when it is available; the native one shows meanwhile.
+  legImageAi?.close();
+  legImageAi = null;
+  void ensureLegImageAi(leg);
   clearHeldKey();
   endShowmode();
   if (engine) {
@@ -3328,6 +3524,8 @@ async function showLegImage(leg: number, pending?: { room: number; replay?: stri
 function dismissLegImage(): void {
   legImage = null;
   legImageNum = -1;
+  legImageAi?.close();   // a 2560x1920 page is ~20MB decoded; don't hold it after dismissal
+  legImageAi = null;
   const pending = legImagePending;
   legImagePending = null;
   if (pending) void enterRoom(pending.room, pending.replay);
@@ -3339,19 +3537,57 @@ function drawLegImage(): void {
   if (!legImage) return;
   const { w, h, rgba } = legImage;
   const cs = contentScaleFor(w, h);
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
+  // The CSS box always follows the NATIVE page size; only the BACKING STORE grows when
+  // the upscaled page is in use. Deriving the box from the backing store instead is the
+  // mistake that mis-sized the subtitle overlay (see roomGeometry).
+  const backW = legImageAi ? legImageAi.width : w;
+  const backH = legImageAi ? legImageAi.height : h;
+  if (canvas.width !== backW || canvas.height !== backH) {
+    canvas.width = backW;
+    canvas.height = backH;
     legImageDrawn = false; // the resize cleared the backing store
   }
   const cssW = `${w * cs}px`;
   const cssH = `${h * cs}px`;
   if (canvas.style.width !== cssW) canvas.style.width = cssW;
   if (canvas.style.height !== cssH) canvas.style.height = cssH;
+  // The ×4 page is displayed smaller than it is, where the stylesheet's global
+  // pixelated rule would point-sample the detail away (same rule as the AI room).
+  const wantSmooth = legImageAi ? scalingFilterFor(backW, w * cs) : '';
+  if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
   if (legImageDrawn) return; // static page — blit once, then let the loop idle
   legImageDrawn = true;
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
+  if (legImageAi) {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, backW, backH);
+    ctx.drawImage(legImageAi, 0, 0);
+  } else {
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
+  }
   perfPaint++;
+}
+
+/**
+ * Load the AI-upscaled story page for `leg`, when the `ai` tier is selected.
+ *
+ * Resolves to nothing on any failure, leaving the original page in place — the same
+ * fallback contract as the rest of the tier. `legImageNum` is re-checked after the
+ * await so a page dismissed (or replaced) mid-load cannot install itself late.
+ */
+async function ensureLegImageAi(leg: number): Promise<void> {
+  if (graphics !== 'ai') return;
+  try {
+    const res = await fetch(`/enhanced-ai/_story/leg${leg}.webp`);
+    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
+    const bmp = await createImageBitmap(await res.blob());
+    if (legImageNum !== leg || screen !== 'legimage') { bmp.close(); return; }
+    legImageAi?.close();
+    legImageAi = bmp;
+    legImageDrawn = false; // repaint at the new resolution
+    wake();
+  } catch (e) {
+    console.warn(`AI story page unavailable for leg ${leg}:`, e);
+  }
 }
 
 /**
@@ -4089,6 +4325,7 @@ function step(): boolean {
     if (cutscene.done) {
       cutscene = null;
       cutsceneSubs = null;
+      disposeAiKufr(); // the cutscene plays once; don't hold its frames afterwards
     }
     return false;
   }
@@ -5444,6 +5681,12 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   zaverMode: () => activeScript?.s.zavermode ?? false,
   // Leg-completion story page (obrazek): the shown leg number (1..8), or null when none.
   legImage: () => (legImage ? legImageNum : null),
+  /** Debug: show a leg story page directly (probes cannot easily win a leg-final room). */
+  showLegImage: (leg: number) => { void showLegImage(leg); },
+  /** Debug: is the upscaled story page in use for the page on screen? */
+  legImageAiActive: () => legImageAi !== null,
+  /** Debug: how many cutscene frames are being served from the upscaled set. */
+  kufrAi: () => (aiKufr ? { frames: aiKufrFrames.size, order: aiKufr.order.length, scale: aiKufr.scale } : null),
   showMap: () => showMap(),
   enterRoom: (n: number) => enterRoom(n),
   enterRoomAwait: (n: number) => enterRoom(n),

@@ -53,6 +53,10 @@ function encodePng(rgba, w, h, dst) {
     const r = spawnSync('ffmpeg', [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${w}x${h}`, '-i', raw,
+      // Drop the (fully opaque) alpha channel: these are LAYERS, not sprites. Staging
+      // them RGBA made the index flag them alpha, which routes the build through the
+      // sprite pipeline (matting//contour) and ships a redundant alpha plane.
+      '-pix_fmt', 'rgb24',
       '-frames:v', '1', dst,
     ]);
     if (r.status !== 0) throw new Error(`ffmpeg failed: ${r.stderr?.toString().slice(0, 200)}`);

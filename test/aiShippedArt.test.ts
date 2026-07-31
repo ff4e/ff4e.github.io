@@ -191,3 +191,71 @@ describe('curation invariants (tools/studio/selections.json)', () => {
     expect(modelForSample('_menu/mapa-1.png')).toBe(modelForSample('_menu/mapa-0.png'));
   });
 });
+
+/**
+ * The three UI groups added after the rooms: leg story pages, world-map name plaques,
+ * and the briefcase cutscene. Each is loaded by a DIFFERENT runtime path, and each
+ * falls back silently to the original art when a file is missing — so, exactly like the
+ * rooms above, a broken build renders a plausible game with nothing logged.
+ */
+describe('shipped _story / _desky / _kufr', () => {
+  const S = 4;
+  const dir = (g: string) => join(AI, g);
+  const have = (g: string) => haveTier && existsSync(dir(g));
+
+  it.runIf(have('_story'))('ships all nine leg pages at exactly ×4 of the original', () => {
+    const man = JSON.parse(readFileSync(join(dir('_story'), 'ai.json'), 'utf8')) as { scale: number; files: string[] };
+    expect(man.scale).toBe(S);
+    for (let leg = 1; leg <= 9; leg++) {
+      const f = `leg${leg}.webp`;
+      expect(man.files, `${f} is in the manifest`).toContain(f);
+      const p = join(dir('_story'), f);
+      expect(existsSync(p), `${f} exists`).toBe(true);
+      const { w, h } = webpInfo(p);
+      // 005 is 641x481 in the original; the rest are 640x480 (see stage-story.mjs).
+      const nw = leg === 5 ? 641 : 640;
+      const nh = leg === 5 ? 481 : 480;
+      expect([w, h], `${f} is ${nw * S}x${nh * S}`).toEqual([nw * S, nh * S]);
+    }
+  });
+
+  it.runIf(have('_desky'))('ships every plaque the geometry declares, at ×4 of its rectangle', () => {
+    const geom = JSON.parse(readFileSync(join(dir('_desky'), 'plaques.json'), 'utf8')) as {
+      plaques: Record<string, { room: number; x: number; y: number; w: number; h: number }>;
+    };
+    const entries = Object.entries(geom.plaques);
+    expect(entries.length, '72 rooms × 2 languages').toBe(144);
+    for (const [key, g] of entries) {
+      // The runtime derives the filename from the geometry key (see aiPlaqueFor).
+      const p = join(dir('_desky'), key.replace(/\.png$/, '.webp'));
+      expect(existsSync(p), `${key} has shipped art`).toBe(true);
+      const { w, h } = webpInfo(p);
+      expect([w, h], `${key} is ${g.w * S}x${g.h * S}`).toEqual([g.w * S, g.h * S]);
+    }
+  });
+
+  it.runIf(have('_kufr'))('ships the cutscene base and every frame the playback order names', () => {
+    const man = JSON.parse(readFileSync(join(dir('_kufr'), 'ai.json'), 'utf8')) as {
+      scale: number; region: { x: number; y: number; w: number; h: number };
+      base: { w: number; h: number }; order: string[]; frames: string[];
+    };
+    expect(man.scale).toBe(S);
+    // The region must match the constants the DEMO decoder writes into (kufrDemo.ts).
+    expect(man.region).toEqual({ x: 135, y: 25, w: 380, h: 285 });
+    expect(man.base).toEqual({ w: 720, h: 555 });
+
+    const base = join(dir('_kufr'), 'base.webp');
+    expect(existsSync(base), 'base.webp exists').toBe(true);
+    const bi = webpInfo(base);
+    expect([bi.w, bi.h]).toEqual([720 * S, 555 * S]);
+
+    // Every entry in the playback order must resolve — the runtime indexes this array
+    // by KufrDemo.framesDrawn, so a hole is a frame that silently falls back.
+    expect(man.order.length, 'the animation has frames').toBeGreaterThan(200);
+    const missing = [...new Set(man.order)].filter((f) => !existsSync(join(dir('_kufr'), 'frames', f)));
+    expect(missing.slice(0, 5), 'every ordered frame is shipped').toEqual([]);
+    // ...and each is the region at ×4.
+    const fi = webpInfo(join(dir('_kufr'), 'frames', man.order[0]!));
+    expect([fi.w, fi.h]).toEqual([380 * S, 285 * S]);
+  });
+});

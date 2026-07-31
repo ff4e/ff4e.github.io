@@ -62,6 +62,10 @@ function encodePng(rgba: Uint8Array, w: number, h: number, dst: string): void {
     const r = spawnSync('ffmpeg', [
       '-hide_banner', '-loglevel', 'error', '-y',
       '-f', 'rawvideo', '-pix_fmt', 'rgba', '-s', `${w}x${h}`, '-i', raw,
+      // Drop the (fully opaque) alpha channel: these are LAYERS, not sprites. Staging
+      // them RGBA made the index flag them alpha, which routes the build through the
+      // sprite pipeline (matting//contour) and ships a redundant alpha plane.
+      '-pix_fmt', 'rgb24',
       '-frames:v', '1', dst,
     ]);
     if (r.status !== 0) throw new Error(`ffmpeg failed: ${r.stderr?.toString().slice(0, 200)}`);
@@ -127,13 +131,13 @@ const baseWritten = writeIfChanged(join(outDir, 'base.png'), pngBytes(canvasRgba
 // Replay the whole cutscene. Voices are stubbed as instantly-finished so the script
 // runs deterministically to the end; only the PICTURE matters here, and the runtime
 // keeps driving the real audio-dependent timeline.
-const seen = new Set<string>();
-const order: string[] = [];   // frame file names, in playback order
+const seen = new Map<string, string>();   // content hash -> file name
+const order: string[] = [];               // file name per DECODED frame, in playback order
 /** Per distinct frame: encoded size and a high-frequency "is this just TV static?" score. */
 const stats: { name: string; size: number; noise: number }[] = [];
-let prev = '';
 let ticks = 0;
 let wrote = 0, skipped = 0;
+let lastDrawn = 0;
 
 /**
  * Mean absolute difference between horizontally adjacent pixels.
@@ -156,20 +160,22 @@ function noiseScore(rgba: Uint8Array, w: number, h: number): number {
   return sum / n;
 }
 
+// Record one entry per DECODED frame, keyed by KufrDemo.framesDrawn — the same counter
+// the runtime advances, so the shipped sequence and the playback position cannot drift.
+// Identical frames still share one file (the animation repeats a few), but each decode
+// gets its own slot in `order`.
 while (!demo.done && ticks++ < 20000) {
   demo.tick(() => 1, () => false);
-  const hash = createHash('md5').update(Buffer.from(demo.pixels)).digest('hex');
-  if (hash === prev) continue;      // nothing changed this tick
-  prev = hash;
-  if (seen.has(hash)) {             // a frame that repeats later in the animation
-    order.push(`f${String([...seen].indexOf(hash)).padStart(4, '0')}.png`);
-    continue;
-  }
-  const name = `f${String(seen.size).padStart(4, '0')}.png`;
-  seen.add(hash);
-  order.push(name);
+  if (demo.framesDrawn === lastDrawn) continue;   // a hold: nothing decoded this tick
+  lastDrawn = demo.framesDrawn;
   const rgba = regionRgba();
   const bytes = pngBytes(rgba, DEMO_W, DEMO_H);
+  const hash = createHash('md5').update(bytes).digest('hex');
+  const known = seen.get(hash);
+  if (known) { order.push(known); continue; }
+  const name = `f${String(seen.size).padStart(4, '0')}.png`;
+  seen.set(hash, name);
+  order.push(name);
   stats.push({ name, size: bytes.length, noise: noiseScore(rgba, DEMO_W, DEMO_H) });
   if (writeIfChanged(join(framesDir, name), bytes)) wrote++;
   else skipped++;
@@ -194,6 +200,6 @@ writeIfChanged(join(outDir, 'frames.json'), Buffer.from(JSON.stringify({
 }), 'utf8'));
 
 console.log(`_kufr: base ${baseWritten ? 'written' : 'unchanged'} (${demo.width}x${demo.height})`);
-console.log(`_kufr: ${wrote} frames written, ${skipped} unchanged — ${seen.size} distinct, ${order.length} in playback order`);
+console.log(`_kufr: ${wrote} frames written, ${skipped} unchanged — ${seen.size} distinct, ${order.length} decoded frames in playback order`);
 console.log(`_kufr: representative frame ${best} (${(bestSize / 1024).toFixed(0)}KB) → anim.png`);
 console.log(`_kufr: → public/enhanced/_kufr (frames/ is derived + gitignored)`);

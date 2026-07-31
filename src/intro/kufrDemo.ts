@@ -62,6 +62,15 @@ export class KufrDemo {
   private readonly canvas: Uint8Array; // working copy (persistent delta target)
   private readonly pck: Uint8Array;
   private pckPos = 0;
+  /**
+   * How many pck frames have actually been DECODED into the canvas (a `pcknum <= 0`
+   * record is a hold and does not count).
+   *
+   * The AI tier ships one upscaled image per decoded frame, and both the staging tool
+   * and the runtime index that sequence by this counter — one rule, shared, rather than
+   * each side deciding independently what counts as "the next frame".
+   */
+  framesDrawn = 0;
   private readonly script: Cmd[];
   private scriptPos = 0;
   private cekani = 0;
@@ -96,6 +105,7 @@ export class KufrDemo {
     const pcknum = dv.getInt32(this.pckPos, true);
     this.pckPos += 4;
     if (pcknum <= 0) return; // hold current frame
+    this.framesDrawn++;
     let pos = this.pckPos;
     this.pckPos += pcknum;
     const W = this.base.w;
