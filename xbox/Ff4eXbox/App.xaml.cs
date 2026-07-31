@@ -1,6 +1,8 @@
+using System;
+using System.Text;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
-using Windows.UI.Core;
+using Windows.Storage;
 using Windows.UI.ViewManagement;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -11,59 +13,118 @@ namespace Ff4eXbox
     /// <summary>
     /// UWP host application for the packaged Fish Fillets 4ever web build.
     ///
-    /// The whole game runs inside a WebView2 (Chromium) control; this shell exists only
-    /// to create the window and apply the two Xbox-specific behaviours that a plain UWP
-    /// app does not get by default (see OnLaunched).
+    /// The game itself runs inside a WebView2 (Chromium) control; this shell only creates
+    /// the window, applies the Xbox-specific input/bounds behaviour, and — importantly on a
+    /// console, where there is no debugger and the Device Portal has no log viewer —
+    /// makes any startup failure *visible* instead of silently returning to Dev Home.
     /// </summary>
     sealed partial class App : Application
     {
+        /// <summary>Boot trace, shown on screen and written to the app's local folder.</summary>
+        public static readonly StringBuilder Boot = new StringBuilder();
+
+        public static void Log(string line)
+        {
+            lock (Boot) Boot.AppendLine(line);
+        }
+
+        /// <summary>
+        /// Persist the boot trace so it can be retrieved from the Xbox Device Portal's file
+        /// explorer (LocalAppData\...\LocalState\boot.log) when the screen is not enough.
+        /// </summary>
+        public static async void SaveLog()
+        {
+            try
+            {
+                string text;
+                lock (Boot) text = Boot.ToString();
+                var file = await ApplicationData.Current.LocalFolder.CreateFileAsync(
+                    "boot.log", CreationCollisionOption.ReplaceExisting);
+                await FileIO.WriteTextAsync(file, text);
+            }
+            catch
+            {
+                /* diagnostics must never themselves break startup */
+            }
+        }
+
         public App()
         {
-            InitializeComponent();
+            // Anything thrown past this point is reported rather than terminating silently.
+            UnhandledException += (s, e) =>
+            {
+                Log("UNHANDLED: " + e.Message);
+                Log(e.Exception?.ToString() ?? "(no exception object)");
+                SaveLog();
+                // Keep the process alive so the message stays on screen to be read.
+                e.Handled = true;
+                MainPage.Current?.ShowBootLog();
+            };
 
-            // Xbox delivers controller input as an emulated *mouse pointer* ("mouse mode")
-            // unless the app opts out. Mouse mode would swallow the gamepad before it ever
-            // reached the web app's Gamepad API, breaking every control added in P0/P1.
-            // WhenRequested keeps the pointer available only if a control explicitly asks
-            // for it, so by default the gamepad stays a gamepad.
-            RequiresPointerMode = ApplicationRequiresPointerMode.WhenRequested;
+            Log("App ctor");
+            InitializeComponent();
+            Log("InitializeComponent ok");
+
+            // Xbox hands controller input to apps as an emulated mouse pointer unless the
+            // app opts out; that would swallow the gamepad before the web app's Gamepad API
+            // saw it. Guarded: on any platform where the property is unavailable this must
+            // not be fatal.
+            try
+            {
+                RequiresPointerMode = ApplicationRequiresPointerMode.WhenRequested;
+                Log("RequiresPointerMode = WhenRequested");
+            }
+            catch (Exception ex)
+            {
+                Log("RequiresPointerMode failed (non-fatal): " + ex.Message);
+            }
 
             Suspending += OnSuspending;
         }
 
         protected override void OnLaunched(LaunchActivatedEventArgs e)
         {
-            // Draw edge to edge on a TV instead of inside the console's default title-safe
-            // inset: the app already renders its own 5% title-safe margin in TV mode (P3),
-            // and letting the OS inset as well would double the margin and shrink the game.
-            var view = ApplicationView.GetForCurrentView();
-            view.SetDesiredBoundsMode(ApplicationViewBoundsMode.UseCoreWindow);
-            view.TryEnterFullScreenMode();
+            Log("OnLaunched");
+            try
+            {
+                // Draw edge to edge on a TV rather than inside the console's default
+                // title-safe inset: the web app already renders its own 5% safe margin in
+                // TV mode, and insetting twice would shrink the picture.
+                var view = ApplicationView.GetForCurrentView();
+                view.SetDesiredBoundsMode(ApplicationViewBoundsMode.UseCoreWindow);
+                Log("bounds mode = UseCoreWindow");
+            }
+            catch (Exception ex)
+            {
+                Log("SetDesiredBoundsMode failed (non-fatal): " + ex.Message);
+            }
 
             if (!(Window.Current.Content is Frame rootFrame))
             {
                 rootFrame = new Frame();
-                rootFrame.NavigationFailed += OnNavigationFailed;
+                rootFrame.NavigationFailed += (s, args) =>
+                {
+                    Log("NAVIGATION FAILED: " + args.SourcePageType.FullName + " — " + args.Exception);
+                    SaveLog();
+                    args.Handled = true;
+                };
                 Window.Current.Content = rootFrame;
             }
 
-            if (e.PrelaunchActivated == false && rootFrame.Content == null)
+            if (rootFrame.Content == null)
             {
+                Log("navigating to MainPage");
                 rootFrame.Navigate(typeof(MainPage), e.Arguments);
             }
 
             Window.Current.Activate();
-        }
-
-        void OnNavigationFailed(object sender, NavigationFailedEventArgs e)
-        {
-            throw new System.Exception("Failed to load " + e.SourcePageType.FullName);
+            Log("window activated");
         }
 
         void OnSuspending(object sender, SuspendingEventArgs e)
         {
-            // Nothing to persist here: the game stores its own progress in WebView2's
-            // localStorage, which survives suspend/terminate and app updates.
+            // Nothing to persist: the game keeps its progress in WebView2's localStorage,
+            // which survives suspend/terminate and app updates.
             var deferral = e.SuspendingOperation.GetDeferral();
             deferral.Complete();
         }

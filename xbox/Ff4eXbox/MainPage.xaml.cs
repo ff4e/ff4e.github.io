@@ -10,100 +10,183 @@ namespace Ff4eXbox
     /// <summary>
     /// Hosts the packaged web build in a WebView2 (Chromium) control.
     ///
-    /// The game is served from a *local virtual host* rather than the network: the
-    /// wwwroot folder inside the installed package is mapped onto https://ff4e.example,
-    /// so the app is fully self-contained and works with no internet connection, while
-    /// still being an https origin (a secure context) so WebGL2, localStorage and the
-    /// Gamepad API all behave exactly as they do on the web build.
+    /// The game is served from a *local virtual host* rather than the network: the wwwroot
+    /// folder inside the installed package is mapped onto https://ff4e.example via
+    /// WebView2's SetVirtualHostNameToFolderMapping, so the app is fully self-contained and
+    /// works with no internet connection, while still being an https origin (a secure
+    /// context) so WebGL2, localStorage and the Gamepad API behave as on the web build.
+    ///
+    /// Every step is traced to App.Boot and every failure is shown on screen: on a console
+    /// there is no debugger attached and the Device Portal has no log viewer, so a silent
+    /// exception would just bounce the player back to Dev Home with no explanation.
     /// </summary>
     public sealed partial class MainPage : Page
     {
-        // RFC 2606 reserves .example, so this hostname can never resolve to a real server
-        // even if the mapping were somehow missing.
+        // RFC 2606 reserves .example, so this can never resolve to a real server.
         const string VirtualHost = "ff4e.example";
+
+        public static MainPage Current { get; private set; }
 
         readonly DisplayRequest _displayRequest = new DisplayRequest();
         bool _displayRequested;
+        Microsoft.UI.Xaml.Controls.WebView2 _web;
 
         public MainPage()
         {
             InitializeComponent();
+            Current = this;
             Loaded += OnLoaded;
             Unloaded += OnUnloaded;
         }
 
-        async void OnLoaded(object sender, RoutedEventArgs e)
+        /// <summary>Show the boot trace on screen (the only diagnostic channel on a console).</summary>
+        public void ShowBootLog()
         {
             try
             {
-                await WebView.EnsureCoreWebView2Async();
+                string text;
+                lock (App.Boot) text = App.Boot.ToString();
+                StatusText.Text = text;
+                StatusScroller.Visibility = Visibility.Visible;
+                if (_web != null) _web.Visibility = Visibility.Collapsed;
+            }
+            catch
+            {
+                /* nothing further we can do */
+            }
+        }
+
+        void Step(string s)
+        {
+            App.Log(s);
+            ShowBootLog();
+        }
+
+        async void OnLoaded(object sender, RoutedEventArgs e)
+        {
+            Step("MainPage loaded");
+
+            // WinUI 2 resources, merged here rather than from App.xaml so that a missing or
+            // unloadable Microsoft.UI.Xaml framework package produces a readable message
+            // instead of killing the app while the Application object is constructed.
+            try
+            {
+                Application.Current.Resources.MergedDictionaries.Add(
+                    new Microsoft.UI.Xaml.Controls.XamlControlsResources());
+                Step("WinUI 2 resources merged");
             }
             catch (Exception ex)
             {
-                // Most likely cause on a console: the WebView2 runtime is missing because
-                // the Xbox OS predates the 2310 (October 2023) update. Say so, instead of
-                // leaving the player looking at a black screen.
-                ShowError(
-                    "Couldn't start the browser engine (WebView2).\n\n" +
-                    "Update the console to Xbox OS 2310 (October 2023) or newer, then try again.\n\n" +
-                    ex.Message);
+                Step("XamlControlsResources FAILED: " + ex.Message);
+            }
+
+            try
+            {
+                _web = new Microsoft.UI.Xaml.Controls.WebView2();
+                RootGrid.Children.Insert(0, _web);
+                Step("WebView2 control created");
+            }
+            catch (Exception ex)
+            {
+                Step("Creating the WebView2 control FAILED:\n" + ex);
+                App.SaveLog();
                 return;
             }
 
-            var core = WebView.CoreWebView2;
+            try
+            {
+                await _web.EnsureCoreWebView2Async();
+                Step("CoreWebView2 ready");
+            }
+            catch (Exception ex)
+            {
+                // Most likely on a console: the WebView2 runtime is missing because the
+                // Xbox OS predates the 2310 (October 2023) update.
+                Step(
+                    "Starting the browser engine (WebView2) FAILED.\n" +
+                    "Update the console to Xbox OS 2310 (October 2023) or newer.\n\n" + ex);
+                App.SaveLog();
+                return;
+            }
 
-            // Console chrome: no right-click menus, no status bar, no pinch/ctrl zoom.
-            core.Settings.AreDefaultContextMenusEnabled = false;
-            core.Settings.IsStatusBarEnabled = false;
-            core.Settings.IsZoomControlEnabled = false;
+            var core = _web.CoreWebView2;
+
+            try
+            {
+                core.Settings.AreDefaultContextMenusEnabled = false;
+                core.Settings.IsStatusBarEnabled = false;
+                core.Settings.IsZoomControlEnabled = false;
 #if DEBUG
-            core.Settings.AreDevToolsEnabled = true;
+                core.Settings.AreDevToolsEnabled = true;
 #else
-            core.Settings.AreDevToolsEnabled = false;
+                core.Settings.AreDevToolsEnabled = false;
 #endif
+            }
+            catch (Exception ex)
+            {
+                Step("settings (non-fatal): " + ex.Message);
+            }
 
-            // Map the packaged wwwroot onto the virtual host. This is the only supported
-            // way to load packaged local content in WebView2 (the legacy ms-appx-web://
-            // scheme works only in the old EdgeHTML WebView).
-            var root = System.IO.Path.Combine(Package.Current.InstalledLocation.Path, "wwwroot");
-            core.SetVirtualHostNameToFolderMapping(
-                VirtualHost, root, CoreWebView2HostResourceAccessKind.Allow);
+            try
+            {
+                // The only supported way to load packaged local content in WebView2 (the
+                // legacy ms-appx-web:// scheme works only in the old EdgeHTML WebView).
+                var root = System.IO.Path.Combine(Package.Current.InstalledLocation.Path, "wwwroot");
+                core.SetVirtualHostNameToFolderMapping(
+                    VirtualHost, root, CoreWebView2HostResourceAccessKind.Allow);
+                Step("mapped " + VirtualHost + " -> " + root);
+            }
+            catch (Exception ex)
+            {
+                Step("Mapping the packaged game folder FAILED:\n" + ex);
+                App.SaveLog();
+                return;
+            }
 
             core.NavigationCompleted += OnNavigationCompleted;
+            core.ProcessFailed += (s, args) =>
+            {
+                Step("WebView2 PROCESS FAILED: " + args.ProcessFailedKind);
+                App.SaveLog();
+            };
 
             // A puzzle game has long stretches with no input while the player thinks —
             // keep the console from blanking the screen.
-            if (!_displayRequested)
+            try
             {
-                _displayRequest.RequestActive();
-                _displayRequested = true;
+                if (!_displayRequested)
+                {
+                    _displayRequest.RequestActive();
+                    _displayRequested = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log("DisplayRequest (non-fatal): " + ex.Message);
             }
 
-            WebView.Source = new Uri($"https://{VirtualHost}/index.html");
-
-            // Make sure the gamepad reaches the web content rather than the XAML shell.
-            WebView.Focus(FocusState.Programmatic);
+            Step("navigating to the game…");
+            _web.Source = new Uri($"https://{VirtualHost}/index.html");
+            _web.Focus(FocusState.Programmatic);
         }
 
-        void OnNavigationCompleted(
-            CoreWebView2 sender,
-            CoreWebView2NavigationCompletedEventArgs args)
+        void OnNavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
         {
             if (!args.IsSuccess)
             {
-                ShowError(
-                    "Couldn't load the game files from the app package.\n\n" +
-                    "Status: " + args.WebErrorStatus);
+                Step("Loading the game files FAILED. Status: " + args.WebErrorStatus);
+                App.SaveLog();
                 return;
             }
-            WebView.Focus(FocusState.Programmatic);
-        }
-
-        void ShowError(string message)
-        {
-            ErrorText.Text = message;
-            ErrorText.Visibility = Visibility.Visible;
-            WebView.Visibility = Visibility.Collapsed;
+            // Success: hide the diagnostics and hand the screen (and the pad) to the game.
+            App.Log("navigation completed ok");
+            App.SaveLog();
+            StatusScroller.Visibility = Visibility.Collapsed;
+            if (_web != null)
+            {
+                _web.Visibility = Visibility.Visible;
+                _web.Focus(FocusState.Programmatic);
+            }
         }
 
         void OnUnloaded(object sender, RoutedEventArgs e)

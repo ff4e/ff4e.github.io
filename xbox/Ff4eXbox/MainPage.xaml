@@ -2,22 +2,21 @@
     x:Class="Ff4eXbox.MainPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:Microsoft.UI.Xaml.Controls"
     Background="#101018">
 
-    <Grid>
-        <!-- The game fills the window; the page background matches the app's brand colour
-             so the TV shows no white flash before the first frame is painted. -->
-        <controls:WebView2 x:Name="WebView" />
-
-        <TextBlock x:Name="ErrorText"
-                   Visibility="Collapsed"
-                   Foreground="#DDEEFF"
-                   FontSize="28"
-                   TextWrapping="Wrap"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center"
-                   TextAlignment="Center"
-                   Margin="120" />
+    <!-- Only core XAML types here. The WebView2 (a WinUI 2 control) is created in
+         code-behind so that a missing/broken WinUI 2 framework package surfaces as a
+         readable message on this page instead of killing the app during XAML parse. -->
+    <Grid x:Name="RootGrid">
+        <ScrollViewer x:Name="StatusScroller"
+                      VerticalScrollBarVisibility="Auto"
+                      Margin="90,60,90,60">
+            <TextBlock x:Name="StatusText"
+                       Foreground="#DDEEFF"
+                       FontSize="22"
+                       FontFamily="Consolas"
+                       TextWrapping="Wrap"
+                       IsTextSelectionEnabled="False" />
+        </ScrollViewer>
     </Grid>
 </Page>

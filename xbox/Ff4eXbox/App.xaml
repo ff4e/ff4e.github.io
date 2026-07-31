@@ -1,14 +1,14 @@
 <Application
     x:Class="Ff4eXbox.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:controls="using:Microsoft.UI.Xaml.Controls">
-    <Application.Resources>
-        <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries>
-                <!-- WinUI 2 resources; required for the Microsoft.UI.Xaml.Controls.WebView2 control. -->
-                <controls:XamlControlsResources />
-            </ResourceDictionary.MergedDictionaries>
-        </ResourceDictionary>
-    </Application.Resources>
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!--
+      Deliberately NO WinUI 2 (XamlControlsResources) merged dictionary here.
+
+      If the Microsoft.UI.Xaml framework package cannot be resolved on the device, merging
+      it from XAML throws while the Application object is being constructed — before any of
+      our code runs and before a window exists, so the app dies on the splash screen with
+      nothing to show for it. The dictionary is merged programmatically in MainPage
+      instead, inside a try/catch that can report the failure on screen.
+    -->
 </Application>
