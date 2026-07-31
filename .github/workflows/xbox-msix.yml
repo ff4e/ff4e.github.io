@@ -16,6 +16,11 @@ name: Build Xbox MSIX
 on:
   workflow_dispatch:
   push:
+    # The branch trigger is what actually runs this today: a workflow_dispatch button
+    # only appears once the file exists on the default branch, and this one lives on
+    # xbox-port for now. It also means every fix pushed while bringing the package up
+    # gets built automatically.
+    branches: ['xbox-port']
     tags: ['xbox-v*']
 
 permissions:
