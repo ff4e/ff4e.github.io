@@ -3441,6 +3441,12 @@ function showMap(): void {
 
 /** ZAVER ("At Home", room 71): the endgame finale cutscene, auto-launched on completion. */
 const ZAVER_ROOM = 71;
+/**
+ * The story page ZAVER ends on: 009.$dv, the medals and the congratulation letter from
+ * ŠÉF. It is the ninth page, and the only one no leg win can reach — legs 1..8 map to
+ * 001..008, and branches 0 and 9 have no depth-15 room at all.
+ */
+const ZAVER_LEG = 9;
 
 /**
  * chybi=0 (USoutez.pas:729): every registered room (1..70) is genuinely solved. Cheat-
@@ -3482,6 +3488,20 @@ function returnFromRoom(): void {
   }
   if (finale) {
     void enterRoom(ZAVER_ROOM);
+    return;
+  }
+  // ZAVER has just ended: close the game on its story page (009.$dv), then the map.
+  //
+  // DELIBERATE DEVIATION from the original, which shows this page when the room is
+  // LAUNCHED — UMain.pas's daRealyRun runs `if Hloubka[av,am]=16 then zobraz_obrazek(av)`
+  // immediately after Spust(), alongside the score screen. The page is a congratulation
+  // on finishing the game, so it reads as an ending rather than a title card.
+  //
+  // It is unreachable in the port otherwise: computeHloubka only covers the nine
+  // REGISTERED branches, so room 71 has depth −1 and the original's Hloubka=16 branch
+  // can never fire. (The score screen that accompanies it upstream is not ported.)
+  if (roomNum === ZAVER_ROOM) {
+    void showLegImage(ZAVER_LEG); // no `pending` ⇒ dismisses to the map
     return;
   }
   showMap();
