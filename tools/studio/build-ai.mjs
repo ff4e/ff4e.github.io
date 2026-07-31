@@ -440,6 +440,37 @@ function buildKufr(report) {
   const anim = cardModel('anim.png');
   if (!base || !anim) { console.warn('  ! _kufr: base.png/anim.png are not indexed'); return false; }
 
+  // Per-SCENE model overrides. One model for the whole animation is the default,
+  // because a model change mid-shot flickers — but across a scene CUT it is invisible,
+  // and different scenes genuinely want different models (the planets scene carries
+  // small handwritten annotations that the cel-art model dissolves into blobs).
+  const rangeFile = join(studioDir, 'kufr-models.json');
+  let ranges = [];
+  if (existsSync(rangeFile)) {
+    try { ranges = JSON.parse(readFileSync(rangeFile, 'utf8')).ranges || []; }
+    catch (e) { console.warn(`  ! kufr-models.json unreadable (${e.message}); using one model throughout`); }
+  }
+  const meta0 = JSON.parse(readFileSync(join(srcDir, 'frames.json'), 'utf8'));
+  // Resolve each ORDER INDEX to a model, then map that back onto frame FILES. Frames are
+  // deduplicated by content, so a file used both inside and outside a range would need
+  // two different upscales under one name — refuse rather than silently pick one.
+  const modelForIndex = (i) => {
+    for (const r of ranges) if (i >= r.from && i <= r.to && r.model) return r.model;
+    return anim.model;
+  };
+  const fileModel = new Map();
+  const straddling = [];
+  meta0.order.forEach((f, i) => {
+    const m = modelForIndex(i);
+    if (fileModel.has(f) && fileModel.get(f) !== m) straddling.push(f);
+    else fileModel.set(f, m);
+  });
+  if (straddling.length) {
+    console.warn(`  ! _kufr: ${straddling.length} frame(s) fall in ranges with DIFFERENT models (${[...new Set(straddling)].slice(0, 3).join(', ')}); adjust kufr-models.json so ranges follow scene cuts`);
+    return false;
+  }
+  const overridden = [...fileModel.values()].filter((m) => m !== anim.model).length;
+
   const stampFile = join(dstDir, '.build-stamp.json');
   const prev = existsSync(stampFile) ? JSON.parse(readFileSync(stampFile, 'utf8')) : {};
   const next = {};
@@ -473,7 +504,7 @@ function buildKufr(report) {
   const frames = listPngs(framesSrc).sort();
   for (const f of frames) {
     const srcAbs = join(framesSrc, f);
-    one(srcAbs, join(dstDir, 'frames', webpName(f)), `frames/${webpName(f)}`, hashFile(srcAbs), anim.model);
+    one(srcAbs, join(dstDir, 'frames', webpName(f)), `frames/${webpName(f)}`, hashFile(srcAbs), fileModel.get(f) ?? anim.model);
   }
   if (!DRY) {
     // The playback order + region geometry the runtime replays.
@@ -487,7 +518,7 @@ function buildKufr(report) {
     }));
     writeFileSync(stampFile, JSON.stringify(next));
   }
-  console.log(`  _kufr: ${wrote} written, ${skipped} unchanged${failed ? `, ${failed} FAILED` : ''} (base=${base.model}, frames=${anim.model}, x${SCALE})`);
+  console.log(`  _kufr: ${wrote} written, ${skipped} unchanged${failed ? `, ${failed} FAILED` : ''} (base=${base.model}, frames=${anim.model}${overridden ? `, ${overridden} overridden by kufr-models.json` : ''}, x${SCALE})`);
   return failed === 0;
 }
 
