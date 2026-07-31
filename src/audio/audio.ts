@@ -82,6 +82,25 @@ export class AudioEngine {
     this.cache.clear();
   }
 
+  /**
+   * Drop the current room's sound package (the global packages stay).
+   *
+   * Entering a room no longer waits for its .ffs body before the room is built —
+   * the voice package is the largest single asset a room fetches (4.3 MB for
+   * PRVNI) and nothing visual depends on it. Clearing here keeps the gap honest:
+   * until the new package lands, a lookup misses and falls back to the globals
+   * rather than playing the PREVIOUS room's sample under the new room.
+   */
+  clearRoom(): void {
+    this.roomPkg = null;
+    this.cache.clear();
+  }
+
+  /** True once the current room's voice package has arrived (see clearRoom). */
+  get roomLoaded(): boolean {
+    return this.roomPkg !== null;
+  }
+
   private ensureCtx(): AudioContext {
     if (!this.ctx) {
       this.ctx = new AudioContext();
@@ -262,7 +281,10 @@ export class AudioEngine {
     let buf = this.musicBufs.get(name);
     if (!buf) {
       try {
-        const bytes = await fetch(url).then((r) => r.arrayBuffer());
+        // Low request priority: a 5-7 MB music track is the largest single file a room
+        // entry pulls, and on a constrained link it would otherwise download in direct
+        // competition with the room art the first visible frame is waiting on.
+        const bytes = await fetch(url, { priority: 'low' } as RequestInit).then((r) => r.arrayBuffer());
         buf = await ctx.decodeAudioData(bytes.slice(0));
       } catch {
         return; // track not present / decode failed — stay silent
@@ -373,7 +395,7 @@ export class AudioEngine {
       const ctx = this.ensureCtx();
       let buf = this.musicBufs.get(name);
       if (!buf) {
-        const bytes = await fetch(url).then((r) => r.arrayBuffer());
+        const bytes = await fetch(url, { priority: 'low' } as RequestInit).then((r) => r.arrayBuffer());
         // WAV loop point is in samples at the file's native rate (header @ offset 24).
         const nativeRate = new DataView(bytes).getUint32(24, true) || 22050;
         buf = await ctx.decodeAudioData(bytes.slice(0));

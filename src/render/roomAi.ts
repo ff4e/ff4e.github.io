@@ -29,6 +29,7 @@ import { Dir, DX_DIR, DY_DIR } from '../core/dir.js';
 import { delphiRound, RANDPOLE } from './framebuffer.js';
 import { FSIZE, TL_ZAKLAD, darkestIndex } from './renderRoom.js';
 import { FISH_BODY_FILE, FISH_HEAD_FILE, frameIndex } from './enhancedArtSource.js';
+import { withLoadSlot } from './loadSlot.js';
 import type { FishFrame } from './renderRoom.js';
 import type { Room, Item } from '../core/room.js';
 import type { FfrBitmap } from '../data/ffr.js';
@@ -143,17 +144,22 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
     const man = (await res.json()) as AiManifest;
     const scale = Number(man.scale) || AI_ROOM_SCALE;
     if (!man.bg?.length || !man.wall?.length) return null;
-    const bg = await Promise.all(man.bg.map((f) => bmp(dir + f)));
-    const wall = await Promise.all(man.wall.map((f) => bmp(dir + f)));
-    const objects: AiObject[] = [];
-    for (const e of man.objects ?? []) {
-      if (typeof e.item !== 'number' || !Array.isArray(e.frames) || e.frames.length === 0) continue;
-      objects.push({ item: e.item, frames: await Promise.all(e.frames.map((f) => bmp(dir + f))) });
-    }
+    const bgLoad = Promise.all(man.bg.map((f) => bmp(dir + f)));
+    const wallLoad = Promise.all(man.wall.map((f) => bmp(dir + f)));
+    const objectLoads = (man.objects ?? []).map(async (e): Promise<AiObject | null> => {
+      if (typeof e.item !== 'number' || !Array.isArray(e.frames) || e.frames.length === 0) return null;
+      return { item: e.item, frames: await Promise.all(e.frames.map((f) => bmp(dir + f))) };
+    });
     // The fish set exists per scale, since the fish are drawn into this room's ×S
     // composite — but it is the SAME art for every room at that scale, so it is shared
     // rather than decoded per room (see fishCache).
-    const fish = await sharedAiFish(base, scale, bmpShared);
+    const [bg, wall, loaded, fish] = await Promise.all([
+      bgLoad,
+      wallLoad,
+      Promise.all(objectLoads),
+      sharedAiFish(base, scale, bmpShared),
+    ]);
+    const objects = loaded.filter((o): o is AiObject => o !== null);
     // Only the room's OWN bitmaps are disposable; the shared fish set outlives any one
     // room and must never be closed from here.
     const owned = await Promise.all([...decoded.values()]);
@@ -170,9 +176,11 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
 /** Fetch + decode one asset. Used directly for assets SHARED between rooms (the fish
  *  set), which therefore must not be owned — or disposed — by any single AiRoom. */
 async function bmpShared(url: string): Promise<ImageBitmap> {
-  const res = await fetch(url);
-  if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${url}: ${res.status}`);
-  return createImageBitmap(await res.blob());
+  return withLoadSlot(async () => {
+    const res = await fetch(url);
+    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${url}: ${res.status}`);
+    return createImageBitmap(await res.blob());
+  });
 }
 
 /**
@@ -222,9 +230,15 @@ async function loadAiFish(dir: string, bmp: (u: string) => Promise<ImageBitmap>)
       map.set(aiFishKey(f), await bmp(aiFishUrl(dir, size, facing, f)))));
     return map;
   };
+  const [smallLeft, smallRight, bigLeft, bigRight] = await Promise.all([
+    side('small', 'left'),
+    side('small', 'right'),
+    side('big', 'left'),
+    side('big', 'right'),
+  ]);
   return {
-    small: { left: await side('small', 'left'), right: await side('small', 'right') },
-    big: { left: await side('big', 'left'), right: await side('big', 'right') },
+    small: { left: smallLeft, right: smallRight },
+    big: { left: bigLeft, right: bigRight },
   };
 }
 

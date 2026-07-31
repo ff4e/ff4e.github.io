@@ -77,6 +77,11 @@ await withApp(
       loadingFill < 0.02,
       `stage is cleared black while the new room loads — no stale-room flash (fill ${loadingFill.toFixed(3)})`,
     );
+    // ...and the black stage is not what the player is looking at: the post-boot
+    // loading overlay is armed on room entry and covers it once the wait is real
+    // (2000ms here, well past the ~200ms threshold).
+    await p.waitForFunction(() => window.__ff.loadingVisible(), { timeout: 10000 });
+    expect(true, 'the loading overlay covers a slow room entry');
 
     // Let the throttled load finish: the freshly-built room now paints.
     expect((await p.evaluate(() => window.__rp)) === 'ok', 'the throttled room load resolves');
@@ -84,6 +89,7 @@ await withApp(
     await tickSleep(p, 4);
     const loadedFill = await stageFill(p);
     expect(loadedFill > 0.1, `the newly-loaded room paints once its assets arrive (fill ${loadedFill.toFixed(3)})`);
+    expect(!(await p.evaluate(() => window.__ff.loadingVisible())), 'the overlay comes down once the room is presented');
     await p.unroute(ffrGlob(30));
 
     // === 2) Hardening: a FAILED load must clear the guard (finally), not wedge black. ===
@@ -105,6 +111,12 @@ await withApp(
     expect(
       recoveredFill > 0.1,
       `after a failed load the stage recovers to the previous room, not wedged black (fill ${recoveredFill.toFixed(3)})`,
+    );
+    // ...and the overlay must not be left up over that recovered frame: loadRoom's
+    // finally clears the guard on the failure path too, and the overlay follows it.
+    expect(
+      !(await p.evaluate(() => window.__ff.loadingVisible())),
+      'a failed load dismisses the loading overlay rather than stranding it',
     );
     await p.unroute(ffrGlob(40));
   },

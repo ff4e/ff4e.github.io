@@ -85,6 +85,7 @@ import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
 import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
 import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { loadAiRoom, aiRoomGateAllows, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
+import { withLoadSlot } from '../render/loadSlot.js';
 import {
   hitInfoButton,
   drawInfoPanel,
@@ -378,9 +379,66 @@ const loadingMsg = document.getElementById('loading-msg') as HTMLElement | null;
 const fatalEl = document.getElementById('fatal') as HTMLElement | null;
 let booted = false; // true once boot succeeds — before that, any error is fatal
 
-/** Update the loading overlay's status line (no-op once boot has finished). */
+/** Update the loading overlay's status line. */
 function setLoadingMsg(msg: string): void {
-  if (loadingMsg && !booted) loadingMsg.textContent = msg;
+  if (loadingMsg) loadingMsg.textContent = msg;
+}
+
+// ── Post-boot room-loading overlay ────────────────────────────────────────────
+// The same #loading markup boot uses, re-armed for room entry. Entering a cold room
+// over a slow link takes 17-27s (measured, Slow 4G) and the stage is deliberately
+// black for all of it, so the wait needs explaining. Armed on a DELAY: a cached or
+// local entry is ready in a few ms and must never flash a spinner.
+const ROOM_LOADING_DELAY_MS = 200;
+/** Invalidates an armed-but-not-yet-shown reveal (a newer entry, or the map). */
+let roomLoadingUiSeq = 0;
+let roomLoadingUiTimer = 0;
+
+/** Arm the overlay for a room entry. No-op during boot, which already shows it. */
+function beginRoomLoadingUi(num: number): void {
+  if (!booted || !loadingEl) return;
+  const seq = ++roomLoadingUiSeq;
+  const desc = ROOMS[num - 1];
+  setLoadingMsg(desc ? `Loading ${subLang() === 'cz' ? desc.cz : desc.en}…` : 'Loading…');
+  if (roomLoadingUiTimer) clearTimeout(roomLoadingUiTimer);
+  roomLoadingUiTimer = window.setTimeout(() => {
+    roomLoadingUiTimer = 0;
+    if (seq !== roomLoadingUiSeq) return;
+    if (screen === 'room' && (roomLoading || roomArtPending())) loadingEl.hidden = false;
+  }, ROOM_LOADING_DELAY_MS);
+}
+
+/**
+ * Take the overlay down once the room is genuinely ready — but only after painting
+ * the frame it was covering. Hiding it first would expose the black stage clear for
+ * a frame, which is the very thing the overlay exists to prevent.
+ *
+ * Called from every place the readiness inputs change; a no-op while still loading.
+ */
+function syncRoomLoadingUi(): void {
+  if (!booted || !loadingEl) return;
+  if (screen === 'room' && (roomLoading || roomArtPending())) return;
+  if (roomLoadingUiTimer) {
+    clearTimeout(roomLoadingUiTimer);
+    roomLoadingUiTimer = 0;
+  }
+  roomLoadingUiSeq++;
+  if (loadingEl.hidden) return;
+  if (screen === 'room' && room) {
+    forceRoomRedraw = true;
+    draw();
+  }
+  loadingEl.hidden = true;
+}
+
+/** Drop the overlay outright (leaving the room screen — nothing left to wait for). */
+function cancelRoomLoadingUi(): void {
+  roomLoadingUiSeq++;
+  if (roomLoadingUiTimer) {
+    clearTimeout(roomLoadingUiTimer);
+    roomLoadingUiTimer = 0;
+  }
+  if (booted && loadingEl) loadingEl.hidden = true;
 }
 
 /** Reveal the fatal-error screen (missing/broken assets or a boot exception). */
@@ -1511,13 +1569,26 @@ function setGraphics(level: GraphicsLevel): void {
   graphics = level;
   localStorage.setItem('ff.graphics', graphics);
   if (enhancedArtActive() && curNum) void ensureEnhancedArt(curNum);
-  if (graphics === 'ai' && curNum) void ensureAiRoom(curNum);
-  else aiRoom = null;
+  if (graphics === 'ai' && curNum) {
+    // Hold the frame we already have until the AI art lands, rather than repainting
+    // the room in enhanced art and then popping to AI — the same rule room entry
+    // follows. Switching away releases it for free: roomArtPending() reads `graphics`.
+    aiPending = aiRoom === null || aiRoomNum !== curNum;
+    aiPendingNum = aiPending ? curNum : 0;
+    void ensureAiRoom(curNum);
+  } else {
+    aiPending = false;
+    aiPendingNum = 0;
+    aiRoom = null;
+  }
   if (graphicsSelect) graphicsSelect.value = graphics;
   forceRoomRedraw = true;
   mapSig = null; // repaint the map so switching to/from the AI level shows immediately
   wake();
   setInfo();
+  // The hold may have just been released by the switch itself (e.g. ai → classic while
+  // the AI art is still in flight); nothing else would take the overlay down.
+  syncRoomLoadingUi();
 }
 
 // Set once if the GPU backend throws, disabling it for the session (the CPU
@@ -1534,6 +1605,26 @@ let enhancedPending = false;
 // level is on and every asset loaded. null ⇒ the room falls back to enhanced/classic.
 let aiRoom: AiRoom | null = null;
 let aiRoomNum = 0; // room number aiRoom belongs to (guards async races)
+// The `ai` tier's counterpart to enhancedPending: true from entering a room (or
+// switching to the tier) until that room's AI art has resolved. Without it the room
+// painted as soon as the ENHANCED art landed and then visibly swapped to the AI art
+// a beat later — measured at a 9-14s visible upgrade over Slow 4G.
+let aiPending = false;
+let aiPendingNum = 0; // room aiPending refers to (the tier can change under it)
+
+/**
+ * Whether the current room is still waiting for the art tier it will actually paint.
+ *
+ * Deliberately a PREDICATE over live state rather than something the room-load promise
+ * awaits. That is what makes "the player switches tier mid-load" free: press E for
+ * classic and enhancedArtActive() is false on the very next frame, so the hold releases
+ * itself — no generation counter, no waiter set, nothing to cancel. It also leaves
+ * loadRoom()'s meaning (and so waitRoom()/roomLoading()) exactly as it was.
+ */
+function roomArtPending(): boolean {
+  if (enhancedArtActive() && enhancedPending) return true;
+  return graphics === 'ai' && aiPending && aiPendingNum === curNum;
+}
 /**
  * jmeno -> loaded AI room (null = no AI art / failed). Keyed on the PROMISE so a second
  * request while a load is in flight joins it instead of starting a duplicate: the entry
@@ -1672,21 +1763,28 @@ async function loadEnhancedObjects(jmeno: string): Promise<EnhancedObject[]> {
   if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return [];
   const manifest = (await res.json()) as { objects?: ObjManifestEntry[] };
   const entries = manifest.objects ?? [];
-  const out: EnhancedObject[] = [];
-  for (const e of entries) {
-    if (typeof e.item !== 'number' || !Array.isArray(e.frames)) continue;
-    const frames = await Promise.all(
-      e.frames.map(async (f) => {
-        const r = await fetch(`/enhanced/${jmeno}/obj/${f}`);
-        if (!isPngResponse(r)) return null;
-        const d = await decodePngResponse(r);
-        return { w: d.w, h: d.h, rgba: d.rgba };
-      }),
-    );
-    const valid = frames.filter((f): f is { w: number; h: number; rgba: Uint8Array } => f !== null);
-    if (valid.length > 0) out.push({ item: e.item, frames: valid });
-  }
-  return out;
+  // One entry at a time was a per-object round trip: with the AI loads parallelised
+  // this waterfall became the thing the first frame waits on (2.2s at a 150ms RTT
+  // against 1.2s for the whole AI set). The sprites are independent, so fetch them
+  // all at once and let the browser schedule.
+  const loaded = await Promise.all(
+    entries.map(async (e): Promise<EnhancedObject | null> => {
+      if (typeof e.item !== 'number' || !Array.isArray(e.frames)) return null;
+      const frames = await Promise.all(
+        e.frames.map(async (f) =>
+          withLoadSlot(async () => {
+            const r = await fetch(`/enhanced/${jmeno}/obj/${f}`);
+            if (!isPngResponse(r)) return null;
+            const d = await decodePngResponse(r);
+            return { w: d.w, h: d.h, rgba: d.rgba };
+          }),
+        ),
+      );
+      const valid = frames.filter((f): f is { w: number; h: number; rgba: Uint8Array } => f !== null);
+      return valid.length > 0 ? { item: e.item, frames: valid } : null;
+    }),
+  );
+  return loaded.filter((o): o is EnhancedObject => o !== null);
 }
 
 /** Load the hi-res panel art once (see panelAi.ts); null ⇒ keep the faithful path. */
@@ -1732,7 +1830,10 @@ async function ensureAiCredits(): Promise<void> {
  */
 async function ensureAiRoom(num: number): Promise<void> {
   const jmeno = ROOMS[num - 1]?.jmeno;
-  if (!jmeno) return;
+  if (!jmeno) {
+    clearAiPending(num);
+    return;
+  }
   let pending = aiRoomCache.get(jmeno);
   if (pending === undefined) {
     pending = loadAiRoom('/', jmeno);
@@ -1742,9 +1843,25 @@ async function ensureAiRoom(num: number): Promise<void> {
     pending.catch(() => aiRoomCache.delete(jmeno));
     aiRoomCache.set(jmeno, pending);
   }
-  const loaded = await pending;
-  if (curNum === num) { aiRoom = loaded; aiRoomNum = num; }
-  await evictAiRooms(jmeno);
+  try {
+    const loaded = await pending;
+    if (curNum === num) { aiRoom = loaded; aiRoomNum = num; }
+    await evictAiRooms(jmeno);
+  } finally {
+    // In a finally: a room whose AI art is missing or fails to decode must release
+    // the hold too (it falls back to the enhanced render), or it would never paint.
+    clearAiPending(num);
+  }
+}
+
+/** Release the `ai` tier's art hold for `num`, and present the frame it was holding. */
+function clearAiPending(num: number): void {
+  if (aiPendingNum !== num) return;
+  aiPending = false;
+  aiPendingNum = 0;
+  forceRoomRedraw = true;
+  wake();
+  syncRoomLoadingUi();
 }
 
 /**
@@ -2644,12 +2761,17 @@ async function loadRoom(num: number): Promise<void> {
   endShowmode(); // a room change ends any KUFRIK demonstration
   forceRoomRedraw = true; // repaint the first frame of the new room
   roomLoading = true; // hide the stale previous room until the new one is built
+  // Boot loads room 7 before the map/intro takes over, and its audio was always
+  // discarded by the killAll() that follows. Deferring the audio (below) would let it
+  // start AFTER the menu music instead, so skip it outright for the boot load.
+  const bootLoad = !booted;
   try {
     const nnn = String(num).padStart(3, '0');
-    const [ffrRes, fftRes, ffsRes] = await Promise.all([
+    // Only the two assets the room cannot be BUILT without are on this path. The
+    // .ffs voice package and the room music used to ride along here; see below.
+    const [ffrRes, fftRes] = await Promise.all([
       fetch(ffrUrl(num)),
       fetch(`/data/Title/${nnn}.fft`),
-      fetch(`/data/Sound/${nnn}.ffs`),
     ]);
     if (!ffrRes.ok) throw new Error(`failed to load room ${num}: ${ffrRes.status}`);
     ffr = parseFfr(new Uint8Array(await ffrRes.arrayBuffer()));
@@ -2660,7 +2782,10 @@ async function loadRoom(num: number): Promise<void> {
     }
     const fftBytes = fftRes.ok ? new Uint8Array(await fftRes.arrayBuffer()) : new Uint8Array(4);
     fftEntries = fftRes.ok ? parseFft(fftBytes) : [];
-    if (fftRes.ok && ffsRes.ok) audio.setRoom(fftBytes, new Uint8Array(await ffsRes.arrayBuffer()));
+    // The outgoing room's samples must not be audible under the new room while its
+    // own package is still in flight (see loadRoomAudio) — a lookup that misses now
+    // falls back to the global packages, i.e. silence for a room-specific line.
+    audio.clearRoom();
     pokus = 1; // fresh attempt on entering a room
     buildRoom();
     // Enhanced background art for this room (async; draw() holds the previous
@@ -2669,13 +2794,33 @@ async function loadRoom(num: number): Promise<void> {
     enhancedArt = null;
     enhancedObjects = [];
     enhancedPending = enhancedArtActive();
-    void ensureEnhancedArt(num);
     aiRoom = null;
-    if (graphics === 'ai') void ensureAiRoom(num);
-    // Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it.
-    const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
-    if (music) void audio.playMusic(music.name, `/data/Music/${music.name}.wav`, music.loopSample);
-    else audio.stopMusic();
+    // Symmetric with enhancedPending: hold the frame until the AI art the `ai` tier
+    // will actually present has landed, so the room is never shown in enhanced art
+    // first and then visibly upgraded underneath the player.
+    aiPending = graphics === 'ai';
+    aiPendingNum = aiPending ? num : 0;
+    const art = Promise.all([
+      ensureEnhancedArt(num),
+      graphics === 'ai' ? ensureAiRoom(num) : Promise.resolve(),
+    ]);
+    // Audio is the bulk of a room entry's bytes and none of it is needed to DRAW the
+    // room: 4.30 MB of .ffs voices plus a 5.65 MB music track for PRVNI, against
+    // 1.67 MB for everything the first visible frame waits on. On a capped link they
+    // simply crowd the art out, so both wait for it — a low-priority hint was measured
+    // and is not enough (KOSTE's first frame: 35.5s with the hint, 27.4s with the wait).
+    //
+    // The cost is a short window after the room appears in which a room-specific line
+    // is silent (subtitles still show; audio.clearRoom() keeps it silent rather than
+    // wrong). That is a much better trade than the black stage it replaces, and it
+    // closes as soon as the package lands.
+    if (!bootLoad) {
+      void art.then(() => {
+        loadRoomVoices(num, nnn, fftBytes);
+        startRoomMusic(num);
+      });
+    }
+    void art.then(syncRoomLoadingUi);
   } finally {
     // Always drop the guard, even if a fetch/parse threw: on error we fall back to
     // the pre-existing behaviour (the previous room stays shown) rather than leaving
@@ -2685,7 +2830,45 @@ async function loadRoom(num: number): Promise<void> {
     roomLoadSeq++;
     forceRoomRedraw = true;
     wake();
+    syncRoomLoadingUi();
   }
+}
+
+/**
+ * Fetch the room's voice package (.ffs).
+ *
+ * Fire-and-forget and guarded on `curNum`: the player can be in a different room by
+ * the time it lands, and applying a stale package would give the new room the old
+ * room's voices. Until it arrives, `audio.clearRoom()` has left only the global
+ * packages, so a line that beats it is silent rather than wrong.
+ *
+ * Keyed on the PROMISE, like aiRoomCache: now that this download outlives the room
+ * load that started it, re-entering the same room quickly used to put two fetches of
+ * the same file in flight at once — and two concurrent writes of one (up to 9.37 MB)
+ * cache entry fail with net::ERR_CACHE_WRITE_FAILURE. The entry is dropped once the
+ * fetch settles, so nothing retains these buffers between entries.
+ */
+const voiceLoads = new Map<string, Promise<ArrayBuffer | null>>();
+
+function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): void {
+  if (curNum !== num || screen !== 'room') return;
+  let pending = voiceLoads.get(nnn);
+  if (pending === undefined) {
+    pending = fetch(`/data/Sound/${nnn}.ffs`)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .catch(() => null);
+    voiceLoads.set(nnn, pending);
+    void pending.then(() => voiceLoads.delete(nnn));
+  }
+  void pending.then((buf) => { if (buf && curNum === num) audio.setRoom(fftBytes, new Uint8Array(buf)); });
+}
+
+/** Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it. */
+function startRoomMusic(num: number): void {
+  if (curNum !== num || screen !== 'room') return;
+  const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
+  if (music) void audio.playMusic(music.name, `/data/Music/${music.name}.wav`, music.loopSample);
+  else audio.stopMusic();
 }
 
 /** Make a fish "talk": show the next subtitle of its colour code (M/V) and play its voice. */
@@ -3424,6 +3607,7 @@ function showMap(): void {
   stopRoomClock(); // bank this visit's play time before the room goes away
   endSilentFilm(); // TRoom.Done (URoom.pas:1513): leaving the room un-mutes the game
   screen = 'map';
+  cancelRoomLoadingUi(); // nothing left to wait for — the map paints immediately
   select.value = 'map'; // keep the dev-bar Room picker in sync with the screen
   clearHeldKey(); // drop any held movement key when leaving the room
   endShowmode(); // leaving the room ends any KUFRIK demonstration
@@ -3784,6 +3968,7 @@ function enterRoom(num: number, replay?: string): Promise<void> {
   wake();
   stopRoomClock(); // bank the outgoing room's time before the switch
   screen = 'room';
+  beginRoomLoadingUi(num); // delayed; a cached entry lands before it ever shows
   startRoomClock(num); // TRoom.Start: casstartu := Date+Time
   mapHoverCorner = null; // drop any map corner hover on leaving the map
   mapHoverRoom = null;
@@ -4156,11 +4341,11 @@ function glParityCompare(art: ArtSource): Record<string, unknown> | null {
 function draw(): void {
   if (!room) return;
   mapSig = null; // this frame paints #screen with the room — invalidate the map cache
-  // Enhanced mode: while this room's truecolor art is still loading, hold the
-  // previous frame rather than painting the classic look (which would flash
-  // before popping to enhanced). Cleared as soon as the art resolves (or is
-  // known missing), so rooms without masters still fall back to classic.
-  if (enhancedArtActive() && enhancedPending) return;
+  // While this room's art is still loading, hold the previous frame rather than
+  // painting a tier the player did not ask for — the classic look before enhanced
+  // lands, or the enhanced look before the AI upscale does. Cleared as soon as the
+  // art resolves (or is known missing), so a room with no masters still falls back.
+  if (roomArtPending()) return;
   const phase = engine?.phase ?? 'idle';
   const animFrame = engine?.animFrame ?? 0;
   const exitFrames = engine?.exitFrames ?? 8;
@@ -4659,7 +4844,7 @@ function loopThrottleOk(): boolean {
       !inShowmode() &&
       !loadmode &&
       ostav === O_NORMAL &&
-      !enhancedPending
+      !roomArtPending()
     );
   }
   if (screen === 'map' && worldMap && mapOverlay === 'none') {
@@ -4725,15 +4910,16 @@ function loop(now: number): void {
   // load the game just slows down.
   if (acc > LOGIC_MS * (MAX_STEPS_PER_FRAME + 1)) acc = LOGIC_MS;
   let steps = 0;
-  // While the enhanced anti-flash hold is active (draw() is holding the previous
-  // frame until this room's truecolor art loads), pause the simulation too, so the
+  // While the anti-flash hold is active (draw() is holding the previous frame until
+  // this room's art loads), pause the simulation too, so the
   // room's scripts/gravity/subtitle timers/audio don't advance under a frame that
   // was never shown — keeping logic in sync with the first visible frame (as classic
   // mode inherently is). acc keeps accumulating but the backlog guard above drops it,
   // so there's no fast-forward catch-up when the hold releases.
-  // enhancedArtActive() rather than `graphics === 'enhanced'`: the AI tier draws the
-  // same truecolor art, so it needs the identical hold while that art is still loading.
-  const holding = screen !== 'map' && !cutscene && enhancedArtActive() && enhancedPending;
+  // roomArtPending() rather than `graphics === 'enhanced'`: every tier that draws
+  // truecolor art needs the identical hold while that art is still loading, and the
+  // ai tier additionally waits for its upscale (see roomArtPending).
+  const holding = screen !== 'map' && !cutscene && roomArtPending();
   // The minigame is modal in the original, so the room's timer does not run while
   // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
   tickTetris(dt);
@@ -4801,7 +4987,7 @@ function loop(now: number): void {
     // every wake (its bands scroll per paint), the loop having chosen a ~30fps wake
     // rate for it. When skipped, the last painted frame persists on the canvas.
     const zxAnim = room?.gspec === 42;
-    const sig = `${count}|${enhancedPending ? 1 : 0}|${graphics}|${renderer}|${glFailed ? 1 : 0}`;
+    const sig = `${count}|${roomArtPending() ? 1 : 0}|${graphics}|${renderer}|${glFailed ? 1 : 0}`;
     // The AI compositor repaints a ×S backing store (1740×1620 for a 435×405 room).
     // Doing that on every refresh when NOTHING changed is work the browser cannot
     // absorb: measured 35fps idle and 20fps with a subtitle on screen, against 62fps
@@ -5658,6 +5844,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     heldState,
     phase: engine?.phase ?? 'idle',
     enhancedPending,
+    aiPending,
+    roomArtPending: roomArtPending(),
     ostav,
     forceRoomRedraw,
   }),
@@ -5698,6 +5886,16 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   // does NOT mean the room you asked for is up, because enterRoom() flips the
   // screen synchronously but loads asynchronously.
   roomLoading: () => roomLoading,
+  // Debug: true while the room is still waiting for the art tier it will PRESENT —
+  // the counterpart of roomLoading() for the visual side (see roomArtPending).
+  roomArtPending: () => roomArtPending(),
+  // Debug: is the post-boot room-loading overlay on screen right now?
+  loadingVisible: () => loadingEl?.hidden === false,
+  // Debug: the current room's AI art has finished loading / is actually painting
+  // this frame. Two different questions — the art can be loaded while the frame is
+  // withheld by the aiRoomRenderActive gate (hooks, ZX, frame effects…).
+  aiRoomLoaded: () => aiRoom !== null && aiRoomNum === curNum,
+  aiRoomActive: () => room !== null && aiRoomRenderActive(room),
   // Debug: the room number that is actually built and running (curNum) — not the
   // one currently being loaded.
   roomNum: () => curNum,
@@ -5819,6 +6017,10 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   winCountdown: () => engine?.winCountdown ?? 0,
   clearSubtitles: () => subs?.clear(),
   audioHas: (name: string) => audio.has(name),  playSound: (name: string) => audio.play(name),
+  // Debug: the room's .ffs voice package now loads AFTER the room's art (it is the
+  // bulk of an entry's bytes and nothing visual needs it), so a probe that asserts on
+  // a room-specific SOUND must wait for this rather than for the room itself.
+  roomAudioReady: () => audio.roomLoaded,
   script: () => (activeScript ? { pokus: activeScript.s.pokus, dialog: activeScript.s.isDialog() } : null),
   itemState: (i: number) => {
     const it = room?.items[i];

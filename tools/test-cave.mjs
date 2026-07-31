@@ -40,4 +40,4 @@ await withApp(async ({ p, expect }) => {
   const after = await p.evaluate(() => window.__ff.roompole(1));
   expect(after > before, `ZAVAL roompole[1] persists+increments across restart (${before} -> ${after})`);
   console.log(`roompole persistence OK (${before} -> ${after})`);
-});
+}, { graphics: 'classic' });
