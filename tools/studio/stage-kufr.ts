@@ -137,7 +137,7 @@ const order: string[] = [];               // file name per DECODED frame, in pla
 const stats: { name: string; size: number; noise: number }[] = [];
 let ticks = 0;
 let wrote = 0, skipped = 0;
-let lastDrawn = 0;
+let lastShown = 0;
 
 /**
  * Mean absolute difference between horizontally adjacent pixels.
@@ -160,14 +160,16 @@ function noiseScore(rgba: Uint8Array, w: number, h: number): number {
   return sum / n;
 }
 
-// Record one entry per DECODED frame, keyed by KufrDemo.framesDrawn — the same counter
-// the runtime advances, so the shipped sequence and the playback position cannot drift.
-// Identical frames still share one file (the animation repeats a few), but each decode
-// gets its own slot in `order`.
+// Record one entry per VISIBLE frame, keyed by KufrDemo.framesShown — the same counter
+// the runtime indexes by, so the shipped sequence and the playback position cannot
+// drift. NOT framesDrawn: one tick here decodes two frames and only the second is ever
+// displayed, so a per-decode index runs ahead of what is actually shown.
+// Identical frames still share one file (the animation repeats a few), but each visible
+// state gets its own slot in `order`.
 while (!demo.done && ticks++ < 20000) {
   demo.tick(() => 1, () => false);
-  if (demo.framesDrawn === lastDrawn) continue;   // a hold: nothing decoded this tick
-  lastDrawn = demo.framesDrawn;
+  if (demo.framesShown === lastShown) continue;   // a hold: nothing decoded this tick
+  lastShown = demo.framesShown;
   const rgba = regionRgba();
   const bytes = pngBytes(rgba, DEMO_W, DEMO_H);
   const hash = createHash('md5').update(bytes).digest('hex');

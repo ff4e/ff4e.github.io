@@ -65,12 +65,21 @@ export class KufrDemo {
   /**
    * How many pck frames have actually been DECODED into the canvas (a `pcknum <= 0`
    * record is a hold and does not count).
-   *
-   * The AI tier ships one upscaled image per decoded frame, and both the staging tool
-   * and the runtime index that sequence by this counter — one rule, shared, rather than
-   * each side deciding independently what counts as "the next frame".
    */
   framesDrawn = 0;
+  /**
+   * How many DISTINCT CANVAS STATES have been shown — i.e. ticks in which at least one
+   * frame was decoded. This is the sequence the AI tier ships one upscaled image per,
+   * and BOTH the staging tool and the runtime index by it.
+   *
+   * It is not the same as framesDrawn: one tick of this cutscene decodes TWO frames
+   * (the script emits two draws before its next wait), and only the second is ever
+   * displayed. Indexing by framesDrawn therefore ran one ahead of the shipped sequence
+   * from that point on — showing the previous frame for the rest of the cutscene, and
+   * running off the end of the array at the finish, which silently dropped the whole
+   * hi-res path back to the faithful renderer.
+   */
+  framesShown = 0;
   private readonly script: Cmd[];
   private scriptPos = 0;
   private cekani = 0;
@@ -156,6 +165,7 @@ export class KufrDemo {
    */
   tick(onCaption: (name: string) => number, isPlaying: () => boolean): void {
     if (this.done) return;
+    const drawnBefore = this.framesDrawn;
     if (this.cekani > 0) this.cekani--;
     // Process zero-delay commands until we hit a wait.
     let guard = 0;
@@ -187,6 +197,7 @@ export class KufrDemo {
           break;
       }
     }
+    if (this.framesDrawn !== drawnBefore) this.framesShown++;
   }
 
   /** Current canvas as an RGBA buffer (using the base palette). */

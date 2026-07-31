@@ -2477,6 +2477,7 @@ let aiKufrTried = false;
 const aiKufrFrames = new Map<string, ImageBitmap>();
 const AI_KUFR_CACHE_MAX = 24;
 const aiKufrLoading = new Set<string>();
+let aiKufrRangeWarned = false;
 
 async function ensureAiKufr(): Promise<void> {
   if (aiKufrTried) return;
@@ -2524,6 +2525,7 @@ function loadAiKufrFrame(name: string): void {
 
 /** Release the cutscene's decoded art (~37 MB of frames at ×4). */
 function disposeAiKufr(): void {
+  aiKufrRangeWarned = false;
   for (const b of aiKufrFrames.values()) b.close();
   aiKufrFrames.clear();
   aiKufr?.base.close();
@@ -2548,10 +2550,18 @@ function drawCutscene(): void {
   // indexed frame. When the vector overlay is unavailable (no subtitle font) it stands
   // down entirely rather than drop the narration text — same rule as the room gate.
   if (graphics === 'ai' && !aiKufrTried) void ensureAiKufr();
-  const aiFrameName = aiKufr ? aiKufr.order[Math.max(0, cutscene.framesDrawn - 1)] ?? '' : '';
+  const aiFrameIdx = Math.max(0, cutscene.framesShown - 1);
+  const aiFrameName = aiKufr ? aiKufr.order[aiFrameIdx] ?? '' : '';
+  // Running past the end means the shipped sequence and the decoder disagree. The
+  // consequence is a silent mid-cutscene drop back to the faithful renderer, which is
+  // exactly how the framesDrawn/framesShown mix-up hid, so say it once.
+  if (aiKufr && !aiFrameName && !aiKufrRangeWarned) {
+    aiKufrRangeWarned = true;
+    console.warn(`AI cutscene: frame ${aiFrameIdx} is past the shipped sequence (${aiKufr.order.length}); falling back`);
+  }
   if (aiKufr && aiFrameName) {
     loadAiKufrFrame(aiFrameName);
-    for (let i = 1; i <= 4; i++) loadAiKufrFrame(aiKufr.order[cutscene.framesDrawn - 1 + i] ?? '');
+    for (let i = 1; i <= 4; i++) loadAiKufrFrame(aiKufr.order[cutscene.framesShown - 1 + i] ?? '');
   }
   const aiBmp = graphics === 'ai' && useVec && aiKufr ? aiKufrFrames.get(aiFrameName) ?? null : null;
   if (aiBmp && aiKufr) {
