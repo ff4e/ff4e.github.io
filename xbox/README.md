@@ -75,9 +75,32 @@ manifest `Publisher` and the signing certificate together, or packaging fails.
 3. **Open Device Portal** — from the Dev Mode home screen note the console's IP, then browse
    to `https://<xbox-ip>:11443` from a PC/Mac on the same network and log in with the
    credentials shown on the console.
-4. **Sideload** — Device Portal → *Add / Install app* → upload the `.msix`. If it refuses
-   the signature, upload the bundled `ff4e.cer` as the certificate first.
+4. **Sideload** — Device Portal → *Add / Install app* → upload the `.msix`. **Also add every
+   `.appx` from the artifact's `Dependencies/` folder as dependency packages** — the console
+   does not ship WinUI 2 / .NET Native, and without them the app installs but dies on the
+   splash screen (see Troubleshooting). If it refuses the signature, upload the bundled
+   `ff4e.cer` as the certificate first.
 5. **Launch** it from the Dev Mode home screen.
+
+## Troubleshooting
+
+**Splash screen appears, then the app closes straight back to Dev Home.**
+Almost always a missing framework dependency. The package declares these, and none of them
+are preinstalled on a console:
+
+- `Microsoft.UI.Xaml.2.8` (WinUI 2 — supplies the WebView2 control)
+- `Microsoft.NET.Native.Framework.2.2` and `Microsoft.NET.Native.Runtime.2.2`
+- `Microsoft.VCLibs.140.00` (+ `.UWPDesktop`)
+
+Install every `.appx` in the artifact's `Dependencies/` folder, then reinstall the app.
+Device Portal's install form has a separate field for dependency packages; add them there
+rather than installing the app alone.
+
+**"Couldn't start the browser engine (WebView2)."** The console is on an Xbox OS older than
+2310 (October 2023). Update it.
+
+**The game renders but the controller does nothing.** Xbox is still handing the pad to the
+app as an emulated mouse pointer — check `RequiresPointerMode` in `App.xaml.cs`.
 
 ## On-device checklist
 

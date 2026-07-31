@@ -99,13 +99,36 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path out | Out-Null
           $pkg = Get-ChildItem -Path xbox -Recurse -Include *.msix, *.appx |
-                 Where-Object { $_.FullName -notmatch 'Dependencies' } |
+                 Where-Object { $_.DirectoryName -notmatch 'Dependencies' } |
                  Sort-Object Length -Descending |
                  Select-Object -First 1
           if (-not $pkg) { Write-Error "No .msix/.appx produced — check the build log."; exit 1 }
           Copy-Item $pkg.FullName out\
           Copy-Item "$env:RUNNER_TEMP\ff4e.cer" out\
           Write-Host "Package: $($pkg.Name)  ($([math]::Round($pkg.Length/1MB,1)) MB)"
+
+          # Framework dependencies (WinUI 2 / WebView2, .NET Native, VCLibs). A console
+          # does NOT have these preinstalled, and without them the app installs fine but
+          # dies on the splash screen because it cannot resolve them at activation, so
+          # they must be shipped and installed alongside the package.
+          New-Item -ItemType Directory -Force -Path out\Dependencies | Out-Null
+          $deps = Get-ChildItem -Path xbox -Recurse -Include *.appx, *.msix |
+                  Where-Object { $_.DirectoryName -match 'Dependencies' -and $_.DirectoryName -match 'x64|arm64|\\Dependencies$' } |
+                  Where-Object { $_.DirectoryName -notmatch 'arm' }
+          foreach ($d in $deps) { Copy-Item $d.FullName out\Dependencies\ -Force }
+          $names = (Get-ChildItem out\Dependencies | Select-Object -ExpandProperty Name) -join ', '
+          Write-Host "Dependencies collected: $(@(Get-ChildItem out\Dependencies).Count) -> $names"
+
+          # The app's declared dependencies, so the log shows at a glance whether any
+          # required framework is missing from the folder above.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.FullName)
+          $entry = $zip.GetEntry('AppxManifest.xml')
+          $sr = New-Object System.IO.StreamReader($entry.Open())
+          $xml = [xml]$sr.ReadToEnd()
+          $sr.Close(); $zip.Dispose()
+          Write-Host "Declared PackageDependency entries:"
+          foreach ($d in $xml.Package.Dependencies.PackageDependency) { Write-Host "  - $($d.Name) $($d.MinVersion)" }
 
       - uses: actions/upload-artifact@v4
         with:
