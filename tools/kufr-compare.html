@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Briefcase demo — original vs AI upscale</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: #14161a; color: #d7dbe0;
+    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    display: flex; flex-direction: column; height: 100vh;
+  }
+  header { padding: 10px 14px; border-bottom: 1px solid #262b33; display: flex; gap: 18px; align-items: baseline; }
+  h1 { font-size: 14px; margin: 0; font-weight: 600; }
+  .hint { color: #7d858f; }
+  #stagewrap { flex: 1; display: grid; place-items: center; overflow: auto; padding: 16px; }
+  /* The two renders are stacked exactly; the top one is revealed by the wipe. */
+  #stage { position: relative; line-height: 0; box-shadow: 0 6px 30px #0008; cursor: ew-resize; }
+  #stage canvas { display: block; }
+  #ai { position: absolute; inset: 0; }
+  #handle {
+    position: absolute; top: 0; bottom: 0; width: 2px; background: #ffcc33;
+    box-shadow: 0 0 0 1px #0006; pointer-events: none;
+  }
+  #handle::after {
+    content: ''; position: absolute; top: 50%; left: 50%; width: 26px; height: 26px;
+    transform: translate(-50%, -50%); border-radius: 50%; background: #ffcc33;
+    box-shadow: 0 0 0 1px #0006;
+  }
+  .tag {
+    position: absolute; top: 8px; padding: 2px 7px; border-radius: 3px;
+    background: #000a; font-size: 11px; letter-spacing: .04em; pointer-events: none;
+  }
+  #tagL { left: 8px; } #tagR { right: 8px; }
+  footer { border-top: 1px solid #262b33; padding: 10px 14px; display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+  button {
+    background: #232830; color: #d7dbe0; border: 1px solid #333a45; border-radius: 5px;
+    padding: 5px 11px; cursor: pointer; font: inherit;
+  }
+  button:hover { background: #2b313b; }
+  button.on { background: #ffcc33; color: #14161a; border-color: #ffcc33; }
+  input[type=range] { width: 260px; }
+  #frame { width: 340px; }
+  label { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+  code { color: #ffcc33; }
+  #status { color: #7d858f; margin-left: auto; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Briefcase demo — original vs AI upscale</h1>
+  <span class="hint">drag on the picture to wipe · <code>space</code> play/pause · <code>←/→</code> step</span>
+</header>
+
+<div id="stagewrap">
+  <div id="stage">
+    <canvas id="orig"></canvas>
+    <canvas id="ai"></canvas>
+    <div id="handle"></div>
+    <div class="tag" id="tagL">ORIGINAL ×4 nearest</div>
+    <div class="tag" id="tagR">AI UPSCALE</div>
+  </div>
+</div>
+
+<footer>
+  <button id="play">▶︎ Play</button>
+  <label>frame <input type="range" id="frame" min="0" value="0"></label>
+  <span id="fnum">0</span>
+  <label>fps <input type="range" id="fps" min="1" max="30" value="13"></label>
+  <span id="fpsv">13</span>
+  <label>zoom
+    <select id="zoom">
+      <option value="fit">fit</option>
+      <option value="1">100%</option>
+      <option value="2">200%</option>
+      <option value="4">400%</option>
+    </select>
+  </label>
+  <button id="region" title="Show only the animated TV-screen region">region only</button>
+  <span id="status">loading…</span>
+</footer>
+
+<script type="module">
+// Paths are repo-relative; serve this file from the repository root.
+const NAT = '/public/enhanced/_kufr';
+const AI  = '/public/enhanced-ai/_kufr';
+
+const origC = document.getElementById('orig');
+const aiC   = document.getElementById('ai');
+const og = origC.getContext('2d');
+const ag = aiC.getContext('2d');
+
+const man   = await (await fetch(`${AI}/ai.json`)).json();          // scale, region, base, order
+const S     = man.scale;
+const REG   = man.region;                                          // 135,25,380,285
+const BASE  = man.base;                                            // 720x555
+const ORDER = man.order;                                           // one entry per VISIBLE frame
+
+const load = (src) => new Promise((res, rej) => {
+  const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src;
+});
+
+const [natBase, aiBase] = await Promise.all([load(`${NAT}/base.png`), load(`${AI}/base.webp`)]);
+
+// Frames are fetched lazily and kept — 285 of each is fine for a desktop review tool.
+const natCache = new Map(), aiCache = new Map();
+const frameOf = async (name) => {
+  const png = name.replace(/\.webp$/, '.png');
+  if (!natCache.has(name)) natCache.set(name, load(`${NAT}/frames/${png}`).catch(() => null));
+  if (!aiCache.has(name)) aiCache.set(name, load(`${AI}/frames/${name}`).catch(() => null));
+  return { nat: await natCache.get(name), ai: await aiCache.get(name) };
+};
+
+let idx = 0, playing = false, fps = 13, wipe = 0.5, zoom = 'fit', regionOnly = false;
+
+const stage = document.getElementById('stage');
+const handle = document.getElementById('handle');
+const status = document.getElementById('status');
+
+/** Size both canvases to the AI resolution, then scale the whole stage with CSS. */
+function layout() {
+  const w = (regionOnly ? REG.w : BASE.w) * S;
+  const h = (regionOnly ? REG.h : BASE.h) * S;
+  for (const c of [origC, aiC]) { if (c.width !== w || c.height !== h) { c.width = w; c.height = h; } }
+  let cssW;
+  if (zoom === 'fit') {
+    const box = document.getElementById('stagewrap').getBoundingClientRect();
+    cssW = Math.min(w, Math.max(200, box.width - 32), (box.height - 32) * (w / h));
+  } else {
+    cssW = (regionOnly ? REG.w : BASE.w) * Number(zoom);
+  }
+  const cssH = cssW * (h / w);
+  for (const c of [origC, aiC]) { c.style.width = `${Math.round(cssW)}px`; c.style.height = `${Math.round(cssH)}px`; }
+  stage.style.width = `${Math.round(cssW)}px`;
+  stage.style.height = `${Math.round(cssH)}px`;
+  applyWipe();
+}
+
+function applyWipe() {
+  const pct = Math.round(wipe * 10000) / 100;
+  aiC.style.clipPath = `inset(0 0 0 ${pct}%)`;
+  handle.style.left = `${pct}%`;
+}
+
+async function draw() {
+  const name = ORDER[idx];
+  const { nat, ai } = await frameOf(name);
+  const ox = regionOnly ? -REG.x * S : 0;
+  const oy = regionOnly ? -REG.y * S : 0;
+
+  // ORIGINAL: native art blown up with nearest-neighbour, i.e. what the tier replaces.
+  og.imageSmoothingEnabled = false;
+  og.setTransform(1, 0, 0, 1, 0, 0);
+  og.clearRect(0, 0, origC.width, origC.height);
+  og.drawImage(natBase, ox, oy, BASE.w * S, BASE.h * S);
+  if (nat) og.drawImage(nat, ox + REG.x * S, oy + REG.y * S, REG.w * S, REG.h * S);
+
+  // AI: the shipped upscale, drawn 1:1.
+  ag.imageSmoothingEnabled = false;
+  ag.setTransform(1, 0, 0, 1, 0, 0);
+  ag.clearRect(0, 0, aiC.width, aiC.height);
+  ag.drawImage(aiBase, ox, oy);
+  if (ai) ag.drawImage(ai, ox + REG.x * S, oy + REG.y * S);
+
+  document.getElementById('fnum').textContent = `${idx + 1} / ${ORDER.length}`;
+  document.getElementById('frame').value = String(idx);
+  status.textContent = `${name}${nat ? '' : '  (native frame missing)'}`;
+}
+
+// ---- playback -------------------------------------------------------------
+let acc = 0, last = 0;
+function loop(t) {
+  if (playing) {
+    if (!last) last = t;
+    acc += t - last; last = t;
+    const step = 1000 / fps;
+    if (acc >= step) {
+      acc = 0;
+      idx = (idx + 1) % ORDER.length;
+      void draw();
+    }
+  } else { last = 0; }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---- controls -------------------------------------------------------------
+const playBtn = document.getElementById('play');
+playBtn.addEventListener('click', () => {
+  playing = !playing;
+  playBtn.textContent = playing ? '❚❚ Pause' : '▶︎ Play';
+  playBtn.classList.toggle('on', playing);
+});
+const frameSlider = document.getElementById('frame');
+frameSlider.max = String(ORDER.length - 1);
+frameSlider.addEventListener('input', () => { idx = Number(frameSlider.value); void draw(); });
+document.getElementById('fps').addEventListener('input', (e) => {
+  fps = Number(e.target.value); document.getElementById('fpsv').textContent = String(fps);
+});
+document.getElementById('zoom').addEventListener('change', (e) => { zoom = e.target.value; layout(); });
+const regionBtn = document.getElementById('region');
+regionBtn.addEventListener('click', () => {
+  regionOnly = !regionOnly;
+  regionBtn.classList.toggle('on', regionOnly);
+  layout(); void draw();
+});
+
+// Drag anywhere on the picture to move the wipe.
+let dragging = false;
+const setWipe = (clientX) => {
+  const r = stage.getBoundingClientRect();
+  wipe = Math.min(1, Math.max(0, (clientX - r.left) / r.width));
+  applyWipe();
+};
+stage.addEventListener('pointerdown', (e) => { dragging = true; stage.setPointerCapture(e.pointerId); setWipe(e.clientX); });
+stage.addEventListener('pointermove', (e) => { if (dragging) setWipe(e.clientX); });
+stage.addEventListener('pointerup', (e) => { dragging = false; stage.releasePointerCapture(e.pointerId); });
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); playBtn.click(); }
+  else if (e.code === 'ArrowRight') { idx = (idx + 1) % ORDER.length; void draw(); }
+  else if (e.code === 'ArrowLeft') { idx = (idx - 1 + ORDER.length) % ORDER.length; void draw(); }
+});
+window.addEventListener('resize', layout);
+
+layout();
+await draw();
+// Warm the first stretch so playback is smooth from the start.
+for (let i = 0; i < 40 && i < ORDER.length; i++) void frameOf(ORDER[i]);
+</script>
+</body>
+</html>

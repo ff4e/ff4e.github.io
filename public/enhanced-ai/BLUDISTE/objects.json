@@ -1,0 +1,1 @@
+{"objects":[{"x":18,"y":14,"type":"item_light","frames":["koral_b.png"],"item":1},{"x":19,"y":29,"type":"item_light","frames":["maly_snek_00.png","maly_snek_01.png","maly_snek_02.png","maly_snek_03.png"],"item":2},{"x":19,"y":31,"type":"item_heavy","frames":["3-ocel.png"],"item":3}]}

@@ -12,7 +12,14 @@
  * (FFNG's `rush` is a redesigned 37×37 level with colored pistons, NOT the original
  * 41×38 beast-push room — verified via fillets-ng-data 1.0.1 models.lua — so its moves
  * do not fit the port and it is unmapped); SCORE #72 (results screen, non-playable);
- * LODE #19, GRAL #64 (loose geometric catch-all rooms many strings reach).
+ * LODE #19, GRAL #64 (gspec=9 push-out rooms with no corpus solution — see below).
+ *
+ * LODE/GRAL were long labelled "loose geometric catch-all rooms many strings reach".
+ * That was an artifact of `tools/map-ffng.ts` replaying physics only: it ignored
+ * `gspec` and let fish exit rooms the original forbids them to exit
+ * (`if (gspec<>9)and(kontroluj_okraje>0)`, URoom.pas:24295), so unrelated move strings
+ * appeared to win them. The tool now honours gspec and they no longer swallow anything;
+ * they are simply unmapped because the FFNG corpus ships no solution for either.
  */
 export const SOLUTION_ROOMS: Record<string, number> = {
   // --- clean auto-derived (unique physics-win) ---

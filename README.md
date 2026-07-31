@@ -69,7 +69,10 @@ GPL-2.0-or-later.
   tutorial's `1st-m-backspace` line teaches Backspace = start over). **Save**/**load** (`F2`/`F3`) persist the
   log to `localStorage` **plus a snapshot of the script state** (every object's Vars + `roompole`/`globpole`),
   so loading restores the "already said"/progress flags and the fish don't re-say lines they already spoke
-  (the original re-derives these by re-running `Programky` during a suppressed load replay). `src/core/record.ts`
+  (the original re-derives these by re-running `Programky` during a suppressed load replay). Saving is gated
+  on `CanSave` (`URoom.pas:26900`): the original only allows it from a recoverable position — both fish alive,
+  or one alive with the other already out — so **a dead fish blocks saving**, and the panel's save button
+  greys out to say so. `src/core/record.ts`
   + a headless replay engine in `main.ts`. (Single-slot; the stats/competition system is deferred.)
 - **Object animation (`goanim`, done):** the `Anim`-string interpreter (`src/core/script.ts`) that runs each
   object's compact animation program (`a`=frame, `d`=delay, `s`=set-var, `l`/`g` loop, `r` restart, `?a-b`
@@ -99,16 +102,46 @@ GPL-2.0-or-later.
   (`src/app/intro.ts`, HTML5 `<video>`), then the persisted `introSeen` flag suppresses it (the original's
   `START`→`NO`, `UMain.pas:677`); a "click to start" splash unlocks audio, and click/Esc/any key skips. Also
   replayable from the map's top-left corner. Transcode the AVIs first (see *Intro movies* under Original data).
-- **Cheat code (`xwemaketherules`, done):** the original room cheat (`URoom.pas:24666` — sets `datcheatu`,
-  `konec:=1`, `RoomVysl:=0`). Type `xwemaketherules` while in a room (or call `__ff.cheat()`) to mark it
-  solved-by-cheat and jump back to the map: the room still unlocks its successor, but its node shows the
-  cheat state rather than a clean solve. Persisted in `localStorage` (`ff.cheated`). `Escape` toggles between
-  the current room and the world map.
-- **Easter egg (`xscore`, done):** type `xscore` anywhere to open the hidden **SCORE** bonus room (room 72,
-  a line-up-the-blocks score puzzle). SCORE is deliberately kept off the world map and out of the endgame, so
-  this typed code (matching the original's `x`-prefixed cheats) is the only way in. The **ZAVER** finale
-  (room 71) is the counterpart: it auto-launches once all 70 registered rooms are genuinely solved
-  (`pustitzaver`, `USoutez.pas:729` → `av:=9`, `UMain.pas:948`).
+- **Cheat codes (all twelve, done):** the original's cheat table (`Uovl.pas:166-182`) ships XOR-obfuscated;
+  decoded, it is `MEGABOMB TETRIS UNDEAD MORPH FISHER STORM INTERLACED SILENT WEMAKETHERULEZ IAMACHEATER
+  SCORE ULTRAVIOLENCE`. Entry follows `ZaznamenejPrikazKlavesou` (`Uovl.pas:744`): press **`X`** to arm, then
+  type the word — a key repeated immediately is not counted twice, and the first letter that cannot continue
+  any code parks the machine until the next `X`. In a room (`URoom.pas:24534-24690`):
+
+  | Code | Effect |
+  |---|---|
+  | `xmegabomb` | kills both fish, with a white flash |
+  | `xtetris` | opens the **Tetris minigame** (below) |
+  | `xundead` | flips the fish sprites — zombie fish |
+  | `xmorph` | each fish takes the other's shape |
+  | `xfisher` | drops a fishing hook (`Hacky`) |
+  | `xstorm` | whips the water up |
+  | `xinterlaced` | collapses the screen in on itself |
+  | `xsilent` | silent-movie mode: sepia, film grain, intertitle cards, sound off |
+  | `xwemaketherulez` | marks the room solved-by-cheat and returns to the map |
+  | `xiamacheater` | accepted, and deliberately does nothing (its Delphi body is commented out) |
+
+  All of them are room-scoped: they survive a restart and die on a room change, because `TRoom.Init` clears
+  them in the same block that zeroes `roompole` (`URoom.pas:1430-1433`). `xwemaketherulez` still unlocks the
+  room's successor, but its map node shows the cheat state rather than a clean solve, persisted in
+  `localStorage` (`ff.cheated`); `__ff.cheat()` does the same. `Escape` toggles between the current room and
+  the world map.
+- **Map-screen cheats (`xscore`, `xultraviolence`, done):** two codes only work on the world map, exactly as
+  in the original (`UMain.pas:1773-1780`; `URoom` has no case for either). `xscore` opens the hidden **SCORE**
+  bonus room (room 72, a line-up-the-blocks score puzzle), deliberately kept off the map and out of the
+  endgame, so this is the only way in. `xultraviolence` arms hooks mode: every room entered afterwards starts
+  with a fishing hook already descending (`URoom.pas:1503`). The **ZAVER** finale (room 71) is SCORE's
+  counterpart: it auto-launches once all 70 registered rooms are genuinely solved (`pustitzaver`,
+  `USoutez.pas:729` → `av:=9`, `UMain.pas:948`).
+- **Tetris minigame (done):** `Ttr/Ttr.pas`, one of the nine units in `Fillets.dpr`'s compile closure and a
+  complete playable game, launched by `xtetris` from a room or the map. Not to be confused with the **TETRIS
+  room** (room 65), an ordinary dialogue room where the fish reminisce about falling blocks. The original
+  opens it as a modal window that freezes the room's timer; the port draws the 150×300 board over the frozen
+  room and takes the keyboard until `Escape`. Faithful to the quirks that make it *this* game: rotation runs
+  backwards, **Down rotates** and **Space slams** (there is no soft drop), a full row is blanked for a tick
+  before it collapses, consecutive rows pay 50 × a rising bonus, and the fall speed steps from 11 ticks per
+  row down to 2. The top-ten table persists (`ff.tetris`; the original's `ttr.pic`). `src/core/tetris.ts`,
+  `src/render/tetrisRender.ts`.
 - **M8 — room scripting (in progress):** built the script runtime — the dialog scheduler
   (`addd`/`addm`/`addv`/`dialogy`, a serial speech queue), the context helpers (`Vars`, `dist`/`xdist`/
   `ydist`/`look_at`, `zije`/`natoceni`/`venku`, `busy`/`delay` idle-timers, `playing`, `random`, `pokus`),
@@ -154,12 +187,44 @@ GPL-2.0-or-later.
 Automated, deterministic, **non-AI** (no LLM/vision at runtime — plain assertions):
 
     npm test        # unit + physics (Vitest, headless, no browser, no game data needed)
-    npm run test:ui # browser/integration (Playwright; auto-starts the dev server)
+    npm run test:ui # browser/integration (Playwright; builds the app and serves it)
     npm run test:all # typecheck + unit + UI, in sequence, fail-fast (the full gate)
     npm run test:solutions # replay known FFNG solutions per room (needs $FFNG_DATA)
 
 `npm run test:all` chains `typecheck && test && test:ui` — the one command to run before
 considering a change done (it stops at the first failing phase).
+
+### How the UI suite runs — read this before adding a probe
+
+`tools/run-ui-tests.mjs` builds the app (`vite build`, ~2s), serves the result on a dedicated
+port, and runs the probes **concurrently**. It used to run them one at a time, each in its own
+cold Chromium, which took ~15 minutes; it now takes ~3, with the same probes and the same
+assertions.
+
+- **A worker pool** runs `FF_UI_JOBS` probes at once (default: `max(2, cores−2)`, capped at 8 — more is
+  counterproductive, because the game clock is wall-clock driven and slows under load). Each
+  probe is still its own `node` process with its own browser context, so the isolation probes
+  rely on (localStorage, saved games) is unchanged. Output is buffered per probe.
+- **Two shared browser servers** (plain, and ANGLE for the WebGL probes) are launched once and
+  advertised over `FF_WS_PLAIN` / `FF_WS_ANGLE`. Get a browser with `launchBrowser()` from
+  `ui-lib.mjs`, never `chromium.launch()` — run a probe by hand and it launches its own.
+- **Wait on conditions, never on the clock.** Use `waitRoom()`, `waitTicks()` and
+  `selectRoom()` from `ui-lib.mjs`. A fixed `waitForTimeout` and a timeout sized just above a
+  wait's nominal duration both become races once eight probes share the machine: the game clock
+  is wall-clock driven and never fast-forwards, so under load a fixed sleep silently buys fewer
+  game ticks than it did when it was written. Legacy `waitForTimeout` calls still exist in older
+  probes; prefer `waitTicks()` in anything you touch.
+- **`screen() === 'room'` does not mean your room is up.** `enterRoom()` flips the screen
+  synchronously but loads asynchronously; act in that window and the room build landing a
+  moment later discards what you did. `waitRoom()`/`selectRoom()` gate on `__ff.roomLoading()`
+  and `__ff.roomNum()` for you.
+- **`waitForFunction(fn, { timeout })` silently ignores that timeout** — options are the
+  *third* argument; as the second it is taken as the predicate's `arg`, leaving the 30s default.
+  Most existing probes still use the two-argument form (harmlessly, since 30s is more generous
+  than what they ask for); new and touched code should use the three-argument form.
+- If a probe asserts on **wall-clock behaviour** (frame rate, tick rate, animation pacing,
+  per-frame motion), add it to `EXCLUSIVE` in the runner so it gets the machine to itself.
+  Do not relax its bounds instead.
 
 - **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test`): the
   **solvability net** — replays committed known-good FFNG solution move-strings
@@ -179,13 +244,17 @@ considering a change done (it stops at the first failing phase).
   the `setBusy` primitive, the **`StdSmrt` death commentary** (Depth-gated survivor lines, the +8-tick fire
   window), and a corpus test that parses all 72 real rooms and checks their load settle (auto-skips when the
   game data isn't present; point `$FFNG_DATA` at the extracted `MAINDIR` to run it).
-- **`npm run test:ui`** (`tools/test-*.mjs`, 17 tests): the HUD (render + hit-test + button dispatch), the
+- **`npm run test:ui`** (`tools/test-*.mjs`, 68 probes): the HUD (render + hit-test + button dispatch), the
   world map (compositing + node hit-test + branch unlock + navigation), the map/room **audio lifecycle**
   (menu music, `KillSnd` + dialogue-clear on leaving), per-room music, the fixed-timestep clock + dialogue
   pacing, lip-sync heads, save/restart determinism, the faithful **input map** (arrow keys move the active
   fish, Space swaps, 1/2 select, right-click steps toward the cursor, click-select is silent), **exit/win**
-  (both fish out → solved → recorded in the progression), the **`xwemaketherules` cheat** (typed in a room or
-  `__ff.cheat()` → returns to the map, records the room as cheat-solved, still unlocks the next room),
+  (both fish out → solved → recorded in the progression), the **cheat codes** (the `X`-armed entry machine and
+  every code, typed on the real keyboard — including `xwemaketherulez` returning to the map with the room
+  recorded as cheat-solved and its successor still unlocked), the **Tetris minigame** (launch from a room and
+  the map, its own clock, the room frozen underneath, the controls, the persistent hiscore), **save gating**
+  (`CanSave` — a dead fish refuses `F2` and the panel button, and greys the button out), **`cas_hry`**
+  (per-room play time banked on room close, map time excluded, surviving a reload),
   **SCHODY**/**KNIHOVNA** end-to-end smoke tests (each room's Programky runs many ticks against real game data
   without error), the **ambient idle chatter** (`StdKecej` — the x03 bank loads, a chatter timer exists in
   ported and unported rooms, and forcing it due speaks a line), and the **death model** (`StdSmrt` — a lone

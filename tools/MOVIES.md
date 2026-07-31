@@ -37,6 +37,40 @@ higher-quality option; wiring the port to prefer it (globally, or only in
 Enhanced-graphics mode) is a one-line change in `src/app/main.ts` (the
 `INTRO_MOVIE` constant).
 
+## AI-upscaled variants (the `ai` graphics level)
+
+The third graphics level, **AI-upscaled** (dev-toolbar Graphics combobox / `E`
+hotkey), plays AI-super-resolved encodes of the logo + intro when they exist, and
+otherwise falls back to the faithful/clean encodes above (see `logoMovie()` /
+`introMovie()` in `src/app/main.ts`). classic + enhanced are unaffected.
+
+| File | Description |
+|------|-------------|
+| `logo_ai.mp4` | AI upscale of `logo.mp4`. |
+| `intro_ai.mp4` | AI upscale of `intro_clean.mp4` (the cleaned base, so the burst fix is inherited). |
+
+Built by `tools/build-movies-ai.mjs` (`npm run build-movies-ai [logo|intro]`).
+Per movie it extracts every frame, AI-upscales the frame folder with **Real-ESRGAN
+ncnn-vulkan** (the same upscaler as `tools/build-cover.py`), then re-encodes at the
+source frame rate and copies the original audio. The default model is
+`realesr-animevideov3-x4` — Real-ESRGAN's **video** model, which cleanly de-blocks
+the smooth 1998 CGI (removing the Cinepak VQ blocks) without hallucinating texture
+or drifting frame-to-frame. Frames are upscaled x4 (2560 wide) then supersampled
+**down** to 1920 wide (`AI_OUT_WIDTH`) for a clean result at a reasonable file size.
+
+The upscaler binary + models are **not** in the repo (same policy as
+`build-cover.py`); the committed `*_ai.mp4` are the outputs, so a normal site build
+needs neither Python, ffmpeg, nor the upscaler:
+
+    export REALESRGAN_NCNN=/path/to/realesrgan-ncnn-vulkan   # its dir must hold ./models
+    npm run build-movies-ai        # needs ffmpeg on PATH
+    # env overrides: AI_MODEL=realesr-animevideov3-x4  AI_SCALE=4  AI_OUT_WIDTH=1920  AI_CRF=23
+
+Download the binary from https://github.com/xinntao/Real-ESRGAN/releases
+(`realesrgan-ncnn-vulkan-*-macos`). Being derived from this port's own faithful
+encodes (themselves from the GPL-released Fish Fillets data), the AI outputs stay
+GPL-clean — no third-party assets.
+
 ## The burst fix (why `intro_clean` exists)
 
 **The problem.** At a couple of points the intro globe suddenly posterizes into

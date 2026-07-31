@@ -5,18 +5,21 @@
  * big fish (the original look_at only works for the fish, so the painters must BE
  * the fish; see zdviz1.ts).
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoomAwait(20));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'ZDVIZ1 has an active script');
 
   const start = await p.evaluate(() => window.__ff.count());
-  await p.waitForFunction((s) => window.__ff.count() >= s + 30, start, { timeout: 6000 }).catch(() => {});
+  await waitTicks(p, start, 30);
   const advanced = (await p.evaluate(() => window.__ff.count())) - start;
   expect(advanced >= 30, `ZDVIZ1 Programky ran ${advanced} ticks without error`);
+  // ...and the script survived them. `advanced` alone only says the CLOCK moved;
+  // a Programka that threw itself off the dispatch list would leave it moving.
+  expect(await p.evaluate(() => window.__ff.script() !== null), 'ZDVIZ1 script still active after 30 ticks');
 
   const match = await p.evaluate(() => {
     const st = window.__ff.state();

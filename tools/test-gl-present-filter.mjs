@@ -9,27 +9,26 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { chromium } from 'playwright';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
-const PORT = process.env.FF_UI_PORT ?? '5173';
 
-const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=metal', '--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser({ gl: true });
 const p = await b.newPage({ viewport: { width: 1000, height: 640 } });
 const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
-await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate(() => window.__ff.enterRoomAwait(6));
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 10, { timeout: 8000 });
+await waitRoom(p, 10);
 
 const res = await p.evaluate(() => window.__ff.glPresentFilterProbe());
 if (!res || res.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 let ok = true;
@@ -45,4 +44,4 @@ else console.log('  OK   crisp present after smooth is NEAREST again — no filt
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

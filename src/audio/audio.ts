@@ -52,6 +52,13 @@ export class AudioEngine {
   private musicSrc: AudioBufferSourceNode | null = null;
   private musicGain: GainNode | null = null;
   private musicName = '';
+  /** Name of the track whose async decode/start is currently in flight, if any.
+   *  Guards against a second concurrent start for the same track spawning a second
+   *  overlapping loop that stopMusic() can't fully cancel (see playMusic). */
+  private musicStarting: string | null = null;
+  /** Bumped by every start and every stop, so an in-flight start can tell whether it
+   *  is still the current intent by the time its decode resolves (see playMusic). */
+  private musicGen = 0;
   private musicBufs = new Map<string, AudioBuffer>();
   /** Debug: recent play names with a timestamp (ring buffer) + a console line so the
    *  source of any glitch can be identified live in the browser console. */
@@ -148,11 +155,21 @@ export class AudioEngine {
   }
 
   /** Play a sound by name (no-op if unknown). `volume` is a 0..1 gain. `bus`
-   *  selects the category output (effects by default; voices for dialogue). */
+   *  selects the category output (effects by default; voices for dialogue).
+   *
+   *  With a `prior` the sound goes through the same priority-tracked path as `snd`
+   *  (startTracked). The original has a single mixer and `KSnd(prior)` (RSound.pas:946)
+   *  kills every channel of that priority regardless of how it was started, so a voice
+   *  (Talk) must be as killable as an effect (Snd) — otherwise a scripted shush like
+   *  MIKRO's `KSnd(101..104)` clears only the bookkeeping and the sample plays on. */
   play(name: string, volume = 1, prior?: number, bus: VolumeBus = 'effect'): void {
     const buf = this.buffer(name);
     if (!buf) return;
     this.logSound(name, volume);
+    if (prior !== undefined) {
+      this.startTracked(buf, prior, false, volume, bus);
+      return;
+    }
     const ctx = this.ensureCtx();
     const src = ctx.createBufferSource();
     src.buffer = buf;
@@ -164,7 +181,6 @@ export class AudioEngine {
     // Track the source so KillSnd can stop it when leaving a room.
     this.voices.add(src);
     src.addEventListener('ended', () => this.voices.delete(src));
-    if (prior !== undefined) this.activeUntil.set(prior, performance.now() + buf.duration * 1000);
   }
 
   /**
@@ -257,13 +273,12 @@ export class AudioEngine {
     this.startTracked(buf, prior, loop, volume, 'music');
   }
 
-  /** KSnd (RSound.pas): stop only the effect(s) of a given priority. */
+  /** KSnd (RSound.pas:946): stop every channel of a given priority — effect or voice.
+   *  The original has one mixer, so anything sounding at `prior` dies here. */
   killVoice(prior: number): void {
-    // KSnd(-999) targets the looping room music (a distinct source, not a voice).
-    if (prior === MUSIC_PRIOR) {
-      this.stopMusic();
-      return;
-    }
+    // KSnd(-999) targets the looping room music (a distinct source, not a voice) —
+    // plus any tracked source that was started on that priority (a packaged band track).
+    if (prior === MUSIC_PRIOR) this.stopMusic();
     const set = this.priorSources.get(prior);
     if (set) {
       for (const src of set) {
@@ -336,34 +351,60 @@ export class AudioEngine {
       this.activeUntil.set(MUSIC_PRIOR, Infinity); // ensure playing(-999) reflects it
       return; // already playing this track
     }
+    // A start for this exact track is already mid-decode AND still the current intent:
+    // a second concurrent call (e.g. the keyboard-skip that reaches the map fires BOTH
+    // showMap()'s startMenuMusic and the once-per-session unlockAudio's in the same
+    // keydown) would otherwise start a second overlapping loop that phases against the
+    // first and survives stopMusic(). Bail — the in-flight start will produce the track.
+    //
+    // `musicName === name` is what makes that promise true. Without it the bail also
+    // swallowed requests the in-flight start could no longer honour: a stopMusic()
+    // during the decode clears musicName, the in-flight start then returns silently at
+    // the check below, and the caller that bailed never retried — so the map ended up
+    // with NO menu music (test-mapaudio).
+    if (this.musicStarting === name && this.musicName === name) return;
     this.stopMusic();
     this.musicName = name;
-    const ctx = this.ensureCtx();
-    let buf = this.musicBufs.get(name);
-    if (!buf) {
-      const bytes = await fetch(url).then((r) => r.arrayBuffer());
-      // WAV loop point is in samples at the file's native rate (header @ offset 24).
-      const nativeRate = new DataView(bytes).getUint32(24, true) || 22050;
-      buf = await ctx.decodeAudioData(bytes.slice(0));
-      (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
-      this.musicBufs.set(name, buf);
+    this.musicStarting = name;
+    // Claim this start. Any later start — or any stopMusic() — bumps the counter, so
+    // when this decode resolves it can tell whether it is still the current intent.
+    const gen = ++this.musicGen;
+    try {
+      const ctx = this.ensureCtx();
+      let buf = this.musicBufs.get(name);
+      if (!buf) {
+        const bytes = await fetch(url).then((r) => r.arrayBuffer());
+        // WAV loop point is in samples at the file's native rate (header @ offset 24).
+        const nativeRate = new DataView(bytes).getUint32(24, true) || 22050;
+        buf = await ctx.decodeAudioData(bytes.slice(0));
+        (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
+        this.musicBufs.set(name, buf);
+      }
+      // Superseded while decoding (room changed, music stopped, or a newer start for
+      // this same track replaced this one). Checking the generation rather than the
+      // name also covers "stopped, then asked for the same track again", where the
+      // name matches but this start is no longer the one that should install itself.
+      if (this.musicGen !== gen) return;
+      this.logSound(name + ' (music-loop)', 1);
+      const nativeRate = (buf as AudioBuffer & { _rate?: number })._rate ?? 22050;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.loopStart = loopSample > 0 ? loopSample / nativeRate : 0;
+      src.loopEnd = buf.duration;
+      const g = ctx.createGain();
+      g.gain.value = 0.45; // music sits under the voices/effects
+      src.connect(g);
+      g.connect(this.busNode('music'));
+      src.start();
+      this.musicSrc = src;
+      this.musicGain = g;
+      this.activeUntil.set(MUSIC_PRIOR, Infinity); // MusicCycle(-999): playing(-999) true
+    } finally {
+      // Only the start that is still current may release the flag; a superseded one
+      // must leave it to whoever replaced it.
+      if (this.musicGen === gen) this.musicStarting = null;
     }
-    if (this.musicName !== name) return; // room changed while decoding
-    this.logSound(name + ' (music-loop)', 1);
-    const nativeRate = (buf as AudioBuffer & { _rate?: number })._rate ?? 22050;
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = true;
-    src.loopStart = loopSample > 0 ? loopSample / nativeRate : 0;
-    src.loopEnd = buf.duration;
-    const g = ctx.createGain();
-    g.gain.value = 0.45; // music sits under the voices/effects
-    src.connect(g);
-    g.connect(this.busNode('music'));
-    src.start();
-    this.musicSrc = src;
-    this.musicGain = g;
-    this.activeUntil.set(MUSIC_PRIOR, Infinity); // MusicCycle(-999): playing(-999) true
   }
 
   /** The currently-looping room-music track name (debug/verification), or '' if none. */
@@ -385,6 +426,9 @@ export class AudioEngine {
     this.musicSrc = null;
     this.musicGain = null;
     this.musicName = '';
+    // Invalidate any in-flight start: without this, a decode that resolves after this
+    // stop would install itself over the silence the caller just asked for.
+    this.musicGen++;
     this.activeUntil.delete(MUSIC_PRIOR);
   }
 }

@@ -303,7 +303,7 @@ function plot(screen: CompositeTarget, x: number, y: number, col: number): void 
 /** fontcol['w',4] (URoom.pas:1109-1114 with i=4 → target colour (0,0,0)): the palette
  *  index nearest to pure black under the engine's weighted colour distance
  *  (0.35·r² + 0.5·g² + 0.15·b²). Used as the gspec=2 darkness fill. */
-function darkestIndex(palette: readonly { r: number; g: number; b: number }[]): number {
+export function darkestIndex(palette: readonly { r: number; g: number; b: number }[]): number {
   let best = 0;
   let bestErr = Infinity;
   for (let i = 0; i < palette.length; i++) {

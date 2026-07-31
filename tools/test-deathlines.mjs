@@ -4,7 +4,7 @@
  * and (b) makes the survivor speak a "smrt-*" line (loaded from the global x02
  * bank). Killing both fish DOES auto-restart once the skeletons disintegrate.
  */
-import { withApp, idle } from './ui-lib.mjs';
+import { idle, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
@@ -15,7 +15,7 @@ await withApp(async ({ p, expect }) => {
 
   async function enter(roomNum) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), roomNum);
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+    await waitRoom(p, 0);
     await idle(p);
   }
 
@@ -28,7 +28,9 @@ await withApp(async ({ p, expect }) => {
   const before = await p.evaluate(() => window.__ff.lines());
   await p.evaluate(() => window.__ff.killFish('big'));
   expect(await p.evaluate(() => window.__ff.state().active) === 'little', 'control passes to the surviving fish');
-  await p.waitForTimeout(2000);
+  // 25 game ticks, not 2000ms of wall clock: the clock is wall-clock driven and
+  // slows under a parallel run, so a fixed sleep silently buys fewer ticks there.
+  await waitTicks(p, await p.evaluate(() => window.__ff.count()), 25);
   expect(await p.evaluate(() => window.__ff.screen()) === 'room', 'a lone death does not auto-return to the map');
   expect(await p.evaluate(() => window.__ff.state().little) !== null, 'the surviving little fish is still in play');
 
@@ -60,7 +62,8 @@ await withApp(async ({ p, expect }) => {
   const alivePixels = await region();
   await p.evaluate(() => window.__ff.killFish('big'));
   // Wait out the disintegration (rozpad 400 @ 30/tick ~= 14 ticks, plus clear).
-  await p.waitForTimeout(2500);
+  // Counted in game ticks so a slow, loaded machine still gets the full 31.
+  await waitTicks(p, await p.evaluate(() => window.__ff.count()), 31);
   const gonePixels = await region();
   let diff = 0;
   for (let i = 0; i < alivePixels.length; i += 4) {
@@ -81,4 +84,4 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff.count() < 5, null, { timeout: 6000 }).catch(() => {});
   const restarted = await p.evaluate(() => window.__ff.count() < 20 && window.__ff.screen() === 'room');
   expect(restarted, 'both fish dead auto-restarts the room');
-}, { cpu: true });
+}, { cpu: true, graphics: 'enhanced' });

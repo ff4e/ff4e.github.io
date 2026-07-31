@@ -1,6 +1,6 @@
 {
   "name": "fish-fillets-4ever",
-  "version": "1.0.12",
+  "version": "1.0.14",
   "private": true,
   "license": "GPL-2.0-or-later",
   "type": "module",
@@ -24,7 +24,17 @@
     "render-enhanced": "tsx tools/render-enhanced.ts",
     "stage-enhanced": "tsx tools/stage-enhanced.ts",
     "stage-enhanced-objects": "tsx tools/stage-enhanced-objects.ts",
-    "stage-enhanced-fish": "tsx tools/stage-enhanced-fish.ts"
+    "stage-enhanced-fish": "tsx tools/stage-enhanced-fish.ts",
+    "build-movies-ai": "node tools/build-movies-ai.mjs",
+    "build-map-ai": "node tools/build-map-ai.mjs",
+    "build-room-ai": "node tools/build-room-ai.mjs",
+    "build-map-matrix": "node tools/build-map-matrix.mjs",
+    "build-map-contest": "node tools/build-map-contest.mjs",
+    "build-room-matrix": "node tools/build-room-matrix.mjs",
+    "build-fish-outline": "node tools/build-fish-outline.mjs",
+    "build-room-algo": "node tools/build-room-algo.mjs",
+    "build-room-contest": "node tools/build-room-contest.mjs",
+    "studio": "node tools/studio/server.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",

@@ -1,0 +1,11 @@
+{
+  "_comment": "Per-scene model overrides for the briefcase cutscene (_kufr). Indices are into the shipped playback order (ai.json 'order'), inclusive, and are the same numbers tools/kufr-compare.html shows. Frames outside every range use the anim.png card's pick from the Studio. A model change is only invisible ACROSS A SCENE CUT, so a range must cover a whole shot — never part of one.",
+  "ranges": [
+    {
+      "from": 63,
+      "to": 94,
+      "model": "siax",
+      "note": "Planets + green handwritten annotations. The default 'anime' model is tuned for flat cel art and dissolves the small glyphs into blobs; it also flattens the dithered planet surfaces into posterised bands. Verified boundaries: 62 is the 'TADY' card and 95 is the desk of papers, so this range is exactly one shot."
+    }
+  ]
+}

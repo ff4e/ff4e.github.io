@@ -128,18 +128,30 @@ export class Script {
    *  except system restart/exit while its finale cutscene plays. Set in ZAVER's init. */
   zavermode = false;
 
-  /** cas_hry (URoom.pas:23472): total play time in days (Delphi Now units). ZAVER's
-   *  finale narrates round(cas_hry*24) as a spoken hour count. The host sets it to the
-   *  elapsed session time; exact cross-session accumulation is deferred. */
+  /**
+   * cas_hry (USoutez.pas:263, consumed at URoom.pas:23472): total play time in days
+   * (Delphi Now units), which ZAVER's finale narrates as a spoken hour count. It is
+   * the sum over all rooms of the time spent INSIDE them, banked when each visit
+   * ends and carried across sessions — so map, menu and intro time never count, and
+   * the figure survives finishing the game over several sittings. The host keeps it
+   * in sync each tick.
+   */
   casHry = 0;
+
+  /**
+   * music_volume (RSound.pas:36): the live music level on the original's 0..64
+   * scale, mirrored from the player's slider by the host each frame. VES's easter
+   * egg (URoom.pas:12190) reads it to notice the player turning the music down.
+   * Defaults to the original's boot level so headless tests match the Delphi.
+   */
+  musicVolume = 27;
 
   /** globtit (URoom.pas:164): a text fragment substituted for `@` in the next subtitle. */
   globtit = '';
   /**
    * ShodLod state (URoom.pas:26285): a ship falls from the sky when a battleship is
    * sunk. `padalod` = -1 when idle, else kterou+100 while a ship is falling; lodni*
-   * are its position/velocity. The falling-ship RENDER is deferred (cosmetic); the
-   * state machine runs so subsequent sinks re-trigger it.
+   * are its position/velocity.
    */
   padalod = -1;
   lodniX = 0;
@@ -195,7 +207,14 @@ export class Script {
     for (let i = 0; i < this.roompole.length; i++) this.roompole[i] = s.roompole[i] ?? 0;
     for (let i = 0; i < this.globpole.length; i++) this.globpole[i] = s.globpole[i] ?? 0;
     this.zvykacka = s.zvykacka;
-    this.room.gspec = s.gspec ?? this.room.gspec;
+    // gspec is snapshotted for the modes a room script toggles at RUNTIME (CHODBA's
+    // 0<->2 darkness, KAJUTA1's 3/4 shove, WIN's 5->0 bonus). gspec=9 is different: it
+    // is a static room declaration that no script ever leaves, so init() is
+    // authoritative and a snapshot must never downgrade it. Without this, a save
+    // written before LODE's `gspec:=9` was restored (URoom.pas:7930) would load with
+    // gspec=0 and silently re-break the room: fish could exit again and the push-out
+    // could not complete.
+    if (this.room.gspec !== 9) this.room.gspec = s.gspec ?? this.room.gspec;
   }
 
   // ----- context helpers used by the ported room programs -----
@@ -457,13 +476,15 @@ export class Script {
     this.lodniDX = this.random(3) - 1;
     this.lodniDY = 4 + this.random(7);
   }
-  /** Advance a falling ship each tick; clears `padalod` once it drops off-screen so
-   * the next sink can trigger another (VyresLode's motion, minus the render). */
+  /** VyresLode (URoom.pas:26295): destructively swap, move, swap, then clear off-screen. */
   tickShodLod(): void {
     if (this.padalod === -1) return;
+    if (this.padalod >= 100) this.padalod -= 100;
+    else this.room.applyWreckSwap(this.lodniX, this.lodniY, this.padalod);
     this.lodniX += this.lodniDX;
     this.lodniY += this.lodniDY;
-    if (this.lodniY > 500) this.padalod = -1;
+    if (this.lodniY > 436) this.padalod = -1;
+    else this.room.applyWreckSwap(this.lodniX, this.lodniY, this.padalod);
   }
 
   // ----- dialog scheduler -----

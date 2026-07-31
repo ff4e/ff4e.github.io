@@ -3,12 +3,12 @@
  * scroll open/close state machine, the three volume sliders, the subtitle
  * cz/en/off buttons, the help overlay, and cross-reload persistence.
  */
-import { withApp } from './ui-lib.mjs';
+import { reloadApp, selectRoom, withApp, tickSleep } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.selectOption('#room', '7'); // enter UTES
+  await selectRoom(p, 7); // enter UTES
   await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), { timeout: 8000 });
-  await p.waitForTimeout(200);
+  await tickSleep(p, 3);
 
   // Starts on the normal panel (o_normal).
   expect((await p.evaluate(() => window.__ff.panelOstav())) === 0, 'starts in o_normal');
@@ -28,6 +28,18 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.volumes().voice)) === 7, 'voices slider -> 7 at x=82');
   await p.evaluate(() => window.__ff.panelAction(19, 141)); // music slider far right
   expect((await p.evaluate(() => window.__ff.volumes().music)) === 12, 'music slider -> 12');
+  // The slider index is mapped back to the original's 0..64 music_volume for room
+  // scripts (VES's quiet-music easter egg reads it — URoom.pas:12190).
+  expect(
+    (await p.evaluate(() => window.__ff.scriptMusicVolume())) === 64,
+    'music_volume tracks the slider (index 12 -> Volumes[12] = 64)',
+  );
+  await p.evaluate(() => window.__ff.panelAction(19, 72)); // music slider -> index 6
+  expect(
+    (await p.evaluate(() => window.__ff.scriptMusicVolume())) === 11,
+    'music_volume follows a drag down (index 6 -> Volumes[6] = 11)',
+  );
+  await p.evaluate(() => window.__ff.panelAction(19, 141)); // restore for the persistence check
 
   // Subtitle buttons switch / turn off subtitles (obltitcz/eng/no).
   await p.evaluate(() => window.__ff.panelAction(22)); // off
@@ -59,8 +71,8 @@ await withApp(async ({ p, expect }) => {
 
   // Persistence: settings survive a reload.
   await p.evaluate(() => window.__ff.panelAction ? window.__ff.toggleOptions() : null);
-  await p.reload({ waitUntil: 'networkidle' });
-  await p.selectOption('#room', '7');
+  await reloadApp(p);
+  await selectRoom(p, 7);
   await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), { timeout: 8000 });
   const v = await p.evaluate(() => window.__ff.volumes());
   expect(v.effect === 0 && v.voice === 7 && v.music === 12, `volumes persisted (${JSON.stringify(v)})`);

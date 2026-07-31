@@ -82,4 +82,33 @@ describe('world-map controller selection helpers', () => {
     const i = ((y) * MAP_W + (x + 13)) * 4;
     expect([ringed[i], ringed[i + 1], ringed[i + 2]]).toEqual([120, 230, 255]);
   });
+
+  it('draws the ring onto a transparent overlay for the AI map path', () => {
+    // The AI (upscaled) path draws its base map straight to the hi-res canvas, so the
+    // ring has to ride the shared native-resolution overlay buffer, which starts fully
+    // transparent. There the glow must be expressed as ALPHA — blending against the
+    // empty buffer (as the faithful path does against the opaque map) would darken it.
+    const map = makeMap();
+    const room = map.selectableNodes(new Set(), new Set())[0]!.room;
+    const { x, y } = map.nodeCenter(room);
+
+    const overlay = new Uint8ClampedArray(MAP_W * MAP_H * 4); // transparent
+    map.drawSelectionRing(overlay, room, /* emphasis (TV) */ true, /* onTransparent */ true);
+
+    // The solid ring band is opaque cyan (emphasis radius 15).
+    const ring = (y * MAP_W + (x + 15)) * 4;
+    expect([overlay[ring], overlay[ring + 1], overlay[ring + 2], overlay[ring + 3]]).toEqual([
+      120, 230, 255, 255,
+    ]);
+
+    // Just outside it, the glow is cyan with partial alpha — never blended toward black.
+    const glow = (y * MAP_W + (x + 19)) * 4;
+    expect(overlay[glow + 3]).toBeGreaterThan(0);
+    expect(overlay[glow + 3]).toBeLessThan(255);
+    expect([overlay[glow], overlay[glow + 1], overlay[glow + 2]]).toEqual([120, 230, 255]);
+
+    // Far from the node the overlay stays untouched (fully transparent).
+    const far = (y * MAP_W + (x + 40)) * 4;
+    expect(overlay[far + 3]).toBe(0);
+  });
 });

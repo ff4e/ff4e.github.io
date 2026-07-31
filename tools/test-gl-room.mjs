@@ -7,9 +7,8 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; if the
  * environment has no WebGL2 it skips (pass), so CI without a GPU still passes.
  */
-import { chromium } from 'playwright';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
-const PORT = process.env.FF_UI_PORT ?? '5173';
 // Full-room classic render is byte-exact vs the CPU oracle: items/fish/effects/
 // mirror/ropes/ZX bands are all integer, and the background wobble has matched
 // the CPU to the pixel at every tested count. So the gate is max===0 (a single
@@ -17,13 +16,13 @@ const PORT = process.env.FF_UI_PORT ?? '5173';
 // background wobble ever shifts a scanline — never observed — that would surface
 // here as a real, investigate-worthy divergence, not be silently tolerated.)
 
-const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=metal', '--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser({ gl: true });
 const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
 const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
-await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 
 let ok = true;
@@ -32,19 +31,19 @@ const unsupportedRooms = [];
 
 // Capability check on the first room.
 await p.evaluate(() => window.__ff.enterRoomAwait(3));
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 15, { timeout: 8000 });
+await waitRoom(p, 15);
 const cap = await p.evaluate(() => window.__ff.glRoomParity());
 if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 for (let num = 1; num <= 72; num++) {
   try {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 15, { timeout: 8000 });
+    await waitRoom(p, 15);
     const r = await p.evaluate(() => window.__ff.glRoomParity());
     if (!r || !r.webgl) { skipped++; continue; }
     if (r.unsupported) { ok = false; unsupported++; unsupportedRooms.push(num); console.log(`  FAIL room ${num}: unexpectedly unsupported on GPU`); continue; }
@@ -58,4 +57,4 @@ if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)
 console.log(`  full-GPU rooms tested=${tested} unsupported=${unsupported}${unsupported ? ' [' + unsupportedRooms.join(',') + ']' : ''} skipped=${skipped} worstMax=${worstMax} worstOverPct=${worstOver.toFixed(3)}% (room ${worstRoom})`);
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

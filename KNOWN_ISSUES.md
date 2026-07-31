@@ -73,6 +73,10 @@ These playable rooms have **no known solution** to replay (they were never in th
   `rush` is intentionally left unmapped in `test/solutionsMapping.ts`; `rush.moves` stays in
   the corpus for the record only.
 - **SPUNT #29**, **ZELVA #37**, **BARELY #44** — playable, unsolved.
+- **LODE #19**, **GRAL #64** — playable, unsolved. Both are gspec=9 push-out rooms; they
+  were previously written off as "loose geometric catch-all rooms many strings reach",
+  which turned out to be a tooling artifact (see Resolved, below), not a property of the
+  rooms.
 - **To resolve:** source a walkthrough (or play the port and capture `srecord` via the
   `__ff` debug hook), then add `<slug>.moves` to `test/fixtures/solutions/` and a pin in
   `SOLUTION_ROOMS`. A brute-force engine solver is infeasible (e.g. SPUNT is 50×35 with 10
@@ -81,10 +85,33 @@ These playable rooms have **no known solution** to replay (they were never in th
 ## Excluded by design (not issues)
 
 - **SCORE #72** — non-playable results screen.
-- **LODE #19**, **GRAL #64** — loose geometric catch-all rooms many strings reach; not
-  asserted to keep the net strict elsewhere.
 
 ## Resolved
+
+### 🔴 LODE #19 was missing `gspec:=9` (push-out win condition inert) — fixed 2026-07-27
+- `LODE_InitProgramky` (URoom.pas:7930) declares LODE a **push-out room**: you win by
+  shoving one of the two gods off the room edge, and the fish are **not** allowed to exit.
+  `src/rooms/lode.ts` `init()` ported every other line of that block but dropped `gspec:=9`.
+- Two player-visible consequences: the faithful `Spec9` marks (URoom.pas:19488/19640) were
+  never consumed, so the cork exit-slide (`stepEngine.ts`, gated on `gspec === 9`) never
+  ran and the room could not be won by pushing; and a fish walking off an edge wrongly won
+  the room, which the original forbids (`if (gspec<>9)and(kontroluj_okraje>0)`,
+  URoom.pas:24295).
+- Fix: restore `s.room.gspec = 9` in `src/rooms/lode.ts` `init()`. `vytlacit` needs no
+  change — LODE never overrides the default 1 (URoom.pas:1445). Regression coverage in
+  `test/lode-pushout.test.ts`. All eight Delphi `gspec:=9` room inits now match the port
+  (LODE, SPUNT, ZELVA, BARELY, MAPA, POHON, GRAL, DISKETA), as do gspec 2/3/4/5/42.
+- Follow-on 1: restoring gspec=9 exposed an over-broad render gate — the enhanced
+  (truecolor) background was gated on `gspec === 0`, so **every** gspec=9 room silently
+  fell back to classic art. Only gspec 2/5/42 actually replace the room render, so the
+  gate is now `classicOnlyBackground()` (`src/render/enhancedArtSource.ts`), and SPUNT,
+  MAPA, POHON, DISKETA, GRAL, ZELVA, BARELY and LODE all show their enhanced background
+  again (CPU/GPU parity still byte-exact — `tools/test-gl-room-enh.mjs`).
+- Follow-on 2: `tools/map-ffng.ts` replayed physics only, so it saw `gspec = 0` everywhere
+  and exited fish from push-out rooms — which is what made LODE/GRAL look like "catch-all"
+  rooms and got them excluded from the solvability net. The tool now runs each room's
+  `init()` for its `gspec` and suppresses fish exits in gspec=9 rooms; its `CATCHALL` list
+  is gone and `test/fixtures/solutions/mapping.tsv` is unchanged by the switch.
 
 ### 🟠 Effects played too loud (clipped on loud overlaps) — fixed 2026-07-03
 - Effects (landings, death cries, bubbles, room-script `snd`/`sndcyc`) were played at full VOICE

@@ -4,7 +4,7 @@
  * optimisation (the overlay stays empty when no subtitle is showing). Asserts
  * painted-vs-empty, never pixel-exact positions or wave timing, so it is not flaky.
  */
-import { withApp } from './ui-lib.mjs';
+import { selectRoom, withApp, tickSleep } from './ui-lib.mjs';
 
 /** Count of non-transparent pixels on the #subs overlay (capped, for speed). */
 async function overlayPixels(p) {
@@ -21,28 +21,28 @@ async function overlayPixels(p) {
 }
 
 await withApp(async ({ p, expect }) => {
-  await p.selectOption('#room', '7'); // UTES — has both fish
+  await selectRoom(p, 7); // UTES — has both fish
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
   await p
     .waitForFunction(() => window.__ff.enhancedActive && window.__ff.enhancedActive(), { timeout: 12000 })
     .catch(() => {});
-  await p.waitForTimeout(200);
+  await tickSleep(p, 3);
 
   // Idle (no subtitle): the overlay does nothing / stays clear.
   expect((await overlayPixels(p)) === 0, 'enhanced idle: overlay is empty');
 
   // A subtitle appears on the overlay (not baked into the frame).
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
-  await p.waitForTimeout(400); // let a few frames + the wave-in run
+  await tickSleep(p, 5); // let the wave-in run (it advances on the game tick)
   expect(await p.evaluate(() => window.__ff.subsActive()), 'enhanced: subtitle active');
   expect((await overlayPixels(p)) > 0, 'enhanced: subtitle painted on the #subs overlay');
 
   // Classic: the overlay is cleared and stays empty; subtitles bake into the frame.
   await p.evaluate(() => window.__ff.setGraphics('classic'));
-  await p.waitForTimeout(200);
+  await tickSleep(p, 3);
   expect((await overlayPixels(p)) === 0, 'classic: overlay cleared on switch');
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
-  await p.waitForTimeout(400);
+  await tickSleep(p, 5);
   expect(await p.evaluate(() => window.__ff.subsActive()), 'classic: subtitle active');
   expect((await overlayPixels(p)) === 0, 'classic: overlay stays empty (subs baked into frame)');
 }, { cpu: true });

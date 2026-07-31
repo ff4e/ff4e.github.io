@@ -5,7 +5,7 @@
  * best count is read from ff.scores, Cancel closes, Run launches, Replay animates
  * a stored best solution, and a cheat-only room has Replay disabled.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp } from './ui-lib.mjs';
 
 // Button centres in 640×480 map space (icons at y=222..268; Run 258-, Replay 301-,
 // Cancel 344-); Fish-House room 1's node is at KulXY (320,121).
@@ -31,7 +31,7 @@ await withApp(async ({ p, expect }) => {
 
   // Unsolved room 1: clicking launches it directly (no panel).
   await click(ROOM1_NODE);
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   expect((await screen()) === 'room', 'unsolved room launches immediately');
   expect((await infoRoom()) === null, 'no info panel for an unsolved room');
 
@@ -62,7 +62,7 @@ await withApp(async ({ p, expect }) => {
   await p.waitForTimeout(80);
   expect((await infoRoom()) === 1, 'panel re-opened');
   await click(RUN);
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   expect((await screen()) === 'room', 'Run launches the room');
   expect((await p.evaluate(() => window.__ff.replayActive())) === false, 'Run is a normal play (not a replay)');
 
@@ -157,4 +157,4 @@ await withApp(async ({ p, expect }) => {
   const nodeDiff =
     Math.abs(nodeClosed[0] - nodeOpen[0]) + Math.abs(nodeClosed[1] - nodeOpen[1]) + Math.abs(nodeClosed[2] - nodeOpen[2]);
   expect(nodeDiff > 30, `opening the record panel hides the lit map/node (closed ${nodeClosed} vs open ${nodeOpen}, diff ${nodeDiff})`);
-});
+}, { graphics: 'enhanced' });

@@ -14,7 +14,13 @@
  * This module is pure logic (no DOM, no rendering) so it stays deterministic
  * and headless-testable, per the PLAN's logic/render split.
  */
-import { type FfrRoom, type FfrBitmap, type FfrPaletteEntry, Kind } from '../data/ffr.js';
+import {
+  type FfrRoom,
+  type FfrBitmap,
+  type FfrPaletteEntry,
+  Kind,
+  markBitmapPixelsChanged,
+} from '../data/ffr.js';
 import { Dir, DX_DIR, DY_DIR } from './dir.js';
 
 export const ITEM_WATER = 255;
@@ -67,6 +73,16 @@ export interface Item {
   readonly fields: readonly Field[];
 }
 
+/** One destructive KresliLod ship/background swap pass (URoom.pas:26296-26361). */
+export interface WreckSwap {
+  readonly x: number;
+  readonly y: number;
+  readonly phase: number;
+  readonly width: number;
+  /** Linear ship-bitmap offsets that the Delphi mask test actually swapped. */
+  readonly pixels: readonly number[];
+}
+
 /** Disintegration counter set when a fish dies (zac_rozpad, URoom.pas:439). */
 export const ZAC_ROZPAD = 400;
 
@@ -107,12 +123,12 @@ export class Room {
   readonly items: Item[];
   readonly grid: Grid;
   readonly palette: readonly FfrPaletteEntry[];
-  readonly bitmaps: readonly (FfrBitmap | null)[];
+  readonly bitmaps: (FfrBitmap | null)[];
   readonly wallItem: Item;
-  readonly bgBmp: FfrBitmap;
+  bgBmp: FfrBitmap;
   wamp: number;
   wper: number;
-  readonly wspd: number;
+  wspd: number;
 
   /** Item indices of the two fish (the first little/big items, as in TRoom.Start).
    *  Mutable because WIN's bonus level (ZapniBonusLevel) reassigns Little/Big to the
@@ -148,6 +164,10 @@ export class Room {
     colors: null,
   };
 
+  /** Ordered destructive swaps, retained so a newly-selected enhanced art source can replay them. */
+  readonly wreckSwaps: WreckSwap[] = [];
+  private readonly mutableBitmaps = new Set<number>();
+
   /** "busy" talking state per fish (set by dialog scripts; drives the talking head). */
   busy: { little: number; big: number } = { little: 0, big: 0 };
   /** Idle timers (delay[mala/velka]): frames since the last player action. */
@@ -182,15 +202,21 @@ export class Room {
     this.idle.big = 0;
   }
 
-  readonly bodies: FfrRoom['bodies'];
-  readonly heads: FfrRoom['heads'];
+  /** Fish body/head frame tables. Not readonly: the UNDEAD and MORPH cheats swap
+   *  in transformed copies (never mutating the shared parsed FFR data, so the
+   *  effect dies with the Room — as it does in the original, whose TRoom.Create
+   *  reloads the sprites). */
+  bodies: FfrRoom['bodies'];
+  heads: FfrRoom['heads'];
 
   constructor(ffr: FfrRoom) {
     this.width = ffr.width;
     this.height = ffr.height;
     this.grid = new Grid(this.width, this.height);
     this.palette = ffr.palette;
-    this.bitmaps = ffr.bitmaps;
+    // Keep the bitmap table room-local. KresliLod mutates selected bitmap pixels,
+    // but parsed FFR data may be reused when the room is rebuilt.
+    this.bitmaps = [...ffr.bitmaps];
     this.wamp = ffr.wamp;
     this.wper = ffr.wper;
     this.wspd = ffr.wspd;
@@ -240,6 +266,59 @@ export class Room {
 
   get itemCount(): number {
     return this.items.length - 1;
+  }
+
+  /**
+   * KresliLod (URoom.pas:26296-26361): where the mask bitmap permits it, swap each
+   * non-mask ship pixel with the room background. Both buffers are deliberately
+   * mutated, which makes the wreck erode as the same sprite is moved and swapped
+   * again on later ticks.
+   */
+  applyWreckSwap(x: number, y: number, phase: number): void {
+    const shipItem = this.items[this.itemCount - 1];
+    const maskItem = this.items[this.itemCount];
+    if (!shipItem || !maskItem) return;
+
+    const shipIndex = shipItem.bmp + phase;
+    const ship = this.mutableBitmap(shipIndex);
+    const bg = this.mutableBitmap(1);
+    const mask = this.bitmaps[maskItem.bmp];
+    if (!ship || !bg || !mask) return;
+
+    const maskColor = mask.pixels[0]!;
+    const swapped: number[] = [];
+    for (let i = 0; i < ship.h; i++) {
+      const dy = y + i;
+      if (dy < 0 || dy > 436) continue;
+      const shipRow = i * ship.w;
+      const bgRow = dy * bg.w + x;
+      const maskRow = (dy > 435 ? 135 : dy < 306 ? 0 : dy - 306) * mask.w + x;
+      for (let j = 0; j < ship.w; j++) {
+        if (mask.pixels[maskRow + j] !== maskColor) continue;
+        const sp = shipRow + j;
+        const shipPixel = ship.pixels[sp]!;
+        if (shipPixel === maskColor) continue;
+        const bp = bgRow + j;
+        const bgPixel = bg.pixels[bp]!;
+        ship.pixels[sp] = bgPixel;
+        bg.pixels[bp] = shipPixel;
+        swapped.push(sp);
+      }
+    }
+    this.wreckSwaps.push({ x, y, phase, width: ship.w, pixels: swapped });
+    if (swapped.length > 0) markBitmapPixelsChanged(bg.pixels);
+  }
+
+  /** Clone a bitmap on its first destructive write so the parsed FFR stays immutable. */
+  private mutableBitmap(index: number): FfrBitmap | null {
+    const current = this.bitmaps[index];
+    if (!current) return null;
+    if (this.mutableBitmaps.has(index)) return current;
+    const clone = { ...current, pixels: current.pixels.slice() };
+    this.bitmaps[index] = clone;
+    this.mutableBitmaps.add(index);
+    if (index === 1) this.bgBmp = clone;
+    return clone;
   }
 
   /** priprav_pole (URoom.pas:26375): rebuild the occupancy grid from item positions. */
@@ -728,6 +807,23 @@ export class Room {
     this.kostra[which] = true;
     this.rozpad[which] = ZAC_ROZPAD;
     this.items[idx]!.kind = Kind.light;
+  }
+
+  /**
+   * CanSave (URoom.pas:26900-26906): saving is only allowed from a recoverable
+   * position — both fish alive, or one alive with the other already out of the
+   * room (venku). A dead fish therefore blocks saving, which matters in the port
+   * because a lone survivor deliberately keeps playing. A gspec=9 push-out room
+   * additionally blocks it once the last item has been shoved out (vytlacit<=0),
+   * i.e. while the win is resolving.
+   */
+  get canSave(): boolean {
+    if (this.gspec === 9 && this.vytlacit <= 0) return false;
+    return (
+      (this.alive.big && this.alive.little) ||
+      (this.alive.big && this.venku.little) ||
+      (this.venku.big && this.alive.little)
+    );
   }
 
   /** True once both fish have exited the room — the room is solved. */

@@ -5,33 +5,33 @@
  *   - fishing hooks (setIndex line/glyph + caught-fish composite)
  *   - a dead fish's disintegrating skeleton (DISINT_FS randpole dither)
  *   - baked classic subtitles (setIndex text) drawn into the GPU target
+ *   - LODE's destructively-swapped falling wreck background
  * via __ff.glLiveParity (classic art), after setting up each scenario.
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { chromium } from 'playwright';
+import { exitProbe, gotoApp, launchBrowser, waitRoom, tickSleep } from './ui-lib.mjs';
 
-const PORT = process.env.FF_UI_PORT ?? '5173';
 const ROOM = 6; // KOSTE — two fish, several items, normal (gspec=0)
 
-const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=metal', '--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser({ gl: true });
 const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
 const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
-await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate(() => window.__ff.setGraphics('classic'));
 
 await p.evaluate((n) => window.__ff.enterRoomAwait(n), ROOM);
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 20, { timeout: 8000 });
+await waitRoom(p, 20);
 const cap = await p.evaluate(() => window.__ff.glLiveParity());
 if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 let ok = true;
@@ -47,20 +47,40 @@ check('fish swim+head', await p.evaluate(() => window.__ff.glLiveParity()));
 
 // 2. Fishing hook (line/glyph via setIndex).
 await p.evaluate(() => window.__ff.spawnHook());
-await p.waitForTimeout(50);
+await tickSleep(p, 1);
 check('fishing hook', await p.evaluate(() => window.__ff.glLiveParity()));
 
 // 3. Baked classic subtitle (setIndex text into the GPU target).
 await p.evaluate(() => window.__ff.pushSubtitle('Test subtitle line for GPU parity', '@'));
-await p.waitForTimeout(50);
+await tickSleep(p, 1);
 check('baked subtitle', await p.evaluate(() => window.__ff.glLiveParity()));
 
 // 4. Dead fish disintegrate (skeleton dither via DISINT_FS).
 await p.evaluate(() => window.__ff.killFish('little'));
-await p.waitForTimeout(50);
+await tickSleep(p, 1);
 check('disintegrate skeleton', await p.evaluate(() => window.__ff.glLiveParity()));
+
+// 5. LODE falling wreck: the logic mutates its background before both compositors.
+await p.evaluate(() => window.__ff.enterRoomAwait(19));
+await waitRoom(p, 20);
+const wreckBefore = await p.evaluate(() => window.__ff.roomBgFrameHash('classic'));
+await p.evaluate(() => window.__ff.dropShip(0));
+// Gate on a VISIBLE background delta, not on wreckState().changed: the wreck starts at
+// lodniY=-100 (ShodLod) and its first swaps are recorded a few ticks before any of them
+// land where the wall mask lets the background show, so the swap counter fires too early.
+// The background-only hash is also immune to ambient fish/item animation, so a change to
+// it can only have come from the wreck.
+let wreckVisible = true;
+try {
+  await p.waitForFunction((h) => window.__ff.roomBgFrameHash('classic') !== h, wreckBefore, { timeout: 8000, polling: 50 });
+} catch (e) {
+  if (e.name !== 'TimeoutError') throw e;
+  wreckVisible = false;
+}
+if (!wreckVisible) { ok = false; console.log('  FAIL LODE falling wreck: no visible frame delta'); }
+check('LODE falling wreck', await p.evaluate(() => window.__ff.glRoomParity()));
 
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

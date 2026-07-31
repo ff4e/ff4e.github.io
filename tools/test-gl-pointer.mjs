@@ -7,30 +7,34 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { chromium } from 'playwright';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
-const PORT = process.env.FF_UI_PORT ?? '5173';
 const ROOM = 6; // KOSTE — two fish, normal room
 const FSIZE = 15; // native cell size (render/renderRoom.ts)
 
-const b = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=metal', '--autoplay-policy=no-user-gesture-required'] });
+const b = await launchBrowser({ gl: true });
 const p = await b.newPage({ viewport: { width: 1200, height: 720 } });
 const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
-await p.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'networkidle' });
+// Pin the art tier: this probe asserts the WebGL pointer LAYERING, which is orthogonal
+// to which art is drawn. Under the default `ai` tier the GL compositor only reports
+// glActive() once the room's AI art has loaded, which can exceed the 10s wait below and
+// make the probe skip itself with a misleading "WebGL2 not available".
+await p.addInitScript(() => { try { localStorage.setItem('ff.graphics', 'enhanced'); } catch {} });
+await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate((n) => window.__ff.enterRoomAwait(n), ROOM);
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 20, { timeout: 8000 });
+await waitRoom(p, 20);
 
 await p.evaluate(() => window.__ff.setRenderer('webgl'));
-await p.waitForTimeout(300);
+await p.waitForFunction(() => window.__ff.glActive(), { timeout: 10000 }).catch(() => {});
 if (!(await p.evaluate(() => window.__ff.glActive()))) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
   await b.close();
-  process.exit(0);
+  exitProbe(0);
 }
 
 let ok = true;
@@ -66,7 +70,9 @@ else {
   const cx = target.left + nx * (target.rw / target.cw);
   const cy = target.top + ny * (target.rh / target.ch);
   await p.mouse.click(cx, cy);
-  await p.waitForTimeout(150);
+  await p
+    .waitForFunction((w) => window.__ff.state().active === w, other, { timeout: 10000 })
+    .catch(() => {});
   const active = await p.evaluate(() => window.__ff.state().active);
   if (active !== other) { ok = false; console.log(`  FAIL: click on ${other} fish did not select it (active=${active})`); }
   else console.log(`  OK   real click selected the ${other} fish in webgl mode`);
@@ -75,4 +81,4 @@ else {
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }
 console.log(ok ? 'PASS' : 'FAIL');
 await b.close();
-process.exit(ok ? 0 : 1);
+exitProbe(ok ? 0 : 1);

@@ -4,12 +4,12 @@
  * crystals, the universal agent, the PC/door animations — executes for many
  * ticks without throwing. The harness hard-fails on any console/page error.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp, forTicks } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoom(62));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
 
   expect(await p.evaluate(() => window.__ff.script() !== null), 'KNIHOVNA script is active in room 62');
 
@@ -17,15 +17,15 @@ await withApp(async ({ p, expect }) => {
   const crystal = await p.evaluate(() => window.__ff.itemState(35));
   expect(crystal !== null && typeof crystal.afaze === 'number', 'crystal (item 35) present with a frame');
 
-  const start = await p.evaluate(() => window.__ff.count());
+  // Sample across a window of GAME time, not of wall time: the assertion below is
+  // about ticks, and a fixed sleep buys however many of them the machine had left
+  // over (2.4s of sleep bought 15 ticks instead of 30 on a loaded run).
   const frames = new Set();
-  for (let i = 0; i < 40; i++) {
-    await p.waitForTimeout(60);
+  const ran = await forTicks(p, 15, async () => {
     const st = await p.evaluate(() => window.__ff.itemState(35));
     if (st) frames.add(st.afaze);
-  }
-  const end = await p.evaluate(() => window.__ff.count());
-  expect(end - start >= 15, `Programky advanced many ticks (${end - start} ticks)`);
+  });
+  expect(ran >= 15, `Programky advanced many ticks (${ran} ticks)`);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'script still active after the run');
   expect([...frames].every((f) => Number.isInteger(f)), 'crystal frame stays a valid integer each tick');
 });

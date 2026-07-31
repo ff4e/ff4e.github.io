@@ -1,15 +1,15 @@
 /** UI probe: VES (room 26, jukebox). Runs past count=65 so the head sings (snd
  *  301) and the three amps kick off looping music (musiccyc 50/51/52) without
  *  error; confirms the amp/head/crab items exist and the music channels sound. */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoomAwait(26));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'VES has an active script');
   for (const i of [1, 2, 3, 4, 13])
     expect(await p.evaluate((n) => window.__ff.itemState(n) !== null, i), `VES item ${i} exists`);
-  await p.waitForFunction(() => window.__ff.count() >= 85, null, { timeout: 12000 }).catch(() => {});
+  await waitTicks(p, 0, 85);
   const c = await p.evaluate(() => window.__ff.count());
   expect(c >= 85, `VES Programky ran to count ${c} without error`);
   const music = await p.evaluate(() => ({

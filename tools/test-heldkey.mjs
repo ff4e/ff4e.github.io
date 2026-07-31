@@ -5,7 +5,7 @@
  * keydown does NOT OS-auto-repeat, so a single held keydown that travels several cells
  * can only be the engine's own repeat; a tap moves at most one cell.
  */
-import { withApp } from './ui-lib.mjs';
+import { waitRoom, withApp, forTicks, tickSleep } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   const key = (type, code) =>
@@ -18,7 +18,7 @@ await withApp(async ({ p, expect }) => {
   const dist = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
   await p.evaluate(() => window.__ff.enterRoomAwait(30)); // RECYCLED — open water
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 5000 });
+  await waitRoom(p, 0);
   await waitIdle();
 
   // Hold each little-fish direction (one keydown, no repeat); the best open direction
@@ -32,12 +32,14 @@ await withApp(async ({ p, expect }) => {
     await waitIdle();
     const start = await cell();
     await key('keydown', d);
-    // Sample the current ticks/cell across the hold (its minimum = the top speed reached).
+    // Sample the current ticks/cell across the hold (its minimum = the top speed
+    // reached). jizda counts TICKS of unobstructed movement (0..6 -> 3, 7..10 -> 2,
+    // 11+ -> 1), so the hold has to be measured in ticks: 24 * 60ms of wall time
+    // reaches tier 1 on an idle machine and never leaves tier 3 on a loaded one.
     let localMin = 3;
-    for (let i = 0; i < 24; i++) {
-      await p.waitForTimeout(60);
+    await forTicks(p, 18, async () => {
       localMin = Math.min(localMin, await p.evaluate(() => window.__ff.moveFrames()));
-    }
+    }, 60);
     await key('keyup', d);
     await waitIdle();
     const moved = dist(await cell(), start);
@@ -59,11 +61,10 @@ await withApp(async ({ p, expect }) => {
   await key('keydown', bestDir);
   let moving = 0;
   let total = 0;
-  for (let i = 0; i < 40; i++) {
-    await p.waitForTimeout(20);
+  await forTicks(p, 16, async () => {
     total++;
     if ((await p.evaluate(() => window.__ff.phase())) === 'move') moving++;
-  }
+  }, 20);
   await key('keyup', bestDir);
   await waitIdle();
   expect(moving / total >= 0.4, `the fish spends a hold sliding, not teleporting (move ${moving}/${total} frames)`);
@@ -75,7 +76,7 @@ await withApp(async ({ p, expect }) => {
   const s2 = await cell();
   await key('keydown', bestDir);
   await key('keyup', bestDir);
-  await p.waitForTimeout(400); // let the single move dispatch and start
+  await tickSleep(p, 5); // let the single move dispatch and start
   await waitIdle();
   const tap = dist(await cell(), s2);
   expect(tap <= 1, `a single tap moves at most one cell (moved ${tap})`);
@@ -88,7 +89,7 @@ await withApp(async ({ p, expect }) => {
   for (let i = 0; i < 3; i++) {
     await key('keydown', bestDir);
     await key('keyup', bestDir);
-    await p.waitForTimeout(400);
+    await tickSleep(p, 5);
     await waitIdle();
   }
   const taps = dist(await cell(), s3);
@@ -98,11 +99,14 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.restart());
   await waitIdle();
   await key('keydown', bestDir);
-  await p.waitForTimeout(700);
+  await tickSleep(p, 9);
   await key('keyup', bestDir);
   await waitIdle();
   const stopped = await cell();
-  await p.waitForTimeout(500);
+  // Watch for a runaway repeat over GAME ticks. A wall-clock sleep makes this
+  // "nothing happened" check weaker the busier the machine is — in the limit it
+  // passes because the game barely ran at all.
+  const quiet = await tickSleep(p, 6);
   const later = await cell();
-  expect(dist(stopped, later) === 0, 'the fish stops once the held key is released');
+  expect(dist(stopped, later) === 0, `the fish stops once the held key is released (still after ${quiet} ticks)`);
 });

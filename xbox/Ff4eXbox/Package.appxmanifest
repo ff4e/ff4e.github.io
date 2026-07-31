@@ -23,7 +23,7 @@
   <Identity
     Name="FF4E.FishFillets4ever"
     Publisher="CN=FF4E"
-    Version="1.0.12.0" />
+    Version="1.0.14.0" />
 
   <mp:PhoneIdentity PhoneProductId="7d1b9f6c-6a1e-4d5f-9c2e-0a3b5d8e1f42" PhonePublisherId="00000000-0000-0000-0000-000000000000" />
 
