@@ -23,7 +23,7 @@
 import { readFileSync, existsSync, mkdirSync, renameSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { MODEL_BY_ID, requireBins, generateVariant, SCALE } from './lib/upscale.mjs';
+import { MODEL_BY_ID, requireBins, generateVariant, layerPadFor, SCALE } from './lib/upscale.mjs';
 
 const studioDir = dirname(fileURLToPath(import.meta.url));
 const root = join(studioDir, '..', '..');
@@ -77,7 +77,7 @@ for (let i = 0; i < list.length; i++) {
   mkdirSync(dir, { recursive: true });
   const tmp = join(dir, `.${modelId}.batch.png`);
   try {
-    generateVariant(srcAbs, tmp, spec, pic.alpha, bins, SCALE);
+    generateVariant(srcAbs, tmp, spec, pic.alpha, bins, SCALE, layerPadFor(pic.kind));
     renameSync(tmp, join(dir, `${modelId}.png`)); // atomic publish
     ok++;
   } catch (e) {

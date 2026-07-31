@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 import {
-  requireBins, availableModels, generateVariant, generateVariantAt, variantName, SCALE, MAX_SCALE,
+  requireBins, availableModels, generateVariant, generateVariantAt, variantName, layerPadFor, SCALE, MAX_SCALE,
 } from './upscale.mjs';
 
 const [indexFile, cacheDir, hash, scaleArg] = process.argv.slice(2);
@@ -51,7 +51,8 @@ function main() {
     try {
       // generateVariantAt composes the model's own passes for scales it can't reach
       // natively; at ×4 it delegates straight to generateVariant.
-      generateVariantAt(srcAbs, tmp, m, pic.alpha, bins, scale);
+      // Pad by KIND so the Studio's previews are the same pixels the build ships.
+      generateVariantAt(srcAbs, tmp, m, pic.alpha, bins, scale, layerPadFor(pic.kind));
       renameSync(tmp, dst);
       done++;
     } catch (e) {

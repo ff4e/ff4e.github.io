@@ -11,6 +11,26 @@ import { dirname, join } from 'node:path';
 
 export const SCALE = 4;
 export const SPRITE_PAD = Number(process.env.SPRITE_PAD || 12);
+/**
+ * Replicate-padding for OPAQUE layers, in source pixels.
+ *
+ * An upscaler has no context past the image border, so it darkens the outermost rows:
+ * measured on a 238x24 plaque with gen_wdn, the first device row came out ~4 luminance
+ * levels darker than the same pixels upscaled with 8px of replicated edge and cropped
+ * back, decaying to ~0 by two source pixels in.
+ *
+ * That only matters where the art is COMPOSITED INTO a larger picture, because the rim
+ * then reads as an outline: the world-map name plaques (24px tall, drawn straight onto
+ * the map) and the briefcase cutscene frames (drawn inside the TV screen). Room
+ * backgrounds and full-screen story pages meet the screen border, where there is
+ * nothing for a rim to contrast against — and padding them would invalidate the whole
+ * upscale cache for no visible gain.
+ */
+export const LAYER_PAD = Number(process.env.LAYER_PAD || 8);
+/** Picture kinds whose upscale is replicate-padded (see LAYER_PAD). */
+export const PADDED_KINDS = new Set(['desky', 'kufr']);
+/** Padding for a picture of `kind`, in source pixels (0 = none). */
+export function layerPadFor(kind) { return PADDED_KINDS.has(kind) ? LAYER_PAD : 0; }
 export const FSIZE = 15;
 /** Ceiling for the adaptive per-room scale (see scaleForRoomSize). */
 export const MAX_SCALE = 2 * SCALE;
@@ -57,8 +77,13 @@ export function scaleForRoomSize(w, h) {
  * Cache/basename for one model's variant at a scale. ×4 keeps the bare historic name
  * so the existing ~9 GB cache stays valid; anything else is suffixed `@<scale>`.
  */
-export function variantName(modelId, scale = SCALE) {
-  return scale === SCALE ? `${modelId}.png` : `${modelId}@${scale}.png`;
+export function variantName(modelId, scale = SCALE, pad = 0) {
+  // A padded upscale is a DIFFERENT image from an unpadded one, so it needs its own
+  // cache entry — otherwise the build happily reuses whichever was generated first.
+  // The pad=0 name is unchanged, so the existing room cache (hours of GPU time) stays
+  // valid; only the padded kinds get the suffix.
+  const p = pad ? `p${pad}` : '';
+  return scale === SCALE ? `${modelId}${p}.png` : `${modelId}${p}@${scale}.png`;
 }
 
 /** Candidate models (order = display order). orig = NN reference (model null).
@@ -306,8 +331,26 @@ export function buildSprite(srcPng, dstPng, spec, bins, scale = SCALE) {
  * alpha go through buildSprite instead, and the NN "orig" model is intercepted by
  * generateVariant before it gets here — so `spec.model` is always a real model.
  */
-export function buildLayer(srcPng, dstPng, spec, bins, scale = SCALE) {
-  upscaleFile(srcPng, dstPng, spec, bins, scale);
+export function buildLayer(srcPng, dstPng, spec, bins, scale = SCALE, pad = 0) {
+  if (!pad) { upscaleFile(srcPng, dstPng, spec, bins, scale); return; }
+  // Replicate the edge, upscale, crop back: the model then has context past the border
+  // instead of inventing a dark rim there (see LAYER_PAD).
+  const { w, h } = probe(srcPng);
+  const work = mkdtempSync(join(tmpdir(), 'studio-'));
+  try {
+    const src = decodeRgba(srcPng, w, h, work, 'src');
+    const { rgba: padded, w: pw, h: ph } = padReplicate(src, w, h, pad);
+    const inPng = join(work, 'pad.png');
+    encodeRgba(padded, pw, ph, work, 'pad', inPng);
+    const bigPng = join(work, 'pad_ai.png');
+    upscaleFile(inPng, bigPng, spec, bins, scale);
+    const pow = pw * scale, poh = ph * scale;
+    const big = decodeRgba(bigPng, pow, poh, work, 'padai');
+    const out = cropRgba(big, pow, pad * scale, pad * scale, w * scale, h * scale);
+    encodeRgba(out, w * scale, h * scale, work, 'out', dstPng);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -322,14 +365,14 @@ export function buildLayer(srcPng, dstPng, spec, bins, scale = SCALE) {
  * the scale filter negotiate a lossy YUV intermediate, which smeared flat colours
  * into palette dithering. Pinning RGBA fixes both.
  */
-export function generateVariant(srcPng, dstPng, spec, alpha, bins, scale = SCALE) {
+export function generateVariant(srcPng, dstPng, spec, alpha, bins, scale = SCALE, pad = 0) {
   if (spec.model === null) {
     // NN keeps whatever channels the source has (RGBA stays RGBA).
     run('nn', 'ffmpeg', ['-y', '-v', 'error', '-i', srcPng, '-vf', `scale=iw*${scale}:ih*${scale}:flags=neighbor`, '-pix_fmt', 'rgba', dstPng]);
     return;
   }
   if (alpha) buildSprite(srcPng, dstPng, spec, bins, scale);
-  else buildLayer(srcPng, dstPng, spec, bins, scale);
+  else buildLayer(srcPng, dstPng, spec, bins, scale, pad);
 }
 
 /**
@@ -391,21 +434,21 @@ function passPlan(spec, target) {
  * pass over 6 pictures / 5 models: the generic pass is sharper and 2–7× faster, but it
  * is a different algorithm than the one that was curated, so purity wins by decision.
  */
-export function generateVariantAt(srcPng, dstPng, spec, alpha, bins, target) {
-  if (target === SCALE) { generateVariant(srcPng, dstPng, spec, alpha, bins, SCALE); return; }
+export function generateVariantAt(srcPng, dstPng, spec, alpha, bins, target, pad = 0) {
+  if (target === SCALE) { generateVariant(srcPng, dstPng, spec, alpha, bins, SCALE, pad); return; }
   if (!(target > 0)) throw new Error(`bad target scale x${target}`);
   // Nearest-neighbour ("orig") is not a network — it hits any scale directly and exactly.
-  if (spec.model === null) { generateVariant(srcPng, dstPng, spec, alpha, bins, target); return; }
+  if (spec.model === null) { generateVariant(srcPng, dstPng, spec, alpha, bins, target, pad); return; }
 
   const { seq, prod } = passPlan(spec, target);
-  if (seq.length === 1 && prod === target) { generateVariant(srcPng, dstPng, spec, alpha, bins, target); return; }
+  if (seq.length === 1 && prod === target) { generateVariant(srcPng, dstPng, spec, alpha, bins, target, pad); return; }
 
   const work = mkdtempSync(join(tmpdir(), 'studioS-'));
   try {
     let cur = srcPng;
     seq.forEach((k, i) => {
       const out = join(work, `p${i}.png`);
-      generateVariant(cur, out, specAtScale(spec, k), alpha, bins, k);
+      generateVariant(cur, out, specAtScale(spec, k), alpha, bins, k, pad);
       cur = out;
     });
     if (prod === target) { copyFileSync(cur, dstPng); return; }

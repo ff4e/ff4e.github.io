@@ -45,7 +45,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import {
   MODEL_BY_ID, requireBins, availableModels, generateVariant,
-  decodePngRgba, encodePngRgba, thinOutline, stretchToBBox, smoothEdges, generateVariantAt, SCALE,
+  decodePngRgba, encodePngRgba, thinOutline, stretchToBBox, smoothEdges, generateVariantAt, layerPadFor, LAYER_PAD, SCALE,
   MAX_SCALE, scaleForRoomSize, variantName,
 } from './lib/upscale.mjs';
 
@@ -119,14 +119,14 @@ const hashFile = (abs) => createHash('md5').update(readFileSync(abs)).digest('he
  * model actually used, so the next build retries the real pick rather than settling.
  */
 /** Cache file for a model at a given scale (×SCALE keeps the bare legacy name). */
-const variantPath = (dir, model, scale) => join(dir, variantName(model, scale));
-function variantFor(hash, srcAbs, alpha, report, scale = SCALE) {
+const variantPath = (dir, model, scale, pad = 0) => join(dir, variantName(model, scale, pad));
+function variantFor(hash, srcAbs, alpha, report, scale = SCALE, pad = 0) {
   const want = selections[hash] || defaultModelId;
   const dir = join(cacheDir, hash);
-  const wantPng = variantPath(dir, want, scale);
+  const wantPng = variantPath(dir, want, scale, pad);
   if (existsSync(wantPng)) return { png: wantPng, model: want };
   if (want === 'orig') { // explicit NN pick
-    const o = variantPath(dir, 'orig', scale);
+    const o = variantPath(dir, 'orig', scale, pad);
     if (existsSync(o)) return { png: o, model: 'orig' };
   }
   const spec = MODEL_BY_ID[want] || MODEL_BY_ID[defaultModelId];
@@ -137,9 +137,9 @@ function variantFor(hash, srcAbs, alpha, report, scale = SCALE) {
   if (DRY) { report.generated++; return { png: wantPng, model: spec.id, planned: true }; }
   try {
     mkdirSync(dir, { recursive: true });
-    const tmp = join(dir, `.${spec.id}@${scale}.build.png`);
-    generateVariantAt(srcAbs, tmp, spec, alpha, getBins(), scale);
-    const dst = variantPath(dir, spec.id, scale);
+    const tmp = join(dir, `.${spec.id}${pad ? `p${pad}` : ''}@${scale}.build.png`);
+    generateVariantAt(srcAbs, tmp, spec, alpha, getBins(), scale, pad);
+    const dst = variantPath(dir, spec.id, scale, pad);
     renameSync(tmp, dst); // atomic publish into the Studio cache
     report.generated++;
     return { png: dst, model: spec.id };
@@ -169,12 +169,12 @@ function variantFor(hash, srcAbs, alpha, report, scale = SCALE) {
  * SUBSTITUTE a different model records that model instead, so the mismatch makes
  * the next build retry it.
  */
-function stampFor(hash, alpha, model, scale = SCALE) {
+function stampFor(hash, alpha, model, scale = SCALE, pad = 0) {
   const s = alpha ? effContour(hash) : 0;
-  const png = variantPath(join(cacheDir, hash), model, scale);
+  const png = variantPath(join(cacheDir, hash), model, scale, pad);
   let v = '-';
   try { const st = statSync(png); v = `${st.size}-${Math.round(st.mtimeMs)}`; } catch { /* not cached yet */ }
-  return `${hash}:${model}:x${scale}:${s}:${s > 0 ? `${smoothSigma}/${smoothCrisp}` : ''}:${v}:q${WEBP_Q}`;
+  return `${hash}:${model}:x${scale}:${s}:${s > 0 ? `${smoothSigma}/${smoothCrisp}` : ''}:${v}:q${WEBP_Q}${pad ? `:pad${pad}` : ''}`;
 }
 
 /**
@@ -239,11 +239,15 @@ function toWebp(srcPng, outAbs) {
 }
 
 /** Write one output file as WebP, post-processing the cached variant if needed. */
-function emit(srcAbs, outAbs, hash, alpha, report, scale) {
+function emit(srcAbs, outAbs, hash, alpha, report, scale, padOverride) {
   const s = alpha ? effContour(hash) : 0;
-  const { png, model, planned } = variantFor(hash, srcAbs, alpha, report, scale);
+  // Replicate-pad by KIND (see layerPadFor): art composited INTO a larger picture would
+  // otherwise carry the upscaler's dark border rim as a visible outline. padOverride is
+  // for art that has no index entry — the cutscene frames.
+  const pad = padOverride ?? layerPadFor(index.pictures[hash]?.kind);
+  const { png, model, planned } = variantFor(hash, srcAbs, alpha, report, scale, pad);
   if (!planned) assertScaled(srcAbs, png, hash, scale);
-  const stamp = stampFor(hash, alpha, model, scale);   // records the model ACTUALLY used
+  const stamp = stampFor(hash, alpha, model, scale, pad);   // records the model ACTUALLY used
   if (DRY) return stamp;
   mkdirSync(dirname(outAbs), { recursive: true });
   let src = png;
@@ -383,7 +387,7 @@ function buildUi(which, report) {
     const out = webpName(rel);
     const outAbs = join(dstDir, out);
     written.push(out);
-    const want = stampFor(hash, alpha, selections[hash] || defaultModelId, SCALE);
+    const want = stampFor(hash, alpha, selections[hash] || defaultModelId, SCALE, layerPadFor(index.pictures[hash]?.kind));
     if (!FORCE && existsSync(outAbs) && prev[out] === want) { next[out] = prev[out]; skipped++; continue; }
     next[out] = emit(srcAbs, outAbs, hash, alpha, report, SCALE);
     wrote++;
@@ -442,7 +446,7 @@ function buildKufr(report) {
   let wrote = 0, skipped = 0, failed = 0;
 
   const one = (srcAbs, outAbs, key, hash, model) => {
-    const want = stampFor(hash, false, model, SCALE);
+    const want = stampFor(hash, false, model, SCALE, LAYER_PAD);
     if (!FORCE && existsSync(outAbs) && prev[key] === want) { next[key] = prev[key]; skipped++; return; }
     // The frames are not in selections (they are not indexed), and emit() resolves the
     // model through it — so pin this frame's model in memory for the call. NEVER saved:
@@ -451,7 +455,10 @@ function buildKufr(report) {
     const before = selections[hash];
     selections[hash] = model;
     try {
-      next[key] = emit(srcAbs, outAbs, hash, false, report, SCALE);
+      // The frames are not indexed, so layerPadFor cannot see their kind — pass the
+      // '_kufr' padding explicitly. They are drawn INSIDE the TV screen, where an
+      // unpadded border rim would read as a box around the picture.
+      next[key] = emit(srcAbs, outAbs, hash, false, report, SCALE, LAYER_PAD);
       wrote++;
     } catch (e) {
       console.error(`  ! ${key}: ${e.message}`);
