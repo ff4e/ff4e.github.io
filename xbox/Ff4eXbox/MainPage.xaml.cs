@@ -1,5 +1,9 @@
 using System;
+using System.Globalization;
+using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
+using Windows.Gaming.Input;
 using Microsoft.Web.WebView2.Core;
 using Windows.ApplicationModel;
 using Windows.System.Display;
@@ -33,6 +37,9 @@ namespace Ff4eXbox
         Microsoft.UI.Xaml.Controls.WebView2 _web;
         TaskCompletionSource<bool> _webLoaded;
         bool _started;
+        Gamepad _pad;
+        string _lastPadJson;
+        CoreWebView2 _core;
 
         public MainPage()
         {
@@ -219,6 +226,9 @@ namespace Ff4eXbox
                 App.Log("DisplayRequest (non-fatal): " + ex.Message);
             }
 
+            _core = core;
+            StartGamepadBridge();
+
             Step("navigating to the game...");
             try
             {
@@ -230,6 +240,91 @@ namespace Ff4eXbox
                 Step("Navigation FAILED: " + ex);
                 App.SaveLog();
             }
+        }
+
+        /// <summary>
+        /// Feed controller state to the web app.
+        ///
+        /// WebView2's own Gamepad API is backed by GameInput (Gaming Services Runtime) and
+        /// reports nothing inside a UWP app on Xbox, so the page sees no controller at all
+        /// (WebView2Feedback#4366). The native shell can read the pad perfectly well, so we
+        /// poll Windows.Gaming.Input here and post a Standard-Gamepad-shaped snapshot into
+        /// the page, where platform/hostGamepad.ts republishes it through
+        /// navigator.getGamepads(). Only sent when something changes.
+        /// </summary>
+        void StartGamepadBridge()
+        {
+            try
+            {
+                _pad = Gamepad.Gamepads.FirstOrDefault();
+                Gamepad.GamepadAdded += (s, g) => { _pad = g; };
+                Gamepad.GamepadRemoved += (s, g) => { if (ReferenceEquals(_pad, g)) _pad = Gamepad.Gamepads.FirstOrDefault(); };
+                Windows.UI.Xaml.Media.CompositionTarget.Rendering += OnFrame;
+                App.Log("gamepad bridge started (pads: " + Gamepad.Gamepads.Count + ")");
+            }
+            catch (Exception ex)
+            {
+                App.Log("gamepad bridge FAILED: " + ex.Message);
+            }
+        }
+
+        static string N(double v)
+        {
+            return v.ToString("0.###", CultureInfo.InvariantCulture);
+        }
+
+        static string B(bool on)
+        {
+            return on ? "1" : "0";
+        }
+
+        void OnFrame(object sender, object e)
+        {
+            if (_core == null) return;
+            var pad = _pad;
+            string json;
+
+            if (pad == null)
+            {
+                json = "{\"t\":\"pad\",\"connected\":false,\"axes\":[0,0,0,0],\"buttons\":[]}";
+            }
+            else
+            {
+                GamepadReading r;
+                try { r = pad.GetCurrentReading(); }
+                catch { return; }
+                var b = r.Buttons;
+
+                // W3C Standard Gamepad order. Thumbstick Y is inverted: Windows reports up
+                // as positive, the Gamepad API reports down as positive.
+                var sb = new StringBuilder(320);
+                sb.Append("{\"t\":\"pad\",\"connected\":true,\"axes\":[")
+                  .Append(N(r.LeftThumbstickX)).Append(',').Append(N(-r.LeftThumbstickY)).Append(',')
+                  .Append(N(r.RightThumbstickX)).Append(',').Append(N(-r.RightThumbstickY))
+                  .Append("],\"buttons\":[")
+                  .Append(B((b & GamepadButtons.A) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.B) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.X) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.Y) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.LeftShoulder) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.RightShoulder) != 0)).Append(',')
+                  .Append(N(r.LeftTrigger)).Append(',')
+                  .Append(N(r.RightTrigger)).Append(',')
+                  .Append(B((b & GamepadButtons.View) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.Menu) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.LeftThumbstick) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.RightThumbstick) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.DPadUp) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.DPadDown) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.DPadLeft) != 0)).Append(',')
+                  .Append(B((b & GamepadButtons.DPadRight) != 0)).Append(",0]}");
+                json = sb.ToString();
+            }
+
+            if (json == _lastPadJson) return; // nothing changed — don't spam the page
+            _lastPadJson = json;
+            try { _core.PostWebMessageAsJson(json); }
+            catch { /* page not ready yet */ }
         }
 
         void OnNavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)

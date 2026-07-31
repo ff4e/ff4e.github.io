@@ -105,6 +105,7 @@ import { initAnalytics } from '../platform/analytics.js';
 import { pollPad, type PadDir, type PadSnapshot } from '../platform/gamepad.js';
 import { tvMode } from '../platform/tv.js';
 import { registerServiceWorker } from '../platform/pwa.js';
+import { initHostGamepad } from '../platform/hostGamepad.js';
 import { setVirtualGamepadEnabled } from '../platform/virtualGamepad.js';
 import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
 import { parseFfp, type FfpPanel } from '../data/ffp.js';
@@ -6122,6 +6123,9 @@ booted = true;
 console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
 initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
 registerServiceWorker(); // PWA app shell (platform layer): production builds only
+// Console only: receive controller state from the native UWP shell, because WebView2's
+// own Gamepad API reports nothing on Xbox. No-op in a browser. See platform/hostGamepad.
+initHostGamepad();
 if (loadingEl) loadingEl.hidden = true;
 maybeShowWebglNote();
 requestAnimationFrame(loop);
