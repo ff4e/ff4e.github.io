@@ -32,6 +32,7 @@ namespace Ff4eXbox
         bool _displayRequested;
         Microsoft.UI.Xaml.Controls.WebView2 _web;
         TaskCompletionSource<bool> _webLoaded;
+        bool _started;
 
         public MainPage()
         {
@@ -87,7 +88,21 @@ namespace Ff4eXbox
                 _web = new Microsoft.UI.Xaml.Controls.WebView2();
                 _webLoaded = new TaskCompletionSource<bool>();
                 _web.Loaded += (s2, e2) => _webLoaded.TrySetResult(true);
-                _web.CoreWebView2Initialized += (s2, e2) => App.Log("CoreWebView2Initialized fired");
+                // The rest of setup is driven from this event rather than from the value of
+                // WebView2.CoreWebView2 after awaiting EnsureCoreWebView2Async: measured on
+                // an Xbox Series X, that property stays null even once the event has fired,
+                // so the event's `sender` is the only reliable way to reach the core.
+                _web.CoreWebView2Initialized += (s3, a3) =>
+                {
+                    if (a3?.Exception != null)
+                    {
+                        Step("CoreWebView2Initialized reported: " + a3.Exception);
+                        return;
+                    }
+                    var c = s3?.CoreWebView2;
+                    Step("CoreWebView2Initialized fired (core " + (c != null ? "available" : "NULL") + ")");
+                    if (c != null) Start(c, "initialized event");
+                };
                 RootGrid.Children.Insert(0, _web);
                 Step("WebView2 control created");
             }
@@ -98,26 +113,15 @@ namespace Ff4eXbox
                 return;
             }
 
-            // The control has to be in the visual tree AND loaded before its browser
-            // process can be attached. Calling EnsureCoreWebView2Async() straight after
-            // adding it completes happily but leaves CoreWebView2 null, which then NREs on
-            // the very next line — measured on an Xbox Series X.
+            // The control must be in the visual tree and loaded before its browser process
+            // can attach.
             var loadedInTime = await Task.WhenAny(_webLoaded.Task, Task.Delay(10000)) == _webLoaded.Task;
             Step("WebView2 Loaded event: " + (loadedInTime ? "yes" : "TIMED OUT"));
 
-            CoreWebView2 core = null;
             try
             {
                 await _web.EnsureCoreWebView2Async();
-                core = _web.CoreWebView2;
-                // Belt and braces: if the core is still not published, give it a few UI
-                // ticks rather than dying on a null reference.
-                for (var i = 0; i < 20 && core == null; i++)
-                {
-                    await Task.Delay(100);
-                    core = _web.CoreWebView2;
-                }
-                Step("CoreWebView2 ready: " + (core != null));
+                Step("EnsureCoreWebView2Async returned");
             }
             catch (Exception ex)
             {
@@ -130,12 +134,29 @@ namespace Ff4eXbox
                 return;
             }
 
-            if (core == null)
+            // If the event never delivered a usable core, fall back to the property (some
+            // builds populate it late) before giving up.
+            if (!_started)
             {
-                Step("CoreWebView2 is still NULL after EnsureCoreWebView2Async — cannot continue.");
-                App.SaveLog();
-                return;
+                for (var i = 0; i < 20 && !_started; i++)
+                {
+                    await Task.Delay(100);
+                    if (_web.CoreWebView2 != null) { Start(_web.CoreWebView2, "property (late)"); break; }
+                }
             }
+            if (!_started)
+            {
+                Step("CoreWebView2 never became available — cannot map the game folder.");
+                App.SaveLog();
+            }
+        }
+
+        /// <summary>Configure the engine, map the packaged game folder, and navigate. Runs once.</summary>
+        void Start(CoreWebView2 core, string via)
+        {
+            if (_started) return;
+            _started = true;
+            Step("starting via " + via);
 
             try
             {
@@ -169,12 +190,19 @@ namespace Ff4eXbox
                 return;
             }
 
-            core.NavigationCompleted += OnNavigationCompleted;
-            core.ProcessFailed += (s, args) =>
+            try
             {
-                Step("WebView2 PROCESS FAILED: " + args.ProcessFailedKind);
-                App.SaveLog();
-            };
+                core.NavigationCompleted += OnNavigationCompleted;
+                core.ProcessFailed += (s2, a2) =>
+                {
+                    Step("WebView2 PROCESS FAILED: " + a2.ProcessFailedKind);
+                    App.SaveLog();
+                };
+            }
+            catch (Exception ex)
+            {
+                Step("event wiring (non-fatal): " + ex.Message);
+            }
 
             // A puzzle game has long stretches with no input while the player thinks —
             // keep the console from blanking the screen.
@@ -191,9 +219,17 @@ namespace Ff4eXbox
                 App.Log("DisplayRequest (non-fatal): " + ex.Message);
             }
 
-            Step("navigating to the game…");
-            _web.Source = new Uri($"https://{VirtualHost}/index.html");
-            _web.Focus(FocusState.Programmatic);
+            Step("navigating to the game...");
+            try
+            {
+                _web.Source = new Uri($"https://{VirtualHost}/index.html");
+                _web.Focus(FocusState.Programmatic);
+            }
+            catch (Exception ex)
+            {
+                Step("Navigation FAILED: " + ex);
+                App.SaveLog();
+            }
         }
 
         void OnNavigationCompleted(CoreWebView2 sender, CoreWebView2NavigationCompletedEventArgs args)
