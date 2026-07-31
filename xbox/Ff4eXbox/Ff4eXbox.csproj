@@ -99,6 +99,15 @@
     <PackageReference Include="Microsoft.UI.Xaml">
       <Version>2.8.6</Version>
     </PackageReference>
+    <!-- Pin the WebView2 SDK explicitly. WinUI 2.8.6 otherwise resolves a version whose
+         loader cannot find the WebView2 runtime that ships in the Xbox OS: initialization
+         fails with FileNotFoundException 0x80070002 ("WebView2 is not installed") and
+         CoreWebView2 is never created. 1.0.2088.41 is the version Microsoft points Xbox
+         developers at — see WebView2Feedback issue 2155, comment 1789523587, referenced
+         from discussion 4128 ("WebView 2 on Xbox ... not installed"). -->
+    <PackageReference Include="Microsoft.Web.WebView2">
+      <Version>1.0.2088.41</Version>
+    </PackageReference>
   </ItemGroup>
 
   <Import Project="$(MSBuildExtensionsPath)\Microsoft\WindowsXaml\v$(VisualStudioVersion)\Microsoft.Windows.UI.Xaml.CSharp.targets" />
