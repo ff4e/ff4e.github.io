@@ -21,7 +21,16 @@ const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
 const errs = [];
 p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
-await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
+await p.addInitScript(() => {
+  try {
+    const o = JSON.parse(localStorage.getItem('ff.options') || '{}');
+    o.introSeen = true;
+    localStorage.setItem('ff.options', JSON.stringify(o));
+    // Pin the tier this probe asserts on: the default is `ai`, whose art this
+    // probe never uses but would still download and wait for.
+    localStorage.setItem('ff.graphics', 'classic');
+  } catch {}
+});
 await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 

@@ -77,6 +77,11 @@ await withApp(
       loadingFill < 0.02,
       `stage is cleared black while the new room loads — no stale-room flash (fill ${loadingFill.toFixed(3)})`,
     );
+    // ...and the black stage is not what the player is looking at: the post-boot
+    // loading overlay is armed on room entry and covers it once the wait is real
+    // (2000ms here, well past the ~200ms threshold).
+    await p.waitForFunction(() => window.__ff.loadingVisible(), { timeout: 10000 });
+    expect(true, 'the loading overlay covers a slow room entry');
 
     // Let the throttled load finish: the freshly-built room now paints.
     expect((await p.evaluate(() => window.__rp)) === 'ok', 'the throttled room load resolves');
@@ -84,27 +89,42 @@ await withApp(
     await tickSleep(p, 4);
     const loadedFill = await stageFill(p);
     expect(loadedFill > 0.1, `the newly-loaded room paints once its assets arrive (fill ${loadedFill.toFixed(3)})`);
+    expect(!(await p.evaluate(() => window.__ff.loadingVisible())), 'the overlay comes down once the room is presented');
     await p.unroute(ffrGlob(30));
 
     // === 2) Hardening: a FAILED load must clear the guard (finally), not wedge black. ===
     // Serve room 40's FFR as a 200 with a garbage body so parseFfr() throws inside
     // loadRoom's try (a realistic corrupt/truncated-asset path). A 200 avoids the
     // browser console error a failed resource load would otherwise emit.
-    await p.route(ffrGlob(40), (r) =>
-      r.fulfill({ status: 200, contentType: 'application/octet-stream', body: 'not a valid ffr' }),
-    );
-    const failRes = await p.evaluate(() =>
+    //
+    // Held for 2000ms first, so the failure lands with the loading overlay ALREADY UP.
+    // Failing immediately would resolve before the 200ms arm and the overlay assertion
+    // below would pass without the overlay ever having been shown — i.e. vacuously.
+    await p.route(ffrGlob(40), async (r) => {
+      await new Promise((x) => setTimeout(x, 2000));
+      await r.fulfill({ status: 200, contentType: 'application/octet-stream', body: 'not a valid ffr' }).catch(() => {});
+    });
+    const failStarted = p.evaluate(() =>
       window.__ff.enterRoom(40).then(
         () => 'ok',
         () => 'err',
       ),
     );
+    await p.waitForFunction(() => window.__ff.loadingVisible(), { timeout: 10000 });
+    expect(true, 'the overlay is up while the doomed load is in flight');
+    const failRes = await failStarted;
     expect(failRes === 'err', 'a failed room load rejects (loadRoom rethrows after finally)');
     await tickSleep(p, 4);
     const recoveredFill = await stageFill(p);
     expect(
       recoveredFill > 0.1,
       `after a failed load the stage recovers to the previous room, not wedged black (fill ${recoveredFill.toFixed(3)})`,
+    );
+    // ...and the overlay must not be left up over that recovered frame: loadRoom's
+    // finally clears the guard on the failure path too, and the overlay follows it.
+    expect(
+      !(await p.evaluate(() => window.__ff.loadingVisible())),
+      'a failed load dismisses the loading overlay rather than stranding it',
     );
     await p.unroute(ffrGlob(40));
   },

@@ -134,6 +134,9 @@
         padding: 24px;
       }
       .overlay[hidden] { display: none; }
+      /* Re-used for room entry after boot: the title and the attribution belong to
+         the boot splash, and would read as "the game restarted" mid-play. */
+      #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
       .overlay h1 { margin: 0; font: 600 26px/1.2 system-ui, sans-serif; letter-spacing: 0.5px; }
       .overlay p { margin: 0; max-width: 34em; opacity: 0.85; }
       .spinner {
