@@ -2931,6 +2931,16 @@ function pollGamepadInput(): void {
     return;
   }
 
+  // The briefcase cutscene owns input while it plays, exactly as it does for the
+  // keyboard (where everything is swallowed and only Escape skips it, zrus_kufr).
+  // Without this, B fell through to "leave the room" below and abandoned the cutscene
+  // half-played — leaving it to resume mid-way, stuck, on re-entering the room.
+  if (cutscene) {
+    if (pad.pressed('b') || pad.pressed('a') || pad.pressed('menu')) skipCutscene();
+    gpReleaseMove();
+    return;
+  }
+
   // B / View: leave a room for the world map (Standard "back").
   if ((pad.pressed('b') || pad.pressed('view')) && screen === 'room') {
     gpReleaseMove();
@@ -3290,11 +3300,13 @@ function handleMapPadInput(pad: PadSnapshot, now: number): void {
     if (pad.pressed('a')) activateInfoButton(mapInfoRoom, mapInfoHover);
     return;
   }
-  // Plain map: B resumes the current room (mirrors Esc), else navigate + activate.
-  if (pad.pressed('b')) {
-    if (room) void enterRoom(Number(select.value));
-    return;
-  }
+  // Plain map: B is "back", and the map is already the top level, so it does nothing.
+  // It deliberately does NOT resume the loaded room the way the keyboard's Escape does:
+  // on a controller B is pressed constantly to back out of things, so that would drop
+  // the player into whichever room happens to be loaded — including one they have not
+  // reached yet. Resuming is still one press away: the last played room is the default
+  // selection, so Ⓐ enters it.
+  if (pad.pressed('b')) return;
   if (!mapSel) initMapSelection();
   syncMapHighlight(); // keep the lit corner / plaque in sync with the selection
   const step = menuStep(pad.leftDir ?? pad.rightDir, now);
@@ -6179,6 +6191,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   record: () => engine?.srecord ?? '',
   moves: () => lengthOfRecord(engine?.srecord ?? ''),
   restart: () => restartRoom(),
+  /** Whether the briefcase cutscene is playing (controller-navigation tests). */
+  cutscene: () => cutscene !== null,
   smoothOn: () => {
     smoothLog = [];
   },
