@@ -13,13 +13,21 @@ The app never touches the network.
 | `SetVirtualHostNameToFolderMapping` | Maps the packaged `wwwroot` onto `https://ff4e.example`. |
 | `wwwroot/` | The built site, staged by `tools/stage-xbox-wwwroot.mjs`. Not committed. |
 
-Two Xbox-specific behaviours live in the host (`App.xaml.cs`):
+Three Xbox-specific behaviours live in the host:
 
 - **`RequiresPointerMode = WhenRequested`** — Xbox otherwise turns the controller into an
   emulated mouse pointer, which would swallow the gamepad before the web app's Gamepad API
   ever saw it.
 - **`SetDesiredBoundsMode(UseCoreWindow)`** — draw edge to edge. The app already renders its
   own 5% title-safe margin in TV mode (P3); letting the OS inset too would double it.
+- **The controller bridge** (`MainPage.xaml.cs` + `src/platform/hostGamepad.ts`) — WebView2's
+  own Gamepad API reports *no controller at all* inside a UWP app on Xbox, because it is
+  backed by GameInput from the Gaming Services Runtime
+  ([WebView2Feedback#4366](https://github.com/MicrosoftEdge/WebView2Feedback/issues/4366)).
+  The host reads the pad with `Windows.Gaming.Input`, which works fine, and posts Standard
+  Gamepad snapshots into the page, where they are republished through
+  `navigator.getGamepads()` — the same mechanism the dev simulator uses, so the game code
+  is unchanged. Covered by `tools/test-hostpad.mjs`.
 
 The web build is compiled with `VITE_TARGET=xbox`, which turns TV mode on by default and
 drops service-worker registration (the content is already local).
@@ -99,8 +107,34 @@ rather than installing the app alone.
 **"Couldn't start the browser engine (WebView2)."** The console is on an Xbox OS older than
 2310 (October 2023). Update it.
 
-**The game renders but the controller does nothing.** Xbox is still handing the pad to the
-app as an emulated mouse pointer — check `RequiresPointerMode` in `App.xaml.cs`.
+**The game renders but the controller does nothing.** Check `pad.log` (below) before
+changing anything — it reports both halves of the bridge. `Gamepad.Gamepads.Count` is what
+the *host* sees; `rx=` is how many snapshots the *page* received. Zero on the host side
+means the controller is off or asleep; messages flowing but `pads=0` in the page means the
+bridge is broken. `RequiresPointerMode` in `App.xaml.cs` stops Xbox turning the pad into an
+emulated mouse pointer.
+
+## Diagnostics
+
+There is no debugger and no DevTools on the console, and the Xbox Device Portal has no log
+viewer, so the app reports on itself into its `LocalState` folder:
+
+- **`boot.log`** — every startup step, and the exact failure if it stops early.
+- **`pad.log`** — refreshed each second: what `Windows.Gaming.Input` reports, the last raw
+  reading, how many snapshots were posted, and what the *page* sees (`pads=`, `rx=`).
+
+`tools/xdeploy.sh` drives the whole loop from a dev machine over the Device Portal REST
+API — no console interaction needed:
+
+```bash
+./tools/xdeploy.sh deploy   # uninstall + install (with dependencies) + launch
+./tools/xdeploy.sh pad      # controller diagnostics
+./tools/xdeploy.sh log      # boot.log
+./tools/xdeploy.sh ps       # is it running?
+```
+
+It expects the package in `~/Downloads/ff4e-xbox` and credentials in `/tmp/.xdp` as
+`user:pass`; override the console address with `XB=https://<ip>:11443`.
 
 ## On-device checklist
 
