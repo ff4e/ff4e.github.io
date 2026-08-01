@@ -2884,7 +2884,10 @@ function pollGamepadInput(): void {
       gpAudioUnlocked = true;
     }
     if (intro.playing) {
-      intro.skip();
+      // On the first-run splash a button must act like clicking "start": skip() is a
+      // deliberate no-op while gated, so without this the controller is stuck on the
+      // very first screen with no way forward.
+      if (!intro.confirmStart()) intro.skip();
       gpReleaseMove();
       return;
     }

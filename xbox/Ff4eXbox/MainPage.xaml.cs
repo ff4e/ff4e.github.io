@@ -97,6 +97,22 @@ namespace Ff4eXbox
                 Step("XamlControlsResources FAILED: " + ex.Message);
             }
 
+            // Must be set before the browser process is created. A console has no address
+            // bar and no concept of a stray autoplaying tab, and controller input does not
+            // count as a user-activation gesture, so the intro movie and game audio would
+            // otherwise be blocked with no way for the player to permit them.
+            try
+            {
+                Environment.SetEnvironmentVariable(
+                    "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+                    "--autoplay-policy=no-user-gesture-required");
+                App.Log("autoplay policy relaxed");
+            }
+            catch (Exception ex)
+            {
+                App.Log("autoplay policy (non-fatal): " + ex.Message);
+            }
+
             try
             {
                 _web = new Microsoft.UI.Xaml.Controls.WebView2();

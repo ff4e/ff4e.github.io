@@ -43,6 +43,23 @@ export class IntroPlayer {
     return this.active;
   }
 
+  /** Whether the first-run "click to start" splash is up, waiting for a gesture. */
+  get awaitingStart(): boolean {
+    return this.active && this.gated;
+  }
+
+  /**
+   * Proceed from the first-run splash — the controller's equivalent of clicking the
+   * start button. Returns false when no splash is showing, so callers can fall back to
+   * skip(). Without this a gamepad cannot get past the splash at all: it is reachable
+   * only by clicking the button, and skip() is a deliberate no-op while gated.
+   */
+  confirmStart(): boolean {
+    if (!this.awaitingStart) return false;
+    this.beginPlayback();
+    return true;
+  }
+
   /** Whether the "click to start" splash is up, waiting for the first gesture. */
   private get gated(): boolean {
     return !this.els.startBtn.hidden;
