@@ -20,14 +20,33 @@ export type VolumeBus = 'effect' | 'voice' | 'music';
 export type SubtitleMode = 'cz' | 'en' | 'off';
 
 /**
- * Default slider indices — the levels the original boots with (RSound.pas:33-35
- * snd_volume=48, talk_volume=64, music_volume=27, read into tahlo by PrectiZvuk,
- * Uovl.pas:286): snd -> 48 (index 11), talk -> 64 (index 12), music -> 27 (index 9).
+ * The levels the ORIGINAL boots with (RSound.pas:33-35 snd_volume=48,
+ * talk_volume=64, music_volume=27, read into tahlo by PrectiZvuk, Uovl.pas:286):
+ * snd -> 48 (index 11), talk -> 64 (index 12), music -> 27 (index 9).
+ *
+ * This is the reference the bus gain is measured against (see busMultiplier), so
+ * "the original's level" stays a fixed point even when this port boots a slider
+ * somewhere else. Do not repurpose it as the boot default — that is DEFAULT_INDEX.
+ */
+export const ORIGINAL_INDEX: Record<VolumeBus, number> = {
+  effect: 11,
+  voice: 12,
+  music: 9,
+};
+
+/**
+ * The slider indices this port boots with.
+ *
+ * Effects and voices keep the original levels. **Music is a deliberate departure**:
+ * the original's 27 (index 9) sits high enough that the music competes with the
+ * voices on modern hardware, so the port boots it at the middle of the 13-step
+ * slider (index 6 -> 11), i.e. ~0.41 of the original level. Raising the slider back
+ * to index 9 restores exactly the original mix.
  */
 export const DEFAULT_INDEX: Record<VolumeBus, number> = {
   effect: 11,
   voice: 12,
-  music: 9,
+  music: 6,
 };
 
 /** Clamp a raw slider index to the valid 0..12 range. */
@@ -36,14 +55,18 @@ export function clampIndex(i: number): number {
 }
 
 /**
- * The bus-gain multiplier for a slider index, relative to the category's
- * default level (so the default index yields exactly 1.0 and the existing
- * per-call category mix — EFFECT_VOL etc. — is preserved unchanged). Across the
- * 13 steps the multiplier is proportional to `Volumes[]`, matching the original's
- * playback curve (which is likewise proportional to the chosen volume level).
+ * The bus-gain multiplier for a slider index, relative to the category's level in
+ * the ORIGINAL (so index 11/12/9 yields exactly 1.0 and the existing per-call
+ * category mix — EFFECT_VOL etc. — is preserved unchanged). Across the 13 steps the
+ * multiplier is proportional to `Volumes[]`, matching the original's playback curve
+ * (which is likewise proportional to the chosen volume level).
+ *
+ * Deliberately measured against ORIGINAL_INDEX, not DEFAULT_INDEX: normalising on
+ * the boot default would make every default 1.0 by construction, so moving a slider's
+ * boot position would move the jockey without changing what the player hears.
  */
 export function busMultiplier(bus: VolumeBus, index: number): number {
-  return VOLUMES[clampIndex(index)]! / VOLUMES[DEFAULT_INDEX[bus]]!;
+  return VOLUMES[clampIndex(index)]! / VOLUMES[ORIGINAL_INDEX[bus]]!;
 }
 
 export interface Settings {
