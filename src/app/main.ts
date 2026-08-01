@@ -69,6 +69,7 @@ import type { RgbaScreen } from '../render/rgbaScreen.js';
 import { ClassicArtSource } from '../render/classicArtSource.js';
 import type { ArtSource } from '../render/artSource.js';
 import { GlScreen, webgl2Available } from '../render/glScreen.js';
+import { GlAiScreen } from '../render/glRoomAi.js';
 import { FontData } from '../render/font.js';
 import { SubtitleSystem, SUB_SUBSTEPS } from '../render/subtitles.js';
 import { HelpScreens } from '../render/help.js';
@@ -85,6 +86,7 @@ import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
 import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
 import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { loadAiRoom, aiRoomGateAllows, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
+import type { AiRoomFrame } from '../render/roomAi.js';
 import { withLoadSlot } from '../render/loadSlot.js';
 import {
   hitInfoButton,
@@ -206,7 +208,10 @@ function contentScaleFor(w: number, h: number): number {
  * So the two are named separately here and derived once:
  *   native   the resolution the SIMULATION uses; all game coordinates are in these px
  *   css      the on-screen box; every layer stacked over the room must match this
- *   backing  the room canvas's pixel buffer, which is native×upscale in the ai tier
+ *   backing  the buffer the frame is COMPOSITED in, which is native×upscale in the ai
+ *            tier — the #screen canvas on the canvas-2D path, GlAiScreen's offscreen
+ *            FBO on the GPU one (where #screen is left at native size, since nothing
+ *            paints into it)
  *
  * `scale` converts native → css, which is what any overlay drawing in game coordinates
  * needs; it is deliberately NOT derived from the backing store.
@@ -2685,7 +2690,7 @@ function drawCutscene(): void {
     ctx.drawImage(aiKufr.base, 0, 0);
     ctx.drawImage(aiBmp, aiKufr.region.x * S, aiKufr.region.y * S);
     updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
-    perfPaint++;
+    paintTick();
     return;
   }
   if (canvas.style.imageRendering) canvas.style.imageRendering = '';
@@ -3461,7 +3466,7 @@ function drawMap(): void {
   const sigT = tetris ? `|ttr${tetrisTick}` : '';
   if (sig + sigT === mapSig) return; // nothing visibly changed — skip the redraw entirely
   mapSig = sig + sigT;
-  perfPaint++; // an actual map paint (past the cache check)
+  paintTick(); // an actual map paint (past the cache check)
   const panelOpen = mapInfoRoom !== null;
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
@@ -3804,7 +3809,7 @@ function drawLegImage(): void {
   } else {
     ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
   }
-  perfPaint++;
+  paintTick();
 }
 
 /**
@@ -4202,6 +4207,27 @@ function glCompositor(): GlScreen | null {
   return glComp;
 }
 
+// The `ai` tier's GPU compositor, on the SAME WebGL2 context as GlScreen (one canvas,
+// one context — see the header of glRoomAi.ts for why it is a separate class and not
+// another mode of GlScreen). getContext returns the context already created above when
+// both are live, so this never allocates a second one.
+let glAiComp: GlAiScreen | null = null;
+let glAiTried = false;
+function glAiCompositor(): GlAiScreen | null {
+  if (glAiTried) return glAiComp;
+  glAiTried = true;
+  if (!webgl2Available()) return null;
+  const gl = glCanvas.getContext('webgl2');
+  if (!gl) return null;
+  try {
+    glAiComp = new GlAiScreen(gl);
+  } catch (e) {
+    console.warn('[ff] the AI tier GPU compositor failed to build; staying on canvas-2D', e);
+    glAiComp = null;
+  }
+  return glAiComp;
+}
+
 // WebGL context loss (GPU reset, driver reclaim, tab backgrounding) does NOT
 // throw — it fires an event and makes subsequent GL calls silently no-op, which
 // would otherwise leave a blank canvas. Handle it as the real per-frame fallback
@@ -4214,6 +4240,8 @@ glCanvas.addEventListener('webglcontextlost', (e) => {
   glFailed = true;
   glComp = null;
   glCompTried = false;
+  glAiComp = null;
+  glAiTried = false;
   console.warn('[ff] WebGL context lost; falling back to the CPU compositor. Press R to retry WebGL.');
   setInfo();
 });
@@ -4222,6 +4250,8 @@ glCanvas.addEventListener('webglcontextrestored', () => {
   // flapping context can never thrash the render path.
   glComp = null;
   glCompTried = false;
+  glAiComp = null;
+  glAiTried = false;
 });
 
 /**
@@ -4232,6 +4262,7 @@ glCanvas.addEventListener('webglcontextrestored', () => {
 function enableWebgl(): void {
   glFailed = false;
   if (!glComp) glCompTried = false;
+  if (!glAiComp) glAiTried = false;
 }
 
 /**
@@ -4298,6 +4329,66 @@ function drawGpu(
     console.warn('[ff] WebGL renderer failed; falling back to the CPU compositor for this session', e);
     return false;
   }
+}
+
+/**
+ * WebGL draw path for the `ai` tier: composite the room's ×S frame on the GPU via the
+ * shared room walk (AiRoom.drawInto → GlAiScreen) and present it to #screen-gl.
+ * Returns false to request the canvas-2D fallback if a GL call throws (the backend is
+ * then disabled for the session) or if the compositor could not be built. Never throws.
+ */
+function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame): boolean {
+  const comp = glAiCompositor();
+  if (!comp || !aiRoom) return false;
+  try {
+    comp.track(aiRoom); // so evicting the room frees its ~50 MB of textures with it
+    comp.begin(geom.backingW, geom.backingH);
+    aiRoom.drawInto(comp, r, f);
+    const dpr = window.devicePixelRatio || 1;
+    // The room's CSS box comes from roomGeometry — the GL canvas is an overlay stacked
+    // on #screen, so it must match that box exactly rather than recompute it.
+    const { cssW, cssH } = geom;
+    const bw = Math.round(cssW * dpr);
+    const bh = Math.round(cssH * dpr);
+    if (glCanvas.width !== bw || glCanvas.height !== bh) {
+      glCanvas.width = bw;
+      glCanvas.height = bh;
+    }
+    glCanvas.style.width = `${cssW}px`;
+    glCanvas.style.height = `${cssH}px`;
+    comp.present(bw, bh);
+    return true;
+  } catch (e) {
+    glFailed = true;
+    console.warn('[ff] the AI tier WebGL compositor failed; falling back to canvas-2D for this session', e);
+    return false;
+  }
+}
+
+/**
+ * Where two frames disagree WORST, and by how much on each side.
+ *
+ * A frame-wide max/rmse says a parity probe failed but not where to look, and in a
+ * 2400x2100 buffer "0.004% of the pixels are wrong" is a needle in a haystack.
+ * Reported alongside the aggregate so a failing room names its own suspect pixel.
+ */
+function worstPixel(cpu: Uint8Array, gpu: Uint8Array, w: number): Record<string, unknown> {
+  let best = -1;
+  let at = 0;
+  for (let i = 0; i < gpu.length; i += 4) {
+    const d = Math.max(
+      Math.abs(gpu[i]! - cpu[i]!),
+      Math.abs(gpu[i + 1]! - cpu[i + 1]!),
+      Math.abs(gpu[i + 2]! - cpu[i + 2]!),
+    );
+    if (d > best) { best = d; at = i; }
+  }
+  const px = at / 4;
+  return {
+    worstAt: [px % w, Math.floor(px / w)],
+    worstCpu: [cpu[at], cpu[at + 1], cpu[at + 2], cpu[at + 3]],
+    worstGpu: [gpu[at], gpu[at + 1], gpu[at + 2], gpu[at + 3]],
+  };
 }
 
 /** Per-channel diff (ignoring alpha) between two same-size RGBA frames. */
@@ -4431,30 +4522,52 @@ function draw(): void {
   const xform = ox || oy ? `translate(${ox}px, ${oy}px)` : '';
 
   // Backend dispatch. The hi-res AI room compositor (ai level, art loaded, and not
-  // a ZX / active-hook / frame-effect frame — see aiRoomRenderActive) takes precedence: it paints the S×-scaled #screen canvas directly with canvas-2D
-  // and the browser scales it down to the room's CSS box. Otherwise the same
-  // renderInto compositor runs on the GPU (GlScreen) or CPU (RgbaScreen); any GL
-  // error falls back to the CPU path for that frame (and disables WebGL for the session).
+  // a ZX / active-hook / frame-effect frame — see aiRoomRenderActive) takes precedence.
+  // It composites the SAME room walk (AiRoom.drawInto) into a ×S buffer on either
+  // backend: GlAiScreen on the GPU, presented to #screen-gl, or canvas-2D into the
+  // ×S-scaled #screen canvas which the browser then scales down to the room's CSS box.
+  // Otherwise the renderInto compositor runs on the GPU (GlScreen) or CPU (RgbaScreen).
+  // Any GL error falls back to the CPU path for that frame (and disables WebGL for the
+  // session).
   const aiActive = aiRoomRenderActive(room);
   if (aiActive) {
     // roomGeometry already resolved the backing store for this frame, including the
     // AI upscale — deriving it a second time here is how the two drifted apart before.
     const aw = geom.backingW;
     const ah = geom.backingH;
-    glCanvas.style.display = 'none';
-    if (canvas.width !== aw || canvas.height !== ah) { canvas.width = aw; canvas.height = ah; }
-    if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
-    if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
-    // The ×S backing store is almost always DISPLAYED SMALLER than it is (e.g.
-    // 3060px shown in a 1139px box), where the stylesheet's global pixelated rule
-    // would point-sample and throw the AI detail away — see scalingFilterFor.
-    const wantSmooth = scalingFilterFor(aw, cssW);
-    if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, aw, ah);
-    aiRoom!.draw(ctx, room, { count, slide, fishAnim });
-    canvas.style.transform = xform;
-    lastRoomBackend = 'cpu';
+    const aiGpu = renderer === 'webgl' && !glFailed && drawAiGpu(geom, room, { count, slide, fishAnim });
+    lastRoomBackend = aiGpu ? 'webgl' : 'cpu';
+    if (aiGpu) {
+      // #screen is only the flow anchor now (see the note in the else-branch below), so
+      // it carries the CSS box but keeps a NATIVE backing store — allocating the ×S one
+      // for a canvas nothing paints into would cost ~20 MB for nothing — and goes back
+      // to the stylesheet's crisp scaling, since the smooth-minification rule below
+      // exists only for the ×S canvas it would otherwise point-sample.
+      if (canvas.style.imageRendering) canvas.style.imageRendering = '';
+      if (canvas.width !== geom.nativeW || canvas.height !== geom.nativeH) {
+        canvas.width = geom.nativeW;
+        canvas.height = geom.nativeH;
+      }
+      if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
+      if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
+      glCanvas.style.display = 'block';
+      glCanvas.style.transform = xform;
+      canvas.style.transform = xform; // keep the (unpainted) anchor aligned under the overlays
+    } else {
+      glCanvas.style.display = 'none';
+      if (canvas.width !== aw || canvas.height !== ah) { canvas.width = aw; canvas.height = ah; }
+      if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
+      if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
+      // The ×S backing store is almost always DISPLAYED SMALLER than it is (e.g.
+      // 3060px shown in a 1139px box), where the stylesheet's global pixelated rule
+      // would point-sample and throw the AI detail away — see scalingFilterFor.
+      const wantSmooth = scalingFilterFor(aw, cssW);
+      if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, aw, ah);
+      aiRoom!.draw(ctx, room, { count, slide, fishAnim });
+      canvas.style.transform = xform;
+    }
   } else {
   // Back on a native-resolution tier: restore the stylesheet's crisp scaling
   // (the AI branch switches this to smooth minification).
@@ -4787,9 +4900,18 @@ let idleTimer: ReturnType<typeof setTimeout> | 0 = 0;
 let perfRaf = 0;
 let perfPaint = 0;
 let perfLast = 0;
+// Monotonic mirrors of the two above. The HUD counters are ZEROED every sample
+// window (and whenever the HUD is off), so a probe cannot difference them over a
+// window of its own choosing; these never reset, which is what a paint-rate
+// measurement needs — the app's OWN paint rate, not the page's rAF rate, is the
+// number the AI tier's compositing cost shows up in.
+let perfRafTotal = 0;
+let perfPaintTotal = 0;
+function paintTick(): void { perfPaint++; perfPaintTotal++; }
+function rafTick(): void { perfRaf++; perfRafTotal++; }
 let lastRoomBackend: 'cpu' | 'webgl' = 'cpu'; // which backend actually painted the last room frame
 function updatePerfHud(now: number): void {
-  perfRaf++;
+  rafTick();
   if (!perfHud || !document.body.classList.contains('dev')) {
     perfLast = now;
     perfRaf = 0;
@@ -4803,9 +4925,15 @@ function updatePerfHud(now: number): void {
     const rafFps = Math.round((perfRaf * 1000) / elapsed);
     const where = screen === 'room' ? 'room' : screen === 'map' ? 'map' : screen;
     // Show the SET renderer and, when it's WebGL, whether it actually engaged this
-    // frame (a silent CPU fallback after a GL failure reads "WEBGL→cpu").
+    // frame — and WHY not, if it didn't. Those are two different situations and
+    // collapsing them hides a real fault: a GL failure has disabled the backend for the
+    // session (fallback), whereas a frame effect / ZX room / active hook / wreck /
+    // sprite cheat is a frame the CPU compositor legitimately owns and the next frame
+    // may well be back on the GPU.
     let backend = renderer.toUpperCase();
-    if (renderer === 'webgl' && screen === 'room' && lastRoomBackend === 'cpu') backend = 'WEBGL→cpu(fallback)';
+    if (renderer === 'webgl' && screen === 'room' && lastRoomBackend === 'cpu') {
+      backend = glFailed ? 'WEBGL→cpu(fallback)' : 'WEBGL→cpu(this frame)';
+    }
     perfHud.textContent =
       `paint ${paintFps} fps   rAF ${rafFps} fps\n` +
       `saver ${renderOnDirty ? 'ON' : 'off'} (P)   ${backend} (R)   [${where}]`;
@@ -4919,7 +5047,7 @@ function loop(now: number): void {
   // alone so the skipped interval still accumulates into `acc` — the simulation sees
   // real elapsed time either way, so capping paint cannot change game speed.
   if (shouldSkipPaint(now, nextPaint, PAINT_EPSILON_MS)) {
-    perfRaf++;            // still a real refresh — the HUD's rAF number must show it,
+    rafTick();            // still a real refresh — the HUD's rAF number must show it,
     rafId = requestAnimationFrame(loop);   // otherwise it just mirrors the paint rate
     return;
   }
@@ -4970,7 +5098,7 @@ function loop(now: number): void {
   if (helpOpen) {
     clearSubOverlay();
     drawHelp();
-    perfPaint++;
+    paintTick();
   } else if (screen === 'intro') {
     clearSubOverlay(); // the <video> overlay covers the stage; nothing to draw
   } else if (screen === 'legimage') {
@@ -4987,11 +5115,11 @@ function loop(now: number): void {
     }
     if (mapOverlay === 'credits') {
       drawCredits();
-      perfPaint++;
+      paintTick();
     } else drawMap(); // counts its own paint (it skips when cached)
   } else if (cutscene) {
     drawCutscene(); // manages the GL canvas + subtitle overlay itself
-    perfPaint++;
+    paintTick();
   } else if (roomLoading) {
     // A newly-entered room's assets are still loading (loadRoom is async). Don't
     // paint the previous room's stale frame held in `room`/`ffr` (e.g. the boot
@@ -5002,7 +5130,7 @@ function loop(now: number): void {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     clearSubOverlay();
-    perfPaint++;
+    paintTick();
   } else {
     // signature captures everything that changes on a logic tick (count → wobble/
     // anim/subtitles) plus the render-mode inputs; roomAnimating() forces 60fps
@@ -5013,17 +5141,31 @@ function loop(now: number): void {
     const zxAnim = room?.gspec === 42;
     const sig = `${count}|${roomArtPending() ? 1 : 0}|${graphics}|${renderer}|${glFailed ? 1 : 0}`;
     // The AI compositor repaints a ×S backing store (1740×1620 for a 435×405 room).
-    // Doing that on every refresh when NOTHING changed is work the browser cannot
-    // absorb: measured 35fps idle and 20fps with a subtitle on screen, against 62fps
-    // in the enhanced tier — and the cost is in compositing, not JS (the frame
-    // callback itself is 0.1ms in both). Its content only changes on a logic tick or
-    // while motion interpolates, both of which are covered below, so honour
-    // render-on-dirty in this tier even when the saver is off.
+    // On CANVAS-2D, doing that on every refresh when nothing changed is work the
+    // browser cannot absorb: measured 35fps idle and 20fps with a subtitle on screen,
+    // against 62fps in the enhanced tier — and the cost is in compositing, not JS (the
+    // frame callback itself is 0.1ms in both). Its content only changes on a logic tick
+    // or while motion interpolates, both of which are covered below, so that path
+    // honours render-on-dirty even when the saver is off.
+    //
+    // On the GPU that constraint does not apply, and the reason is worth being precise
+    // about, because the raw compositing cost is NOT where the difference is: on macOS
+    // the browser already GPU-accelerates canvas-2D, and the marginal cost of one ×S
+    // frame measures 0.26-0.51 ms there against 0.26-0.39 ms on GlAiScreen
+    // (tools/bench-ai-room.mjs) — near parity. What the GPU path removes is the OTHER
+    // half: the canvas-2D path hands the browser a ×S canvas to rescale into the room's
+    // box on every presented frame, which is the cost the note above measured as frame
+    // rate, while GlAiScreen presents straight into that box.
+    //
+    // So the restriction is tied to the backend that needs it rather than to the tier.
+    // Note the saver is ON by default, so this only gives the GPU path back the user's
+    // own choice when they have turned it off — it does not make the tier busier for
+    // anyone who has not asked for that.
     const aiFrame = room !== null && aiRoomRenderActive(room);
-    const dirtyOnly = renderOnDirty || aiFrame;
+    const dirtyOnly = renderOnDirty || (aiFrame && lastRoomBackend === 'cpu');
     if (!dirtyOnly || forceRoomRedraw || roomAnimating() || zxAnim || sig !== lastRoomSig) {
       draw();
-      perfPaint++;
+      paintTick();
       lastRoomSig = sig;
       // Clear the one-shot force, but keep repainting while a cheat effect is live:
       // the grain, the interlaced collapse and the minigame all animate on their own,
@@ -5859,9 +6001,17 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   subFontList: () => SUB_FONT_CANDIDATES.map((c) => c.name),
   setSubFont: (i: number) => applySubFont(i),
   cycleSubFont: (next = true) => previewSubFont(next),
-  // True when the last frame was actually presented by the WebGL backend (i.e.
-  // renderer=webgl, not fallen back to CPU and the GL canvas is the visible one).
-  glActive: () => renderer === 'webgl' && !glFailed && glCanvas.style.display !== 'none',
+  // True when the last frame was actually presented by the WebGL backend.
+  //
+  // In a room this reports the backend that PAINTED, not the one the canvas stacking
+  // suggests. That distinction is the whole point: the `ai` tier used to paint on
+  // canvas-2D while `renderer` still read `webgl`, and a display-only check said the
+  // GPU was engaged. Off the room screen (map, cutscene) the visible canvas is still
+  // the honest signal.
+  glActive: () =>
+    renderer === 'webgl' &&
+    !glFailed &&
+    (screen === 'room' ? lastRoomBackend === 'webgl' : glCanvas.style.display !== 'none'),
   // Loop-throttle diagnostics (perf): whether the render loop may drop to the idle
   // timer rate right now, and the room-side conditions that force the full-rate rAF
   // spin when any is true (see loopThrottleOk). Used by the perf regression test.
@@ -6182,6 +6332,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   closeTetris: () => closeTetris(),
   /** Which backend actually painted the last room frame ('cpu' | 'webgl'). */
   roomBackend: () => lastRoomBackend,
+  /**
+   * Monotonic loop counters: `paint` = frames the app actually PAINTED, `raf` =
+   * refreshes the loop was woken for. A probe differences these over its own
+   * window to get the app's paint rate — measuring `requestAnimationFrame` from
+   * the page instead just reports the display refresh and is blind to whether the
+   * room repainted at all.
+   */
+  perfCounters: () => ({ raf: perfRafTotal, paint: perfPaintTotal, t: performance.now() }),
   /** cas_hry in days, plus the raw per-room banked milliseconds behind it. */
   casHry: () => casHry(),
   playTime: () => Object.fromEntries(playTime),
@@ -6230,6 +6388,121 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   // GPU via the shared compositor (renderRoomInto → GlScreen) and compare to the
   // CPU frame, byte-for-byte. Classic art source, resting pose (count only).
   glRoomParity: () => (room ? glParityCompare(classicArtFor(room)) : null),
+  /**
+   * Perf probe: MARGINAL milliseconds per ×S AI frame on each backend.
+   *
+   * Two things make the naive version of this measurement lie.
+   *
+   * First, the render loop caps paints at MAX_PAINT_FPS, so a frame-rate reading on a
+   * machine that holds the cap reports the cap, not the cost — which is exactly how a
+   * compositing regression hides. So this renders back-to-back frames instead.
+   *
+   * Second, both backends only QUEUE work: WebGL until something forces a sync, and
+   * canvas-2D until something forces rasterisation. Draining once at the end and
+   * dividing by N therefore folds a FIXED drain cost into the per-frame number, and the
+   * answer changes with N — measured 3.7 ms/frame at N=30 against 0.33 ms/frame at
+   * N=60 for identical work. So time N frames and 2N frames, both drained, and report
+   * the difference over N: the fixed cost appears in both and cancels.
+   *
+   * The CPU side deliberately alternates `count`, because the canvas-2D target caches
+   * the background composite per logic tick — repeating one tick would measure the
+   * cache rather than the compositor.
+   */
+  aiRenderBench: (frames = 30) => {
+    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
+    const comp = glAiCompositor();
+    const geom = roomGeometry(room);
+    const w = geom.nativeW * aiRoom.scale;
+    const h = geom.nativeH * aiRoom.scale;
+    const frame = (n: number): AiRoomFrame => ({
+      count: count + n,
+      slide: (n % 4) / 4,
+      fishAnim: {
+        little: { bodyFrame: TL_PLAV[1]!, headFrame: HL_MRK },
+        big: { bodyFrame: TL_NAHORU[1]!, headFrame: HL_TLACI },
+      },
+    });
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const c2 = cv.getContext('2d', { willReadFrequently: true });
+    if (!c2) return null;
+    const cpuRun = (n: number): number => {
+      const t = performance.now();
+      for (let i = 0; i < n; i++) {
+        c2.setTransform(1, 0, 0, 1, 0, 0);
+        c2.clearRect(0, 0, w, h);
+        aiRoom!.draw(c2, room!, frame(i));
+      }
+      c2.getImageData(0, 0, 1, 1); // drain the 2D command queue
+      return performance.now() - t;
+    };
+    const gpuRun = (n: number): number => {
+      const t = performance.now();
+      for (let i = 0; i < n; i++) {
+        comp!.begin(w, h);
+        aiRoom!.drawInto(comp!, room!, frame(i));
+      }
+      comp!.finish();
+      return performance.now() - t;
+    };
+    cpuRun(4); // warm caches on both sides before either clock starts
+    const cpuMs = (cpuRun(2 * frames) - cpuRun(frames)) / frames;
+    let gpuMs = null;
+    if (comp) {
+      comp.track(aiRoom);
+      gpuRun(4); // warm: the first call allocates the FBO and uploads the art
+      gpuMs = (gpuRun(2 * frames) - gpuRun(frames)) / frames;
+    }
+    return { w, h, frames, cpuMs, gpuMs };
+  },
+  /**
+   * Test probe: the `ai` tier's CPU↔GPU parity. Renders the current room's ×S frame
+   * through BOTH AiTargets — canvas-2D into an offscreen canvas, and GlAiScreen into
+   * its FBO — from the identical room walk and frame state, and diffs them.
+   *
+   * Non-resting fish (an explicit swim body + head overlay) and a half-step slide are
+   * used deliberately: a resting pose exercises neither the head overlay nor the item
+   * slide offset, which is most of what a z-order or coordinate bug would move.
+   *
+   * Unlike the classic/enhanced probes this is NOT byte-exact, and the reason is
+   * structural rather than a tolerance chosen to make it pass: the classic oracle
+   * (RgbaScreen) is pure JS with defined rounding, whereas this oracle is the browser's
+   * own canvas-2D `drawImage`, which blends in PREMULTIPLIED space with rounding no
+   * specification pins down. Two roundings of the same blend differ by ±1 per channel
+   * on anti-aliased sprite edges. See tools/test-gl-room-ai.mjs for the gate.
+   */
+  aiGlParity: () => {
+    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
+    const comp = glAiCompositor();
+    if (!comp) return { webgl: false };
+    const geom = roomGeometry(room);
+    const w = geom.nativeW * aiRoom.scale;
+    const h = geom.nativeH * aiRoom.scale;
+    const f: AiRoomFrame = {
+      count,
+      slide: 0.5,
+      fishAnim: {
+        little: { bodyFrame: TL_PLAV[1]!, headFrame: HL_MRK },
+        big: { bodyFrame: TL_NAHORU[1]!, headFrame: HL_TLACI },
+      },
+    };
+    const cv = document.createElement('canvas');
+    cv.width = w;
+    cv.height = h;
+    const c2 = cv.getContext('2d', { willReadFrequently: true });
+    if (!c2) return { webgl: true, noCanvas: true };
+    c2.setTransform(1, 0, 0, 1, 0, 0);
+    c2.clearRect(0, 0, w, h);
+    aiRoom.draw(c2, room, f);
+    const cpu = new Uint8Array(c2.getImageData(0, 0, w, h).data.buffer.slice(0));
+    comp.track(aiRoom);
+    comp.begin(w, h);
+    aiRoom.drawInto(comp, room, f);
+    const gpu = comp.readback();
+    if (gpu.w !== w || gpu.h !== h) return { webgl: true, dimMismatch: true };
+    return { webgl: true, w, h, ...glChannelDiff(cpu, gpu.rgba), ...worstPixel(cpu, gpu.rgba, w) };
+  },
   // Test probe: same, through the ENHANCED (FFNG truecolor) art source.
   // `enh` reports whether the FFNG masters were actually engaged for this room.
   glEnhParity: () => {

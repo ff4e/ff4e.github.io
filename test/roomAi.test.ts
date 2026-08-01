@@ -46,6 +46,8 @@ import { darkestIndex } from '../src/render/renderRoom.js';
 import { AI_ROOM_SCALE, aiRoomGateAllows } from '../src/render/roomAi.js';
 import { FISH_BODY_FILE, frameIndex } from '../src/render/enhancedArtSource.js';
 import { AiRoom } from '../src/render/roomAi.js';
+import { Canvas2dAiTarget } from '../src/render/aiTarget.js';
+import type { AiTarget } from '../src/render/aiTarget.js';
 import { FSIZE as FSIZE_PX } from '../src/render/renderRoom.js';
 import { makeRoom } from './roomBuilder.js';
 import type { FfrBitmap } from '../src/data/ffr.js';
@@ -584,8 +586,11 @@ describe('AiRoom.drawRope paints the real double rope', () => {
       S,
     );
     const { ctx, fills } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
-    (ai as unknown as { drawRope(c: CanvasRenderingContext2D, r: typeof room, a: number, b: number, cc: number, d: number, e: number): void })
-      .drawRope(ctx, room, x1, y1, x2, y2, ROPE_COL);
+    // drawRope now emits to an AiTarget (so the GPU backend replays the identical
+    // walk); the canvas-2D target is what turns those calls back into fillStyle +
+    // fillRect, which is exactly what these assertions are about.
+    (ai as unknown as { drawRope(t: AiTarget, r: typeof room, a: number, b: number, cc: number, d: number, e: number): void })
+      .drawRope(new Canvas2dAiTarget(ctx), room, x1, y1, x2, y2, ROPE_COL);
     return fills;
   }
 
