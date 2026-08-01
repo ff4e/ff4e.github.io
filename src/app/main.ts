@@ -4380,47 +4380,57 @@ function presentToGlCanvas(comp: { present(w: number, h: number): void }, geom: 
 }
 
 /**
- * Where two frames disagree WORST, and by how much on each side.
+ * Per-channel diff (ignoring alpha) between two same-size RGBA frames, plus WHERE they
+ * disagree worst and what each side holds there.
  *
- * A frame-wide max/rmse says a parity probe failed but not where to look, and in a
- * 2400x2100 buffer "0.004% of the pixels are wrong" is a needle in a haystack.
- * Reported alongside the aggregate so a failing room names its own suspect pixel.
+ * The aggregate alone says a parity probe failed but not where to look, and in a
+ * 2400x2100 buffer "0.004% of the pixels are wrong" is a needle in a haystack — so a
+ * failing room names its own suspect pixel. `w` (the frame width) turns the index into
+ * coordinates; pass 0 when the caller has no use for them.
+ *
+ * Both are computed in ONE pass. A second sweep is another ~20 MB of pixel traffic per
+ * room at this tier's frame sizes, times 72 rooms, on a machine already running the
+ * whole probe suite in parallel — and the UI gate's value is that it stays fast enough
+ * to run on every change.
  */
-function worstPixel(cpu: Uint8Array, gpu: Uint8Array, w: number): Record<string, unknown> {
-  let best = -1;
-  let at = 0;
-  for (let i = 0; i < gpu.length; i += 4) {
-    const d = Math.max(
-      Math.abs(gpu[i]! - cpu[i]!),
-      Math.abs(gpu[i + 1]! - cpu[i + 1]!),
-      Math.abs(gpu[i + 2]! - cpu[i + 2]!),
-    );
-    if (d > best) { best = d; at = i; }
-  }
-  const px = at / 4;
-  return {
-    worstAt: [px % w, Math.floor(px / w)],
-    worstCpu: [cpu[at], cpu[at + 1], cpu[at + 2], cpu[at + 3]],
-    worstGpu: [gpu[at], gpu[at + 1], gpu[at + 2], gpu[at + 3]],
-  };
-}
-
-/** Per-channel diff (ignoring alpha) between two same-size RGBA frames. */
-function glChannelDiff(cpu: Uint8Array, gpu: Uint8Array): { max: number; rmse: number; overPct: number } {
+function glChannelDiff(
+  cpu: Uint8Array,
+  gpu: Uint8Array,
+  w = 0,
+): {
+  max: number;
+  rmse: number;
+  overPct: number;
+  worstAt: [number, number];
+  worstCpu: number[];
+  worstGpu: number[];
+} {
   let max = 0;
   let sumsq = 0;
   let over = 0;
   let px = 0;
+  let at = 0;
   const n = gpu.length;
-  for (let i = 0; i < n; i++) {
-    if (i % 4 === 3) continue; // alpha
-    const d = Math.abs(gpu[i]! - cpu[i]!);
-    if (d > max) max = d;
-    sumsq += d * d;
-    if (d > 2) over++;
-    px++;
+  for (let i = 0; i < n; i += 4) {
+    let pixMax = 0;
+    for (let c = 0; c < 3; c++) {
+      const d = Math.abs(gpu[i + c]! - cpu[i + c]!);
+      if (d > pixMax) pixMax = d;
+      sumsq += d * d;
+      if (d > 2) over++;
+      px++;
+    }
+    if (pixMax > max) { max = pixMax; at = i; }
   }
-  return { max, rmse: Math.sqrt(sumsq / px), overPct: (over / px) * 100 };
+  const idx = at / 4;
+  return {
+    max,
+    rmse: Math.sqrt(sumsq / px),
+    overPct: (over / px) * 100,
+    worstAt: w > 0 ? [idx % w, Math.floor(idx / w)] : [idx, 0],
+    worstCpu: [cpu[at]!, cpu[at + 1]!, cpu[at + 2]!, cpu[at + 3]!],
+    worstGpu: [gpu[at]!, gpu[at + 1]!, gpu[at + 2]!, gpu[at + 3]!],
+  };
 }
 
 /**
@@ -6598,7 +6608,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     aiRoom.drawInto(comp, room, f);
     const gpu = comp.readback();
     if (gpu.w !== w || gpu.h !== h) return { webgl: true, dimMismatch: true };
-    return { webgl: true, w, h, ...glChannelDiff(cpu, gpu.rgba), ...worstPixel(cpu, gpu.rgba, w) };
+    return { webgl: true, w, h, ...glChannelDiff(cpu, gpu.rgba, w) };
   },
   // Test probe: same, through the ENHANCED (FFNG truecolor) art source.
   // `enh` reports whether the FFNG masters were actually engaged for this room.

@@ -31,7 +31,45 @@
 import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 const MAX_CHANNEL_DELTA = 1; // see the header: browser-vs-GL blend rounding, nothing more
-const ROOMS = 72;
+
+/**
+ * Which rooms to compare.
+ *
+ * The full 72-room sweep costs what it costs because every room must DECODE its ×4 art
+ * (~50 MB) before it can be compared, and each comparison then moves two ~20 MB frames
+ * through readPixels/getImageData. Measured against `main` on the same machine, running
+ * it by default nearly doubled the whole UI suite's CPU: 1140s user vs 592s. That gate's
+ * value is that it is cheap enough to run on every change (and PR #6 deliberately made it
+ * load-INDEPENDENT), so making it twice as expensive to re-prove a property that does not
+ * vary per room is a bad trade.
+ *
+ * What DOES vary per room is which primitives the compositor reaches and how big the
+ * buffer is, so the default set covers every primitive at least once plus both size
+ * extremes — named, so the list can be checked rather than trusted:
+ *
+ *    1 PRVNI     the canonical room: wobbling background + wall
+ *    3           the room the present-alignment and cost checks below use
+ *    9 ZRC       the spec=1 mirror (chroma-key glass mask, ping-pong pass) — and the ONLY
+ *                room in the game with any CPU↔GPU delta at all (1 on one channel)
+ *   19 LODE      the wreck: spec=11 hidden items, and the gate's wreckActive exclusion
+ *   20 ZDVIZ1    spec=3/4 elevator double rope
+ *   28 ZDVIZ2    the same rope with different endpoints (it leans)
+ *   33 MIKRO     small backing store (1440x840)
+ *   39 NOGROUND  small, square backing store (1140x1140)
+ *   42           largest backing store in the game (3180x2340)
+ *   56 CHODBA    gspec=2 darkness: full-canvas fill + lit-item-only visibility
+ *   66           gspec=42 ZX — withheld from this tier, so it checks the GATE holds
+ *   67           second-largest backing store (3120x2220)
+ *   68 WIN       gspec=5 young/old fish swap + items with no AI art (classic ×S fallback)
+ *   72 SCORE     ships no AI art at all
+ *
+ * `FF_AI_ROOMS=all` runs all 72. That is what produced the "70 of 71 byte-exact" figure
+ * in the header, and it is what to run when the compositor itself changes — as opposed
+ * to when something around it does.
+ */
+const DEFAULT_ROOMS = [1, 3, 9, 19, 20, 28, 33, 39, 42, 56, 66, 67, 68, 72];
+const FULL = process.env.FF_AI_ROOMS === 'all';
+const ROOM_LIST = FULL ? Array.from({ length: 72 }, (_, i) => i + 1) : DEFAULT_ROOMS;
 
 const b = await launchBrowser({ gl: true });
 const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
@@ -51,10 +89,20 @@ await p.addInitScript(() => {
 await gotoApp(p);
 await p.waitForFunction(() => window.__ff && window.__ff.count);
 
-/** Wait until the room is built AND its AI art has landed (the tier holds the frame). */
+/**
+ * Wait until the room is built AND its AI art has landed (the tier holds the frame).
+ *
+ * Deliberately does NOT wait for the room to settle. The sibling GL probes wait 15 logic
+ * ticks before comparing, and copying that here cost 1.2s x 72 rooms = ~86s of pure
+ * sleeping — most of this probe's runtime, in a suite whose whole design is a ~3min gate
+ * that stays load-INDEPENDENT. It buys nothing for a parity comparison: both backends are
+ * driven from the same `room` object inside one evaluate, with the frame state passed in
+ * explicitly (fixed fish frames and slide), so whatever the fish happen to be doing, the
+ * two sides see it identically. Measured: 141s -> ~35s, with the same 72 rooms compared.
+ */
 async function enter(num) {
   await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
-  await waitRoom(p, 15);
+  await waitRoom(p, 0);
   await p.waitForFunction(() => window.__ff.roomArtPending() === false, { timeout: 30000 });
 }
 
@@ -71,7 +119,7 @@ if (!cap || cap.webgl === false) {
   exitProbe(0);
 }
 
-for (let num = 1; num <= ROOMS; num++) {
+for (const num of ROOM_LIST) {
   try {
     await enter(num);
     // 1. The regression this whole path exists for: with renderer=webgl and the art
@@ -245,7 +293,8 @@ try {
 
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }
 console.log(
-  `  ai rooms tested=${tested} byteExact=${exact} noAiArt=${noArt} worstMax=${worstMax} (room ${worstRoom})` +
+  `  ai rooms tested=${tested}/${ROOM_LIST.length} (${FULL ? 'full sweep' : 'default set; FF_AI_ROOMS=all for all 72'})` +
+    ` byteExact=${exact} noAiArt=${noArt} worstMax=${worstMax} (room ${worstRoom})` +
     (cpuRooms.length ? ` cpuFallbackRooms=[${cpuRooms.join(',')}]` : ''),
 );
 console.log(ok ? 'PASS' : 'FAIL');

@@ -297,6 +297,16 @@ export class AiRoom {
     this.disposeHooks.push(fn);
   }
 
+  /**
+   * The bitmaps this room ALONE holds — its background, wall and object sprites, deduped
+   * by URL. Deliberately excludes the fish set, which is shared by every room at this
+   * scale (see sharedAiFish) and must outlive any single room: a backend that treated it
+   * as room-owned would re-acquire it on every room entry.
+   */
+  ownedImages(): readonly ImageBitmap[] {
+    return this.owned;
+  }
+
   /** Native room pixel size the caller must scale the framebuffer from (×scale). */
   get nativeWidth(): number { return Math.round(this.bg[0]!.width / this.scale); }
   get nativeHeight(): number { return Math.round(this.bg[0]!.height / this.scale); }

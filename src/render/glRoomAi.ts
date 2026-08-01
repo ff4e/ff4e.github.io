@@ -179,9 +179,17 @@ void main() {
   frag = vec4(acc / (n * n), 1.0);
 }`;
 
-/** The art owner whose disposal must also release this backend's textures. */
+/**
+ * The art owner whose disposal must also release this backend's textures.
+ *
+ * `ownedImages` is what makes the distinction that matters: a room's own background,
+ * wall and object bitmaps die with it, but the fish sprite set is SHARED by every room
+ * at a given scale and must outlive any of them.
+ */
 export interface AiTextureOwner {
   onDispose(fn: () => void): void;
+  /** The bitmaps this owner alone holds — NOT the shared ones it merely draws from. */
+  ownedImages(): Iterable<AiImage>;
 }
 
 export class GlAiScreen implements AiTarget {
@@ -207,15 +215,21 @@ export class GlAiScreen implements AiTarget {
   private readonly shiftTex: WebGLTexture;
 
   /**
-   * Every texture this backend has uploaded, grouped by the art owner that caused it.
+   * One texture per source bitmap, for the LIFE OF THE CONTEXT.
    *
-   * One map per owner rather than a lookup cache plus a separate "currently pending"
-   * set: at ×4 a room's art is ~50 MB of VRAM, `AiRoom.dispose()` exists to bound that,
-   * and this is what lets the dispose hook free exactly that room's textures. Keyed
-   * weakly on the owner so a room that is dropped without disposing cannot pin them.
+   * Deliberately global rather than per owner. The fish sprite set (~130 sprites at ×4)
+   * is shared by every room at a given scale, so a per-room cache re-uploaded all of it
+   * on every room entry — in every probe in the suite, since `ai` + `webgl` is the
+   * default configuration. Measured: that alone raised the whole UI suite's CPU from
+   * 592s to ~1080s.
+   *
+   * Weak, so a bitmap nothing references any more takes its texture with it; `track()`
+   * additionally frees a room's OWN textures the moment it is evicted, because at ×4
+   * those are ~50 MB of VRAM and waiting for GC is not good enough.
    */
-  private readonly owned = new WeakMap<AiTextureOwner, Map<AiImage | Float32Array, WebGLTexture>>();
-  private tracked: Map<AiImage | Float32Array, WebGLTexture> | null = null;
+  private readonly texCache = new WeakMap<AiImage | Float32Array, WebGLTexture>();
+  private tracked: AiTextureOwner | null = null;
+  private readonly hooked = new WeakSet<AiTextureOwner>();
 
   private fboA: { fbo: WebGLFramebuffer; tex: WebGLTexture } | null = null;
   private fboB: { fbo: WebGLFramebuffer; tex: WebGLTexture } | null = null;
@@ -266,32 +280,27 @@ export class GlAiScreen implements AiTarget {
   }
 
   /**
-   * Bind the art owner whose textures this backend is about to build.
+   * Bind the art owner whose textures this backend is about to build, and arrange for its
+   * OWN textures to be freed when it is evicted.
    *
-   * Registering the dispose hook exactly ONCE per owner is the point: an earlier version
-   * registered a fresh hook (and a fresh map) every time the tracked owner changed, so
-   * alternating between two cached rooms accumulated closures without bound. Because the
-   * map is per owner, a room re-entered later finds its own textures still there instead
-   * of re-uploading them into somebody else's set.
-   *
-   * The fish sprite set is SHARED between rooms and stays attributed to whichever room
-   * uploaded it first — that room's disposal deletes it and the next room re-uploads it.
-   * Correct (nothing keeps a handle across the delete: `drawInto` is fully synchronous
-   * and eviction only runs between frames), and worth roughly one re-upload per room
-   * entry against a room load that already moves megabytes.
+   * The hook is registered exactly once per owner (an earlier version registered a fresh
+   * one every time the tracked owner changed, so alternating between two cached rooms
+   * accumulated closures without bound). It frees only `ownedImages()`: the shared fish
+   * set stays in the cache for the life of the context, which is the whole point — it is
+   * the same art for every room and re-uploading it per room was measurably expensive.
    */
   track(owner: AiTextureOwner): void {
-    let mine = this.owned.get(owner);
-    if (!mine) {
-      mine = new Map();
-      this.owned.set(owner, mine);
-      owner.onDispose(() => {
-        for (const tex of mine!.values()) this.gl.deleteTexture(tex);
-        mine!.clear();
-        this.owned.delete(owner);
-      });
-    }
-    this.tracked = mine;
+    this.tracked = owner;
+    if (this.hooked.has(owner)) return;
+    this.hooked.add(owner);
+    owner.onDispose(() => {
+      for (const img of owner.ownedImages()) {
+        const tex = this.texCache.get(img);
+        if (!tex) continue;
+        this.gl.deleteTexture(tex);
+        this.texCache.delete(img);
+      }
+    });
   }
 
   /** RGBA8 texture for a decoded sprite, uploaded once and cached by source object. */
@@ -312,14 +321,12 @@ export class GlAiScreen implements AiTarget {
     });
   }
 
-  /** Look the source up in the current owner's set, uploading it once on a miss. */
+  /** Look the source up in the texture cache, uploading it once on a miss. */
   private cached(src: AiImage | Float32Array, upload: () => WebGLTexture): WebGLTexture {
-    const mine = this.tracked;
-    if (!mine) return upload(); // untracked (tests): correct, just not pooled
-    const hit = mine.get(src);
+    const hit = this.texCache.get(src);
     if (hit) return hit;
     const t = upload();
-    mine.set(src, t);
+    this.texCache.set(src, t);
     return t;
   }
 
