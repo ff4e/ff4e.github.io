@@ -32,22 +32,28 @@ import type { FfrBitmap, FfrPaletteEntry } from '../data/ffr.js';
 import type { CompositeTarget, TruecolorTarget } from './framebuffer.js';
 import type { Room } from '../core/room.js';
 import { backgroundInputs } from './renderRoom.js';
+import {
+  RECT_VS,
+  linkProgram,
+  makeFullscreenVao,
+  makeRectVao,
+  nearestClamp,
+  setRectUniform,
+  uniformLocations,
+  type Uni,
+} from './glCommon.js';
 
-const QUAD_VS = `#version 300 es
+/**
+ * Fullscreen pass. Unlike the shared QUAD_VS this also hands the fragment shader a
+ * [0,1]² varying, which MIRROR_FS and PRESENT_FS sample by; the AI compositor derives
+ * the same thing from gl_FragCoord and does not need it.
+ */
+const UV_QUAD_VS = `#version 300 es
 in vec2 aPos;
 out vec2 vUV;
 void main() {
   vUV = aPos * 0.5 + 0.5;
   gl_Position = vec4(aPos, 0.0, 1.0);
-}`;
-
-/** A screen-rect quad in FBO pixel space; the VS maps [0,1]² across uRect (NDC). */
-const RECT_VS = `#version 300 es
-in vec2 aCorner;         // unit quad corner 0..1
-uniform vec4 uRect;      // (x0,y0,x1,y1) in NDC
-void main() {
-  vec2 p = mix(uRect.xy, uRect.zw, aCorner);
-  gl_Position = vec4(p, 0.0, 1.0);
 }`;
 
 /** Dual-output tail shared by every draw shader (RGBA colour + R8UI index). */
@@ -335,35 +341,10 @@ void main() {
   frag = texture(uTex, vec2(vUV.x, 1.0 - vUV.y));
 }`;
 
-function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
-  const sh = gl.createShader(type)!;
-  gl.shaderSource(sh, src);
-  gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    throw new Error('shader compile failed: ' + gl.getShaderInfoLog(sh));
-  }
-  return sh;
-}
-
-function program(gl: WebGL2RenderingContext, vs: string, fs: string, attrib0: string): WebGLProgram {
-  const p = gl.createProgram()!;
-  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vs));
-  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs));
-  gl.bindAttribLocation(p, 0, attrib0);
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-    throw new Error('program link failed: ' + gl.getProgramInfoLog(p));
-  }
-  return p;
-}
-
 function indexTexture(gl: WebGL2RenderingContext): WebGLTexture {
   const t = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  nearestClamp(gl);
   return t;
 }
 
@@ -371,15 +352,9 @@ function indexTexture(gl: WebGL2RenderingContext): WebGLTexture {
 function rgbaTexture(gl: WebGL2RenderingContext): WebGLTexture {
   const t = gl.createTexture()!;
   gl.bindTexture(gl.TEXTURE_2D, t);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  nearestClamp(gl);
   return t;
 }
-
-/** Uniform-location cache per program (getUniformLocation is slow to call in loops). */
-type Uni = Record<string, WebGLUniformLocation | null>;
 
 /** An offscreen render target: RGBA8 colour + R8UI palette-index (MRT). */
 interface FboSet {
@@ -456,47 +431,31 @@ export class GlScreen implements TruecolorTarget {
 
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
-    this.bgProg = program(gl, QUAD_VS, BG_FS, 'aPos');
-    this.bg2Prog = program(gl, QUAD_VS, BG2_FS, 'aPos');
-    this.zxProg = program(gl, QUAD_VS, ZX_FS, 'aPos');
-    this.itemProg = program(gl, RECT_VS, ITEM_FS, 'aCorner');
-    this.fishProg = program(gl, RECT_VS, FISH_FS, 'aCorner');
-    this.disintProg = program(gl, RECT_VS, DISINT_FS, 'aCorner');
-    this.setProg = program(gl, RECT_VS, SET_FS, 'aCorner');
-    this.indexedProg = program(gl, QUAD_VS, INDEXED_FS, 'aPos');
-    this.spriteProg = program(gl, RECT_VS, SPRITE_FS, 'aCorner');
-    this.mirrorProg = program(gl, QUAD_VS, MIRROR_FS, 'aPos');
-    this.presentProg = program(gl, QUAD_VS, PRESENT_FS, 'aPos');
-    this.bgUni = this.uniforms(this.bgProg, ['uWall', 'uBg', 'uLut', 'uMask', 'uBgExtra', 'uWamp', 'uWper', 'uWspd', 'uCount']);
-    this.bg2Uni = this.uniforms(this.bg2Prog, ['uWall', 'uBgIdx', 'uFfngWall', 'uFfngBg', 'uMask', 'uBgExtra', 'uW', 'uWamp', 'uWper', 'uWspd', 'uCount']);
-    this.zxUni = this.uniforms(this.zxProg, ['uWall', 'uBg', 'uBands', 'uLut', 'uMask', 'uBgExtra', 'uWamp', 'uWper', 'uWspd', 'uCount']);
-    this.itemUni = this.uniforms(this.itemProg, ['uItem', 'uLut', 'uX', 'uY', 'uW', 'uMask', 'uMode', 'uRect']);
-    this.fishUni = this.uniforms(this.fishProg, ['uBody', 'uHead', 'uLut', 'uAX', 'uY', 'uMask', 'uSplit', 'uHeadW', 'uHasHead', 'uRev', 'uRect']);
-    this.disintUni = this.uniforms(this.disintProg, ['uItem', 'uRand', 'uLut', 'uAX', 'uY', 'uW', 'uMask', 'uRozpad', 'uRev', 'uRect']);
-    this.setUni = this.uniforms(this.setProg, ['uLut', 'uIdx', 'uRect']);
-    this.indexedUni = this.uniforms(this.indexedProg, ['uIdxTex', 'uLut']);
-    this.spriteUni = this.uniforms(this.spriteProg, ['uSprite', 'uX', 'uY', 'uW', 'uMirror', 'uRect']);
-    this.mirrorUni = this.uniforms(this.mirrorProg, ['uRgba', 'uIdx', 'uX', 'uY', 'uDX', 'uDY', 'uCX', 'uCY', 'uW']);
-    this.presentUni = this.uniforms(this.presentProg, ['uTex']);
+    this.bgProg = linkProgram(gl, UV_QUAD_VS, BG_FS, 'aPos', 'room');
+    this.bg2Prog = linkProgram(gl, UV_QUAD_VS, BG2_FS, 'aPos', 'room');
+    this.zxProg = linkProgram(gl, UV_QUAD_VS, ZX_FS, 'aPos', 'room');
+    this.itemProg = linkProgram(gl, RECT_VS, ITEM_FS, 'aCorner', 'room');
+    this.fishProg = linkProgram(gl, RECT_VS, FISH_FS, 'aCorner', 'room');
+    this.disintProg = linkProgram(gl, RECT_VS, DISINT_FS, 'aCorner', 'room');
+    this.setProg = linkProgram(gl, RECT_VS, SET_FS, 'aCorner', 'room');
+    this.indexedProg = linkProgram(gl, UV_QUAD_VS, INDEXED_FS, 'aPos', 'room');
+    this.spriteProg = linkProgram(gl, RECT_VS, SPRITE_FS, 'aCorner', 'room');
+    this.mirrorProg = linkProgram(gl, UV_QUAD_VS, MIRROR_FS, 'aPos', 'room');
+    this.presentProg = linkProgram(gl, UV_QUAD_VS, PRESENT_FS, 'aPos', 'room');
+    this.bgUni = uniformLocations(gl, this.bgProg, ['uWall', 'uBg', 'uLut', 'uMask', 'uBgExtra', 'uWamp', 'uWper', 'uWspd', 'uCount']);
+    this.bg2Uni = uniformLocations(gl, this.bg2Prog, ['uWall', 'uBgIdx', 'uFfngWall', 'uFfngBg', 'uMask', 'uBgExtra', 'uW', 'uWamp', 'uWper', 'uWspd', 'uCount']);
+    this.zxUni = uniformLocations(gl, this.zxProg, ['uWall', 'uBg', 'uBands', 'uLut', 'uMask', 'uBgExtra', 'uWamp', 'uWper', 'uWspd', 'uCount']);
+    this.itemUni = uniformLocations(gl, this.itemProg, ['uItem', 'uLut', 'uX', 'uY', 'uW', 'uMask', 'uMode', 'uRect']);
+    this.fishUni = uniformLocations(gl, this.fishProg, ['uBody', 'uHead', 'uLut', 'uAX', 'uY', 'uMask', 'uSplit', 'uHeadW', 'uHasHead', 'uRev', 'uRect']);
+    this.disintUni = uniformLocations(gl, this.disintProg, ['uItem', 'uRand', 'uLut', 'uAX', 'uY', 'uW', 'uMask', 'uRozpad', 'uRev', 'uRect']);
+    this.setUni = uniformLocations(gl, this.setProg, ['uLut', 'uIdx', 'uRect']);
+    this.indexedUni = uniformLocations(gl, this.indexedProg, ['uIdxTex', 'uLut']);
+    this.spriteUni = uniformLocations(gl, this.spriteProg, ['uSprite', 'uX', 'uY', 'uW', 'uMirror', 'uRect']);
+    this.mirrorUni = uniformLocations(gl, this.mirrorProg, ['uRgba', 'uIdx', 'uX', 'uY', 'uDX', 'uDY', 'uCX', 'uCY', 'uW']);
+    this.presentUni = uniformLocations(gl, this.presentProg, ['uTex']);
 
-    // Fullscreen oversized triangle (background + mirror + present).
-    this.fsVao = gl.createVertexArray()!;
-    gl.bindVertexArray(this.fsVao);
-    const fsBuf = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, fsBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-    // Unit quad (item/fish/setIndex rects), triangle strip corners.
-    this.rectVao = gl.createVertexArray()!;
-    gl.bindVertexArray(this.rectVao);
-    const rectBuf = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, rectBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.bindVertexArray(null);
+    this.fsVao = makeFullscreenVao(gl);   // background + mirror + present
+    this.rectVao = makeRectVao(gl);       // item/fish/setIndex rects
 
     this.wallTex = indexTexture(gl);
     this.bgTex = indexTexture(gl);
@@ -512,16 +471,7 @@ export class GlScreen implements TruecolorTarget {
     this.spriteTex = rgbaTexture(gl);
     this.lutTex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.lutTex);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  }
-
-  private uniforms(p: WebGLProgram, names: readonly string[]): Uni {
-    const u: Uni = {};
-    for (const n of names) u[n] = this.gl.getUniformLocation(p, n);
-    return u;
+    nearestClamp(gl);
   }
 
   private uploadIndex(tex: WebGLTexture, w: number, h: number, pixels: Uint8Array): void {
@@ -630,11 +580,7 @@ export class GlScreen implements TruecolorTarget {
 
   /** NDC rect for a screen pixel rect [x0,x1)×[y0,y1); no Y flip (matches the bg shader). */
   private setRect(loc: WebGLUniformLocation | null, x0: number, y0: number, x1: number, y1: number): void {
-    const nx0 = (x0 / this.width) * 2 - 1;
-    const nx1 = (x1 / this.width) * 2 - 1;
-    const ny0 = (y0 / this.height) * 2 - 1;
-    const ny1 = (y1 / this.height) * 2 - 1;
-    this.gl.uniform4f(loc, nx0, ny0, nx1, ny1);
+    setRectUniform(this.gl, loc, this.width, this.height, x0, y0, x1, y1);
   }
 
   // --- CompositeTarget: read-back primitives the GPU path never uses ----------

@@ -26,7 +26,10 @@ await withApp(async ({ p, expect }) => {
   p.on('pageerror', (e) => errors.push(String(e)));
 
   await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
-  // The CPU backend paints #screen; the default WebGL one leaves it blank.
+  // The pixel assertions below sample #screen directly, which only the canvas-2D
+  // backend paints — with the GPU backend the composite lives in GlAiScreen's FBO. That
+  // is a real constraint of reading pixels, not a gap: the backend-independent half of
+  // this probe (the frame-effect yield) is run in BOTH renderers at the end.
   await p.evaluate(() => window.__ff.setRenderer('cpu'));
   await p.evaluate(() => window.__ff.setGraphics('ai'));
 
@@ -106,29 +109,37 @@ await withApp(async ({ p, expect }) => {
   // The CPU-only frame effects (interlaced/silent-film/megabomb/Tetris) are applied by
   // the faithful compositor while it builds the frame. The AI path bypasses that
   // compositor, so it MUST yield for those frames or the effect silently does nothing —
-  // and nothing errors, the room just renders without it. Detect via the backing store:
-  // the AI path is native×scale, the faithful one is native.
-  await p.evaluate((id) => window.__ff.enterRoomAwait(id), ROOMS[0].id);
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 8000 });
-  const hi = await p.waitForFunction(() => {
-    const c = document.querySelector('#screen');
-    return c && c.width > 800 ? c.width : null;
-  }, undefined, { timeout: 20000 }).then((h) => h.jsonValue()).catch(() => null);
-  expect(hi !== null, `AI room is hi-res before the effect (${hi}px)`);
+  // and nothing errors, the room just renders without it.
+  //
+  // Asserted on roomGeom().upscale rather than on #screen.width, and run in BOTH
+  // renderers. The canvas is only the ×S composite on the canvas-2D backend; with the
+  // GPU backend (which is the DEFAULT) the composite lives in GlAiScreen's FBO and
+  // #screen stays at native size, so a width-based oracle silently tested the path
+  // users do not get.
+  for (const mode of ['cpu', 'webgl']) {
+    await p.evaluate((m) => window.__ff.setRenderer(m), mode);
+    await p.evaluate((id) => window.__ff.enterRoomAwait(id), ROOMS[0].id);
+    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, { timeout: 8000 });
+    const hi = await p.waitForFunction(() => {
+      const g = window.__ff.roomGeom();
+      return g && g.upscale > 1 ? g.upscale : null;
+    }, undefined, { timeout: 20000 }).then((h) => h.jsonValue()).catch(() => null);
+    expect(hi !== null, `[${mode}] AI room composites at x${hi} before the effect`);
 
-  await p.evaluate(() => window.__ff.typeCheat('XINTERLACED'));
-  const lo = await p.waitForFunction((was) => {
-    const c = document.querySelector('#screen');
-    return c && c.width < was ? c.width : null;
-  }, hi, { timeout: 8000 }).then((h) => h.jsonValue()).catch(() => null);
-  expect(lo !== null, `AI path yields to a frame effect (${hi} -> ${lo})`);
+    await p.evaluate(() => window.__ff.typeCheat('XINTERLACED'));
+    const lo = await p.waitForFunction(() => {
+      const g = window.__ff.roomGeom();
+      return g && g.upscale === 1 ? 1 : null;
+    }, undefined, { timeout: 8000 }).then((h) => h.jsonValue()).catch(() => null);
+    expect(lo !== null, `[${mode}] AI path yields to a frame effect (x${hi} -> x${lo})`);
 
-  await p.evaluate(() => window.__ff.typeCheat('XINTERLACED'));
-  const restored = await p.waitForFunction((was) => {
-    const c = document.querySelector('#screen');
-    return c && c.width === was ? c.width : null;
-  }, hi, { timeout: 8000 }).then((h) => h.jsonValue()).catch(() => null);
-  expect(restored !== null, `AI path resumes once the effect ends (${restored}px)`);
+    await p.evaluate(() => window.__ff.typeCheat('XINTERLACED'));
+    const restored = await p.waitForFunction((was) => {
+      const g = window.__ff.roomGeom();
+      return g && g.upscale === was ? was : null;
+    }, hi, { timeout: 8000 }).then((h) => h.jsonValue()).catch(() => null);
+    expect(restored !== null, `[${mode}] AI path resumes once the effect ends (x${restored})`);
+  }
 
   expect(errors.length === 0, `no page errors (${errors.slice(0, 3).join(' | ')})`);
 });

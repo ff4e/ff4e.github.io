@@ -15,11 +15,15 @@
  *
  * Measured across all 71 AI-art rooms on this build: 70 rooms are byte-exact (max = 0)
  * and one (room 9) differs by 1 on a single channel of a single pixel. So the gate is
- * max ≤ 1 with ZERO pixels off by more than 2 — tight enough that the bug this probe
- * was written against still fails it loudly. That bug is worth recording: the staged
- * art was being decoded to PREMULTIPLIED ImageBitmaps, the GPU multiplied by alpha
- * again, and every anti-aliased edge darkened toward the background — max = 64, but
- * only 0.004 % of pixels, so a loose "average looks fine" gate would have shipped it.
+ * simply max ≤ 1 — and that IS the whole gate. An earlier revision also tested
+ * `overPct > 0` (the share of channels off by more than 2), which sounds stricter and is
+ * unreachable: nothing can exceed 2 once the maximum is 1. It was removed rather than
+ * left in to look thorough.
+ *
+ * The bug this gate was written against is worth recording: the staged art was being
+ * decoded to PREMULTIPLIED ImageBitmaps, the GPU multiplied by alpha again, and every
+ * anti-aliased edge darkened toward the background — max = 64, but only 0.004 % of
+ * pixels, so a "the average looks fine" gate would have shipped it.
  *
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; if the environment
  * has no WebGL2 it skips (pass), so CI without a GPU still passes.
@@ -101,7 +105,7 @@ for (let num = 1; num <= ROOMS; num++) {
     tested++;
     if (r.max === 0) exact++;
     if (r.max > worstMax) { worstMax = r.max; worstRoom = num; }
-    if (r.max > MAX_CHANNEL_DELTA || r.overPct > 0) {
+    if (r.max > MAX_CHANNEL_DELTA) {
       ok = false;
       console.log(
         `  FAIL room ${num}: max=${r.max} overPct=${r.overPct.toFixed(4)}% rmse=${r.rmse.toFixed(3)} ` +
@@ -146,54 +150,98 @@ try {
 
 // 4. The dissolving skeleton (KresliK's RANDPOLE dither) is the one primitive no
 //    resting frame reaches — it needs a crushed fish. Its erosion pattern is a
-//    per-original-pixel threshold, so a scale or row/column mix-up in the shader turns
-//    into a subtly different pattern that the room sweep above cannot see at all.
+//    per-original-pixel threshold, so a scale or row/column transposition in the shader
+//    is a subtly different pattern the room sweep above cannot see at all.
+//
+//    Sampled repeatedly as `rozpad` counts down rather than once right after the kill:
+//    it starts clamped at 255, where almost every pixel survives and almost any wrong
+//    predicate still looks plausible. Walking it through mid-erosion is where a
+//    transposition actually shows, and sampling on a schedule (rather than waiting for
+//    one exact value) keeps that independent of how loaded the machine is.
+//
+//    NOTE this only proves the two AI BACKENDS agree. That they agree with the FAITHFUL
+//    renderer is pinned in test/roomAi.test.ts, which imports `dissolveKeeps` and
+//    compares it against RgbaScreen.blitDisintegrate — the check this probe structurally
+//    cannot make, and the one that catches a rule broken identically on both backends.
 try {
   await enter(1);
   await p.evaluate(() => window.__ff.killFish('little'));
-  await p.waitForTimeout(200);
-  const d = await p.evaluate(() => window.__ff.aiGlParity());
-  if (!d || !d.webgl) {
-    ok = false;
-    console.log('  FAIL dissolve: no parity result');
-  } else if (d.max > MAX_CHANNEL_DELTA || d.overPct > 0) {
-    ok = false;
-    console.log(`  FAIL dissolve: max=${d.max} overPct=${d.overPct.toFixed(4)}% worst at ${JSON.stringify(d.worstAt)}`);
-  } else {
-    console.log(`  dissolving skeleton: max=${d.max}`);
+  let samples = 0;
+  let worst = 0;
+  for (let i = 0; i < 10; i++) {
+    await p.waitForTimeout(120);
+    const d = await p.evaluate(() => window.__ff.aiGlParity());
+    if (!d || !d.webgl || d.dimMismatch) continue;
+    samples++;
+    if (d.max > worst) worst = d.max;
+    if (d.max > MAX_CHANNEL_DELTA) {
+      ok = false;
+      console.log(`  FAIL dissolve sample ${i}: max=${d.max} worst at ${JSON.stringify(d.worstAt)}`);
+    }
   }
+  if (samples === 0) { ok = false; console.log('  FAIL dissolve: no samples taken'); }
+  else console.log(`  dissolving skeleton: ${samples} samples across the erosion, worstMax=${worst}`);
 } catch (e) {
   ok = false;
   console.log(`  FAIL dissolve: ${String(e).slice(0, 80)}`);
 }
 
-// 5. A blow-up guard on the GPU path's per-frame cost.
-//
-//    NOT a performance target — this suite runs eight browsers at once and any tight
-//    bound would just flake. It is deliberately loose enough to survive a fully loaded
-//    machine while still catching the class of regression that would otherwise pass
-//    every assertion above: something per-frame and synchronous sneaking into the GPU
-//    path (a full-FBO readback, a re-upload of the room's art, a stall) turns 0.3 ms
-//    into tens of ms, which no amount of machine load explains. Measured on an idle M4:
-//    0.26-0.39 ms GPU against 0.26-0.51 ms canvas-2D (tools/bench-ai-room.mjs) — the
-//    two are near parity per frame, so do not read the 3x bound as a speed claim.
+// 5. The PRESENT pass. Everything above compares offscreen composites; this is the only
+//    check on the pass that actually puts pixels on the screen. It is an ALIGNMENT test,
+//    not a pixel one — the GPU box-downsamples and canvas-2D leans on the browser's own
+//    minification filter, so they legitimately differ. What cannot legitimately differ is
+//    orientation: the identity must score better than the frame flipped or shifted
+//    against itself. A wrong Y flip, viewport or footprint fails that; a different filter
+//    does not.
 try {
   await enter(3);
-  const bench = await p.evaluate(() => window.__ff.aiRenderBench(30));
-  if (!bench || bench.gpuMs === null) {
+  const q = await p.evaluate(() => window.__ff.aiPresentCheck());
+  if (!q || !q.webgl) {
     ok = false;
-    console.log('  FAIL bench: no GPU timing');
+    console.log('  FAIL present: no result');
+  } else if (q.unsupported || q.noCanvas) {
+    ok = false;
+    console.log(`  FAIL present: ${q.unsupported ? 'GPU could not size the buffer' : 'no 2D reference context'}`);
   } else {
-    console.log(`  frame cost ${bench.w}x${bench.h}: cpu ${bench.cpuMs.toFixed(2)} ms  gpu ${bench.gpuMs.toFixed(2)} ms`);
-    if (!(bench.gpuMs < bench.cpuMs * 3)) {
+    const rivals = { flipY: q.flipY, flipX: q.flipX, shiftX: q.shiftX, shiftY: q.shiftY };
+    const beaten = Object.entries(rivals).filter(([, v]) => !(q.identity < v));
+    // A featureless reference would tie against every rival, so identity winning would
+    // prove nothing; require the frame to have real contrast first.
+    if (!(q.spread > 4)) {
       ok = false;
-      console.log(`  FAIL bench: gpu ${bench.gpuMs.toFixed(2)} ms is not below 3x cpu ${bench.cpuMs.toFixed(2)} ms`);
+      console.log(`  FAIL present: reference frame is featureless (spread ${q.spread.toFixed(2)})`);
+    }
+    if (beaten.length) {
+      ok = false;
+      console.log(
+        `  FAIL present: identity ${q.identity.toFixed(2)} does not beat ` +
+          beaten.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', '),
+      );
+    } else {
+      console.log(
+        `  present alignment ${q.w}x${q.h}: identity ${q.identity.toFixed(2)} vs ` +
+          `flipY ${q.flipY.toFixed(2)} flipX ${q.flipX.toFixed(2)} shiftX ${q.shiftX.toFixed(2)} shiftY ${q.shiftY.toFixed(2)}`,
+      );
     }
   }
 } catch (e) {
   ok = false;
-  console.log(`  FAIL bench: ${String(e).slice(0, 80)}`);
+  console.log(`  FAIL present: ${String(e).slice(0, 80)}`);
 }
+
+// The per-frame cost of the two backends is REPORTED, not asserted. An earlier revision
+// gated on `gpuMs < cpuMs * 3`, which is a wall-clock ratio measured inside the
+// concurrent worker pool — and run-ui-tests.mjs's own rule is that rate-asserting probes
+// belong in EXCLUSIVE or nowhere. Adding a probe to the quiet lane to protect a bound
+// that was never a real target is a bad trade, so the number is printed for the log and
+// tools/bench-ai-room.mjs remains the place that measures it properly.
+try {
+  await enter(3);
+  const bench = await p.evaluate(() => window.__ff.aiRenderBench(30));
+  if (bench && bench.gpuMs !== null) {
+    console.log(`  frame cost ${bench.w}x${bench.h}: cpu ${bench.cpuMs.toFixed(2)} ms  gpu ${bench.gpuMs.toFixed(2)} ms (report only)`);
+  }
+} catch { /* reporting only: never fail the probe on a timing read */ }
 
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }
 console.log(

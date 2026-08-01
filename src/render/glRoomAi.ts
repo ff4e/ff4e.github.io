@@ -20,20 +20,18 @@
  * it (see tools/test-gl-room-ai.mjs) — and then presented, downscaled, to #screen-gl.
  */
 import { RANDPOLE } from './framebuffer.js';
+import {
+  QUAD_VS,
+  RECT_VS,
+  linkProgram,
+  makeFullscreenVao,
+  makeRectVao,
+  nearestClamp,
+  setRectUniform,
+  uniformLocations,
+  type Uni,
+} from './glCommon.js';
 import type { AiImage, AiTarget } from './aiTarget.js';
-
-const QUAD_VS = `#version 300 es
-in vec2 aPos;
-void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
-
-/** A screen-rect quad in FBO pixel space; the VS maps [0,1]² across uRect (NDC). */
-const RECT_VS = `#version 300 es
-in vec2 aCorner;
-uniform vec4 uRect;
-void main() {
-  vec2 p = mix(uRect.xy, uRect.zw, aCorner);
-  gl_Position = vec4(p, 0.0, 1.0);
-}`;
 
 /** Opaque colour fill (the darkness room, the elevator rope). */
 const FILL_FS = `#version 300 es
@@ -107,7 +105,7 @@ void main() {
   int col = int(gl_FragCoord.x) - uX;
   int row = int(gl_FragCoord.y) - uY;
   int p = ((((row / uScale) * uNativeW) & 255) + col / uScale) & 255;
-  if (int(texelFetch(uRand, ivec2(p, 0), 0).r) < uRozpad) discard;
+  if (int(texelFetch(uRand, ivec2(p, 0), 0).r) >= uRozpad) discard;
   outColor = texelFetch(uSprite, ivec2(col, row), 0);
 }`;
 
@@ -181,30 +179,6 @@ void main() {
   frag = vec4(acc / (n * n), 1.0);
 }`;
 
-function compile(gl: WebGL2RenderingContext, type: number, src: string): WebGLShader {
-  const sh = gl.createShader(type)!;
-  gl.shaderSource(sh, src);
-  gl.compileShader(sh);
-  if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-    throw new Error(`ai shader: ${gl.getShaderInfoLog(sh) ?? ''}`);
-  }
-  return sh;
-}
-
-function program(gl: WebGL2RenderingContext, vs: string, fs: string, attrib0: string): WebGLProgram {
-  const p = gl.createProgram()!;
-  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vs));
-  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fs));
-  gl.bindAttribLocation(p, 0, attrib0);
-  gl.linkProgram(p);
-  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
-    throw new Error(`ai program: ${gl.getProgramInfoLog(p) ?? ''}`);
-  }
-  return p;
-}
-
-type Uni = Record<string, WebGLUniformLocation | null>;
-
 /** The art owner whose disposal must also release this backend's textures. */
 export interface AiTextureOwner {
   onDispose(fn: () => void): void;
@@ -233,16 +207,15 @@ export class GlAiScreen implements AiTarget {
   private readonly shiftTex: WebGLTexture;
 
   /**
-   * Art texture per source bitmap. Weak so a bitmap the room has dropped takes its
-   * texture with it; `own()` additionally deletes them the moment the room is evicted,
-   * because at ×4 a room's art is ~50 MB of VRAM and waiting for GC to notice is not
-   * good enough.
+   * Every texture this backend has uploaded, grouped by the art owner that caused it.
+   *
+   * One map per owner rather than a lookup cache plus a separate "currently pending"
+   * set: at ×4 a room's art is ~50 MB of VRAM, `AiRoom.dispose()` exists to bound that,
+   * and this is what lets the dispose hook free exactly that room's textures. Keyed
+   * weakly on the owner so a room that is dropped without disposing cannot pin them.
    */
-  private readonly texCache = new WeakMap<AiImage, WebGLTexture>();
-  private readonly maskCache = new WeakMap<Float32Array, WebGLTexture>();
-  /** Textures uploaded for the currently-tracked owner, so its eviction can free them. */
-  private pending = new Map<AiImage | Float32Array, WebGLTexture>();
-  private tracked: AiTextureOwner | null = null;
+  private readonly owned = new WeakMap<AiTextureOwner, Map<AiImage | Float32Array, WebGLTexture>>();
+  private tracked: Map<AiImage | Float32Array, WebGLTexture> | null = null;
 
   private fboA: { fbo: WebGLFramebuffer; tex: WebGLTexture } | null = null;
   private fboB: { fbo: WebGLFramebuffer; tex: WebGLTexture } | null = null;
@@ -250,37 +223,31 @@ export class GlAiScreen implements AiTarget {
   private fboW = 0;
   private fboH = 0;
 
+  /**
+   * "This backend could not fully composite the frame." Same seam GlScreen exposes: the
+   * caller checks it after the room walk and falls back to canvas-2D for that frame,
+   * rather than presenting a frame that is silently missing an effect. Set only when the
+   * mirror ping-pong buffer cannot be allocated. Cleared by `begin`.
+   */
+  unsupported = false;
+
   constructor(gl: WebGL2RenderingContext) {
     this.gl = gl;
-    this.fillProg = program(gl, RECT_VS, FILL_FS, 'aCorner');
-    this.bgProg = program(gl, QUAD_VS, BG_FS, 'aPos');
-    this.spriteProg = program(gl, RECT_VS, SPRITE_FS, 'aCorner');
-    this.disintProg = program(gl, RECT_VS, DISINT_FS, 'aCorner');
-    this.mirrorProg = program(gl, QUAD_VS, MIRROR_FS, 'aPos');
-    this.presentProg = program(gl, QUAD_VS, PRESENT_FS, 'aPos');
-    this.fillUni = this.uniforms(this.fillProg, ['uColor', 'uRect']);
-    this.bgUni = this.uniforms(this.bgProg, ['uBg', 'uWall', 'uShift', 'uScale', 'uBgW', 'uWobble']);
-    this.spriteUni = this.uniforms(this.spriteProg, ['uSprite', 'uX', 'uY', 'uW', 'uMirror', 'uRect']);
-    this.disintUni = this.uniforms(this.disintProg, ['uSprite', 'uRand', 'uX', 'uY', 'uScale', 'uNativeW', 'uRozpad', 'uRect']);
-    this.mirrorUni = this.uniforms(this.mirrorProg, ['uSrc', 'uMask', 'uRx0', 'uRx1', 'uRy0', 'uRy1', 'uDx0', 'uDx1', 'uK', 'uMX', 'uMY', 'uMW', 'uMH']);
-    this.presentUni = this.uniforms(this.presentProg, ['uTex', 'uSize', 'uFootprint', 'uTaps']);
+    this.fillProg = linkProgram(gl, RECT_VS, FILL_FS, 'aCorner', 'ai');
+    this.bgProg = linkProgram(gl, QUAD_VS, BG_FS, 'aPos', 'ai');
+    this.spriteProg = linkProgram(gl, RECT_VS, SPRITE_FS, 'aCorner', 'ai');
+    this.disintProg = linkProgram(gl, RECT_VS, DISINT_FS, 'aCorner', 'ai');
+    this.mirrorProg = linkProgram(gl, QUAD_VS, MIRROR_FS, 'aPos', 'ai');
+    this.presentProg = linkProgram(gl, QUAD_VS, PRESENT_FS, 'aPos', 'ai');
+    this.fillUni = uniformLocations(gl, this.fillProg, ['uColor', 'uRect']);
+    this.bgUni = uniformLocations(gl, this.bgProg, ['uBg', 'uWall', 'uShift', 'uScale', 'uBgW', 'uWobble']);
+    this.spriteUni = uniformLocations(gl, this.spriteProg, ['uSprite', 'uX', 'uY', 'uW', 'uMirror', 'uRect']);
+    this.disintUni = uniformLocations(gl, this.disintProg, ['uSprite', 'uRand', 'uX', 'uY', 'uScale', 'uNativeW', 'uRozpad', 'uRect']);
+    this.mirrorUni = uniformLocations(gl, this.mirrorProg, ['uSrc', 'uMask', 'uRx0', 'uRx1', 'uRy0', 'uRy1', 'uDx0', 'uDx1', 'uK', 'uMX', 'uMY', 'uMW', 'uMH']);
+    this.presentUni = uniformLocations(gl, this.presentProg, ['uTex', 'uSize', 'uFootprint', 'uTaps']);
 
-    this.fsVao = gl.createVertexArray()!;
-    gl.bindVertexArray(this.fsVao);
-    const fsBuf = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, fsBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-
-    this.rectVao = gl.createVertexArray()!;
-    gl.bindVertexArray(this.rectVao);
-    const rectBuf = gl.createBuffer()!;
-    gl.bindBuffer(gl.ARRAY_BUFFER, rectBuf);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0);
-    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    gl.bindVertexArray(null);
+    this.fsVao = makeFullscreenVao(gl);
+    this.rectVao = makeRectVao(gl);
 
     this.randTex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.randTex);
@@ -288,75 +255,102 @@ export class GlAiScreen implements AiTarget {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, 256, 1, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, RANDPOLE);
     nearestClamp(gl);
 
+    // Allocated 1×1 up front, not left empty: a room with no water wobble never uploads
+    // to it, yet `background()` still binds it to BG_FS's `highp isampler2D`. The shader
+    // guards the FETCH, not the binding, and an incomplete texture bound to an integer
+    // sampler is exactly the sort of thing implementations are free to treat differently.
     this.shiftTex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, this.shiftTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, 1, 1, 0, gl.RED_INTEGER, gl.SHORT, new Int16Array(1));
     nearestClamp(gl);
-  }
-
-  private uniforms(p: WebGLProgram, names: readonly string[]): Uni {
-    const u: Uni = {};
-    for (const n of names) u[n] = this.gl.getUniformLocation(p, n);
-    return u;
   }
 
   /**
    * Bind the art owner whose textures this backend is about to build.
    *
-   * A room's art is ~50 MB of VRAM at ×4 and `AiRoom.dispose()` exists precisely to
-   * bound that, so the textures are freed from its hook rather than left to GC. The
-   * cache entry is dropped with the texture: the fish set is SHARED between rooms and
-   * is attributed to whichever room happened to upload it first, so a stale cache entry
-   * would hand a later room a deleted texture. Re-uploading it is the cheap, correct
-   * outcome (once per room entry, against a room load that already moves megabytes).
+   * Registering the dispose hook exactly ONCE per owner is the point: an earlier version
+   * registered a fresh hook (and a fresh map) every time the tracked owner changed, so
+   * alternating between two cached rooms accumulated closures without bound. Because the
+   * map is per owner, a room re-entered later finds its own textures still there instead
+   * of re-uploading them into somebody else's set.
+   *
+   * The fish sprite set is SHARED between rooms and stays attributed to whichever room
+   * uploaded it first — that room's disposal deletes it and the next room re-uploads it.
+   * Correct (nothing keeps a handle across the delete: `drawInto` is fully synchronous
+   * and eviction only runs between frames), and worth roughly one re-upload per room
+   * entry against a room load that already moves megabytes.
    */
   track(owner: AiTextureOwner): void {
-    if (this.tracked === owner) return;
-    this.tracked = owner;
-    const mine = new Map<AiImage | Float32Array, WebGLTexture>();
-    this.pending = mine;
-    owner.onDispose(() => {
-      for (const [src, tex] of mine) {
-        this.gl.deleteTexture(tex);
-        if (src instanceof Float32Array) this.maskCache.delete(src);
-        else this.texCache.delete(src);
-      }
-      mine.clear();
-    });
+    let mine = this.owned.get(owner);
+    if (!mine) {
+      mine = new Map();
+      this.owned.set(owner, mine);
+      owner.onDispose(() => {
+        for (const tex of mine!.values()) this.gl.deleteTexture(tex);
+        mine!.clear();
+        this.owned.delete(owner);
+      });
+    }
+    this.tracked = mine;
   }
 
   /** RGBA8 texture for a decoded sprite, uploaded once and cached by source object. */
   private texture(src: AiImage): WebGLTexture {
-    const hit = this.texCache.get(src);
+    return this.cached(src, () => {
+      const gl = this.gl;
+      const t = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      // Straight (non-premultiplied) alpha, top-down — matching how the CPU path reads
+      // these bitmaps, and what the blend equations below assume. The bitmaps themselves
+      // are decoded with `premultiplyAlpha: 'none'` (see roomAi.ts) because texImage2D
+      // takes an ImageBitmap's OWN alpha mode and ignores these flags for that source.
+      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, src);
+      nearestClamp(gl);
+      return t;
+    });
+  }
+
+  /** Look the source up in the current owner's set, uploading it once on a miss. */
+  private cached(src: AiImage | Float32Array, upload: () => WebGLTexture): WebGLTexture {
+    const mine = this.tracked;
+    if (!mine) return upload(); // untracked (tests): correct, just not pooled
+    const hit = mine.get(src);
     if (hit) return hit;
-    const gl = this.gl;
-    const t = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    // Straight (non-premultiplied) alpha, top-down — matching how the CPU path reads
-    // these bitmaps, and what the blend equations below assume.
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, src);
-    nearestClamp(gl);
-    this.texCache.set(src, t);
-    this.pending.set(src, t);
+    const t = upload();
+    mine.set(src, t);
     return t;
   }
 
   private maskTexture(mask: Float32Array, w: number, h: number): WebGLTexture {
-    const hit = this.maskCache.get(mask);
-    if (hit) return hit;
-    const gl = this.gl;
-    const t = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, mask);
-    nearestClamp(gl);
-    this.maskCache.set(mask, t);
-    this.pending.set(mask, t);
-    return t;
+    return this.cached(mask, () => {
+      const gl = this.gl;
+      const t = gl.createTexture()!;
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, w, h, 0, gl.RED, gl.FLOAT, mask);
+      nearestClamp(gl);
+      return t;
+    });
   }
 
-  private makeFbo(w: number, h: number): { fbo: WebGLFramebuffer; tex: WebGLTexture } {
+  /**
+   * Whether this GPU can hold the room's ×S buffer AND its art.
+   *
+   * WebGL2 only GUARANTEES `MAX_TEXTURE_SIZE` of 2048, while the shipped rooms reach
+   * 3120×1980 at ×4. This has to be asked rather than attempted, because an oversized
+   * `texImage2D` reports an INVALID_VALUE GL error instead of throwing: without the
+   * check the compositor would sail on, `drawAiGpu` would return true, the canvas-2D
+   * frame would be hidden, and the player would get a blank room — on the default tier,
+   * on exactly the low-end hardware that can least afford a silent failure.
+   */
+  canRender(w: number, h: number): boolean {
+    const max = this.gl.getParameter(this.gl.MAX_TEXTURE_SIZE) as number;
+    return w > 0 && h > 0 && w <= max && h <= max;
+  }
+
+  private makeFbo(w: number, h: number): { fbo: WebGLFramebuffer; tex: WebGLTexture } | null {
     const gl = this.gl;
     const tex = gl.createTexture()!;
     gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -368,6 +362,14 @@ export class GlAiScreen implements AiTarget {
     const fbo = gl.createFramebuffer()!;
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    // Same reasoning as canRender(): allocation failure is reported, not thrown. An
+    // incomplete framebuffer renders nothing at all, so it must fail the caller rather
+    // than be drawn into.
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+      gl.deleteFramebuffer(fbo);
+      gl.deleteTexture(tex);
+      return null;
+    }
     return { fbo, tex };
   }
 
@@ -378,34 +380,35 @@ export class GlAiScreen implements AiTarget {
    * at ×4 each one is ~20 MB, so the 71 rooms with no spec=1 mirror never pay for the
    * second.
    */
-  begin(w: number, h: number): void {
+  begin(w: number, h: number): boolean {
     const gl = this.gl;
     if (this.fboW !== w || this.fboH !== h || !this.fboA) {
       if (this.fboA) { gl.deleteFramebuffer(this.fboA.fbo); gl.deleteTexture(this.fboA.tex); }
       if (this.fboB) { gl.deleteFramebuffer(this.fboB.fbo); gl.deleteTexture(this.fboB.tex); this.fboB = null; }
-      this.fboA = this.makeFbo(w, h);
+      this.fboA = null;
+      this.fboW = 0;
+      this.fboH = 0;
+      if (!this.canRender(w, h)) return false;
+      const made = this.makeFbo(w, h);
+      if (!made) return false;
+      this.fboA = made;
       this.fboW = w;
       this.fboH = h;
     }
     this.width = w;
     this.height = h;
+    this.unsupported = false;
     this.cur = this.fboA;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.cur.fbo);
     gl.viewport(0, 0, w, h);
     gl.disable(gl.BLEND);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
+    return true;
   }
 
-  /** Map a pixel rect to the NDC rect the RECT_VS quad spans. */
   private setRect(loc: WebGLUniformLocation | null, x0: number, y0: number, x1: number, y1: number): void {
-    this.gl.uniform4f(
-      loc,
-      (x0 / this.width) * 2 - 1,
-      (y0 / this.height) * 2 - 1,
-      (x1 / this.width) * 2 - 1,
-      (y1 / this.height) * 2 - 1,
-    );
+    setRectUniform(this.gl, loc, this.width, this.height, x0, y0, x1, y1);
   }
 
   private drawRect(): void {
@@ -519,6 +522,7 @@ export class GlAiScreen implements AiTarget {
     const dx0 = Math.max(rx0, X * S), dx1 = Math.min(rx1, (X + w) * S);
     if (dx1 <= dx0) return;
     if (!this.fboB) this.fboB = this.makeFbo(this.fboW, this.fboH);
+    if (!this.fboB) { this.unsupported = true; return; } // no VRAM for the ping-pong
     const src = this.cur!;
     const dst = src === this.fboA ? this.fboB : this.fboA!;
     gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
@@ -569,6 +573,28 @@ export class GlAiScreen implements AiTarget {
     this.drawFullscreen();
   }
 
+  /**
+   * Test-only: present at `w`×`h` and read the PRESENTED pixels back from the default
+   * framebuffer (top-down RGBA).
+   *
+   * `readback()` reads the offscreen composite and so is blind to the present pass —
+   * which is the only pass the player actually sees, and where a wrong viewport, Y flip
+   * or filter footprint would leave the composite byte-exact and the screen wrong.
+   */
+  presentReadback(w: number, h: number): Uint8Array {
+    const gl = this.gl;
+    this.present(w, h);
+    const out = new Uint8Array(w * h * 4);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    // The default framebuffer is bottom-up; flip so callers get the same top-down
+    // orientation readback() and the canvas-2D path use.
+    const flipped = new Uint8Array(out.length);
+    const row = w * 4;
+    for (let y = 0; y < h; y++) flipped.set(out.subarray((h - 1 - y) * row, (h - y) * row), y * row);
+    return flipped;
+  }
+
   /** Read the composited ×S frame back as top-down RGBA (for the parity probe). */
   readback(): { w: number; h: number; rgba: Uint8Array } {
     const gl = this.gl;
@@ -597,11 +623,4 @@ export class GlAiScreen implements AiTarget {
     gl.readBuffer(gl.COLOR_ATTACHMENT0);
     gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(4));
   }
-}
-
-function nearestClamp(gl: WebGL2RenderingContext): void {
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 }

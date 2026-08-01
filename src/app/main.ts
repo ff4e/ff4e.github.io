@@ -87,6 +87,7 @@ import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
 import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { loadAiRoom, aiRoomGateAllows, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
+import { Canvas2dAiTarget } from '../render/aiTarget.js';
 import { withLoadSlot } from '../render/loadSlot.js';
 import {
   hitInfoButton,
@@ -1575,9 +1576,17 @@ function setGraphics(level: GraphicsLevel): void {
   setInfo();
 }
 
-// Set once if the GPU backend throws, disabling it for the session (the CPU
-// compositor takes over) so a driver/context failure can never wedge rendering.
+// Set once if a GPU backend throws, disabling it for the session (the CPU compositor
+// takes over) so a driver/context failure can never wedge rendering.
+//
+// One flag PER backend, because they fail independently and share nothing but the
+// context. Collapsing them was wrong in both directions: the `ai` tier's ×S buffers are
+// an order of magnitude larger than the faithful compositor's, so an AI-only allocation
+// failure would have disabled the GPU for `classic`/`enhanced` where it was working
+// fine — and conversely, an AI compositor that never built at all left this flag false,
+// so the HUD reported a per-frame CPU fallback forever instead of a disabled backend.
 let glFailed = false;
+let glAiFailed = false;
 let enhancedArt: EnhancedArt | null = null; // decoded art for the current room (null = classic)
 let enhancedObjects: EnhancedObject[] = []; // decoded truecolor object sprites for the current room
 let curNum = 0; // current room number, for enhanced-art lookup
@@ -2690,7 +2699,7 @@ function drawCutscene(): void {
     ctx.drawImage(aiKufr.base, 0, 0);
     ctx.drawImage(aiBmp, aiKufr.region.x * S, aiKufr.region.y * S);
     updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
-    paintTick();
+    perfPaint++;
     return;
   }
   if (canvas.style.imageRendering) canvas.style.imageRendering = '';
@@ -3466,7 +3475,7 @@ function drawMap(): void {
   const sigT = tetris ? `|ttr${tetrisTick}` : '';
   if (sig + sigT === mapSig) return; // nothing visibly changed — skip the redraw entirely
   mapSig = sig + sigT;
-  paintTick(); // an actual map paint (past the cache check)
+  perfPaint++; // an actual map paint (past the cache check)
   const panelOpen = mapInfoRoom !== null;
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
@@ -3809,7 +3818,7 @@ function drawLegImage(): void {
   } else {
     ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
   }
-  paintTick();
+  perfPaint++;
 }
 
 /**
@@ -4188,45 +4197,50 @@ function classicArtFor(r: Room): ClassicArtSource {
   return classicArt;
 }
 
-// P3 WebGL compositor. Bound lazily to the stacked #screen-gl canvas; the CPU
-// Canvas2D path stays the default and the fallback. Returns null (→ CPU) if
-// WebGL2 is unavailable or context/compositor construction fails.
-let glComp: GlScreen | null = null;
-let glCompTried = false;
-function glCompositor(): GlScreen | null {
-  if (glCompTried) return glComp;
-  glCompTried = true;
-  if (!webgl2Available()) return null;
-  const gl = glCanvas.getContext('webgl2');
-  if (!gl) return null;
-  try {
-    glComp = new GlScreen(gl);
-  } catch {
-    glComp = null;
-  }
-  return glComp;
+/**
+ * A WebGL compositor built on demand from the stacked #screen-gl canvas, at most once
+ * per context: `reset()` (context loss / re-enable) lets the next call rebuild it.
+ * Yields null — meaning "use the CPU path" — when WebGL2 is unavailable or construction
+ * fails, which is a normal outcome, not an error.
+ *
+ * There are two of these (the faithful compositor and the `ai` tier's) and they share
+ * one canvas and one context: `getContext('webgl2')` returns the context the other one
+ * already created. Only the class differs, so only the class is passed in.
+ */
+function lazyCompositor<T>(what: string, build: (gl: WebGL2RenderingContext) => T) {
+  let comp: T | null = null;
+  let tried = false;
+  return {
+    get(): T | null {
+      if (tried) return comp;
+      tried = true;
+      if (!webgl2Available()) return null;
+      const gl = glCanvas.getContext('webgl2');
+      if (!gl) return null;
+      try {
+        comp = build(gl);
+      } catch (e) {
+        console.warn(`[ff] the ${what} WebGL compositor failed to build; staying on the CPU path`, e);
+        comp = null;
+      }
+      return comp;
+    },
+    /** Drop the built compositor so the next `get()` rebuilds it. */
+    reset(): void {
+      comp = null;
+      tried = false;
+    },
+    /** Allow a rebuild only if nothing is live — a cpu→webgl toggle must not leak one. */
+    allowRebuild(): void {
+      if (!comp) tried = false;
+    },
+  };
 }
 
-// The `ai` tier's GPU compositor, on the SAME WebGL2 context as GlScreen (one canvas,
-// one context — see the header of glRoomAi.ts for why it is a separate class and not
-// another mode of GlScreen). getContext returns the context already created above when
-// both are live, so this never allocates a second one.
-let glAiComp: GlAiScreen | null = null;
-let glAiTried = false;
-function glAiCompositor(): GlAiScreen | null {
-  if (glAiTried) return glAiComp;
-  glAiTried = true;
-  if (!webgl2Available()) return null;
-  const gl = glCanvas.getContext('webgl2');
-  if (!gl) return null;
-  try {
-    glAiComp = new GlAiScreen(gl);
-  } catch (e) {
-    console.warn('[ff] the AI tier GPU compositor failed to build; staying on canvas-2D', e);
-    glAiComp = null;
-  }
-  return glAiComp;
-}
+const roomGl = lazyCompositor('room', (gl) => new GlScreen(gl));
+const aiGl = lazyCompositor('ai tier', (gl) => new GlAiScreen(gl));
+const glCompositor = (): GlScreen | null => roomGl.get();
+const glAiCompositor = (): GlAiScreen | null => aiGl.get();
 
 // WebGL context loss (GPU reset, driver reclaim, tab backgrounding) does NOT
 // throw — it fires an event and makes subsequent GL calls silently no-op, which
@@ -4238,31 +4252,29 @@ function glAiCompositor(): GlAiScreen | null {
 glCanvas.addEventListener('webglcontextlost', (e) => {
   e.preventDefault();
   glFailed = true;
-  glComp = null;
-  glCompTried = false;
-  glAiComp = null;
-  glAiTried = false;
+  glAiFailed = true;
+  roomGl.reset();
+  aiGl.reset();
   console.warn('[ff] WebGL context lost; falling back to the CPU compositor. Press R to retry WebGL.');
   setInfo();
 });
 glCanvas.addEventListener('webglcontextrestored', () => {
   // Allow a rebuild, but stay on CPU until the user re-enables WebGL (R), so a
   // flapping context can never thrash the render path.
-  glComp = null;
-  glCompTried = false;
-  glAiComp = null;
-  glAiTried = false;
+  roomGl.reset();
+  aiGl.reset();
 });
 
 /**
- * Clear the WebGL disabled-for-session state so the GPU backend can run again.
- * Rebuilds the compositor only if none is live (i.e. after a context loss);
- * a normal cpu→webgl toggle keeps the existing GlScreen rather than leaking it.
+ * Clear the WebGL disabled-for-session state so both GPU backends can run again.
+ * Rebuilds a compositor only if none is live (i.e. after a context loss); a normal
+ * cpu→webgl toggle keeps the existing ones rather than leaking them.
  */
 function enableWebgl(): void {
   glFailed = false;
-  if (!glComp) glCompTried = false;
-  if (!glAiComp) glAiTried = false;
+  glAiFailed = false;
+  roomGl.allowRebuild();
+  aiGl.allowRebuild();
 }
 
 /**
@@ -4310,19 +4322,7 @@ function drawGpu(
     renderRoomInto(gl, room, art, opts);
     if (gl.unsupported) return false; // defensive: an un-ported primitive → CPU this frame
     if (!useVecSubs) subs?.draw(gl, opts.count ?? 0); // baked subtitles via GPU setIndex
-    const dpr = window.devicePixelRatio || 1;
-    // The room's CSS box comes from roomGeometry — the GL canvas is an overlay stacked
-    // on #screen, so it must match that box exactly rather than recompute it.
-    const { cssW, cssH } = geom;
-    const bw = Math.round(cssW * dpr);
-    const bh = Math.round(cssH * dpr);
-    if (glCanvas.width !== bw || glCanvas.height !== bh) {
-      glCanvas.width = bw;
-      glCanvas.height = bh;
-    }
-    glCanvas.style.width = `${cssW}px`;
-    glCanvas.style.height = `${cssH}px`;
-    gl.present(bw, bh);
+    presentToGlCanvas(gl, geom);
     return true;
   } catch (e) {
     glFailed = true;
@@ -4334,35 +4334,49 @@ function drawGpu(
 /**
  * WebGL draw path for the `ai` tier: composite the room's ×S frame on the GPU via the
  * shared room walk (AiRoom.drawInto → GlAiScreen) and present it to #screen-gl.
- * Returns false to request the canvas-2D fallback if a GL call throws (the backend is
- * then disabled for the session) or if the compositor could not be built. Never throws.
+ * Returns false to request the canvas-2D fallback — when the compositor could not be
+ * built, when the GPU cannot hold this room's ×S buffer, when a primitive could not run,
+ * or when a GL call throws (which disables this backend for the session). Never throws.
  */
 function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame): boolean {
   const comp = glAiCompositor();
   if (!comp || !aiRoom) return false;
   try {
     comp.track(aiRoom); // so evicting the room frees its ~50 MB of textures with it
-    comp.begin(geom.backingW, geom.backingH);
+    // Not a formality: a ×4 room needs up to 3120px, WebGL2 only guarantees 2048, and an
+    // oversized allocation is reported as a GL error rather than thrown — so without
+    // this the frame would be "successfully" presented blank.
+    if (!comp.begin(geom.backingW, geom.backingH)) return false;
     aiRoom.drawInto(comp, r, f);
-    const dpr = window.devicePixelRatio || 1;
-    // The room's CSS box comes from roomGeometry — the GL canvas is an overlay stacked
-    // on #screen, so it must match that box exactly rather than recompute it.
-    const { cssW, cssH } = geom;
-    const bw = Math.round(cssW * dpr);
-    const bh = Math.round(cssH * dpr);
-    if (glCanvas.width !== bw || glCanvas.height !== bh) {
-      glCanvas.width = bw;
-      glCanvas.height = bh;
-    }
-    glCanvas.style.width = `${cssW}px`;
-    glCanvas.style.height = `${cssH}px`;
-    comp.present(bw, bh);
+    if (comp.unsupported) return false;
+    presentToGlCanvas(comp, geom);
     return true;
   } catch (e) {
-    glFailed = true;
+    glAiFailed = true;
     console.warn('[ff] the AI tier WebGL compositor failed; falling back to canvas-2D for this session', e);
     return false;
   }
+}
+
+/**
+ * Size #screen-gl to the room's CSS box at device resolution and present into it.
+ *
+ * The room's box comes from roomGeometry — the GL canvas is an overlay stacked on
+ * #screen, so it must match that box exactly rather than recompute it. Shared by both
+ * GPU paths: the compositors differ entirely, the presentation does not.
+ */
+function presentToGlCanvas(comp: { present(w: number, h: number): void }, geom: RoomGeometry): void {
+  const dpr = window.devicePixelRatio || 1;
+  const { cssW, cssH } = geom;
+  const bw = Math.round(cssW * dpr);
+  const bh = Math.round(cssH * dpr);
+  if (glCanvas.width !== bw || glCanvas.height !== bh) {
+    glCanvas.width = bw;
+    glCanvas.height = bh;
+  }
+  glCanvas.style.width = `${cssW}px`;
+  glCanvas.style.height = `${cssH}px`;
+  comp.present(bw, bh);
 }
 
 /**
@@ -4531,43 +4545,34 @@ function draw(): void {
   // session).
   const aiActive = aiRoomRenderActive(room);
   if (aiActive) {
-    // roomGeometry already resolved the backing store for this frame, including the
-    // AI upscale — deriving it a second time here is how the two drifted apart before.
+    // roomGeometry already resolved the ×S backing store for this frame — deriving it a
+    // second time here is how the two drifted apart before.
     const aw = geom.backingW;
     const ah = geom.backingH;
-    const aiGpu = renderer === 'webgl' && !glFailed && drawAiGpu(geom, room, { count, slide, fishAnim });
+    const aiGpu = renderer === 'webgl' && !glAiFailed && drawAiGpu(geom, room, { count, slide, fishAnim });
     lastRoomBackend = aiGpu ? 'webgl' : 'cpu';
-    if (aiGpu) {
-      // #screen is only the flow anchor now (see the note in the else-branch below), so
-      // it carries the CSS box but keeps a NATIVE backing store — allocating the ×S one
-      // for a canvas nothing paints into would cost ~20 MB for nothing — and goes back
-      // to the stylesheet's crisp scaling, since the smooth-minification rule below
-      // exists only for the ×S canvas it would otherwise point-sample.
-      if (canvas.style.imageRendering) canvas.style.imageRendering = '';
-      if (canvas.width !== geom.nativeW || canvas.height !== geom.nativeH) {
-        canvas.width = geom.nativeW;
-        canvas.height = geom.nativeH;
-      }
-      if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
-      if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
-      glCanvas.style.display = 'block';
-      glCanvas.style.transform = xform;
-      canvas.style.transform = xform; // keep the (unpainted) anchor aligned under the overlays
-    } else {
-      glCanvas.style.display = 'none';
-      if (canvas.width !== aw || canvas.height !== ah) { canvas.width = aw; canvas.height = ah; }
-      if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
-      if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
-      // The ×S backing store is almost always DISPLAYED SMALLER than it is (e.g.
-      // 3060px shown in a 1139px box), where the stylesheet's global pixelated rule
-      // would point-sample and throw the AI detail away — see scalingFilterFor.
-      const wantSmooth = scalingFilterFor(aw, cssW);
-      if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
+    // On the GPU path #screen is only the flow anchor: it still carries the room's CSS
+    // box (everything stacked over the room is positioned against it) but keeps a NATIVE
+    // backing store, because allocating the ×S one for a canvas nothing paints into
+    // would cost ~20 MB for nothing. On the canvas-2D path it IS the ×S composite, and
+    // is then displayed smaller than it is (e.g. 3060px in a 1139px box) — which the
+    // stylesheet's global `pixelated` rule would point-sample, throwing the AI detail
+    // away, hence scalingFilterFor.
+    const bw = aiGpu ? geom.nativeW : aw;
+    const bh = aiGpu ? geom.nativeH : ah;
+    const wantSmooth = aiGpu ? '' : scalingFilterFor(aw, cssW);
+    if (canvas.width !== bw || canvas.height !== bh) { canvas.width = bw; canvas.height = bh; }
+    if (canvas.style.width !== `${cssW}px`) canvas.style.width = `${cssW}px`;
+    if (canvas.style.height !== `${cssH}px`) canvas.style.height = `${cssH}px`;
+    if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
+    glCanvas.style.display = aiGpu ? 'block' : 'none';
+    if (aiGpu) glCanvas.style.transform = xform;
+    else {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, aw, ah);
       aiRoom!.draw(ctx, room, { count, slide, fishAnim });
-      canvas.style.transform = xform;
     }
+    canvas.style.transform = xform; // on the GPU path this keeps the anchor under the overlays
   } else {
   // Back on a native-resolution tier: restore the stylesheet's crisp scaling
   // (the AI branch switches this to smooth minification).
@@ -4900,18 +4905,9 @@ let idleTimer: ReturnType<typeof setTimeout> | 0 = 0;
 let perfRaf = 0;
 let perfPaint = 0;
 let perfLast = 0;
-// Monotonic mirrors of the two above. The HUD counters are ZEROED every sample
-// window (and whenever the HUD is off), so a probe cannot difference them over a
-// window of its own choosing; these never reset, which is what a paint-rate
-// measurement needs — the app's OWN paint rate, not the page's rAF rate, is the
-// number the AI tier's compositing cost shows up in.
-let perfRafTotal = 0;
-let perfPaintTotal = 0;
-function paintTick(): void { perfPaint++; perfPaintTotal++; }
-function rafTick(): void { perfRaf++; perfRafTotal++; }
 let lastRoomBackend: 'cpu' | 'webgl' = 'cpu'; // which backend actually painted the last room frame
 function updatePerfHud(now: number): void {
-  rafTick();
+  perfRaf++;
   if (!perfHud || !document.body.classList.contains('dev')) {
     perfLast = now;
     perfRaf = 0;
@@ -4932,7 +4928,10 @@ function updatePerfHud(now: number): void {
     // may well be back on the GPU.
     let backend = renderer.toUpperCase();
     if (renderer === 'webgl' && screen === 'room' && lastRoomBackend === 'cpu') {
-      backend = glFailed ? 'WEBGL→cpu(fallback)' : 'WEBGL→cpu(this frame)';
+      // Either backend being disabled counts as a fallback: which one owns this frame
+      // depends on the tier, and the distinction the reader needs is "disabled for the
+      // session" vs "this frame only".
+      backend = glFailed || glAiFailed ? 'WEBGL→cpu(fallback)' : 'WEBGL→cpu(this frame)';
     }
     perfHud.textContent =
       `paint ${paintFps} fps   rAF ${rafFps} fps\n` +
@@ -5047,7 +5046,7 @@ function loop(now: number): void {
   // alone so the skipped interval still accumulates into `acc` — the simulation sees
   // real elapsed time either way, so capping paint cannot change game speed.
   if (shouldSkipPaint(now, nextPaint, PAINT_EPSILON_MS)) {
-    rafTick();            // still a real refresh — the HUD's rAF number must show it,
+    perfRaf++;            // still a real refresh — the HUD's rAF number must show it,
     rafId = requestAnimationFrame(loop);   // otherwise it just mirrors the paint rate
     return;
   }
@@ -5098,7 +5097,7 @@ function loop(now: number): void {
   if (helpOpen) {
     clearSubOverlay();
     drawHelp();
-    paintTick();
+    perfPaint++;
   } else if (screen === 'intro') {
     clearSubOverlay(); // the <video> overlay covers the stage; nothing to draw
   } else if (screen === 'legimage') {
@@ -5115,11 +5114,11 @@ function loop(now: number): void {
     }
     if (mapOverlay === 'credits') {
       drawCredits();
-      paintTick();
+      perfPaint++;
     } else drawMap(); // counts its own paint (it skips when cached)
   } else if (cutscene) {
     drawCutscene(); // manages the GL canvas + subtitle overlay itself
-    paintTick();
+    perfPaint++;
   } else if (roomLoading) {
     // A newly-entered room's assets are still loading (loadRoom is async). Don't
     // paint the previous room's stale frame held in `room`/`ffr` (e.g. the boot
@@ -5130,7 +5129,7 @@ function loop(now: number): void {
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     clearSubOverlay();
-    paintTick();
+    perfPaint++;
   } else {
     // signature captures everything that changes on a logic tick (count → wobble/
     // anim/subtitles) plus the render-mode inputs; roomAnimating() forces 60fps
@@ -5139,7 +5138,7 @@ function loop(now: number): void {
     // every wake (its bands scroll per paint), the loop having chosen a ~30fps wake
     // rate for it. When skipped, the last painted frame persists on the canvas.
     const zxAnim = room?.gspec === 42;
-    const sig = `${count}|${roomArtPending() ? 1 : 0}|${graphics}|${renderer}|${glFailed ? 1 : 0}`;
+    const sig = `${count}|${roomArtPending() ? 1 : 0}|${graphics}|${renderer}|${glFailed ? 1 : 0}${glAiFailed ? 1 : 0}`;
     // The AI compositor repaints a ×S backing store (1740×1620 for a 435×405 room).
     // On CANVAS-2D, doing that on every refresh when nothing changed is work the
     // browser cannot absorb: measured 35fps idle and 20fps with a subtitle on screen,
@@ -5165,7 +5164,7 @@ function loop(now: number): void {
     const dirtyOnly = renderOnDirty || (aiFrame && lastRoomBackend === 'cpu');
     if (!dirtyOnly || forceRoomRedraw || roomAnimating() || zxAnim || sig !== lastRoomSig) {
       draw();
-      paintTick();
+      perfPaint++;
       lastRoomSig = sig;
       // Clear the one-shot force, but keep repainting while a cheat effect is live:
       // the grain, the interlaced collapse and the minigame all animate on their own,
@@ -5954,7 +5953,16 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   talk: (which: 'little' | 'big') => talk(which),
   count: () => count,
   fsize: () => FSIZE,
-  /** The room's resolved geometry (see roomGeometry): native/css/backing sizes. */
+  /**
+   * The room's resolved geometry (see roomGeometry): native/css/backing sizes plus the
+   * AI upscale.
+   *
+   * `upscale` is the sound way to ask "is the AI compositor drawing this frame?".
+   * `#screen.width` is not: on the canvas-2D path #screen IS the ×S composite, but on
+   * the GPU path the composite lives in GlAiScreen's FBO and #screen stays at native
+   * size — so a probe reading the canvas only ever tests one backend, and since `webgl`
+   * is the default, the wrong one.
+   */
   roomGeom: () => (room ? roomGeometry(room) : null),
   phase: () => engine?.phase ?? 'idle',
   moveFrames: () => engine?.moveFrames() ?? MOVE_FRAMES, // current ticks/cell (jizda speed-up)
@@ -6011,7 +6019,12 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   glActive: () =>
     renderer === 'webgl' &&
     !glFailed &&
-    (screen === 'room' ? lastRoomBackend === 'webgl' : glCanvas.style.display !== 'none'),
+    // While the room is loading or the help overlay is up, loop() hides #screen-gl and
+    // nothing paints the room at all, so `lastRoomBackend` is stale — the visible-canvas
+    // test is the honest one there, exactly as it is off the room screen.
+    (screen === 'room' && !roomLoading && !helpOpen
+      ? lastRoomBackend === 'webgl'
+      : glCanvas.style.display !== 'none'),
   // Loop-throttle diagnostics (perf): whether the render loop may drop to the idle
   // timer rate right now, and the room-side conditions that force the full-rate rAF
   // spin when any is true (see loopThrottleOk). Used by the perf regression test.
@@ -6332,14 +6345,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   closeTetris: () => closeTetris(),
   /** Which backend actually painted the last room frame ('cpu' | 'webgl'). */
   roomBackend: () => lastRoomBackend,
-  /**
-   * Monotonic loop counters: `paint` = frames the app actually PAINTED, `raf` =
-   * refreshes the loop was woken for. A probe differences these over its own
-   * window to get the app's paint rate — measuring `requestAnimationFrame` from
-   * the page instead just reports the display refresh and is blind to whether the
-   * room repainted at all.
-   */
-  perfCounters: () => ({ raf: perfRafTotal, paint: perfPaintTotal, t: performance.now() }),
   /** cas_hry in days, plus the raw per-room banked milliseconds behind it. */
   casHry: () => casHry(),
   playTime: () => Object.fromEntries(playTime),
@@ -6427,12 +6432,17 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     cv.height = h;
     const c2 = cv.getContext('2d', { willReadFrequently: true });
     if (!c2) return null;
+    // Its own target, reused across the runs: the background composite cache is part of
+    // the canvas-2D path's real cost profile so it must persist, but binding the room's
+    // live target to this scratch canvas would leave the room holding it (plus its
+    // full-size cache clone) long after the probe returned.
+    const cpuTarget = new Canvas2dAiTarget(c2);
     const cpuRun = (n: number): number => {
       const t = performance.now();
       for (let i = 0; i < n; i++) {
         c2.setTransform(1, 0, 0, 1, 0, 0);
         c2.clearRect(0, 0, w, h);
-        aiRoom!.draw(c2, room!, frame(i));
+        aiRoom!.drawInto(cpuTarget, room!, frame(i));
       }
       c2.getImageData(0, 0, 1, 1); // drain the 2D command queue
       return performance.now() - t;
@@ -6455,6 +6465,93 @@ window.addEventListener('keydown', unlockAudio, { once: true });
       gpuMs = (gpuRun(2 * frames) - gpuRun(frames)) / frames;
     }
     return { w, h, frames, cpuMs, gpuMs };
+  },
+  /**
+   * Test probe: is the AI tier's PRESENT pass geometrically right?
+   *
+   * `aiGlParity` compares the offscreen ×S composite and stops there, so a wrong
+   * viewport, Y flip or filter footprint in `present()` leaves it byte-exact while the
+   * on-screen image is wrong — the one pass the player actually sees is the one nothing
+   * covered.
+   *
+   * It cannot be a pixel comparison: the GPU box-downsamples at the real ratio and the
+   * canvas-2D path leans on the browser's own minification filter, so the two legitimately
+   * differ (measured mean ~6/255). What IS filter-independent is ALIGNMENT. Present the
+   * frame, read it back, build the same frame through the canvas-2D path scaled to the
+   * same size, and score the mean absolute difference for the identity against a
+   * y-flipped, x-flipped and ±1px-shifted version of itself. If `present()` is right the
+   * identity must win every one of those; if it flips or shifts, it cannot. `spread` is
+   * the reference's own variance, so a blank frame (which would tie everywhere) is
+   * distinguishable from an aligned one.
+   */
+  aiPresentCheck: () => {
+    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
+    const comp = glAiCompositor();
+    if (!comp) return { webgl: false };
+    const geom = roomGeometry(room);
+    const w = geom.nativeW * aiRoom.scale;
+    const h = geom.nativeH * aiRoom.scale;
+    // Present at a real minification (the shipping case), small enough to score quickly.
+    const pw = Math.max(2, Math.round(geom.nativeW));
+    const ph = Math.max(2, Math.round(geom.nativeH));
+    const rest = { bodyFrame: TL_ZAKLAD[0]!, headFrame: 0 };
+    const f: AiRoomFrame = { count, slide: 0, fishAnim: { little: rest, big: rest } };
+    comp.track(aiRoom);
+    if (!comp.begin(w, h)) return { webgl: true, unsupported: true };
+    aiRoom.drawInto(comp, room, f);
+    const gpu = comp.presentReadback(pw, ph);
+
+    // Reference: the canvas-2D composite, scaled to the presented size by the browser.
+    const big = document.createElement('canvas');
+    big.width = w;
+    big.height = h;
+    const bg = big.getContext('2d', { willReadFrequently: true });
+    if (!bg) return { webgl: true, noCanvas: true };
+    bg.clearRect(0, 0, w, h);
+    aiRoom.drawInto(new Canvas2dAiTarget(bg), room, f);
+    const small = document.createElement('canvas');
+    small.width = pw;
+    small.height = ph;
+    const sg = small.getContext('2d', { willReadFrequently: true });
+    if (!sg) return { webgl: true, noCanvas: true };
+    sg.imageSmoothingEnabled = true;
+    sg.drawImage(big, 0, 0, pw, ph);
+    const ref = sg.getImageData(0, 0, pw, ph).data;
+
+    const score = (dx: number, dy: number, flipY: boolean, flipX: boolean): number => {
+      let sum = 0;
+      let n = 0;
+      for (let y = 0; y < ph; y++) {
+        const ry = flipY ? ph - 1 - y : y + dy;
+        if (ry < 0 || ry >= ph) continue;
+        for (let x = 0; x < pw; x++) {
+          const rx = flipX ? pw - 1 - x : x + dx;
+          if (rx < 0 || rx >= pw) continue;
+          const a = (y * pw + x) * 4;
+          const b = (ry * pw + rx) * 4;
+          sum += Math.abs(gpu[a]! - ref[b]!) + Math.abs(gpu[a + 1]! - ref[b + 1]!) + Math.abs(gpu[a + 2]! - ref[b + 2]!);
+          n += 3;
+        }
+      }
+      return n === 0 ? Number.POSITIVE_INFINITY : sum / n;
+    };
+    let mean = 0;
+    for (let i = 0; i < ref.length; i += 4) mean += ref[i]!;
+    mean /= ref.length / 4;
+    let spread = 0;
+    for (let i = 0; i < ref.length; i += 4) spread += Math.abs(ref[i]! - mean);
+    spread /= ref.length / 4;
+    return {
+      webgl: true,
+      w: pw,
+      h: ph,
+      spread,
+      identity: score(0, 0, false, false),
+      flipY: score(0, 0, true, false),
+      flipX: score(0, 0, false, true),
+      shiftX: score(1, 0, false, false),
+      shiftY: score(0, 1, false, false),
+    };
   },
   /**
    * Test probe: the `ai` tier's CPU↔GPU parity. Renders the current room's ×S frame
@@ -6494,7 +6591,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     if (!c2) return { webgl: true, noCanvas: true };
     c2.setTransform(1, 0, 0, 1, 0, 0);
     c2.clearRect(0, 0, w, h);
-    aiRoom.draw(c2, room, f);
+    aiRoom.drawInto(new Canvas2dAiTarget(c2), room, f); // scratch target: see aiRenderBench
     const cpu = new Uint8Array(c2.getImageData(0, 0, w, h).data.buffer.slice(0));
     comp.track(aiRoom);
     comp.begin(w, h);

@@ -10,10 +10,14 @@
  * The seam is deliberately drawn HERE rather than by giving the GPU its own copy of
  * the room walk. Every rule about what is drawn, in what order, at what coordinates —
  * the gspec=2 visibility flip, the gspec=5 fish swap, the spec=1/3/4 effect anchors,
- * the slide interpolation — has exactly one definition, so the two backends cannot
- * drift. This codebase has already shipped bugs from hand-copied duplicates of such
- * rules (see the note on aiRoomGateAllows in roomAi.ts); a second compositor is
- * precisely the situation that produces them.
+ * the slide interpolation — has one definition ACROSS THESE TWO BACKENDS, so they
+ * cannot drift from each other. This codebase has already shipped bugs from hand-copied
+ * duplicates of such rules (see the note on aiRoomGateAllows in roomAi.ts).
+ *
+ * It does NOT unify this tier with the faithful compositor: `renderInto`
+ * (src/render/renderRoom.ts) still encodes those same rules independently, for the
+ * native-resolution palette-index tiers. Merging the two walks is separate work; this
+ * seam only ensures the `ai` tier did not become a third copy.
  *
  * Coordinates are BACKING-STORE pixels (native game px × the room's AI scale) in a
  * top-down, y-down space — the same space canvas-2D uses, which the GL target
@@ -70,14 +74,21 @@ export interface AiTarget {
 }
 
 /**
- * True where KresliK keeps the source pixel: `RANDPOLE[(row*w + col) & 255] >= rozpad`,
+ * True where KresliK keeps the source pixel: `RANDPOLE[(row*w + col) & 255] < rozpad`,
  * evaluated on the ORIGINAL pixel grid (the AI sprite is ×S of it) so the dissolve keeps
- * the faithful render's coarse granularity instead of turning into fine noise.
+ * the faithful render's coarse granularity instead of turning into fine noise. As
+ * `rozpad` counts down, fewer indices pass and the skeleton erodes away.
  *
- * Shared by both backends so the erosion pattern has one definition.
+ * **The inequality is the whole rule and it is easy to get backwards** — an earlier
+ * revision of this function had it reversed, so the skeleton materialised instead of
+ * eroding. Nothing caught it: both AI backends call THIS function, so the CPU↔GPU parity
+ * probe compared two identically-wrong implementations and reported a byte-exact match.
+ * It is pinned against the faithful `RgbaScreen.blitDisintegrate` in test/roomAi.test.ts
+ * by IMPORTING this function rather than restating it — a restated copy cannot catch the
+ * bug it is guarding.
  */
 export function dissolveKeeps(nativeRow: number, nativeCol: number, nativeW: number, rozpad: number): boolean {
-  return RANDPOLE[(((nativeRow * nativeW) & 255) + nativeCol) & 255]! >= rozpad;
+  return RANDPOLE[(((nativeRow * nativeW) & 255) + nativeCol) & 255]! < rozpad;
 }
 
 /** The canvas-2D compositor: the shipped `ai` renderer, the oracle and the fallback. */
@@ -110,15 +121,22 @@ export class Canvas2dAiTarget implements AiTarget {
   get width(): number { return this.ctx.canvas.width; }
   get height(): number { return this.ctx.canvas.height; }
 
+  // #screen is shared with drawMap / drawCutscene / the room-loading fill, so these
+  // restore `fillStyle` rather than leaving the room's colour on the context.
   fill(r: number, g: number, b: number): void {
     const ctx = this.ctx;
+    ctx.save();
     ctx.fillStyle = `rgb(${r},${g},${b})`;
     ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
   }
 
   fillRect(x: number, y: number, w: number, h: number, r: number, g: number, b: number): void {
-    this.ctx.fillStyle = `rgb(${r},${g},${b})`;
-    this.ctx.fillRect(x, y, w, h);
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
   }
 
   blit(src: AiImage, x: number, y: number, mirror: boolean): void {

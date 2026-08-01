@@ -46,7 +46,7 @@ import { darkestIndex } from '../src/render/renderRoom.js';
 import { AI_ROOM_SCALE, aiRoomGateAllows } from '../src/render/roomAi.js';
 import { FISH_BODY_FILE, frameIndex } from '../src/render/enhancedArtSource.js';
 import { AiRoom } from '../src/render/roomAi.js';
-import { Canvas2dAiTarget } from '../src/render/aiTarget.js';
+import { Canvas2dAiTarget, dissolveKeeps } from '../src/render/aiTarget.js';
 import type { AiTarget } from '../src/render/aiTarget.js';
 import { FSIZE as FSIZE_PX } from '../src/render/renderRoom.js';
 import { makeRoom } from './roomBuilder.js';
@@ -175,13 +175,22 @@ describe('drawRope stepping parity vs cpuDrawRope (roomAi.ts:221)', () => {
 //    evaluated per ORIGINAL pixel. Assert identical keep sets for a spread of rozpad.
 // ---------------------------------------------------------------------------
 
-/** The AI dissolve keep rule, verbatim from roomAi.ts:531-533 (kept iff < rozpad). */
+/**
+ * The AI dissolve keep set, from the SHIPPING rule — `dissolveKeeps` is imported, not
+ * restated.
+ *
+ * This function used to carry its own copy of the predicate, and that is precisely why it
+ * failed to do its job: when `dissolveKeeps` was refactored out of `AiRoom` with the
+ * inequality reversed, the copy here still held the correct rule, so this test compared
+ * the OLD rule against the faithful renderer and stayed green while the shipping code
+ * rendered the skeleton backwards. A re-implementation cannot catch a bug in the
+ * implementation it re-implements.
+ */
 function aiKeptSet(w: number, h: number, rozpad: number): Set<string> {
   const set = new Set<string>();
   for (let i = 0; i < h; i++) {
-    const pBase = (i * w) & 255;
     for (let j = 0; j < w; j++) {
-      if (RANDPOLE[(pBase + j) & 255]! < rozpad) set.add(`${j},${i}`); // survives
+      if (dissolveKeeps(i, j, w, rozpad)) set.add(`${j},${i}`);
     }
   }
   return set;
