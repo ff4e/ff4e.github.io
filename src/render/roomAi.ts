@@ -178,8 +178,9 @@ async function bmpShared(url: string): Promise<ImageBitmap> {
 /**
  * The fish set is shared by every room at a given scale, so it is decoded ONCE and
  * cached by scale. Loading it per room meant ~133 extra asset fetches and another 132
- * retained ImageBitmaps for every room entered — the same art over and over, since
- * AiRoom instances are cached for the session and never release their bitmaps.
+ * retained ImageBitmaps for every room entered — the same art over and over, on top of
+ * whatever the caller's AiRoom cache is holding (main.ts keeps an LRU of three rooms
+ * and disposes the rest; each room retains ~50 MB of decoded pixels).
  *
  * Keyed on the PROMISE so two rooms loading concurrently share one decode.
  */
