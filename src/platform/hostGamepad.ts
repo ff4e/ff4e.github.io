@@ -29,6 +29,7 @@ interface HostPadMessage {
 }
 
 let latest: HostPadMessage | null = null;
+let received = 0;
 let installed = false;
 let origGetGamepads: (() => (Gamepad | null)[]) | null = null;
 
@@ -86,6 +87,10 @@ export function initHostGamepad(): void {
     const msg = (typeof d === 'string' ? safeParse(d) : d) as HostPadMessage | null;
     if (!msg || msg.t !== 'pad' || !Array.isArray(msg.axes) || !Array.isArray(msg.buttons)) return;
     latest = msg;
+    // Counter the native host can read back (there is no console on a console) to tell
+    // "no messages arriving" apart from "arriving but not reaching the game".
+    received++;
+    (window as unknown as { __ffHostPad?: number }).__ffHostPad = received;
   });
 
   const nav = navigator as Navigator & { getGamepads?: () => (Gamepad | null)[] };

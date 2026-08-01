@@ -313,6 +313,32 @@ namespace Ff4eXbox
                 sb.AppendLine("last reading         = " + _lastReading);
                 sb.AppendLine("CoreWindow keys seen = " + keys);
 
+                // The native side is provably reading the pad, so the remaining unknown is
+                // what the web app sees. Ask the page directly — there is no console and no
+                // DevTools here, so this is the only window into it.
+                if (_core != null)
+                {
+                    try
+                    {
+                        var probe = await _core.ExecuteScriptAsync(
+                            "(function(){try{" +
+                            "var w=window.chrome&&window.chrome.webview?1:0;" +
+                            "var gp=navigator.getGamepads?navigator.getGamepads():[];" +
+                            "var n=0,btn='',ax='';" +
+                            "for(var i=0;i<gp.length;i++){if(gp[i]){n++;if(n===1){" +
+                            "btn=gp[i].buttons.map(function(b){return b.pressed?1:0}).join('');" +
+                            "ax=gp[i].axes.map(function(a){return a.toFixed(2)}).join(',');}}}" +
+                            "return 'webview='+w+' pads='+n+' patched='+(window.__ffHostPad||0)" +
+                            "+' btns='+btn+' axes='+ax;" +
+                            "}catch(e){return 'probe error: '+e.message}})()");
+                        sb.AppendLine("page                 = " + probe);
+                    }
+                    catch (Exception pex)
+                    {
+                        sb.AppendLine("page probe failed    = " + pex.Message);
+                    }
+                }
+
                 var file = await Windows.Storage.ApplicationData.Current.LocalFolder.CreateFileAsync(
                     "pad.log", Windows.Storage.CreationCollisionOption.ReplaceExisting);
                 await Windows.Storage.FileIO.WriteTextAsync(file, sb.ToString());
