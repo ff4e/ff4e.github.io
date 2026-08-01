@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   VOLUMES,
   DEFAULT_INDEX,
+  ORIGINAL_INDEX,
   clampIndex,
   busMultiplier,
   defaultSettings,
@@ -36,10 +37,26 @@ describe('settings volume model (Uovl.pas Volumes / tahlo)', () => {
     expect([...VOLUMES]).toEqual([1, 2, 3, 4, 6, 8, 11, 15, 20, 27, 36, 48, 64]);
   });
 
-  it('boots at the original default levels (snd=48, talk=64, music=27)', () => {
+  it('boots effects and voices at the original levels (snd=48, talk=64)', () => {
     expect(VOLUMES[DEFAULT_INDEX.effect]).toBe(48);
     expect(VOLUMES[DEFAULT_INDEX.voice]).toBe(64);
-    expect(VOLUMES[DEFAULT_INDEX.music]).toBe(27);
+  });
+
+  it('keeps the ORIGINAL levels as the gain reference (snd=48, talk=64, music=27)', () => {
+    expect(VOLUMES[ORIGINAL_INDEX.effect]).toBe(48);
+    expect(VOLUMES[ORIGINAL_INDEX.voice]).toBe(64);
+    expect(VOLUMES[ORIGINAL_INDEX.music]).toBe(27);
+  });
+
+  it('boots music at the middle of the slider, quieter than the original', () => {
+    // A deliberate departure from RSound.pas:35 (music_volume=27, index 9): the
+    // port boots the music slider at its midpoint so the music sits under the voices.
+    expect(DEFAULT_INDEX.music).toBe(6);
+    expect(VOLUMES[DEFAULT_INDEX.music]).toBe(11);
+    // ...and it must be an AUDIBLE change, not just a moved jockey: normalising the
+    // gain on DEFAULT_INDEX instead of ORIGINAL_INDEX would make this 1.0 again.
+    expect(busMultiplier('music', DEFAULT_INDEX.music)).toBeCloseTo(11 / 27, 5);
+    expect(busMultiplier('music', DEFAULT_INDEX.music)).toBeLessThan(1);
   });
 
   it('clamps slider indices to 0..12', () => {
@@ -49,10 +66,10 @@ describe('settings volume model (Uovl.pas Volumes / tahlo)', () => {
     expect(clampIndex(3.9)).toBe(3);
   });
 
-  it('bus multiplier is 1.0 at the default index (classic level unchanged)', () => {
-    expect(busMultiplier('effect', DEFAULT_INDEX.effect)).toBeCloseTo(1);
-    expect(busMultiplier('voice', DEFAULT_INDEX.voice)).toBeCloseTo(1);
-    expect(busMultiplier('music', DEFAULT_INDEX.music)).toBeCloseTo(1);
+  it('bus multiplier is 1.0 at the ORIGINAL index (classic level unchanged)', () => {
+    expect(busMultiplier('effect', ORIGINAL_INDEX.effect)).toBeCloseTo(1);
+    expect(busMultiplier('voice', ORIGINAL_INDEX.voice)).toBeCloseTo(1);
+    expect(busMultiplier('music', ORIGINAL_INDEX.music)).toBeCloseTo(1);
   });
 
   it('bus multiplier scales proportionally to Volumes across the steps', () => {
