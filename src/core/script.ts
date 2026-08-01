@@ -38,6 +38,19 @@ export interface SoundFns {
   music?: (name: string, prior: number) => void;
   musiccyc?: (name: string, prior: number) => void;
   talkNow?: (name: string, prior: number) => number;
+  /**
+   * Whether the room's voice package has settled (arrived, or definitively failed).
+   *
+   * The package is fetched AFTER the room's art, so there is a window where the room
+   * is on screen and playable but its voices are not loaded yet. A line spoken in that
+   * window finds no sample: it plays silently, `duration()` returns 0, and the queue
+   * gives it the flat DEFAULT_LINE_TICKS fallback — so a room's opening conversation
+   * would drain at ~1s per line and be gone before the voices ever arrived. Holding
+   * the queue instead costs the player nothing: the room is already playable, and the
+   * conversation starts intact a moment later. Defaults to "settled" so any caller
+   * that does not care (tests, rooms with no voice package) is unaffected.
+   */
+  voicesReady?: () => boolean;
 }
 
 /** Persistent script state captured in a save (Vars + roompole/globpole + flags). */
@@ -665,6 +678,9 @@ export class Script {
     } else if (d.zvuk.startsWith('ANIM')) {
       this.setanim(d.prior, d.zvuk.slice(4));
     } else {
+      // Hold the whole queue — do not shift — until the room's voices exist, so the
+      // conversation is spoken rather than silently consumed (see SoundFns.voicesReady).
+      if (this.sound.voicesReady && !this.sound.voicesReady()) return;
       this.aktdialzvuk = d.prior;
       this.voiceEndCount = count + this.talk(d.zvuk, d.prior);
       d.promSet?.(d.prior);

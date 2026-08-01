@@ -86,8 +86,8 @@ export class AudioEngine {
    * Drop the current room's sound package (the global packages stay).
    *
    * Entering a room no longer waits for its .ffs body before the room is built —
-   * the voice package is the largest single asset a room fetches (4.3 MB for
-   * PRVNI) and nothing visual depends on it. Clearing here keeps the gap honest:
+   * the voice package is a large non-visual asset (4.30 MB for PRVNI) and nothing
+   * that is drawn depends on it. Clearing here keeps the gap honest:
    * until the new package lands, a lookup misses and falls back to the globals
    * rather than playing the PREVIOUS room's sample under the new room.
    */
@@ -281,9 +281,11 @@ export class AudioEngine {
     let buf = this.musicBufs.get(name);
     if (!buf) {
       try {
-        // Low request priority: a 5-7 MB music track is the largest single file a room
-        // entry pulls, and on a constrained link it would otherwise download in direct
-        // competition with the room art the first visible frame is waiting on.
+        // Low request priority: a 5-7 MB music track is the largest single file the
+        // game fetches. Room entry already avoids the contention that matters by
+        // starting music only after the room's art (see loadRoom); this is the backstop
+        // for every other caller — notably the menu music, which competes with the
+        // world map's own assets.
         const bytes = await fetch(url, { priority: 'low' } as RequestInit).then((r) => r.arrayBuffer());
         buf = await ctx.decodeAudioData(bytes.slice(0));
       } catch {

@@ -96,15 +96,23 @@ await withApp(
     // Serve room 40's FFR as a 200 with a garbage body so parseFfr() throws inside
     // loadRoom's try (a realistic corrupt/truncated-asset path). A 200 avoids the
     // browser console error a failed resource load would otherwise emit.
-    await p.route(ffrGlob(40), (r) =>
-      r.fulfill({ status: 200, contentType: 'application/octet-stream', body: 'not a valid ffr' }),
-    );
-    const failRes = await p.evaluate(() =>
+    //
+    // Held for 2000ms first, so the failure lands with the loading overlay ALREADY UP.
+    // Failing immediately would resolve before the 200ms arm and the overlay assertion
+    // below would pass without the overlay ever having been shown — i.e. vacuously.
+    await p.route(ffrGlob(40), async (r) => {
+      await new Promise((x) => setTimeout(x, 2000));
+      await r.fulfill({ status: 200, contentType: 'application/octet-stream', body: 'not a valid ffr' }).catch(() => {});
+    });
+    const failStarted = p.evaluate(() =>
       window.__ff.enterRoom(40).then(
         () => 'ok',
         () => 'err',
       ),
     );
+    await p.waitForFunction(() => window.__ff.loadingVisible(), { timeout: 10000 });
+    expect(true, 'the overlay is up while the doomed load is in flight');
+    const failRes = await failStarted;
     expect(failRes === 'err', 'a failed room load rejects (loadRoom rethrows after finally)');
     await tickSleep(p, 4);
     const recoveredFill = await stageFill(p);
