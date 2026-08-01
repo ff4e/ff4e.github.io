@@ -156,7 +156,6 @@ import {
   computeStageLayout,
   contentScale as fitScale,
   isFitMode,
-  safeAvail,
   type StageLayout,
   type FitMode,
 } from './layout.js';
@@ -440,10 +439,12 @@ function maybeShowWebglNote(): void {
  * cutscene canvases are sized per-frame in their draw functions from `stage`.
  */
 function relayout(): void {
-  const rawW = stageRow?.clientWidth || window.innerWidth;
-  const rawH = stageRow?.clientHeight || window.innerHeight;
-  // TV mode keeps a title-safe inset so nothing touches an overscanned TV edge.
-  const { availW, availH } = safeAvail(rawW, rawH, tvMode);
+  const availW = stageRow?.clientWidth || window.innerWidth;
+  const availH = stageRow?.clientHeight || window.innerHeight;
+  // The picture is drawn full-bleed, including on a TV: a 4:3 room or the world map is
+  // already pillarboxed on a 16:9 panel, and insetting for overscan on top of that threw
+  // away another 10% of both dimensions for no benefit on hardware that maps HDMI 1:1.
+  // Title-safe still applies to text and controller chrome, which keep their own margins.
   stage = computeStageLayout(availW, availH, !tvMode);
   stageBox.style.width = `${Math.round(stage.stageW)}px`;
   stageBox.style.height = `${Math.round(stage.stageH)}px`;
@@ -3081,14 +3082,31 @@ function runPadConfirm(): void {
 }
 
 // --- Options overlay (volumes / subtitles / help) --------------------------
-type OptRow = 'effect' | 'voice' | 'music' | 'subtitles' | 'help';
-const PAD_OPT_ROWS: readonly OptRow[] = ['effect', 'voice', 'music', 'subtitles', 'help'];
+type OptRow = 'effect' | 'voice' | 'music' | 'subtitles' | 'fit' | 'help';
+const PAD_OPT_ROWS: readonly OptRow[] = ['effect', 'voice', 'music', 'subtitles', 'fit', 'help'];
 const OPT_LABEL: Record<OptRow, string> = {
   effect: 'Sound',
   voice: 'Voices',
   music: 'Music',
   subtitles: 'Subtitles',
+  fit: 'Picture size',
   help: 'Help',
+};
+/**
+ * Picture-size choices offered on a controller, smallest to largest. The dev bar has the
+ * full set; these are the ones that mean something on a TV. 'fixed' keeps every room the
+ * same on-screen size (faithful, but a small or wide room then leaves a lot of the panel
+ * unused), while 'fill' grows each room until it fills the screen as far as its aspect
+ * ratio allows — on a 16:9 TV that is the difference between a wide room using 41% of the
+ * width and 87% of it.
+ */
+const FIT_ORDER: readonly FitMode[] = ['fixed', 'small', 'medium', 'large', 'fill'];
+const FIT_LABEL: Partial<Record<FitMode, string>> = {
+  fixed: 'Faithful',
+  small: 'Small',
+  medium: 'Medium',
+  large: 'Large',
+  fill: 'Fill screen',
 };
 const SUB_LABEL: Record<SubtitleMode, string> = { cz: 'Čeština', en: 'English', off: 'Off' };
 const SUB_ORDER: readonly SubtitleMode[] = ['cz', 'en', 'off'];
@@ -3096,6 +3114,20 @@ let padOptionsOpen = false;
 let padOptionsRow = 0;
 const padOptionsEl = document.getElementById('pad-options') as HTMLElement | null;
 const padOptionsListEl = document.getElementById('pad-options-list') as HTMLElement | null;
+
+/**
+ * Change how large the picture is drawn, and persist it. Shared by the dev bar's Fit
+ * dropdown and the controller Options menu so both apply it identically — the fit scale
+ * changes the room canvas size, so the room has to be repainted, not just re-laid-out.
+ */
+function setFitMode(mode: FitMode): void {
+  settings.fitMode = mode;
+  saveSettings(settings);
+  if (fitSelect) fitSelect.value = mode; // keep the dev bar in sync when set from a pad
+  forceRoomRedraw = true;
+  relayout();
+  wake();
+}
 
 function openPadOptions(): void {
   padOptionsOpen = true;
@@ -3127,6 +3159,7 @@ function renderPadOptions(): void {
     val.className = 'val';
     if (row === 'effect' || row === 'voice' || row === 'music') val.innerHTML = volumeBarHtml(settings.volume[row]);
     else if (row === 'subtitles') val.textContent = SUB_LABEL[settings.subtitles];
+    else if (row === 'fit') val.textContent = FIT_LABEL[settings.fitMode] ?? settings.fitMode;
     else val.textContent = '›';
     li.append(name, val);
     padOptionsListEl.appendChild(li);
@@ -3158,6 +3191,11 @@ function handlePadOptionsInput(pad: PadSnapshot, now: number): void {
       setSubtitleMode(SUB_ORDER[(i + delta + SUB_ORDER.length) % SUB_ORDER.length]!);
       renderPadOptions();
       wake();
+    } else if (row === 'fit') {
+      const i = Math.max(0, FIT_ORDER.indexOf(settings.fitMode));
+      setFitMode(FIT_ORDER[(i + delta + FIT_ORDER.length) % FIT_ORDER.length]!);
+      renderPadOptions();
+      wake();
     }
   }
   if (pad.pressed('a')) {
@@ -3167,6 +3205,10 @@ function handlePadOptionsInput(pad: PadSnapshot, now: number): void {
     } else if (row === 'subtitles') {
       const i = SUB_ORDER.indexOf(settings.subtitles);
       setSubtitleMode(SUB_ORDER[(i + 1) % SUB_ORDER.length]!);
+      renderPadOptions();
+    } else if (row === 'fit') {
+      const i = Math.max(0, FIT_ORDER.indexOf(settings.fitMode));
+      setFitMode(FIT_ORDER[(i + 1) % FIT_ORDER.length]!);
       renderPadOptions();
     }
     wake();
@@ -5955,10 +5997,7 @@ if (fitSelect) {
   fitSelect.value = settings.fitMode;
   fitSelect.addEventListener('change', () => {
     const v = fitSelect.value;
-    settings.fitMode = isFitMode(v) ? v : 'medium';
-    saveSettings(settings);
-    forceRoomRedraw = true; // the fit scale changes the room canvas size — repaint
-    wake();
+    setFitMode(isFitMode(v) ? v : 'medium');
   });
 }
 // Dev-bar renderer (CPU/WebGL) + idle-FPS-saver toggles. These mirror the state

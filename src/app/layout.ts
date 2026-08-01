@@ -119,21 +119,21 @@ export const CAPPED_MAX = FIT_FACTORS.medium;
 export const MIN_STAGE_SCALE = 0.5;
 
 /**
- * TV/console overscan safe margin: the fraction of each edge kept clear in TV mode
- * so the whole stage (room, world map + corners, HUD, subtitles, pause menu) stays
- * inside the title-safe rectangle on a 10-foot display that may crop the panel edge.
- * 0.05 → a 5% inset on every side = a 90% action-safe box (≈93% title-safe on 4:3),
- * the industry-standard overscan allowance. Applied to the available area before
- * stage sizing; ignored entirely on the plain web build (see `safeAvail`).
+ * TV/console overscan safe margin: the fraction of each edge kept clear for *text and
+ * UI* on a 10-foot display that may crop the panel edge. 0.05 → a 5% inset per side.
+ *
+ * This is deliberately NOT applied to the game picture. Title-safe applies to text and
+ * interactive chrome; the picture itself is drawn action-safe, i.e. full-bleed, because
+ * insetting it as well costs 10% of both dimensions — very visible on a 4:3 picture that
+ * is already pillarboxed on a 16:9 panel — and modern consoles and TVs map HDMI 1:1
+ * rather than overscanning. The controller overlays keep their own margins in CSS.
  */
 export const TV_SAFE_INSET = 0.05;
 
 /**
- * Shrink an available area by the TV overscan safe margin on both axes (identity
- * when `tv` is false, so the web build is untouched). Kept pure/DOM-free so the
- * title-safe maths is unit-tested; `relayout()` in main.ts feeds the result to
- * `computeStageLayout`, and the stage's centered flex layout turns the smaller box
- * into equal margins on all four sides.
+ * Shrink an available area by the TV overscan safe margin on both axes (identity when
+ * `tv` is false). Kept pure/DOM-free so the maths is unit-tested. Used for title-safe
+ * *UI* placement; the stage itself is sized from the full area — see TV_SAFE_INSET.
  */
 export function safeAvail(
   availW: number,
