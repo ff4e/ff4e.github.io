@@ -8,6 +8,8 @@
 #   ./xdeploy.sh pad      # pad.log (native + in-page controller diagnostics)
 #   ./xdeploy.sh crash    # crash.log (survives relaunches, unlike boot.log)
 #   ./xdeploy.sh ps       # is it running?
+#   ./xdeploy.sh gamemode # register UWP content as a *game*: 5 GB + full GPU, not
+#                         #   1 GB + 45% (console-wide; survives redeploys)
 #
 # Credentials live in /tmp/.xdp as user:pass (mode 600).
 set -uo pipefail
@@ -74,6 +76,21 @@ case "${1:-deploy}" in
   log)    file boot.log ;;
   pad)    file pad.log ;;
   crash)  file crash.log ;;
+  gamemode)
+    t=$(tok)
+    # Xbox gives a UWP *app* 1 GB and 45% of the GPU, but a *game* 5 GB and all of it.
+    # This is a console setting rather than something the package can declare.
+    curl -sS -k -m 30 -b "$CJ" -H "X-CSRF-Token: $t" -H "Content-Type: application/json" \
+      --user "$CRED" -X PUT -d '{"Value":"true"}' -o /dev/null -w "gamemode  HTTP %{http_code}\n" \
+      "$XB/ext/settings/DefaultUWPContentTypeToGame"
+    curl -sS -k -m 20 --user "$CRED" "$XB/ext/settings" 2>/dev/null | python3 -c "
+import sys, json
+for x in json.load(sys.stdin).get('Settings', []):
+    if x.get('Name') == 'DefaultUWPContentTypeToGame':
+        print('DefaultUWPContentTypeToGame =', x.get('Value'))
+"
+    echo "(relaunch the app for the new allowance to apply)"
+    ;;
   ps)
     curl -sS -k -m 30 --user "$CRED" "$XB/api/resourcemanager/processes" 2>/dev/null | python3 -c "
 import sys, json
@@ -83,5 +100,5 @@ wv = [p for p in d.get('Processes', []) if 'msedgewebview' in (p.get('ImageName'
 print('Ff4eXbox.exe:', app[0]['ProcessId'] if app else 'NOT RUNNING', '| webview procs:', len(wv))
 "
     ;;
-  *) echo "usage: $0 {deploy|launch|log|pad|crash|ps}"; exit 2 ;;
+  *) echo "usage: $0 {deploy|launch|log|pad|crash|ps|gamemode}"; exit 2 ;;
 esac

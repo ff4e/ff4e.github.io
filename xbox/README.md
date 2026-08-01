@@ -88,7 +88,16 @@ manifest `Publisher` and the signing certificate together, or packaging fails.
    does not ship WinUI 2 / .NET Native, and without them the app installs but dies on the
    splash screen (see Troubleshooting). If it refuses the signature, upload the bundled
    `ff4e.cer` as the certificate first.
-5. **Launch** it from the Dev Mode home screen.
+5. **Register UWP content as a game** — `./tools/xdeploy.sh gamemode`, or on the console
+   set the app's type to *Game* in Dev Home. **Do this before playing:** Xbox gives a UWP
+   *app* only **1 GB of memory and 45% of the GPU**, but a *game* **5 GB and the full GPU**
+   ([system resource allocation](https://learn.microsoft.com/en-us/previous-versions/windows/uwp/xbox-apps/system-resource-allocation)).
+   At the app allowance the AI-upscaled art tier can exhaust memory and have the browser
+   engine killed mid-play, which looks exactly like the game crashing. The setting is
+   console-wide (`DefaultUWPContentTypeToGame`) and survives redeploys; verify with
+   `./tools/xdeploy.sh pad`, which prints `memory = mem <used> MB / <limit> MB` — the
+   limit should read 5120 MB, not 1024 MB.
+6. **Launch** it from the Dev Mode home screen.
 
 ## Troubleshooting
 
@@ -103,6 +112,11 @@ are preinstalled on a console:
 Install every `.appx` in the artifact's `Dependencies/` folder, then reinstall the app.
 Device Portal's install form has a separate field for dependency packages; add them there
 rather than installing the app alone.
+
+**The game crashes back to Dev Home while playing.** Almost certainly memory. Check
+`./tools/xdeploy.sh crash` (which survives the relaunch) and the `memory =` line in
+`pad.log`. If the limit reads 1024 MB the console is treating the package as an app —
+run `./tools/xdeploy.sh gamemode` and relaunch to get the 5 GB game allowance.
 
 **"Couldn't start the browser engine (WebView2)."** The console is on an Xbox OS older than
 2310 (October 2023). Update it.
