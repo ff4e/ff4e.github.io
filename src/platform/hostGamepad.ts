@@ -62,9 +62,25 @@ function buildPad(m: HostPadMessage): Gamepad {
   } as unknown as Gamepad;
 }
 
+/**
+ * Current controller state. The host injects a receiver into every document before any
+ * page script runs (window.__ffPad), which is the reliable source: it exists from
+ * document creation, whereas this module's own listener is only registered once the
+ * bundle has evaluated, so anything posted before that is lost. The local listener is
+ * kept as a fallback.
+ */
+function current(): HostPadMessage | null {
+  const injected = (window as unknown as { __ffPad?: HostPadMessage }).__ffPad;
+  if (injected && injected.t === 'pad') return injected;
+  return latest;
+}
+
 function patchedGetGamepads(): (Gamepad | null)[] {
   const real = origGetGamepads ? Array.from(origGetGamepads.call(navigator)) : [];
-  const mine = latest && latest.connected ? [buildPad(latest)] : [];
+  const m = current();
+  const mine = m && m.connected && Array.isArray(m.axes) && Array.isArray(m.buttons)
+    ? [buildPad(m)]
+    : [];
   return [...mine, ...real.filter((p): p is Gamepad => !!p)];
 }
 

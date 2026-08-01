@@ -41,6 +41,8 @@ namespace Ff4eXbox
         string _lastPadJson;
         CoreWebView2 _core;
         int _posts;                       // web messages actually sent
+        int _frames;
+        int _nextHeartbeat;
         string _lastReading = "(none)";   // last raw Windows.Gaming.Input reading
         readonly System.Collections.Generic.HashSet<string> _keysSeen =
             new System.Collections.Generic.HashSet<string>();
@@ -232,6 +234,27 @@ namespace Ff4eXbox
             }
 
             _core = core;
+
+            // Install the controller receiver before any page script runs. Relying on the
+            // app bundle to register the listener is fragile: anything posted before the
+            // bundle finishes evaluating is dropped, and the bundle registers late in its
+            // own startup. This script is re-injected on every navigation.
+            try
+            {
+                var t = core.AddScriptToExecuteOnDocumentCreatedAsync(
+                    "window.__ffPadRx=0;window.__ffPad=null;" +
+                    "if(window.chrome&&window.chrome.webview){" +
+                    "window.chrome.webview.addEventListener('message',function(e){" +
+                    "var d=e.data;if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){return}}" +
+                    "if(d&&d.t==='pad'){window.__ffPad=d;window.__ffPadRx=(window.__ffPadRx||0)+1;}" +
+                    "});}");
+                t.Completed = (a, b2) => App.Log("pad receiver injected");
+            }
+            catch (Exception ex)
+            {
+                App.Log("injecting the pad receiver failed: " + ex.Message);
+            }
+
             StartGamepadBridge();
 
             Step("navigating to the game...");
@@ -328,7 +351,7 @@ namespace Ff4eXbox
                             "for(var i=0;i<gp.length;i++){if(gp[i]){n++;if(n===1){" +
                             "btn=gp[i].buttons.map(function(b){return b.pressed?1:0}).join('');" +
                             "ax=gp[i].axes.map(function(a){return a.toFixed(2)}).join(',');}}}" +
-                            "return 'webview='+w+' pads='+n+' patched='+(window.__ffHostPad||0)" +
+                            "return 'webview='+w+' pads='+n+' rx='+(window.__ffPadRx||0)+' applied='+(window.__ffHostPad||0)" +
                             "+' btns='+btn+' axes='+ax;" +
                             "}catch(e){return 'probe error: '+e.message}})()");
                         sb.AppendLine("page                 = " + probe);
@@ -404,7 +427,12 @@ namespace Ff4eXbox
                 json = sb.ToString();
             }
 
-            if (json == _lastPadJson) return; // nothing changed — don't spam the page
+            // Post on change, plus a periodic heartbeat. Change-only posting meant a
+            // controller sitting still produced exactly one message — which was sent
+            // before the page had loaded, so the page never saw a pad at all.
+            _frames++;
+            if (json == _lastPadJson && _frames < _nextHeartbeat) return;
+            if (_frames >= _nextHeartbeat) _nextHeartbeat = _frames + 30; // ~0.5s at 60Hz
             _lastPadJson = json;
             try { _core.PostWebMessageAsJson(json); _posts++; }
             catch { /* page not ready yet */ }
@@ -420,6 +448,8 @@ namespace Ff4eXbox
             }
             // Success: hide the diagnostics and hand the screen (and the pad) to the game.
             App.Log("navigation completed ok");
+            _lastPadJson = null; // new document — re-send controller state to it
+            _nextHeartbeat = 0;
             App.SaveLog();
             StatusScroller.Visibility = Visibility.Collapsed;
             if (_web != null)
