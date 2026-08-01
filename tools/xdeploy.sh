@@ -6,6 +6,7 @@
 #   ./xdeploy.sh launch   # just (re)launch
 #   ./xdeploy.sh log      # boot.log
 #   ./xdeploy.sh pad      # pad.log (native + in-page controller diagnostics)
+#   ./xdeploy.sh crash    # crash.log (survives relaunches, unlike boot.log)
 #   ./xdeploy.sh ps       # is it running?
 #
 # Credentials live in /tmp/.xdp as user:pass (mode 600).
@@ -72,6 +73,7 @@ case "${1:-deploy}" in
   launch) launch ;;
   log)    file boot.log ;;
   pad)    file pad.log ;;
+  crash)  file crash.log ;;
   ps)
     curl -sS -k -m 30 --user "$CRED" "$XB/api/resourcemanager/processes" 2>/dev/null | python3 -c "
 import sys, json
@@ -81,5 +83,5 @@ wv = [p for p in d.get('Processes', []) if 'msedgewebview' in (p.get('ImageName'
 print('Ff4eXbox.exe:', app[0]['ProcessId'] if app else 'NOT RUNNING', '| webview procs:', len(wv))
 "
     ;;
-  *) echo "usage: $0 {deploy|launch|log|pad|ps}"; exit 2 ;;
+  *) echo "usage: $0 {deploy|launch|log|pad|crash|ps}"; exit 2 ;;
 esac

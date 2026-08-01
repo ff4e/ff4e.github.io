@@ -1455,9 +1455,15 @@ type GraphicsLevel = 'classic' | 'enhanced' | 'ai';
 let graphics: GraphicsLevel =
   ((): GraphicsLevel => {
     const v = localStorage.getItem('ff.graphics');
+    if (v === 'classic' || v === 'enhanced' || v === 'ai') return v; // explicit choice wins
     // Default: the AI-upscaled tier. Each element falls back to enhanced (and thence
     // to classic) when it has no AI asset, so this is safe even for anything unbuilt.
-    return v === 'classic' || v === 'enhanced' || v === 'ai' ? v : 'ai';
+    // Except on a console, which is far tighter on memory than a PC — an Xbox in
+    // developer mode leaves only a few hundred MB free, and the AI tier's upscaled
+    // artwork is several times the size of the enhanced art, which is enough to have
+    // the browser engine killed mid-game. Start consoles on `enhanced`; the player can
+    // still pick `ai` in Options, and that choice is remembered.
+    return tvMode ? 'enhanced' : 'ai';
   })();
 
 /**

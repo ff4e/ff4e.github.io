@@ -29,6 +29,24 @@ namespace Ff4eXbox
         }
 
         /// <summary>
+        /// Append a line to a crash log that is never truncated, so a failure survives
+        /// the relaunch that follows it (boot.log is replaced on every start).
+        /// </summary>
+        public static async void AppendCrash(string line)
+        {
+            try
+            {
+                var file = await ApplicationData.Current.LocalFolder.CreateFileAsync(
+                    "crash.log", CreationCollisionOption.OpenIfExists);
+                await FileIO.AppendTextAsync(file, DateTime.Now.ToString("s") + "  " + line + "\r\n");
+            }
+            catch
+            {
+                /* diagnostics must never themselves break the app */
+            }
+        }
+
+        /// <summary>
         /// Persist the boot trace so it can be retrieved from the Xbox Device Portal's file
         /// explorer (LocalAppData\...\LocalState\boot.log) when the screen is not enough.
         /// </summary>
@@ -54,6 +72,7 @@ namespace Ff4eXbox
             UnhandledException += (s, e) =>
             {
                 Log("UNHANDLED: " + e.Message);
+                AppendCrash("UNHANDLED: " + e.Message);
                 Log(e.Exception?.ToString() ?? "(no exception object)");
                 SaveLog();
                 // Keep the process alive so the message stays on screen to be read.

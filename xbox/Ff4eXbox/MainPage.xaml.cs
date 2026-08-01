@@ -228,6 +228,11 @@ namespace Ff4eXbox
                 {
                     Step("WebView2 PROCESS FAILED: " + a2.ProcessFailedKind);
                     App.SaveLog();
+                    // boot.log is rewritten on every launch, so a crash followed by a
+                    // relaunch erases its own evidence. Append this to a file that is
+                    // never truncated, with the memory figures at the time — the most
+                    // likely cause on a console is the renderer being killed for memory.
+                    App.AppendCrash("WebView2 " + a2.ProcessFailedKind + " | " + MemoryLine());
                 };
             }
             catch (Exception ex)
@@ -352,6 +357,7 @@ namespace Ff4eXbox
                 sb.AppendLine("Gamepad.Gamepads.Count = " + count);
                 sb.AppendLine("_pad set             = " + (_pad != null));
                 sb.AppendLine("web messages posted  = " + _posts);
+                sb.AppendLine("memory               = " + MemoryLine());
                 sb.AppendLine("last reading         = " + _lastReading);
                 sb.AppendLine("buttons EVER seen    = " + (_buttonsSeen == GamepadButtons.None ? "(none)" : _buttonsSeen.ToString()));
                 sb.AppendLine("CoreWindow keys seen = " + keys);
@@ -396,6 +402,21 @@ namespace Ff4eXbox
             catch
             {
                 /* diagnostics must never break the game */
+            }
+        }
+
+        /// <summary>Current app memory use, for crash diagnosis.</summary>
+        static string MemoryLine()
+        {
+            try
+            {
+                var r = Windows.System.MemoryManager.AppMemoryUsage / (1024ul * 1024ul);
+                var lim = Windows.System.MemoryManager.AppMemoryUsageLimit / (1024ul * 1024ul);
+                return "mem " + r + " MB / " + lim + " MB (" + Windows.System.MemoryManager.AppMemoryUsageLevel + ")";
+            }
+            catch
+            {
+                return "mem (unavailable)";
             }
         }
 
