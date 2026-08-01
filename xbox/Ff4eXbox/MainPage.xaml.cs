@@ -43,6 +43,7 @@ namespace Ff4eXbox
         int _posts;                       // web messages actually sent
         int _frames;
         int _nextHeartbeat;
+        GamepadButtons _buttonsSeen;
         string _lastReading = "(none)";   // last raw Windows.Gaming.Input reading
         readonly System.Collections.Generic.HashSet<string> _keysSeen =
             new System.Collections.Generic.HashSet<string>();
@@ -262,7 +263,9 @@ namespace Ff4eXbox
                     "if(window.chrome&&window.chrome.webview){" +
                     "window.chrome.webview.addEventListener('message',function(e){" +
                     "var d=e.data;if(typeof d==='string'){try{d=JSON.parse(d)}catch(x){return}}" +
-                    "if(d&&d.t==='pad'){window.__ffPad=d;window.__ffPadRx=(window.__ffPadRx||0)+1;}" +
+                    "if(d&&d.t==='pad'){window.__ffPad=d;window.__ffPadRx=(window.__ffPadRx||0)+1;" +
+                    "window.__ffPadSeen=window.__ffPadSeen||{};" +
+                    "for(var i=0;i<d.buttons.length;i++){if(d.buttons[i]>0.5)window.__ffPadSeen[i]=1;}}" +
                     "});}");
                 t.Completed = (a, b2) => App.Log("pad receiver injected");
             }
@@ -350,6 +353,7 @@ namespace Ff4eXbox
                 sb.AppendLine("_pad set             = " + (_pad != null));
                 sb.AppendLine("web messages posted  = " + _posts);
                 sb.AppendLine("last reading         = " + _lastReading);
+                sb.AppendLine("buttons EVER seen    = " + (_buttonsSeen == GamepadButtons.None ? "(none)" : _buttonsSeen.ToString()));
                 sb.AppendLine("CoreWindow keys seen = " + keys);
 
                 // The native side is provably reading the pad, so the remaining unknown is
@@ -367,7 +371,14 @@ namespace Ff4eXbox
                             "for(var i=0;i<gp.length;i++){if(gp[i]){n++;if(n===1){" +
                             "btn=gp[i].buttons.map(function(b){return b.pressed?1:0}).join('');" +
                             "ax=gp[i].axes.map(function(a){return a.toFixed(2)}).join(',');}}}" +
+                            "var seen=Object.keys(window.__ffPadSeen||{}).join(',')||'none';" +
+                            "var sp=document.getElementById('intro-start');" +
+                            "var il=document.getElementById('intro-layer');" +
+                            "var po=document.getElementById('pad-options');" +
                             "return 'webview='+w+' pads='+n+' rx='+(window.__ffPadRx||0)+' applied='+(window.__ffHostPad||0)" +
+                            "+' seenBtns='+seen" +
+                            "+' splash='+(sp&&!sp.hidden?1:0)+' introLayer='+(il&&!il.hidden?1:0)" +
+                            "+' options='+(po&&!po.hidden?1:0)" +
                             "+' btns='+btn+' axes='+ax;" +
                             "}catch(e){return 'probe error: '+e.message}})()");
                         sb.AppendLine("page                 = " + probe);
@@ -428,6 +439,7 @@ namespace Ff4eXbox
                 try { r = pad.GetCurrentReading(); }
                 catch { return; }
                 var b = r.Buttons;
+                _buttonsSeen |= b;
                 _lastReading = b + " LX=" + N(r.LeftThumbstickX) + " LY=" + N(r.LeftThumbstickY) +
                                " RX=" + N(r.RightThumbstickX) + " RY=" + N(r.RightThumbstickY);
 
