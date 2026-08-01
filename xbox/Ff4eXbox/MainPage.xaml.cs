@@ -385,7 +385,21 @@ namespace Ff4eXbox
         void OnFrame(object sender, object e)
         {
             if (_core == null) return;
+
+            // Re-acquire rather than trusting GamepadAdded alone: a controller that is
+            // switched on (or wakes from idle) after the app started must still be picked
+            // up, and a stale handle after a disconnect must be dropped.
             var pad = _pad;
+            if (pad == null)
+            {
+                try { pad = _pad = Gamepad.Gamepads.FirstOrDefault(); }
+                catch { pad = null; }
+            }
+            else
+            {
+                try { if (!Gamepad.Gamepads.Contains(pad)) pad = _pad = Gamepad.Gamepads.FirstOrDefault(); }
+                catch { /* keep the current handle */ }
+            }
             string json;
 
             if (pad == null)
