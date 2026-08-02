@@ -106,6 +106,7 @@ import { pollPad, type PadDir, type PadSnapshot } from '../platform/gamepad.js';
 import { tvMode } from '../platform/tv.js';
 import { registerServiceWorker } from '../platform/pwa.js';
 import { initHostGamepad } from '../platform/hostGamepad.js';
+import { applyPadCaptions } from '../platform/padCaptions.js';
 import { setVirtualGamepadEnabled } from '../platform/virtualGamepad.js';
 import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
 import { parseFfp, type FfpPanel } from '../data/ffp.js';
@@ -2700,7 +2701,9 @@ async function loadRoom(num: number): Promise<void> {
       ffr = { ...ffr, palette: applyWinDesktopPalette(ffr.palette) };
     }
     const fftBytes = fftRes.ok ? new Uint8Array(await fftRes.arrayBuffer()) : new Uint8Array(4);
-    fftEntries = fftRes.ok ? parseFft(fftBytes) : [];
+    // On a console, rewrite the tutorial captions that name PC keys (F2/F3/F1) so the
+    // demonstration teaches the controls the player actually has.
+    fftEntries = [...applyPadCaptions(fftRes.ok ? parseFft(fftBytes) : [], tvMode)];
     if (fftRes.ok && ffsRes.ok) audio.setRoom(fftBytes, new Uint8Array(await ffsRes.arrayBuffer()));
     pokus = 1; // fresh attempt on entering a room
     buildRoom();
