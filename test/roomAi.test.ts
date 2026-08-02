@@ -49,6 +49,7 @@ import { AiRoom } from '../src/render/roomAi.js';
 import { Canvas2dAiTarget, dissolveKeeps } from '../src/render/aiTarget.js';
 import type { AiTarget } from '../src/render/aiTarget.js';
 import { FSIZE as FSIZE_PX } from '../src/render/renderRoom.js';
+import { Dir } from '../src/core/dir.js';
 import { makeRoom } from './roomBuilder.js';
 import type { FfrBitmap } from '../src/data/ffr.js';
 
@@ -541,6 +542,31 @@ describe('AiRoom.draw drives the real compositor (recording context)', () => {
     // The fixture's items sit at x = 2,6,10,14 cells ⇒ x*FSIZE*S in device pixels.
     expect(items.map((d) => d.dx)).toEqual([2, 6, 10, 14].map((c) => c * FSIZE_PX * S));
     expect(items.map((d) => d.dy)).toEqual([2, 2, 2, 2].map((c) => c * FSIZE_PX * S));
+  });
+
+  it('applies the slide interpolation at S×, rounding the partial shift', () => {
+    // The AI half of the rule pinned in test/slide.test.ts: an item with a pending dir
+    // is offset by round(slide * FSIZE) along dx_dir/dy_dir (URoom.pas:62-63), and only
+    // THEN scaled by S. Hand-computed, not read back from the faithful renderer — the
+    // two paths share one walk, so comparing them proves nothing (see dissolveKeeps).
+    const at = (dir: number, slide: number): { dx: number; dy: number } => {
+      const { room, ai } = scene();
+      room.items[1]!.dir = dir as never;
+      const { ctx, draws } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
+      ai.draw(ctx, room, { ...frame, slide });
+      const d = draws.find((x) => (x.img as { tag: string }).tag === 'obj1')!;
+      return { dx: d.dx, dy: d.dy };
+    };
+    const rest = { dx: 2 * FSIZE_PX * S, dy: 2 * FSIZE_PX * S };
+    expect(at(Dir.no, 0.5)).toEqual(rest); // no pending move ⇒ no offset
+    // slide=0.5 ⇒ 0.5*15 = 7.5 ⇒ round = 8 native px ⇒ 8*S device px. Truncating would
+    // give 7 (28 device px), so this distinguishes the rule from its near misses.
+    expect(at(Dir.right, 0.5)).toEqual({ dx: rest.dx + 8 * S, dy: rest.dy });
+    expect(at(Dir.left, 0.5)).toEqual({ dx: rest.dx - 8 * S, dy: rest.dy });
+    expect(at(Dir.up, 0.5)).toEqual({ dx: rest.dx, dy: rest.dy - 8 * S });
+    // A whole cell at slide=1, and a non-boundary value to pin the FSIZE scale.
+    expect(at(Dir.down, 1)).toEqual({ dx: rest.dx, dy: rest.dy + FSIZE_PX * S });
+    expect(at(Dir.right, 0.4)).toEqual({ dx: rest.dx + 6 * S, dy: rest.dy });
   });
 
   it('draws the background before any item', () => {
