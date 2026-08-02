@@ -180,7 +180,11 @@ function prog(s: Script): void {
         s.random(100) < 1
       ) {
         v[R.room_oholi] = 1;
-        s.addv(0, 'lod-v-Items[r_LODE_hul]^'); // (verbatim placeholder from the original → silent)
+        // DELIBERATE DEVIATION (URoom.pas:19389): the original pasted the Pascal
+        // expression `Items[r_LODE_hul]^` inside the string literal instead of the sound
+        // name, so this line was silent. The intended `lod-v-hul` ships in this room's
+        // own FFT/FFS. FFNG fixed the same typo (gods/code.lua:135).
+        s.addv(0, 'lod-v-hul');
         s.addm(s.random(7), 'lod-m-ozizlana');
       } else if (v[R.room_opalce] === 0 && s.random(1000) < 1) {
         v[R.room_opalce] = 1;

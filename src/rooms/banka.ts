@@ -194,9 +194,13 @@ function roomBlock(s: Script): void {
       s.addm(s.random(42) + 14, 'bank-m-labolator' + d1(s.random(3)));
       if (s.pokus > s.random(5) && s.random(4) === 1) {
         room[R.room_pokusy] = 1;
-        // Verbatim original bug: the sound name literally contains the Pascal
-        // expression source (URoom.pas:14594) — no such sample exists, so it is silent.
-        s.addv(10, 'bank-v-Vars^[r_BANKA_room_pokusy]' + d1(s.random(2)));
+        // DELIBERATE DEVIATION (URoom.pas:14594). The Delphi source has
+        // `addv(10,'bank-v-Vars^[r_BANKA_room_pokusy]'+chr(49+random(2)))` — the Pascal
+        // expression was pasted inside the string literal instead of the sound name, so
+        // the lookup could never resolve and the line was silent. The intended name is
+        // plain `bank-v-pokusy` + '1'/'2'; both samples ship in this room's own FFT/FFS.
+        // FFNG fixed the same typo (experiments/code.lua:65,180).
+        s.addv(10, 'bank-v-pokusy' + d1(s.random(2)));
       }
     }
 

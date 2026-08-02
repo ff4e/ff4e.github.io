@@ -154,10 +154,18 @@ function prog(s: Script): void {
       s.addv(10, 'sec-v-mesto');
     } else if (v[R.room_okrabech] === 0 && s.random(2000) === 0) {
       v[R.room_okrabech] = 1;
-      // NOTE: faithful to the original — this sound name is a developer placeholder
-      // that was never filled in (URoom.pas:16347), so it resolves to nothing (a
-      // silent ~20-tick beat in the exchange). Kept verbatim.
-      s.addm(20, 'sec-m-Items[r_SECRET_krab]^');
+      // DELIBERATE DEVIATION from the original (URoom.pas:16347). The Delphi source
+      // has `addm(20,'sec-m-Items[r_SECRET_krab]^')` — a fragment of Pascal that was
+      // pasted INSIDE the string literal instead of the sound name. The engine then
+      // looked up a file that cannot exist, so the little fish's line was silent and
+      // the big fish answered "A kterého myslíš?" out of nowhere.
+      //
+      // The line itself shipped all along: `sec-m-krab` is present in this room's own
+      // FFT/FFS with its subtitle ("Nezdá se ti ten krab poněkud úchylný?"), it was
+      // simply never referenced. FFNG fixed the same typo (crabshow/code.lua:83).
+      // Restored here because it is a typo, not a design decision — a recorded,
+      // subtitled line no player of the 1998 build ever heard.
+      s.addm(20, 'sec-m-krab');
       s.addv(10, 'sec-v-ktery');
       s.addm(5, 'sec-m-dole' + digit(s.random(2)));
       s.addv(5 + s.random(20), 'sec-v-normalni' + digit(s.random(2)));
