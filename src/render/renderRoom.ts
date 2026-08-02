@@ -116,8 +116,15 @@ export function renderRoomInto(
 
 /**
  * The wall + background bitmaps and water-wobble parameters for a room's Kresli2
- * background — the same inputs `renderInto` computes, exposed so the WebGL
- * compositor can upload them as textures.
+ * background (URoom.pas:26223) — where the frame choice lives, for the compositor,
+ * the isolated background reference render and the WebGL texture upload alike:
+ *   Bitmaps[BMP + afaze] (wall foreground) and Bitmaps[BgBMP + Bgfaze] (background).
+ *
+ * BgBMP is always 1 (URoom.pas:1238). `Bgfaze` is only ever set — by STEEL's red alert
+ * (URoom.pas:9983/9990) — to the same value it writes to the wall item's `afaze`
+ * (URoom.pas:9999), so in every shipped room `Bgfaze === wallItem.afaze`. Keying both
+ * frames off `wallItem.afaze` reproduces STEEL's whole-room red alert (afaze=0
+ * elsewhere, so this is a no-op for every other room).
  */
 export function backgroundInputs(room: Room): {
   wall: FfrBitmap;
@@ -154,20 +161,10 @@ export function renderRoomBackgroundRgba(room: Room, art: ArtSource, opts: Rende
  */
 function faithfulSink(screen: CompositeTarget, art: ArtSource): RoomWalkSink {
   return {
+    // The art source paints it — classic (palette) or enhanced (FFNG truecolor); the
+    // ZX / darkness / no-master cases delegate to classicBackground.
     background: (room, count) => {
-      // Wall + water-wobble background frames (Kresli2, URoom.pas:26223):
-      //   Bitmaps[BMP + afaze] (wall foreground) and Bitmaps[BgBMP + Bgfaze] (background).
-      // BgBMP is always 1 (URoom.pas:1238). `Bgfaze` is only ever set — by STEEL's red
-      // alert (URoom.pas:9983/9990) — to the same value it writes to the wall item's
-      // `afaze` (URoom.pas:9999), so in every shipped room `Bgfaze === wallItem.afaze`.
-      // Keying both frames off `wallItem.afaze` reproduces STEEL's whole-room red alert
-      // (afaze=0 elsewhere, so this is a no-op for every other room).
-      //
-      // The art source paints it — classic (palette) or enhanced (FFNG truecolor). The
-      // ZX / darkness / no-master cases delegate to classicBackground.
-      const faze = room.wallItem.afaze;
-      const wall = room.bitmaps[room.wallItem.bmp + faze] ?? wallBaseOf(room);
-      const bg = room.bitmaps[1 + faze] ?? room.bgBmp;
+      const { wall, bg } = backgroundInputs(room);
       art.paintBackground(screen, room, wall, bg, count);
     },
     item: (room, item, index, sx, sy) => art.drawItem(screen, room, item, index, sx, sy),

@@ -1,42 +1,28 @@
 /**
- * The room walk — ONE traversal of the room that decides what is drawn, in what
- * order, at what coordinates. A faithful port of TRoom.Priprav (URoom.pas:26167-26283).
+ * The room walk — ONE traversal deciding what is drawn, in what order, at what
+ * coordinates. A faithful port of TRoom.Priprav (URoom.pas:26167-26283).
  *
- * Two very different renderers replay it: the faithful compositor (`renderInto` in
- * renderRoom.ts) at native resolution into a palette-indexed `CompositeTarget`, and
- * the hi-res `ai` tier (`AiRoom.drawInto` in roomAi.ts) at ×S into an RGBA `AiTarget`.
- * Until this module existed they encoded the SAME rules twice, independently — the
- * gspec=2 visibility flip, the gspec=5 fish swap, the spec=1/3/4 effect anchors, the
- * spec=11/!visible skip, the slide interpolation, the elevator rope endpoints and its
- * sampled colour. Those are GAME RULES, and hand-copied game rules are exactly what
- * silently drifts: see the note on `dissolveKeeps` in aiTarget.ts for the bug that
- * shipped through a green gate because two copies were wrong in the same way.
+ * Replayed by both renderers: `renderInto` (renderRoom.ts, native px into a
+ * palette-indexed `CompositeTarget`) and `AiRoom.drawInto` (roomAi.ts, ×S into an RGBA
+ * `AiTarget`). They used to encode these rules twice, independently — and hand-copied
+ * game rules are what drifts: see `dissolveKeeps` in aiTarget.ts for the inequality that
+ * shipped through a green gate because both copies were wrong the same way. They now
+ * differ only in `RoomWalkSink`, the shape glCommon.ts already set for GlScreen and
+ * GlAiScreen: share the mechanics, keep the classes apart.
  *
- * So the walk lives here once and the renderers differ only in `RoomWalkSink`. This is
- * the same shape as glCommon.ts, which deduplicates GlScreen and GlAiScreen WITHOUT
- * merging them: extract what is mechanical, keep apart what genuinely differs.
+ * Deliberately NOT shared, because these genuinely differ:
  *
- * What deliberately did NOT move here, because it is not shared:
+ *   - the target families — `CompositeTarget` is paletted and native, `AiTarget` RGBA at
+ *     ×S. Unifying them needs stubs whose semantics mean nothing on the other side.
+ *   - the background paint — different art containers, and the `ai` tier has no gspec=42.
+ *   - the spec=1 mirror, the ONE effect reading the composited plane back
+ *     (framebuffer.ts:145,154); the `ai` tier masks off its own sprite instead. The walk
+ *     supplies the anchor, each sink reflects its own way.
+ *   - the fishing hooks, faithful-only. They stay in `renderInto` rather than becoming an
+ *     optional method, so this walk carries no "does this sink do hooks?" branch.
  *
- *   - the two target families. `CompositeTarget` is paletted and native-resolution;
- *     `AiTarget` is RGBA at ×S. Forcing one to implement the other would need a
- *     stack of stub methods whose palette-index semantics mean nothing on the other
- *     side — duplication moved, not removed.
- *   - painting the background. Different art containers (FFR bitmaps vs decoded
- *     ImageBitmaps), different primitives, and the `ai` tier has no gspec=42 ZX band
- *     render at all. It is one `sink.background()` call from here.
- *   - the spec=1 mirror. It is the ONE effect that reads the composited plane back
- *     (framebuffer.ts:145,154, via cpuMirror); the `ai` tier instead keys off a
- *     chroma-key glass mask on its own sprite, which is better art rather than a
- *     workaround. The walk supplies the anchor; each sink reflects its own way.
- *   - the fishing hooks, which only the faithful path draws (`aiRoomGateAllows`
- *     withholds those frames). They stay in `renderInto` rather than becoming an
- *     optional sink method, so this walk carries no "does this sink do hooks?" branch.
- *
- * SCALE IS NOT A PARAMETER HERE. The walk emits NATIVE coordinates — the item's cell
- * origin plus the slide offset — exactly as `ArtSource.drawItem` has always taken them.
- * The `ai` sink multiplies by its own scale on the way out. A scale-parametric walk
- * would put `× S` on every coordinate and make the faithful tier pay `× 1` forever.
+ * Scale is NOT a parameter here: the walk emits native coordinates, exactly as
+ * `ArtSource.drawItem` always took them, and the `ai` sink multiplies on the way out.
  */
 import { Dir, DX_DIR, DY_DIR } from '../core/dir.js';
 import type { Room, Item } from '../core/room.js';
