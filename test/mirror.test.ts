@@ -14,6 +14,13 @@ import { Kind, type FfrRoom, type FfrItem, type FfrBitmap } from '../src/data/ff
 const GLASS = 88; // the mirror's reflective fill colour
 const BLOCK = 42; // the colour of the block sitting to the mirror's left
 const BG = 50;
+/**
+ * What the empty backdrop actually renders as. The compositor takes the wobble
+ * background from `bitmaps[1 + faze]`, i.e. the same all-255 bitmap it uses as the
+ * wall, and blit2 leaves index 0 where the wall is fully transparent — so the empty
+ * area is 0, not the `BG` fill above (which this harness never gets to show).
+ */
+const BACKDROP = 0;
 
 function solid(w: number, h: number, value: number): FfrBitmap {
   return { w, h, pixels: new Uint8Array(w * h).fill(value), padded: 0 };
@@ -75,5 +82,25 @@ describe('ZRC mirror reflection', () => {
     const room = mirrorRoom(1);
     // Column 76 reflects source 75+3-1 = 77, still inside the glass -> stays glass.
     expect(px(room, 76, 15)).toBe(GLASS);
+  });
+
+  it('pins the reflection AXIS: src = 2X+3-dest, with X the mirror anchor', () => {
+    // The rule is an axis, not "some glass becomes the block colour", so assert the two
+    // columns where the reflected image starts and ends. With anchor X=75 the source
+    // column is 153-dest; the block occupies x 60..74, so the reflected block lands on
+    // dest 79..93 exactly. A one-pixel error in the anchor moves both edges.
+    const room = mirrorRoom(1);
+    expect(px(room, 93, 15)).toBe(BLOCK); // src 60 = the block's first column
+    expect(px(room, 94, 15)).toBe(BACKDROP); // src 59 = just left of the block
+    expect(px(room, 79, 15)).toBe(BLOCK); // src 74 = the block's last column
+    expect(px(room, 78, 15)).toBe(GLASS); // src 75 = glass reflecting glass
+  });
+
+  it('pins the mirror rect ORIGIN, so its top row is reflected too', () => {
+    // The rect starts at the item's slid y, so row 0 is inside it. If the anchor drifted
+    // down by a pixel the top row would fall outside the rect and stay raw glass.
+    const room = mirrorRoom(1);
+    expect(px(room, 85, 0)).toBe(BLOCK);
+    expect(px(room, 85, 29)).toBe(BLOCK); // and the bottom row of the 30px-tall mirror
   });
 });

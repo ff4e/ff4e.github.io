@@ -579,6 +579,35 @@ describe('AiRoom.draw drives the real compositor (recording context)', () => {
     expect(bgIdx).toBeLessThan(firstItem);
   });
 
+  it('applies the gspec=2 darkness visibility flip (only spec=2 items are lit)', () => {
+    // URoom.pas:26251 as the darkness rooms invert it: in gspec=2 the normal
+    // spec=11/!visible rule does not apply — instead ONLY the two fish and items with
+    // spec=2 (CHODBA's glowing dog eyes) are drawn, everything else is swallowed by the
+    // dark. The AI side had no pin for this at all; a mutation of the rule here left the
+    // whole suite green. This fixture has no fish, so exactly the spec=2 item survives.
+    const { room, ai } = scene();
+    room.gspec = 2;
+    room.items[2]!.spec = 2; // lit
+    room.items[3]!.visible = false; // would be skipped anyway — the dark rule wins first
+    const { ctx, draws } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
+    ai.draw(ctx, room, frame);
+    const tags = draws
+      .filter((d) => String((d.img as { tag: string }).tag).startsWith('obj'))
+      .map((d) => (d.img as { tag: string }).tag);
+    expect(tags).toEqual(['obj2']);
+  });
+
+  it('outside gspec=2 a spec=2 item is not special (control for the flip above)', () => {
+    const { room, ai } = scene();
+    room.items[2]!.spec = 2;
+    const { ctx, draws } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
+    ai.draw(ctx, room, frame);
+    const tags = draws
+      .filter((d) => String((d.img as { tag: string }).tag).startsWith('obj'))
+      .map((d) => (d.img as { tag: string }).tag);
+    expect(tags).toEqual(['obj1', 'obj2', 'obj3', 'obj4']);
+  });
+
   it('skips invisible items and spec=11 (the hidden LODE wreck)', () => {
     const { room, ai } = scene();
     room.items[2]!.visible = false;

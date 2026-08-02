@@ -8,12 +8,13 @@
  */
 import { describe, it, expect } from 'vitest';
 import { Room } from '../src/core/room.js';
-import { renderRoomState, TL_ZAKLAD, type FishFrame } from '../src/render/renderRoom.js';
+import { renderRoomState, TL_ZAKLAD, TL_PLAV, type FishFrame } from '../src/render/renderRoom.js';
 import { Kind, type FfrRoom, type FfrItem, type FfrBitmap } from '../src/data/ffr.js';
 
 const FSIZE = 15;
 const BG = 50;
-const FISHBODY = 140; // the young fish's body sprite colour
+const FISHBODY = 140; // the young fish's body sprite colour (the resting BASE_FRAME pose)
+const SWIMBODY = 141; // a NON-resting body frame, to catch a missing BASE_FRAME forcing
 const OLD_L = 100; // the old little fish's item bitmap colour
 const OLD_B = 110; // the old big fish's item bitmap colour
 
@@ -24,7 +25,10 @@ function solid(w: number, h: number, value: number): FfrBitmap {
 /** Body-frame table: frame TL_ZAKLAD[0] (the resting base pose) is the fish body colour. */
 function bodyFrames(): (FfrBitmap | null)[] {
   const out: (FfrBitmap | null)[] = [null];
-  for (let i = 1; i <= 23; i++) out.push(solid(FSIZE, FSIZE, i === TL_ZAKLAD[0] ? FISHBODY : 9));
+  for (let i = 1; i <= 23; i++) {
+    const col = i === TL_ZAKLAD[0] ? FISHBODY : i === TL_PLAV[0] ? SWIMBODY : 9;
+    out.push(solid(FSIZE, FSIZE, col));
+  }
   return out;
 }
 
@@ -69,6 +73,12 @@ const anim: { little: FishFrame; big: FishFrame } = {
   big: { bodyFrame: TL_ZAKLAD[0], headFrame: 0 },
 };
 
+/** A non-resting pose: the swim frames are drawn in SWIMBODY, not FISHBODY. */
+const swimAnim: { little: FishFrame; big: FishFrame } = {
+  little: { bodyFrame: TL_PLAV[0], headFrame: 0 },
+  big: { bodyFrame: TL_PLAV[0], headFrame: 0 },
+};
+
 describe('gspec=5 bonus-level fish/sprite inversion', () => {
   it('draws the young fish as bodies and the old (controlled) fish as item sprites', () => {
     const room = bonusRoom();
@@ -92,5 +102,29 @@ describe('gspec=5 bonus-level fish/sprite inversion', () => {
     const s = renderRoomState(room, { fishAnim: anim });
     expect(centre(s, 2, 2)).toBe(FISHBODY); // young little = the fish
     expect(centre(s, 4, 2)).toBe(OLD_L); // old-little item drawn as a plain sprite
+  });
+
+  it('forces the young fish to BASE_FRAME — the live animation must not leak onto them', () => {
+    // URoom.pas:26259-26260: the young pair SIT STILL in the bonus. The controlled old
+    // fish keep animating, so the frame the host computes for them (here a swim pose)
+    // must not be used to draw the young bodies. Without the forcing the young fish
+    // would render SWIMBODY; with it they stay on the resting FISHBODY pose.
+    const room = bonusRoom();
+    room.gspec = 5;
+    room.littleIdx = 3;
+    room.bigIdx = 4;
+    const s = renderRoomState(room, { fishAnim: swimAnim });
+    expect(centre(s, 2, 2)).toBe(FISHBODY);
+    expect(centre(s, 2, 4)).toBe(FISHBODY);
+  });
+
+  it('outside the bonus the animation IS honoured (control for the forcing above)', () => {
+    // The same swim pose, without gspec=5: the fish must now be drawn from it, so the
+    // test above is pinning the bonus rule rather than a table that always resolves
+    // to the resting frame.
+    const room = bonusRoom();
+    const s = renderRoomState(room, { fishAnim: swimAnim });
+    expect(centre(s, 2, 2)).toBe(SWIMBODY);
+    expect(centre(s, 2, 4)).toBe(SWIMBODY);
   });
 });
