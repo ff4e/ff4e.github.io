@@ -42,12 +42,20 @@ await withApp(
     // Watch EVERY frame for the invariant that kills symptom 2, and watch what was
     // actually PAINTED rather than what the state flags claim.
     //
-    // The oracle is the #screen backing store: roomGeometry() sizes it to nativeW×4
-    // only when the AI compositor is the path drawing this frame, so a room painted in
-    // enhanced/classic art is visibly a smaller canvas. Sampling the state flags alone
-    // would keep passing if draw()'s hold were deleted — the flags would still say
-    // "pending" while the room was painted underneath. One getImageData of a single
-    // row per frame is cheap enough to run at rAF rate.
+    // The oracle is the #screen backing store: on the CANVAS-2D backend (pinned via
+    // `{ cpu: true }` below) roomGeometry() sizes it to nativeW×4 only when the AI
+    // compositor is the path drawing this frame, so a room painted in enhanced/classic
+    // art is visibly a smaller canvas. Sampling the state flags alone would keep passing
+    // if draw()'s hold were deleted — the flags would still say "pending" while the room
+    // was painted underneath. One getImageData of a single row per frame is cheap enough
+    // to run at rAF rate.
+    //
+    // The cpu pin is load-bearing and not incidental: this probe has to observe PAINTED
+    // PIXELS per frame, and only the canvas-2D backend puts them somewhere a probe can
+    // read (the GPU backend composites into GlAiScreen's FBO and leaves #screen at
+    // native size). `roomGeom().upscale` is asserted alongside the width so the oracle
+    // states which backend it is reading rather than implying #screen always means the
+    // ×S composite.
     await p.evaluate(() => {
       window.__sampling = true;
       window.__firstPaint = null; // { w, h } of the first frame that showed room content
@@ -117,7 +125,13 @@ await withApp(
     await waitFrames(p, 3);
     const final = await p.evaluate(() => {
       window.__sampling = false;
-      return { first: window.__firstPaint, pending: window.__ff.roomArtPending(), w: document.getElementById('screen').width };
+      return {
+        first: window.__firstPaint,
+        pending: window.__ff.roomArtPending(),
+        w: document.getElementById('screen').width,
+        upscale: window.__ff.roomGeom()?.upscale ?? 0,
+        backend: window.__ff.roomBackend(),
+      };
     });
     expect(final.first !== null, 'the room was painted at all (the oracle saw a frame)');
     // The whole point: the FIRST frame that ever showed this room was already the AI
@@ -125,6 +139,10 @@ await withApp(
     expect(
       final.first !== null && final.first.w > 1000,
       `the first painted frame of the room is the AI one (${final.first ? final.first.w : 'none'}px backing store)`,
+    );
+    expect(
+      final.upscale > 1 && final.backend === 'cpu',
+      `the oracle read the canvas-2D composite (upscale x${final.upscale}, backend ${final.backend})`,
     );
     expect(!final.pending, 'the art hold clears once the AI art is up');
     for (const glob of gated) await p.unroute(glob).catch(() => {});

@@ -26,7 +26,9 @@
  * touch it.
  */
 import { Dir, DX_DIR, DY_DIR } from '../core/dir.js';
-import { delphiRound, RANDPOLE } from './framebuffer.js';
+import { delphiRound } from './framebuffer.js';
+import { Canvas2dAiTarget } from './aiTarget.js';
+import type { AiImage, AiTarget } from './aiTarget.js';
 import { FSIZE, TL_ZAKLAD, darkestIndex } from './renderRoom.js';
 import { FISH_BODY_FILE, FISH_HEAD_FILE, frameIndex } from './enhancedArtSource.js';
 import { withLoadSlot } from './loadSlot.js';
@@ -179,7 +181,14 @@ async function bmpShared(url: string): Promise<ImageBitmap> {
   return withLoadSlot(async () => {
     const res = await fetch(url);
     if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${url}: ${res.status}`);
-    return createImageBitmap(await res.blob());
+    // `premultiplyAlpha: 'none'` is load-bearing, not a default spelled out. With the
+    // browser's own choice ('default') Chrome hands back PREMULTIPLIED pixels, and
+    // texImage2D from an ImageBitmap takes the bitmap's own alpha mode — the GPU
+    // compositor then multiplied by alpha a second time and every anti-aliased sprite
+    // edge came out darkened toward the background (measured: a 160,95,44 edge pixel
+    // rendering as 105,61,32). canvas-2D is unaffected either way, so nothing else in
+    // the tier could have caught it.
+    return createImageBitmap(await res.blob(), { premultiplyAlpha: 'none' });
   });
 }
 
@@ -247,13 +256,12 @@ export class AiRoom {
   readonly scale: number;
   /** Per-sprite glass masks for the spec=1 mirror (see glassMask). */
   private readonly glassCache = new WeakMap<ImageBitmap, Float32Array>();
-  /** Scratch canvas reused by the skeleton dissolve (see drawDisintegrating). */
-  private dissolveCanvas: HTMLCanvasElement | null = null;
-  /** Cached background+wall composite, and the state it was built for. */
-  private bgCanvas: HTMLCanvasElement | null = null;
-  private bgSig = '';
   /** ×S palette sprites for items with no staged art (see drawClassicItem). */
   private readonly classicCache = new Map<string, HTMLCanvasElement>();
+  /** The canvas-2D target, kept across frames so its composite caches survive. */
+  private cpuTarget: Canvas2dAiTarget | null = null;
+  /** Fired by dispose() so a GPU mirror of these bitmaps can be released with them. */
+  private readonly disposeHooks: (() => void)[] = [];
 
   constructor(
     private readonly bg: readonly ImageBitmap[],
@@ -274,9 +282,29 @@ export class AiRoom {
   dispose(): void {
     for (const b of this.owned) b.close();
     this.classicCache.clear();
-    this.dissolveCanvas = null;
-    this.bgCanvas = null;
-    this.bgSig = '';
+    this.cpuTarget?.release();
+    for (const fn of this.disposeHooks) fn();
+    this.disposeHooks.length = 0;
+  }
+
+  /**
+   * Register a callback for `dispose()`. The GPU target holds a texture per bitmap of
+   * this room (~50 MB at ×4), and `dispose()` closes the bitmaps themselves — without
+   * this the GL textures would be orphaned by exactly the eviction that exists to bound
+   * the memory.
+   */
+  onDispose(fn: () => void): void {
+    this.disposeHooks.push(fn);
+  }
+
+  /**
+   * The bitmaps this room ALONE holds — its background, wall and object sprites, deduped
+   * by URL. Deliberately excludes the fish set, which is shared by every room at this
+   * scale (see sharedAiFish) and must outlive any single room: a backend that treated it
+   * as room-owned would re-acquire it on every room entry.
+   */
+  ownedImages(): readonly ImageBitmap[] {
+    return this.owned;
   }
 
   /** Native room pixel size the caller must scale the framebuffer from (×scale). */
@@ -284,55 +312,45 @@ export class AiRoom {
   get nativeHeight(): number { return Math.round(this.bg[0]!.height / this.scale); }
 
   /**
-   * Draw the background+wall composite, reusing a cached copy when it has not changed.
+   * Per-NATIVE-row horizontal wobble shift for this frame, or null when the room does
+   * not wobble (Kresli2: dest[j] = bg[j+k]).
    *
-   * The composite depends only on the wall's animation phase and — when the room has
-   * water wobble — the logic tick, both of which advance at 12.5Hz. The fish, however,
-   * interpolate between ticks, so the room repaints at the display rate; without this
-   * cache every one of those frames re-ran the whole banded wobble.
-   *
-   * Measured on a 435×405 room at ×4: 85 drawImage calls and 5.98 Mpx blitted per
-   * frame, against a canvas of only 2.82 Mpx. The AI tier could not hold 60fps and its
-   * subtitles visibly juddered while the enhanced tier (which composites on the GPU)
-   * stayed smooth. Cached, a repeat frame is a single full-canvas blit.
-   *
-   * With wamp === 0 the composite does not depend on `count` at all, so a still room
-   * builds it exactly once.
+   * Computed here, once, for BOTH backends — the canvas-2D target turns it into
+   * horizontal band blits and the GPU target into a texture lookup, but neither
+   * re-derives `sin` for itself. That is deliberate: the classic tier's GPU background
+   * has to reproduce a `sin` in FP32 GLSL to match the CPU, and the isolated
+   * glBgParity probe exists precisely because that is fragile. This tier does not
+   * inherit the problem.
    */
-  private paintBackgroundCached(ctx: CanvasRenderingContext2D, room: Room, bg: ImageBitmap, wall: ImageBitmap, count: number, faze: number): void {
-    const W = ctx.canvas.width;
-    const H = ctx.canvas.height;
-    // No DOM (unit tests drive this with a recording context) ⇒ paint straight through.
-    // The cache is a rendering optimisation, not behaviour: the composite it produces is
-    // identical either way, so the uncached path is the correct fallback.
-    if (typeof document === 'undefined') { this.paintBackground(ctx, room, bg, wall, count); return; }
-    const sig = `${faze}|${room.wamp === 0 ? 0 : count}|${W}x${H}`;
-    if (!this.bgCanvas || this.bgSig !== sig) {
-      if (!this.bgCanvas) this.bgCanvas = document.createElement('canvas');
-      if (this.bgCanvas.width !== W || this.bgCanvas.height !== H) {
-        this.bgCanvas.width = W;
-        this.bgCanvas.height = H;
-      }
-      const bctx = this.bgCanvas.getContext('2d');
-      if (!bctx) { this.bgCanvas = null; this.paintBackground(ctx, room, bg, wall, count); return; }
-      bctx.setTransform(1, 0, 0, 1, 0, 0);
-      bctx.imageSmoothingEnabled = false;
-      bctx.clearRect(0, 0, W, H);
-      this.paintBackground(bctx, room, bg, wall, count);
-      this.bgSig = sig;
-    }
-    ctx.drawImage(this.bgCanvas, 0, 0);
+  private wobbleShifts(room: Room, count: number): Int16Array | null {
+    if (room.wamp === 0) return null;
+    const { wamp, wper, wspd } = room;
+    const H = this.nativeHeight;
+    const out = new Int16Array(H);
+    for (let i = 0; i < H; i++) out[i] = delphiRound((wamp / 2) * Math.sin(i / wper + count / wspd));
+    return out;
   }
 
   /**
-   * Composite the wall-over-wobbled background + all sprites for `room`+`f` into
-   * `ctx` (a scale×-sized 2D context, already cleared by the caller), at (0,0).
-   * Replays renderInto's background + item pass, only bigger — including the
-   * gspec=2 darkness fill and the spec=1/3/4 effect anchors.
+   * Composite the wall-over-wobbled background + all sprites for `room`+`f` into a
+   * scale×-sized 2D context, already cleared by the caller, at (0,0). The canvas-2D
+   * entry point: wraps `ctx` in the persistent Canvas2dAiTarget (whose background
+   * composite cache must outlive the frame) and runs the shared walk.
    */
   draw(ctx: CanvasRenderingContext2D, room: Room, f: AiRoomFrame): void {
+    if (this.cpuTarget) this.cpuTarget.bind(ctx);
+    else this.cpuTarget = new Canvas2dAiTarget(ctx);
+    this.drawInto(this.cpuTarget, room, f);
+  }
+
+  /**
+   * The room walk, shared by every backend: replays renderInto's background + item
+   * pass, only bigger — including the gspec=2 darkness fill and the spec=1/3/4 effect
+   * anchors. Emits primitives to `t`; see src/render/aiTarget.ts for why the seam is
+   * here rather than in a second copy of this method.
+   */
+  drawInto(t: AiTarget, room: Room, f: AiRoomFrame): void {
     const S = this.scale;
-    ctx.imageSmoothingEnabled = false;
     const faze = room.wallItem.afaze;
     const bg = this.bg[Math.min(faze, this.bg.length - 1)]!;
     const wall = this.wall[Math.min(faze, this.wall.length - 1)]!;
@@ -341,11 +359,14 @@ export class AiRoom {
       // near-black — no wall, no background. Only the lit items (spec=2, e.g. CHODBA's
       // glowing dog eyes) and the fish silhouettes are drawn on top, so those are the
       // parts worth having at S×.
-      const d = room.palette[darkestIndex(room.palette)];
-      ctx.fillStyle = d ? `rgb(${d.r},${d.g},${d.b})` : '#000';
-      ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+      const d = room.palette[darkestIndex(room.palette)] ?? { r: 0, g: 0, b: 0 };
+      t.fill(d.r, d.g, d.b);
     } else {
-      this.paintBackgroundCached(ctx, room, bg, wall, f.count, faze);
+      const shifts = this.wobbleShifts(room, f.count);
+      // The composite depends only on the wall's animation phase and — when the room
+      // wobbles — the logic tick; the fish interpolate BETWEEN ticks, so a target that
+      // can cache the composite skips it on most frames.
+      t.background(`${faze}|${shifts === null ? 0 : f.count}`, bg, wall, shifts, S);
     }
 
     // gspec=5 (WIN bonus level): the fish BODY is drawn for the YOUNG fish
@@ -387,11 +408,11 @@ export class AiRoom {
       // renderInto forces BASE_FRAME there, so the live animation of the (elsewhere
       // controlled) old pair must not leak onto them.
       const bonus = room.gspec === 5;
-      if (j === bigFishIdx) this.drawFish(ctx, room, 'big', x0, y0, bonus ? BASE_FRAME : f.fishAnim.big, it);
-      else if (j === littleFishIdx) this.drawFish(ctx, room, 'little', x0, y0, bonus ? BASE_FRAME : f.fishAnim.little, it);
-      else this.drawItem(ctx, it, j, x0, y0, room);
+      if (j === bigFishIdx) this.drawFish(t, room, 'big', x0, y0, bonus ? BASE_FRAME : f.fishAnim.big, it);
+      else if (j === littleFishIdx) this.drawFish(t, room, 'little', x0, y0, bonus ? BASE_FRAME : f.fishAnim.little, it);
+      else this.drawItem(t, it, j, x0, y0, room);
     }
-    if (mirror) this.drawMirror(ctx, mirror.x, mirror.y, mirror.bmp, mirror.spr);
+    if (mirror) this.drawMirror(t, mirror.x, mirror.y, mirror.bmp, mirror.spr);
     // The elevator cable, after the mirror — KresliSpec's spec=3 case: a double rope
     // from the gear pulley (x+58, y+27) to the lift top (x+43, y), coloured by the
     // pixel sampled from the gear bitmap at (col 1, row 58).
@@ -399,7 +420,7 @@ export class AiRoom {
       const g = gear, l = lift;
       const ci = 58 * g.bmp.w + 1;
       const col = ci < g.bmp.pixels.length ? g.bmp.pixels[ci]! : 0;
-      this.drawRope(ctx, room, g.x + 58, g.y + 27, l.x + 43, l.y, col);
+      this.drawRope(t, room, g.x + 58, g.y + 27, l.x + 43, l.y, col);
     }
   }
 
@@ -411,13 +432,11 @@ export class AiRoom {
    * step paints an S×S block, giving a rope that is S px thick instead of a hairline.
    * `col` is a palette index — resolved through the room palette since we draw RGBA.
    */
-  private drawRope(ctx: CanvasRenderingContext2D, room: Room, x1: number, y1: number, x2: number, y2: number, col: number): void {
+  private drawRope(t: AiTarget, room: Room, x1: number, y1: number, x2: number, y2: number, col: number): void {
     if (y2 <= y1) return; // guards div-by-zero and the empty loop
     const S = this.scale;
     const c = room.palette[col];
     if (!c) return;
-    ctx.save();
-    ctx.fillStyle = `rgb(${c.r},${c.g},${c.b})`;
     const d = (x2 - x1) / (y2 - y1);
     let r = 0.5;
     let x = x1;
@@ -425,10 +444,9 @@ export class AiRoom {
       while (r > 1) { x++; r -= 1; }
       while (r < 0) { x--; r += 1; }
       r += d;
-      ctx.fillRect(x * S, y * S, S, S);
-      ctx.fillRect((x + 4) * S, y * S, S, S);
+      t.fillRect(x * S, y * S, S, S, c.r, c.g, c.b);
+      t.fillRect((x + 4) * S, y * S, S, S, c.r, c.g, c.b);
     }
-    ctx.restore();
   }
 
   /** The AI sprite an item is currently drawn with (same lookup as drawItem). */
@@ -461,53 +479,13 @@ export class AiRoom {
    * in-place left-to-right loop effectively produces (its near-axis self-reference
    * reads glass→glass, a no-op).
    */
-  private drawMirror(ctx: CanvasRenderingContext2D, X: number, Y: number, bmp: FfrBitmap, spr: ImageBitmap | null): void {
-    const S = this.scale;
+  private drawMirror(t: AiTarget, X: number, Y: number, bmp: FfrBitmap, spr: ImageBitmap | null): void {
     const w = bmp.w, h = bmp.h;
     if (w <= 0 || h <= 0 || !spr) return;
     const glass = this.glassMask(spr);
     if (!glass) return;
-    const MW = spr.width, MH = spr.height;
-    const CW = ctx.canvas.width, CH = ctx.canvas.height;
-    // dest span [X, X+w) and its reflection [X+4-w, X+4), both in native columns.
-    const rx0 = Math.max(0, Math.min(X, X + 4 - w) * S);
-    const rx1 = Math.min(CW, Math.max(X + w, X + 4) * S);
-    const ry0 = Math.max(0, Y * S), ry1 = Math.min(CH, (Y + h) * S);
-    if (rx1 <= rx0 || ry1 <= ry0) return;
-    const img = ctx.getImageData(rx0, ry0, rx1 - rx0, ry1 - ry0);
-    const px = img.data;
-    const snap = new Uint8ClampedArray(px); // pre-mirror snapshot to read from
-    const RW = img.width;
-    const K = S * (2 * X + 4) - 1; // srcCol = K - destCol
-    const dx0 = Math.max(rx0, X * S), dx1 = Math.min(rx1, (X + w) * S);
-    for (let sy = ry0; sy < ry1; sy++) {
-      const my = sy - Y * S;
-      if (my < 0 || my >= MH) continue;
-      const rowBase = (sy - ry0) * RW;
-      const mRow = my * MW;
-      for (let D = dx0; D < dx1; D++) {
-        const mx = D - X * S;
-        if (mx < 0 || mx >= MW) continue;
-        const g = glass[mRow + mx]!;
-        if (g <= 0) continue; // frame / highlight streak / outside the glass
-        const sX = K - D;
-        if (sX < rx0 || sX >= rx1) continue;
-        const di = (rowBase + (D - rx0)) * 4;
-        const si = (rowBase + (sX - rx0)) * 4;
-        if (g >= 1) {
-          px[di] = snap[si]!; px[di + 1] = snap[si + 1]!; px[di + 2] = snap[si + 2]!; px[di + 3] = 255;
-        } else { // soft rim: blend so the oval edge stays anti-aliased
-          const n = 1 - g;
-          px[di] = snap[si]! * g + snap[di]! * n;
-          px[di + 1] = snap[si + 1]! * g + snap[di + 1]! * n;
-          px[di + 2] = snap[si + 2]! * g + snap[di + 2]! * n;
-          px[di + 3] = 255;
-        }
-      }
-    }
-    ctx.putImageData(img, rx0, ry0);
+    t.mirrorGlass(X, Y, w, h, this.scale, glass, spr.width, spr.height);
   }
-
   /**
    * Per-pixel "glassness" of a mirror sprite at S×, cached per bitmap. The staged
    * art paints the reflective area with a pure-cyan chroma key that the reflection
@@ -543,39 +521,6 @@ export class AiRoom {
   }
 
   /**
-   * Wall over the water-wobbled background. Only the background wobbles (a per-row
-   * sinusoidal horizontal shift, Kresli2), so it is drawn as horizontal bands —
-   * consecutive native rows that round to the same shift `k` share one draw — then
-   * the wall (its matted alpha carries the doorway hole) is drawn flat on top.
-   */
-  private paintBackground(ctx: CanvasRenderingContext2D, room: Room, bg: ImageBitmap, wall: ImageBitmap, count: number): void {
-    const S = this.scale;
-    const H = this.nativeHeight;
-    const W = bg.width;
-    const { wamp, wper, wspd } = room;
-    if (wamp === 0) {
-      ctx.drawImage(bg, 0, 0);
-    } else {
-      let bandStart = 0;
-      let bandK = delphiRound((wamp / 2) * Math.sin(0 / wper + count / wspd));
-      const flush = (endRow: number) => {
-        const sy = bandStart * S;
-        const sh = (endRow - bandStart) * S;
-        const dx = -bandK * S; // dest[j] = bg[j+k] ⇒ shift the image left by k
-        ctx.drawImage(bg, 0, sy, W, sh, dx, sy, W, sh);
-        if (bandK > 0) ctx.drawImage(bg, W - 1, sy, 1, sh, W - bandK * S, sy, bandK * S, sh); // clamp right edge
-        else if (bandK < 0) ctx.drawImage(bg, 0, sy, 1, sh, 0, sy, -bandK * S, sh); // clamp left edge
-      };
-      for (let i = 1; i < H; i++) {
-        const k = delphiRound((wamp / 2) * Math.sin(i / wper + count / wspd));
-        if (k !== bandK) { flush(i); bandStart = i; bandK = k; }
-      }
-      flush(H);
-    }
-    ctx.drawImage(wall, 0, 0);
-  }
-
-  /**
    * An item's AI sprite(s) at its slid hi-res position. Matches the enhanced
    * spec=10 flip (statically-spec=10 art is pre-mirrored ⇒ drawn as-is; a runtime
    * spec=10 toggle mirrors the base art), and draws every sprite bound to this item
@@ -583,21 +528,21 @@ export class AiRoom {
    * drawClassicItem(): the room's own FFR bitmap nearest-scaled ×S, mirroring
    * EnhancedArtSource's per-element fallback.
    */
-  private drawItem(ctx: CanvasRenderingContext2D, item: Item, index: number, x0: number, y0: number, room: Room): void {
+  private drawItem(t: AiTarget, item: Item, index: number, x0: number, y0: number, room: Room): void {
     const preMirrored = (item.initSpec ?? item.spec) === 10;
     const mirror = (item.spec === 10) !== preMirrored;
     let drew = false;
     for (const obj of this.objects) {
       if (obj.item !== index || obj.frames.length === 0) continue;
       const spr = obj.frames[frameIndex(item.afaze, obj.frames.length)]!;
-      this.blit(ctx, spr, x0, y0, mirror);
+      t.blit(spr, x0, y0, mirror);
       drew = true;
     }
     // Not every item has staged FFNG art (e.g. WIN's bonus-window fish, items 10/11,
     // are absent from objects.json). The enhanced source silently falls through to
     // classicItem() in that case; without the same fallback the AI tier would simply
     // DROP those items. Draw the room's own FFR bitmap, nearest-scaled ×S.
-    if (!drew) this.drawClassicItem(ctx, room, item, x0, y0);
+    if (!drew) this.drawClassicItem(t, room, item, x0, y0);
   }
 
   /**
@@ -605,20 +550,12 @@ export class AiRoom {
    * index, magnified nearest-neighbour so it lines up with the rest of the ×S
    * composite. Cached per bitmap+mask — the art is static, only the position moves.
    */
-  private drawClassicItem(ctx: CanvasRenderingContext2D, room: Room, item: Item, x0: number, y0: number): void {
+  private drawClassicItem(t: AiTarget, room: Room, item: Item, x0: number, y0: number): void {
     const bmp = room.bitmaps[item.bmp + item.afaze];
     if (!bmp) return;
     const cv = this.classicSprite(room, bmp, item.mask, `i${item.bmp + item.afaze}`);
     if (!cv) return;
-    if (item.spec === 10) {                            // KresliRev
-      ctx.save();
-      ctx.translate(x0 + cv.width, y0);
-      ctx.scale(-1, 1);
-      ctx.drawImage(cv, 0, 0);
-      ctx.restore();
-    } else {
-      ctx.drawImage(cv, x0, y0);
-    }
+    t.blit(cv, x0, y0, item.spec === 10);              // KresliRev
   }
 
   /**
@@ -655,7 +592,7 @@ export class AiRoom {
   }
 
   /** A fish's AI body (+ optional head overlay) at its slid hi-res position. */
-  private drawFish(ctx: CanvasRenderingContext2D, room: Room, which: 'little' | 'big', x0: number, y0: number, frame: FishFrame, item: Item): void {
+  private drawFish(t: AiTarget, room: Room, which: 'little' | 'big', x0: number, y0: number, frame: FishFrame, item: Item): void {
     const venku = which === 'little' ? room.venku.little : room.venku.big;
     if (venku) return;                    // exited: gone
     const alive = which === 'little' ? room.alive.little : room.alive.big;
@@ -672,7 +609,7 @@ export class AiRoom {
       const skel = set.get(SKELETON_FILE);
       if (!skel) return;
       const rozpad = Math.min(which === 'big' ? room.rozpad.big : room.rozpad.little, 255);
-      this.drawDisintegrating(ctx, skel, x0, y0, rozpad);
+      t.disintegrate(skel, x0, y0, this.scale, rozpad);
       return;
     }
     const bodyFile = FISH_BODY_FILE[frame.bodyFrame];
@@ -685,68 +622,16 @@ export class AiRoom {
       const bmp = bodies[frame.bodyFrame];
       if (!bmp) return;
       const cv = this.classicSprite(room, bmp, item.mask, `f${which}${frame.bodyFrame}`);
-      if (cv) this.blit2(ctx, cv, x0, y0, facingRight);
+      if (cv) t.blit(cv, x0, y0, facingRight);
       return;
     }
     const body = set.get(bodyFile);
     if (!body) return;
-    this.blit(ctx, body, x0, y0, false);
+    t.blit(body, x0, y0, false);
     if (frame.headFrame > 0) {
       const headFile = FISH_HEAD_FILE[frame.headFrame];
       const head = headFile ? set.get(headFile) : undefined;
-      if (head) this.blit(ctx, head, x0, y0, false);
+      if (head) t.blit(head, x0, y0, false);
     }
-  }
-
-  /**
-   * KresliK's dithered dissolve at S×. The original keeps a source pixel only
-   * where `RANDPOLE[(row*w + col) & 255] < rozpad`, so as rozpad counts down the
-   * skeleton erodes away. The threshold is evaluated per ORIGINAL pixel (the AI
-   * sprite is S× that grid), so the dissolve keeps the same coarse granularity as
-   * the faithful render rather than turning into fine noise. Composed on a scratch
-   * canvas — punching the holes with clearRect there and blitting once keeps the
-   * room composite untouched.
-   */
-  private drawDisintegrating(ctx: CanvasRenderingContext2D, spr: ImageBitmap, x0: number, y0: number, rozpad: number): void {
-    const S = this.scale;
-    const nw = Math.max(1, Math.round(spr.width / S));
-    const nh = Math.max(1, Math.round(spr.height / S));
-    let cv = this.dissolveCanvas;
-    if (!cv || cv.width !== spr.width || cv.height !== spr.height) {
-      cv = document.createElement('canvas');
-      cv.width = spr.width; cv.height = spr.height;
-      this.dissolveCanvas = cv;
-    }
-    const g = cv.getContext('2d');
-    if (!g) return;
-    g.clearRect(0, 0, cv.width, cv.height);
-    g.drawImage(spr, 0, 0);
-    for (let i = 0; i < nh; i++) {
-      const pBase = (i * nw) & 255;
-      for (let j = 0; j < nw; j++) {
-        if (RANDPOLE[(pBase + j) & 255]! < rozpad) continue; // survives
-        g.clearRect(j * S, i * S, S, S);
-      }
-    }
-    ctx.drawImage(cv, x0, y0);
-  }
-
-  /** blit() for a canvas source (the classic ×S sprites). */
-  private blit2(ctx: CanvasRenderingContext2D, spr: HTMLCanvasElement, x: number, y: number, mirror: boolean): void {
-    if (!mirror) { ctx.drawImage(spr, x, y); return; }
-    ctx.save();
-    ctx.translate(x + spr.width, y);
-    ctx.scale(-1, 1);
-    ctx.drawImage(spr, 0, 0);
-    ctx.restore();
-  }
-
-  private blit(ctx: CanvasRenderingContext2D, spr: ImageBitmap, x: number, y: number, mirror: boolean): void {
-    if (!mirror) { ctx.drawImage(spr, x, y); return; }
-    ctx.save();
-    ctx.translate(x + spr.width, y);
-    ctx.scale(-1, 1);
-    ctx.drawImage(spr, 0, 0);
-    ctx.restore();
   }
 }
