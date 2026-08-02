@@ -48,6 +48,40 @@ await withApp(async ({ p, expect }) => {
   // Restore the default so this test leaves no persisted side effect for others.
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
 
+  // Modifier chords must NOT reach the single-key dev toggles. Cmd/Ctrl+R is the one
+  // that hurt: it toggled the renderer and persisted it, so the backend flipped
+  // CPU/WebGL on every keyboard reload, while the toolbar reload button — which fires
+  // no keydown — left it alone. Cmd+P, Cmd+E, Cmd+F and Cmd+G were the same class.
+  const renderer0 = await p.evaluate(() => window.__ff.renderer());
+  const graphics0 = await p.evaluate(() => window.__ff.graphics());
+  const saver0 = await p.evaluate(() => localStorage.getItem('ff.renderOnDirty'));
+  for (const chord of ['Meta+r', 'Control+r', 'Meta+e', 'Control+e', 'Meta+p', 'Alt+r']) {
+    await p.keyboard.press(chord);
+    await p.waitForTimeout(30);
+  }
+  expect(
+    (await p.evaluate(() => window.__ff.renderer())) === renderer0,
+    `Cmd/Ctrl/Alt+R leaves the renderer alone (was ${renderer0})`,
+  );
+  expect((await rendVal()) === renderer0, 'the Renderer picker is untouched by modifier chords');
+  expect(
+    (await p.evaluate(() => window.__ff.graphics())) === graphics0,
+    `Cmd/Ctrl+E leaves the graphics level alone (was ${graphics0})`,
+  );
+  expect(
+    (await p.evaluate(() => localStorage.getItem('ff.renderOnDirty'))) === saver0,
+    'Cmd+P leaves the idle-FPS saver alone',
+  );
+
+  // ...but the BARE key still works. (Shift stays a legal dev modifier — Shift+F walks
+  // the subtitle fonts backwards — so the guard blocks only Meta/Ctrl/Alt.)
+  await p.keyboard.press('r');
+  await p.waitForTimeout(50);
+  expect((await p.evaluate(() => window.__ff.renderer())) !== renderer0, 'a BARE r still toggles the renderer');
+  await p.keyboard.press('r');
+  await p.waitForTimeout(50);
+  expect((await p.evaluate(() => window.__ff.renderer())) === renderer0, 'and a second bare r toggles it back');
+
   // Entering a room selects it in the picker.
   await p.evaluate(() => window.__ff.enterRoomAwait(12));
   await p.waitForFunction(() => window.__ff.screen() === 'room', { timeout: 5000 });

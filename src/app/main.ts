@@ -5298,8 +5298,18 @@ window.addEventListener('keydown', (e) => {
     setDevEnabled(!devEnabled);
     return;
   }
-  // The single-key dev toggles are armed ONLY while the dev pane is enabled.
-  if (devEnabled) {
+  // The single-key dev toggles are armed ONLY while the dev pane is enabled, and only
+  // for a BARE keypress. Without the modifier guard these collide with the browser's
+  // own shortcuts: Cmd/Ctrl+R (reload) toggled the renderer and persisted it, so the
+  // backend flipped CPU/WebGL on every reload — and reloading from the toolbar button,
+  // which fires no keydown, did not. Cmd+P (print) silently disabled the idle-FPS
+  // saver, Cmd+E changed the graphics tier, Cmd+F the subtitle font, Cmd+G the
+  // subtitle language. All of those are persisted, so a single accidental shortcut
+  // changed how the game rendered from then on.
+  //
+  // Ctrl+Alt+D above is deliberately checked BEFORE this and is unaffected: it is the
+  // one dev key that is meant to carry modifiers.
+  if (devEnabled && !e.metaKey && !e.ctrlKey && !e.altKey) {
     if (e.code === 'KeyG') {
       // Cycle subtitles Czech -> English -> off (obltitcz/eng/no).
       setSubtitleMode(settings.subtitles === 'cz' ? 'en' : settings.subtitles === 'en' ? 'off' : 'cz');
