@@ -109,8 +109,11 @@ function prog(s: Script): void {
       v[R.room_olodi] = 1;
       switch (s.random(2)) {
         case 0:
-          // Faithful reproduction of the original's copy-paste bug (broken sound name).
-          s.addv(s.random(7), 'sm-v-Items[r_SMETAK_lod]^');
+          // DELIBERATE DEVIATION (URoom.pas:12869): the original pasted the Pascal
+          // expression `Items[r_SMETAK_lod]^` inside the string literal instead of the
+          // sound name, so this line was silent. The intended `sm-v-lod` ("Vidíš tu
+          // loďku?") ships in this room's own FFT/FFS. FFNG fixed it too (dump/code.lua:70).
+          s.addv(s.random(7), 'sm-v-lod');
           s.addm(s.random(7), 'sm-m-dedek');
           s.addv(s.random(7), 'sm-v-charon');
           s.addm(s.random(7), 'sm-m-codela');
