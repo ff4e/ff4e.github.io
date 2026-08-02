@@ -588,7 +588,12 @@ describe('AiRoom.draw drives the real compositor (recording context)', () => {
     const { room, ai } = scene();
     room.gspec = 2;
     room.items[2]!.spec = 2; // lit
-    room.items[3]!.visible = false; // would be skipped anyway — the dark rule wins first
+    // …and hidden. The darkness branch REPLACES the `spec === 11 || !visible` test
+    // rather than ANDing with it, so a lit item still draws even when the room has
+    // toggled it invisible. With a visible lit item this assertion could not tell the
+    // two readings apart.
+    room.items[2]!.visible = false;
+    room.items[3]!.visible = false; // ordinary + hidden: swallowed either way
     const { ctx, draws } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
     ai.draw(ctx, room, frame);
     const tags = draws

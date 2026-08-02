@@ -13,7 +13,8 @@
  * paths against each other proves nothing (see the note on `dissolveKeeps` in
  * aiTarget.ts — a parity probe cannot catch a refactor that moves the oracle). Every
  * expectation below is therefore hand-computed from the formula above, never read back
- * from either renderer.
+ * from either renderer — with ONE deliberate exception, the tie-rounding case, which is
+ * flagged where it appears because it records current behaviour rather than URoom.pas.
  *
  * The AI (S×) side of the same rule is pinned in test/roomAi.test.ts, section 9.
  */
@@ -107,10 +108,22 @@ describe('slide interpolation (round(slide * FSIZE) along dx_dir/dy_dir)', () =>
     expect(itemOrigin(Dir.left, 0.5).x).toBe(REST.x - 8);
     // slide=0.1 -> 1.5 -> 2 (again a .5 case, rounded up).
     expect(itemOrigin(Dir.right, 0.1).x).toBe(REST.x + 2);
-    // slide=0.3 -> 4.5 -> 5.
-    expect(itemOrigin(Dir.down, 0.3).y).toBe(REST.y + 5);
     // A value that is not a .5 boundary, to pin the scale itself: 0.4*15 = 6.
     expect(itemOrigin(Dir.right, 0.4).x).toBe(REST.x + 6);
+  });
+
+  it('uses JS Math.round on ties, NOT the Delphi ties-to-even Round', () => {
+    // Recorded, not endorsed. slide=0.3 -> 4.5, where the two disagree: JS Math.round
+    // gives 5, while `delphiRound` (framebuffer.ts:41, used for the water wobble) gives
+    // 4 because it rounds ties to even. Both room walks used Math.round before they were
+    // unified, so keeping it is what makes this a pure refactor — but unlike every other
+    // expectation in this file, this one is pinned from CURRENT BEHAVIOUR rather than
+    // derived from URoom.pas, and it may well be a latent fidelity bug.
+    //
+    // If the port ever switches the slide to delphiRound, this test SHOULD go red, and
+    // the right response is to change it deliberately rather than to assume it encodes
+    // the original's semantics.
+    expect(itemOrigin(Dir.down, 0.3).y).toBe(REST.y + 5);
   });
 
   it('scales by FSIZE, so slide runs the item exactly one cell over [0,1]', () => {

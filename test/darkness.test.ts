@@ -109,6 +109,20 @@ describe('gspec=2 darkness visibility (URoom.pas:26251)', () => {
     expect(centre(dark, 2, 4)).toBe(DARK);
     expect(centre(dark, 4, 4)).toBe(DARK);
   });
+
+  it('ignores `visible` in the dark: a hidden spec=2 item and hidden fish still light', () => {
+    // The darkness branch replaces the normal `spec === 11 || !visible` test outright —
+    // it does not AND with it. So an item the room has toggled invisible is still lit
+    // if it is spec=2, and the fish are drawn whatever their flags say. Without this the
+    // rule could be re-written as "gspec=2 AND visible" and every other assertion here
+    // would stay green, since nothing else in the fixture is hidden.
+    const room = darkRoom(true);
+    room.items[2]!.visible = false; // the spec=2 glowing eyes
+    room.items[3]!.visible = false; // the little fish
+    const s = renderRoomState(room, { fishAnim: litFrame });
+    expect(centre(s, 4, 2)).toBe(EYES);
+    expect(centre(s, 2, 4)).toBe(DARK);
+  });
 });
 
 describe('gspec=2 fish silhouette (URoom.pas:25746-25748)', () => {

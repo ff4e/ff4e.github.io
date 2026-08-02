@@ -104,7 +104,7 @@ export function walkRoom(
   // items. spec=1 = mirror; spec=3 gear + spec=4 lift = the ZDVIZ elevator rope.
   // Captured at their slid positions during the item pass, applied after it.
   let mirror: MirrorAnchor | null = null;
-  let gear: { bmp: FfrBitmap; x: number; y: number } | null = null;
+  let gear: { bmp: FfrBitmap | null; x: number; y: number } | null = null;
   let lift: { x: number; y: number } | null = null;
 
   for (let j = 1; j <= room.itemCount; j++) {
@@ -126,8 +126,12 @@ export function walkRoom(
       const bmp = room.bitmaps[it.bmp + it.afaze];
       if (bmp) mirror = { item: it, index: j, bmp, x: it.x * FSIZE + sx, y: it.y * FSIZE + sy };
     } else if (it.spec === 3) {
-      const bmp = room.bitmaps[it.bmp]; // gear pulley (no afaze)
-      if (bmp) gear = { bmp, x: it.x * FSIZE + sx, y: it.y * FSIZE + sy };
+      // The LAST spec=3 wins, and a missing bitmap on it suppresses the rope entirely
+      // rather than falling back to an earlier gear — the faithful path's
+      // `gearBmp = … ?? null; haveGear = true` followed by its `haveGear && gearBmp`
+      // guard below. Unreachable in shipped content (every elevator room has exactly
+      // one gear), but this is a refactor, so it keeps the reference semantics.
+      gear = { bmp: room.bitmaps[it.bmp] ?? null, x: it.x * FSIZE + sx, y: it.y * FSIZE + sy }; // no afaze
     } else if (it.spec === 4) {
       lift = { x: it.x * FSIZE + sx, y: it.y * FSIZE + sy }; // the cabin below
     }
@@ -136,14 +140,16 @@ export function walkRoom(
     else sink.item(room, it, j, sx, sy);
   }
 
-  // The mirror reflection (KresliSpec spec=1 -> KresliZrcadlo, URoom.pas:25822): the
-  // fish drawn to the mirror's left are reflected across it, in place.
+  // The mirror reflection (KresliSpec spec=1 -> KresliZrcadlo, URoom.pas:25822):
+  // whatever has been composited to the mirror's left is reflected across it, in place.
+  // Applied here, after the WHOLE item pass, so items drawn later than the mirror (in
+  // ZRC the fish are items 7/8 to its item 2) appear in their own reflection.
   if (mirror) sink.mirror(room, mirror);
 
   // The elevator cable, after the mirror — KresliSpec's spec=3 case (URoom.pas:25896):
   // a double rope from the gear pulley (x+58, y+27) to the lift top (x+43, y), coloured
   // by the pixel sampled from the gear bitmap at (col 1, row 58).
-  if (gear && lift) {
+  if (gear?.bmp && lift) {
     const ci = 58 * gear.bmp.w + 1;
     const col = ci < gear.bmp.pixels.length ? gear.bmp.pixels[ci]! : 0;
     sink.rope(room, gear.x + 58, gear.y + 27, lift.x + 43, lift.y, col);

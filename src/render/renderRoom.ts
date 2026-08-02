@@ -1,11 +1,16 @@
 /**
- * Room compositor — a faithful port of TRoom.Priprav (URoom.pas:26167-26283)
- * plus the fish rendering of KresliRybu (URoom.pas:25658-25785).
+ * The faithful (classic / enhanced) room renderer: the entry points, the
+ * `RoomWalkSink` that drives them, the classic draw helpers (KresliRybu,
+ * URoom.pas:25658-25785, and KresliObjekt) and the fishing hooks.
  *
- * Draws from live `Room` state. Items with a pending `dir` slide by `slide`
- * (presentation of the gfaze catch-up). Each fish is drawn from an explicit
- * animation descriptor (body frame + head frame) that the host computes from the
- * engine's frame tables; a crushed fish is drawn as an eroding skeleton.
+ * The traversal itself — TRoom.Priprav (URoom.pas:26167-26283), i.e. which items are
+ * drawn, in what order, at what coordinates, including the slide of an item with a
+ * pending `dir` — lives in `roomWalk.ts` and is shared with the `ai` tier. Look there
+ * for the visibility, gspec and effect-anchor rules, not here.
+ *
+ * Draws from live `Room` state. Each fish is drawn from an explicit animation
+ * descriptor (body frame + head frame) that the host computes from the engine's frame
+ * tables; a crushed fish is drawn as an eroding skeleton.
  *
  * Fish frame tables (URoom.pas:380-398): tl_zaklad=[1,2,3] (idle), tl_plav=
  * [4..9] (swim L/R), tl_otocka=[10,11,12] (turn), tl_nahoru=[13..18] /
@@ -17,7 +22,7 @@ import { Room, type Item } from '../core/room.js';
 import { IndexedScreen, type CompositeTarget } from './framebuffer.js';
 import { RgbaScreen } from './rgbaScreen.js';
 import { ClassicArtSource } from './classicArtSource.js';
-import { walkRoom, FSIZE, TL_ZAKLAD, type RoomWalkSink, type MirrorAnchor, type FishFrame } from './roomWalk.js';
+import { walkRoom, FSIZE, TL_ZAKLAD, type RoomWalkSink, type FishFrame } from './roomWalk.js';
 import type { ArtSource } from './artSource.js';
 
 export { FSIZE, TL_ZAKLAD, type FishFrame };
