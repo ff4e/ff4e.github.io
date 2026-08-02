@@ -14,13 +14,13 @@
  */
 import { type FfrRoom, type FfrBitmap, Kind } from '../data/ffr.js';
 import { Room, type Item } from '../core/room.js';
-import { Dir, DX_DIR, DY_DIR } from '../core/dir.js';
 import { IndexedScreen, type CompositeTarget } from './framebuffer.js';
 import { RgbaScreen } from './rgbaScreen.js';
 import { ClassicArtSource } from './classicArtSource.js';
+import { walkRoom, FSIZE, TL_ZAKLAD, type RoomWalkSink, type MirrorAnchor, type FishFrame } from './roomWalk.js';
 import type { ArtSource } from './artSource.js';
 
-export const FSIZE = 15;
+export { FSIZE, TL_ZAKLAD, type FishFrame };
 const DXRYBY = { little: 45, big: 60 } as const;
 const DXHLAVY = { little: 14, big: 19 } as const;
 const TL_KOSTRA = 19;
@@ -37,7 +37,6 @@ export function darkBodyFrame(winkOut: boolean): number {
   return winkOut ? 0 : TL_TMA;
 }
 
-export const TL_ZAKLAD = [1, 2, 3] as const;
 export const TL_PLAV = [4, 5, 6, 7, 8, 9] as const;
 export const TL_OTOCKA = [10, 11, 12] as const;
 export const TL_NAHORU = [13, 14, 15, 16, 17, 18] as const;
@@ -49,11 +48,11 @@ export const HL_MRK = 2;
 /** hl_mluvi (URoom.pas:398): talking head frames, cycled while a voice plays (0 = mouth closed). */
 export const HL_MLUVI = [0, 5, 6] as const;
 
-/** Which Tela body frame and Hlavy head frame to draw for a fish (headFrame 0 = no overlay). */
-export interface FishFrame {
-  bodyFrame: number;
-  headFrame: number;
-}
+/**
+ * Which Tela body frame and Hlavy head frame to draw for a fish — see
+ * `FishFrame` in roomWalk.ts, re-exported above. `TL_ZAKLAD` lives there too,
+ * because the resting `BASE_FRAME` the walk falls back to is derived from it.
+ */
 
 export interface RenderOptions {
   /** Engine frame counter; drives the water displacement. Default 0. */
@@ -71,8 +70,6 @@ export interface RenderOptions {
     cil: 'little' | 'big';
   }>;
 }
-
-const BASE_FRAME: FishFrame = { bodyFrame: TL_ZAKLAD[0], headFrame: 0 };
 
 /** Faithful wall bitmap for a room (defines the BMScreen dimensions). */
 function wallBaseOf(room: Room): FfrBitmap {
@@ -151,103 +148,45 @@ export function renderRoomBackgroundRgba(room: Room, art: ArtSource, opts: Rende
 }
 
 /**
- * Shared room compositor body — a faithful port of TRoom.Priprav, written once
- * against `CompositeTarget` so it can render into either the palette-indexed
- * `IndexedScreen` or the RGBA `RgbaScreen`.
+ * The faithful renderer's `RoomWalkSink` — a pure forwarder over the target and the
+ * art source. Every coordinate the walk emits is already native, which is exactly what
+ * `ArtSource` takes, so nothing is translated on the way through.
+ */
+function faithfulSink(screen: CompositeTarget, art: ArtSource): RoomWalkSink {
+  return {
+    background: (room, count) => {
+      // Wall + water-wobble background frames (Kresli2, URoom.pas:26223):
+      //   Bitmaps[BMP + afaze] (wall foreground) and Bitmaps[BgBMP + Bgfaze] (background).
+      // BgBMP is always 1 (URoom.pas:1238). `Bgfaze` is only ever set — by STEEL's red
+      // alert (URoom.pas:9983/9990) — to the same value it writes to the wall item's
+      // `afaze` (URoom.pas:9999), so in every shipped room `Bgfaze === wallItem.afaze`.
+      // Keying both frames off `wallItem.afaze` reproduces STEEL's whole-room red alert
+      // (afaze=0 elsewhere, so this is a no-op for every other room).
+      //
+      // The art source paints it — classic (palette) or enhanced (FFNG truecolor). The
+      // ZX / darkness / no-master cases delegate to classicBackground.
+      const faze = room.wallItem.afaze;
+      const wall = room.bitmaps[room.wallItem.bmp + faze] ?? wallBaseOf(room);
+      const bg = room.bitmaps[1 + faze] ?? room.bgBmp;
+      art.paintBackground(screen, room, wall, bg, count);
+    },
+    item: (room, item, index, sx, sy) => art.drawItem(screen, room, item, index, sx, sy),
+    fish: (room, which, item, sx, sy, frame) => art.drawFish(screen, room, which, item, sx, sy, frame),
+    // The target's own `mirror` primitive: a CPU pixel loop, or a GPU shader pass.
+    mirror: (_room, at) => screen.mirror(at.x, at.y, at.bmp.w, at.bmp.h),
+    rope: (_room, x1, y1, x2, y2, col) => screen.drawRope(x1, y1, x2, y2, col),
+  };
+}
+
+/**
+ * Render the room into a `CompositeTarget` — the palette-indexed `IndexedScreen`, the
+ * RGBA `RgbaScreen`, or the WebGL `GlScreen`. Structure comes from the shared
+ * `walkRoom`; this function adds only the fishing hooks, which the `ai` tier never
+ * draws (`aiRoomGateAllows` hands those frames back here) and which therefore have no
+ * business in the shared walk.
  */
 function renderInto(screen: CompositeTarget, room: Room, opts: RenderOptions, art: ArtSource): void {
-  const count = opts.count ?? 0;
-  const slide = opts.slide ?? 0;
-  const fishAnim = opts.fishAnim;
-
-  const wallBase = wallBaseOf(room);
-
-  // Wall + water-wobble background frames (Kresli2, URoom.pas:26223):
-  //   Bitmaps[BMP + afaze]  (wall foreground)  and  Bitmaps[BgBMP + Bgfaze]  (background).
-  // BgBMP is always 1 (URoom.pas:1238). `Bgfaze` is only ever set — by STEEL's red alert
-  // (URoom.pas:9983/9990) — to the same value it writes to the wall item's `afaze`
-  // (URoom.pas:9999), so in every shipped room `Bgfaze === wallItem.afaze`. Keying both
-  // frames off `wallItem.afaze` reproduces STEEL's whole-room red alert (afaze=0 elsewhere,
-  // so this is a no-op for every other room).
-  const faze = room.wallItem.afaze;
-  const wall = room.bitmaps[room.wallItem.bmp + faze] ?? wallBase;
-  const bg = room.bitmaps[1 + faze] ?? room.bgBmp;
-
-  // The art source paints the background — classic (palette) or enhanced (FFNG
-  // truecolor). The ZX / darkness / no-master cases delegate to classicBackground.
-  art.paintBackground(screen, room, wall, bg, count);
-
-  // specs[] anchors (KresliSpec, URoom.pas:25890-25903): effects drawn on top of
-  // the items. spec=1 = mirror (KresliZrcadlo reflection); spec=3 gear + spec=4
-  // lift = the ZDVIZ elevator rope. Captured at their slid screen positions during
-  // the item pass, then applied after all items are drawn.
-  let gearBmp: FfrBitmap | null = null;
-  let gearX = 0;
-  let gearY = 0;
-  let liftX = 0;
-  let liftY = 0;
-  let haveGear = false;
-  let haveLift = false;
-  let mirror: { x: number; y: number; w: number; h: number } | null = null;
-
-  // gspec=5 (WIN bonus level, URoom.pas:26259-26260): the animated fish body is drawn
-  // for the YOUNG fish (StartLittle/StartBig) — who sit still — while the controlled
-  // "old" fish (littleIdx/bigIdx) are drawn as their plain item sprites. Outside the
-  // bonus these both point at the same fish.
-  const bigFishIdx = room.gspec === 5 ? room.startBig : room.bigIdx;
-  const littleFishIdx = room.gspec === 5 ? room.startLittle : room.littleIdx;
-
-  for (let j = 1; j <= room.itemCount; j++) {
-    const it = room.items[j]!;
-    // Visibility (Priprav, URoom.pas:26251): normally an item with spec=11 is hidden
-    // (LODE's on-demand falling-ship sprite, PARTY window figures); `it.visible`
-    // covers other room-toggled cases. In a gspec=2 "darkness" room (CHODBA) the
-    // rule flips: only the two fish and items with spec=2 (the guard dogs' glowing
-    // eyes) are lit — everything else is swallowed by the dark, regardless of spec/visible.
-    if (room.gspec === 2) {
-      if (it.spec !== 2 && j !== room.littleIdx && j !== room.bigIdx) continue;
-    } else if (it.spec === 11 || !it.visible) {
-      continue;
-    }
-    const shift = it.dir !== Dir.no ? Math.round(slide * FSIZE) : 0;
-    const sx = shift * DX_DIR[it.dir]!;
-    const sy = shift * DY_DIR[it.dir]!;
-    if (it.spec === 1) {
-      const bm = room.bitmaps[it.bmp + it.afaze];
-      if (bm) mirror = { x: it.x * FSIZE + sx, y: it.y * FSIZE + sy, w: bm.w, h: bm.h };
-    } else if (it.spec === 3) {
-      gearBmp = room.bitmaps[it.bmp] ?? null;
-      gearX = it.x * FSIZE + sx;
-      gearY = it.y * FSIZE + sy;
-      haveGear = true;
-    } else if (it.spec === 4) {
-      liftX = it.x * FSIZE + sx;
-      liftY = it.y * FSIZE + sy;
-      haveLift = true;
-    }
-    if (j === bigFishIdx) {
-      // The young fish sit still in the bonus: resting pose, not the active animation.
-      art.drawFish(screen, room, 'big', it, sx, sy, room.gspec === 5 ? BASE_FRAME : (fishAnim?.big ?? BASE_FRAME));
-    } else if (j === littleFishIdx) {
-      art.drawFish(screen, room, 'little', it, sx, sy, room.gspec === 5 ? BASE_FRAME : (fishAnim?.little ?? BASE_FRAME));
-    } else {
-      art.drawItem(screen, room, it, j, sx, sy);
-    }
-  }
-
-  // The mirror reflection (KresliSpec spec=1 -> KresliZrcadlo, URoom.pas:25822): the
-  // fish drawn to the mirror's left are reflected across it, in-place. The target's
-  // own `mirror` primitive runs it (CPU pixel loop or GPU shader pass).
-  if (mirror) screen.mirror(mirror.x, mirror.y, mirror.w, mirror.h);
-
-  // The elevator cable: a double rope from the gear pulley (x0+58, y0+27) to the
-  // lift top (dx+43, dy), coloured by a pixel sampled from the gear bitmap at
-  // (col 1, row 58) — a faithful port of KresliSpec's spec=3 case (URoom.pas:25896).
-  if (haveGear && haveLift && gearBmp) {
-    const ci = 58 * gearBmp.w + 1;
-    const col = ci < gearBmp.pixels.length ? gearBmp.pixels[ci]! : 0;
-    screen.drawRope(gearX + 58, gearY + 27, liftX + 43, liftY, col);
-  }
+  walkRoom(faithfulSink(screen, art), room, opts.count ?? 0, opts.slide ?? 0, opts.fishAnim);
 
   // Hacky (KresliHacky, URoom.pas:25987): the fishing hooks, drawn on top of all.
   if (opts.hooks && opts.hooks.length > 0) drawHooks(screen, room, opts.hooks);
