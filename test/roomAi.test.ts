@@ -49,6 +49,7 @@ import { AiRoom } from '../src/render/roomAi.js';
 import { Canvas2dAiTarget, dissolveKeeps } from '../src/render/aiTarget.js';
 import type { AiTarget } from '../src/render/aiTarget.js';
 import { FSIZE as FSIZE_PX } from '../src/render/renderRoom.js';
+import { Dir } from '../src/core/dir.js';
 import { makeRoom } from './roomBuilder.js';
 import type { FfrBitmap } from '../src/data/ffr.js';
 
@@ -543,6 +544,31 @@ describe('AiRoom.draw drives the real compositor (recording context)', () => {
     expect(items.map((d) => d.dy)).toEqual([2, 2, 2, 2].map((c) => c * FSIZE_PX * S));
   });
 
+  it('applies the slide interpolation at S×, rounding the partial shift', () => {
+    // The AI half of the rule pinned in test/slide.test.ts: an item with a pending dir
+    // is offset by round(slide * FSIZE) along dx_dir/dy_dir (URoom.pas:62-63), and only
+    // THEN scaled by S. Hand-computed, not read back from the faithful renderer — the
+    // two paths share one walk, so comparing them proves nothing (see dissolveKeeps).
+    const at = (dir: number, slide: number): { dx: number; dy: number } => {
+      const { room, ai } = scene();
+      room.items[1]!.dir = dir as never;
+      const { ctx, draws } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
+      ai.draw(ctx, room, { ...frame, slide });
+      const d = draws.find((x) => (x.img as { tag: string }).tag === 'obj1')!;
+      return { dx: d.dx, dy: d.dy };
+    };
+    const rest = { dx: 2 * FSIZE_PX * S, dy: 2 * FSIZE_PX * S };
+    expect(at(Dir.no, 0.5)).toEqual(rest); // no pending move ⇒ no offset
+    // slide=0.5 ⇒ 0.5*15 = 7.5 ⇒ round = 8 native px ⇒ 8*S device px. Truncating would
+    // give 7 (28 device px), so this distinguishes the rule from its near misses.
+    expect(at(Dir.right, 0.5)).toEqual({ dx: rest.dx + 8 * S, dy: rest.dy });
+    expect(at(Dir.left, 0.5)).toEqual({ dx: rest.dx - 8 * S, dy: rest.dy });
+    expect(at(Dir.up, 0.5)).toEqual({ dx: rest.dx, dy: rest.dy - 8 * S });
+    // A whole cell at slide=1, and a non-boundary value to pin the FSIZE scale.
+    expect(at(Dir.down, 1)).toEqual({ dx: rest.dx, dy: rest.dy + FSIZE_PX * S });
+    expect(at(Dir.right, 0.4)).toEqual({ dx: rest.dx + 6 * S, dy: rest.dy });
+  });
+
   it('draws the background before any item', () => {
     const { room, ai } = scene();
     const { ctx, draws } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
@@ -551,6 +577,40 @@ describe('AiRoom.draw drives the real compositor (recording context)', () => {
     const bgIdx = draws.findIndex((d) => (d.img as { tag: string }).tag === 'bg');
     expect(bgIdx).toBeGreaterThanOrEqual(0);
     expect(bgIdx).toBeLessThan(firstItem);
+  });
+
+  it('applies the gspec=2 darkness visibility flip (only spec=2 items are lit)', () => {
+    // URoom.pas:26251 as the darkness rooms invert it: in gspec=2 the normal
+    // spec=11/!visible rule does not apply — instead ONLY the two fish and items with
+    // spec=2 (CHODBA's glowing dog eyes) are drawn, everything else is swallowed by the
+    // dark. The AI side had no pin for this at all; a mutation of the rule here left the
+    // whole suite green. This fixture has no fish, so exactly the spec=2 item survives.
+    const { room, ai } = scene();
+    room.gspec = 2;
+    room.items[2]!.spec = 2; // lit
+    // …and hidden. The darkness branch REPLACES the `spec === 11 || !visible` test
+    // rather than ANDing with it, so a lit item still draws even when the room has
+    // toggled it invisible. With a visible lit item this assertion could not tell the
+    // two readings apart.
+    room.items[2]!.visible = false;
+    room.items[3]!.visible = false; // ordinary + hidden: swallowed either way
+    const { ctx, draws } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
+    ai.draw(ctx, room, frame);
+    const tags = draws
+      .filter((d) => String((d.img as { tag: string }).tag).startsWith('obj'))
+      .map((d) => (d.img as { tag: string }).tag);
+    expect(tags).toEqual(['obj2']);
+  });
+
+  it('outside gspec=2 a spec=2 item is not special (control for the flip above)', () => {
+    const { room, ai } = scene();
+    room.items[2]!.spec = 2;
+    const { ctx, draws } = ctxRecorder(40 * FSIZE_PX * S, 20 * FSIZE_PX * S);
+    ai.draw(ctx, room, frame);
+    const tags = draws
+      .filter((d) => String((d.img as { tag: string }).tag).startsWith('obj'))
+      .map((d) => (d.img as { tag: string }).tag);
+    expect(tags).toEqual(['obj1', 'obj2', 'obj3', 'obj4']);
   });
 
   it('skips invisible items and spec=11 (the hidden LODE wreck)', () => {

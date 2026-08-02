@@ -25,14 +25,13 @@
  * all of which the faithful compositor must draw instead. classic/enhanced never
  * touch it.
  */
-import { Dir, DX_DIR, DY_DIR } from '../core/dir.js';
 import { delphiRound } from './framebuffer.js';
 import { Canvas2dAiTarget } from './aiTarget.js';
 import type { AiImage, AiTarget } from './aiTarget.js';
-import { FSIZE, TL_ZAKLAD, darkestIndex } from './renderRoom.js';
+import { darkestIndex } from './renderRoom.js';
+import { walkRoom, FSIZE, type RoomWalkSink, type FishFrame } from './roomWalk.js';
 import { FISH_BODY_FILE, FISH_HEAD_FILE, frameIndex } from './enhancedArtSource.js';
 import { withLoadSlot } from './loadSlot.js';
-import type { FishFrame } from './renderRoom.js';
 import type { Room, Item } from '../core/room.js';
 import type { FfrBitmap } from '../data/ffr.js';
 
@@ -89,7 +88,6 @@ export function aiRoomGateAllows(g: AiRoomGateInput): boolean {
   return true;
 }
 
-const BASE_FRAME: FishFrame = { bodyFrame: TL_ZAKLAD[0], headFrame: 0 };
 /** Staged skeleton body (FFR frame TL_KOSTRA=19, absent from FISH_BODY_FILE). */
 const SKELETON_FILE = 'body_skeleton_00.png';
 
@@ -344,84 +342,59 @@ export class AiRoom {
   }
 
   /**
-   * The room walk, shared by every backend: replays renderInto's background + item
-   * pass, only bigger — including the gspec=2 darkness fill and the spec=1/3/4 effect
-   * anchors. Emits primitives to `t`; see src/render/aiTarget.ts for why the seam is
-   * here rather than in a second copy of this method.
+   * Composite `room`+`f` into `t` at S×. The structure — background first, then items
+   * in z-order with the gspec=2 visibility flip, the gspec=5 fish swap, the slide
+   * interpolation and the spec=1/3/4 effect anchors — comes from the shared `walkRoom`
+   * (src/render/roomWalk.ts), which the faithful compositor replays too. This tier
+   * differs only in `AiSink` below: bigger art, RGBA instead of a palette plane, and
+   * every coordinate multiplied by `scale` on the way out.
    */
   drawInto(t: AiTarget, room: Room, f: AiRoomFrame): void {
+    walkRoom(this.sink(t), room, f.count, f.slide, f.fishAnim);
+  }
+
+  /**
+   * This tier's `RoomWalkSink` — a pure forwarder onto `t`, and the ONLY place the S×
+   * scale enters. The walk emits native coordinates (an item's cell origin plus its
+   * slide offset); everything below multiplies them out to backing-store pixels.
+   */
+  private sink(t: AiTarget): RoomWalkSink {
     const S = this.scale;
+    const px = (cell: number, shift: number): number => (cell * FSIZE + shift) * S;
+    return {
+      background: (room, count) => this.paintBackground(t, room, count),
+      item: (room, it, index, sx, sy) => this.drawItem(t, it, index, px(it.x, sx), px(it.y, sy), room),
+      fish: (room, which, it, sx, sy, frame) =>
+        this.drawFish(t, room, which, px(it.x, sx), px(it.y, sy), frame, it),
+      // No index plane to read back here, so the reflection is masked by the mirror's
+      // own ×S sprite instead — see drawMirror.
+      mirror: (_room, at) => this.drawMirror(t, at.x, at.y, at.bmp, this.spriteFor(at.item, at.index)),
+      rope: (room, x1, y1, x2, y2, col) => this.drawRope(t, room, x1, y1, x2, y2, col),
+    };
+  }
+
+  /**
+   * The wall-over-wobbled-background composite, or the gspec=2 darkness fill.
+   *
+   * VyplnMistnost (URoom.pas:26210): a darkness room is filled with the palette's
+   * near-black — no wall, no background. Only the lit items (spec=2, e.g. CHODBA's
+   * glowing dog eyes) and the fish silhouettes are drawn on top, so those are the
+   * parts worth having at S×.
+   */
+  private paintBackground(t: AiTarget, room: Room, count: number): void {
+    if (room.gspec === 2) {
+      const d = room.palette[darkestIndex(room.palette)] ?? { r: 0, g: 0, b: 0 };
+      t.fill(d.r, d.g, d.b);
+      return;
+    }
     const faze = room.wallItem.afaze;
     const bg = this.bg[Math.min(faze, this.bg.length - 1)]!;
     const wall = this.wall[Math.min(faze, this.wall.length - 1)]!;
-    if (room.gspec === 2) {
-      // VyplnMistnost (URoom.pas:26210): a darkness room is filled with the palette's
-      // near-black — no wall, no background. Only the lit items (spec=2, e.g. CHODBA's
-      // glowing dog eyes) and the fish silhouettes are drawn on top, so those are the
-      // parts worth having at S×.
-      const d = room.palette[darkestIndex(room.palette)] ?? { r: 0, g: 0, b: 0 };
-      t.fill(d.r, d.g, d.b);
-    } else {
-      const shifts = this.wobbleShifts(room, f.count);
-      // The composite depends only on the wall's animation phase and — when the room
-      // wobbles — the logic tick; the fish interpolate BETWEEN ticks, so a target that
-      // can cache the composite skips it on most frames.
-      t.background(`${faze}|${shifts === null ? 0 : f.count}`, bg, wall, shifts, S);
-    }
-
-    // gspec=5 (WIN bonus level): the fish BODY is drawn for the YOUNG fish
-    // (StartLittle/StartBig) — who sit still, hence BASE_FRAME below — while the
-    // controlled "old" pair render as plain item sprites. Same swap renderInto does.
-    const bigFishIdx = room.gspec === 5 ? room.startBig : room.bigIdx;
-    const littleFishIdx = room.gspec === 5 ? room.startLittle : room.littleIdx;
-    // spec=1 mirror anchor, captured during the item pass and applied after every
-    // item is drawn — exactly like renderInto's KresliSpec ordering. spec=3 (gear)
-    // and spec=4 (lift) likewise anchor the ZDVIZ elevator's double rope.
-    let mirror: { x: number; y: number; bmp: FfrBitmap; spr: ImageBitmap | null } | null = null;
-    let gear: { x: number; y: number; bmp: FfrBitmap } | null = null;
-    let lift: { x: number; y: number } | null = null;
-    for (let j = 1; j <= room.itemCount; j++) {
-      const it = room.items[j]!;
-      // In a gspec=2 darkness room the visibility rule flips: only the two fish and
-      // items with spec=2 (the lit ones) show — everything else is swallowed by the
-      // dark, regardless of spec/visible. Mirrors renderInto.
-      if (room.gspec === 2) {
-        if (it.spec !== 2 && j !== room.littleIdx && j !== room.bigIdx) continue;
-      } else if (it.spec === 11 || !it.visible) {
-        continue;
-      }
-      const shift = it.dir !== Dir.no ? Math.round(f.slide * FSIZE) : 0;
-      const sx = shift * DX_DIR[it.dir]!;
-      const sy = shift * DY_DIR[it.dir]!;
-      const x0 = (it.x * FSIZE + sx) * S;
-      const y0 = (it.y * FSIZE + sy) * S;
-      if (it.spec === 1) {
-        const bm = room.bitmaps[it.bmp + it.afaze];
-        if (bm) mirror = { x: it.x * FSIZE + sx, y: it.y * FSIZE + sy, bmp: bm, spr: this.spriteFor(it, j) };
-      } else if (it.spec === 3) {
-        const bm = room.bitmaps[it.bmp];                       // gear pulley (no afaze)
-        if (bm) gear = { x: it.x * FSIZE + sx, y: it.y * FSIZE + sy, bmp: bm };
-      } else if (it.spec === 4) {
-        lift = { x: it.x * FSIZE + sx, y: it.y * FSIZE + sy }; // the cabin below
-      }
-      // In the bonus the YOUNG fish are the ones drawn as fish, and they sit still —
-      // renderInto forces BASE_FRAME there, so the live animation of the (elsewhere
-      // controlled) old pair must not leak onto them.
-      const bonus = room.gspec === 5;
-      if (j === bigFishIdx) this.drawFish(t, room, 'big', x0, y0, bonus ? BASE_FRAME : f.fishAnim.big, it);
-      else if (j === littleFishIdx) this.drawFish(t, room, 'little', x0, y0, bonus ? BASE_FRAME : f.fishAnim.little, it);
-      else this.drawItem(t, it, j, x0, y0, room);
-    }
-    if (mirror) this.drawMirror(t, mirror.x, mirror.y, mirror.bmp, mirror.spr);
-    // The elevator cable, after the mirror — KresliSpec's spec=3 case: a double rope
-    // from the gear pulley (x+58, y+27) to the lift top (x+43, y), coloured by the
-    // pixel sampled from the gear bitmap at (col 1, row 58).
-    if (gear && lift) {
-      const g = gear, l = lift;
-      const ci = 58 * g.bmp.w + 1;
-      const col = ci < g.bmp.pixels.length ? g.bmp.pixels[ci]! : 0;
-      this.drawRope(t, room, g.x + 58, g.y + 27, l.x + 43, l.y, col);
-    }
+    const shifts = this.wobbleShifts(room, count);
+    // The composite depends only on the wall's animation phase and — when the room
+    // wobbles — the logic tick; the fish interpolate BETWEEN ticks, so a target that
+    // can cache the composite skips it on most frames.
+    t.background(`${faze}|${shifts === null ? 0 : count}`, bg, wall, shifts, this.scale);
   }
 
   /**
