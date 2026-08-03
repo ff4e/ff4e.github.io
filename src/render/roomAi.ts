@@ -128,7 +128,10 @@ export interface AiWreckSurface {
  * written pixel opaque additionally makes the getImageData/putImageData round-trip that
  * feeds `bg` lossless, since premultiplying by 1 is the identity.
  *
- * `artW`/`artH` are the FULL ×S art size, for the same clipping guards syncWreck applies.
+ * Delphi's `y > 436` fall cut-off is deliberately NOT repeated here. `applyWreckSwap`
+ * applies it while RECORDING, so no swap can carry a pixel past it — restating the rule
+ * would add a branch that no test can reach and a second place for it to drift.
+ * `artW`/`artH` are the FULL ×S art size and clip to the buffer, which is a real bound.
  */
 export function applyWreckSwapScaled(
   bg: AiWreckSurface,
@@ -145,7 +148,7 @@ export function applyWreckSwapScaled(
     const i = Math.floor(pixel / swap.width);
     const j = pixel % swap.width;
     const dy = swap.y + i;
-    if (dy < 0 || dy > 436 || dy * S >= artH) continue;
+    if (dy < 0 || dy * S >= artH) continue;
     if (i >= nativeSpriteH || j >= nativeSpriteW) continue;
     const dx = swap.x + j - FFR_EXTRA;
     if (dx < 0 || dx * S >= artW) continue;

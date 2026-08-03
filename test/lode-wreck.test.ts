@@ -410,6 +410,39 @@ describe('LODE falling wreck at ×S (the `ai` tier)', () => {
     }
   });
 
+  it('clips to the ×S art rather than writing past its edges', () => {
+    // The window handed to a swap is derived from the art size, so a swap that reaches
+    // past the art must be cut at the art, not at the window. Nothing in a shipped room
+    // reaches this — LODE's fall band is well inside its background — but it is the only
+    // bound the function itself owns (Delphi's y>436 cut-off is applied when the swap is
+    // RECORDED, so this must not restate it), and an unbounded write here corrupts
+    // whatever the ×S buffer neighbours.
+    const room = wreckRoom();
+    const script = primeDrop(room);
+    const pal = room.palette;
+    script.tickShodLod();
+    const swap = room.wreckSwaps.find((sw) => sw.pixels.length > 0)!;
+
+    // Art declared as ending ABOVE this swap's row (1) and LEFT of its column (10).
+    const shortArt = () => scaledArt(room.bitmaps[1]!, pal, FFR_EXTRA, 0, W, H);
+    const pristine = scaledArt(room.bitmaps[1]!, pal, FFR_EXTRA, 0, W, H);
+    const spr = () => scaledArt(room.bitmaps[3]!, pal, 0, 0, 2, 1);
+
+    const tooLow = shortArt();
+    applyWreckSwapScaled(tooLow, spr(), swap, S, tooLow.w, 1 * S); // art ends at native row 1
+    expect(Buffer.from(tooLow.data).equals(Buffer.from(pristine.data))).toBe(true);
+
+    const tooFarRight = shortArt();
+    applyWreckSwapScaled(tooFarRight, spr(), swap, S, 10 * S, tooFarRight.h); // ends at col 10
+    expect(Buffer.from(tooFarRight.data).equals(Buffer.from(pristine.data))).toBe(true);
+
+    // ...and with the real art size it DOES write, so the two assertions above are not
+    // just observing a swap that does nothing.
+    const full = shortArt();
+    applyWreckSwapScaled(full, spr(), swap, S, full.w, full.h);
+    expect(Buffer.from(full.data).equals(Buffer.from(pristine.data))).toBe(false);
+  });
+
   it('confines a swap to the ship footprint (the rect the canvas actually reads back)', () => {
     const room = wreckRoom();
     const script = primeDrop(room);
