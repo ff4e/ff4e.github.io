@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Script } from '../src/core/script.js';
-import { Room } from '../src/core/room.js';
+import { Room, forEachWreckPixel, wreckFrame, wreckObject, type WreckSwap } from '../src/core/room.js';
 import { StepEngine } from '../src/core/stepEngine.js';
 import { FFR_EXTRA, Kind, type FfrBitmap, type FfrItem, type FfrRoom } from '../src/data/ffr.js';
 import { LODE_ROOM } from '../src/rooms/lode.js';
@@ -11,7 +11,7 @@ import {
   type EnhancedObject,
 } from '../src/render/enhancedArtSource.js';
 import { renderRoomRgba, renderRoomState } from '../src/render/renderRoom.js';
-import { applyWreckSwapScaled, wreckSwapRect, type AiWreckSurface } from '../src/render/roomAi.js';
+import { applyWreckBatch, applyWreckSwapScaled, planWreckBatch, wreckSwapRect, type AiWreckSurface } from '../src/render/roomAi.js';
 import { rgbaAt } from './rgbaAt.js';
 
 const W = 690;
@@ -29,7 +29,7 @@ function palette() {
   return Array.from({ length: 256 }, (_, i) => ({ r: i, g: (i * 3) & 255, b: 255 - i }));
 }
 
-function wreckRoom(): Room {
+function wreckRoom(shipH = 1): Room {
   const wall: FfrItem = {
     xStart: 0,
     yStart: 0,
@@ -54,10 +54,22 @@ function wreckRoom(): Room {
     kind: Kind.light,
     fields: [{ x: 0, y: 0 }],
   };
-  const shipFrame = (): FfrBitmap => ({
+  // Phase 0 is the original 2x1 [SHIP, SHIP_2] sprite every existing assertion is written
+  // against. The other four carry DISTINCT colours so a replay that ignores `phase` and
+  // always reaches for frame 0 produces different pixels; `shipH` makes the sprite tall
+  // enough for a tick's erase and draw footprints to OVERLAP, which is what makes the
+  // order swaps are applied in observable at all.
+  const shipFrame = (phase: number): FfrBitmap => ({
     w: 2,
-    h: 1,
-    pixels: new Uint8Array([SHIP, SHIP_2]),
+    h: shipH,
+    // Every pixel distinct beyond row 0, deliberately. Identical rows make the exchange
+    // order-INDEPENDENT (swapping a row with an identical one is a no-op either way), and
+    // a fixture like that cannot see a batch applied backwards. Row 0 keeps the original
+    // [SHIP, SHIP_2] so every assertion written against the 1-row ship is untouched.
+    pixels: new Uint8Array(
+      Array.from({ length: 2 * shipH }, (_, i) =>
+        phase === 0 ? (i < 2 ? [SHIP, SHIP_2][i]! : 100 + i) : 30 + phase * 10 + i),
+    ),
     padded: 0,
   });
   const item = (index: number): FfrItem => ({
@@ -91,11 +103,11 @@ function wreckRoom(): Room {
       null,
       background,
       solid(W, H, MASK),
-      shipFrame(),
-      shipFrame(),
-      shipFrame(),
-      shipFrame(),
-      shipFrame(),
+      shipFrame(0),
+      shipFrame(1),
+      shipFrame(2),
+      shipFrame(3),
+      shipFrame(4),
       // The real LODE mask is only 130 rows even though Delphi addresses row 135
       // for screen y=436; the port safely treats that out-of-range row as blocked.
       solid(W, 130, MASK),
@@ -112,9 +124,9 @@ function wreckRoom(): Room {
   return room;
 }
 
-function primeDrop(room: Room): Script {
+function primeDrop(room: Room, phase = 0): Script {
   const script = new Script(room, () => 0);
-  script.padalod = 100;
+  script.padalod = phase + 100;   // shodLod stores kterou+100; the first tick strips the 100
   script.lodniX = 20;
   script.lodniY = 0;
   script.lodniDX = 0;
@@ -136,7 +148,7 @@ function enhancedArt(): EnhancedArt {
   return { w: W, h: H, wall: [wall], bg: [bg] };
 }
 
-const wreckObject: EnhancedObject = {
+const wreckShipArt: EnhancedObject = {
   item: 15,
   frames: Array.from({ length: 5 }, () => ({
     w: 2,
@@ -179,7 +191,7 @@ describe('LODE falling wreck', () => {
   it('replays the same destructive swaps through the enhanced compositor', () => {
     const room = wreckRoom();
     const script = primeDrop(room);
-    const source = new EnhancedArtSource(room.palette, enhancedArt(), [wreckObject], null);
+    const source = new EnhancedArtSource(room.palette, enhancedArt(), [wreckShipArt], null);
 
     script.tickShodLod();
     let frame = renderRoomRgba(room, source);
@@ -196,7 +208,7 @@ describe('LODE falling wreck', () => {
 
     const replayed = renderRoomRgba(
       room,
-      new EnhancedArtSource(room.palette, enhancedArt(), [wreckObject], null),
+      new EnhancedArtSource(room.palette, enhancedArt(), [wreckShipArt], null),
     );
     expect(Buffer.from(replayed.rgba).equals(Buffer.from(frame.rgba))).toBe(true);
 
@@ -260,7 +272,8 @@ describe('LODE falling wreck', () => {
 // block expansion, the direction of the exchange and the erosion trail all at once.
 //
 // It is asserted MID-FALL — after the second tick, the state the test above proves has an
-// eroded sprite and a trail. A resting LODE has an empty swap list and proves nothing.
+// eroded sprite and a trail — and again over the whole fall. A resting LODE has an empty
+// swap list and proves nothing.
 // ---------------------------------------------------------------------------
 
 const S = 4;
@@ -345,11 +358,12 @@ describe('LODE falling wreck at ×S (the `ai` tier)', () => {
   });
 
   it('stays byte-exact for the WHOLE fall, including the y=436 clear-out row', () => {
-    // The mid-fall case above never reaches the bottom of the fall band, so on its own it
-    // leaves Delphi's `dy > 436` cut-off unpinned — and that guard is a magic number the
-    // engine and this replay both carry. Running to padalod = -1 walks the ship through
-    // every row it can touch, so a wrong cut-off (or a lost final erase pass) shows up as
-    // a background that no longer matches the faithful one.
+    // The mid-fall case above never reaches the bottom of the fall band. Running to
+    // padalod = -1 walks the ship through every row it can touch, including the final
+    // off-screen pass that records no pixels at all, so a lost last erase — or any drift
+    // in how the engine's `y > 436` cut-off interacts with the replay, which deliberately
+    // does not restate it — shows up as a background that no longer matches the faithful
+    // one.
     const room = wreckRoom();
     const script = primeDrop(room);
     const pal = room.palette;
@@ -474,5 +488,320 @@ describe('LODE falling wreck at ×S (the `ai` tier)', () => {
     expect(bgArt.data[o + 3]).toBe(255);
     expect(bgArt.data[o]).toBe(pal[SHIP]!.r); // the RGB still came from the sprite
     expect(spr.data[3]).toBe(255);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The ×S replay AS PRODUCTION RUNS IT: a windowed readback of several swaps at once.
+//
+// The sweeps above call applyWreckSwapScaled with a full-art surface (`ox`/`oy` = 0) and
+// one swap at a time. That is not what ships. `AiRoom.syncWreck` reads back only the UNION
+// of the pending swaps' footprints, applies them all into that one sub-rectangle, and
+// writes it back — so the `- bg.ox` / `- bg.oy` translation and the union bounds are the
+// coordinate system the game actually uses, and they were reachable only from the browser
+// probe. Replaying through the same shape here puts them under the byte-exact faithful
+// oracle instead.
+// ---------------------------------------------------------------------------
+
+/** Copy a sub-rectangle out of a ×S surface, as syncWreck's getImageData does. */
+function windowOf(src: AiWreckSurface, x: number, y: number, w: number, h: number): AiWreckSurface {
+  const data = new Uint8ClampedArray(w * h * 4);
+  for (let r = 0; r < h; r++) {
+    const from = ((y + r) * src.w + x) * 4;
+    data.set(src.data.subarray(from, from + w * 4), r * w * 4);
+  }
+  return { data, w, h, ox: x, oy: y };
+}
+
+/** Write a window back, as syncWreck's putImageData does. */
+function blitBack(dst: AiWreckSurface, win: AiWreckSurface): void {
+  for (let r = 0; r < win.h; r++) {
+    const to = ((win.oy + r) * dst.w + win.ox) * 4;
+    dst.data.set(win.data.subarray(r * win.w * 4, (r + 1) * win.w * 4), to);
+  }
+}
+
+/**
+ * A replayer that consumes `room.wreckSwaps` exactly as `AiRoom.syncWreck` does: plan the
+ * pending batch, read back the ONE window that covers it, apply the batch into that
+ * window, write it back, advance the cursor.
+ *
+ * It drives `planWreckBatch` and `applyWreckBatch` themselves rather than reimplementing
+ * them, so the rules they own — the union rect, the cursor, and above all the ORDER swaps
+ * are applied in — are under test here and not merely mirrored.
+ *
+ * Call it after each tick to reproduce the shipping rhythm (one pass per frame, so a
+ * batch is a tick's erase-here / draw-one-row-down pair), or once at the end to check that
+ * batching is an optimisation rather than a behaviour.
+ */
+function makeReplayer(bg: AiWreckSurface, sprites: Map<number, AiWreckSurface>) {
+  let cursor = 0;
+  return (swaps: readonly WreckSwap[]): void => {
+    const batch = planWreckBatch(swaps, cursor, (phase) => sprites.get(phase) ?? null, S, bg.w, bg.h);
+    if (batch.rect) {
+      const win = windowOf(bg, batch.rect.x, batch.rect.y, batch.rect.w, batch.rect.h);
+      applyWreckBatch(win, batch.pending, S, bg.w, bg.h);
+      blitBack(bg, win);
+    }
+    cursor = batch.cursor;
+  };
+}
+
+/** Every ×S pixel of `art` must equal the faithful renderer's native pixel under it. */
+function expectMatchesFaithful(art: AiWreckSurface, faithful: ReturnType<typeof renderRoomRgba>): void {
+  let bad = 0;
+  let first = '';
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const want = rgbaAt(faithful, x, y);
+      for (let by = 0; by < S; by++) {
+        for (let bx = 0; bx < S; bx++) {
+          const o = ((y * S + by) * art.w + x * S + bx) * 4;
+          if (
+            art.data[o] !== want.r || art.data[o + 1] !== want.g ||
+            art.data[o + 2] !== want.b || art.data[o + 3] !== 255
+          ) {
+            if (!first) first = `native (${x},${y}) block (${bx},${by}): got ${art.data[o]},${art.data[o + 1]},${art.data[o + 2]} want ${want.r},${want.g},${want.b}`;
+            bad++;
+          }
+        }
+      }
+    }
+  }
+  expect(first).toBe('');
+  expect(bad).toBe(0);
+}
+
+describe('LODE wreck: the ×S replay as syncWreck actually runs it', () => {
+  /**
+   * Copy the room's art BEFORE anything falls. `Room` clones a bitmap on its first
+   * destructive write, so reading `room.bitmaps` after a tick hands back the already-
+   * wrecked pixels — staging from those compares the replay against itself and passes
+   * whatever the replay does.
+   */
+  function pristine(room: Room) {
+    const copy = (b: FfrBitmap): FfrBitmap => ({ ...b, pixels: b.pixels.slice() });
+    return {
+      pal: room.palette,
+      bg: copy(room.bitmaps[1]!),
+      ships: Array.from({ length: 5 }, (_, phase) => copy(room.bitmaps[3 + phase]!)),
+    };
+  }
+
+  /** A fresh ×S staging of that pristine art: background plus the per-phase sprite set. */
+  function stage(art: ReturnType<typeof pristine>): { bg: AiWreckSurface; sprites: Map<number, AiWreckSurface> } {
+    const sprites = new Map<number, AiWreckSurface>();
+    art.ships.forEach((b, phase) => sprites.set(phase, scaledArt(b, art.pal, 0, 0, b.w, b.h)));
+    return { bg: scaledArt(art.bg, art.pal, FFR_EXTRA, 0, W, H), sprites };
+  }
+
+  it('is byte-exact when replayed tick by tick through WINDOWED readbacks', () => {
+    // A 3-row ship falling one row per tick makes a tick's erase (here) and draw (one row
+    // down) footprints OVERLAP while sitting at DIFFERENT positions, which is what makes
+    // the order they are applied in observable. Replaying per tick is also the shipping
+    // rhythm: syncWreck runs once per frame, so a batch is exactly that pair.
+    const room = wreckRoom(3);
+    const script = primeDrop(room);
+    const { bg, sprites } = stage(pristine(room));
+    const replay = makeReplayer(bg, sprites);
+
+    for (let t = 0; t < 6; t++) {
+      script.tickShodLod();
+      replay(room.wreckSwaps);
+    }
+    expect(room.wreckSwaps.length).toBeGreaterThan(6);
+    expectMatchesFaithful(bg, renderRoomRgba(room, new ClassicArtSource(room.palette)));
+  });
+
+  it('gives the same result however the pending swaps are batched', () => {
+    // syncWreck batches whatever is pending, which is two swaps per tick in flight but can
+    // be more after a paused frame. Batching must be an optimisation, never a behaviour:
+    // one window for six swaps has to land the same pixels as six windows of one.
+    const room = wreckRoom(3);
+    const script = primeDrop(room);
+    const art = pristine(room);
+    for (let t = 0; t < 6; t++) script.tickShodLod();
+
+    const stepwise = stage(art);
+    const stepReplay = makeReplayer(stepwise.bg, stepwise.sprites);
+    for (let k = 1; k <= room.wreckSwaps.length; k++) stepReplay(room.wreckSwaps.slice(0, k));
+
+    const atOnce = stage(art);
+    makeReplayer(atOnce.bg, atOnce.sprites)(room.wreckSwaps);
+
+    expect(Buffer.from(atOnce.bg.data).equals(Buffer.from(stepwise.bg.data))).toBe(true);
+    expectMatchesFaithful(stepwise.bg, renderRoomRgba(room, new ClassicArtSource(room.palette)));
+  });
+
+  it('replays the phase each swap recorded, not always the first sprite', () => {
+    // Every other test drops phase 0, so a replay that ignored `swap.phase` entirely would
+    // look perfect. The five shipped ship sprites differ in both art and size.
+    const room = wreckRoom(3);
+    const script = primeDrop(room, 3);
+    const art = pristine(room);
+    for (let t = 0; t < 5; t++) script.tickShodLod();
+    expect(room.wreckSwaps.every((sw) => sw.phase === 3)).toBe(true);
+
+    const { bg, sprites } = stage(art);
+    makeReplayer(bg, sprites)(room.wreckSwaps);
+    expectMatchesFaithful(bg, renderRoomRgba(room, new ClassicArtSource(room.palette)));
+
+    // ...and the fixture really does distinguish the phases, so the sweep above is a test.
+    expect(sprites.get(3)!.data[0]).not.toBe(sprites.get(0)!.data[0]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// planWreckBatch — what a syncWreck pass applies, in what order, and how far the cursor
+// is allowed to move. Extracted from syncWreck precisely so it can be tested: the method
+// itself needs a canvas, and vitest runs in node with no DOM.
+//
+// The cursor rules matter more than they look. Consuming a swap that was never applied
+// loses its damage permanently and silently, and because the exchange is destructive and
+// order-dependent, applying a LATER swap over a skipped earlier one is worse than doing
+// nothing — the background ends up wrong rather than merely incomplete.
+// ---------------------------------------------------------------------------
+describe('planWreckBatch (roomAi.ts)', () => {
+  const surface = (w: number, h: number): AiWreckSurface =>
+    ({ data: new Uint8ClampedArray(w * h * 4), w, h, ox: 0, oy: 0 });
+  const swap = (y: number, phase = 0, pixels: number[] = [0, 1]): WreckSwap =>
+    ({ x: 20, y, phase, width: 2, pixels });
+  const ART_W = W * S, ART_H = H * S;
+  const plan = (swaps: WreckSwap[], from: number, spriteFor: (p: number) => AiWreckSurface | null) =>
+    planWreckBatch(swaps, from, spriteFor, S, ART_W, ART_H);
+  const always = () => surface(2 * S, 1 * S);
+
+  it('keeps the recorded order and unions every footprint into one rect', () => {
+    const swaps = [swap(1), swap(2), swap(3)];
+    const b = plan(swaps, 0, always);
+    expect(b.pending.map((p) => p.swap)).toEqual(swaps);      // order IS the rule
+    expect(b.cursor).toBe(3);
+    // Columns 10..11 native for all three; rows 1..3 plus the sprite's one row.
+    expect(b.rect).toEqual({ x: 10 * S, y: 1 * S, w: 2 * S, h: 3 * S });
+  });
+
+  it('consumes swaps that changed nothing without drawing', () => {
+    // applyWreckSwap records the final off-screen pass with an empty pixel list; retrying
+    // it forever would mean the cursor never advances again.
+    const b = plan([swap(1, 0, []), swap(2, 0, [])], 0, always);
+    expect(b.pending).toEqual([]);
+    expect(b.rect).toBeNull();
+    expect(b.cursor).toBe(2);
+  });
+
+  it('STOPS at a swap whose sprite is unavailable, and does not consume it', () => {
+    // The bug this guards: advancing past an unresolvable swap drops its damage for good,
+    // so a transient failure (a canvas context the browser declined) would permanently
+    // corrupt the room. Stopping means the next frame retries.
+    const swaps = [swap(1, 0), swap(2, 1), swap(3, 0)];
+    const b = plan(swaps, 0, (phase) => (phase === 1 ? null : always()));
+    expect(b.pending.map((p) => p.swap)).toEqual([swaps[0]]);
+    expect(b.cursor).toBe(1);                                  // parked ON the failure
+    // ...and once the sprite is available the rest is replayed, still in order.
+    const again = plan(swaps, b.cursor, always);
+    expect(again.pending.map((p) => p.swap)).toEqual([swaps[1], swaps[2]]);
+    expect(again.cursor).toBe(3);
+  });
+
+  it('resumes from the cursor rather than replaying the history', () => {
+    const swaps = [swap(1), swap(2), swap(3)];
+    const b = plan(swaps, 2, always);
+    expect(b.pending.map((p) => p.swap)).toEqual([swaps[2]]);
+    expect(b.cursor).toBe(3);
+    expect(plan(swaps, 3, always).pending).toEqual([]);         // nothing left to do
+  });
+
+  it('sizes the union from EACH swap\'s own sprite, which differ per phase', () => {
+    // The five shipped ship sprites are 195x127 down to 106x77. Unioning with one sprite's
+    // size would leave a taller or wider swap partly outside the window it is applied into.
+    const big = surface(8 * S, 6 * S);
+    const small = surface(2 * S, 1 * S);
+    const b = plan([swap(1, 0), swap(1, 1)], 0, (p) => (p === 0 ? small : big));
+    expect(b.rect).toEqual({ x: 10 * S, y: 1 * S, w: 8 * S, h: 6 * S });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The two bindings every wreck replay depends on (core/room.ts). Both are silent when
+// wrong — the wrong item renders an undamaged room, the wrong phase renders a correctly
+// placed wreck in another ship's colours — and neither is visible to a check based on
+// WHERE the damage landed, which is what the browser probe compares. So they are pinned
+// here, on the rule itself.
+// ---------------------------------------------------------------------------
+describe('wreck object/frame binding (core/room.ts)', () => {
+  const objects = [
+    { item: 1, frames: ['other-a', 'other-b'] },
+    { item: 15, frames: ['ship0', 'ship1', 'ship2', 'ship3', 'ship4'] },
+  ];
+  const ITEM_COUNT = 16; // the ship is itemCount - 1, the mask is one past it
+
+  it('binds the ship to item itemCount - 1', () => {
+    expect(wreckObject(objects, ITEM_COUNT)?.item).toBe(15);
+    expect(wreckObject(objects, ITEM_COUNT)?.frames).toHaveLength(5);
+    expect(wreckObject(objects, 2)?.item).toBe(1);          // follows itemCount, not a constant
+    expect(wreckObject(objects, 99)).toBeNull();            // absent ⇒ no replay, not a throw
+    expect(wreckObject([], ITEM_COUNT)).toBeNull();
+  });
+
+  it('selects the frame the swap phase names, not the first one', () => {
+    // The mutation this kills: `frames[0]` instead of `frames[phase]`. Every fall uses ONE
+    // phase for its whole duration, so a tier that ignored `phase` still produces damage in
+    // exactly the right place — just drawn from the wrong ship.
+    expect(wreckFrame(objects, ITEM_COUNT, 0)).toBe('ship0');
+    expect(wreckFrame(objects, ITEM_COUNT, 3)).toBe('ship3');
+    expect(wreckFrame(objects, ITEM_COUNT, 4)).toBe('ship4');
+    expect(wreckFrame(objects, ITEM_COUNT, 5)).toBeNull();  // past the end ⇒ null, not undefined
+    expect(wreckFrame(objects, 99, 0)).toBeNull();
+  });
+
+  it('agrees with the room the engine actually builds', () => {
+    // Ties the constants above to the real fixture rather than to a guess: LODE stages the
+    // ship under item 15 with itemCount 16, and `applyWreckSwap` reads items[itemCount-1]
+    // as the ship and items[itemCount] as the mask.
+    const room = wreckRoom();
+    expect(room.itemCount).toBe(16);
+    expect(room.items[room.itemCount - 1]).toBe(room.items[15]);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// forEachWreckPixel — the shared decode both replays read a recorded swap through.
+// Its placement and its offset arithmetic are covered by the byte-exact sweeps above (a
+// mutation of either turns them red). What those cannot reach is the sprite-bounds guard:
+// a swap is always replayed against the same phase's sprite it was recorded from, so the
+// sizes agree and the guard never fires in a shipped room. It still has to be there —
+// neither replay bounds-checks the sprite offset it computes from `i`/`j`, so a staged
+// sprite smaller than the recording bitmap would read and write past the end of it.
+// ---------------------------------------------------------------------------
+describe('forEachWreckPixel (core/room.ts)', () => {
+  const collect = (swap: WreckSwap, w: number, h: number) => {
+    const out: [number, number, number, number][] = [];
+    forEachWreckPixel(swap, w, h, (i, j, dx, dy) => out.push([i, j, dx, dy]));
+    return out;
+  };
+
+  it('decodes row-major over swap.width and unpads the background column', () => {
+    // pixel 5 with width 2 => row 2, col 1; the background is stored with FFR_EXTRA
+    // columns of padding each side, so column x+j is art column x+j-FFR_EXTRA.
+    expect(collect({ x: 20, y: 7, phase: 0, width: 2, pixels: [0, 5] }, 2, 3)).toEqual([
+      [0, 0, 20 - FFR_EXTRA, 7],
+      [2, 1, 21 - FFR_EXTRA, 9],
+    ]);
+  });
+
+  it('skips any pixel that falls outside the REPLAYING sprite', () => {
+    // Recorded against a 4-wide, 3-tall bitmap; replayed against a 2x1 sprite. Only the
+    // pixels inside the smaller sprite may be emitted — the rest would index past its end.
+    const swap = { x: 20, y: 0, phase: 0, width: 4, pixels: [0, 1, 2, 3, 4, 8] } as WreckSwap;
+    expect(collect(swap, 4, 3).length).toBe(6);        // all of them fit the real bitmap
+    expect(collect(swap, 2, 1)).toEqual([              // ...but not a 2x1 sprite
+      [0, 0, 20 - FFR_EXTRA, 0],
+      [0, 1, 21 - FFR_EXTRA, 0],
+    ]);
+  });
+
+  it('emits nothing for a swap that changed nothing', () => {
+    expect(collect({ x: 20, y: 3, phase: 0, width: 2, pixels: [] }, 2, 1)).toEqual([]);
   });
 });

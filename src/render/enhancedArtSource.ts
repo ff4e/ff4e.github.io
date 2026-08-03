@@ -12,12 +12,13 @@
  * per element, whether it has truecolor art or falls back to classic.
  */
 import { FSIZE, classicBackground, classicItem, classicFish } from './renderRoom.js';
-import { buildPaletteLut } from './artSource.js';
+import { buildPaletteLut, wreckDamage, type WreckDamage } from './artSource.js';
 import { isTruecolorTarget } from './framebuffer.js';
 import type { ArtSource } from './artSource.js';
 import type { FishFrame } from './renderRoom.js';
 import type { CompositeTarget } from './framebuffer.js';
-import { FFR_EXTRA, type FfrPaletteEntry, type FfrBitmap } from '../data/ffr.js';
+import { type FfrPaletteEntry, type FfrBitmap } from '../data/ffr.js';
+import { forEachWreckPixel, wreckObject } from '../core/room.js';
 import type { Room, Item } from '../core/room.js';
 
 /**
@@ -219,31 +220,22 @@ export class EnhancedArtSource implements ArtSource {
   }
 
   /**
-   * Test/debug: the bounding box, in native px, of everything the wreck has changed in
-   * this source's private background copy — or null if it has changed nothing.
+   * Test/debug: what the wreck has changed in this source's private background copy, in
+   * native px — or null if it has changed nothing.
    *
-   * The `ai` tier replays the SAME swap history into ×S art through an independent
-   * implementation (AiRoom.syncWreck). Comparing the two footprints on the real shipped
-   * art is a cross-implementation check that neither tier's own tests can be: this one
-   * predates the ×S replay and knows nothing about it.
+   * The `ai` tier replays the SAME recorded history into ×S art through a separate
+   * implementation (AiRoom.syncWreck). Comparing the two damage reports on the real
+   * shipped art is a cross-implementation check neither tier's own tests can be: this one
+   * predates the ×S replay and knows nothing about it. Both read the same recorded
+   * history, so it validates the two REPLAYS against each other, not the recording —
+   * `test/lode-wreck.test.ts` pins the recording against the faithful renderer.
    */
-  wreckDamageRect(): { x: number; y: number; w: number; h: number } | null {
+  wreckDamageRect(): WreckDamage | null {
     const art = this.art;
     const now = this.wreckBackgrounds?.[0];
     const was = art?.bg[0];
     if (!art || !now || !was) return null;
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (let y = 0; y < art.h; y++) {
-      for (let x = 0; x < art.w; x++) {
-        const o = (y * art.w + x) * 4;
-        if (now[o] === was[o] && now[o + 1] === was[o + 1] && now[o + 2] === was[o + 2]) continue;
-        if (x < x0) x0 = x;
-        if (y < y0) y0 = y;
-        if (x > x1) x1 = x;
-        if (y > y1) y1 = y;
-      }
-    }
-    return x1 < x0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+    return wreckDamage(now, was, art.w, art.h, 1);
   }
 
   /**
@@ -258,9 +250,9 @@ export class EnhancedArtSource implements ArtSource {
     if (!currentBg || !art || this.wreckCursor >= swaps.length) return;
 
     if (!this.wreckSprites) {
-      const wreckObject = this.objects.find((obj) => obj.item === room.itemCount - 1);
-      if (!wreckObject) return;
-      this.wreckSprites = wreckObject.frames.map((frame) => ({ ...frame, rgba: frame.rgba.slice() }));
+      const ship = wreckObject(this.objects, room.itemCount);
+      if (!ship) return;
+      this.wreckSprites = ship.frames.map((frame) => ({ ...frame, rgba: frame.rgba.slice() }));
     }
 
     // Publish a new immutable snapshot so GlScreen's identity cache re-uploads it.
@@ -270,22 +262,20 @@ export class EnhancedArtSource implements ArtSource {
       const op = swaps[this.wreckCursor]!;
       const sprite = this.wreckSprites[op.phase];
       if (!sprite) continue;
-      for (const pixel of op.pixels) {
-        const i = Math.floor(pixel / op.width);
-        const j = pixel % op.width;
-        const dy = op.y + i;
-        if (dy < 0 || dy > 436 || dy >= art.h) continue;
-        if (i >= sprite.h || j >= sprite.w) continue;
+      // How a recorded swap DECODES into positions is shared with the ×S replay
+      // (forEachWreckPixel, core/room.ts). Only this tier's art bounds and its
+      // four-channel exchange live here.
+      forEachWreckPixel(op, sprite.w, sprite.h, (i, j, dx, dy) => {
+        if (dy < 0 || dy >= art.h) return;
+        if (dx < 0 || dx >= art.w) return;
         const sp = (i * sprite.w + j) * 4;
-        const dx = op.x + j - FFR_EXTRA;
-        if (dx < 0 || dx >= art.w) continue;
         const bp = (dy * art.w + dx) * 4;
         for (let channel = 0; channel < 4; channel++) {
           const oldBg = bg[bp + channel]!;
           bg[bp + channel] = sprite.rgba[sp + channel]!;
           sprite.rgba[sp + channel] = oldBg;
         }
-      }
+      });
     }
   }
 }

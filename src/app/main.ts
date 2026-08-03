@@ -1874,8 +1874,9 @@ function clearAiPending(num: number): void {
  * Still excluded: gspec=42, the ZX-Spectrum band render (its per-scanline bands
  * are an index effect, and the low-fi look is the point), any frame with an active
  * fishing hook, which the faithful path draws on top from the palette, any frame
- * with a CPU-only frame effect running (frameEffectsActive), and any frame with a
- * sprite cheat active. LODE's falling wreck used to be here too; AiRoom.syncWreck
+ * with a CPU-only frame effect running (frameEffectsActive), any frame with a
+ * sprite cheat active, and any frame whose subtitle must be baked in because no
+ * subtitle font loaded. LODE's falling wreck used to be here too; AiRoom.syncWreck
  * now replays its destructive swaps into a mutable ×S background, so the room no
  * longer drops to native resolution mid-fall.
  */

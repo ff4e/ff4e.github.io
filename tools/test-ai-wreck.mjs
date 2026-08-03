@@ -6,8 +6,10 @@
  * replays the recorded swaps into a mutable ×S copy of the background instead. This probe
  * pins that at the only place it can be observed end to end: a real browser, mid-fall.
  *
- * Four things are asserted, and the order matters — each covers a way the previous one
- * could pass while the feature was broken:
+ * Four things are asserted, in this order, and the order matters — each covers a way the
+ * previous one could pass while the feature was broken. Checks 2 and 3 are then repeated a
+ * few ticks later, because a replay that mutated the art once and then froze would satisfy
+ * all four:
  *
  *  1. The gate is gone: mid-fall the tier still composites, `roomGeom().upscale` stays 4
  *     and the room paints on the GPU. (Pre-change this reads 1.)
@@ -23,8 +25,10 @@
  *     waiting for the player when they come back.
  *
  * Note what is NOT the oracle here: AI-CPU vs AI-GPU alone would report agreement for any
- * bug the two share, since both replay through the same function. The replay's pixel rule
- * is pinned against the FAITHFUL renderer in test/lode-wreck.test.ts, byte-exact.
+ * bug the two share, since both replay through the same functions. The replay's pixel rule
+ * is pinned against the FAITHFUL renderer in test/lode-wreck.test.ts, byte-exact. And the
+ * enhanced-tier comparison below validates the two REPLAYS against each other — both read
+ * the same recorded history, so it cannot say anything about the recording itself.
  *
  * Runs its own ANGLE browser for WebGL2; skips (pass) where WebGL2 is unavailable.
  */
@@ -77,7 +81,10 @@ expect(await p.evaluate(() => window.__ff.aiRoomActive()), 'at rest: the ai tier
 expect(await p.evaluate(() => window.__ff.aiWreckDigest()) === null, 'at rest: no ×S wreck art allocated');
 
 // ── mid-fall ────────────────────────────────────────────────────────────────
-await p.evaluate(() => window.__ff.dropShip(0));
+// Phase 3, not 0: the five KresliLod ship sprites differ in art AND size (195x127 down
+// to 106x77), and dropping the first one everywhere would let a replay that ignored
+// `swap.phase` pass every check in this file.
+await p.evaluate(() => window.__ff.dropShip(3));
 await p.waitForFunction(() => window.__ff.wreckState().changed > 0, { timeout: 15000 });
 const startCount = await p.evaluate(() => window.__ff.count());
 await waitTicks(p, startCount, 4); // several ticks in: the sprite has eroded, not just landed
@@ -106,9 +113,34 @@ expect((mid.digest?.revision ?? 0) > 0, 'mid-fall: the background carries a cach
 // real shipped art their damage footprints must be the same native rectangle. This is the
 // check a CPU↔GPU diff cannot be — both AI backends share one replay.
 expect(mid.enhDamage !== null, 'mid-fall: the enhanced tier reports a damage footprint');
+// The BOX is geometry — where the ship is and how far it has fallen — so it must match
+// exactly; only the cell COUNT is art-dependent (see below).
+const box = (d) => (d ? `${d.x},${d.y} ${d.w}x${d.h}` : 'null');
 expect(
-  JSON.stringify(mid.digest?.damage) === JSON.stringify(mid.enhDamage),
-  `mid-fall: ×S damage ${JSON.stringify(mid.digest?.damage)} matches enhanced ${JSON.stringify(mid.enhDamage)}`,
+  box(mid.digest?.damage) === box(mid.enhDamage),
+  `mid-fall: ×S damage box ${box(mid.digest?.damage)} matches enhanced ${box(mid.enhDamage)}`,
+);
+// `cells` is what makes that comparison mean something. A bounding box on its own is far
+// too coarse: a replay that erodes the ship wrongly, or applies a tick's two swaps in the
+// wrong order, changes very different pixels inside an IDENTICAL box. Counting the
+// distinct native cells that differ catches both, and counting CELLS rather than pixels is
+// what makes an ×4 replay comparable with a native one at all.
+//
+// It is a tolerance, not an equality, and deliberately so — do not "tighten" this to ===.
+// The two tiers replay the same history into DIFFERENT art: where a swap writes a ship
+// colour that the native truecolor background already had, nothing changes and the cell is
+// not counted, while the ×4 upscale of those same two pixels can still differ slightly (or
+// the reverse). Measured on the shipped art that is a handful of cells in a few thousand
+// (~0.1%). The bugs this is here to catch are not subtle by comparison: a broken sprite
+// erosion or a reversed batch moves the count by 20-25%.
+const aiCells = mid.digest?.damage?.cells ?? 0;
+const enhCells = mid.enhDamage?.cells ?? 0;
+const cellDrift = enhCells > 0 ? Math.abs(aiCells - enhCells) / enhCells : 1;
+expect(aiCells > 100, `mid-fall: the damage is substantial (${aiCells} native cells)`);
+expect(
+  cellDrift < 0.02,
+  `mid-fall: ×S changed ${aiCells} native cells vs the enhanced replay's ${enhCells} ` +
+    `(${(cellDrift * 100).toFixed(2)}% drift, tolerance 2%)`,
 );
 
 // 3. CPU↔GPU parity, mid-fall — the stale-texture check
@@ -142,9 +174,16 @@ const after = await p.evaluate(() => ({
   swaps: window.__ff.wreckState()?.swaps ?? -1,
 }));
 expect(after.swaps === 0, `re-entry: the room's swap history is empty again (${after.swaps})`);
+// Assert the PIXELS, not the cursor. `replayed === 0` only says the counter was reset, so
+// it passes even when the canvas still holds the previous fall's damage — which is exactly
+// the bug this check exists to catch, since an AiRoom outlives the Room that wrecked it.
+expect(
+  after.digest === null || after.digest.damage === null,
+  `re-entry: the cached AiRoom's ×S background is pristine (damage=${JSON.stringify(after.digest?.damage)})`,
+);
 expect(
   after.digest === null || after.digest.replayed === 0,
-  `re-entry: the cached AiRoom's ×S background is pristine (replayed=${after.digest?.replayed})`,
+  `re-entry: and its replay cursor was rewound (replayed=${after.digest?.replayed})`,
 );
 
 if (errs.length) {

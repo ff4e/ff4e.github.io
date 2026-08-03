@@ -46,7 +46,7 @@ import { darkestIndex } from '../src/render/renderRoom.js';
 import { AI_ROOM_SCALE, aiRoomGateAllows } from '../src/render/roomAi.js';
 import { FISH_BODY_FILE, frameIndex } from '../src/render/enhancedArtSource.js';
 import { AiRoom } from '../src/render/roomAi.js';
-import { Canvas2dAiTarget, aiImageRevision, dissolveKeeps, markAiImageChanged } from '../src/render/aiTarget.js';
+import { Canvas2dAiTarget, aiImagePatch, aiImageRevision, dissolveKeeps, markAiImageChanged } from '../src/render/aiTarget.js';
 import type { AiTarget } from '../src/render/aiTarget.js';
 import { FSIZE as FSIZE_PX } from '../src/render/renderRoom.js';
 import { Dir } from '../src/core/dir.js';
@@ -704,10 +704,11 @@ describe('AiRoom.drawRope paints the real double rope', () => {
 // 12. The mutable-background cache key (aiTarget.ts aiImageRevision, roomAi.ts
 //     paintBackground).
 //
-//     LODE's ×S background is mutated IN PLACE by the falling wreck, so both backends —
-//     which cache the composite by source identity — have to be told. `Canvas2dAiTarget`
-//     keys its cached composite on `sig`, so the revision must be IN that sig; GlAiScreen
-//     keys its texture on the same revision. The rule is imported, not restated.
+//     LODE's ×S background is mutated IN PLACE by the falling wreck, so anything caching
+//     work derived from it has to be told. The two backends cache differently and both
+//     need the revision: `Canvas2dAiTarget` keys its composite on `sig`, so the revision
+//     must be IN that sig, while `GlAiScreen` keys its texture on the source object plus
+//     the revision. The rule is imported, not restated.
 //
 //     LODE happens to have water wobble, which puts the logic tick into `sig` and would
 //     mask a missing revision most of the time. These fixtures deliberately do NOT wobble,
@@ -772,5 +773,59 @@ describe('mutable background art (aiTarget.ts aiImageRevision)', () => {
     markAiImageChanged(bg); // what AiRoom.syncWreck does after replaying a wreck swap
     ai.drawInto(t, room, frame);
     expect(sigs[0]).not.toBe(sigs[1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 13. The dirty-rect patch that rides alongside the revision (aiTarget.ts).
+//
+//     Re-uploading LODE's whole ×4 background is 12.3 ms against 0.68 ms for the ship's
+//     footprint, so the GPU updates only the rect that changed — but ONLY when it is
+//     exactly one revision behind, because a patch describes one revision's delta and
+//     says nothing about a revision that was skipped. These are pure functions, so the
+//     rule is pinned here rather than left to the browser probe, which can only observe
+//     the consequence.
+// ---------------------------------------------------------------------------
+describe('mutable background patches (aiTarget.ts aiImagePatch)', () => {
+  const px = (n: number) => new Uint8ClampedArray(n * 4);
+
+  it('has no patch until one is supplied', () => {
+    const img = fakeBitmap(8, 8, 'p0');
+    expect(aiImagePatch(img)).toBeNull();
+    markAiImageChanged(img);
+    expect(aiImagePatch(img)).toBeNull();
+    expect(aiImageRevision(img)).toBe(1);
+  });
+
+  it('tags the patch with the revision it belongs to', () => {
+    // The consumer compares this against its own cached revision; an untagged (or
+    // mis-tagged) patch could be applied on top of art it does not describe.
+    const img = fakeBitmap(8, 8, 'p1');
+    markAiImageChanged(img, { x: 1, y: 2, w: 3, h: 4, data: px(12) });
+    expect(aiImagePatch(img)?.revision).toBe(1);
+    expect(aiImageRevision(img)).toBe(1);
+    markAiImageChanged(img, { x: 5, y: 6, w: 1, h: 1, data: px(1) });
+    expect(aiImagePatch(img)).toMatchObject({ revision: 2, x: 5, y: 6, w: 1, h: 1 });
+    expect(aiImageRevision(img)).toBe(2);
+  });
+
+  it('DROPS the patch when a mutation supplies none, forcing a whole re-upload', () => {
+    // This is the wreck resetting to pristine art on room re-entry: the rect from the
+    // previous fall is meaningless against the restored background, and a consumer that
+    // still saw it would patch damage back onto a clean room.
+    const img = fakeBitmap(8, 8, 'p2');
+    markAiImageChanged(img, { x: 1, y: 1, w: 2, h: 2, data: px(4) });
+    expect(aiImagePatch(img)).not.toBeNull();
+    markAiImageChanged(img);
+    expect(aiImagePatch(img)).toBeNull();
+    expect(aiImageRevision(img)).toBe(2); // still counted, so consumers know to re-upload
+  });
+
+  it('keeps revision and patch per image, never global', () => {
+    const a = fakeBitmap(8, 8, 'pa');
+    const b = fakeBitmap(8, 8, 'pb');
+    markAiImageChanged(a, { x: 0, y: 0, w: 1, h: 1, data: px(1) });
+    expect(aiImageRevision(b)).toBe(0);
+    expect(aiImagePatch(b)).toBeNull();
   });
 });

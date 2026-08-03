@@ -28,8 +28,7 @@ import { RANDPOLE } from './framebuffer.js';
 /** Anything both backends can sample: staged AI art, or a ×S palette sprite canvas. */
 export type AiImage = ImageBitmap | HTMLCanvasElement;
 
-const aiImageRevisions = new WeakMap<AiImage, number>();
-const aiImagePatches = new WeakMap<AiImage, AiImagePatch>();
+const aiImageMutations = new WeakMap<AiImage, { revision: number; patch: AiImagePatch | null }>();
 
 /** A rectangle of straight-RGBA pixels that a mutation wrote, tagged with its revision. */
 export interface AiImagePatch {
@@ -52,10 +51,13 @@ export interface AiImagePatch {
  * whose texture was uploaded once.
  *
  * Same shape and same reason as `bitmapPixelRevision` in data/ffr.ts, which exists for
- * this exact effect on the faithful tier (see glScreen.ts's `lastUpload`).
+ * this exact effect on the faithful tier (see glScreen.ts's `lastUpload`). It is a
+ * separate mechanism rather than that one because these are DOM images, not the
+ * `Uint8Array` bitmap planes that one keys on, and because a texture consumer needs the
+ * dirty rect that one has no notion of.
  */
 export function aiImageRevision(img: AiImage): number {
-  return aiImageRevisions.get(img) ?? 0;
+  return aiImageMutations.get(img)?.revision ?? 0;
 }
 
 /**
@@ -67,15 +69,19 @@ export function aiImageRevision(img: AiImage): number {
  * (the GPU, which draws every frame) takes it, anything further behind re-uploads whole.
  */
 export function aiImagePatch(img: AiImage): AiImagePatch | null {
-  return aiImagePatches.get(img) ?? null;
+  return aiImageMutations.get(img)?.patch ?? null;
 }
 
-/** Mark an image's pixels as changed without replacing the image object. */
+/**
+ * Mark an image's pixels as changed without replacing the image object.
+ *
+ * A mutation with no patch (the wreck resetting to pristine art) DROPS the stored patch,
+ * so the next consumer cannot mistake a stale rect for the current delta and must
+ * re-upload whole.
+ */
 export function markAiImageChanged(img: AiImage, patch?: { x: number; y: number; w: number; h: number; data: Uint8ClampedArray }): void {
   const revision = aiImageRevision(img) + 1;
-  aiImageRevisions.set(img, revision);
-  if (patch) aiImagePatches.set(img, { revision, ...patch });
-  else aiImagePatches.delete(img);
+  aiImageMutations.set(img, { revision, patch: patch ? { revision, ...patch } : null });
 }
 
 export interface AiTarget {
