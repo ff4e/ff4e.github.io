@@ -15,25 +15,28 @@
  * Scope: the wall-over-wobbled background and the object + fish sprites in item
  * z-order, PLUS the effects the faithful path draws from index read-back — the
  * spec=1 mirror (drawMirror), the spec=3/4 elevator double rope (drawRope), the
- * gspec=2 darkness fill and the gspec=5 bonus fish swap. Anything with no staged
- * FFNG art (un-mapped items, the skeleton and the darkness silhouette) falls back
- * to the room's own palette bitmaps via classicSprite(), mirroring what the
- * enhanced source does. Used whenever `graphics === 'ai'` and the room's AI assets
- * loaded; the caller (aiRoomRenderActive) withholds it for gspec=42 (the ZX band
- * render), frames with an active fishing hook, and frames with a CPU-only frame
- * effect running (megabomb flash / silent film / interlaced / the Tetris overlay),
- * all of which the faithful compositor must draw instead. classic/enhanced never
- * touch it.
+ * gspec=2 darkness fill and the gspec=5 bonus fish swap — and LODE's destructive
+ * falling wreck, replayed into a mutable ×S copy of the background (syncWreck).
+ * Anything with no staged FFNG art (un-mapped items, the skeleton and the darkness
+ * silhouette) falls back to the room's own palette bitmaps via classicSprite(),
+ * mirroring what the enhanced source does. Used whenever `graphics === 'ai'` and the
+ * room's AI assets loaded; the caller (aiRoomRenderActive) withholds it for gspec=42
+ * (the ZX band render), frames with an active fishing hook, and frames with a CPU-only
+ * frame effect running (megabomb flash / silent film / interlaced / the Tetris
+ * overlay), all of which the faithful compositor must draw instead. classic/enhanced
+ * never touch it.
  */
 import { delphiRound } from './framebuffer.js';
-import { Canvas2dAiTarget } from './aiTarget.js';
+import { Canvas2dAiTarget, aiImageRevision, markAiImageChanged } from './aiTarget.js';
 import type { AiImage, AiTarget } from './aiTarget.js';
 import { darkestIndex } from './renderRoom.js';
 import { walkRoom, FSIZE, type RoomWalkSink, type FishFrame } from './roomWalk.js';
 import { FISH_BODY_FILE, FISH_HEAD_FILE, frameIndex } from './enhancedArtSource.js';
 import { withLoadSlot } from './loadSlot.js';
-import type { Room, Item } from '../core/room.js';
-import type { FfrBitmap } from '../data/ffr.js';
+import { wreckDamage, type WreckDamage } from './artSource.js';
+import { forEachWreckPixel, wreckFrame } from '../core/room.js';
+import type { Room, Item, WreckSwap } from '../core/room.js';
+import { FFR_EXTRA, type FfrBitmap } from '../data/ffr.js';
 
 /** Upscale factor of the committed AI room art (must match tools/build-room-ai.mjs AI_SCALE). */
 export const AI_ROOM_SCALE = 4;
@@ -43,8 +46,8 @@ export const AI_ROOM_SCALE = 4;
  * of main.ts's aiRoomRenderActive so it has ONE definition that tests can import. The
  * caller supplies the module state it cannot see (tier, loaded art, current room).
  *
- * Named fields rather than positional flags on purpose: this gate has grown to six
- * inputs, five of them boolean, and this codebase has already shipped a bug where an
+ * Named fields rather than positional flags on purpose: this gate takes five inputs,
+ * three of them boolean, and this codebase has already shipped a bug where an
  * argument slid into the wrong positional slot and failed silently.
  *
  * A frame is withheld when:
@@ -54,9 +57,6 @@ export const AI_ROOM_SCALE = 4;
  *  - a CPU-only frame effect is running (megabomb flash / silent film / interlaced /
  *    the Tetris overlay) — those are applied by the faithful compositor as it builds the
  *    frame, so this path would silently render without them;
- *  - the LODE shipwreck is falling — the faithful and enhanced paths replay destructive
- *    per-pixel wreck swaps into the background, which this path's static ×4 bitmaps
- *    cannot represent, so it would show a stale, undamaged room;
  *  - a sprite cheat (xundead / xmorph) is reshaping the fish — those transform the
  *    classic sprite sheet that the enhanced tier re-derives from, while this path blits
  *    pre-baked AI fish frames that no cheat can reach;
@@ -65,13 +65,17 @@ export const AI_ROOM_SCALE = 4;
  *    applyFrameEffects; this path has no equivalent, so it would drop the line entirely.
  *    Falling back costs resolution for those frames, which is far better than losing
  *    dialogue — and it only happens when every bundled font failed to load.
+ *
+ * LODE's falling wreck USED to be a sixth condition: the ship destroys the room
+ * background per pixel, which static ×S bitmaps cannot represent, so the tier handed the
+ * frame back and the room visibly dropped from ×4 to native mid-fall. `AiRoom.syncWreck`
+ * now replays those swaps into a mutable ×S copy, so the condition is gone rather than
+ * merely satisfied. Of the remaining five, only gspec=42 is reachable in normal play.
  */
 export interface AiRoomGateInput {
   gspec: number;
   hookStates: readonly number[];
   frameEffects: boolean;
-  /** LODE: room.wreckSwaps is non-empty, i.e. the ship has damaged the background. */
-  wreckActive: boolean;
   /** xundead / xmorph active — the AI fish cache cannot reflect them. */
   spriteCheatsActive: boolean;
   /** A subtitle is showing and must be baked into the frame rather than overlaid. */
@@ -82,7 +86,6 @@ export function aiRoomGateAllows(g: AiRoomGateInput): boolean {
   if (g.gspec === 42) return false;
   if (g.hookStates.some((s) => s !== 0)) return false;
   if (g.frameEffects) return false;
-  if (g.wreckActive) return false;
   if (g.spriteCheatsActive) return false;
   if (g.bakedSubsNeeded) return false;
   return true;
@@ -90,6 +93,180 @@ export function aiRoomGateAllows(g: AiRoomGateInput): boolean {
 
 /** Staged skeleton body (FFR frame TL_KOSTRA=19, absent from FISH_BODY_FILE). */
 const SKELETON_FILE = 'body_skeleton_00.png';
+
+/**
+ * A mutable straight-RGBA buffer the ×S wreck replay exchanges pixels through.
+ *
+ * `ox`/`oy` are the buffer's top-left corner in the FULL ×S art, so the caller can hand
+ * over a WINDOW of the background instead of the whole thing: at ×4 LODE's background is
+ * 2760×2280 (25 MB) and each swap touches at most one ship footprint (≤780×508), so
+ * reading and writing back only that rect is what keeps this affordable — and keeps the
+ * canvas, not a second full-size array, as the single source of truth.
+ */
+export interface AiWreckSurface {
+  readonly data: Uint8ClampedArray;
+  readonly w: number;
+  readonly h: number;
+  readonly ox: number;
+  readonly oy: number;
+}
+
+/**
+ * Replay ONE recorded KresliLod swap (Room.applyWreckSwap, core/room.ts:277) into ×S art.
+ *
+ * The native exchange is `ship[sp] <-> bg[bp]` on the palette plane; at ×S every native
+ * pixel is an S×S block, so this exchanges the block. How a recorded swap is DECODED into
+ * positions — the row-major offset, the `- FFR_EXTRA` padded-column offset, the sprite
+ * bounds — is not restated here: `forEachWreckPixel` (core/room.ts) owns it, and the
+ * enhanced tier's `syncWreck` reads the same history through the same function. Only the
+ * ×S art bounds and the block exchange below belong to this tier.
+ *
+ * **Alpha is deliberately NOT exchanged; both sides are forced opaque.** The faithful
+ * path swaps palette INDICES, which carry no alpha at all, so opaque is the honest ×S
+ * analogue. It also has to be: the GPU background pass writes `outColor.a = 1.0`
+ * (glRoomAi.ts BG_FS) while canvas-2D keeps whatever alpha the background carries, so a
+ * sub-255 pixel here — which a ×4 block around an opaque native pixel can easily pick up
+ * from an anti-aliased sprite edge — would make the two backends disagree. Keeping every
+ * written pixel opaque additionally makes the getImageData/putImageData round-trip that
+ * feeds `bg` lossless, since premultiplying by 1 is the identity.
+ *
+ * `artW`/`artH` are the FULL ×S art size and clip to it; `bg` may be a WINDOW of that art
+ * (see AiWreckSurface), which is what production passes.
+ */
+export function applyWreckSwapScaled(
+  bg: AiWreckSurface,
+  sprite: AiWreckSurface,
+  swap: WreckSwap,
+  scale: number,
+  artW: number,
+  artH: number,
+): void {
+  const S = scale;
+  forEachWreckPixel(swap, Math.round(sprite.w / S), Math.round(sprite.h / S), (i, j, dx, dy) => {
+    if (dy < 0 || dy * S >= artH) return;
+    if (dx < 0 || dx * S >= artW) return;
+    for (let by = 0; by < S; by++) {
+      const sy = i * S + by - sprite.oy;
+      const ty = dy * S + by - bg.oy;
+      if (sy < 0 || sy >= sprite.h || ty < 0 || ty >= bg.h) continue;
+      for (let bx = 0; bx < S; bx++) {
+        const sx = j * S + bx - sprite.ox;
+        const tx = dx * S + bx - bg.ox;
+        if (sx < 0 || sx >= sprite.w || tx < 0 || tx >= bg.w) continue;
+        const sp = (sy * sprite.w + sx) * 4;
+        const bp = (ty * bg.w + tx) * 4;
+        for (let channel = 0; channel < 3; channel++) {
+          const oldBg = bg.data[bp + channel]!;
+          bg.data[bp + channel] = sprite.data[sp + channel]!;
+          sprite.data[sp + channel] = oldBg;
+        }
+        bg.data[bp + 3] = 255;
+        sprite.data[sp + 3] = 255;
+      }
+    }
+  });
+}
+
+/** The ×S art rect one swap can touch, in ×S pixels, clipped to the art. */
+export function wreckSwapRect(
+  swap: WreckSwap,
+  spriteW: number,
+  spriteH: number,
+  scale: number,
+  artW: number,
+  artH: number,
+): { x: number; y: number; w: number; h: number } | null {
+  if (swap.pixels.length === 0) return null;
+  const x0 = Math.max(0, (swap.x - FFR_EXTRA) * scale);
+  const y0 = Math.max(0, swap.y * scale);
+  const x1 = Math.min(artW, (swap.x - FFR_EXTRA) * scale + spriteW);
+  const y1 = Math.min(artH, swap.y * scale + spriteH);
+  if (x1 <= x0 || y1 <= y0) return null;
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+}
+
+/** What a `syncWreck` pass should read back, apply and consume. */
+export interface WreckBatch {
+  /**
+   * The swaps to apply, IN RECORDED ORDER. The exchange is destructive and each swap
+   * reads what the previous one left, so this order is the rule, not a detail.
+   */
+  readonly pending: readonly { swap: WreckSwap; sprite: AiWreckSurface }[];
+  /** The ×S rect covering every pending swap — one readback for the whole batch. */
+  readonly rect: { x: number; y: number; w: number; h: number } | null;
+  /** Where the cursor lands ONCE `pending` has actually been applied. */
+  readonly cursor: number;
+}
+
+/**
+ * Decide what the next wreck pass does — the whole of `syncWreck`'s decision-making, kept
+ * pure so it can be tested without a DOM (vitest runs in node here, with no canvas).
+ *
+ * Two rules live here and neither is obvious:
+ *
+ *  - **A swap whose sprite cannot be resolved STOPS the batch; it is not skipped.** The
+ *    exchange is destructive and order-dependent, so replaying a later swap over an
+ *    unapplied earlier one yields a background that is wrong rather than merely
+ *    incomplete. Leaving the cursor on the failure means a transient fault (a canvas
+ *    context the browser declined to give us) is retried next frame instead of silently
+ *    eating the rest of the fall.
+ *  - **A swap that changed nothing is consumed.** Every fall ends with one of those
+ *    (`applyWreckSwap` records the final off-screen pass with an empty pixel list), and
+ *    retrying it forever would mean never advancing again.
+ *
+ * `cursor` is what the caller should store AFTER applying `pending` — never before.
+ */
+export function planWreckBatch(
+  swaps: readonly WreckSwap[],
+  from: number,
+  spriteFor: (phase: number) => AiWreckSurface | null,
+  scale: number,
+  artW: number,
+  artH: number,
+): WreckBatch {
+  const pending: { swap: WreckSwap; sprite: AiWreckSurface }[] = [];
+  let cursor = from;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (; cursor < swaps.length; cursor++) {
+    const swap = swaps[cursor]!;
+    const sprite = spriteFor(swap.phase);
+    if (!sprite) break;
+    const r = wreckSwapRect(swap, sprite.w, sprite.h, scale, artW, artH);
+    if (!r) continue;
+    pending.push({ swap, sprite });
+    if (r.x < x0) x0 = r.x;
+    if (r.y < y0) y0 = r.y;
+    if (r.x + r.w > x1) x1 = r.x + r.w;
+    if (r.y + r.h > y1) y1 = r.y + r.h;
+  }
+  return {
+    pending,
+    rect: pending.length === 0 ? null : { x: x0, y: y0, w: x1 - x0, h: y1 - y0 },
+    cursor,
+  };
+}
+
+/**
+ * Apply a planned batch into the window `planWreckBatch` sized for it.
+ *
+ * The iteration ORDER is the whole content of this function, which is why it is a function
+ * at all rather than a loop inside `syncWreck`: the exchange is destructive, each swap
+ * reads what the previous one left, and a tick's erase and draw footprints overlap almost
+ * completely — so applying a batch backwards produces a plausible-looking wreck made of
+ * the wrong pixels. That is invisible to any check based on WHERE the damage is, and
+ * `syncWreck` itself cannot be unit-tested (it needs a canvas).
+ */
+export function applyWreckBatch(
+  window: AiWreckSurface,
+  pending: readonly { swap: WreckSwap; sprite: AiWreckSurface }[],
+  scale: number,
+  artW: number,
+  artH: number,
+): void {
+  for (const { swap, sprite } of pending) {
+    applyWreckSwapScaled(window, sprite, swap, scale, artW, artH);
+  }
+}
 
 /** An enhanced object bound to an FFR item index, its animation frames as bitmaps. */
 interface AiObject {
@@ -261,6 +438,33 @@ export class AiRoom {
   /** Fired by dispose() so a GPU mirror of these bitmaps can be released with them. */
   private readonly disposeHooks: (() => void)[] = [];
 
+  /**
+   * LODE's mutable ×S background — a copy of `bg[0]` the falling wreck destroys.
+   *
+   * Allocated on the first swap (25 MB at ×4, so no other room pays for it) and then
+   * REUSED for the life of this AiRoom, never replaced: both backends cache by source
+   * identity, and the GPU frees its texture through `ownedImages()`, so swapping in a
+   * fresh canvas would strand a 25 MB texture per reset.
+   */
+  private wreckBg: HTMLCanvasElement | null = null;
+  /**
+   * The eroding ×S ship sprites, by phase. They are the swap's other half — never drawn
+   * (item spec=11 is skipped by the walk), so they need pixels but no canvas.
+   */
+  private readonly wreckSprites = new Map<number, AiWreckSurface>();
+  /** How much of `room.wreckSwaps` has already been replayed (see syncWreck). */
+  private wreckCursor = 0;
+  /**
+   * The swap history these mutations belong to.
+   *
+   * `EnhancedArtSource` is rebuilt whenever the Room identity changes, so its copies die
+   * with the room; an AiRoom does NOT — it is cached by room name across entries with an
+   * LRU of 3. Without this, leaving LODE and coming back (or restarting the room) gave a
+   * fresh Room with an empty history but the same AiRoom, still showing a fully wrecked
+   * background. `room.wreckSwaps` is a readonly field, so its identity IS the room's.
+   */
+  private wreckOwner: readonly WreckSwap[] | null = null;
+
   constructor(
     private readonly bg: readonly ImageBitmap[],
     private readonly wall: readonly ImageBitmap[],
@@ -283,6 +487,13 @@ export class AiRoom {
     this.cpuTarget?.release();
     for (const fn of this.disposeHooks) fn();
     this.disposeHooks.length = 0;
+    // AFTER the hooks: they read ownedImages(), which includes the wreck canvas, to free
+    // its texture. Dropping it first would strand 25 MB of VRAM on exactly the eviction
+    // that exists to bound this tier's memory.
+    this.wreckBg = null;
+    this.wreckSprites.clear();
+    this.wreckCursor = 0;
+    this.wreckOwner = null;
   }
 
   /**
@@ -296,13 +507,48 @@ export class AiRoom {
   }
 
   /**
-   * The bitmaps this room ALONE holds — its background, wall and object sprites, deduped
-   * by URL. Deliberately excludes the fish set, which is shared by every room at this
-   * scale (see sharedAiFish) and must outlive any single room: a backend that treated it
-   * as room-owned would re-acquire it on every room entry.
+   * Test/debug: the state of the ×S wreck replay — how many recorded swaps have been
+   * applied, the background's cache revision, an FNV-1a hash of the mutable ×S
+   * background, and what differs from the pristine art. `null` for every room that has
+   * never wrecked anything.
+   *
+   * Exists because "CPU and GPU agree" is not enough here: they would also agree if the
+   * replay did nothing and both rendered the pristine background. The hash proves the art
+   * moved at all; `damage` is reported in NATIVE cells so it can be compared directly
+   * against the enhanced tier's replay of the same history (see wreckDamage). Reads the
+   * whole ×S canvas, so it is a probe hook, not something to call per frame.
    */
-  ownedImages(): readonly ImageBitmap[] {
-    return this.owned;
+  wreckDigest(): { replayed: number; revision: number; hash: number; damage: WreckDamage | null } | null {
+    const cv = this.wreckBg;
+    const base = this.bg[0];
+    if (!cv || !base || typeof document === 'undefined') return null;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!g) return null;
+    const now = g.getImageData(0, 0, cv.width, cv.height).data;
+    let hash = 2166136261;
+    for (let i = 0; i < now.length; i++) hash = Math.imul(hash ^ now[i]!, 16777619);
+
+    const ref = document.createElement('canvas');
+    ref.width = cv.width;
+    ref.height = cv.height;
+    const rg = ref.getContext('2d', { willReadFrequently: true });
+    const digest = { replayed: this.wreckCursor, revision: aiImageRevision(cv), hash: hash >>> 0 };
+    if (!rg) return { ...digest, damage: null };
+    rg.imageSmoothingEnabled = false;
+    rg.drawImage(base, 0, 0);
+    const was = rg.getImageData(0, 0, cv.width, cv.height).data;
+    return { ...digest, damage: wreckDamage(now, was, cv.width, cv.height, this.scale) };
+  }
+
+  /**
+   * The bitmaps this room ALONE holds — its background, wall and object sprites, deduped
+   * by URL, plus LODE's mutable ×S background copy once the wreck has allocated it.
+   * Deliberately excludes the fish set, which is shared by every room at this scale (see
+   * sharedAiFish) and must outlive any single room: a backend that treated it as
+   * room-owned would re-acquire it on every room entry.
+   */
+  ownedImages(): readonly AiImage[] {
+    return this.wreckBg ? [...this.owned, this.wreckBg] : this.owned;
   }
 
   /** Native room pixel size the caller must scale the framebuffer from (×scale). */
@@ -388,13 +634,135 @@ export class AiRoom {
       return;
     }
     const faze = room.wallItem.afaze;
-    const bg = this.bg[Math.min(faze, this.bg.length - 1)]!;
+    this.syncWreck(room);
+    const bgIdx = Math.min(faze, this.bg.length - 1);
+    // Only frame 0 is ever wrecked, exactly as EnhancedArtSource.syncWreck mutates only
+    // wreckBackgrounds[0] (LODE ships a single background frame).
+    const bg: AiImage = (bgIdx === 0 && this.wreckBg) ? this.wreckBg : this.bg[bgIdx]!;
     const wall = this.wall[Math.min(faze, this.wall.length - 1)]!;
     const shifts = this.wobbleShifts(room, count);
     // The composite depends only on the wall's animation phase and — when the room
     // wobbles — the logic tick; the fish interpolate BETWEEN ticks, so a target that
-    // can cache the composite skips it on most frames.
-    t.background(`${faze}|${shifts === null ? 0 : count}`, bg, wall, shifts, this.scale);
+    // can cache the composite skips it on most frames. The background's REVISION is in
+    // the key because LODE's is mutable: the wreck changes its pixels without changing
+    // the image object, and a target caching on `sig` alone would keep re-blitting the
+    // undamaged composite. (LODE happens to wobble, so `count` would mask this most of
+    // the time — which is luck, not correctness.)
+    t.background(`${faze}|${shifts === null ? 0 : count}|${aiImageRevision(bg)}`, bg, wall, shifts, this.scale);
+  }
+
+  /**
+   * Replay KresliLod's destructive swaps into a private ×S copy of the background and of
+   * the ship sprites — the ×S counterpart of `EnhancedArtSource.syncWreck`, and the
+   * reason this tier no longer hands LODE's falling ship back to the faithful compositor.
+   *
+   * `wreckCursor` makes the history idempotent: each recorded swap is applied exactly
+   * once, however many display frames pass between logic ticks. What to apply, in what
+   * order, and how far the cursor may advance is decided by `planWreckBatch`, which is
+   * pure and therefore testable; everything here is the canvas work it cannot do. A whole
+   * batch shares ONE readback of its union rect (a fall in flight records an erase and a
+   * draw per tick, with overlapping footprints), and that rect is then handed on as the
+   * patch the GPU updates its texture from. Reading the whole 25 MB canvas back per swap,
+   * or re-uploading it whole, would each cost more than a frame.
+   *
+   * Requires a DOM; the unit tests drive `planWreckBatch` and `applyWreckSwapScaled`
+   * directly instead.
+   */
+  private syncWreck(room: Room): void {
+    const swaps = room.wreckSwaps;
+    if (this.wreckOwner !== swaps) {
+      // A rebuilt Room (re-entry, restart, undo past the wreck) starts from pristine art.
+      this.wreckOwner = swaps;
+      this.wreckCursor = 0;
+      this.wreckSprites.clear();
+      if (this.wreckBg) this.resetWreckBg();
+    }
+    if (this.wreckCursor >= swaps.length) return;
+    if (typeof document === 'undefined') return;
+    const base = this.bg[0];
+    if (!base) return;
+    const canvas = this.wreckBg ?? this.makeWreckBg(base);
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+
+    const batch = planWreckBatch(
+      swaps,
+      this.wreckCursor,
+      (phase) => this.wreckSprite(room, phase),
+      this.scale,
+      canvas.width,
+      canvas.height,
+    );
+    if (!batch.rect) {
+      this.wreckCursor = batch.cursor; // only no-op swaps, if any: nothing to draw
+      return;
+    }
+
+    const { x, y, w, h } = batch.rect;
+    const img = ctx.getImageData(x, y, w, h);
+    const window: AiWreckSurface = { data: img.data, w: img.width, h: img.height, ox: x, oy: y };
+    applyWreckBatch(window, batch.pending, this.scale, canvas.width, canvas.height);
+    // Committed here, not after the write: applying a swap ERODES the sprite, and that is
+    // the half that cannot be undone. Replaying it would erode twice.
+    this.wreckCursor = batch.cursor;
+    ctx.putImageData(img, x, y);
+    // Both backends cache the background by identity; this is how they learn it moved —
+    // and the patch is what lets the GPU update the changed rect instead of the whole
+    // 25 MB texture (12.3 ms vs 0.68 ms, see the measurement note in aiTarget.ts).
+    markAiImageChanged(canvas, { x, y, w: img.width, h: img.height, data: img.data });
+  }
+
+  /** The mutable ×S background copy, created on the first swap. */
+  private makeWreckBg(base: ImageBitmap): HTMLCanvasElement | null {
+    const cv = document.createElement('canvas');
+    cv.width = base.width;
+    cv.height = base.height;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!g) return null;
+    g.imageSmoothingEnabled = false;
+    g.drawImage(base, 0, 0);
+    this.wreckBg = cv;
+    markAiImageChanged(cv);      // ⇒ revision >= 1, so its sig can never collide with bg[0]'s
+    return cv;
+  }
+
+  /** Restore the wreck canvas to the pristine background, keeping its identity. */
+  private resetWreckBg(): void {
+    const cv = this.wreckBg;
+    const base = this.bg[0];
+    if (!cv || !base) return;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!g) return;
+    g.imageSmoothingEnabled = false;
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.drawImage(base, 0, 0);
+    markAiImageChanged(cv);
+  }
+
+  /**
+   * The eroding ×S pixels of ship phase `phase`, lazily copied out of the staged sprite.
+   *
+   * The wreck object is bound to item `itemCount - 1` — the same lookup syncWreck uses,
+   * and the index the shipped LODE manifest stages its five `potop_*` frames under.
+   */
+  private wreckSprite(room: Room, phase: number): AiWreckSurface | null {
+    const hit = this.wreckSprites.get(phase);
+    if (hit) return hit;
+    if (typeof document === 'undefined') return null;
+    const src = wreckFrame(this.objects, room.itemCount, phase);
+    if (!src) return null;
+    const cv = document.createElement('canvas');
+    cv.width = src.width;
+    cv.height = src.height;
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!g) return null;
+    g.imageSmoothingEnabled = false;
+    g.drawImage(src, 0, 0);
+    const img = g.getImageData(0, 0, src.width, src.height);
+    const surface: AiWreckSurface = { data: img.data, w: img.width, h: img.height, ox: 0, oy: 0 };
+    this.wreckSprites.set(phase, surface);
+    return surface;
   }
 
   /**

@@ -23,10 +23,12 @@ import fs from 'node:fs';
 
 const W = 'src/render/roomWalk.ts';
 const A = 'src/render/roomAi.ts';
+const C = 'src/core/room.ts';       // the shared WreckSwap protocol both replays read
 
 const ALL_TESTS = [
   'test/darkness.test.ts',
   'test/gspec5.test.ts',
+  'test/lode-wreck.test.ts',
   'test/mirror.test.ts',
   'test/roomAi.test.ts',
   'test/rope.test.ts',
@@ -83,12 +85,89 @@ const MUTATIONS = [
   { rule: 'x S scaling of item positions (ai sink)', file: A, tests: ['test/roomAi.test.ts'],
     from: 'const px = (cell: number, shift: number): number => (cell * FSIZE + shift) * S;',
     to: 'const px = (cell: number, shift: number): number => (cell * FSIZE + shift) * (S + 1);' },
+
+  // ── LODE's falling wreck ────────────────────────────────────────────────────
+  // The replay is pinned against the FAITHFUL renderer, byte-exact, in lode-wreck.test.ts.
+  // These prove that pin bites: the sibling AI backend replays through the same functions,
+  // so a CPU<->GPU probe cannot kill any of them (see dissolveKeeps / PR #11).
+  //
+  // The first three live in core/room.ts, which is the ONE definition of how a recorded
+  // swap is read. Each lists BOTH tiers' fixtures, so a surviving mutation would mean the
+  // enhanced and xS replays are no longer really sharing the rule.
+  { rule: 'wreck: recorded offsets decode row-major over swap.width', file: C,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    const i = Math.floor(pixel / swap.width);\n    const j = pixel % swap.width;',
+    to: '    const j = Math.floor(pixel / swap.width);\n    const i = pixel % swap.width;' },
+  { rule: 'wreck: padded background column -> art column (- FFR_EXTRA)', file: C,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    fn(i, j, swap.x + j - FFR_EXTRA, swap.y + i);',
+    to: '    fn(i, j, swap.x + j, swap.y + i);' },
+  { rule: 'wreck: a pixel outside the replaying sprite is skipped', file: C,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    if (i >= spriteH || j >= spriteW) continue;', to: '' },
+  { rule: 'wreck: the ship is item itemCount - 1', file: C, tests: ['test/lode-wreck.test.ts'],
+    from: '  return objects.find((o) => o.item === itemCount - 1) ?? null;',
+    to: '  return objects.find((o) => o.item === itemCount) ?? null;' },
+  { rule: 'wreck: a swap replays the sprite ITS phase names', file: C,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '  return wreckObject(objects, itemCount)?.frames[phase] ?? null;',
+    to: '  return wreckObject(objects, itemCount)?.frames[0] ?? null;' },
+
+  // ── and the xS half, in roomAi.ts ───────────────────────────────────────────
+  { rule: 'wreck: the swap is an EXCHANGE, not an overwrite', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '          const oldBg = bg.data[bp + channel]!;\n          bg.data[bp + channel] = sprite.data[sp + channel]!;\n          sprite.data[sp + channel] = oldBg;',
+    to: '          bg.data[bp + channel] = sprite.data[sp + channel]!;' },
+  { rule: 'wreck: the background receives the ship (not only the ship the background)',
+    file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '          const oldBg = bg.data[bp + channel]!;\n          bg.data[bp + channel] = sprite.data[sp + channel]!;\n          sprite.data[sp + channel] = oldBg;',
+    to: '          sprite.data[sp + channel] = bg.data[bp + channel]!;' },
+  { rule: 'wreck: every native pixel becomes an SxS BLOCK', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '    for (let by = 0; by < S; by++) {', to: '    for (let by = 0; by < 1; by++) {' },
+  { rule: 'wreck: the SxS block is square (columns too)', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '      for (let bx = 0; bx < S; bx++) {', to: '      for (let bx = 0; bx < 1; bx++) {' },
+  { rule: 'wreck: the window is addressed relative to its own origin (rows)', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '      const ty = dy * S + by - bg.oy;', to: '      const ty = dy * S + by;' },
+  { rule: 'wreck: the window is addressed relative to its own origin (columns)', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '        const tx = dx * S + bx - bg.ox;', to: '        const tx = dx * S + bx;' },
+  { rule: 'wreck: written pixels are forced OPAQUE (BG_FS writes a=1, canvas-2D does not)',
+    file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '        bg.data[bp + 3] = 255;\n        sprite.data[sp + 3] = 255;',
+    to: '        bg.data[bp + 3] = sprite.data[sp + 3]!;' },
+  { rule: 'wreck: rows past the bottom of the xS art are clipped', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    if (dy < 0 || dy * S >= artH) return;', to: '    if (dy < 0) return;' },
+  { rule: 'wreck: columns past the right edge of the xS art are clipped', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    if (dx < 0 || dx * S >= artW) return;', to: '    if (dx < 0) return;' },
+  { rule: 'wreck: the readback rect covers the whole ship footprint', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '  const x1 = Math.min(artW, (swap.x - FFR_EXTRA) * scale + spriteW);',
+    to: '  const x1 = Math.min(artW, (swap.x - FFR_EXTRA) * scale + spriteW - 1);' },
+  { rule: 'wreck: a no-op swap needs no readback at all', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '  if (swap.pixels.length === 0) return null;', to: '  if (swap.pixels.length < 0) return null;' },
+  { rule: 'wreck: the batch window unions EVERY pending footprint', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    if (r.y + r.h > y1) y1 = r.y + r.h;', to: '    if (r.y + r.h < y1) y1 = r.y + r.h;' },
+  { rule: 'wreck: a batch is applied in RECORDED order', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '  for (const { swap, sprite } of pending) {\n    applyWreckSwapScaled',
+    to: '  for (const { swap, sprite } of [...pending].reverse()) {\n    applyWreckSwapScaled' },
+  { rule: 'wreck: an unresolvable sprite STOPS the batch and is not consumed', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    if (!sprite) break;', to: '    if (!sprite) continue;' },
+  { rule: 'wreck: a swap that changed nothing IS consumed', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '    if (!r) continue;', to: '    if (!r) break;' },
+  { rule: 'wreck: the mutated background moves the composite cache key', file: A,
+    tests: ['test/roomAi.test.ts'],
+    from: '`${faze}|${shifts === null ? 0 : count}|${aiImageRevision(bg)}`',
+    to: '`${faze}|${shifts === null ? 0 : count}`' },
 ];
 
 const run = (tests) => spawnSync('npx', ['vitest', 'run', ...tests], { encoding: 'utf8' });
 
-if (spawnSync('git', ['diff', '--quiet', 'HEAD', '--', W, A]).status !== 0) {
-  console.error(`Refusing to run: ${W} or ${A} has uncommitted changes.`);
+if (spawnSync('git', ['diff', '--quiet', 'HEAD', '--', W, A, C]).status !== 0) {
+  console.error(`Refusing to run: ${W}, ${A} or ${C} has uncommitted changes.`);
   console.error('This harness edits those files in place; commit or stash first.');
   process.exit(2);
 }

@@ -51,7 +51,9 @@ const MAX_CHANNEL_DELTA = 1; // see the header: browser-vs-GL blend rounding, no
  *    3           the room the present-alignment and cost checks below use
  *    9 ZRC       the spec=1 mirror (chroma-key glass mask, ping-pong pass) — and the ONLY
  *                room in the game with any CPU↔GPU delta at all (1 on one channel)
- *   19 LODE      the wreck: spec=11 hidden items, and the gate's wreckActive exclusion
+ *   19 LODE      the wreck: spec=11 hidden items, and the mutable ×S background the
+ *                falling ship destroys (AiRoom.syncWreck) — this room is the only one
+ *                whose art changes under the texture cache
  *   20 ZDVIZ1    spec=3/4 elevator double rope
  *   28 ZDVIZ2    the same rope with different endpoints (it leans)
  *   33 MIKRO     small backing store (1440x840)

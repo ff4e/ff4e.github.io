@@ -28,6 +28,62 @@ import { RANDPOLE } from './framebuffer.js';
 /** Anything both backends can sample: staged AI art, or a ×S palette sprite canvas. */
 export type AiImage = ImageBitmap | HTMLCanvasElement;
 
+const aiImageMutations = new WeakMap<AiImage, { revision: number; patch: AiImagePatch | null }>();
+
+/** A rectangle of straight-RGBA pixels that a mutation wrote, tagged with its revision. */
+export interface AiImagePatch {
+  readonly revision: number;
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly data: Uint8ClampedArray;
+}
+
+/**
+ * How many times this source image has been mutated in place.
+ *
+ * Almost all `ai` art is immutable once decoded, so both backends cache by source
+ * IDENTITY. LODE's falling wreck breaks that: it exchanges pixels between the room
+ * background and the ship sprite, so the background image object stays the same while
+ * its pixels change. An identity-only cache then keeps serving the undamaged art —
+ * invisibly on canvas-2D, which re-reads the canvas anyway, and permanently on the GPU,
+ * whose texture was uploaded once.
+ *
+ * Same shape and same reason as `bitmapPixelRevision` in data/ffr.ts, which exists for
+ * this exact effect on the faithful tier (see glScreen.ts's `lastUpload`). It is a
+ * separate mechanism rather than that one because these are DOM images, not the
+ * `Uint8Array` bitmap planes that one keys on, and because a texture consumer needs the
+ * dirty rect that one has no notion of.
+ */
+export function aiImageRevision(img: AiImage): number {
+  return aiImageMutations.get(img)?.revision ?? 0;
+}
+
+/**
+ * The pixels the LAST mutation wrote, for a consumer that can update in place.
+ *
+ * Re-uploading LODE's whole ×4 background costs 12.3 ms on an M4 — a dropped frame on
+ * every logic tick of the fall — against 0.68 ms for a `texSubImage2D` of the ship's
+ * footprint. Only the most recent patch is kept: a consumer exactly one revision behind
+ * (the GPU, which draws every frame) takes it, anything further behind re-uploads whole.
+ */
+export function aiImagePatch(img: AiImage): AiImagePatch | null {
+  return aiImageMutations.get(img)?.patch ?? null;
+}
+
+/**
+ * Mark an image's pixels as changed without replacing the image object.
+ *
+ * A mutation with no patch (the wreck resetting to pristine art) DROPS the stored patch,
+ * so the next consumer cannot mistake a stale rect for the current delta and must
+ * re-upload whole.
+ */
+export function markAiImageChanged(img: AiImage, patch?: { x: number; y: number; w: number; h: number; data: Uint8ClampedArray }): void {
+  const revision = aiImageRevision(img) + 1;
+  aiImageMutations.set(img, { revision, patch: patch ? { revision, ...patch } : null });
+}
+
 export interface AiTarget {
   /** Backing-store size in pixels (native × the room's AI scale). */
   readonly width: number;

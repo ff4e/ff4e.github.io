@@ -19,6 +19,7 @@ import {
   type FfrBitmap,
   type FfrPaletteEntry,
   Kind,
+  FFR_EXTRA,
   markBitmapPixelsChanged,
 } from '../data/ffr.js';
 import { Dir, DX_DIR, DY_DIR } from './dir.js';
@@ -81,6 +82,72 @@ export interface WreckSwap {
   readonly width: number;
   /** Linear ship-bitmap offsets that the Delphi mask test actually swapped. */
   readonly pixels: readonly number[];
+}
+
+/**
+ * The falling ship's object, given a tier's staged objects.
+ *
+ * KresliLod reads the LAST item as the ship and the one past it as the mask
+ * (`applyWreckSwap` below), so every tier that replays the wreck has to bind to
+ * `itemCount - 1`. One definition, because a tier that bound to the wrong item would
+ * simply render an undamaged room — no error, nothing to notice.
+ */
+export function wreckObject<T>(
+  objects: readonly { readonly item: number; readonly frames: readonly T[] }[],
+  itemCount: number,
+): { readonly item: number; readonly frames: readonly T[] } | null {
+  return objects.find((o) => o.item === itemCount - 1) ?? null;
+}
+
+/**
+ * The ship sprite a recorded swap's `phase` selects.
+ *
+ * `phase` indexes the wreck object's frames directly. Getting it wrong puts a
+ * correctly-placed, correctly-sized wreck on screen painted from the wrong ship — which
+ * no comparison of WHERE the damage landed can detect, only one of what it looks like.
+ */
+export function wreckFrame<T>(
+  objects: readonly { readonly item: number; readonly frames: readonly T[] }[],
+  itemCount: number,
+  phase: number,
+): T | null {
+  return wreckObject(objects, itemCount)?.frames[phase] ?? null;
+}
+
+/**
+ * Decode a recorded swap back into positions, and hand each one to `fn`.
+ *
+ * THE one definition of how a `WreckSwap` is read. Three things live here that a replay
+ * must not restate, because getting any of them wrong is silent and this codebase has
+ * shipped that class of bug before (see `dissolveKeeps`, render/aiTarget.ts):
+ *
+ *  - `pixels` are LINEAR offsets into the ship bitmap, row-major over `swap.width` — the
+ *    recording bitmap's width, which is not necessarily the replaying sprite's;
+ *  - the background is stored with `FFR_EXTRA` columns of padding on each side, so a
+ *    background column `swap.x + j` is art column `swap.x + j - FFR_EXTRA`;
+ *  - a pixel outside the replaying sprite is skipped.
+ *
+ * Callers own their own ART bounds, because those differ per tier — the faithful and
+ * enhanced tiers clip in native pixels, the `ai` tier at ×S. They do NOT own Delphi's
+ * `y > 436` fall cut-off either: `applyWreckSwap` applies it while RECORDING, so no swap
+ * can carry a pixel past it and a replay that re-checked it would be adding a branch no
+ * test can reach.
+ *
+ * `spriteW`/`spriteH` are the replaying sprite's size in NATIVE pixels whatever the
+ * tier's own resolution, so the bounds test means the same thing everywhere.
+ */
+export function forEachWreckPixel(
+  swap: WreckSwap,
+  spriteW: number,
+  spriteH: number,
+  fn: (i: number, j: number, dx: number, dy: number) => void,
+): void {
+  for (const pixel of swap.pixels) {
+    const i = Math.floor(pixel / swap.width);
+    const j = pixel % swap.width;
+    if (i >= spriteH || j >= spriteW) continue;
+    fn(i, j, swap.x + j - FFR_EXTRA, swap.y + i);
+  }
 }
 
 /** Disintegration counter set when a fish dies (zac_rozpad, URoom.pas:439). */

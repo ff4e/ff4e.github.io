@@ -58,3 +58,60 @@ export function buildPaletteLut(palette: readonly FfrPaletteEntry[]): Uint8Array
   }
   return lut;
 }
+
+/**
+ * What a wreck replay changed, in NATIVE game pixels, whatever resolution it replayed at.
+ *
+ * `cells` is the number of distinct native cells that differ — not pixels — so the count
+ * is directly comparable between a native-resolution replay and an ×S one. That
+ * comparability is the point: `tools/test-ai-wreck.mjs` checks the `ai` tier's ×S replay
+ * against the enhanced tier's native replay of the SAME recorded history, and a bounding
+ * box alone is far too coarse an oracle for that — a replay that erodes the ship wrongly,
+ * or applies a tick's swaps in the wrong order, produces very different pixels inside an
+ * identical box. `cells` catches both; the box on its own does not.
+ */
+export interface WreckDamage {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+  readonly cells: number;
+}
+
+/**
+ * Compare a mutated RGBA buffer against its pristine original and report the damage.
+ *
+ * Alpha is ignored, because the two tiers deliberately treat it differently (the ×S
+ * replay forces written pixels opaque — see applyWreckSwapScaled), and comparing it would
+ * make the tiers disagree for a reason that is not a defect.
+ *
+ * Diagnostic only: it scans the whole buffer, which at ×4 is 25 MB.
+ */
+export function wreckDamage(
+  now: Uint8Array | Uint8ClampedArray,
+  was: Uint8Array | Uint8ClampedArray,
+  width: number,
+  height: number,
+  scale: number,
+): WreckDamage | null {
+  const cw = Math.ceil(width / scale);
+  const seen = new Uint8Array(cw * Math.ceil(height / scale));
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  let cells = 0;
+  for (let y = 0; y < height; y++) {
+    const row = y * width * 4;
+    const ny = Math.floor(y / scale);
+    for (let x = 0; x < width; x++) {
+      const o = row + x * 4;
+      if (now[o] === was[o] && now[o + 1] === was[o + 1] && now[o + 2] === was[o + 2]) continue;
+      const nx = Math.floor(x / scale);
+      const cell = ny * cw + nx;
+      if (seen[cell] === 0) { seen[cell] = 1; cells++; }
+      if (nx < x0) x0 = nx;
+      if (ny < y0) y0 = ny;
+      if (nx > x1) x1 = nx;
+      if (ny > y1) y1 = ny;
+    }
+  }
+  return cells === 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1, cells };
+}
