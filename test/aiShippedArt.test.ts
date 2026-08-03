@@ -259,3 +259,53 @@ describe('shipped _story / _desky / _kufr', () => {
     expect([fi.w, fi.h]).toEqual([380 * S, 285 * S]);
   });
 });
+
+/**
+ * LODE's falling wreck.
+ *
+ * `AiRoom.syncWreck` replays the destructive KresliLod swaps into a mutable ×S copy of
+ * the background, exchanging an S×S block per native pixel. That only lines up if the
+ * staged ×S ship sprites are an exact ×S of the native ones — and the tier has no
+ * runtime check for it, deliberately: adding one would put back the very gate condition
+ * this replaces. So it is pinned here, on the shipped bytes.
+ *
+ * The wreck object is looked up as item `itemCount - 1`, which for LODE is 15.
+ */
+const LODE = join(AI, 'LODE');
+const ENH_LODE = join(process.cwd(), 'public/enhanced/LODE');
+
+describe.skipIf(!existsSync(LODE) || !existsSync(ENH_LODE))('shipped LODE wreck art', () => {
+  const man = JSON.parse(readFileSync(join(LODE, 'ai.json'), 'utf8')) as {
+    scale: number; bg: string[]; objects: { item: number; frames: string[] }[];
+  };
+  const S = man.scale;
+  const wreck = man.objects.find((o) => o.item === 15);
+
+  /** Width/height straight out of a PNG IHDR (the enhanced tier ships native PNGs). */
+  function pngSize(file: string): { w: number; h: number } {
+    const b = readFileSync(file);
+    return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
+  }
+
+  it('stages the wreck under item 15 (itemCount - 1), with all five KresliLod phases', () => {
+    expect(wreck, 'objects[] entry for item 15').toBeDefined();
+    expect(wreck!.frames).toHaveLength(5);
+  });
+
+  it('ships each wreck phase at exactly x scale of the enhanced native sprite', () => {
+    for (const [phase, frame] of wreck!.frames.entries()) {
+      const native = pngSize(join(ENH_LODE, 'obj', `potop_${String(phase).padStart(2, '0')}.png`));
+      const ai = webpInfo(join(LODE, frame));
+      expect([ai.w, ai.h], `phase ${phase} (${frame})`).toEqual([native.w * S, native.h * S]);
+    }
+  });
+
+  it('ships a single background frame, at exactly x scale of the enhanced one', () => {
+    // syncWreck mutates frame 0 only, exactly as EnhancedArtSource does. A second frame
+    // would render undamaged whenever the wall animation selected it.
+    expect(man.bg).toHaveLength(1);
+    const native = pngSize(join(ENH_LODE, 'p.png'));
+    const ai = webpInfo(join(LODE, man.bg[0]!));
+    expect([ai.w, ai.h]).toEqual([native.w * S, native.h * S]);
+  });
+});

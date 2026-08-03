@@ -31,6 +31,7 @@ import {
   uniformLocations,
   type Uni,
 } from './glCommon.js';
+import { aiImageRevision } from './aiTarget.js';
 import type { AiImage, AiTarget } from './aiTarget.js';
 
 /** Opaque colour fill (the darkness room, the elevator rope). */
@@ -226,8 +227,15 @@ export class GlAiScreen implements AiTarget {
    * Weak, so a bitmap nothing references any more takes its texture with it; `track()`
    * additionally frees a room's OWN textures the moment it is evicted, because at ×4
    * those are ~50 MB of VRAM and waiting for GC is not good enough.
+   *
+   * Keyed on identity PLUS `aiImageRevision`, for the same reason GlScreen's `lastUpload`
+   * carries `bitmapPixelRevision`: LODE's ×S background is mutated IN PLACE by the
+   * falling wreck, so an identity-only cache would keep rendering the undamaged art on
+   * the GPU while canvas-2D — which re-reads the canvas every frame — looked perfectly
+   * correct. That asymmetry is invisible to any test not exercising the wreck mid-fall
+   * on BOTH backends.
    */
-  private readonly texCache = new WeakMap<AiImage | Float32Array, WebGLTexture>();
+  private readonly texCache = new WeakMap<AiImage | Float32Array, { tex: WebGLTexture; revision: number }>();
   private tracked: AiTextureOwner | null = null;
   private readonly hooked = new WeakSet<AiTextureOwner>();
 
@@ -295,38 +303,57 @@ export class GlAiScreen implements AiTarget {
     this.hooked.add(owner);
     owner.onDispose(() => {
       for (const img of owner.ownedImages()) {
-        const tex = this.texCache.get(img);
-        if (!tex) continue;
-        this.gl.deleteTexture(tex);
+        const entry = this.texCache.get(img);
+        if (!entry) continue;
+        this.gl.deleteTexture(entry.tex);
         this.texCache.delete(img);
       }
     });
   }
 
-  /** RGBA8 texture for a decoded sprite, uploaded once and cached by source object. */
+  /**
+   * RGBA8 texture for a decoded sprite, uploaded once and cached by source object —
+   * and RE-uploaded when the source's `aiImageRevision` moves (LODE's wreck mutating
+   * the ×S background in place). The re-upload goes into the SAME texture object, so a
+   * mutating source does not churn textures the way delete-and-recreate would.
+   */
   private texture(src: AiImage): WebGLTexture {
-    return this.cached(src, () => {
-      const gl = this.gl;
-      const t = gl.createTexture()!;
-      gl.bindTexture(gl.TEXTURE_2D, t);
-      // Straight (non-premultiplied) alpha, top-down — matching how the CPU path reads
-      // these bitmaps, and what the blend equations below assume. The bitmaps themselves
-      // are decoded with `premultiplyAlpha: 'none'` (see roomAi.ts) because texImage2D
-      // takes an ImageBitmap's OWN alpha mode and ignores these flags for that source.
-      gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, src);
-      nearestClamp(gl);
-      return t;
-    });
+    const gl = this.gl;
+    const revision = aiImageRevision(src);
+    const hit = this.texCache.get(src);
+    if (hit) {
+      if (hit.revision === revision) return hit.tex;
+      gl.bindTexture(gl.TEXTURE_2D, hit.tex);
+      this.uploadImage(src);
+      hit.revision = revision;
+      return hit.tex;
+    }
+    const t = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    this.uploadImage(src);
+    nearestClamp(gl);
+    this.texCache.set(src, { tex: t, revision });
+    return t;
   }
 
-  /** Look the source up in the texture cache, uploading it once on a miss. */
+  /** texImage2D of `src` into the currently bound texture. */
+  private uploadImage(src: AiImage): void {
+    const gl = this.gl;
+    // Straight (non-premultiplied) alpha, top-down — matching how the CPU path reads
+    // these bitmaps, and what the blend equations below assume. The bitmaps themselves
+    // are decoded with `premultiplyAlpha: 'none'` (see roomAi.ts) because texImage2D
+    // takes an ImageBitmap's OWN alpha mode and ignores these flags for that source.
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, src);
+  }
+
+  /** Look an immutable source up in the texture cache, uploading it once on a miss. */
   private cached(src: AiImage | Float32Array, upload: () => WebGLTexture): WebGLTexture {
     const hit = this.texCache.get(src);
-    if (hit) return hit;
+    if (hit) return hit.tex;
     const t = upload();
-    this.texCache.set(src, t);
+    this.texCache.set(src, { tex: t, revision: 0 });
     return t;
   }
 

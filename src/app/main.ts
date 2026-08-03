@@ -1874,8 +1874,10 @@ function clearAiPending(num: number): void {
  * Still excluded: gspec=42, the ZX-Spectrum band render (its per-scanline bands
  * are an index effect, and the low-fi look is the point), any frame with an active
  * fishing hook, which the faithful path draws on top from the palette, any frame
- * with a CPU-only frame effect running (frameEffectsActive), the LODE shipwreck
- * while it is destroying the background, and any frame with a sprite cheat active.
+ * with a CPU-only frame effect running (frameEffectsActive), and any frame with a
+ * sprite cheat active. LODE's falling wreck used to be here too; AiRoom.syncWreck
+ * now replays its destructive swaps into a mutable ×S background, so the room no
+ * longer drops to native resolution mid-fall.
  */
 function aiRoomRenderActive(r: Room): boolean {
   if (graphics !== 'ai' || aiRoom === null || aiRoomNum !== curNum) return false;
@@ -1885,7 +1887,6 @@ function aiRoomRenderActive(r: Room): boolean {
     gspec: r.gspec,
     hookStates: hooks.snapshot.map((h) => h.stav),
     frameEffects: frameEffectsActive(),
-    wreckActive: r.wreckSwaps.length > 0,
     spriteCheatsActive: spriteCheats.length > 0,
     // Mirrors useVecSubs (drawRoom): in this tier enhancedArtActive() is always true, so
     // the vector overlay is available iff a subtitle font loaded.
@@ -6254,6 +6255,19 @@ window.addEventListener('keydown', unlockAudio, { once: true });
           changed: room?.wreckSwaps.reduce((n, swap) => n + swap.pixels.length, 0) ?? 0,
         }
       : null,
+  /** The `ai` tier's ×S wreck replay: swaps applied, cache revision, background hash. */
+  aiWreckDigest: () => (aiRoom && aiRoomNum === curNum ? aiRoom.wreckDigest() : null),
+  /**
+   * The ENHANCED tier's replay of the same wreck history, as a native-px damage box.
+   * Renders the background first so the source actually replays it, then reports what it
+   * changed — the independent footprint `aiWreckDigest().damage` is compared against.
+   */
+  enhWreckDamage: () => {
+    if (!room) return null;
+    const art = enhancedArtFor(room);
+    renderRoomBackgroundRgba(room, art, { count: 0 });
+    return art.wreckDamageRect();
+  },
   /** Stable fixed-count frame hash used by browser tests to prove a visible delta. */
   roomFrameHash: (mode: GraphicsLevel = graphics) => {
     if (!room) return null;

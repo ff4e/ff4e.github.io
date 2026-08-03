@@ -11,6 +11,7 @@ import {
   type EnhancedObject,
 } from '../src/render/enhancedArtSource.js';
 import { renderRoomRgba, renderRoomState } from '../src/render/renderRoom.js';
+import { applyWreckSwapScaled, wreckSwapRect, type AiWreckSurface } from '../src/render/roomAi.js';
 import { rgbaAt } from './rgbaAt.js';
 
 const W = 690;
@@ -241,5 +242,160 @@ describe('LODE falling wreck', () => {
     expect(script.padalod).toBe(0);
     expect(script.lodniY).toBe(1);
     expect(room.wreckSwaps.some((swap) => swap.pixels.length > 0)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The `ai` tier's ×S replay (AiRoom.syncWreck -> applyWreckSwapScaled, roomAi.ts).
+//
+// The oracle here is the FAITHFUL renderer, not the other AI backend. This task takes
+// over a frame the faithful compositor used to own, so that is the comparison that means
+// something — and PR #11's lesson is that a CPU↔GPU parity probe cannot catch a bug that
+// is identical on both sides (both call this same function).
+//
+// The fixture's ×S art is built as an EXACT ×S expansion of the room's own palette
+// bitmaps, which makes the comparison byte-exact rather than approximate: every native
+// pixel of the faithful background must equal all S×S pixels of the ×S background. That
+// pins the coordinate arithmetic (including the `- FFR_EXTRA` padded-column offset), the
+// block expansion, the direction of the exchange and the erosion trail all at once.
+//
+// It is asserted MID-FALL — after the second tick, the state the test above proves has an
+// eroded sprite and a trail. A resting LODE has an empty swap list and proves nothing.
+// ---------------------------------------------------------------------------
+
+const S = 4;
+
+/** An exact ×S expansion of a palette bitmap region, as straight opaque RGBA. */
+function scaledArt(
+  bmp: FfrBitmap,
+  pal: ReturnType<typeof palette>,
+  x0: number,
+  y0: number,
+  w: number,
+  h: number,
+): AiWreckSurface {
+  const data = new Uint8ClampedArray(w * S * h * S * 4);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const c = pal[bmp.pixels[(y0 + y) * bmp.w + (x0 + x)]!]!;
+      for (let by = 0; by < S; by++) {
+        for (let bx = 0; bx < S; bx++) {
+          const o = ((y * S + by) * (w * S) + x * S + bx) * 4;
+          data[o] = c.r; data[o + 1] = c.g; data[o + 2] = c.b; data[o + 3] = 255;
+        }
+      }
+    }
+  }
+  return { data, w: w * S, h: h * S, ox: 0, oy: 0 };
+}
+
+describe('LODE falling wreck at ×S (the `ai` tier)', () => {
+  it('replays the swaps into ×S art so every S×S block matches the faithful background', () => {
+    const room = wreckRoom();
+    const script = primeDrop(room);
+    const pal = room.palette;
+
+    // Snapshot the PRISTINE art before any swap: Room clones a bitmap on its first
+    // destructive write, so this has to happen before the ticks.
+    const bgArt = scaledArt(room.bitmaps[1]!, pal, FFR_EXTRA, 0, W, H);
+    const sprites = new Map<number, AiWreckSurface>();
+    for (let phase = 0; phase < 5; phase++) {
+      const b = room.bitmaps[3 + phase]!;
+      sprites.set(phase, scaledArt(b, pal, 0, 0, b.w, b.h));
+    }
+
+    script.tickShodLod();
+    script.tickShodLod(); // MID-FALL: the sprite has eroded and left a trail
+
+    for (const swap of room.wreckSwaps) {
+      const spr = sprites.get(swap.phase)!;
+      applyWreckSwapScaled(bgArt, spr, swap, S, bgArt.w, bgArt.h);
+    }
+
+    const faithful = renderRoomRgba(room, new ClassicArtSource(pal));
+    let mismatches = 0;
+    let firstBad = '';
+    for (let y = 0; y < H && mismatches === 0; y++) {
+      for (let x = 0; x < W; x++) {
+        const want = rgbaAt(faithful, x, y);
+        for (let by = 0; by < S; by++) {
+          for (let bx = 0; bx < S; bx++) {
+            const o = ((y * S + by) * bgArt.w + x * S + bx) * 4;
+            if (
+              bgArt.data[o] !== want.r || bgArt.data[o + 1] !== want.g ||
+              bgArt.data[o + 2] !== want.b || bgArt.data[o + 3] !== 255
+            ) {
+              if (!firstBad) {
+                firstBad = `native (${x},${y}) block (${bx},${by}): got ` +
+                  `${bgArt.data[o]},${bgArt.data[o + 1]},${bgArt.data[o + 2]},${bgArt.data[o + 3]} ` +
+                  `want ${want.r},${want.g},${want.b},255`;
+              }
+              mismatches++;
+            }
+          }
+        }
+      }
+    }
+    expect(firstBad).toBe('');
+    expect(mismatches).toBe(0);
+
+    // ...and the wreck really is visible here, so the sweep above is not vacuously green.
+    expect(room.wreckSwaps.some((s) => s.pixels.length > 0)).toBe(true);
+    expect(rgbaAt(faithful, 11, 2)).toEqual({ ...pal[SHIP_2]!, a: 255 });
+  });
+
+  it('erodes the ×S sprite in step with the palette sprite (the trail comes from this)', () => {
+    const room = wreckRoom();
+    const script = primeDrop(room);
+    const pal = room.palette;
+    const bgArt = scaledArt(room.bitmaps[1]!, pal, FFR_EXTRA, 0, W, H);
+    const spr = scaledArt(room.bitmaps[3]!, pal, 0, 0, 2, 1);
+
+    script.tickShodLod();
+    for (const swap of room.wreckSwaps) applyWreckSwapScaled(bgArt, spr, swap, S, bgArt.w, bgArt.h);
+
+    // The palette sprite's first pixel became the MASK the background carried there;
+    // the ×S sprite must carry the SAME colour, in every pixel of its block.
+    expect(room.bitmaps[3]!.pixels[0]).toBe(MASK);
+    for (let by = 0; by < S; by++) {
+      for (let bx = 0; bx < S; bx++) {
+        const o = (by * spr.w + bx) * 4;
+        expect([spr.data[o], spr.data[o + 1], spr.data[o + 2], spr.data[o + 3]])
+          .toEqual([pal[MASK]!.r, pal[MASK]!.g, pal[MASK]!.b, 255]);
+      }
+    }
+  });
+
+  it('confines a swap to the ship footprint (the rect the canvas actually reads back)', () => {
+    const room = wreckRoom();
+    const script = primeDrop(room);
+    script.tickShodLod();
+    const swap = room.wreckSwaps.find((s) => s.pixels.length > 0)!;
+    // 2x1 sprite at padded column 20 => art column 10, row 1.
+    expect(wreckSwapRect(swap, 2 * S, 1 * S, S, W * S, H * S))
+      .toEqual({ x: 10 * S, y: 1 * S, w: 2 * S, h: 1 * S });
+    // A swap that changed nothing has no rect at all, so it costs no readback.
+    expect(wreckSwapRect({ x: 20, y: 5, phase: 0, width: 2, pixels: [] }, 2 * S, 1 * S, S, W * S, H * S))
+      .toBeNull();
+  });
+
+  it('writes opaque pixels even where the ×S sprite is transparent', () => {
+    // BG_FS writes outColor.a = 1.0 while canvas-2D keeps whatever alpha the background
+    // carries, so a sub-255 alpha here makes the two `ai` backends disagree — and a ×S
+    // block around an opaque native pixel can pick one up from an anti-aliased edge.
+    const room = wreckRoom();
+    const script = primeDrop(room);
+    const pal = room.palette;
+    const bgArt = scaledArt(room.bitmaps[1]!, pal, FFR_EXTRA, 0, W, H);
+    const spr = scaledArt(room.bitmaps[3]!, pal, 0, 0, 2, 1);
+    for (let i = 3; i < spr.data.length; i += 4) spr.data[i] = 0; // fully transparent art
+
+    script.tickShodLod();
+    for (const swap of room.wreckSwaps) applyWreckSwapScaled(bgArt, spr, swap, S, bgArt.w, bgArt.h);
+
+    const o = ((1 * S) * bgArt.w + 10 * S) * 4;
+    expect(bgArt.data[o + 3]).toBe(255);
+    expect(bgArt.data[o]).toBe(pal[SHIP]!.r); // the RGB still came from the sprite
+    expect(spr.data[3]).toBe(255);
   });
 });

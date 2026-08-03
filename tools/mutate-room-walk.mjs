@@ -27,6 +27,7 @@ const A = 'src/render/roomAi.ts';
 const ALL_TESTS = [
   'test/darkness.test.ts',
   'test/gspec5.test.ts',
+  'test/lode-wreck.test.ts',
   'test/mirror.test.ts',
   'test/roomAi.test.ts',
   'test/rope.test.ts',
@@ -83,6 +84,45 @@ const MUTATIONS = [
   { rule: 'x S scaling of item positions (ai sink)', file: A, tests: ['test/roomAi.test.ts'],
     from: 'const px = (cell: number, shift: number): number => (cell * FSIZE + shift) * S;',
     to: 'const px = (cell: number, shift: number): number => (cell * FSIZE + shift) * (S + 1);' },
+
+  // ── LODE's falling wreck at xS (applyWreckSwapScaled / syncWreck, roomAi.ts) ──
+  // The replay is pinned against the FAITHFUL renderer, byte-exact, in lode-wreck.test.ts.
+  // These prove that pin bites: the sibling AI backend replays through the same function,
+  // so a CPU<->GPU probe cannot kill any of them (see dissolveKeeps / PR #11).
+  { rule: 'wreck: the swap is an EXCHANGE, not an overwrite', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '          const oldBg = bg.data[bp + channel]!;\n          bg.data[bp + channel] = sprite.data[sp + channel]!;\n          sprite.data[sp + channel] = oldBg;',
+    to: '          bg.data[bp + channel] = sprite.data[sp + channel]!;' },
+  { rule: 'wreck: the swap direction (sprite -> background)', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '          const oldBg = bg.data[bp + channel]!;\n          bg.data[bp + channel] = sprite.data[sp + channel]!;\n          sprite.data[sp + channel] = oldBg;',
+    to: '          const oldSp = sprite.data[sp + channel]!;\n          sprite.data[sp + channel] = bg.data[bp + channel]!;\n          bg.data[bp + channel] = oldSp;' },
+  { rule: 'wreck: every native pixel becomes an SxS BLOCK', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '    for (let by = 0; by < S; by++) {', to: '    for (let by = 0; by < 1; by++) {' },
+  { rule: 'wreck: the SxS block is square (columns too)', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '      for (let bx = 0; bx < S; bx++) {', to: '      for (let bx = 0; bx < 1; bx++) {' },
+  { rule: 'wreck: padded background column -> art column (- FFR_EXTRA)', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    const dx = swap.x + j - FFR_EXTRA;', to: '    const dx = swap.x + j;' },
+  { rule: 'wreck: the ship offset decodes as row-major over swap.width', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '    const i = Math.floor(pixel / swap.width);\n    const j = pixel % swap.width;',
+    to: '    const j = Math.floor(pixel / swap.width);\n    const i = pixel % swap.width;' },
+  { rule: 'wreck: written pixels are forced OPAQUE (BG_FS writes a=1, canvas-2D does not)',
+    file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '        bg.data[bp + 3] = 255;\n        sprite.data[sp + 3] = 255;',
+    to: '        bg.data[bp + 3] = sprite.data[sp + 3]!;' },
+  { rule: 'wreck: Delphi y=436 clear-out row', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '    if (dy < 0 || dy > 436 || dy * S >= artH) continue;',
+    to: '    if (dy < 0 || dy > 400 || dy * S >= artH) continue;' },
+  { rule: 'wreck: the readback rect covers the whole ship footprint', file: A,
+    tests: ['test/lode-wreck.test.ts'],
+    from: '  const x1 = Math.min(artW, (swap.x - FFR_EXTRA) * scale + spriteW);',
+    to: '  const x1 = Math.min(artW, (swap.x - FFR_EXTRA) * scale + spriteW - 1);' },
+  { rule: 'wreck: a no-op swap needs no readback at all', file: A, tests: ['test/lode-wreck.test.ts'],
+    from: '  if (swap.pixels.length === 0) return null;', to: '  if (swap.pixels.length < 0) return null;' },
+  { rule: 'wreck: the mutated background moves the composite cache key', file: A,
+    tests: ['test/roomAi.test.ts'],
+    from: '`${faze}|${shifts === null ? 0 : count}|${aiImageRevision(bg)}`',
+    to: '`${faze}|${shifts === null ? 0 : count}`' },
 ];
 
 const run = (tests) => spawnSync('npx', ['vitest', 'run', ...tests], { encoding: 'utf8' });

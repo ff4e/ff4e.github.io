@@ -46,7 +46,7 @@ import { darkestIndex } from '../src/render/renderRoom.js';
 import { AI_ROOM_SCALE, aiRoomGateAllows } from '../src/render/roomAi.js';
 import { FISH_BODY_FILE, frameIndex } from '../src/render/enhancedArtSource.js';
 import { AiRoom } from '../src/render/roomAi.js';
-import { Canvas2dAiTarget, dissolveKeeps } from '../src/render/aiTarget.js';
+import { Canvas2dAiTarget, aiImageRevision, dissolveKeeps, markAiImageChanged } from '../src/render/aiTarget.js';
 import type { AiTarget } from '../src/render/aiTarget.js';
 import { FSIZE as FSIZE_PX } from '../src/render/renderRoom.js';
 import { Dir } from '../src/core/dir.js';
@@ -327,7 +327,6 @@ const GATE_OK = {
   gspec: 0,
   hookStates: [] as number[],
   frameEffects: false,
-  wreckActive: false,
   spriteCheatsActive: false,
   bakedSubsNeeded: false,
 };
@@ -355,12 +354,15 @@ describe('aiRoomRenderActive gate rule (main.ts:954)', () => {
     expect(aiGateAllows({ frameEffects: false })).toBe(true);
   });
 
-  it('excludes frames while the LODE shipwreck is damaging the background', () => {
-    // Upstream 7f25aad replays destructive per-pixel wreck swaps into the background for
-    // the faithful and enhanced tiers. This path draws static ×4 bitmaps and cannot show
-    // the damage, so it must stand down rather than render a stale, undamaged room.
-    expect(aiGateAllows({ gspec: 9, wreckActive: true })).toBe(false);
-    expect(aiGateAllows({ gspec: 9, wreckActive: false })).toBe(true);
+  it('no longer withholds LODE while the shipwreck is damaging the background', () => {
+    // This WAS an exclusion: the faithful/enhanced tiers replay destructive per-pixel
+    // wreck swaps into the background, and static ×4 bitmaps could not show the damage,
+    // so the room visibly dropped from ×4 to native mid-fall. AiRoom.syncWreck now
+    // replays the same swaps into a mutable ×S background, so the CONDITION IS GONE
+    // rather than merely satisfied — there is no field left to set. LODE (gspec=9) is
+    // therefore allowed like any other room; the replay itself is pinned against the
+    // faithful renderer in test/lode-wreck.test.ts.
+    expect(aiGateAllows({ gspec: 9 })).toBe(true);
   });
 
   it('excludes frames with a sprite cheat (xundead/xmorph) active', () => {
@@ -380,7 +382,7 @@ describe('aiRoomRenderActive gate rule (main.ts:954)', () => {
     // checked in isolation above, so here we assert none of them is skippable.
     const exclusions: Partial<typeof GATE_OK>[] = [
       { gspec: 42 }, { hookStates: [1] }, { frameEffects: true },
-      { wreckActive: true }, { spriteCheatsActive: true }, { bakedSubsNeeded: true },
+      { spriteCheatsActive: true }, { bakedSubsNeeded: true },
     ];
     for (const e of exclusions) expect(aiGateAllows(e)).toBe(false);
     expect(aiGateAllows()).toBe(true); // ...and the all-clear case still passes
@@ -695,5 +697,80 @@ describe('AiRoom.drawRope paints the real double rope', () => {
 
   it('draws nothing when the rope has no vertical extent', () => {
     expect(ropeFills(10, 12, 10, 5).length).toBe(0); // y2 <= y1 guard
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 12. The mutable-background cache key (aiTarget.ts aiImageRevision, roomAi.ts
+//     paintBackground).
+//
+//     LODE's ×S background is mutated IN PLACE by the falling wreck, so both backends —
+//     which cache the composite by source identity — have to be told. `Canvas2dAiTarget`
+//     keys its cached composite on `sig`, so the revision must be IN that sig; GlAiScreen
+//     keys its texture on the same revision. The rule is imported, not restated.
+//
+//     LODE happens to have water wobble, which puts the logic tick into `sig` and would
+//     mask a missing revision most of the time. These fixtures deliberately do NOT wobble,
+//     so only the revision can move the key.
+// ---------------------------------------------------------------------------
+describe('mutable background art (aiTarget.ts aiImageRevision)', () => {
+  const S = 4;
+
+  /** An AiTarget that records nothing but the background signatures it is handed. */
+  function sigRecorder(w: number, h: number) {
+    const sigs: string[] = [];
+    const t: AiTarget = {
+      width: w, height: h,
+      fill() {}, fillRect() {}, blit() {}, disintegrate() {}, mirrorGlass() {},
+      background(sig) { sigs.push(sig); },
+    };
+    return { t, sigs };
+  }
+
+  function scene() {
+    const room = makeRoom({ w: 8, h: 6, items: [] });
+    room.wamp = 0; // no wobble: `count` cannot move the signature here
+    const bg = fakeBitmap(8 * FSIZE_PX * S, 6 * FSIZE_PX * S, 'bg');
+    const ai = new AiRoom(
+      [bg],
+      [fakeBitmap(8 * FSIZE_PX * S, 6 * FSIZE_PX * S, 'wall')],
+      [],
+      fakeFish() as never,
+      S,
+    );
+    return { room, ai, bg };
+  }
+
+  const frame = {
+    count: 0, slide: 0,
+    fishAnim: { little: { bodyFrame: 0, headFrame: 0 }, big: { bodyFrame: 0, headFrame: 0 } },
+  };
+
+  it('starts at revision 0 and counts up per mutation', () => {
+    const img = fakeBitmap(1, 1, 'x');
+    expect(aiImageRevision(img)).toBe(0);
+    markAiImageChanged(img);
+    expect(aiImageRevision(img)).toBe(1);
+    markAiImageChanged(img);
+    expect(aiImageRevision(img)).toBe(2);
+    expect(aiImageRevision(fakeBitmap(1, 1, 'y'))).toBe(0); // per-image, not global
+  });
+
+  it('repeats the SAME background signature while the art is untouched', () => {
+    const { room, ai } = scene();
+    const { t, sigs } = sigRecorder(8 * FSIZE_PX * S, 6 * FSIZE_PX * S);
+    ai.drawInto(t, room, frame);
+    ai.drawInto(t, room, { ...frame, count: 7 });
+    expect(sigs).toHaveLength(2);
+    expect(sigs[0]).toBe(sigs[1]); // the cached composite is still valid — that's the point
+  });
+
+  it('CHANGES the background signature when the art is mutated in place', () => {
+    const { room, ai, bg } = scene();
+    const { t, sigs } = sigRecorder(8 * FSIZE_PX * S, 6 * FSIZE_PX * S);
+    ai.drawInto(t, room, frame);
+    markAiImageChanged(bg); // what AiRoom.syncWreck does after replaying a wreck swap
+    ai.drawInto(t, room, frame);
+    expect(sigs[0]).not.toBe(sigs[1]);
   });
 });

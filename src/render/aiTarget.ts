@@ -28,6 +28,30 @@ import { RANDPOLE } from './framebuffer.js';
 /** Anything both backends can sample: staged AI art, or a ×S palette sprite canvas. */
 export type AiImage = ImageBitmap | HTMLCanvasElement;
 
+const aiImageRevisions = new WeakMap<AiImage, number>();
+
+/**
+ * How many times this source image has been mutated in place.
+ *
+ * Almost all `ai` art is immutable once decoded, so both backends cache by source
+ * IDENTITY. LODE's falling wreck breaks that: it exchanges pixels between the room
+ * background and the ship sprite, so the background image object stays the same while
+ * its pixels change. An identity-only cache then keeps serving the undamaged art —
+ * invisibly on canvas-2D, which re-reads the canvas anyway, and permanently on the GPU,
+ * whose texture was uploaded once.
+ *
+ * Same shape and same reason as `bitmapPixelRevision` in data/ffr.ts, which exists for
+ * this exact effect on the faithful tier (see glScreen.ts's `lastUpload`).
+ */
+export function aiImageRevision(img: AiImage): number {
+  return aiImageRevisions.get(img) ?? 0;
+}
+
+/** Mark an image's pixels as changed without replacing the image object. */
+export function markAiImageChanged(img: AiImage): void {
+  aiImageRevisions.set(img, aiImageRevision(img) + 1);
+}
+
 export interface AiTarget {
   /** Backing-store size in pixels (native × the room's AI scale). */
   readonly width: number;

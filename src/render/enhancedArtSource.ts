@@ -219,6 +219,34 @@ export class EnhancedArtSource implements ArtSource {
   }
 
   /**
+   * Test/debug: the bounding box, in native px, of everything the wreck has changed in
+   * this source's private background copy — or null if it has changed nothing.
+   *
+   * The `ai` tier replays the SAME swap history into ×S art through an independent
+   * implementation (AiRoom.syncWreck). Comparing the two footprints on the real shipped
+   * art is a cross-implementation check that neither tier's own tests can be: this one
+   * predates the ×S replay and knows nothing about it.
+   */
+  wreckDamageRect(): { x: number; y: number; w: number; h: number } | null {
+    const art = this.art;
+    const now = this.wreckBackgrounds?.[0];
+    const was = art?.bg[0];
+    if (!art || !now || !was) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (let y = 0; y < art.h; y++) {
+      for (let x = 0; x < art.w; x++) {
+        const o = (y * art.w + x) * 4;
+        if (now[o] === was[o] && now[o + 1] === was[o + 1] && now[o + 2] === was[o + 2]) continue;
+        if (x < x0) x0 = x;
+        if (y < y0) y0 = y;
+        if (x > x1) x1 = x;
+        if (y > y1) y1 = y;
+      }
+    }
+    return x1 < x0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+  }
+
+  /**
    * Replay KresliLod's destructive swaps into private FFNG background/sprite
    * copies. The classic mask still decides eligible pixels; RGBA pixels perform
    * the same exchange, preserving the original erosion/trail in enhanced mode.
