@@ -106,7 +106,7 @@ import { pollPad, type PadDir, type PadSnapshot } from '../platform/gamepad.js';
 import { tvMode } from '../platform/tv.js';
 import { registerServiceWorker } from '../platform/pwa.js';
 import { initHostGamepad } from '../platform/hostGamepad.js';
-import { applyPadCaptions } from '../platform/padCaptions.js';
+import { applyPadCaptions, loadPadVoices } from '../platform/padCaptions.js';
 import { setVirtualGamepadEnabled } from '../platform/virtualGamepad.js';
 import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
 import { parseFfp, type FfpPanel } from '../data/ffp.js';
@@ -2704,6 +2704,9 @@ async function loadRoom(num: number): Promise<void> {
     // On a console, rewrite the tutorial captions that name PC keys (F2/F3/F1) so the
     // demonstration teaches the controls the player actually has.
     fftEntries = [...applyPadCaptions(fftRes.ok ? parseFft(fftBytes) : [], tvMode)];
+    // Re-recorded audio for those captions, if it has been produced yet. Fire-and-forget:
+    // a line with no recording keeps the original clip and the corrected subtitle.
+    void loadPadVoices((n, u) => audio.loadOverride(n, u), tvMode);
     if (fftRes.ok && ffsRes.ok) audio.setRoom(fftBytes, new Uint8Array(await ffsRes.arrayBuffer()));
     pokus = 1; // fresh attempt on entering a room
     buildRoom();

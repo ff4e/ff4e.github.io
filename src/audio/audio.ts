@@ -119,7 +119,38 @@ export class AudioEngine {
     this.ensureCtx();
   }
 
+  /**
+   * Replacement clips that take priority over the sound banks, by sound name.
+   *
+   * The console build re-records the tutorial lines that name PC keys, and the banks are
+   * a packed binary format keyed by byte offset — editing them in place would mean
+   * rewriting shipped game data and could not be undone per-platform. Overriding at
+   * playback instead keeps the original assets exactly as released, and the override
+   * simply does not exist on the web build.
+   */
+  private readonly overrides = new Map<string, AudioBuffer>();
+
+  /**
+   * Load replacement audio for `name` from `url`. Failure is non-fatal and leaves the
+   * original clip in place: a missing or broken replacement should cost the line its new
+   * wording, not its voice.
+   */
+  async loadOverride(name: string, url: string): Promise<boolean> {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return false;
+      const buf = await this.ensureCtx().decodeAudioData(await res.arrayBuffer());
+      this.overrides.set(name, buf);
+      this.cache.delete(name); // drop any bank copy already decoded under this name
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private buffer(name: string): AudioBuffer | null {
+    const override = this.overrides.get(name);
+    if (override) return override;
     const cached = this.cache.get(name);
     if (cached) return cached;
     const pkgs = this.roomPkg ? [this.roomPkg, ...this.globals] : this.globals;

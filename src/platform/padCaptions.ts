@@ -47,6 +47,35 @@ export function hasPadCaption(name: string): boolean {
   return Object.prototype.hasOwnProperty.call(PAD_CAPTIONS, name);
 }
 
+/** The caption ids rewritten for a controller, in tutorial order. */
+export const PAD_CAPTION_IDS: readonly string[] = Object.keys(PAD_CAPTIONS);
+
+/**
+ * Where a re-recorded clip for `name` lives. The audio is Czech, matching the shipped
+ * recordings (the game has Czech speech with English subtitles over it), and is served
+ * from the same static tree as the rest of the assets.
+ */
+export const padVoiceUrl = (name: string): string => `/data/xbox-voice/${name}.wav`;
+
+/**
+ * Load re-recorded audio for the rewritten captions, so the tutorial does not *say* one
+ * thing while the subtitle reads another.
+ *
+ * Each clip is optional and independent: a line with no recording keeps the original
+ * audio and shows the corrected subtitle, which is still an improvement over naming a
+ * key the console does not have. Returns the ids that were actually replaced.
+ */
+export async function loadPadVoices(
+  load: (name: string, url: string) => Promise<boolean>,
+  on: boolean,
+): Promise<string[]> {
+  if (!on) return [];
+  const results = await Promise.all(
+    PAD_CAPTION_IDS.map(async (name) => ((await load(name, padVoiceUrl(name))) ? name : null)),
+  );
+  return results.filter((n): n is string => n !== null);
+}
+
 /** Re-wrap replacement text as a subtitle, preserving the original's colour code. */
 function retext(orig: FftSubtitle, text: string): FftSubtitle {
   return { color: orig.color, text, raw: orig.color ? `${orig.color} ${text}` : text };

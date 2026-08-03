@@ -9,7 +9,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parseFft } from '../src/data/fft.js';
-import { applyPadCaptions, hasPadCaption } from '../src/platform/padCaptions.js';
+import { applyPadCaptions, hasPadCaption, loadPadVoices, padVoiceUrl, PAD_CAPTION_IDS } from '../src/platform/padCaptions.js';
 
 const entries = parseFft(new Uint8Array(readFileSync('public/data/Title/002.fft')));
 const REWRITTEN = ['help2', 'help7', 'help11', 'help22'];
@@ -60,6 +60,29 @@ describe('controller tutorial captions', () => {
     }
     // All four are the big fish — only one voice has to be reproduced.
     for (const n of REWRITTEN) expect(orig.get(n)!.en.color).toBe('V');
+  });
+
+  it('asks for a recording of every caption it rewrites, and only on a controller', async () => {
+    const asked: string[] = [];
+    const load = async (name: string, url: string) => {
+      asked.push(name);
+      expect(url).toBe(padVoiceUrl(name));
+      return true;
+    };
+    expect(await loadPadVoices(load, false)).toEqual([]); // web build: never fetched
+    expect(asked).toEqual([]);
+
+    const replaced = await loadPadVoices(load, true);
+    expect(asked.sort()).toEqual([...REWRITTEN].sort());
+    expect(replaced.sort()).toEqual([...REWRITTEN].sort());
+    expect([...PAD_CAPTION_IDS].sort()).toEqual([...REWRITTEN].sort());
+  });
+
+  it('keeps the original clip for a line whose recording is missing or broken', async () => {
+    // Half-finished recording sessions are the normal state of this work: a line without
+    // audio must still play, with the corrected subtitle, rather than falling silent.
+    const load = async (name: string) => name === 'help2';
+    expect(await loadPadVoices(load, true)).toEqual(['help2']);
   });
 
   it('changes only the four captions, leaving the rest of the tutorial alone', () => {
