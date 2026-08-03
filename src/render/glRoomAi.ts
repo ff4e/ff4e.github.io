@@ -31,7 +31,7 @@ import {
   uniformLocations,
   type Uni,
 } from './glCommon.js';
-import { aiImageRevision } from './aiTarget.js';
+import { aiImagePatch, aiImageRevision } from './aiTarget.js';
 import type { AiImage, AiTarget } from './aiTarget.js';
 
 /** Opaque colour fill (the darkness room, the elevator rope). */
@@ -316,6 +316,12 @@ export class GlAiScreen implements AiTarget {
    * and RE-uploaded when the source's `aiImageRevision` moves (LODE's wreck mutating
    * the ×S background in place). The re-upload goes into the SAME texture object, so a
    * mutating source does not churn textures the way delete-and-recreate would.
+   *
+   * A consumer exactly one revision behind takes the source's patch and updates only the
+   * rect that changed: LODE's background is 2760×2280, and re-uploading it whole costs
+   * 12.3 ms on an M4 — a dropped frame on every logic tick of the fall — against 0.68 ms
+   * for the ship's footprint. Anything further behind (a room re-entered after eviction,
+   * a reset to pristine art) re-uploads whole, which is always correct.
    */
   private texture(src: AiImage): WebGLTexture {
     const gl = this.gl;
@@ -324,7 +330,15 @@ export class GlAiScreen implements AiTarget {
     if (hit) {
       if (hit.revision === revision) return hit.tex;
       gl.bindTexture(gl.TEXTURE_2D, hit.tex);
-      this.uploadImage(src);
+      const patch = aiImagePatch(src);
+      if (patch && patch.revision === revision && hit.revision === revision - 1) {
+        // A typed-array source, so UNPACK_FLIP_Y / UNPACK_PREMULTIPLY_ALPHA do not apply
+        // to it at all: the rows are top-down and straight-alpha, matching the texture
+        // this is patching into.
+        gl.texSubImage2D(gl.TEXTURE_2D, 0, patch.x, patch.y, patch.w, patch.h, gl.RGBA, gl.UNSIGNED_BYTE, patch.data);
+      } else {
+        this.uploadImage(src);
+      }
       hit.revision = revision;
       return hit.tex;
     }

@@ -595,8 +595,12 @@ export class AiRoom {
    * reason this tier no longer hands LODE's falling ship back to the faithful compositor.
    *
    * `wreckCursor` makes the history idempotent: each recorded swap is applied exactly
-   * once, however many display frames pass between logic ticks. Only the rect a swap can
-   * touch is read back and written (see wreckSwapRect) — the whole canvas is 25 MB.
+   * once, however many display frames pass between logic ticks. Every pending swap is
+   * applied inside ONE readback of their union rect (a tick records two swaps — the erase
+   * at the old position and the draw at the new — with overlapping footprints), and that
+   * rect is then handed on as the patch the GPU updates its texture from. Reading the
+   * whole 25 MB canvas back per swap, or re-uploading it whole, would each cost more than
+   * a frame.
    *
    * Requires a DOM; the unit tests drive `applyWreckSwapScaled` directly instead.
    */
@@ -617,25 +621,35 @@ export class AiRoom {
     if (!canvas) return;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
+
+    // Pass 1: resolve each pending swap's sprite and footprint, and union the footprints.
+    const pending: { swap: WreckSwap; sprite: AiWreckSurface }[] = [];
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (; this.wreckCursor < swaps.length; this.wreckCursor++) {
       const swap = swaps[this.wreckCursor]!;
       const sprite = this.wreckSprite(room, swap.phase);
       if (!sprite) continue;
-      const rect = wreckSwapRect(swap, sprite.w, sprite.h, this.scale, canvas.width, canvas.height);
-      if (!rect) continue;
-      const img = ctx.getImageData(rect.x, rect.y, rect.w, rect.h);
-      applyWreckSwapScaled(
-        { data: img.data, w: img.width, h: img.height, ox: rect.x, oy: rect.y },
-        sprite,
-        swap,
-        this.scale,
-        canvas.width,
-        canvas.height,
-      );
-      ctx.putImageData(img, rect.x, rect.y);
+      const r = wreckSwapRect(swap, sprite.w, sprite.h, this.scale, canvas.width, canvas.height);
+      if (!r) continue;
+      pending.push({ swap, sprite });
+      if (r.x < x0) x0 = r.x;
+      if (r.y < y0) y0 = r.y;
+      if (r.x + r.w > x1) x1 = r.x + r.w;
+      if (r.y + r.h > y1) y1 = r.y + r.h;
     }
-    // Both backends cache the background by identity; this is how they learn it moved.
-    markAiImageChanged(canvas);
+    if (pending.length === 0) return;
+
+    // Pass 2: apply them all inside that one window.
+    const img = ctx.getImageData(x0, y0, x1 - x0, y1 - y0);
+    const window: AiWreckSurface = { data: img.data, w: img.width, h: img.height, ox: x0, oy: y0 };
+    for (const { swap, sprite } of pending) {
+      applyWreckSwapScaled(window, sprite, swap, this.scale, canvas.width, canvas.height);
+    }
+    ctx.putImageData(img, x0, y0);
+    // Both backends cache the background by identity; this is how they learn it moved —
+    // and the patch is what lets the GPU update the changed rect instead of the whole
+    // 25 MB texture (12.3 ms vs 0.68 ms on an M4).
+    markAiImageChanged(canvas, { x: x0, y: y0, w: img.width, h: img.height, data: img.data });
   }
 
   /** The mutable ×S background copy, created on the first swap. */
