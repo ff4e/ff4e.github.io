@@ -344,6 +344,50 @@ describe('LODE falling wreck at ×S (the `ai` tier)', () => {
     expect(rgbaAt(faithful, 11, 2)).toEqual({ ...pal[SHIP_2]!, a: 255 });
   });
 
+  it('stays byte-exact for the WHOLE fall, including the y=436 clear-out row', () => {
+    // The mid-fall case above never reaches the bottom of the fall band, so on its own it
+    // leaves Delphi's `dy > 436` cut-off unpinned — and that guard is a magic number the
+    // engine and this replay both carry. Running to padalod = -1 walks the ship through
+    // every row it can touch, so a wrong cut-off (or a lost final erase pass) shows up as
+    // a background that no longer matches the faithful one.
+    const room = wreckRoom();
+    const script = primeDrop(room);
+    const pal = room.palette;
+    const bgArt = scaledArt(room.bitmaps[1]!, pal, FFR_EXTRA, 0, W, H);
+    const sprites = new Map<number, AiWreckSurface>();
+    for (let phase = 0; phase < 5; phase++) {
+      const b = room.bitmaps[3 + phase]!;
+      sprites.set(phase, scaledArt(b, pal, 0, 0, b.w, b.h));
+    }
+
+    while (script.padalod !== -1) script.tickShodLod();
+    expect(script.lodniY).toBe(437);
+    for (const swap of room.wreckSwaps) {
+      applyWreckSwapScaled(bgArt, sprites.get(swap.phase)!, swap, S, bgArt.w, bgArt.h);
+    }
+
+    const faithful = renderRoomRgba(room, new ClassicArtSource(pal));
+    let bad = 0;
+    for (let y = 0; y < H && bad === 0; y++) {
+      for (let x = 0; x < W; x++) {
+        const want = rgbaAt(faithful, x, y);
+        for (let by = 0; by < S; by++) {
+          for (let bx = 0; bx < S; bx++) {
+            const o = ((y * S + by) * bgArt.w + x * S + bx) * 4;
+            if (
+              bgArt.data[o] !== want.r || bgArt.data[o + 1] !== want.g ||
+              bgArt.data[o + 2] !== want.b || bgArt.data[o + 3] !== 255
+            ) bad++;
+          }
+        }
+      }
+    }
+    expect(bad).toBe(0);
+    // The trail the engine leaves behind survives to the end (as the faithful test above
+    // asserts on the index plane), so this sweep is not comparing two pristine images.
+    expect(rgbaAt(faithful, 10, 1)).toEqual({ ...pal[SHIP]!, a: 255 });
+  });
+
   it('erodes the ×S sprite in step with the palette sprite (the trail comes from this)', () => {
     const room = wreckRoom();
     const script = primeDrop(room);
