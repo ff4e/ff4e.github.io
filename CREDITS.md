@@ -14,6 +14,13 @@
   open-source remake by Ivo Danihelka and contributors. The room data shipped with
   this port is derived from the **GPL-licensed fillets-ng data**. Attribution and the
   data's license terms follow that project.
+- **Two restored voice lines** — `pyr-m-nudi` (PYRAMIDA) and `jes-v-potvora2`
+  (JESKYNE) are ALTAR recordings that the 1998 release's code calls for but whose
+  audio was cut from its data packages. They are taken from the GPL-licensed
+  fillets-ng data, with their Czech subtitles from ALTAR's own master index in the
+  GPL Delphi source release and their English subtitles from fillets-ng. They live in
+  [`public/restored/`](public/restored/), separate from the untouched 1998 data —
+  see that directory's README for the full provenance.
 
 ## Fonts
 

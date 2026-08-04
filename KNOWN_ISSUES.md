@@ -129,6 +129,31 @@ These playable rooms have **no known solution** to replay (they were never in th
   is edited), and `RIPPLE.amp = 0` restores the pure resampled wobble exactly.
   Tune it live with `tools/ripple-lab.html` on the dev server.
 
+## Audio: 🟡 two 1998 lines whose recordings do not survive anywhere
+
+Found by `tools/sweep-sounds.ts`, which expands every sound name `URoom.pas` can build
+and diffs it against both the release packages and ALTAR's master index in the GPL
+Delphi source. Nine names come up; seven are now heard (five were name typos in the
+original, two are restored in [`public/restored/`](public/restored/)). These two are not,
+and cannot be:
+
+- **`mot-v-znovu1` (MOTOR #54, `URoom.pas:16869`).** `addv(30,'mot-v-znovu'+chr(48+random(2)))`
+  is a 50/50 pick and only `mot-v-znovu0` shipped. It *was* recorded — ALTAR's master
+  `Titl/motor.fft` has it (60416 samples) and the release's `054.ffs` is that stream with
+  its 94690 compressed bytes cut out, every later offset shifted by exactly that. The
+  audio survives in no distribution, fillets-ng included (`engine/cs` has only
+  `mot-v-znovu0`, and `engine/code.lua:125` still rolls the same 50/50). The big fish is
+  silent half the time he suggests restarting the engine, here and in FFNG.
+- **`steel-x-ticho` (STEEL #55, `URoom.pas:9967-9968`).** `sndcyc('steel-x-ticho',-2)`
+  twice, for the press hall's drone. The name is in no package, not in the master index,
+  and not in fillets-ng — whose `steel/code.lua` drops the call entirely. The hum appears
+  never to have been made; the room's package holds only `steel-m-0/1` and
+  `steel-x-redalert`. Kept verbatim in `src/rooms/steel.ts:40-41`.
+
+Neither is fixable without inventing audio, which is out of scope for a faithful port.
+Should a build of the 1998 data containing them ever surface, both drop straight into
+`public/restored/` via `tools/build-restored-sounds.ts`.
+
 ## Excluded by design (not issues)
 
 - **SCORE #72** — non-playable results screen.

@@ -71,7 +71,14 @@ function prog(s: Script): void {
       ((velkar.x === 16 && velkar.y === 3 && !s.facingRight('big')) ||
         (velkar.x < 16 && velkar.y === 4))
     ) {
-      if (s.random(2) === 0) s.addv(0, 'pot-v-pohnu');
+      // DELIBERATE DEVIATION (URoom.pas:11587). The Delphi source has
+      // `addv(0,'pot-v-pohnu')`, but no such sample exists in any build — not in this
+      // room's 012 package, not in the authors' master index, not in FFNG's data. The
+      // recorded line is `pot-v-nehnu` ("S tím ani nehnu."), one letter away, and it
+      // pairs with the 50/50 alternative `pot-v-trub` ("S tou trubkou nepohnu.").
+      // FFNG read it the same way (wreck/code.lua:60). Left verbatim, the big fish is
+      // silent half the times he tries to shift the steel pipe.
+      if (s.random(2) === 0) s.addv(0, 'pot-v-nehnu');
       else s.addv(0, 'pot-v-trub');
       if (s.random(2) === 0) s.addm(15, 'pot-m-nezb');
       else s.addm(15, 'pot-m-dovn');

@@ -81,6 +81,11 @@ function prog(s: Script): void {
       malarY() < 21 &&
       (stelaAfaze === 2 || stelaAfaze === 4 || stelaAfaze === 5)
     ) {
+      // `pyr-m-nudi` is NOT in the shipped 025 package: packaging cut its 106887
+      // compressed bytes out of 025.ffs (every later entry's offset shifts by exactly
+      // that), leaving this call pointing at nothing. It survives in the authors' master
+      // index in the GPL Delphi source (Titl/Pyramida.fft) and as audio in FFNG's data,
+      // and it is restored from there — see public/restored/README.md.
       s.addm(0, 'pyr-m-nudi');
       s.addv(2 + s.random(3), 'pyr-v-sark');
       if (s.random(100) < 50) s.addm(s.random(5), 'pyr-m-comy');
