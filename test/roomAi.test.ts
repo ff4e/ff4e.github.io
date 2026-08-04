@@ -555,6 +555,21 @@ describe('ai-tier smooth wobble vs the faithful rule (aiTarget.ts / framebuffer.
     }
   });
 
+  it('the FAITHFUL table ignores the sub-tick fraction (canvas-2D caches its composite on the tick)', () => {
+    // Canvas2dAiTarget keys its whole ×S background composite on `faze|count`. If the
+    // faithful table read `time` instead of `count` the two would disagree, the cache
+    // would miss on every display frame, and the fallback path would re-blit a 2400×2100
+    // canvas at the display rate — the precise cost that made it keep the 1998 sampling.
+    for (const t of WAVES) {
+      for (const count of [0, 7, 40]) {
+        const onTick = [...faithfulWobbleShifts(wave(t, count), 80)];
+        for (const alpha of [0.01, 0.5, 0.99]) {
+          expect([...faithfulWobbleShifts(wave(t, count + alpha), 80)]).toEqual(onTick);
+        }
+      }
+    }
+  });
+
   it('a wamp=0 room has no displacement at all (rooms 46 and 66 — the parity control)', () => {
     const w = wave([0, 12, 7], 40.37);
     const phase = wobblePhase(w);
