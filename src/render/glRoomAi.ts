@@ -80,7 +80,7 @@ void main() { outColor = vec4(uColor, 1.0); }`;
  * position instead (the obvious version) puts crest passage at ~19 Hz, above what a
  * 30 fps idle repaint can show, and the effect degenerates into aliased shimmer.
  *
- * They are computed on the CPU (`activeRipples`) and arrive as at most three
+ * They are computed on the CPU (`activeRipples`) and arrive as at most `RIPPLE_GPU_SLOTS`
  * `vec4(centre, sigma, amplitude, freq)` in NATIVE units — deliberately not hashed in
  * GLSL, because the JS oracle has to reproduce this arithmetic exactly and
  * `fract(sin(...))` noise is precision-dependent. A room with `wamp == 0` gets none, so a

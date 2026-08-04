@@ -6782,11 +6782,16 @@ window.addEventListener('keydown', unlockAudio, { once: true });
    * CPU↔GPU parity probe structurally cannot, because that probe now compares two
    * backends that are deliberately allowed to differ here.
    *
-   * 1. `oracleMax` — vs an INDEPENDENT JS reimplementation of BG_FS (the continuous
-   *    curve from `smoothWobbleShift`, linearly interpolated between source columns,
-   *    then the wall composited over it), built from the SOURCE art rather than from
-   *    the other AI backend. This is the pin: a rule broken identically on both AI
-   *    targets — the failure mode recorded on `dissolveKeeps` — shows up here.
+   * 1. `oracleMax` — vs a JS reimplementation of BG_FS (the continuous curve from
+   *    `smoothWobbleShift`, linearly interpolated between source columns, then the wall
+   *    composited over it), built from this room's SOURCE art rather than from the other
+   *    AI backend. Precisely what it is independent OF is worth stating, because it is
+   *    not everything: it is independent of the GLSL and of both backends, so a rule
+   *    broken identically on both AI targets — the `dissolveKeeps` failure mode — shows
+   *    up here. It is NOT independent of the shared JS rule (`smoothWobbleShift`,
+   *    `activeRipples`, `wobblePhase`), which the shader is fed from; that half is
+   *    pinned instead by test/roomAi.test.ts against the faithful `waterShift`, and by
+   *    tools/mutate-room-walk.mjs.
    * 2. `bandedMax` — vs the FAITHFUL banded expectation. This one must be LARGE: it is
    *    the negative control that catches a silent regression to the quantized shader,
    *    which check 1 alone would happily accept if the oracle regressed with it.

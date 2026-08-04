@@ -95,6 +95,34 @@ await withApp(async ({ p, expect }) => {
   const ratio = ai.fps / enh.fps;
   expect(ratio > 0.7, `ai subtitle smoothness is comparable to enhanced (ratio ${ratio.toFixed(2)}, ai ${ai.fps.toFixed(1)}/s vs enhanced ${enh.fps.toFixed(1)}/s)`);
 
+  // ── the MECHANISM behind that ratio, asserted directly ──
+  //
+  // The ratio above is a wall-clock measurement and degrades on a loaded machine even
+  // when the code is correct. What actually protects the subtitle is `waterOwesRepaint`
+  // capping the ×S room repaint at `waterAnimMs` while the loop runs at the full paint
+  // rate for the overlay's sake — and that contract is not wall-clock at all, so it can
+  // be asserted exactly. Without the cap this counted ~60 repaints/s; the cap is what
+  // brought the ratio back from 0.60 to ~0.95.
+  await p.evaluate(() => window.__ff.setGraphics('ai'));
+  await p.evaluate(() => window.__ff.talk('little'));
+  await p.waitForFunction(() => window.__ff.subsActive(), { timeout: 8000 });
+  const capWindowMs = 1500;
+  const r0 = await p.evaluate(() => ({ n: window.__ff.throttleInfo().roomPaints, t: performance.now() }));
+  await new Promise((r) => setTimeout(r, capWindowMs));
+  const r1 = await p.evaluate(() => ({ n: window.__ff.throttleInfo().roomPaints, t: performance.now() }));
+  const waterMs = await p.evaluate(() => window.__ff.waterAnimMs());
+  const elapsed = r1.t - r0.t;
+  // Ceiling = the water's own rate, plus the 12.5Hz logic tick (which repaints on its
+  // own via the signature and does not align with it), plus slack for the boundaries.
+  const ceiling = Math.ceil(elapsed / waterMs) + Math.ceil(elapsed / 80) + 4;
+  expect(
+    r1.n - r0.n <= ceiling,
+    `[ai] room repaints stay capped while a subtitle animates (${r1.n - r0.n} in ${Math.round(elapsed)}ms, ceiling ${ceiling})`,
+  );
+  // …and the water is genuinely still animating underneath it — this is the other half
+  // of the trade, and the reason the suppression that used to live here was removed.
+  expect(r1.n - r0.n >= 8, `[ai] the room keeps animating under a subtitle (${r1.n - r0.n} repaints)`);
+
   // ── the ai tier draws the SAME line smaller, anchored to the same bottom edge ──
   //
   // Measured on the overlay's own ink, not on the scale constant: that way a transform
