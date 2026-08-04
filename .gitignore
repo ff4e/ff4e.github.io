@@ -43,3 +43,7 @@ tools/fish-outline/
 # `npx tsx tools/studio/stage-kufr.ts`. The two curated cards beside them
 # (base.png, anim.png) and the playback order (frames.json) are NOT ignored.
 public/enhanced/_kufr/frames/
+
+# Throwaway probe/debug scripts a session writes while working. Never part of the
+# shipped app or the test suite — tools/ is where a script that earns its keep goes.
+.scratch/
