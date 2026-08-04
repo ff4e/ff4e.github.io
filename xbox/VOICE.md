@@ -88,3 +88,61 @@ For an actual timbre match the next step is voice conversion (RVC or similar) tr
 the corpus from step 1: ~36 minutes of clean single-speaker audio is comfortably enough.
 Feed it the source takes, and a human reading the lines will convert better than any TTS,
 because flat synthetic prosody survives conversion intact.
+
+## Training the conversion model on Kaggle
+
+Local training on the M4 was abandoned — see below. Azure was ruled out entirely: every
+GPU SKU is `NotAvailableForSubscription` or returns `QuotaNotAvailableForResource` on a
+Visual Studio Enterprise subscription, and the legacy K80/M60 SKUs whose quota still shows
+(18 vCPU) were retired by Azure and no longer exist in any region's catalog.
+
+Kaggle gives a free T4/P100 with ~30 GPU-hours a week, no card and no quota request. It is
+also Linux, which is what makes real RVC installable at all — `rvc-python` cannot build
+fairseq on Apple Silicon.
+
+```bash
+./tools/kaggle/build-package.sh      # -> out/kaggle/ff4e-voice.zip (80 MB)
+```
+
+The zip carries `wavs/` (614 clips / 36 min), `src/` (the four replacement lines, already
+duration- and pitch-matched) and `targets.json`.
+
+1. kaggle.com -> **Datasets -> New Dataset**, upload the zip, keep it **Private**.
+2. **Code -> New Notebook**, then **File -> Import Notebook** and pick
+   `tools/kaggle/ff4e-svc-kaggle.ipynb`.
+3. Settings: **Accelerator = GPU T4 x2** (or P100), **Internet = On**.
+4. **Add data ->** attach the dataset from step 1.
+5. Run all. ~1.5–2 h for the default 200 epochs.
+
+Edit the notebook via `tools/kaggle/make-notebook.py` and regenerate — the `.ipynb` is
+generated so the code stays diff-friendly in git.
+
+Download `ff4e-voice-takes.zip` from the notebook's Output tab, then:
+
+```bash
+unzip -o ~/Downloads/ff4e-voice-takes.zip -d out/voice-kaggle
+python3 tools/voice-pitch.py out/voice-kaggle/*.wav    # expect ~134 Hz
+afplay out/voice-kaggle/help2.wav                      # audition all four
+```
+
+Only after every line is approved:
+
+```bash
+cp out/voice-kaggle/*.wav public/data/xbox-voice/
+```
+
+No code change is needed — `src/platform/padCaptions.ts` already fetches
+`/data/xbox-voice/<id>.wav` and `src/audio/audio.ts` consults `loadOverride()` before the
+sound banks.
+
+`G_final.pth` + `config.json` are saved alongside the takes; keep them to re-convert new
+lines later without retraining.
+
+### Why not local
+
+so-vits-svc preprocessing completed fine on the Mac, but training did not fit. The trap:
+`ps` RSS showed 0.4 GB while `footprint -p <pid>` showed **15 GB** — Metal/MPS allocations
+do not appear in RSS. `PYTORCH_MPS_HIGH_WATERMARK_RATIO` is a fraction of the *GPU budget*
+(25 GB here), so 0.7 authorised 17.5 GB. Capping it to fit caused MPS OOM instead: even
+batch_size 1 needs ~7.2 GB, and only ~8 GB was genuinely free. A 16 GB CUDA card trains
+this at batch 12 without trouble.
