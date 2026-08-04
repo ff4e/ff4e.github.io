@@ -311,21 +311,78 @@ try {
 //       (`exactRows` = 1) with the same estimated shift across all 4 rows of a native
 //       band (`bandsVarying` = 0). Both must move decisively off those values.
 //
-//    Room 46 runs the same probe as the control: it has wamp=0 in the data, so it must
-//    still read exactly like the old banded world (exactRows 1, bandsVarying 0).
+//    Run over the SAME room list as the parity sweep above, not just one room. That
+//    matters because step 2 now compares the two backends in still water, so a wobbling
+//    background is no longer exercised per-room by anything else — the edge clamp, the
+//    interpolation and the ripple term all depend on the room's own art, wall
+//    transparency and dimensions. Checking one room would leave 69 unchecked. It is
+//    affordable because `aiWobbleCheck` composites the BACKGROUND ONLY and reads it back
+//    once, and rooms that do not wobble (46, and 66 which is out of tier) act as the
+//    control: they must still read exactly like the old banded world (exactRows 1,
+//    bandsVarying 0).
 //
 //    These three are mutation-checked by tools/mutate-gl-room-ai.mjs, which breaks BG_FS
-//    four ways (centring, interpolation, direction, and a regression to the 1998
-//    sampling) and asserts this step goes red for each. A gate nobody has tried to defeat
-//    is a gate nobody knows the strength of.
+//    seven ways (centring, interpolation, shift direction, a regression to the 1998
+//    sampling, and three on the ripple term) and asserts this step goes red for each. A
+//    gate nobody has tried to defeat is a gate nobody knows the strength of.
+/**
+ * Score one room's water. Returns the probe result, or null if it could not run.
+ *
+ * The wait for the ripple train is on GAME TICKS, not wall-clock: a train is born at
+ * zero height and fades in, so scoring at birth would exercise the shader's ripple term
+ * with all-zero inputs and prove nothing — and a fixed `waitForTimeout` delivers a
+ * different number of ticks on a loaded machine, which is how a probe like this starts
+ * flaking under CI load rather than under a real fault.
+ */
+async function wobbleAt(num) {
+  await enter(num);
+  // A room with no staged AI art has no ×S background to score (room 72 ships none).
+  if (!(await p.evaluate(() => window.__ff.aiRoomLoaded()))) return { skip: true };
+  const wobbles = await p.evaluate(() => window.__ff.water().wamp !== 0);
+  if (wobbles) {
+    const born = await p.evaluate(() => { window.__ff.startTrainNow(); return window.__ff.count(); });
+    const half = await p.evaluate(() => Math.round(window.__ff.rippleTuning().lifeTicks / 2));
+    await p.waitForFunction((t) => window.__ff.count() >= t, born + half, { timeout: 30000 });
+  }
+  return p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
+}
+
+const wobbleRooms = [];
+for (const num of ROOM_LIST) {
+  try {
+    const r = await wobbleAt(num);
+    if (r && r.skip) continue;
+    if (!r || !r.webgl) { ok = false; console.log(`  FAIL wobble room ${num}: no result`); continue; }
+    if (r.unsupported || r.noArt || r.noCanvas) continue; // no AI art / GPU cannot size it
+    const fail = (m) => { ok = false; console.log(`  FAIL wobble room ${num}: ${m}`); };
+    if (r.scoredRows < 40) continue; // too little clear wall to score this room
+    // (a) the curve, in EVERY room: the JS BG_FS oracle is built from this room's own
+    //     source art, so a wrong edge clamp or interpolation shows up here room by room.
+    if (!(r.oracleMax <= 2)) fail(`GPU differs from the JS BG_FS oracle: max=${r.oracleMax.toFixed(2)}`);
+    if (!r.wobbles) {
+      // The control rooms. No wave ⇒ the frame must be motionless and unshifted.
+      if (r.ripples !== 0) fail(`a wamp=0 room must get no ripples (got ${r.ripples})`);
+      if (r.exactRows !== 1 || r.bandsVarying !== 0) {
+        fail(`a wamp=0 room must be motionless (exactRows=${r.exactRows} bandsVarying=${r.bandsVarying})`);
+      }
+      continue;
+    }
+    wobbleRooms.push(num);
+    // (b) …and it is emphatically NOT the banded one.
+    if (!(r.bandedMax >= 8)) fail(`still matches the BANDED expectation (max=${r.bandedMax}) — regressed to per-native-row?`);
+    if (!(r.exactRows < 0.6)) fail(`${(r.exactRows * 100).toFixed(0)}% of rows are exact integer translations — the shift is not fractional`);
+    if (!(r.bandsVarying > 0.25)) fail(`only ${(r.bandsVarying * 100).toFixed(0)}% of native bands vary within themselves — still banded`);
+  } catch (e) {
+    ok = false;
+    console.log(`  FAIL wobble room ${num}: ${String(e).slice(0, 100)}`);
+  }
+}
+console.log(`  wobble checked in ${wobbleRooms.length} wobbling rooms [${wobbleRooms.join(',')}] + the wamp=0 controls`);
+
+// The ripple term needs ONE room to be scored in depth (rippleDelta), because it needs a
+// train on screen at real amplitude — see wobbleAt.
 try {
-  await enter(3);
-  // Put a ripple train on screen and let it reach real amplitude before scoring — a
-  // train is born at zero height (it fades in), so checking at birth would exercise the
-  // shader's ripple term with all-zero inputs and prove nothing about it.
-  await p.evaluate(() => window.__ff.startTrainNow());
-  await p.waitForTimeout(1800);
-  const smooth = await p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
+  const smooth = await wobbleAt(3);
   if (!smooth || !smooth.webgl || smooth.unsupported || smooth.noArt || smooth.noCanvas) {
     ok = false;
     console.log(`  FAIL wobble: no result (${JSON.stringify(smooth)})`);
@@ -354,22 +411,6 @@ try {
     );
   }
 
-  await enter(46);
-  const still = await p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
-  if (!still || !still.webgl || still.unsupported) {
-    ok = false;
-    console.log('  FAIL wobble control: no result for room 46');
-  } else {
-    if (still.wobbles) { ok = false; console.log('  FAIL wobble control: room 46 should have wamp=0'); }
-    if (still.ripples !== 0) { ok = false; console.log(`  FAIL wobble control: room 46 must get no ripples (got ${still.ripples})`); }
-    if (!(still.oracleMax <= 2)) { ok = false; console.log(`  FAIL wobble control: room 46 oracleMax=${still.oracleMax.toFixed(2)}`); }
-    if (still.exactRows !== 1 || still.bandsVarying !== 0) {
-      ok = false;
-      console.log(`  FAIL wobble control: room 46 must be motionless (exactRows=${still.exactRows} bandsVarying=${still.bandsVarying})`);
-    } else {
-      console.log(`  wobble control room 46 (wamp=0): unshifted, exactRows=1 bandsVarying=0, oracleMax=${still.oracleMax.toFixed(2)}`);
-    }
-  }
 } catch (e) {
   ok = false;
   console.log(`  FAIL wobble: ${String(e).slice(0, 120)}`);

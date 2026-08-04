@@ -14,7 +14,7 @@
  * This asserts the two tiers are within a reasonable factor of each other, rather than
  * pinning an absolute fps that would be machine- and headless-dependent.
  *
- * It also pins the `ai` tier's SMALLER subtitle (AI_SUB_SCALE): the overlay draws in
+ * It also pins the `ai` tier's SMALLER subtitle (`aiSubScale`): the overlay draws in
  * native game pixels in every tier, which sizes the text for 1998 bitmap art and reads
  * far too heavy over the AI upscale. That is a pure presentation transform — the engine's
  * line positions are shared with the faithful bitmap path and must not move — so it is

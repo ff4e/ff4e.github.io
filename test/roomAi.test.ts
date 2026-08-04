@@ -510,11 +510,22 @@ describe('ai-tier smooth wobble vs the faithful rule (aiTarget.ts / framebuffer.
   it('resamples the curve rather than translating the image (a band averages to its native row)', () => {
     // The half-pixel centring is easy to drop, and dropping it shifts the WHOLE
     // background up by half a native row — a bug no smoothness check would notice.
+    //
+    // Asserted against smoothWobbleShift itself, NOT against the centring formula
+    // restated here: an earlier version of this test recomputed `(y+0.5)/S - 0.5`
+    // locally and proved only that arithmetic identity, which would have passed for
+    // any implementation at all.
     for (const S2 of [2, 3, 4, 8]) {
-      for (let i = 0; i < 20; i++) {
-        let sum = 0;
-        for (let r = 0; r < S2; r++) sum += (i * S2 + r + 0.5) / S2 - 0.5;
-        expect(sum / S2).toBeCloseTo(i, 12);
+      for (const t of WAVES.filter((v) => v[0] !== 0)) {
+        const w = wave(t, 40);
+        const phase = wobblePhase(w);
+        for (let i = 0; i < 20; i++) {
+          let sum = 0;
+          for (let r = 0; r < S2; r++) sum += smoothWobbleShift(i * S2 + r, S2, w, phase) / S2;
+          // The band's MEAN displacement is the faithful displacement at that native
+          // row (to second order — the curve is smooth over one native row).
+          expect(sum / S2).toBeCloseTo(waterShift(i, 40, t[0], t[1], t[2]), 2);
+        }
       }
     }
   });
@@ -731,7 +742,9 @@ describe('ripple trains (aiTarget.ts activeRipples)', () => {
 
   it('the shipped tuning stays inside what the renderer can actually show, and leaves calm', () => {
     // Crest passage in Hz = carrier/(2*pi) cycles per tick * 12.5 ticks/s. An idle room
-    // repaints at ~30 fps (ZX_ANIM_MS), so anything at or above ~15 Hz aliases.
+    // repaints at `waterAnimMs` (20 fps today), so anything at or above ~10 Hz aliases.
+    // The bound below is deliberately well inside that rather than at Nyquist, so the
+    // margin survives the idle rate being retuned again.
     const crestHz = (RIPPLE.carrier / (2 * Math.PI)) * 12.5;
     expect(crestHz).toBeLessThan(7); // half of Nyquist, i.e. real headroom, not a hair
     // …and the water must not be rippling permanently: the effect is occasional.

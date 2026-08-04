@@ -322,7 +322,8 @@ export interface AiRoomFrame {
   count: number;
   /**
    * Sub-tick interpolation fraction (0..1) — the SAME `alpha` the loop already uses to
-   * interpolate fish motion between logic ticks (main.ts:1952). Read-only here: it moves
+   * interpolate fish motion between logic ticks (main.ts, set from `acc`/`LOGIC_MS` at
+   * the end of the fixed-timestep loop). Read-only here: it moves
    * no game state, it only lets the GPU sample the water wave at display resolution
    * instead of at 12.5 Hz. Optional so a probe that does not care can omit it.
    */

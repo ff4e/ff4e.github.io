@@ -114,10 +114,12 @@ export interface RippleTuning {
  * The shipped ripple tuning. Mutable so a capture/dev probe can sweep it without a
  * rebuild — nothing in the game writes to it.
  *
- * `periodTicks` is 37 against a base wave whose period is `2π·wspd` ≈ 31.4 ticks for the
- * 60 rooms that share wamp=5/wper=10/wspd=5, so births do not phase-lock to the swell.
- * `lifeTicks` is 2·`periodTicks`, which is what makes ripples overlap in pairs rather
- * than arriving as separated events.
+ * Chosen on screen, in the lab, not derived. What the numbers mean: a train takes
+ * `lifeTicks` = 48 ticks (~3.8 s) to rise, and the next is born a mean `periodTicks` = 60
+ * ticks (~4.8 s) after the last. Because the mean gap EXCEEDS the lifetime, trains are
+ * usually discrete events with calm water between them — `jitter` = 0.5 then spreads the
+ * gaps over 30..90 ticks (2.4..7.2 s) so they do not arrive on a metronome, and `max` = 2
+ * covers the part of that spread where one train is still leaving as the next arrives.
  */
 /**
  * How many ripple trains the GPU path can carry at once.
@@ -377,7 +379,7 @@ export interface AiTarget {
    *  - `GlAiScreen` evaluates the wave per FRAGMENT at ×S — a shift per scaled row, a
    *    fractional shift sampled between source columns, and the sub-tick `time`. The
    *    water is then as hi-res as the art, which is the whole point of the tier (the
-   *    same reasoning already shipped for the mirror, roomAi.ts:816).
+   *    same reasoning already shipped for the mirror, `AiRoom.drawMirror`).
    *  - `Canvas2dAiTarget` keeps the faithful 1998 sampling: one rounded shift per NATIVE
    *    row, advanced on the logic tick. It cannot follow — at ×S the spatial half is
    *    thousands of `drawImage` calls per rebuild, and a fractional `time` misses its

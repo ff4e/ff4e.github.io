@@ -110,7 +110,7 @@ These playable rooms have **no known solution** to replay (they were never in th
   an amplitude change; `wamp`/`wper`/`wspd` are untouched game data.
 - **Where to look:** `AiTarget.background` (`src/render/aiTarget.ts`) documents the split;
   `BG_FS` in `src/render/glRoomAi.ts` is the smooth path; `faithfulWobbleShifts` /
-  `Canvas2dAiTarget.paint` is the faithful one. The rule itself has one definition,
+  `Canvas2dAiTarget.background` is the faithful one. The rule itself has one definition,
   `waterShift` in `src/render/framebuffer.ts`.
 - **How it is guarded:** `tools/test-gl-room-ai.mjs` compares the two backends with
   `wamp = 0` forced (still water), so everything else stays byte-exact at the same gate;

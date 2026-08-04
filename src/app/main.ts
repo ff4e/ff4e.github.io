@@ -559,17 +559,16 @@ let aiSubScale = 0.5;
  * shrinks the line spacing and the wave amplitude by the same factor — i.e. the whole
  * subtitle gets smaller, rather than the glyphs shrinking inside unchanged spacing.
  *
- * Returns the scale it applied so the caller can put it in the repaint signature.
+ * The overlay's repaint cache is invalidated by `graphics` in `subOverlaySignature`, and
+ * by `__ff.subScale()` clearing the signature directly — not by anything returned here.
  */
-function applySubScale(ctx: CanvasRenderingContext2D, sys: SubtitleSystem): number {
+function applySubScale(ctx: CanvasRenderingContext2D, sys: SubtitleSystem): void {
   const s = graphics === 'ai' ? aiSubScale : 1;
-  if (s !== 1) {
-    const { w, h } = sys.vectorScreen;
-    ctx.translate(w / 2, h);
-    ctx.scale(s, s);
-    ctx.translate(-w / 2, -h);
-  }
-  return s;
+  if (s === 1) return;
+  const { w, h } = sys.vectorScreen;
+  ctx.translate(w / 2, h);
+  ctx.scale(s, s);
+  ctx.translate(-w / 2, -h);
 }
 
 /** Size the subtitle overlay to cover the game canvas at device resolution. */
@@ -616,7 +615,7 @@ function syncSubOverlay(): void {
  */
 function subOverlaySignature(who: string, sys: SubtitleSystem, scale: number): string {
   // `graphics` is in the key because the ai tier draws the overlay smaller
-  // (AI_SUB_SCALE); without it, switching tier could serve the previous tier's cached
+  // (`aiSubScale`); without it, switching tier could serve the previous tier's cached
   // overlay, which is exactly the class of bug this gate exists around.
   return `${who}|${graphics}|${subFontFamily}|${subFontWeight}|${subCanvas.width}x${subCanvas.height}|${scale}|${sys.vectorSignature(count, alpha)}`;
 }
@@ -4952,11 +4951,12 @@ const ZX_ANIM_MS = 33; // ~30fps
  * chatter script, so the only one whose idle cost can actually be measured — renderer CPU
  * against the wake rate:
  *
- *     12.5/s (no water animation)  0.72 %   <- `main` is 0.66 %
- *     20/s   (this)                0.93 %
- *     30/s                         1.23 %   <- was ~1.9x main, and made the GPU path
- *                                              more expensive than canvas-2D, which it
- *                                              had never been
+ *     30/s                         1.05 %   <- was ~2x main, and made the GPU path more
+ *                                              expensive than canvas-2D, which it had
+ *                                              never been
+ *     20/s   (this)                0.74 %
+ *     15/s                         0.56 %
+ *     12.5/s (no water animation)  0.48 %   <- the floor; `main` measures 0.51 %
  *
  * The wave the player is watching is slow — `1/wspd` rad/tick is ~0.4 Hz for the 60 rooms
  * that share wspd=5 — so 20/s is ~50 samples per cycle of the swell and comfortably above
@@ -5002,14 +5002,14 @@ let lastWaterPaint = 0;
  * the other decides whether an already-awake frame owes the room a repaint.
  *
  * The limit is the point. When the loop is at the full paint rate for some OTHER reason —
- * a vector subtitle waving in is the common one — an unlimited `waterAnim` would repaint
- * the ×S composite on every one of those 60 frames, which is double what the effect was
- * ever specified to need (ZX_ANIM_MS, ~30fps) and is exactly the cost the render-on-dirty
- * comment below exists to avoid. Measured on tools/test-aisubs.mjs, which guards it: the
- * ai tier's subtitle rate against enhanced was 0.91 before any of this, 0.77-0.81 with an
- * unlimited water repaint, and 0.60 once ripples made each composite dearer — through a
- * gate set at 0.70. Capped here it is back at parity, and the water is unaffected because
- * 30fps was always the target.
+ * a vector subtitle waving in is the common one — an uncapped `waterAnim` would repaint
+ * the ×S composite on every one of those 60 frames, three times what the water asks for
+ * (`waterAnimMs`, 20fps) and exactly the cost the render-on-dirty comment below exists to
+ * avoid. Measured on tools/test-aisubs.mjs, which guards it: the ai tier's subtitle rate
+ * against enhanced was 0.91 before any of this, 0.77-0.81 with an uncapped water repaint,
+ * and 0.60 once ripples made each composite dearer — through a gate set at 0.70. Capped
+ * here it is back at parity, and the water is unaffected because it only ever asked for
+ * `waterAnimMs`.
  */
 function waterOwesRepaint(now: number): boolean {
   return aiWaterAnimating() && now - lastWaterPaint >= waterAnimMs - PAINT_EPSILON_MS;
