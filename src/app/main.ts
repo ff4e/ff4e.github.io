@@ -4975,16 +4975,15 @@ function aiWaterAnimating(): boolean {
     room !== null &&
     room.wamp !== 0 &&
     lastRoomBackend === 'webgl' &&
-    // A settling vector subtitle switches the water off for the ~1.5s it takes to wave
-    // in. That overlay is its own layer, and the `else if` in the loop below exists
-    // precisely to animate it WITHOUT a room repaint underneath; keeping the water going
-    // puts a ×S composite back under every one of those frames and costs the subtitle a
-    // third of its frame rate (tools/test-aisubs.mjs measures exactly this — 0.91 before
-    // any of this work, 0.60 with the water running unrestricted, against a 0.70 gate).
-    // Between the two, the text the player is actually reading wins. The water does not
-    // stop, it just falls back to the 12.5Hz tick repaint for a second and a half, which
-    // is where it was before this work anyway.
-    !(enhancedArtActive() && subFontReady && subs !== null && subs.vectorAnimating(count)) &&
+    // NOTE: the water deliberately keeps animating while a vector subtitle waves in.
+    // An earlier revision suppressed it there, because with the water repainting on
+    // EVERY frame it cost the subtitle a third of its rate. But that was the unrestricted
+    // repaint's fault, not the water's: once `waterOwesRepaint` caps it at waterAnimMs,
+    // suppression buys almost nothing and is plainly visible — the wobble (and every
+    // other room animation) drops to the 12.5Hz tick rate for ~1.5s each time anyone
+    // speaks, which reads as a stutter triggered by the text. Measured interleaved on an
+    // idle machine, tools/test-aisubs.mjs: suppressed 0.95, running 0.90, gate 0.70. Five
+    // points of a metric with that much headroom is not worth a visible hitch in 70 rooms.
     aiRoomRenderActive(room)
   );
 }
@@ -5019,6 +5018,11 @@ let perfLast = 0;
 // runs with the dev pane open, so a probe cannot use it to measure the idle WAKE RATE —
 // which is exactly what the ai-water animation gate below changes.
 let loopTicks = 0;
+// …and how often the ROOM was actually repainted, which is a different number: the loop
+// can wake without redrawing (render-on-dirty). This is the one that costs — a ×S
+// composite and a present — and the one the player sees as the water moving, so it is
+// what a perf or smoothness probe actually wants to measure.
+let roomPaints = 0;
 let lastRoomBackend: 'cpu' | 'webgl' = 'cpu'; // which backend actually painted the last room frame
 function updatePerfHud(now: number): void {
   perfRaf++;
@@ -5285,6 +5289,7 @@ function loop(now: number): void {
     if (!dirtyOnly || forceRoomRedraw || roomAnimating() || zxAnim || waterAnim || sig !== lastRoomSig) {
       draw();
       lastWaterPaint = now; // any room paint satisfies the water for this interval
+      roomPaints++;
       perfPaint++;
       lastRoomSig = sig;
       // Clear the one-shot force, but keep repainting while a cheat effect is live:
@@ -6166,6 +6171,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     // tier's water is sampled per paint on the GPU (see aiWaterAnimating).
     waterAnim: aiWaterAnimating(),
     loops: loopTicks,
+    roomPaints,
     heldState,
     phase: engine?.phase ?? 'idle',
     enhancedPending,
