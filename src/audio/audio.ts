@@ -26,6 +26,8 @@ const TALKING_MEZ_MS = TALKING_MEZ_SEC * 1000;
 export const MUSIC_PRIOR = -999;
 
 interface Pkg {
+  /** Package id, as the original names its files: '025', 'x01', 'restored'. */
+  id: string;
   entries: Map<string, FftEntry>;
   ffs: Uint8Array;
 }
@@ -40,6 +42,7 @@ export class AudioEngine {
   /** The slider-driven gain multiplier per bus (1.0 = the category's default level). */
   private busGain: Record<VolumeBus, number> = { effect: 1, voice: 1, music: 1 };
   private globals: Pkg[] = [];
+  /** The current room's own 0NN package. */
   private roomPkg: Pkg | null = null;
   private cache = new Map<string, AudioBuffer>();
   /** Active voices by priority, with the wall-clock time they finish. */
@@ -72,14 +75,32 @@ export class AudioEngine {
   }
 
   /** A persistent global package (e.g. x00 effects). */
-  loadGlobal(fftBytes: Uint8Array, ffsBytes: Uint8Array): void {
-    this.globals.push({ entries: indexFft(parseFft(fftBytes)), ffs: ffsBytes });
+  loadGlobal(id: string, fftBytes: Uint8Array, ffsBytes: Uint8Array): void {
+    this.globals.push({ id, entries: indexFft(parseFft(fftBytes)), ffs: ffsBytes });
   }
 
   /** The current room's sound package; replaces the previous room's. */
-  setRoom(fftBytes: Uint8Array, ffsBytes: Uint8Array): void {
-    this.roomPkg = { entries: indexFft(parseFft(fftBytes)), ffs: ffsBytes };
+  setRoom(id: string, fftBytes: Uint8Array, ffsBytes: Uint8Array): void {
+    this.roomPkg = { id, entries: indexFft(parseFft(fftBytes)), ffs: ffsBytes };
     this.cache.clear();
+  }
+
+  /**
+   * The FFT record for a name, room packages first — the subtitle text and the
+   * sample live in the same record, so nothing has to keep a second copy of the
+   * index just to render a line.
+   */
+  entry(name: string): FftEntry | undefined {
+    for (const pkg of this.pkgs) {
+      const e = pkg.entries.get(name);
+      if (e) return e;
+    }
+    return undefined;
+  }
+
+  /** How many sounds a loaded package holds (0 if it is not loaded). */
+  entryCount(id: string): number {
+    return this.pkgs.find((p) => p.id === id)?.entries.size ?? 0;
   }
 
   /**
@@ -96,9 +117,14 @@ export class AudioEngine {
     this.cache.clear();
   }
 
-  /** True once the current room's voice package has arrived (see clearRoom). */
+  /** True once the current room's own voice package has arrived (see clearRoom). */
   get roomLoaded(): boolean {
     return this.roomPkg !== null;
+  }
+
+  /** Every loaded package, the room's own first — the order `Search` resolves in. */
+  private get pkgs(): Pkg[] {
+    return this.roomPkg ? [this.roomPkg, ...this.globals] : this.globals;
   }
 
   private ensureCtx(): AudioContext {
@@ -141,7 +167,7 @@ export class AudioEngine {
   private buffer(name: string): AudioBuffer | null {
     const cached = this.cache.get(name);
     if (cached) return cached;
-    const pkgs = this.roomPkg ? [this.roomPkg, ...this.globals] : this.globals;
+    const pkgs = this.pkgs;
     for (const pkg of pkgs) {
       const e = pkg.entries.get(name);
       if (e && e.delka > 0) {
@@ -159,13 +185,12 @@ export class AudioEngine {
 
   /** True if a sound with this name exists in a loaded package. */
   has(name: string): boolean {
-    if (this.roomPkg?.entries.has(name)) return true;
-    return this.globals.some((p) => p.entries.has(name));
+    return this.pkgs.some((p) => p.entries.has(name));
   }
 
   /** Duration of a sound in seconds (from its decompressed sample count). */
   duration(name: string): number {
-    const pkgs = this.roomPkg ? [this.roomPkg, ...this.globals] : this.globals;
+    const pkgs = this.pkgs;
     for (const pkg of pkgs) {
       const e = pkg.entries.get(name);
       if (e) return e.delka / FFS_SAMPLE_RATE;
@@ -248,7 +273,7 @@ export class AudioEngine {
 
   /** True if `name` resolves to an entry in the room/global sound packages. */
   hasPackaged(name: string): boolean {
-    const pkgs = this.roomPkg ? [this.roomPkg, ...this.globals] : this.globals;
+    const pkgs = this.pkgs;
     for (const pkg of pkgs) {
       const e = pkg.entries.get(name);
       if (e && e.delka > 0) return true;

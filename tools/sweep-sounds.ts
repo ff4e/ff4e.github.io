@@ -12,7 +12,7 @@
  * Three ways a name reaches Snd/Talk/addm/addv (URoom.pas):
  *   a) a plain literal                        'pyr-m-nudi'
  *   b) literal + chr(BASE+random(N))          'mot-v-znovu'+chr(48+random(2))
- *   c) literal + IntToStr(<runtime expr>)     'bank-m-n'+IntToStr(...)
+ *   c) literal + IntToStr(<runtime expr>)     'z-c-'+inttostr(cas div 1000)
  *
  * (a) is decided by a set lookup. (b) MUST be expanded: collapsing it to its
  * stem and then discarding the stem because a sibling exists is exactly what
@@ -50,9 +50,37 @@ const comments: Array<[number, number]> = [];
 for (const m of src.matchAll(/\{[^}]*\}/g)) comments.push([m.index!, m.index! + m[0].length]);
 const inComment = (i: number): boolean => comments.some(([a, b]) => i >= a && i < b);
 
-/** A sound id is a hyphenated alphanumeric token; the animation scripts share the
- *  quote syntax ('a0d?1-10a4') but never match this. */
-const looksLikeSound = (s: string): boolean => /^[A-Za-z0-9]+(-[A-Za-z0-9]+)+$/.test(s);
+/** A sound id is a hyphenated alphanumeric token. */
+const looksLikeSound = (t: string): boolean => /^[A-Za-z0-9]+(-[A-Za-z0-9]+)+$/.test(t);
+
+/**
+ * The procedures that actually look a name up (RSound.pas:764-787, URoom.pas:684-694).
+ * Filtering on the CALL is what keeps animation scripts out: `setanim`'s argument
+ * shares the quote syntax and one of them ('d10-99a3a1…', URoom.pas:21676) happens to
+ * contain no '?' and so looks exactly like a hyphenated id.
+ */
+const SOUND_CALLS = new Set([
+  'snd', 'sndcyc', 'sndcycle', 'sndvol', 'sndvolcyc', 'sndvolcycle',
+  'talk', 'talkcyc', 'talkcycle', 'music', 'musiccyc', 'musiccycle',
+  'addd', 'addm', 'addv', 'mem',
+]);
+
+/** The name of the call whose argument list encloses `at`, lowercased. */
+function enclosingCall(at: number): string {
+  let depth = 0;
+  for (let i = at - 1; i >= 0 && at - i < 400; i--) {
+    const c = src[i]!;
+    if (c === ')') depth++;
+    else if (c === '(') {
+      if (depth === 0) {
+        const head = /([A-Za-z_]\w*)\s*$/.exec(src.slice(Math.max(0, i - 40), i));
+        return head ? head[1]!.toLowerCase() : '';
+      }
+      depth--;
+    }
+  }
+  return '';
+}
 
 interface Ask { line: number; how: string; dead: boolean }
 const asked = new Map<string, Ask>();
@@ -62,6 +90,7 @@ for (const m of src.matchAll(/'([^'\n]*)'/g)) {
   const at = m.index!;
   // Only start at the head of a concatenation chain: 'a'+'b'+chr(..) is one name.
   if (/\+\s*$/.test(src.slice(Math.max(0, at - 40), at))) continue;
+  if (!SOUND_CALLS.has(enclosingCall(at))) continue;
 
   const line = lineOf(at);
   const dead = inComment(at);
@@ -98,7 +127,10 @@ for (const m of src.matchAll(/'([^'\n]*)'/g)) {
       break;
     }
 
-    if (/^\s*\+\s*inttostr/i.test(rest)) {
+    if (/^\s*\+/.test(rest)) {
+      // Some other runtime expression — `+IntToStr(...)`, or a plain string variable
+      // as in `Snd('sp-bubles'+s,1000)` (URoom.pas:23745, s from str(z,s)). The name
+      // cannot be resolved statically, so report the family, never the bare stem.
       if (!families.has(stem)) families.set(stem, { lines: [], dead });
       families.get(stem)!.lines.push(line);
       stem = '';
@@ -117,13 +149,23 @@ for (const [n, a] of missing) {
 }
 
 console.log(`\n=== '<stem>'+IntToStr(...) families — a gap in the CONSECUTIVE run is the signal ===`);
+// addd multiplexes on its `zvuk` argument: 'ANIM'/'ANIMWAIT' + an animation script
+// are commands, not names (URoom.pas:731,735 — the port mirrors this in script.ts).
+const SENTINELS = new Set(['ANIM', 'ANIMWAIT']);
 for (const [stem, f] of [...families].sort()) {
+  if (SENTINELS.has(stem)) continue;
   const members = [...have]
     .filter((h) => h.startsWith(stem) && /^\d+$/.test(h.slice(stem.length)))
     .map((h) => Number(h.slice(stem.length)))
     .sort((a, b) => a - b);
   if (members.length === 0) {
-    console.log(`  ${stem.padEnd(22)} URoom.pas:${f.lines.join(',')}  no numbered member at all`);
+    // A non-numeric family: 'ANIM'/'ANIMWAIT' are addd's animation sentinels, 'KD-'
+    // the cutscene captions. Only a stem with NOTHING behind it is a real signal.
+    const related = [...have].filter((h) => h.startsWith(stem)).length;
+    console.log(
+      `  ${stem.padEnd(22)} URoom.pas:${f.lines.join(',')}  ` +
+        (related ? `${related} related names, none numbered` : 'NO name starts with this stem'),
+    );
     continue;
   }
   // Only the leading consecutive run is a numbered VARIANT family (`…0`, `…1`, …).

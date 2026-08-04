@@ -14,11 +14,15 @@
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { makeRoom, type ItemSpec } from './roomBuilder.js';
 import { Script } from '../src/core/script.js';
 import { parseFft } from '../src/data/fft.js';
 import { decodeSound } from '../src/audio/ffs.js';
+import { AudioEngine } from '../src/audio/audio.js';
+import { depthOfRoom } from '../src/data/world.js';
+import { ROOMS } from '../src/data/roomTable.js';
 import { encodeSound, quantize } from '../tools/lib/ffsEncode.js';
 import { BOTTLES } from '../src/rooms/bottles.js';
 import { POTOPENA } from '../src/rooms/potopena.js';
@@ -175,6 +179,16 @@ describe('public/restored', () => {
   const fft = parseFft(readFileSync('public/restored/restored.fft'));
   const ffs = readFileSync('public/restored/restored.ffs');
 
+  it('is exactly the bytes tools/build-restored-sounds.ts produced', () => {
+    // The only human-reviewable surface a committed binary has. If a rebuild drifts —
+    // a different ffmpeg, a different FFNG copy, an encoder change — this fails and
+    // the new hashes have to be justified rather than slipping through as "Bin ... bytes".
+    const sha = (f: string): string =>
+      createHash('sha256').update(readFileSync(join('public/restored', f))).digest('hex');
+    expect(sha('restored.fft')).toBe('46eceead4e916dac9d2fb4085dab20c3757c99cad2d5ae0dabd7bc274fea47a0');
+    expect(sha('restored.ffs')).toBe('d9bccf820ff349075e73a37ecd329c1014462b7316ed6f9bdc45cedce42d425a');
+  });
+
   it('carries exactly the two lines the release packages are missing', () => {
     expect(fft.map((e) => e.name)).toEqual(['pyr-m-nudi', 'jes-v-potvora2']);
   });
@@ -220,6 +234,34 @@ describe('FFS codec', () => {
     }
   });
 
+  it('quantizes by masking, exactly as PrZvuku/Uprevod.pas:293 does', () => {
+    // `hodn and $FFFC` on a smallint: truncate toward -inf, never round. Rounding
+    // would turn -6 into -4 and 32766 into 32768 (which wraps to the negative rail).
+    const q = quantize(Int16Array.from([0, 1, 3, 4, 6, -1, -3, -4, -6, 32767, 32766, -32768, -32765]));
+    expect(Array.from(q)).toEqual([0, 0, 0, 4, 4, -4, -4, -4, -8, 32764, 32764, -32768, -32768]);
+  });
+
+  it('refuses unquantized input instead of emitting a corrupt stream', () => {
+    // The literal branch stores t>>2 but tracks clast=t, so one bad sample desyncs
+    // every sample after it. This must throw, not "mostly work".
+    expect(() => encodeSound(Int16Array.from([0, 4, 5, 8]))).toThrow(/not quantized/);
+  });
+
+  it('caps a delta run at 127 samples, as the original does', () => {
+    // A constant second difference of 0 is delta-codable forever; the only thing that
+    // can break the stream up is the 7-bit run length. 300 samples => runs of
+    // 127+127+46, i.e. 3 control bytes, not 1.
+    const ramp = quantize(Int16Array.from({ length: 300 }, (_, i) => i * 4));
+    const enc = encodeSound(ramp);
+    const controls: number[] = [];
+    for (let i = 0; i < enc.length; ) {
+      const c = enc[i]!;
+      if (c & 0x80) { controls.push(c & 0x7f); i += 1 + (c & 0x7f); } else i += 2;
+    }
+    expect(controls).toEqual([127, 127, 46]);
+    expect(Array.from(decodeSound(enc, 0, ramp.length))).toEqual(Array.from(ramp));
+  });
+
   it('round-trips synthetic signal, including the transients that force literals', () => {
     const pcm = new Int16Array(4096);
     for (let i = 0; i < pcm.length; i++) {
@@ -248,11 +290,27 @@ describe('no room script asks for a name nothing can answer', () => {
   // never inside a call. Keyed to their URoom.pas site by tools/sweep-sounds.ts.
   const dead = ['bot-m-lebka', 'pot-v-pohnu', 'z-c-tisic', 'z-c-tisice', 'chob-p'];
 
+  // Every name-taking call on Script (see src/core/script.ts). `sndvol` is easy to
+  // forget and is genuinely used (src/rooms/steel.ts:50).
+  const CALLS = 'addm|addv|addd|addset|snd|sndcyc|sndvol|talkNow|music|musiccyc';
+
   it.each(dead)('never passes %s to a dialogue call', (name) => {
     for (const { f, src } of rooms) {
-      const called = new RegExp(`(?:addm|addv|addd|snd|sndcyc|talkNow)\\(\\s*[^)]*?'${name}'`).test(src);
+      // Anchored per line: `[^)\n]` cannot run past the end of the statement into a
+      // neighbouring one, so the result does not depend on comment-stripping having
+      // removed a nearby quotation of the dead name.
+      const called = new RegExp(`(?:${CALLS})\\(\\s*[^)\\n]*?'${name}'`).test(src);
       expect(called, `${f} calls '${name}'`).toBe(false);
     }
+  });
+
+  it('the call list covers every name-taking Script method', () => {
+    // If a new one is added and not listed above, the dead-name guard silently stops
+    // covering it — so derive the truth from Script itself.
+    const script = readFileSync('src/core/script.ts', 'utf8');
+    const declared = [...script.matchAll(/^  (?:readonly )?(\w+)\(name: string/gm)].map((m) => m[1]!);
+    const listed = new Set(CALLS.split('|'));
+    expect(declared.filter((d) => !listed.has(d))).toEqual([]);
   });
 
   it('still asks for the two restored names, which public/restored now answers', () => {
@@ -261,5 +319,81 @@ describe('no room script asks for a name nothing can answer', () => {
       expect(all).toContain(`'${name}'`);
       expect(parseFft(readFileSync('public/restored/restored.fft')).some((e) => e.name === name)).toBe(true);
     }
+  });
+});
+
+// ------------------------------------------------------- x01, the border remarks
+
+describe('x01 border lines (URoom.pas:1018-1021)', () => {
+  const x01 = parseFft(readFileSync('public/data/Title/x01.fft'));
+
+  it('holds exactly the eight names stdKrajniHlaska can build', () => {
+    // `'cil-' + (m|v) + '-hlaska' + chr(cislo + 48)`, cislo 0..3 (src/core/script.ts).
+    const wanted = ['m', 'v'].flatMap((who) => [0, 1, 2, 3].map((n) => `cil-${who}-hlaska${n}`));
+    expect(x01.map((e) => e.name).sort()).toEqual(wanted.sort());
+    for (const e of x01) expect(e.delka).toBeGreaterThan(0);
+  });
+
+  it('is the only package that has them — so it must be loaded, not assumed', () => {
+    // The regression this guards: x01 was never fetched, so all eight resolved to
+    // nothing and the border remark was silent in every leg-final room.
+    for (const id of ['x00', 'x02', 'x03']) {
+      const other = parseFft(readFileSync(join('public/data/Title', `${id}.fft`))).map((e) => e.name);
+      expect(other.filter((n) => n.startsWith('cil-'))).toEqual([]);
+    }
+  });
+
+  it('is asked for by exactly the rooms the original loads it in', () => {
+    // This is what lets the port keep x01 for the session while the original scopes it
+    // to depth-15 rooms: the set of rooms that can speak a border line IS the set of
+    // depth-15 rooms, so nothing else can ever resolve a `cil-*` name. If a future room
+    // starts calling stdKrajniHlaska without being a leg-final, that equivalence breaks
+    // and x01 has to become room-scoped again — hence this test rather than a comment.
+    const legFinals = Array.from({ length: 72 }, (_, i) => i + 1).filter((n) => depthOfRoom(n) === 15);
+    expect(legFinals).toEqual([19, 29, 37, 44, 51, 58, 64, 70]);
+    const callers = readdirSync('src/rooms')
+      .filter((f) => f.endsWith('.ts') && readFileSync(join('src/rooms', f), 'utf8').includes('stdKrajniHlaska'))
+      .map((f) => f.replace('.ts', '').toUpperCase())
+      .sort();
+    expect(callers).toEqual(legFinals.map((n) => ROOMS[n - 1]!.jmeno).sort());
+  });
+});
+
+describe('AudioEngine package lifetimes', () => {
+  const roomFft = readFileSync('public/data/Title/025.fft');
+  const roomFfs = readFileSync('public/data/Sound/025.ffs');
+  const globFft = readFileSync('public/data/Title/x01.fft');
+  const globFfs = readFileSync('public/data/Sound/x01.ffs');
+
+  it('resolves a name to its FFT record, room package first', () => {
+    const a = new AudioEngine();
+    expect(a.entry('cil-m-hlaska0')).toBeUndefined();
+    a.loadGlobal('x01', globFft, globFfs);
+    a.setRoom('025', roomFft, roomFfs);
+    expect(a.entry('cil-m-hlaska0')?.name).toBe('cil-m-hlaska0');
+    expect(a.entry('pyr-m-kam')?.name).toBe('pyr-m-kam');
+    expect(a.entryCount('x01')).toBe(8);
+  });
+
+  it('drops the room package with the room, and keeps the globals', () => {
+    // The reason clearRoom exists: a line spoken before the next room's package lands
+    // must be silent, never the PREVIOUS room's sample.
+    const a = new AudioEngine();
+    a.loadGlobal('x01', globFft, globFfs);
+    a.setRoom('025', roomFft, roomFfs);
+    expect(a.roomLoaded).toBe(true);
+    a.clearRoom();
+    expect(a.roomLoaded).toBe(false);
+    expect(a.entry('pyr-m-kam')).toBeUndefined();
+    expect(a.entry('cil-m-hlaska0')?.name).toBe('cil-m-hlaska0');
+  });
+
+  it('carries the subtitle on the same record as the sample', () => {
+    // Why nothing needs a second parsed copy of an FFT to render a line.
+    const a = new AudioEngine();
+    a.setRoom('025', roomFft, roomFfs);
+    const e = a.entry('pyr-m-kam');
+    expect(e?.cz.text).toBe(' Kam jsme se to dostali?');
+    expect(e?.delka).toBeGreaterThan(0);
   });
 });

@@ -141,10 +141,11 @@ function roomBlock(s: Script): void {
     switch (s.random(3)) {
       case 0: s.addv(s.random(5), 'jes-v-potvora0'); break;
       case 1: s.addv(s.random(5), 'jes-v-potvora1'); break;
-      // `jes-v-potvora2` is NOT in the shipped 063 package: packaging cut its 56781
-      // compressed bytes out of 063.ffs (the nine entries after it all shift by exactly
-      // that), so one third of the big fish's answers was silent. Restored from the
-      // authors' master index + FFNG's audio — see public/restored/README.md.
+      // `jes-v-potvora2` is NOT in the shipped 063 package, and here the packaging cut
+      // is exact: against the authors' master index (Titl/jeskyne.fft) all 25 shared
+      // sounds are byte-identical in length, the 16 before it sit at the same offset,
+      // and the 9 after it shift by exactly its 56781 B. So one third of the big fish's
+      // answers was silent. Restored from FFNG's audio — see public/restored/README.md.
       case 2: s.addv(s.random(5), 'jes-v-potvora2'); break;
     }
     v[R.room_potvurka] = 1;
