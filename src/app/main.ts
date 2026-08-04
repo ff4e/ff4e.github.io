@@ -531,6 +531,47 @@ const logoMovie = (): string =>
 const introMovie = (): string =>
   graphics === 'ai' && aiMovieAvailable[INTRO_MOVIE_AI] ? INTRO_MOVIE_AI : INTRO_MOVIE;
 
+/**
+ * Vector-subtitle size in the `ai` tier, as a fraction of the faithful size.
+ *
+ * The subtitle overlay draws in NATIVE game pixels in every tier, so the text has always
+ * been the same size relative to the room. That reads as correct against classic and
+ * enhanced art, and too heavy against the AI upscale: next to art carrying four times the
+ * detail, a line sized for a 1998 bitmap font is the coarsest thing on screen.
+ *
+ * Applied as a pure PRESENTATION transform in `applySubScale` — the engine's own line
+ * positions (`ys`/`cilys`, advanced by PosunTitulky at the logic tick) are shared with the
+ * faithful bitmap path and must not move. So this scales what is drawn, not what is
+ * computed: classic and enhanced are byte-identical, and tools/test-subtitles-parity.mjs
+ * (which pins the vector overlay against a from-first-principles reference) still runs on
+ * the enhanced tier untouched.
+ */
+// `let` for the same reason as waterAnimMs and RIPPLE: it is a look decision, so it has
+// to be judgeable on screen without a rebuild. Nothing in the game writes to it.
+let aiSubScale = 0.5;
+
+/**
+ * Shrink the subtitle overlay about its bottom-centre anchor for the `ai` tier.
+ *
+ * Bottom-centre because that is where the layout is anchored: `drawVector` centres each
+ * line on `screenW` and puts its baseline at `ys + screenH`, with `ys` negative. Scaling
+ * about that point keeps the block centred and sitting on the same bottom edge, and
+ * shrinks the line spacing and the wave amplitude by the same factor — i.e. the whole
+ * subtitle gets smaller, rather than the glyphs shrinking inside unchanged spacing.
+ *
+ * Returns the scale it applied so the caller can put it in the repaint signature.
+ */
+function applySubScale(ctx: CanvasRenderingContext2D, sys: SubtitleSystem): number {
+  const s = graphics === 'ai' ? aiSubScale : 1;
+  if (s !== 1) {
+    const { w, h } = sys.vectorScreen;
+    ctx.translate(w / 2, h);
+    ctx.scale(s, s);
+    ctx.translate(-w / 2, -h);
+  }
+  return s;
+}
+
 /** Size the subtitle overlay to cover the game canvas at device resolution. */
 function syncSubOverlaySized(cssW: number, cssH: number): void {
   const dpr = window.devicePixelRatio || 1;
@@ -574,7 +615,10 @@ function syncSubOverlay(): void {
  * and the backing-store size — a resize wipes the canvas, so the key must change.
  */
 function subOverlaySignature(who: string, sys: SubtitleSystem, scale: number): string {
-  return `${who}|${subFontFamily}|${subFontWeight}|${subCanvas.width}x${subCanvas.height}|${scale}|${sys.vectorSignature(count, alpha)}`;
+  // `graphics` is in the key because the ai tier draws the overlay smaller
+  // (AI_SUB_SCALE); without it, switching tier could serve the previous tier's cached
+  // overlay, which is exactly the class of bug this gate exists around.
+  return `${who}|${graphics}|${subFontFamily}|${subFontWeight}|${subCanvas.width}x${subCanvas.height}|${scale}|${sys.vectorSignature(count, alpha)}`;
 }
 
 /** Clear the subtitle overlay (used off the room screen). */
@@ -2573,6 +2617,7 @@ function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number, dpr: n
     subCtx.setTransform(1, 0, 0, 1, 0, 0);
     subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
     subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+    applySubScale(subCtx, cutsceneSubs);
     cutsceneSubs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
     subOverlayPaints++;
     subOverlayPainted = true;
@@ -4651,6 +4696,7 @@ function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): 
       subCtx.setTransform(1, 0, 0, 1, 0, 0);
       subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
       subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+      applySubScale(subCtx, subs);
       subs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
       subOverlayPaints++;
       subOverlayPainted = true;
@@ -6811,6 +6857,16 @@ window.addEventListener('keydown', unlockAudio, { once: true });
    * or tuning probe can sweep the look without a rebuild; the game never writes to it.
    */
   rippleTuning: () => RIPPLE,
+  /** Vector-subtitle size in the `ai` tier, as a fraction of the faithful size. */
+  subScale: (v?: number) => {
+    if (v !== undefined) {
+      aiSubScale = Math.max(0.2, Math.min(1, v));
+      subOverlaySig = ''; // the overlay caches on a signature; force the next repaint
+      forceRoomRedraw = true;
+      wake();
+    }
+    return aiSubScale;
+  },
   /** Idle water wake period in ms (see waterAnimMs) — the perf/smoothness trade, live. */
   waterAnimMs: (ms?: number) => {
     if (ms !== undefined) {
