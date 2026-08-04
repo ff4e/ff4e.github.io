@@ -473,6 +473,30 @@ describe('ai-tier smooth wobble vs the faithful rule (aiTarget.ts / framebuffer.
   const wave = (t: [number, number, number], time: number): AiWobble =>
     ({ wamp: t[0], wper: t[1], wspd: t[2], count: Math.floor(time), time });
 
+  it('the faithful curve itself matches hand-computed values (an ABSOLUTE pin)', () => {
+    // Everything else in this block compares the ai path to the faithful path. Since the
+    // dedup that made `smoothWobbleShift` build on `waterShiftAtPhase`, those two move
+    // TOGETHER — so a wrong amplitude or period in the shared definition changes both
+    // sides equally and every relative test stays green. That is exactly the
+    // `dissolveKeeps` failure mode, and mutation testing caught it: mutating wamp/2 to
+    // wamp, or i/wper to i*wper, survived the whole suite.
+    //
+    // So the shared curve needs one test that does not reference the implementation at
+    // all. These are `(wamp/2)·sin(i/wper + count/wspd)` evaluated by hand for the wave
+    // parameters that actually occur in the shipped rooms.
+    const CASES: [number, number, number, number, number, number][] = [
+      [0, 0, 5, 10, 5, 0],
+      [3, 7, 5, 10, 5, 2.479162026131],
+      [17, 40, 5, 10, 5, -0.679401566027],
+      [9, 13, 8, 20, 12, 3.997193376517],
+      [1, 1, 2, 6, 4, 0.404714563561],
+      [25, 99, 7, 11, 7, -2.275097641034],
+    ];
+    for (const [i, count, wamp, wper, wspd, want] of CASES) {
+      expect(waterShift(i, count, wamp, wper, wspd)).toBeCloseTo(want, 9);
+    }
+  });
+
   it('a scaled row centred on native row i has EXACTLY the faithful displacement there', () => {
     // (y + 0.5)/S - 0.5 === i  <=>  y === i*S + (S-1)/2, the band's mid-row.
     for (const t of WAVES) {
