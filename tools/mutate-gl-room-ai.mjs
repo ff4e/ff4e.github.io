@@ -16,15 +16,18 @@
  *     npx vite --port 5399 --strictPort &
  *     FF_UI_PORT=5399 node tools/mutate-gl-room-ai.mjs
  *
- * Result on the shipping shader (2026-08-04, all four killed):
+ * Result on the shipping shader (2026-08-04, all seven killed):
  *
- *   centring dropped              → oracleMax 7.18
- *   interpolation dropped         → oracleMax 15.05, exactRows 100 %
- *   regressed to 1998 sampling    → oracleMax 22.23, exactRows 100 %, bandsVarying 0 %
- *   shift direction flipped       → oracleMax 40.95
+ *   centring dropped               → oracleMax 8.38
+ *   interpolation dropped          → oracleMax 12.96, exactRows 99 %
+ *   regressed to 1998 sampling     → oracleMax, exactRows and bandsVarying all trip
+ *   shift direction flipped        → oracleMax 36.70
+ *   ripple term ignored            → rippleDelta collapses to the oracle's own floor
+ *   crests driven by band position → oracleMax (this IS the ~19 Hz aliasing bug)
+ *   ripple window dropped          → oracleMax (a train becomes the whole room)
  *
  * The third is the one worth reading twice: a silent regression to the old banded shader
- * trips all three of step 6's checks, which is exactly what that step was written for.
+ * trips all three of step 6's spatial checks, which is exactly what it was written for.
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -44,8 +47,23 @@ const MUTATIONS = [
   },
   {
     rule: 'regression to the 1998 sampling (one rounded native-px shift per native row)',
-    from: '    float row = (float(y) + 0.5) / float(uScale) - 0.5;\n    float sh = uAmpS * sin(row / uPer + uPhase);',
-    to: '    float row = floor(float(y) / float(uScale));\n    float sh = floor(uAmpS * sin(row / uPer + uPhase) / float(uScale) + 0.5) * float(uScale);',
+    from: '    sh *= float(uScale);',
+    to: '    sh = floor(uAmp * sin(floor(float(y) / float(uScale)) / uPer + uPhase) + 0.5) * float(uScale);',
+  },
+  {
+    rule: 'the ripple trains reach the shader at all (uRip not ignored)',
+    from: '      sh += uRip[i].z * exp(-0.5 * e * e) * sin(row * uRip[i].w + uRipPh[i]);',
+    to: '      sh += 0.0 * uRip[i].z * e;',
+  },
+  {
+    rule: 'ripple crests are driven by the carrier phase, not by the band position',
+    from: '      sh += uRip[i].z * exp(-0.5 * e * e) * sin(row * uRip[i].w + uRipPh[i]);',
+    to: '      sh += uRip[i].z * exp(-0.5 * e * e) * sin((row - uRip[i].x) * uRip[i].w);',
+  },
+  {
+    rule: 'the ripple band is a Gaussian WINDOW (not the whole room)',
+    from: '      sh += uRip[i].z * exp(-0.5 * e * e) * sin(row * uRip[i].w + uRipPh[i]);',
+    to: '      sh += uRip[i].z * sin(row * uRip[i].w + uRipPh[i]);',
   },
   {
     rule: 'the shift is applied in the right direction (dest[j] = bg[j+k])',
