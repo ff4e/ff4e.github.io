@@ -68,7 +68,7 @@ async function enterLode() {
 
 await enterLode();
 
-const cap = await p.evaluate(() => window.__ff.aiGlParity());
+const cap = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
 if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
@@ -143,8 +143,17 @@ expect(
     `(${(cellDrift * 100).toFixed(2)}% drift, tolerance 2%)`,
 );
 
-// 3. CPU↔GPU parity, mid-fall — the stale-texture check
-const par = await p.evaluate(() => window.__ff.aiGlParity());
+// 3. CPU↔GPU parity, mid-fall — the stale-texture check.
+//
+//    In STILL WATER, for the same reason tools/test-gl-room-ai.mjs is: the `ai` tier
+//    samples the water wobble at ×S on the GPU and at 1998's quantization on canvas-2D,
+//    so a wobbling room's BACKGROUND legitimately differs between the two backends —
+//    and LODE wobbles (wamp=5 wper=20 wspd=3). Forcing `wamp = 0` for the comparison is
+//    what keeps this check as sharp as it was rather than widening MAX_CHANNEL_DELTA
+//    past the very asymmetry it exists to catch. It costs this probe nothing: the wreck
+//    damage is in the ART, which the override does not touch — a stale GPU texture shows
+//    up in still water exactly as it did before.
+const par = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
 expect(par && par.webgl && !par.noCanvas && !par.dimMismatch, 'mid-fall: parity comparison ran');
 if (par && par.max !== undefined) {
   expect(
@@ -160,7 +169,7 @@ await waitTicks(p, await p.evaluate(() => window.__ff.count()), 6);
 const later = await p.evaluate(() => window.__ff.aiWreckDigest());
 expect(later !== null && later.replayed > mid.digest.replayed, 'the replay keeps up with the fall');
 expect(later !== null && later.hash !== mid.digest.hash, 'the ×S background keeps changing as it does');
-const par2 = await p.evaluate(() => window.__ff.aiGlParity());
+const par2 = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
 if (par2 && par2.max !== undefined) {
   expect(par2.max <= MAX_CHANNEL_DELTA, `later mid-fall CPU↔GPU max=${par2.max}`);
 }
