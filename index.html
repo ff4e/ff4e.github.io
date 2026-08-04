@@ -192,7 +192,7 @@
     </div>
     <!-- Non-blocking note when WebGL2 is unavailable (CPU renderer active). -->
     <div id="webgl-note" hidden>
-      <span>Running on the software renderer (WebGL unavailable) — the game may run slower.</span>
+      <span>Running on the software renderer (WebGL unavailable) — the game may run slower, and in the AI-upscaled tier the water is drawn at the original resolution.</span>
       <button id="webgl-note-x" type="button">Dismiss</button>
     </div>
     <div id="intro-layer" hidden>
@@ -218,7 +218,7 @@
           <option value="fill">Fit — fill box</option>
         </optgroup>
       </select></label>
-      <label>Renderer <select id="renderer">
+      <label title="Room compositor backend. In the AI-upscaled tier these are not pixel-identical: the GPU draws the water wobble at the upscaled resolution, the CPU fallback keeps the faithful 1998 sampling of it. Everything else matches byte for byte.">Renderer <select id="renderer">
         <option value="webgl">WebGL (GPU)</option>
         <option value="cpu">CPU</option>
       </select></label>

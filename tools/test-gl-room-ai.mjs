@@ -6,6 +6,19 @@
  * no-WebGL2 fallback) and GlAiScreen. This probe renders both for every room and diffs
  * them, exactly as test-gl-room.mjs does for the classic tier.
  *
+ * ── Why the comparison is made in STILL WATER ────────────────────────────────
+ * The `ai` tier evaluates the water wobble at ×S on the GPU (per scaled row, at a
+ * fractional shift, at the sub-tick time) while the canvas-2D fallback keeps the
+ * faithful 1998 sampling — so in 70 of the 72 rooms the BACKGROUND legitimately differs
+ * between the two backends and cannot be byte-compared. Widening the tolerance to
+ * absorb that would throw away the net for everything else in the same motion, so
+ * instead the sweep asks for `stillWater`: `wamp = 0` for the duration of the
+ * comparison puts both backends on the identical unshifted fetch, and items, fish,
+ * mirror, rope, wreck, dissolve, the wall composite and the classic-sprite fallback are
+ * held to exactly the gate they always were. Rooms 46 and 66 have `wamp === 0` in the
+ * data, so they are compared WITHOUT the override and prove the override is not what is
+ * producing the match. Step 6 then covers the wobble itself, which this cannot.
+ *
  * ── The gate, and why it is not max === 0 ─────────────────────────────────────
  * The classic/enhanced oracle (RgbaScreen) is pure JS with rounding this repo defines,
  * so those probes can demand byte-equality. This oracle is the BROWSER's canvas-2D
@@ -113,7 +126,7 @@ let tested = 0, noArt = 0, worstMax = 0, worstRoom = 0, exact = 0;
 const cpuRooms = [];
 
 await enter(3);
-const cap = await p.evaluate(() => window.__ff.aiGlParity());
+const cap = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
 if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
@@ -147,7 +160,7 @@ for (const num of ROOM_LIST) {
     //    nothing for this tier to composite (room 72) — it renders through the normal
     //    compositor, which test-gl-room covers.
     if (!live.aiLoaded) { noArt++; continue; }
-    const r = await p.evaluate(() => window.__ff.aiGlParity());
+    const r = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
     if (!r) { ok = false; console.log(`  FAIL room ${num}: no parity result`); continue; }
     if (!r.webgl) { ok = false; console.log(`  FAIL room ${num}: WebGL vanished mid-run`); continue; }
     if (r.noCanvas) { ok = false; console.log(`  FAIL room ${num}: no 2D oracle context`); continue; }
@@ -220,7 +233,7 @@ try {
   let worst = 0;
   for (let i = 0; i < 10; i++) {
     await p.waitForTimeout(120);
-    const d = await p.evaluate(() => window.__ff.aiGlParity());
+    const d = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
     if (!d || !d.webgl || d.dimMismatch) continue;
     samples++;
     if (d.max > worst) worst = d.max;
@@ -277,6 +290,130 @@ try {
 } catch (e) {
   ok = false;
   console.log(`  FAIL present: ${String(e).slice(0, 80)}`);
+}
+
+
+// 6. The water wobble itself — the one thing step 2 deliberately switched off.
+//
+//    Three questions, none of which a CPU↔GPU comparison can answer any more, and none
+//    of which a screenshot can answer at all:
+//
+//    a) is the GPU drawing the RIGHT curve? Scored against an independent JS
+//       reimplementation of BG_FS built from the SOURCE art (`oracleMax`). Compare
+//       against the wamp=0 room's score to see the floor: ~1.4/255 comes from the
+//       un-premultiply round-trip of reading the wall art back out of a 2D canvas, not
+//       from the wobble.
+//    b) is it actually the SMOOTH one? `bandedMax` scores the same frame against the
+//       faithful banded expectation and must be LARGE — this is the negative control
+//       that fails loudly if the shader ever regresses to a per-native-row lookup.
+//    c) is it smooth in the PIXELS, with no reference image at all? A banded integer
+//       shift makes every output row an exact integer translation of its source row
+//       (`exactRows` = 1) with the same estimated shift across all 4 rows of a native
+//       band (`bandsVarying` = 0). Both must move decisively off those values.
+//
+//    Run over the SAME room list as the parity sweep above, not just one room. That
+//    matters because step 2 now compares the two backends in still water, so a wobbling
+//    background is no longer exercised per-room by anything else — the edge clamp, the
+//    interpolation and the ripple term all depend on the room's own art, wall
+//    transparency and dimensions. Checking one room would leave 69 unchecked. It is
+//    affordable because `aiWobbleCheck` composites the BACKGROUND ONLY and reads it back
+//    once, and rooms that do not wobble (46, and 66 which is out of tier) act as the
+//    control: they must still read exactly like the old banded world (exactRows 1,
+//    bandsVarying 0).
+//
+//    These three are mutation-checked by tools/mutate-gl-room-ai.mjs, which breaks BG_FS
+//    seven ways (centring, interpolation, shift direction, a regression to the 1998
+//    sampling, and three on the ripple term) and asserts this step goes red for each. A
+//    gate nobody has tried to defeat is a gate nobody knows the strength of.
+/**
+ * Score one room's water. Returns the probe result, or null if it could not run.
+ *
+ * The wait for the ripple train is on GAME TICKS, not wall-clock: a train is born at
+ * zero height and fades in, so scoring at birth would exercise the shader's ripple term
+ * with all-zero inputs and prove nothing — and a fixed `waitForTimeout` delivers a
+ * different number of ticks on a loaded machine, which is how a probe like this starts
+ * flaking under CI load rather than under a real fault.
+ */
+async function wobbleAt(num) {
+  await enter(num);
+  // A room with no staged AI art has no ×S background to score (room 72 ships none).
+  if (!(await p.evaluate(() => window.__ff.aiRoomLoaded()))) return { skip: true };
+  const wobbles = await p.evaluate(() => window.__ff.water().wamp !== 0);
+  if (wobbles) {
+    const born = await p.evaluate(() => { window.__ff.startTrainNow(); return window.__ff.count(); });
+    const half = await p.evaluate(() => Math.round(window.__ff.rippleTuning().lifeTicks / 2));
+    await p.waitForFunction((t) => window.__ff.count() >= t, born + half, { timeout: 30000 });
+  }
+  return p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
+}
+
+const wobbleRooms = [];
+for (const num of ROOM_LIST) {
+  try {
+    const r = await wobbleAt(num);
+    if (r && r.skip) continue;
+    if (!r || !r.webgl) { ok = false; console.log(`  FAIL wobble room ${num}: no result`); continue; }
+    if (r.unsupported || r.noArt || r.noCanvas) continue; // no AI art / GPU cannot size it
+    const fail = (m) => { ok = false; console.log(`  FAIL wobble room ${num}: ${m}`); };
+    if (r.scoredRows < 40) continue; // too little clear wall to score this room
+    // (a) the curve, in EVERY room: the JS BG_FS oracle is built from this room's own
+    //     source art, so a wrong edge clamp or interpolation shows up here room by room.
+    if (!(r.oracleMax <= 2)) fail(`GPU differs from the JS BG_FS oracle: max=${r.oracleMax.toFixed(2)}`);
+    if (!r.wobbles) {
+      // The control rooms. No wave ⇒ the frame must be motionless and unshifted.
+      if (r.ripples !== 0) fail(`a wamp=0 room must get no ripples (got ${r.ripples})`);
+      if (r.exactRows !== 1 || r.bandsVarying !== 0) {
+        fail(`a wamp=0 room must be motionless (exactRows=${r.exactRows} bandsVarying=${r.bandsVarying})`);
+      }
+      continue;
+    }
+    wobbleRooms.push(num);
+    // (b) …and it is emphatically NOT the banded one.
+    if (!(r.bandedMax >= 8)) fail(`still matches the BANDED expectation (max=${r.bandedMax}) — regressed to per-native-row?`);
+    if (!(r.exactRows < 0.6)) fail(`${(r.exactRows * 100).toFixed(0)}% of rows are exact integer translations — the shift is not fractional`);
+    if (!(r.bandsVarying > 0.25)) fail(`only ${(r.bandsVarying * 100).toFixed(0)}% of native bands vary within themselves — still banded`);
+  } catch (e) {
+    ok = false;
+    console.log(`  FAIL wobble room ${num}: ${String(e).slice(0, 100)}`);
+  }
+}
+console.log(`  wobble checked in ${wobbleRooms.length} wobbling rooms [${wobbleRooms.join(',')}] + the wamp=0 controls`);
+
+// The ripple term needs ONE room to be scored in depth (rippleDelta), because it needs a
+// train on screen at real amplitude — see wobbleAt.
+try {
+  const smooth = await wobbleAt(3);
+  if (!smooth || !smooth.webgl || smooth.unsupported || smooth.noArt || smooth.noCanvas) {
+    ok = false;
+    console.log(`  FAIL wobble: no result (${JSON.stringify(smooth)})`);
+  } else {
+    const fail = (m) => { ok = false; console.log(`  FAIL wobble: ${m}`); };
+    if (!smooth.wobbles) fail('room 3 is expected to wobble');
+    // (a) the curve. 2 leaves headroom over the ~1.4 canvas-readback floor without
+    //     leaving room for a wrong shift, which scores in the tens (see bandedMax).
+    if (!(smooth.oracleMax <= 2)) fail(`GPU differs from the JS BG_FS oracle: max=${smooth.oracleMax.toFixed(2)}`);
+    // (b) …and it is emphatically NOT the banded one.
+    if (!(smooth.bandedMax >= 8)) fail(`GPU still matches the BANDED expectation (max=${smooth.bandedMax}) — regressed to per-native-row?`);
+    // (b2) the ripple trains reached the shader at all. `rippleDelta` scores the same
+    //      frame against the wobble WITHOUT them, so a shader that silently ignored uRip
+    //      would score at the oracle's own floor and fail here while passing (a).
+    if (!(smooth.ripples >= 1)) fail('no ripple train on screen — the ripple term was never exercised');
+    if (!(smooth.rippleDelta >= 8)) fail(`the ripple trains moved nothing (rippleDelta=${smooth.rippleDelta.toFixed(2)}) — uRip ignored?`);
+    // (c) measured on the pixels alone.
+    if (!(smooth.scoredRows > 300)) fail(`too few scorable rows (${smooth.scoredRows})`);
+    if (!(smooth.exactRows < 0.6)) fail(`${(smooth.exactRows * 100).toFixed(0)}% of rows are exact integer translations — the shift is not fractional`);
+    if (!(smooth.bandsVarying > 0.25)) fail(`only ${(smooth.bandsVarying * 100).toFixed(0)}% of native bands vary within themselves — still banded`);
+    console.log(
+      `  wobble room 3 (wamp=${smooth.wamp} wper=${smooth.wper} wspd=${smooth.wspd}): ` +
+        `oracleMax=${smooth.oracleMax.toFixed(2)} rmse=${smooth.oracleRmse.toFixed(3)} bandedMax=${smooth.bandedMax} ` +
+        `exactRows=${smooth.exactRows.toFixed(2)} bandsVarying=${smooth.bandsVarying.toFixed(2)} ` +
+        `ripples=${smooth.ripples} rippleDelta=${smooth.rippleDelta.toFixed(1)} (${smooth.scoredRows} rows)`,
+    );
+  }
+
+} catch (e) {
+  ok = false;
+  console.log(`  FAIL wobble: ${String(e).slice(0, 120)}`);
 }
 
 // The per-frame cost of the two backends is REPORTED, not asserted. An earlier revision

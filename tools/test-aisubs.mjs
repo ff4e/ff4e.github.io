@@ -13,6 +13,12 @@
  *
  * This asserts the two tiers are within a reasonable factor of each other, rather than
  * pinning an absolute fps that would be machine- and headless-dependent.
+ *
+ * It also pins the `ai` tier's SMALLER subtitle (`aiSubScale`): the overlay draws in
+ * native game pixels in every tier, which sizes the text for 1998 bitmap art and reads
+ * far too heavy over the AI upscale. That is a pure presentation transform — the engine's
+ * line positions are shared with the faithful bitmap path and must not move — so it is
+ * checked on the rendered INK rather than on any internal number.
  */
 import { withApp } from './ui-lib.mjs';
 
@@ -88,4 +94,91 @@ await withApp(async ({ p, expect }) => {
   expect(ai.raf > 30, `ai stays on rAF while the line settles (${ai.raf.toFixed(1)}/s)`);
   const ratio = ai.fps / enh.fps;
   expect(ratio > 0.7, `ai subtitle smoothness is comparable to enhanced (ratio ${ratio.toFixed(2)}, ai ${ai.fps.toFixed(1)}/s vs enhanced ${enh.fps.toFixed(1)}/s)`);
+
+  // ── the MECHANISM behind that ratio, asserted directly ──
+  //
+  // The ratio above is a wall-clock measurement and degrades on a loaded machine even
+  // when the code is correct. What actually protects the subtitle is `waterOwesRepaint`
+  // capping the ×S room repaint at `waterAnimMs` while the loop runs at the full paint
+  // rate for the overlay's sake — and that contract is not wall-clock at all, so it can
+  // be asserted exactly. Without the cap this counted ~60 repaints/s; the cap is what
+  // brought the ratio back from 0.60 to ~0.95.
+  await p.evaluate(() => window.__ff.setGraphics('ai'));
+  await p.evaluate(() => window.__ff.talk('little'));
+  await p.waitForFunction(() => window.__ff.subsActive(), { timeout: 8000 });
+  const capWindowMs = 1500;
+  const r0 = await p.evaluate(() => ({ n: window.__ff.throttleInfo().roomPaints, t: performance.now() }));
+  await new Promise((r) => setTimeout(r, capWindowMs));
+  const r1 = await p.evaluate(() => ({ n: window.__ff.throttleInfo().roomPaints, t: performance.now() }));
+  const waterMs = await p.evaluate(() => window.__ff.waterAnimMs());
+  const elapsed = r1.t - r0.t;
+  // Ceiling = the water's own rate, plus the 12.5Hz logic tick (which repaints on its
+  // own via the signature and does not align with it), plus slack for the boundaries.
+  const ceiling = Math.ceil(elapsed / waterMs) + Math.ceil(elapsed / 80) + 4;
+  expect(
+    r1.n - r0.n <= ceiling,
+    `[ai] room repaints stay capped while a subtitle animates (${r1.n - r0.n} in ${Math.round(elapsed)}ms, ceiling ${ceiling})`,
+  );
+  // …and the water is genuinely still animating underneath it — this is the other half
+  // of the trade, and the reason the suppression that used to live here was removed.
+  expect(r1.n - r0.n >= 8, `[ai] the room keeps animating under a subtitle (${r1.n - r0.n} repaints)`);
+
+  // ── the ai tier draws the SAME line smaller, anchored to the same bottom edge ──
+  //
+  // Measured on the overlay's own ink, not on the scale constant: that way a transform
+  // applied about the wrong origin (text drifting up the screen, or off-centre) fails
+  // here, which a check on the number could not see. The line is frozen at a fixed tick
+  // via the deterministic subtitle probe so both tiers are compared at the identical
+  // wave phase — sampling live would compare different moments of the wave-in.
+  const inkBox = async (tier) => {
+    await p.evaluate((t) => window.__ff.setGraphics(t), tier);
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier, { timeout: 15000 });
+    await p.waitForFunction(() => window.__ff.subsActive(), { timeout: 8000 });
+    await p.waitForTimeout(400);
+    return p.evaluate(() => {
+      const c = document.getElementById('subs');
+      const g = c.getContext('2d', { willReadFrequently: true });
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+      for (let y = 0; y < c.height; y++) {
+        for (let x = 0; x < c.width; x++) {
+          if (d[(y * c.width + x) * 4 + 3] > 40) {
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+          }
+        }
+      }
+      return { w: x1 - x0, h: y1 - y0, bottom: c.height - y1, cx: (x0 + x1) / 2 / c.width, ink: x1 >= 0 };
+    });
+  };
+
+  await p.evaluate(() => window.__ff.talk('little'));
+  await p.waitForFunction(() => window.__ff.subsActive(), { timeout: 8000 });
+  await p.waitForTimeout(2200); // let the wave finish so the ink is the settled line
+  const enhInk = await inkBox('enhanced');
+  const aiInk = await inkBox('ai');
+  const want = await p.evaluate(() => window.__ff.subScale());
+  if (!enhInk.ink || !aiInk.ink) {
+    expect(false, 'a subtitle line is inked on the overlay in both tiers');
+  } else {
+    const wRatio = aiInk.w / enhInk.w;
+    // Generous band: glyph hinting and the stroke width do not scale perfectly linearly.
+    expect(
+      Math.abs(wRatio - want) < 0.12,
+      `[ai] the subtitle is drawn at ~${want} of the faithful size (width ratio ${wRatio.toFixed(2)}, ` +
+        `${aiInk.w}px vs ${enhInk.w}px)`,
+    );
+    // Anchored: same bottom edge, still centred. A transform about the wrong origin
+    // scales the text correctly and puts it in the wrong place.
+    expect(
+      Math.abs(aiInk.bottom - enhInk.bottom) < enhInk.h,
+      `[ai] the subtitle still sits on the same bottom edge (${aiInk.bottom}px vs ${enhInk.bottom}px from the bottom)`,
+    );
+    expect(
+      Math.abs(aiInk.cx - enhInk.cx) < 0.04,
+      `[ai] the subtitle is still centred (centre ${aiInk.cx.toFixed(3)} vs ${enhInk.cx.toFixed(3)} of the overlay)`,
+    );
+  }
 }, { gl: true });

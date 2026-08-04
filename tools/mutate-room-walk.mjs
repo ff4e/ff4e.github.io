@@ -24,8 +24,11 @@ import fs from 'node:fs';
 const W = 'src/render/roomWalk.ts';
 const A = 'src/render/roomAi.ts';
 const C = 'src/core/room.ts';       // the shared WreckSwap protocol both replays read
+const T = 'src/render/aiTarget.ts'; // the two water-wobble sampling rules, one file
+const F = 'src/render/framebuffer.ts'; // the faithful curve both tiers are built on
 
 const ALL_TESTS = [
+  'test/render-parity.test.ts',
   'test/darkness.test.ts',
   'test/gspec5.test.ts',
   'test/lode-wreck.test.ts',
@@ -160,14 +163,111 @@ const MUTATIONS = [
     from: '    if (!r) continue;', to: '    if (!r) break;' },
   { rule: 'wreck: the mutated background moves the composite cache key', file: A,
     tests: ['test/roomAi.test.ts'],
-    from: '`${faze}|${shifts === null ? 0 : count}|${aiImageRevision(bg)}`',
-    to: '`${faze}|${shifts === null ? 0 : count}`' },
+    from: '`${faze}|${wobble === null ? 0 : count}|${aiImageRevision(bg)}`',
+    to: '`${faze}|${wobble === null ? 0 : count}`' },
+
+  // ── the water wobble's two samplings ────────────────────────────────────────
+  // The `ai` tier's GPU path resamples the 1998 curve continuously while canvas-2D keeps
+  // the quantized original, so the two backends legitimately disagree and NO CPU<->GPU
+  // probe can kill any of these. They are pinned in roomAi.test.ts against `waterShift`
+  // imported from framebuffer.ts — the faithful definition — and these prove that bites.
+  // (The GLSL half of the same rule cannot be reached from vitest; it is pinned in the
+  // browser by tools/test-gl-room-ai.mjs step 6, and tools/mutate-gl-room-ai.mjs is the
+  // sibling harness that proves THAT step bites.)
+  { rule: 'wobble: the scaled row is centred before becoming a native row', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  const row = (y + 0.5) / scale - 0.5;', to: '  const row = y / scale;' },
+  { rule: 'wobble: the smooth shift is expressed in SCALED pixels', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  return sh * scale;', to: '  return sh;' },
+  // These two live on the SHARED curve in framebuffer.ts (waterShiftAtPhase), which both
+  // the faithful tiers and the ai tier's continuous path are built from. That is exactly
+  // why they can ONLY be killed by the absolute pin in roomAi.test.ts (hand-computed
+  // values): every comparison-based suite has the same curve on both sides of the
+  // comparison and moves with the mutation. Verified — render-parity.test.ts diffs two
+  // CPU paths that now both call it, and stays green for both of these. Do not re-add it
+  // to this list; a test that structurally cannot fail is worse than no test, because it
+  // reads like coverage.
+  { rule: 'wobble: amplitude is wamp/2, not wamp', file: F, tests: ['test/roomAi.test.ts'],
+    from: '  return (wamp / 2) * Math.sin(i / wper + phase);',
+    to: '  return wamp * Math.sin(i / wper + phase);' },
+  { rule: 'wobble: the row divides by wper', file: F, tests: ['test/roomAi.test.ts'],
+    from: '  return (wamp / 2) * Math.sin(i / wper + phase);',
+    to: '  return (wamp / 2) * Math.sin(i * wper + phase);' },
+  { rule: 'wobble: the ai path is built on the FAITHFUL curve, not a restatement', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  let sh = waterShiftAtPhase(row, phase, w.wamp, w.wper);',
+    to: '  let sh = waterShiftAtPhase(row, phase, w.wamp, w.wper) * 1.05;' },
+  { rule: 'wobble: the GPU phase uses the SUB-TICK time, not the logic tick', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  return ((w.time / w.wspd) % TAU + TAU) % TAU;',
+    to: '  return ((w.count / w.wspd) % TAU + TAU) % TAU;' },
+  { rule: 'wobble: the phase divides by wspd', file: T, tests: ['test/roomAi.test.ts'],
+    from: '  return ((w.time / w.wspd) % TAU + TAU) % TAU;',
+    to: '  return ((w.time * w.wspd) % TAU + TAU) % TAU;' },
+  { rule: 'wobble: the faithful table is ROUNDED (Delphi banker\'s), not truncated', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: 'out[i] = delphiRound(waterShift(i, w.count, w.wamp, w.wper, w.wspd));',
+    to: 'out[i] = Math.trunc(waterShift(i, w.count, w.wamp, w.wper, w.wspd));' },
+  { rule: 'wobble: the faithful table is sampled on the LOGIC TICK (canvas-2D caches on it)',
+    file: T, tests: ['test/roomAi.test.ts'],
+    from: 'out[i] = delphiRound(waterShift(i, w.count, w.wamp, w.wper, w.wspd));',
+    to: 'out[i] = delphiRound(waterShift(i, w.time, w.wamp, w.wper, w.wspd));' },
+
+  // ── ripple trains ───────────────────────────────────────────────────────────
+  // The `ai` tier's one deliberate liberty, so unlike the wobble above there is no
+  // faithful rule to pin it against. What IS pinnable is the set of properties that make
+  // it usable at all — deterministic, continuous, ordered, off in a still room — and each
+  // of these breaks exactly one of them.
+  { rule: 'ripple: arrivals are actually jittered, not a metronome', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  return n * t.periodTicks + (rippleHash(n, 6) - 0.5) * j * t.periodTicks;',
+    to: '  return n * t.periodTicks;' },
+  { rule: 'ripple: the jitter is BOUNDED, not an accumulating drift', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  return n * t.periodTicks + (rippleHash(n, 6) - 0.5) * j * t.periodTicks;',
+    to: '  return n * t.periodTicks + (rippleHash(n, 6) - 0.5) * j * t.periodTicks * n;' },
+  { rule: 'ripple: trains RISE (row 0 is the top, so the centre decreases)', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '      c: nativeHeight + 2 * sigma - u * span,',
+    to: '      c: -2 * sigma + u * span,' },
+  { rule: 'ripple: the crests rise WITH the band', file: T, tests: ['test/roomAi.test.ts'],
+    from: '      phase: rippleHash(n, 5) * Math.PI * 2 + t.carrier * age,',
+    to: '      phase: rippleHash(n, 5) * Math.PI * 2 - t.carrier * age,' },
+  { rule: 'ripple: each fades in and out over its life (nothing pops)', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: ' * t.amp * (0.7 + 0.3 * rippleHash(n, 2)) * Math.sin(Math.PI * u),',
+    to: ' * t.amp * (0.7 + 0.3 * rippleHash(n, 2)),' },
+  { rule: 'ripple: a wamp=0 room gets none (rooms 46/66 and the still-water parity gate)',
+    file: T, tests: ['test/roomAi.test.ts'],
+    from: '  if (w.wamp === 0 || t.amp <= 0 || t.lifeTicks <= 0 || t.periodTicks <= 0) return [];',
+    to: '  if (t.amp <= 0 || t.lifeTicks <= 0 || t.periodTicks <= 0) return [];' },
+  { rule: 'ripple: amplitude scales with the room\'s own wamp', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '      amp: (w.wamp / 2) * t.amp * (0.7 + 0.3 * rippleHash(n, 2)) * Math.sin(Math.PI * u),',
+    to: '      amp: t.amp * (0.7 + 0.3 * rippleHash(n, 2)) * Math.sin(Math.PI * u),' },
+  { rule: 'ripple: frequency scales with the room\'s own wper', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '      k: (t.freq / w.wper) * (0.85 + 0.3 * rippleHash(n, 4)),',
+    to: '      k: t.freq * (0.85 + 0.3 * rippleHash(n, 4)),' },
+  { rule: 'ripple: the overlap cap keeps the NEWEST trains', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  for (let n = hi; n >= lo && out.length < cap; n--) {',
+    to: '  for (let n = lo; n <= hi && out.length < cap; n++) {' },
+  { rule: 'ripple: the carrier phase is what moves the crests', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '    sh += r.amp * Math.exp(-0.5 * e * e) * Math.sin(row * r.k + r.phase);',
+    to: '    sh += r.amp * Math.exp(-0.5 * e * e) * Math.sin((row - r.c) * r.k);' },
+  { rule: 'ripple: the band is a WINDOW (without it a train is the whole room)', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '    sh += r.amp * Math.exp(-0.5 * e * e) * Math.sin(row * r.k + r.phase);',
+    to: '    sh += r.amp * Math.sin(row * r.k + r.phase);' },
 ];
 
 const run = (tests) => spawnSync('npx', ['vitest', 'run', ...tests], { encoding: 'utf8' });
 
-if (spawnSync('git', ['diff', '--quiet', 'HEAD', '--', W, A, C]).status !== 0) {
-  console.error(`Refusing to run: ${W}, ${A} or ${C} has uncommitted changes.`);
+if (spawnSync('git', ['diff', '--quiet', 'HEAD', '--', W, A, C, T, F]).status !== 0) {
+  console.error(`Refusing to run: ${W}, ${A}, ${C}, ${T} or ${F} has uncommitted changes.`);
   console.error('This harness edits those files in place; commit or stash first.');
   process.exit(2);
 }
