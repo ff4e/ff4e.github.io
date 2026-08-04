@@ -100,16 +100,26 @@ function prog(s: Script): void {
     v[R.zaver_hlaska]!++;
     const cas = v[R.zaver_cas]!;
     if (cas >= 1000) {
+      // DELIBERATE DEVIATION (URoom.pas:23493 and :23499). The Delphi source asks for
+      // ASCII 'z-c-tisice' / 'z-c-tisic', but this room's package spells both with the
+      // Czech í — `z-c-tisíce` and `z-c-tisíc` (071.fft; the authors' own master index
+      // spells them that way too, so the code has been wrong since 1998). Search
+      // (RSound.pas:246-253) compares byte-for-byte and there is no loose .wav to fall
+      // back to, so the word "thousand" has never been heard: the narrator counted
+      // "three … two hundred …" and swallowed the unit. FFNG worked around it by copying
+      // the two samples under the ASCII names (sound/ending/cs, dated 2004-09-07 against
+      // the 2004-04-20 bulk that is the rest of its tree). We use our own, correctly
+      // spelled.
       if (cas >= 2000) {
         pom1--;
         if (pom1 === 0) s.talkNow('z-c-' + istr(Math.floor(cas / 1000)), 10);
       }
       if ([2, 3, 4].includes(Math.floor(cas / 1000))) {
         pom1--;
-        if (pom1 === 0) s.talkNow('z-c-tisice', 10);
+        if (pom1 === 0) s.talkNow('z-c-tisíce', 10);
       } else {
         pom1--;
-        if (pom1 === 0) s.talkNow('z-c-tisic', 10);
+        if (pom1 === 0) s.talkNow('z-c-tisíc', 10);
       }
     }
     switch (Math.floor((cas % 1000) / 100)) {

@@ -70,7 +70,14 @@ function prog(s: Script): void {
     } else if (v[R.room_olebce] === 0 && s.dist(R.malar, R.lebzna) < 4) {
       v[R.room_olebce] = 1;
       switch (s.random(2)) {
-        case 0: s.addm(5, 'bot-m-lebka'); break;
+        // DELIBERATE DEVIATION (URoom.pas:14493). The Delphi source has
+        // `addm(5,'bot-m-lebka')`, and no `bot-m-lebka` was ever recorded — it is in
+        // neither this room's 059 package, the authors' master index, nor FFNG's data.
+        // The one skull line that exists is the BIG fish's `bot-v-lebka` ("Z té lebky
+        // vyzařuje něco tajemného."), so restoring it also moves the line to the fish
+        // it was recorded for — `addm` becomes `addv`. FFNG made the same call
+        // (aztec/code.lua:58). Left verbatim, half of the skull reactions are silent.
+        case 0: s.addv(5, 'bot-v-lebka'); break;
         case 1: s.addm(5, 'bot-m-vidim'); break;
       }
     } else if (

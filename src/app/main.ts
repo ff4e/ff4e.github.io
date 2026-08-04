@@ -1443,6 +1443,12 @@ let subs: SubtitleSystem | null = null;
 let fftEntries: FftEntry[] = [];
 let chatFft: FftEntry[] = []; // global x03 ambient-chatter subtitles (ob-*)
 let deathFft: FftEntry[] = []; // global x02 death-commentary subtitles (smrt-*)
+/**
+ * The two lines the 1998 release referenced but shipped without (public/restored/,
+ * built by tools/build-restored-sounds.ts) — `pyr-m-nudi` and `jes-v-potvora2`.
+ * Kept out of the room packages so `public/data/**` stays the 1998 release verbatim.
+ */
+let restoredFft: FftEntry[] = [];
 // Player options (volume sliders + subtitle language), persisted across sessions
 // (settings.ts). Subtitles extend the port's cz/en with an off state (tit_no);
 // `titDef` remembers the last cz/en pick — the one language used for the titles,
@@ -2310,7 +2316,8 @@ function scriptTalk(name: string, prior: number): number {
   const entry =
     fftEntries.find((e) => e.name === name) ??
     chatFft.find((e) => e.name === name) ??
-    deathFft.find((e) => e.name === name);
+    deathFft.find((e) => e.name === name) ??
+    restoredFft.find((e) => e.name === name);
   if (entry && subs && subsOn()) {
     const t = subLang() === 'cz' ? entry.cz : entry.en;
     // globtit (Talk, URoom.pas:654): substitute a '@' placeholder with the room's
@@ -6080,6 +6087,28 @@ if (!panel || !worldMap) {
   showFatal('Some core game files are missing. Please try again, or check the installation.');
   throw new Error('missing critical assets: ' + (!panel ? 'panel ' : '') + (!worldMap ? 'worldMap' : ''));
 }
+// The two restored lines (see restoredFft). A separate package rather than a patched
+// 025/063, so the committed 1998 data stays byte-for-byte what ALTAR released; it is
+// loaded as a global because its two names are room-prefixed and cannot collide.
+//
+// Fetched AFTER boot and off the critical path, not with the globals above: each of
+// those is a serialized round trip before the game can start, and this is two chatter
+// lines in two rooms that are not room 7. Landing a moment late costs nothing; making
+// boot wait for it costs every player, and the room 25/63 packages take longer to
+// arrive than this does anyway.
+void (async () => {
+  try {
+    const [rfft, rffs] = await Promise.all([
+      fetch('/restored/restored.fft').then((r) => r.arrayBuffer()),
+      fetch('/restored/restored.ffs').then((r) => r.arrayBuffer()),
+    ]);
+    const rfftBytes = new Uint8Array(rfft);
+    restoredFft = parseFft(rfftBytes);
+    audio.loadGlobal(rfftBytes, new Uint8Array(rffs));
+  } catch {
+    /* restored lines optional */
+  }
+})();
 // Boot: on first run, auto-play the intro (logo → intro) before the map, then
 // flip the persisted flag so later runs go straight to the map (the original's
 // START→NO first-run gate, UMain.pas:677-682). The intro is always replayable
