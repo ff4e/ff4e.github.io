@@ -61,6 +61,173 @@ export function faithfulWobbleShifts(w: AiWobble, nativeHeight: number): Int16Ar
 }
 
 /**
+ * One ripple: a Gaussian-windowed wave packet riding on the base wobble, in NATIVE units.
+ *
+ * `c` is its centre row, `halfW` the Gaussian sigma in rows, `amp` its peak displacement
+ * in native px (already faded by its own age envelope), and `k` its angular frequency in
+ * radians per row. The wave is `sin((row - c) · k)` — odd about the centre, so the packet
+ * is a wavelet with no discontinuity at either end of its window.
+ */
+export interface Ripple {
+  readonly c: number;
+  readonly halfW: number;
+  readonly amp: number;
+  readonly k: number;
+  /** Carrier phase now, in radians. Advances on its own — see `activeRipples`. */
+  readonly phase: number;
+}
+
+/** Dev-tunable shape of the ripple effect; the shipped values are the defaults here. */
+export interface RippleTuning {
+  /** MEAN ticks between trains, before `jitter` scatters them. */
+  periodTicks: number;
+  /**
+   * How irregular the arrivals are, 0..0.95. A gap runs
+   * `periodTicks · (1 ± jitter)`, so 0 is a metronome and 0.5 gives gaps between half
+   * and one-and-a-half times the mean. Must stay below 1 or births could reorder.
+   */
+  jitter: number;
+  /** How long one train takes to cross, in ticks. */
+  lifeTicks: number;
+  /** Gaussian sigma of the travelling band, in native rows. */
+  halfWidth: number;
+  /** Peak amplitude as a fraction of the room's own `wamp/2`. 0 disables the effect. */
+  amp: number;
+  /** Carrier angular frequency as a multiple of the base wave's `1/wper`. */
+  freq: number;
+  /** Carrier phase speed, radians per tick — how fast the crests themselves flow. */
+  carrier: number;
+  /** Hard cap on how many trains may overlap. */
+  max: number;
+  /**
+   * Shifts the birth schedule, in ticks. Zero in the game; the ripple lab sets it to
+   * start a train on demand instead of waiting out `periodTicks`.
+   */
+  offsetTicks: number;
+}
+
+/**
+ * The shipped ripple tuning. Mutable so a capture/dev probe can sweep it without a
+ * rebuild — nothing in the game writes to it.
+ *
+ * `periodTicks` is 37 against a base wave whose period is `2π·wspd` ≈ 31.4 ticks for the
+ * 60 rooms that share wamp=5/wper=10/wspd=5, so births do not phase-lock to the swell.
+ * `lifeTicks` is 2·`periodTicks`, which is what makes ripples overlap in pairs rather
+ * than arriving as separated events.
+ */
+export const RIPPLE: RippleTuning = {
+  periodTicks: 60,
+  jitter: 0.5,
+  lifeTicks: 48,
+  halfWidth: 25,
+  amp: 0.8,
+  freq: 6,
+  carrier: 0.4,
+  max: 2,
+  offsetTicks: 0,
+};
+
+/**
+ * When train `n` is born, in ticks — deterministic, and strictly increasing in `n`.
+ *
+ * Both properties are load-bearing. Deterministic, because a frame has to be a pure
+ * function of game time (see `rippleHash`); strictly increasing, because the search in
+ * `activeRipples` finds the live trains by bracketing `n` around `clock / periodTicks`,
+ * which only works if birth order matches index order. That is why the offset is a
+ * bounded jitter around a fixed cadence rather than an accumulated random walk: a walk
+ * would drift away from the bracket without limit and trains would start disappearing.
+ * `jitter` is clamped below 1 so the gap can never reach zero or go negative.
+ */
+function birthTick(n: number, t: RippleTuning): number {
+  const j = Math.min(Math.max(t.jitter, 0), 0.95);
+  return n * t.periodTicks + (rippleHash(n, 6) - 0.5) * j * t.periodTicks;
+}
+
+/** The first train born strictly after `clock` (used by the lab's "start a train now"). */
+export function nextRippleBirth(clock: number, t: RippleTuning = RIPPLE): number {
+  let n = Math.floor(clock / Math.max(1, t.periodTicks)) - 1;
+  for (let i = 0; i < 8; i++, n++) {
+    const b = birthTick(n, t);
+    if (b > clock) return b;
+  }
+  return clock + t.periodTicks;
+}
+
+/**
+ * A stable [0,1) pseudo-random from a ripple index — integer mixing only.
+ *
+ * NOT `Math.random()`, and that is the whole point: every frame this tier draws has to be
+ * a pure function of game time, or the JS oracle in `aiWobbleCheck` cannot reproduce what
+ * the shader drew, the composite cache cannot key on anything, and two calls at the same
+ * `count` stop agreeing. "Random-looking" here means "a hash of which ripple this is".
+ * It also must not draw on the engine's own RNG, which is game state.
+ */
+function rippleHash(n: number, salt: number): number {
+  let x = Math.imul(n ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(salt + 0x165667b1, 0xc2b2ae35);
+  x = Math.imul(x ^ (x >>> 15), 0x2545f491);
+  x ^= x >>> 13;
+  return (x >>> 0) / 4294967296;
+}
+
+/**
+ * The ripple trains alive at `w.time`, newest first.
+ *
+ * A train is a broad Gaussian BAND that sweeps across the room once, carrying a much
+ * finer wave inside it. Its two speeds are deliberately independent, which is the whole
+ * trick: the band (the group velocity) crosses the room in `lifeTicks`, while the crests
+ * inside it (the phase velocity) advance at `carrier` rad/tick.
+ *
+ * Tying the two together — the obvious first implementation — does not work. A band wide
+ * enough to read as "a wave of ripples" has to cross ~900 native rows in a few seconds,
+ * i.e. ~20 rows/tick; at a carrier of 0.6 rad/row that is ~19 Hz of crest passage, which
+ * is above what a 30 fps idle repaint can show and turns the whole effect into aliased
+ * shimmer. Split, the band can sweep fast while the crests flow at a visible ~2 Hz.
+ *
+ * Trains always run BOTTOM TO TOP, like anything rising through water; the direction is
+ * not randomised, because water that sometimes flows one way and sometimes the other
+ * reads as a glitch rather than as a current.
+ *
+ * Arrivals are irregular: `birthTick` scatters them around a mean cadence by `jitter`,
+ * so the water is not on a metronome. Everything else is hashed from the train's index
+ * too (width, strength, pace, exact frequency and phase), so the sequence looks random
+ * but is identical on every machine and every replay. Each fades in and out over its life
+ * (`sin(π·age)`), so nothing pops, and each starts and ends fully off-screen.
+ *
+ * Returns nothing for a room with `wamp === 0` (46 and 66): a still room stays still, and
+ * that is also what keeps the CPU↔GPU still-water parity comparison exact.
+ */
+export function activeRipples(w: AiWobble, nativeHeight: number, t: RippleTuning = RIPPLE): Ripple[] {
+  if (w.wamp === 0 || t.amp <= 0 || t.lifeTicks <= 0 || t.periodTicks <= 0) return [];
+  const out: Ripple[] = [];
+  const clock = w.time + t.offsetTicks;
+  // A train born at birthTick(n) is alive while clock - birthTick(n) is in [0, life).
+  // birthTick sits within ±jitter·period/2 of n·period, so bracket `n` by that much and
+  // test each candidate — newest first, so the `max` cap drops the OLDEST (already
+  // fading, on its way off-screen) rather than the one just arriving.
+  const slack = t.periodTicks * 0.5 + 1;
+  const hi = Math.floor((clock + slack) / t.periodTicks);
+  const lo = Math.ceil((clock - t.lifeTicks - slack) / t.periodTicks) - 1;
+  for (let n = hi; n >= lo && out.length < t.max; n--) {
+    const age = clock - birthTick(n, t);
+    if (age < 0 || age >= t.lifeTicks) continue;
+    const u = age / t.lifeTicks;
+    const sigma = t.halfWidth * (0.8 + 0.4 * rippleHash(n, 3));
+    // Enter and leave fully outside the room, so the band is never clipped mid-crest.
+    // Row 0 is the TOP, so rising means a decreasing centre.
+    const span = (nativeHeight + 4 * sigma) * (0.9 + 0.2 * rippleHash(n, 1));
+    out.push({
+      c: nativeHeight + 2 * sigma - u * span,
+      halfW: sigma,
+      amp: (w.wamp / 2) * t.amp * (0.7 + 0.3 * rippleHash(n, 2)) * Math.sin(Math.PI * u),
+      k: (t.freq / w.wper) * (0.85 + 0.3 * rippleHash(n, 4)),
+      // Increasing phase moves the crests toward decreasing rows, i.e. up with the band.
+      phase: rippleHash(n, 5) * Math.PI * 2 + t.carrier * age,
+    });
+  }
+  return out;
+}
+
+/**
  * The `ai` tier's CONTINUOUS wobble: the horizontal displacement, in SCALED pixels, of
  * scaled row `y` — the exact rule `glRoomAi.ts`'s BG_FS evaluates per fragment, kept
  * here in JS so a probe can hold the shader to it without restating it.
@@ -72,10 +239,25 @@ export function faithfulWobbleShifts(w: AiWobble, nativeHeight: number): Int16Ar
  * whole background up by half a native row.)
  *
  * `phase` is `time/wspd` pre-reduced into [0, 2π) in FP64 by `wobblePhase` below.
+ * `ripples` is the additive wave-packet term (see `activeRipples`); pass none for the
+ * bare 1998 curve.
  */
-export function smoothWobbleShift(y: number, scale: number, w: AiWobble, phase: number): number {
+export function smoothWobbleShift(
+  y: number,
+  scale: number,
+  w: AiWobble,
+  phase: number,
+  ripples: readonly Ripple[] = [],
+): number {
   const row = (y + 0.5) / scale - 0.5;
-  return (w.wamp / 2) * scale * Math.sin(row / w.wper + phase);
+  let sh = (w.wamp / 2) * Math.sin(row / w.wper + phase);
+  for (const r of ripples) {
+    const e = (row - r.c) / r.halfW;
+    // Band (group) and crests (phase) are separate: the envelope follows `r.c`, the
+    // carrier follows `r.phase`. See activeRipples for why they must not be the same.
+    sh += r.amp * Math.exp(-0.5 * e * e) * Math.sin(row * r.k + r.phase);
+  }
+  return sh * scale;
 }
 
 /**

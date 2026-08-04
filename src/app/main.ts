@@ -87,7 +87,7 @@ import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
 import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { loadAiRoom, aiRoomGateAllows, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
-import { Canvas2dAiTarget, faithfulWobbleShifts, smoothWobbleShift, wobblePhase } from '../render/aiTarget.js';
+import { Canvas2dAiTarget, RIPPLE, activeRipples, faithfulWobbleShifts, nextRippleBirth, smoothWobbleShift, wobblePhase } from '../render/aiTarget.js';
 import type { AiWobble } from '../render/aiTarget.js';
 import { withLoadSlot } from '../render/loadSlot.js';
 import {
@@ -6772,6 +6772,39 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     }
     return out.toDataURL('image/png');
   },
+  /**
+   * The live ripple tuning (src/render/aiTarget.ts). Returned by reference so a capture
+   * or tuning probe can sweep the look without a rebuild; the game never writes to it.
+   */
+  rippleTuning: () => RIPPLE,
+  /**
+   * Live ripple state for the tuning lab (tools/ripple-lab.html): what is on screen now,
+   * and how long until the next train. `startTrainNow` shifts the birth schedule so one
+   * begins immediately, rather than making the tuner wait out `periodTicks`.
+   */
+  rippleState: () => {
+    if (!room) return null;
+    const w: AiWobble = {
+      wamp: room.wamp, wper: room.wper, wspd: room.wspd, count, time: count + alpha,
+    };
+    const clock = w.time + RIPPLE.offsetTicks;
+    const active = activeRipples(w, roomGeometry(room).nativeH);
+    return {
+      wamp: room.wamp,
+      wobbles: room.wamp !== 0,
+      active: active.length,
+      // Gaps are jittered, so "when is the next one" has to be asked of the schedule
+      // rather than derived from the period.
+      nextInTicks: +(nextRippleBirth(clock, RIPPLE) - clock).toFixed(1),
+      inTrain: active.length > 0,
+    };
+  },
+  startTrainNow: () => {
+    if (!room) return;
+    const clock = count + alpha + RIPPLE.offsetTicks;
+    RIPPLE.offsetTicks += nextRippleBirth(clock, RIPPLE) - clock;
+    forceRoomRedraw = true;
+  },
   aiWobbleCheck: (opts: { alpha?: number; minRun?: number } = {}) => {
     if (!room || !aiRoom || aiRoomNum !== curNum) return null;
     const comp = glAiCompositor();
@@ -6810,10 +6843,12 @@ window.addEventListener('keydown', unlockAudio, { once: true });
       wamp: room.wamp, wper: room.wper, wspd: room.wspd, count, time: count + alpha,
     };
     const phase = wobblePhase(w);
+    const ripples = activeRipples(w, geom.nativeH);
     const banded = wobbles ? faithfulWobbleShifts(w, geom.nativeH) : null;
 
     let oracleMax = 0;
     let bandedMax = 0;
+    let rippleDelta = 0;
     let sq = 0;
     let n = 0;
     const estimates = new Int32Array(H).fill(0x7fffffff);
@@ -6821,9 +6856,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     let exact = 0;
 
     for (let y = 0; y < H; y++) {
-      const sh = wobbles ? smoothWobbleShift(y, S, w, phase) : 0;
+      const sh = wobbles ? smoothWobbleShift(y, S, w, phase, ripples) : 0;
       const f = Math.floor(sh);
       const frac = sh - f;
+      // Same instant with the ripple term removed: how much the trains actually moved
+      // the picture. If the shader ignored uRip this collapses to the oracle's own floor.
+      const shNoRip = wobbles ? smoothWobbleShift(y, S, w, phase) : 0;
+      const fN = Math.floor(shNoRip);
+      const fracN = shNoRip - fN;
       const kBand = banded ? banded[Math.min(geom.nativeH - 1, Math.floor(y / S))]! * S : 0;
       const rowOff = y * W * 4;
       // Longest fully-transparent wall run on this row (where composite === background).
@@ -6856,6 +6896,13 @@ window.addEventListener('keydown', unlockAudio, { once: true });
           const wantB = wallPx[o + ch]! * wa + bgPx[rowOff + cb * 4 + ch]! * (1 - wa);
           const dB = Math.abs(wantB - got);
           if (dB > bandedMax) bandedMax = dB;
+          const n0 = Math.min(Math.max(x + fN, 0), W - 1);
+          const n1 = Math.min(Math.max(x + fN + 1, 0), W - 1);
+          const na = bgPx[rowOff + n0 * 4 + ch]!;
+          const nb = bgPx[rowOff + n1 * 4 + ch]!;
+          const wantN = wallPx[o + ch]! * wa + (wobbles ? na + (nb - na) * fracN : na) * (1 - wa);
+          const dN = Math.abs(wantN - got);
+          if (dN > rippleDelta) rippleDelta = dN;
         }
       }
       // Best INTEGER shift of this row against its own source row, and its residual.
@@ -6898,9 +6945,11 @@ window.addEventListener('keydown', unlockAudio, { once: true });
       webgl: true,
       w: W, h: H, scale: S, wobbles, alpha,
       wamp: room.wamp, wper: room.wper, wspd: room.wspd,
+      ripples: ripples.length,
       oracleMax,
       oracleRmse: Math.sqrt(sq / Math.max(1, n)),
       bandedMax,
+      rippleDelta,
       scoredRows: scored,
       exactRows: scored ? exact / scored : 1,
       bands,

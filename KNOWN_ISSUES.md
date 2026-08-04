@@ -120,6 +120,14 @@ These playable rooms have **no known solution** to replay (they were never in th
   the faithful `waterShift` at every band mid-row.
 - **The UI does not claim otherwise:** the software-renderer notice says the water is drawn
   at the original resolution, and the dev-bar Renderer picker says the same.
+- **Ripple trains are a separate matter, and are a deliberate LIBERTY.** On top of the
+  resampled wobble, the GPU path adds a fine wave that rises through the water every few
+  seconds (`activeRipples`, `src/render/aiTarget.ts`). The 1998 engine had one sine and no
+  more, so unlike everything above this is *not* a resampling of an existing rule — it is
+  new motion, added because it was asked for and it looks right. It is confined to the
+  `ai` tier and the GPU backend, it scales off the room's own `wamp`/`wper` (no game data
+  is edited), and `RIPPLE.amp = 0` restores the pure resampled wobble exactly.
+  Tune it live with `tools/ripple-lab.html` on the dev server.
 
 ## Excluded by design (not issues)
 

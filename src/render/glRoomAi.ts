@@ -31,8 +31,11 @@ import {
   uniformLocations,
   type Uni,
 } from './glCommon.js';
-import { aiImagePatch, aiImageRevision, wobblePhase } from './aiTarget.js';
+import { activeRipples, aiImagePatch, aiImageRevision, wobblePhase } from './aiTarget.js';
 import type { AiImage, AiTarget, AiWobble } from './aiTarget.js';
+
+/** Must match the `uRip` array length in BG_FS and RippleTuning.max's ceiling. */
+const MAX_RIPPLES = 3;
 
 /** Opaque colour fill (the darkness room, the elevator rope). */
 const FILL_FS = `#version 300 es
@@ -69,6 +72,23 @@ void main() { outColor = vec4(uColor, 1.0); }`;
  * `uPhase` arrives pre-reduced into [0, 2π) — see `wobblePhase` in aiTarget.ts for why
  * a FP32 `sin` must not be handed a raw `count/wspd`.
  *
+ * RIPPLES (`uRip`/`uRipPh`) are an additive second term and, unlike everything above,
+ * they are a genuine LIBERTY rather than a resampling: the 1998 engine had one sine and
+ * no more. Every so often a broad Gaussian BAND sweeps across the room carrying a much
+ * finer wave (~6× the base frequency) inside it — so the water occasionally gets a train
+ * of ripples flowing through, and is plain in between.
+ *
+ * The band and the crests move at different speeds ON PURPOSE — `uRip[i].x` is the band's
+ * centre, `uRipPh[i]` the carrier's own phase. Driving the crests from the band's
+ * position instead (the obvious version) puts crest passage at ~19 Hz, above what a
+ * 30 fps idle repaint can show, and the effect degenerates into aliased shimmer.
+ *
+ * They are computed on the CPU (`activeRipples`) and arrive as at most three
+ * `vec4(centre, sigma, amplitude, freq)` in NATIVE units — deliberately not hashed in
+ * GLSL, because the JS oracle has to reproduce this arithmetic exactly and
+ * `fract(sin(...))` noise is precision-dependent. A room with `wamp == 0` gets none, so a
+ * still room stays perfectly still.
+ *
  * With `uWobble == 0` (rooms 46 and 66) this is a plain `texelFetch`, bit-identical to
  * the canvas-2D path — which is what the CPU↔GPU parity probe compares.
  *
@@ -81,8 +101,10 @@ precision highp float;
 precision highp int;
 uniform sampler2D uBg;
 uniform sampler2D uWall;
-uniform int uScale, uBgW, uWobble;
-uniform float uAmpS, uPer, uPhase;
+uniform int uScale, uBgW, uWobble, uRipN;
+uniform float uAmp, uPer, uPhase;
+uniform vec4 uRip[3];
+uniform float uRipPh[3];
 out vec4 outColor;
 void main() {
   int x = int(gl_FragCoord.x);
@@ -90,7 +112,13 @@ void main() {
   vec3 bg;
   if (uWobble == 1) {
     float row = (float(y) + 0.5) / float(uScale) - 0.5;
-    float sh = uAmpS * sin(row / uPer + uPhase);
+    float sh = uAmp * sin(row / uPer + uPhase);
+    for (int i = 0; i < 3; i++) {
+      if (i >= uRipN) break;
+      float e = (row - uRip[i].x) / uRip[i].y;
+      sh += uRip[i].z * exp(-0.5 * e * e) * sin(row * uRip[i].w + uRipPh[i]);
+    }
+    sh *= float(uScale);
     float f = floor(sh);
     int s0 = clamp(x + int(f), 0, uBgW - 1);
     int s1 = clamp(x + int(f) + 1, 0, uBgW - 1);
@@ -240,6 +268,9 @@ export class GlAiScreen implements AiTarget {
   private readonly fsVao: WebGLVertexArrayObject;
   private readonly rectVao: WebGLVertexArrayObject;
   private readonly randTex: WebGLTexture;
+  /** Scratch for the per-frame `uRip` upload — allocated once, not per frame. */
+  private readonly ripBuf = new Float32Array(MAX_RIPPLES * 4);
+  private readonly ripPhBuf = new Float32Array(MAX_RIPPLES);
 
   /**
    * One texture per source bitmap, for the LIFE OF THE CONTEXT.
@@ -288,7 +319,7 @@ export class GlAiScreen implements AiTarget {
     this.mirrorProg = linkProgram(gl, QUAD_VS, MIRROR_FS, 'aPos', 'ai');
     this.presentProg = linkProgram(gl, QUAD_VS, PRESENT_FS, 'aPos', 'ai');
     this.fillUni = uniformLocations(gl, this.fillProg, ['uColor', 'uRect']);
-    this.bgUni = uniformLocations(gl, this.bgProg, ['uBg', 'uWall', 'uScale', 'uBgW', 'uWobble', 'uAmpS', 'uPer', 'uPhase']);
+    this.bgUni = uniformLocations(gl, this.bgProg, ['uBg', 'uWall', 'uScale', 'uBgW', 'uWobble', 'uAmp', 'uPer', 'uPhase', 'uRipN', 'uRip[0]', 'uRipPh[0]']);
     this.spriteUni = uniformLocations(gl, this.spriteProg, ['uSprite', 'uX', 'uY', 'uW', 'uMirror', 'uRect']);
     this.disintUni = uniformLocations(gl, this.disintProg, ['uSprite', 'uRand', 'uX', 'uY', 'uScale', 'uNativeW', 'uRozpad', 'uRect']);
     this.mirrorUni = uniformLocations(gl, this.mirrorProg, ['uSrc', 'uMask', 'uRx0', 'uRx1', 'uRy0', 'uRy1', 'uDx0', 'uDx1', 'uK', 'uMX', 'uMY', 'uMW', 'uMH']);
@@ -541,14 +572,31 @@ export class GlAiScreen implements AiTarget {
     gl.uniform1i(u.uScale!, scale);
     gl.uniform1i(u.uBgW!, bg.width);
     gl.uniform1i(u.uWobble!, wobble ? 1 : 0);
-    // Amplitude is pre-multiplied by the scale so the shader works entirely in scaled
-    // pixels, and the phase is pre-reduced in FP64 (wobblePhase) so the FP32 `sin` never
-    // sees a large argument. Uploaded even when the room does not wobble: a uniform left
-    // at whatever the previous room set is exactly the sort of state that survives a
-    // `uWobble` guard being edited later.
-    gl.uniform1f(u.uAmpS!, wobble ? (wobble.wamp / 2) * scale : 0);
+    // The wave is evaluated in NATIVE units and scaled at the end, so the ripple packets
+    // (whose width and frequency are naturally per native row) need no conversion. The
+    // phase is pre-reduced in FP64 (wobblePhase) so the FP32 `sin` never sees a large
+    // argument. Uploaded even when the room does not wobble: a uniform left at whatever
+    // the previous room set is exactly the sort of state that survives a `uWobble` guard
+    // being edited later.
+    gl.uniform1f(u.uAmp!, wobble ? wobble.wamp / 2 : 0);
     gl.uniform1f(u.uPer!, wobble ? wobble.wper : 1);
     gl.uniform1f(u.uPhase!, wobble ? wobblePhase(wobble) : 0);
+    const rips = wobble ? activeRipples(wobble, Math.max(1, Math.round(bg.height / scale))) : [];
+    // The whole array is written every frame, expired slots included: leaving a dead
+    // ripple's numbers behind a shrinking uRipN is invisible until something reorders the
+    // loop, and then it is a ghost that only appears on some frames.
+    for (let i = 0; i < MAX_RIPPLES; i++) {
+      const r = rips[i];
+      const o = i * 4;
+      this.ripBuf[o] = r ? r.c : 0;
+      this.ripBuf[o + 1] = r ? r.halfW : 1;
+      this.ripBuf[o + 2] = r ? r.amp : 0;
+      this.ripBuf[o + 3] = r ? r.k : 0;
+      this.ripPhBuf[i] = r ? r.phase : 0;
+    }
+    gl.uniform1i(u.uRipN!, Math.min(rips.length, MAX_RIPPLES));
+    gl.uniform4fv(u['uRip[0]']!, this.ripBuf);
+    gl.uniform1fv(u['uRipPh[0]']!, this.ripPhBuf);
     this.drawFullscreen();
   }
 

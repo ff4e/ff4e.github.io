@@ -1,0 +1,199 @@
+<!doctype html>
+<!--
+  Ripple tuning lab — DEV ONLY.
+
+  Lives under tools/ deliberately: `vite build` has a single entry (index.html), so
+  nothing here can reach the built site, and tools/ is not staged by
+  tools/stage-pages-assets.mjs either. Open it on the dev server:
+
+      npm run dev
+      http://127.0.0.1:5173/tools/ripple-lab.html
+
+  It runs the real game in an iframe (same origin) and writes straight into the live
+  `__ff.rippleTuning()` object, so every slider is the shipping code path — not a
+  re-implementation of the effect that could drift from it.
+
+  Note the room list: a per-row HORIZONTAL shift is invisible on flat colour, so the
+  water is far more visible in some rooms than others. The percentages are the measured
+  share of pixels the base swell can actually move, and rooms 3/15/19 essentially cannot
+  show this effect at all. Tuning in one of those is how you conclude the water is broken.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fish Fillets — ripple lab</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; height: 100vh; display: flex; background: #0d0d12; color: #cdd;
+        font: 13px/1.45 system-ui, sans-serif;
+      }
+      #stage { flex: 1; min-width: 0; border: 0; }
+      #panel {
+        width: 340px; flex: none; padding: 14px 16px; overflow-y: auto;
+        background: #14141c; border-left: 1px solid #2a2a3a;
+      }
+      h1 { font-size: 15px; margin: 0 0 2px; color: #9fd; }
+      h2 {
+        font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #778;
+        margin: 18px 0 8px; border-bottom: 1px solid #2a2a3a; padding-bottom: 4px;
+      }
+      p.note { color: #889; margin: 0 0 10px; font-size: 11.5px; }
+      label.row { display: block; margin: 10px 0; }
+      label.row .top { display: flex; justify-content: space-between; align-items: baseline; }
+      label.row .name { color: #cdd; }
+      label.row .val { color: #9fd; font: 600 12px ui-monospace, monospace; }
+      label.row .hint { color: #778; font-size: 11px; display: block; margin-top: 1px; }
+      input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #4aa; }
+      select, button {
+        background: #1e1e2a; color: #cdd; border: 1px solid #33334a; border-radius: 6px;
+        padding: 6px 9px; font: inherit; cursor: pointer;
+      }
+      button:hover, select:hover { border-color: #4aa; }
+      select { width: 100%; }
+      .btns { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+      .btns button { flex: 1 1 auto; }
+      #state {
+        font: 11.5px/1.6 ui-monospace, monospace; background: #0f0f16; border: 1px solid #2a2a3a;
+        border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; color: #8b9;
+      }
+      #json {
+        width: 100%; height: 92px; background: #0f0f16; color: #9fd; border: 1px solid #2a2a3a;
+        border-radius: 6px; font: 11.5px/1.5 ui-monospace, monospace; padding: 8px; resize: vertical;
+      }
+      .warn { color: #e97; }
+    </style>
+  </head>
+  <body>
+    <iframe id="stage" src="/"></iframe>
+    <div id="panel">
+      <h1>Ripple lab</h1>
+      <p class="note">
+        Writes into the live <code>__ff.rippleTuning()</code>. Nothing here is a copy of the
+        effect — it drives the shipping shader.
+      </p>
+
+      <h2>Room</h2>
+      <select id="room"></select>
+      <p class="note" style="margin-top:6px">
+        % = share of pixels the base swell can visibly move. A horizontal shift does nothing
+        to flat colour, so low-% rooms cannot show ripples <em>at all</em>.
+      </p>
+
+      <h2>Strength &amp; shape</h2>
+      <div id="sliders"></div>
+
+      <h2>Trains</h2>
+      <div class="btns">
+        <button id="now">Start a train now</button>
+        <button id="off">Ripples off (PR&nbsp;#17)</button>
+      </div>
+      <div class="btns">
+        <button id="reset">Reset defaults</button>
+        <button id="continuous">Continuous</button>
+      </div>
+
+      <h2>Live</h2>
+      <div id="state">connecting…</div>
+
+      <h2>Values</h2>
+      <textarea id="json" readonly></textarea>
+      <div class="btns"><button id="copy">Copy</button></div>
+    </div>
+
+    <script type="module">
+      // Rooms worth tuning in, with the measured visibility of the base wobble. Sorted
+      // best first, because the whole point is not to tune in a room that cannot show it.
+      const ROOMS = [
+        [67, 56], [21, 40], [42, 38], [4, 31], [1, 23], [61, 21], [33, 15], [19, 9],
+        [3, 3], [15, 3], [46, 0],
+      ];
+      const SLIDERS = [
+        ['amp', 0, 1.5, 0.01, 'peak height, as a fraction of the room’s own wamp/2'],
+        ['freq', 1, 14, 0.5, 'ripple frequency, as a multiple of the base 1/wper'],
+        ['carrier', 0, 4, 0.05, 'how fast the crests flow, rad/tick (≈2 Hz at 1.2)'],
+        ['halfWidth', 10, 200, 1, 'height of the travelling band, native rows (sigma)'],
+        ['lifeTicks', 8, 200, 1, 'how long one train takes to rise (12.5 ticks = 1 s)'],
+        ['periodTicks', 12, 500, 1, 'MEAN gap between trains (12.5 ticks = 1 s)'],
+        ['jitter', 0, 0.95, 0.05, 'how irregular the arrivals are: gap = period x (1 ± this)'],
+        ['max', 1, 3, 1, 'how many trains may overlap'],
+      ];
+
+      const stage = document.getElementById('stage');
+      const panel = document.getElementById('sliders');
+      const state = document.getElementById('state');
+      const json = document.getElementById('json');
+      const roomSel = document.getElementById('room');
+      let ff = null;
+
+      for (const [n, pct] of ROOMS) {
+        const o = document.createElement('option');
+        o.value = String(n);
+        o.textContent = `room ${n} — ${pct}% visible${pct >= 30 ? '  ✔ good' : pct <= 5 ? '  ✖ cannot show it' : ''}`;
+        roomSel.append(o);
+      }
+      roomSel.value = '21';
+
+      const inputs = new Map();
+      for (const [key, min, max, step, hint] of SLIDERS) {
+        const l = document.createElement('label');
+        l.className = 'row';
+        l.innerHTML =
+          `<span class="top"><span class="name">${key}</span><span class="val" data-v="${key}"></span></span>` +
+          `<span class="hint">${hint}</span>`;
+        const i = document.createElement('input');
+        i.type = 'range'; i.min = min; i.max = max; i.step = step;
+        i.addEventListener('input', () => { if (ff) { ff.rippleTuning()[key] = Number(i.value); sync(); } });
+        l.append(i);
+        panel.append(l);
+        inputs.set(key, i);
+      }
+
+      function sync() {
+        if (!ff) return;
+        const t = ff.rippleTuning();
+        for (const [key, i] of inputs) {
+          i.value = String(t[key]);
+          panel.querySelector(`[data-v="${key}"]`).textContent = String(t[key]);
+        }
+        const { offsetTicks, ...shown } = t;
+        json.value = JSON.stringify(shown, null, 2);
+      }
+
+      const DEFAULTS = { periodTicks: 60, jitter: 0.5, lifeTicks: 48, halfWidth: 25, amp: 0.8, freq: 6, carrier: 0.4, max: 2 };
+      document.getElementById('now').onclick = () => ff?.startTrainNow();
+      document.getElementById('off').onclick = () => { if (ff) { ff.rippleTuning().amp = 0; sync(); } };
+      document.getElementById('reset').onclick = () => { if (ff) { Object.assign(ff.rippleTuning(), DEFAULTS); sync(); } };
+      document.getElementById('continuous').onclick = () => {
+        if (!ff) return;
+        const t = ff.rippleTuning();
+        t.periodTicks = t.lifeTicks; // back-to-back trains: for judging the shape, not for shipping
+        sync();
+      };
+      document.getElementById('copy').onclick = () => navigator.clipboard?.writeText(json.value);
+      roomSel.onchange = () => ff?.enterRoomAwait(Number(roomSel.value));
+
+      // The game publishes __ff at the very end of boot, so poll for it rather than
+      // racing the iframe's load event.
+      setInterval(() => {
+        const w = stage.contentWindow;
+        const now = w && w.__ff;
+        if (now && now !== ff) {
+          ff = now;
+          sync();
+          ff.enterRoomAwait(Number(roomSel.value));
+        }
+        if (!ff) { state.textContent = 'waiting for the game to boot…'; return; }
+        const s = ff.rippleState?.();
+        if (!s) { state.textContent = 'no room'; return; }
+        state.innerHTML = s.wobbles
+          ? `room ${ff.roomNum?.() ?? '?'}   wamp ${s.wamp}\n` +
+            `backend ${ff.roomBackend?.()}\n` +
+            `trains on screen: ${s.active}\n` +
+            (s.inTrain ? 'a train is passing now' : `next in ${(s.nextInTicks / 12.5).toFixed(1)} s`)
+          : `<span class="warn">this room has wamp = 0 — no wobble, no ripples by design</span>`;
+      }, 250);
+    </script>
+  </body>
+</html>

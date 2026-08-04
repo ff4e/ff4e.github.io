@@ -50,15 +50,18 @@ import { FISH_BODY_FILE, frameIndex } from '../src/render/enhancedArtSource.js';
 import { AiRoom } from '../src/render/roomAi.js';
 import {
   Canvas2dAiTarget,
+  RIPPLE,
+  activeRipples,
   aiImagePatch,
   aiImageRevision,
   dissolveKeeps,
   faithfulWobbleShifts,
   markAiImageChanged,
+  nextRippleBirth,
   smoothWobbleShift,
   wobblePhase,
 } from '../src/render/aiTarget.js';
-import type { AiTarget, AiWobble } from '../src/render/aiTarget.js';
+import type { AiTarget, AiWobble, RippleTuning } from '../src/render/aiTarget.js';
 import { FSIZE as FSIZE_PX } from '../src/render/renderRoom.js';
 import { Dir } from '../src/core/dir.js';
 import { makeRoom } from './roomBuilder.js';
@@ -575,6 +578,185 @@ describe('ai-tier smooth wobble vs the faithful rule (aiTarget.ts / framebuffer.
     const phase = wobblePhase(w);
     for (let y = 0; y < 40; y++) expect(smoothWobbleShift(y, S, w, phase) + 0).toBe(0);
     expect([...faithfulWobbleShifts(w, 20)]).toEqual(Array(20).fill(0));
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// 8c. Ripple trains — the `ai` tier's one deliberate LIBERTY.
+//
+//     Unlike everything in 8b, this is not a resampling of a 1998 rule: the original
+//     engine had one sine and no more. So there is no faithful oracle to pin it against,
+//     and the properties that matter are structural instead — determinism, continuity,
+//     ordering, and that a still room stays still. Each is something that, if broken,
+//     would look like "the water glitches occasionally" and would be near-impossible to
+//     find from a screenshot.
+// ---------------------------------------------------------------------------
+describe('ripple trains (aiTarget.ts activeRipples)', () => {
+  const H = 525; // room 3 / 21's native height
+  const w = (time: number, wamp = 5): AiWobble => ({ wamp, wper: 10, wspd: 5, count: Math.floor(time), time });
+
+  it('is a pure function of game time — the same instant gives the same water', () => {
+    // The whole tier depends on this: the JS oracle in aiWobbleCheck reproduces what the
+    // shader drew, and the composite cache keys on the tick. Math.random() here would
+    // break both silently, and only on the frames nobody screenshotted.
+    for (const t of [0, 17.25, 613.5, 20_000.125]) {
+      expect(JSON.stringify(activeRipples(w(t), H))).toBe(JSON.stringify(activeRipples(w(t), H)));
+    }
+  });
+
+  it('scatters the arrivals but never lets two births reorder', () => {
+    let c = 0;
+    const births: number[] = [];
+    for (let i = 0; i < 200; i++) { c = nextRippleBirth(c, RIPPLE); births.push(c); }
+    const gaps = births.slice(1).map((b, i) => b - births[i]!);
+    expect(Math.min(...gaps)).toBeGreaterThan(0); // strictly increasing: the bracket search relies on it
+    // Bounded jitter, NOT an accumulated random walk — a walk would drift out of the
+    // bracket activeRipples searches and trains would start vanishing.
+    expect(Math.min(...gaps)).toBeGreaterThanOrEqual(RIPPLE.periodTicks * (1 - RIPPLE.jitter) - 1e-9);
+    expect(Math.max(...gaps)).toBeLessThanOrEqual(RIPPLE.periodTicks * (1 + RIPPLE.jitter) + 1e-9);
+    // …and irregular: a metronome would give one distinct gap.
+    expect(new Set(gaps.map((g) => g.toFixed(1))).size).toBeGreaterThan(50);
+    const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+    expect(Math.abs(mean - RIPPLE.periodTicks)).toBeLessThan(RIPPLE.periodTicks * 0.1);
+  });
+
+  it('jitter = 0 is an exact metronome (the parameter really is the only source of scatter)', () => {
+    const t: RippleTuning = { ...RIPPLE, jitter: 0 };
+    let c = 0;
+    const gaps: number[] = [];
+    for (let i = 0; i < 20; i++) { const n = nextRippleBirth(c, t); gaps.push(n - c); c = n; }
+    for (const g of gaps.slice(1)) expect(g).toBeCloseTo(t.periodTicks, 9);
+  });
+
+  it('every scheduled train actually appears', () => {
+    let c = 0;
+    for (let i = 0; i < 60; i++) {
+      c = nextRippleBirth(c, RIPPLE);
+      const justAfter = activeRipples(w(c + 0.2), H);
+      // A newborn is identifiable by its envelope still being near zero.
+      expect(justAfter.some((r) => Math.abs(r.amp) < 0.05)).toBe(true);
+    }
+  });
+
+  it('never pops: the total displacement is continuous across every sub-tick', () => {
+    // sin(pi*age) fades a train in and out, and each enters/leaves fully off-screen. A
+    // train appearing at full strength would be a visible flash in 70 rooms.
+    let maxJump = 0;
+    let prev: number | null = null;
+    for (let t = 0; t < 1500; t += 0.25) {
+      const tot = activeRipples(w(t), H).reduce((s, r) => s + Math.abs(r.amp), 0);
+      if (prev !== null) maxJump = Math.max(maxJump, Math.abs(tot - prev));
+      prev = tot;
+    }
+    expect(maxJump).toBeLessThan(0.1); // a pop would be the full amplitude, ~2px
+  });
+
+  it('rises: the band travels bottom to top and its crests travel with it', () => {
+    // Row 0 is the TOP, so rising means a DECREASING centre. Water that sometimes flows
+    // up and sometimes down reads as a glitch, so the direction is not randomised.
+    let checked = 0;
+    for (let t = 0; t < 2000; t += 3) {
+      const a = activeRipples(w(t), H)[0];
+      const b = activeRipples(w(t + 2), H)[0];
+      if (!a || !b || activeRipples(w(t), H).length !== 1 || activeRipples(w(t + 2), H).length !== 1) continue;
+      if (Math.abs(a.c - b.c) > H) continue; // different trains
+      expect(b.c).toBeLessThan(a.c);         // band rises
+      expect(b.phase).toBeGreaterThan(a.phase); // crests rise with it
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(50);
+  });
+
+  it('honours the overlap cap, keeping the NEWEST trains', () => {
+    for (let t = 0; t < 3000; t += 0.5) {
+      const a = activeRipples(w(t), H);
+      expect(a.length).toBeLessThanOrEqual(RIPPLE.max);
+    }
+    // With a period far below the lifetime, many would qualify; the cap must bite, and
+    // must drop the oldest (already fading) rather than the one just arriving.
+    const dense: RippleTuning = { ...RIPPLE, periodTicks: 6, jitter: 0, max: 2 };
+    const a = activeRipples(w(600), H, dense);
+    expect(a.length).toBe(2);
+    expect(a[0]!.c).toBeGreaterThan(a[1]!.c); // newest is lowest down = largest row
+  });
+
+  it('scales with the room: amplitude follows wamp, frequency follows wper', () => {
+    // One tuning has to work across all 70 wobbling rooms, whose wamp spans 2..8 and
+    // wper 6..20 — so the parameters are RELATIVE, not absolute pixel counts.
+    const peak = (wamp: number) => {
+      let m = 0;
+      for (let t = 0; t < 600; t += 0.5) for (const r of activeRipples(w(t, wamp), H)) m = Math.max(m, Math.abs(r.amp));
+      return m;
+    };
+    expect(peak(8) / peak(4)).toBeCloseTo(2, 1);
+    // Pick an instant that actually has a train, rather than assuming one (the gaps are
+    // jittered now, so a hard-coded tick can easily land in the calm).
+    let at = -1;
+    for (let t = 0; t < 3000 && at < 0; t += 0.5) if (activeRipples(w(t), H).length === 1) at = t;
+    expect(at).toBeGreaterThanOrEqual(0);
+    const k = (wper: number) => activeRipples({ ...w(at), wper }, H)[0]!.k;
+    expect(k(10) / k(20)).toBeCloseTo(2, 6);
+  });
+
+  it('a still room gets none — rooms 46 and 66, and the still-water parity comparison', () => {
+    // aiGlParity({stillWater}) forces wamp=0 to compare the two backends byte-for-byte.
+    // If ripples survived that, the whole parity net would go with them.
+    for (let t = 0; t < 500; t += 0.5) expect(activeRipples(w(t, 0), H)).toEqual([]);
+  });
+
+  it('amp = 0 is exactly PR #17 — the effect can be switched off completely', () => {
+    const off: RippleTuning = { ...RIPPLE, amp: 0 };
+    for (let t = 0; t < 500; t += 0.5) expect(activeRipples(w(t), H, off)).toEqual([]);
+    const ww = w(123.4);
+    const ph = wobblePhase(ww);
+    for (let y = 0; y < 40; y++) {
+      expect(smoothWobbleShift(y, 4, ww, ph, activeRipples(ww, H, off))).toBe(smoothWobbleShift(y, 4, ww, ph));
+    }
+  });
+
+  it('the carrier phase is what moves the crests — not the band position', () => {
+    // The trap this guards: driving the crests from the band's own position couples the
+    // two velocities, and a band wide enough to read as a wave has to cross the room fast
+    // enough that crest passage lands near 19 Hz — above what a 30 fps idle repaint can
+    // show, so the whole effect degenerates into aliased shimmer. `phase` existing but
+    // being ignored would look almost right and be very hard to spot.
+    const ww = w(200);
+    const ph = wobblePhase(ww);
+    const base = { c: 200, halfW: 25, amp: 1.5, k: 0.6 };
+    const a1 = smoothWobbleShift(800, 4, ww, ph, [{ ...base, phase: 0 }]);
+    const a2 = smoothWobbleShift(800, 4, ww, ph, [{ ...base, phase: Math.PI / 2 }]);
+    expect(Math.abs(a1 - a2)).toBeGreaterThan(0.5);
+  });
+
+  it('the shipped tuning stays inside what the renderer can actually show, and leaves calm', () => {
+    // Crest passage in Hz = carrier/(2*pi) cycles per tick * 12.5 ticks/s. An idle room
+    // repaints at ~30 fps (ZX_ANIM_MS), so anything at or above ~15 Hz aliases.
+    const crestHz = (RIPPLE.carrier / (2 * Math.PI)) * 12.5;
+    expect(crestHz).toBeLessThan(7); // half of Nyquist, i.e. real headroom, not a hair
+    // …and the water must not be rippling permanently: the effect is occasional.
+    let on = 0, n = 0;
+    for (let t = 0; t < 4000; t += 0.5) { n++; if (activeRipples(w(t), H).length) on++; }
+    const coverage = on / n;
+    expect(coverage).toBeGreaterThan(0.1);
+    expect(coverage).toBeLessThan(0.95);
+  });
+
+  it('adds to the base wave rather than replacing it', () => {
+    const ww = w(200);
+    const ph = wobblePhase(ww);
+    const rips = activeRipples(ww, H);
+    expect(rips.length).toBeGreaterThan(0);
+    let moved = 0;
+    for (let y = 0; y < H * 4; y += 7) {
+      const base = smoothWobbleShift(y, 4, ww, ph);
+      const withRip = smoothWobbleShift(y, 4, ww, ph, rips);
+      // Far from every band the two must agree exactly; near one they must differ.
+      const far = rips.every((r) => Math.abs((y + 0.5) / 4 - 0.5 - r.c) > 6 * r.halfW);
+      if (far) expect(withRip).toBeCloseTo(base, 6);
+      else if (Math.abs(withRip - base) > 0.05) moved++;
+    }
+    expect(moved).toBeGreaterThan(0);
   });
 });
 

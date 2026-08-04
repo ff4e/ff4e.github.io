@@ -320,6 +320,11 @@ try {
 //    is a gate nobody knows the strength of.
 try {
   await enter(3);
+  // Put a ripple train on screen and let it reach real amplitude before scoring — a
+  // train is born at zero height (it fades in), so checking at birth would exercise the
+  // shader's ripple term with all-zero inputs and prove nothing about it.
+  await p.evaluate(() => window.__ff.startTrainNow());
+  await p.waitForTimeout(1800);
   const smooth = await p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
   if (!smooth || !smooth.webgl || smooth.unsupported || smooth.noArt || smooth.noCanvas) {
     ok = false;
@@ -332,6 +337,11 @@ try {
     if (!(smooth.oracleMax <= 2)) fail(`GPU differs from the JS BG_FS oracle: max=${smooth.oracleMax.toFixed(2)}`);
     // (b) …and it is emphatically NOT the banded one.
     if (!(smooth.bandedMax >= 8)) fail(`GPU still matches the BANDED expectation (max=${smooth.bandedMax}) — regressed to per-native-row?`);
+    // (b2) the ripple trains reached the shader at all. `rippleDelta` scores the same
+    //      frame against the wobble WITHOUT them, so a shader that silently ignored uRip
+    //      would score at the oracle's own floor and fail here while passing (a).
+    if (!(smooth.ripples >= 1)) fail('no ripple train on screen — the ripple term was never exercised');
+    if (!(smooth.rippleDelta >= 8)) fail(`the ripple trains moved nothing (rippleDelta=${smooth.rippleDelta.toFixed(2)}) — uRip ignored?`);
     // (c) measured on the pixels alone.
     if (!(smooth.scoredRows > 300)) fail(`too few scorable rows (${smooth.scoredRows})`);
     if (!(smooth.exactRows < 0.6)) fail(`${(smooth.exactRows * 100).toFixed(0)}% of rows are exact integer translations — the shift is not fractional`);
@@ -339,7 +349,8 @@ try {
     console.log(
       `  wobble room 3 (wamp=${smooth.wamp} wper=${smooth.wper} wspd=${smooth.wspd}): ` +
         `oracleMax=${smooth.oracleMax.toFixed(2)} rmse=${smooth.oracleRmse.toFixed(3)} bandedMax=${smooth.bandedMax} ` +
-        `exactRows=${smooth.exactRows.toFixed(2)} bandsVarying=${smooth.bandsVarying.toFixed(2)} (${smooth.scoredRows} rows)`,
+        `exactRows=${smooth.exactRows.toFixed(2)} bandsVarying=${smooth.bandsVarying.toFixed(2)} ` +
+        `ripples=${smooth.ripples} rippleDelta=${smooth.rippleDelta.toFixed(1)} (${smooth.scoredRows} rows)`,
     );
   }
 
@@ -350,6 +361,7 @@ try {
     console.log('  FAIL wobble control: no result for room 46');
   } else {
     if (still.wobbles) { ok = false; console.log('  FAIL wobble control: room 46 should have wamp=0'); }
+    if (still.ripples !== 0) { ok = false; console.log(`  FAIL wobble control: room 46 must get no ripples (got ${still.ripples})`); }
     if (!(still.oracleMax <= 2)) { ok = false; console.log(`  FAIL wobble control: room 46 oracleMax=${still.oracleMax.toFixed(2)}`); }
     if (still.exactRows !== 1 || still.bandsVarying !== 0) {
       ok = false;

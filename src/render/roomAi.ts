@@ -11,16 +11,27 @@
  * context (the #screen canvas), so the browser does the alpha compositing and the caller
  * CSS-scales the result down to the room's display box.
  *
- * Where it is NOT merely "the same pixels, larger": having real hi-res art lets an
- * effect the 1998 engine could only evaluate on the native pixel grid be evaluated on
- * THIS one. Nothing about the effect's rule changes — only the resolution it is sampled
- * at. Two do this, both on the GPU backend:
- *   - the spec=1 mirror reflects with sub-pixel accuracy (drawMirror, below);
- *   - the water wobble is evaluated per fragment, at a fractional shift, at the sub-tick
- *     time (glRoomAi.ts's BG_FS). The canvas-2D fallback keeps the faithful 1998
- *     sampling of it — the tier's one backend-dependent difference, documented on
- *     `AiTarget.background`.
- * Game state, timing and logic are untouched by both.
+ * Where it is NOT merely "the same pixels, larger", in two distinct senses that are
+ * worth keeping apart:
+ *
+ * 1. RESAMPLING. Having real hi-res art lets an effect the 1998 engine could only
+ *    evaluate on the native pixel grid be evaluated on THIS one. Nothing about the
+ *    effect's rule changes — only the resolution it is sampled at. Two do this, both on
+ *    the GPU backend: the spec=1 mirror reflects with sub-pixel accuracy (drawMirror,
+ *    below), and the water wobble is evaluated per fragment, at a fractional shift, at
+ *    the sub-tick time (glRoomAi.ts's BG_FS). The canvas-2D fallback keeps the faithful
+ *    1998 sampling of the wobble — the tier's one backend-dependent difference,
+ *    documented on `AiTarget.background`.
+ *
+ * 2. AN ADDITION, i.e. a LIBERTY. The ripple trains (`activeRipples`, aiTarget.ts) are
+ *    motion the original never had at all: a fine wave that rises through the water
+ *    every few seconds. No amount of resolution derives that from the 1998 engine, and
+ *    calling it a resampling would be dishonest. It is here because it was asked for and
+ *    it looks right, it is confined to this tier and this backend, and it is switchable
+ *    (`RIPPLE.amp = 0` restores the pure resampled wobble exactly).
+ *
+ * Game state, timing and logic are untouched by all of it: nothing above moves an item,
+ * changes a tick, or is read by anything the simulation can see.
  *
  * Scope: the wall-over-wobbled background and the object + fish sprites in item
  * z-order, PLUS the effects the faithful path draws from index read-back — the
