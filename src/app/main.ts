@@ -4919,12 +4919,45 @@ let rafId = 0;
  * canvas-2D is excluded on purpose: it keeps the faithful tick-rate wobble, so it has
  * nothing to animate and must keep its current idle cost, which is the higher of the two.
  */
+let lastWaterPaint = 0;
+
+/**
+ * Should THIS frame be repainted just because the water moved?
+ *
+ * `aiWaterAnimating` says the water is animating; this adds the rate limit, and the two
+ * are separate because they answer different questions — one picks the idle WAKE rate,
+ * the other decides whether an already-awake frame owes the room a repaint.
+ *
+ * The limit is the point. When the loop is at the full paint rate for some OTHER reason —
+ * a vector subtitle waving in is the common one — an unlimited `waterAnim` would repaint
+ * the ×S composite on every one of those 60 frames, which is double what the effect was
+ * ever specified to need (ZX_ANIM_MS, ~30fps) and is exactly the cost the render-on-dirty
+ * comment below exists to avoid. Measured on tools/test-aisubs.mjs, which guards it: the
+ * ai tier's subtitle rate against enhanced was 0.91 before any of this, 0.77-0.81 with an
+ * unlimited water repaint, and 0.60 once ripples made each composite dearer — through a
+ * gate set at 0.70. Capped here it is back at parity, and the water is unaffected because
+ * 30fps was always the target.
+ */
+function waterOwesRepaint(now: number): boolean {
+  return aiWaterAnimating() && now - lastWaterPaint >= ZX_ANIM_MS - PAINT_EPSILON_MS;
+}
+
 function aiWaterAnimating(): boolean {
   return (
     screen === 'room' &&
     room !== null &&
     room.wamp !== 0 &&
     lastRoomBackend === 'webgl' &&
+    // A settling vector subtitle switches the water off for the ~1.5s it takes to wave
+    // in. That overlay is its own layer, and the `else if` in the loop below exists
+    // precisely to animate it WITHOUT a room repaint underneath; keeping the water going
+    // puts a ×S composite back under every one of those frames and costs the subtitle a
+    // third of its frame rate (tools/test-aisubs.mjs measures exactly this — 0.91 before
+    // any of this work, 0.60 with the water running unrestricted, against a 0.70 gate).
+    // Between the two, the text the player is actually reading wins. The water does not
+    // stop, it just falls back to the 12.5Hz tick repaint for a second and a half, which
+    // is where it was before this work anyway.
+    !(enhancedArtActive() && subFontReady && subs !== null && subs.vectorAnimating(count)) &&
     aiRoomRenderActive(room)
   );
 }
@@ -5194,8 +5227,9 @@ function loop(now: number): void {
     // every wake (its bands scroll per paint), the loop having chosen a ~30fps wake
     // rate for it. When skipped, the last painted frame persists on the canvas.
     const zxAnim = room?.gspec === 42;
-    // Same shape as zxAnim: content that changes per PAINT, which `sig` cannot see.
-    const waterAnim = aiWaterAnimating();
+    // Same shape as zxAnim: content that changes per PAINT, which `sig` cannot see —
+    // but rate-limited, see waterOwesRepaint.
+    const waterAnim = waterOwesRepaint(now);
     const sig = `${count}|${roomArtPending() ? 1 : 0}|${graphics}|${renderer}|${glFailed ? 1 : 0}${glAiFailed ? 1 : 0}`;
     // The AI compositor repaints a ×S backing store (1740×1620 for a 435×405 room).
     // On CANVAS-2D, doing that on every refresh when nothing changed is work the
@@ -5222,6 +5256,7 @@ function loop(now: number): void {
     const dirtyOnly = renderOnDirty || (aiFrame && lastRoomBackend === 'cpu');
     if (!dirtyOnly || forceRoomRedraw || roomAnimating() || zxAnim || waterAnim || sig !== lastRoomSig) {
       draw();
+      lastWaterPaint = now; // any room paint satisfies the water for this interval
       perfPaint++;
       lastRoomSig = sig;
       // Clear the one-shot force, but keep repainting while a cheat effect is live:
