@@ -180,16 +180,18 @@ const MUTATIONS = [
   { rule: 'wobble: the smooth shift is expressed in SCALED pixels', file: T,
     tests: ['test/roomAi.test.ts'],
     from: '  return sh * scale;', to: '  return sh;' },
-  // These two now live on the SHARED curve in framebuffer.ts (waterShiftAtPhase), which
-  // both the faithful tiers and the ai tier's continuous path are built from — so they
-  // are listed against the faithful fixtures too. That they kill on both sides is the
-  // evidence the rule really is shared rather than merely similar.
-  { rule: 'wobble: amplitude is wamp/2, not wamp', file: F,
-    tests: ['test/roomAi.test.ts', 'test/render-parity.test.ts'],
+  // These two live on the SHARED curve in framebuffer.ts (waterShiftAtPhase), which both
+  // the faithful tiers and the ai tier's continuous path are built from. That is exactly
+  // why they can ONLY be killed by the absolute pin in roomAi.test.ts (hand-computed
+  // values): every comparison-based suite has the same curve on both sides of the
+  // comparison and moves with the mutation. Verified — render-parity.test.ts diffs two
+  // CPU paths that now both call it, and stays green for both of these. Do not re-add it
+  // to this list; a test that structurally cannot fail is worse than no test, because it
+  // reads like coverage.
+  { rule: 'wobble: amplitude is wamp/2, not wamp', file: F, tests: ['test/roomAi.test.ts'],
     from: '  return (wamp / 2) * Math.sin(i / wper + phase);',
     to: '  return wamp * Math.sin(i / wper + phase);' },
-  { rule: 'wobble: the row divides by wper', file: F,
-    tests: ['test/roomAi.test.ts', 'test/render-parity.test.ts'],
+  { rule: 'wobble: the row divides by wper', file: F, tests: ['test/roomAi.test.ts'],
     from: '  return (wamp / 2) * Math.sin(i / wper + phase);',
     to: '  return (wamp / 2) * Math.sin(i * wper + phase);' },
   { rule: 'wobble: the ai path is built on the FAITHFUL curve, not a restatement', file: T,
