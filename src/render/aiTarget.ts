@@ -23,7 +23,74 @@
  * top-down, y-down space — the same space canvas-2D uses, which the GL target
  * reproduces rather than exposing GL's bottom-up convention upward.
  */
-import { RANDPOLE } from './framebuffer.js';
+import { RANDPOLE, delphiRound, waterShift } from './framebuffer.js';
+
+/**
+ * The water wobble as the two `ai` backends receive it: the room's FFR wave data, plus
+ * the GAME TIME to evaluate it at.
+ *
+ * `time` is fractional — `count + alpha`, the same sub-tick fraction the loop already
+ * uses to interpolate fish motion between logic ticks. `count` is kept alongside it
+ * because the canvas-2D target composites on the LOGIC tick and caches on it (see
+ * `Canvas2dAiTarget.background`), so it must not be handed a value that changes every
+ * display frame.
+ *
+ * The two backends deliberately sample this differently — see `AiTarget.background`.
+ */
+export interface AiWobble {
+  readonly wamp: number;
+  readonly wper: number;
+  readonly wspd: number;
+  /** Integer logic tick (the faithful sampling instant). */
+  readonly count: number;
+  /** `count + alpha`: the same instant, at display resolution. */
+  readonly time: number;
+}
+
+/**
+ * The faithful per-NATIVE-row integer wobble, exactly as Kresli2 computes it — the
+ * canvas-2D target's rule, and the one classic/enhanced use at native resolution.
+ *
+ * Evaluated at the integer `count`: this is the 1998 sampling, quantized in all three
+ * axes (one shift per native row, rounded to whole native px, advanced at 12.5 Hz).
+ */
+export function faithfulWobbleShifts(w: AiWobble, nativeHeight: number): Int16Array {
+  const out = new Int16Array(nativeHeight);
+  for (let i = 0; i < nativeHeight; i++) out[i] = delphiRound(waterShift(i, w.count, w.wamp, w.wper, w.wspd));
+  return out;
+}
+
+/**
+ * The `ai` tier's CONTINUOUS wobble: the horizontal displacement, in SCALED pixels, of
+ * scaled row `y` — the exact rule `glRoomAi.ts`'s BG_FS evaluates per fragment, kept
+ * here in JS so a probe can hold the shader to it without restating it.
+ *
+ * `(y + 0.5)/scale - 0.5` is the scaled row's centre expressed as a NATIVE row
+ * coordinate. That centring matters: its mean over the `scale` rows of one native row's
+ * band is exactly that native row's index, so the smooth curve is the faithful curve
+ * resampled — it does not translate the image. (Using `y/scale` instead would bias the
+ * whole background up by half a native row.)
+ *
+ * `phase` is `time/wspd` pre-reduced into [0, 2π) in FP64 by `wobblePhase` below.
+ */
+export function smoothWobbleShift(y: number, scale: number, w: AiWobble, phase: number): number {
+  const row = (y + 0.5) / scale - 0.5;
+  return (w.wamp / 2) * scale * Math.sin(row / w.wper + phase);
+}
+
+/**
+ * `time/wspd` reduced into [0, 2π).
+ *
+ * The GPU evaluates `sin` in FP32, and `count` grows without bound — an hour of play is
+ * `count ≈ 45 000`, so the raw argument reaches ~9 000 rad and ten hours reaches ~90 000,
+ * where FP32 range reduction visibly degrades. Reducing here, in FP64, keeps the shader's
+ * argument small forever and keeps it within ~1e-7 of this JS oracle, which is what lets
+ * a probe pin one against the other.
+ */
+export function wobblePhase(w: AiWobble): number {
+  const TAU = Math.PI * 2;
+  return ((w.time / w.wspd) % TAU + TAU) % TAU;
+}
 
 /** Anything both backends can sample: staged AI art, or a ×S palette sprite canvas. */
 export type AiImage = ImageBitmap | HTMLCanvasElement;
@@ -101,12 +168,27 @@ export interface AiTarget {
   /**
    * The wall-over-wobbled-background composite.
    *
-   * `shifts[i]` is row i's horizontal wobble in NATIVE px (null = the room does not
-   * wobble); the caller has already applied Delphi's rounding, so both backends shift
-   * by identical amounts and no backend re-derives `sin` for itself. `sig` identifies
-   * the composite so a target may reuse a cached copy across frames.
+   * **The two backends deliberately sample the water differently, and this is the only
+   * place in the tier where that is true.** `wobble` is the room's wave DATA (null = the
+   * room does not wobble), not a pre-computed answer, precisely because there are now two
+   * answers:
+   *
+   *  - `GlAiScreen` evaluates the wave per FRAGMENT at ×S — a shift per scaled row, a
+   *    fractional shift sampled between source columns, and the sub-tick `time`. The
+   *    water is then as hi-res as the art, which is the whole point of the tier (the
+   *    same reasoning already shipped for the mirror, roomAi.ts:816).
+   *  - `Canvas2dAiTarget` keeps the faithful 1998 sampling: one rounded shift per NATIVE
+   *    row, advanced on the logic tick. It cannot follow — at ×S the spatial half is
+   *    thousands of `drawImage` calls per rebuild, and a fractional `time` misses its
+   *    composite cache on every single display frame. It is the FALLBACK (no WebGL2,
+   *    context loss, the CPU-only frame paths), and a fallback being lower fidelity is
+   *    what a fallback is.
+   *
+   * `sig` identifies the composite so a target may reuse a cached copy across frames; it
+   * carries the LOGIC tick, so a target that caches on it is not invalidated by the
+   * sub-tick term only the GPU consumes.
    */
-  background(sig: string, bg: AiImage, wall: AiImage, shifts: Int16Array | null, scale: number): void;
+  background(sig: string, bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number): void;
 
   /** KresliK's dithered dissolve of `src` at (x,y) — see the RANDPOLE rule below. */
   disintegrate(src: AiImage, x: number, y: number, scale: number, rozpad: number): void;
@@ -147,7 +229,13 @@ export function dissolveKeeps(nativeRow: number, nativeCol: number, nativeW: num
   return RANDPOLE[(((nativeRow * nativeW) & 255) + nativeCol) & 255]! < rozpad;
 }
 
-/** The canvas-2D compositor: the shipped `ai` renderer, the oracle and the fallback. */
+/**
+ * The canvas-2D compositor: the `ai` tier's fallback renderer and its parity oracle.
+ *
+ * Fidelity note, because it is the one place the tier is not backend-independent: this
+ * target draws the FAITHFUL 1998 water wobble (banded, integer, 12.5 Hz) while the GPU
+ * draws it at ×S. See `AiTarget.background`.
+ */
 export class Canvas2dAiTarget implements AiTarget {
   private ctx: CanvasRenderingContext2D;
   /** Cached background+wall composite, and the signature it was built for. */
@@ -217,10 +305,13 @@ export class Canvas2dAiTarget implements AiTarget {
    * frame, against a canvas of only 2.82 Mpx. Cached, a repeat frame is a single
    * full-canvas blit. With no wobble the composite is built exactly once.
    */
-  background(sig: string, bg: AiImage, wall: AiImage, shifts: Int16Array | null, scale: number): void {
+  background(sig: string, bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number): void {
     const ctx = this.ctx;
     const W = ctx.canvas.width;
     const H = ctx.canvas.height;
+    // The faithful integer shift table, derived here rather than handed down: this target
+    // is the only consumer of it now (the GPU samples the wave continuously instead).
+    const shifts = wobble ? faithfulWobbleShifts(wobble, Math.max(1, Math.round(bg.height / scale))) : null;
     // No DOM (unit tests drive this with a recording context) ⇒ paint straight through.
     // The cache is a rendering optimisation, not behaviour: the composite it produces is
     // identical either way, so the uncached path is the correct fallback.

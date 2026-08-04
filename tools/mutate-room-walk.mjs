@@ -24,6 +24,7 @@ import fs from 'node:fs';
 const W = 'src/render/roomWalk.ts';
 const A = 'src/render/roomAi.ts';
 const C = 'src/core/room.ts';       // the shared WreckSwap protocol both replays read
+const T = 'src/render/aiTarget.ts'; // the two water-wobble sampling rules, one file
 
 const ALL_TESTS = [
   'test/darkness.test.ts',
@@ -160,14 +161,50 @@ const MUTATIONS = [
     from: '    if (!r) continue;', to: '    if (!r) break;' },
   { rule: 'wreck: the mutated background moves the composite cache key', file: A,
     tests: ['test/roomAi.test.ts'],
-    from: '`${faze}|${shifts === null ? 0 : count}|${aiImageRevision(bg)}`',
-    to: '`${faze}|${shifts === null ? 0 : count}`' },
+    from: '`${faze}|${wobble === null ? 0 : count}|${aiImageRevision(bg)}`',
+    to: '`${faze}|${wobble === null ? 0 : count}`' },
+
+  // ── the water wobble's two samplings ────────────────────────────────────────
+  // The `ai` tier's GPU path resamples the 1998 curve continuously while canvas-2D keeps
+  // the quantized original, so the two backends legitimately disagree and NO CPU<->GPU
+  // probe can kill any of these. They are pinned in roomAi.test.ts against `waterShift`
+  // imported from framebuffer.ts — the faithful definition — and these prove that bites.
+  // (The GLSL half of the same rule cannot be reached from vitest; it is pinned in the
+  // browser by tools/test-gl-room-ai.mjs step 6, whose own mutations are recorded there.)
+  { rule: 'wobble: the scaled row is centred before becoming a native row', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  const row = (y + 0.5) / scale - 0.5;', to: '  const row = y / scale;' },
+  { rule: 'wobble: the smooth shift is expressed in SCALED pixels', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  return (w.wamp / 2) * scale * Math.sin(row / w.wper + phase);',
+    to: '  return (w.wamp / 2) * Math.sin(row / w.wper + phase);' },
+  { rule: 'wobble: amplitude is wamp/2, not wamp', file: T, tests: ['test/roomAi.test.ts'],
+    from: '  return (w.wamp / 2) * scale * Math.sin(row / w.wper + phase);',
+    to: '  return w.wamp * scale * Math.sin(row / w.wper + phase);' },
+  { rule: 'wobble: the row divides by wper', file: T, tests: ['test/roomAi.test.ts'],
+    from: '  return (w.wamp / 2) * scale * Math.sin(row / w.wper + phase);',
+    to: '  return (w.wamp / 2) * scale * Math.sin(row * w.wper + phase);' },
+  { rule: 'wobble: the GPU phase uses the SUB-TICK time, not the logic tick', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: '  return ((w.time / w.wspd) % TAU + TAU) % TAU;',
+    to: '  return ((w.count / w.wspd) % TAU + TAU) % TAU;' },
+  { rule: 'wobble: the phase divides by wspd', file: T, tests: ['test/roomAi.test.ts'],
+    from: '  return ((w.time / w.wspd) % TAU + TAU) % TAU;',
+    to: '  return ((w.time * w.wspd) % TAU + TAU) % TAU;' },
+  { rule: 'wobble: the faithful table is ROUNDED (Delphi banker\'s), not truncated', file: T,
+    tests: ['test/roomAi.test.ts'],
+    from: 'out[i] = delphiRound(waterShift(i, w.count, w.wamp, w.wper, w.wspd));',
+    to: 'out[i] = Math.trunc(waterShift(i, w.count, w.wamp, w.wper, w.wspd));' },
+  { rule: 'wobble: the faithful table is sampled on the LOGIC TICK (canvas-2D caches on it)',
+    file: T, tests: ['test/roomAi.test.ts'],
+    from: 'out[i] = delphiRound(waterShift(i, w.count, w.wamp, w.wper, w.wspd));',
+    to: 'out[i] = delphiRound(waterShift(i, w.time, w.wamp, w.wper, w.wspd));' },
 ];
 
 const run = (tests) => spawnSync('npx', ['vitest', 'run', ...tests], { encoding: 'utf8' });
 
-if (spawnSync('git', ['diff', '--quiet', 'HEAD', '--', W, A, C]).status !== 0) {
-  console.error(`Refusing to run: ${W}, ${A} or ${C} has uncommitted changes.`);
+if (spawnSync('git', ['diff', '--quiet', 'HEAD', '--', W, A, C, T]).status !== 0) {
+  console.error(`Refusing to run: ${W}, ${A}, ${C} or ${T} has uncommitted changes.`);
   console.error('This harness edits those files in place; commit or stash first.');
   process.exit(2);
 }

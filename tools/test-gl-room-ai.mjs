@@ -6,6 +6,19 @@
  * no-WebGL2 fallback) and GlAiScreen. This probe renders both for every room and diffs
  * them, exactly as test-gl-room.mjs does for the classic tier.
  *
+ * ── Why the comparison is made in STILL WATER ────────────────────────────────
+ * The `ai` tier evaluates the water wobble at ×S on the GPU (per scaled row, at a
+ * fractional shift, at the sub-tick time) while the canvas-2D fallback keeps the
+ * faithful 1998 sampling — so in 70 of the 72 rooms the BACKGROUND legitimately differs
+ * between the two backends and cannot be byte-compared. Widening the tolerance to
+ * absorb that would throw away the net for everything else in the same motion, so
+ * instead the sweep asks for `stillWater`: `wamp = 0` for the duration of the
+ * comparison puts both backends on the identical unshifted fetch, and items, fish,
+ * mirror, rope, wreck, dissolve, the wall composite and the classic-sprite fallback are
+ * held to exactly the gate they always were. Rooms 46 and 66 have `wamp === 0` in the
+ * data, so they are compared WITHOUT the override and prove the override is not what is
+ * producing the match. Step 6 then covers the wobble itself, which this cannot.
+ *
  * ── The gate, and why it is not max === 0 ─────────────────────────────────────
  * The classic/enhanced oracle (RgbaScreen) is pure JS with rounding this repo defines,
  * so those probes can demand byte-equality. This oracle is the BROWSER's canvas-2D
@@ -113,7 +126,7 @@ let tested = 0, noArt = 0, worstMax = 0, worstRoom = 0, exact = 0;
 const cpuRooms = [];
 
 await enter(3);
-const cap = await p.evaluate(() => window.__ff.aiGlParity());
+const cap = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
 if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
@@ -147,7 +160,7 @@ for (const num of ROOM_LIST) {
     //    nothing for this tier to composite (room 72) — it renders through the normal
     //    compositor, which test-gl-room covers.
     if (!live.aiLoaded) { noArt++; continue; }
-    const r = await p.evaluate(() => window.__ff.aiGlParity());
+    const r = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
     if (!r) { ok = false; console.log(`  FAIL room ${num}: no parity result`); continue; }
     if (!r.webgl) { ok = false; console.log(`  FAIL room ${num}: WebGL vanished mid-run`); continue; }
     if (r.noCanvas) { ok = false; console.log(`  FAIL room ${num}: no 2D oracle context`); continue; }
@@ -220,7 +233,7 @@ try {
   let worst = 0;
   for (let i = 0; i < 10; i++) {
     await p.waitForTimeout(120);
-    const d = await p.evaluate(() => window.__ff.aiGlParity());
+    const d = await p.evaluate(() => window.__ff.aiGlParity({ stillWater: true }));
     if (!d || !d.webgl || d.dimMismatch) continue;
     samples++;
     if (d.max > worst) worst = d.max;
@@ -277,6 +290,72 @@ try {
 } catch (e) {
   ok = false;
   console.log(`  FAIL present: ${String(e).slice(0, 80)}`);
+}
+
+
+// 6. The water wobble itself — the one thing step 2 deliberately switched off.
+//
+//    Three questions, none of which a CPU↔GPU comparison can answer any more, and none
+//    of which a screenshot can answer at all:
+//
+//    a) is the GPU drawing the RIGHT curve? Scored against an independent JS
+//       reimplementation of BG_FS built from the SOURCE art (`oracleMax`). Compare
+//       against the wamp=0 room's score to see the floor: ~1.4/255 comes from the
+//       un-premultiply round-trip of reading the wall art back out of a 2D canvas, not
+//       from the wobble.
+//    b) is it actually the SMOOTH one? `bandedMax` scores the same frame against the
+//       faithful banded expectation and must be LARGE — this is the negative control
+//       that fails loudly if the shader ever regresses to a per-native-row lookup.
+//    c) is it smooth in the PIXELS, with no reference image at all? A banded integer
+//       shift makes every output row an exact integer translation of its source row
+//       (`exactRows` = 1) with the same estimated shift across all 4 rows of a native
+//       band (`bandsVarying` = 0). Both must move decisively off those values.
+//
+//    Room 46 runs the same probe as the control: it has wamp=0 in the data, so it must
+//    still read exactly like the old banded world (exactRows 1, bandsVarying 0).
+try {
+  await enter(3);
+  const smooth = await p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
+  if (!smooth || !smooth.webgl || smooth.unsupported || smooth.noArt || smooth.noCanvas) {
+    ok = false;
+    console.log(`  FAIL wobble: no result (${JSON.stringify(smooth)})`);
+  } else {
+    const fail = (m) => { ok = false; console.log(`  FAIL wobble: ${m}`); };
+    if (!smooth.wobbles) fail('room 3 is expected to wobble');
+    // (a) the curve. 2 leaves headroom over the ~1.4 canvas-readback floor without
+    //     leaving room for a wrong shift, which scores in the tens (see bandedMax).
+    if (!(smooth.oracleMax <= 2)) fail(`GPU differs from the JS BG_FS oracle: max=${smooth.oracleMax.toFixed(2)}`);
+    // (b) …and it is emphatically NOT the banded one.
+    if (!(smooth.bandedMax >= 8)) fail(`GPU still matches the BANDED expectation (max=${smooth.bandedMax}) — regressed to per-native-row?`);
+    // (c) measured on the pixels alone.
+    if (!(smooth.scoredRows > 300)) fail(`too few scorable rows (${smooth.scoredRows})`);
+    if (!(smooth.exactRows < 0.6)) fail(`${(smooth.exactRows * 100).toFixed(0)}% of rows are exact integer translations — the shift is not fractional`);
+    if (!(smooth.bandsVarying > 0.25)) fail(`only ${(smooth.bandsVarying * 100).toFixed(0)}% of native bands vary within themselves — still banded`);
+    console.log(
+      `  wobble room 3 (wamp=${smooth.wamp} wper=${smooth.wper} wspd=${smooth.wspd}): ` +
+        `oracleMax=${smooth.oracleMax.toFixed(2)} rmse=${smooth.oracleRmse.toFixed(3)} bandedMax=${smooth.bandedMax} ` +
+        `exactRows=${smooth.exactRows.toFixed(2)} bandsVarying=${smooth.bandsVarying.toFixed(2)} (${smooth.scoredRows} rows)`,
+    );
+  }
+
+  await enter(46);
+  const still = await p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
+  if (!still || !still.webgl || still.unsupported) {
+    ok = false;
+    console.log('  FAIL wobble control: no result for room 46');
+  } else {
+    if (still.wobbles) { ok = false; console.log('  FAIL wobble control: room 46 should have wamp=0'); }
+    if (!(still.oracleMax <= 2)) { ok = false; console.log(`  FAIL wobble control: room 46 oracleMax=${still.oracleMax.toFixed(2)}`); }
+    if (still.exactRows !== 1 || still.bandsVarying !== 0) {
+      ok = false;
+      console.log(`  FAIL wobble control: room 46 must be motionless (exactRows=${still.exactRows} bandsVarying=${still.bandsVarying})`);
+    } else {
+      console.log(`  wobble control room 46 (wamp=0): unshifted, exactRows=1 bandsVarying=0, oracleMax=${still.oracleMax.toFixed(2)}`);
+    }
+  }
+} catch (e) {
+  ok = false;
+  console.log(`  FAIL wobble: ${String(e).slice(0, 120)}`);
 }
 
 // The per-frame cost of the two backends is REPORTED, not asserted. An earlier revision

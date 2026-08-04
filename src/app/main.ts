@@ -87,7 +87,8 @@ import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
 import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { loadAiRoom, aiRoomGateAllows, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
-import { Canvas2dAiTarget } from '../render/aiTarget.js';
+import { Canvas2dAiTarget, faithfulWobbleShifts, smoothWobbleShift, wobblePhase } from '../render/aiTarget.js';
+import type { AiWobble } from '../render/aiTarget.js';
 import { withLoadSlot } from '../render/loadSlot.js';
 import {
   hitInfoButton,
@@ -4561,7 +4562,12 @@ function draw(): void {
     // second time here is how the two drifted apart before.
     const aw = geom.backingW;
     const ah = geom.backingH;
-    const aiGpu = renderer === 'webgl' && !glAiFailed && drawAiGpu(geom, room, { count, slide, fishAnim });
+    // `alpha` rides along so the GPU compositor can sample the water wave at the
+    // display rate rather than at the 12.5 Hz logic tick (see AiTarget.background). It
+    // is the same sub-tick fraction `slide` above is derived from, and it is read-only:
+    // no game state, timing or logic depends on it here.
+    const aiFrameState: AiRoomFrame = { count, alpha, slide, fishAnim };
+    const aiGpu = renderer === 'webgl' && !glAiFailed && drawAiGpu(geom, room, aiFrameState);
     lastRoomBackend = aiGpu ? 'webgl' : 'cpu';
     // On the GPU path #screen is only the flow anchor: it still carries the room's CSS
     // box (everything stacked over the room is positioned against it) but keeps a NATIVE
@@ -4582,7 +4588,7 @@ function draw(): void {
     else {
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, aw, ah);
-      aiRoom!.draw(ctx, room, { count, slide, fishAnim });
+      aiRoom!.draw(ctx, room, aiFrameState);
     }
     canvas.style.transform = xform; // on the GPU path this keeps the anchor under the overlays
   } else {
@@ -4890,6 +4896,38 @@ const IDLE_LOOP_MS = LOGIC_MS;
 // ~2.4x the original — smoother than 12.5fps, far cheaper than 60fps.
 const ZX_ANIM_MS = 33; // ~30fps
 let rafId = 0;
+
+/**
+ * Does an IDLE frame still need repainting because the `ai` tier's water is animating
+ * between logic ticks?
+ *
+ * The GPU compositor evaluates the wobble at `count + alpha`, so its phase now advances
+ * with the PAINT rate rather than the 12.5 Hz tick. Both idle gates above it are blind
+ * to that: `loopThrottleOk` drops a settled room to an 80 ms timer, and the render-on-dirty
+ * signature contains `count` and nothing sub-tick. Left alone, the smooth wobble would be
+ * visible only while a fish happens to be moving (which already holds the loop at 60 fps
+ * via roomAnimating) and would snap back to lurching the moment the room settled — a
+ * worse artefact than the one it fixes.
+ *
+ * So an idle wobbling AI-GPU room takes the SAME treatment the ZX room already has:
+ * `ZX_ANIM_MS`, plus a forced repaint. That argument is written out at ZX_ANIM_MS above
+ * and applies unchanged here — 12.5 fps looks choppy, 60 fps costs a full-rate ×S
+ * repaint of a room where nothing else is happening, ~30 fps is the compromise. Note the
+ * loop stays THROTTLED (the timer path, not rAF), so the idle-FPS saver's contract is
+ * intact; only the delay changes.
+ *
+ * canvas-2D is excluded on purpose: it keeps the faithful tick-rate wobble, so it has
+ * nothing to animate and must keep its current idle cost, which is the higher of the two.
+ */
+function aiWaterAnimating(): boolean {
+  return (
+    screen === 'room' &&
+    room !== null &&
+    room.wamp !== 0 &&
+    lastRoomBackend === 'webgl' &&
+    aiRoomRenderActive(room)
+  );
+}
 /**
  * Paint-rate cap. requestAnimationFrame fires at the DISPLAY refresh — 120Hz+ on
  * current Macs — but this game steps its logic at 12.5Hz (LOGIC_MS) and interpolates,
@@ -4917,6 +4955,10 @@ let idleTimer: ReturnType<typeof setTimeout> | 0 = 0;
 let perfRaf = 0;
 let perfPaint = 0;
 let perfLast = 0;
+// Monotonic loop-iteration counter. `perfRaf` above is reset every HUD interval and only
+// runs with the dev pane open, so a probe cannot use it to measure the idle WAKE RATE —
+// which is exactly what the ai-water animation gate below changes.
+let loopTicks = 0;
 let lastRoomBackend: 'cpu' | 'webgl' = 'cpu'; // which backend actually painted the last room frame
 function updatePerfHud(now: number): void {
   perfRaf++;
@@ -5026,7 +5068,8 @@ function scheduleNext(): void {
   if (loopThrottleOk()) {
     // A ZX room keeps animating its bands, so it wakes at ~30fps; any other idle
     // room/map wakes at the 12.5fps logic rate.
-    const delay = screen === 'room' && room?.gspec === 42 ? ZX_ANIM_MS : IDLE_LOOP_MS;
+    const delay =
+      (screen === 'room' && room?.gspec === 42) || aiWaterAnimating() ? ZX_ANIM_MS : IDLE_LOOP_MS;
     idleTimer = setTimeout(() => {
       idleTimer = 0;
       loop(performance.now());
@@ -5054,6 +5097,7 @@ function wake(): void {
 /** The render loop: steps the game at a fixed timestep, then draws (capped, see
  *  MAX_PAINT_FPS) once per RAF. */
 function loop(now: number): void {
+  loopTicks++;
   // Skip this refresh entirely when it would exceed the paint cap. lastTime is left
   // alone so the skipped interval still accumulates into `acc` — the simulation sees
   // real elapsed time either way, so capping paint cannot change game speed.
@@ -5150,6 +5194,8 @@ function loop(now: number): void {
     // every wake (its bands scroll per paint), the loop having chosen a ~30fps wake
     // rate for it. When skipped, the last painted frame persists on the canvas.
     const zxAnim = room?.gspec === 42;
+    // Same shape as zxAnim: content that changes per PAINT, which `sig` cannot see.
+    const waterAnim = aiWaterAnimating();
     const sig = `${count}|${roomArtPending() ? 1 : 0}|${graphics}|${renderer}|${glFailed ? 1 : 0}${glAiFailed ? 1 : 0}`;
     // The AI compositor repaints a ×S backing store (1740×1620 for a 435×405 room).
     // On CANVAS-2D, doing that on every refresh when nothing changed is work the
@@ -5174,7 +5220,7 @@ function loop(now: number): void {
     // anyone who has not asked for that.
     const aiFrame = room !== null && aiRoomRenderActive(room);
     const dirtyOnly = renderOnDirty || (aiFrame && lastRoomBackend === 'cpu');
-    if (!dirtyOnly || forceRoomRedraw || roomAnimating() || zxAnim || sig !== lastRoomSig) {
+    if (!dirtyOnly || forceRoomRedraw || roomAnimating() || zxAnim || waterAnim || sig !== lastRoomSig) {
       draw();
       perfPaint++;
       lastRoomSig = sig;
@@ -6053,6 +6099,10 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   throttleInfo: () => ({
     throttleOk: loopThrottleOk(),
     onTimer: idleTimer !== 0,
+    // Why an idle room may still be waking faster than the 12.5 Hz logic tick: the ai
+    // tier's water is sampled per paint on the GPU (see aiWaterAnimating).
+    waterAnim: aiWaterAnimating(),
+    loops: loopTicks,
     heldState,
     phase: engine?.phase ?? 'idle',
     enhancedPending,
@@ -6604,7 +6654,225 @@ window.addEventListener('keydown', unlockAudio, { once: true });
    * specification pins down. Two roundings of the same blend differ by ±1 per channel
    * on anti-aliased sprite edges. See tools/test-gl-room-ai.mjs for the gate.
    */
-  aiGlParity: () => {
+  /**
+   * Test probe: is the `ai` tier's water actually sampled at ×S — and is it the RIGHT
+   * curve?
+   *
+   * Renders the BACKGROUND LAYER ONLY on the GPU (no sprites, so nothing else can mask
+   * or explain a difference) and measures it three ways. Each answers a question the
+   * CPU↔GPU parity probe structurally cannot, because that probe now compares two
+   * backends that are deliberately allowed to differ here.
+   *
+   * 1. `oracleMax` — vs an INDEPENDENT JS reimplementation of BG_FS (the continuous
+   *    curve from `smoothWobbleShift`, linearly interpolated between source columns,
+   *    then the wall composited over it), built from the SOURCE art rather than from
+   *    the other AI backend. This is the pin: a rule broken identically on both AI
+   *    targets — the failure mode recorded on `dissolveKeeps` — shows up here.
+   * 2. `bandedMax` — vs the FAITHFUL banded expectation. This one must be LARGE: it is
+   *    the negative control that catches a silent regression to the quantized shader,
+   *    which check 1 alone would happily accept if the oracle regressed with it.
+   * 3. `exactRows` / `bandsVarying` — measured on the pixels, with no reference image at
+   *    all. A banded integer shift makes every output row an EXACT integer translation
+   *    of its source row, so the L1 residual at the best integer shift is 0 for 100 % of
+   *    rows, and the estimated shift is CONSTANT across all `scale` rows of a native
+   *    band. A fractional per-scaled-row shift breaks both. So `exactRows` must fall well
+   *    below 1 and `bandsVarying` must rise well above 0 — a screenshot cannot see either.
+   *
+   * Rows are scored only across the widest run of FULLY TRANSPARENT wall columns, where
+   * the composite is the background unaltered; a row whose run is too short is skipped.
+   */
+  /**
+   * Capture aid: the wall-over-wobbled-background layer at ×S, as a PNG data URL.
+   *
+   * Deterministic — the tick and sub-tick fraction are arguments, not whatever the live
+   * loop happens to be on — so the two backends can be captured at the SAME instant and
+   * put side by side. That is the whole point: since canvas-2D keeps the faithful 1998
+   * sampling and the GPU samples at ×S, `{ cpu: true }` and `{ cpu: false }` at one
+   * `count` are exactly the before/after pair for this change.
+   *
+   * Crops rather than returning the whole ×S frame by default: room 3's is 2400×2100,
+   * and the band seams are only legible at 1:1 anyway.
+   */
+  aiBgCapture: (opts: { x?: number; y?: number; w?: number; h?: number; at?: number; alpha?: number; cpu?: boolean } = {}) => {
+    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
+    const S = aiRoom.scale;
+    const geom = roomGeometry(room);
+    const W = geom.nativeW * S;
+    const H = geom.nativeH * S;
+    const x = Math.max(0, Math.min(W - 1, opts.x ?? 0));
+    const y = Math.max(0, Math.min(H - 1, opts.y ?? 0));
+    const w = Math.max(1, Math.min(W - x, opts.w ?? W));
+    const h = Math.max(1, Math.min(H - y, opts.h ?? H));
+    const at = opts.at ?? count;
+    const alpha = opts.alpha ?? 0;
+    const out = document.createElement('canvas');
+    out.width = w;
+    out.height = h;
+    const og = out.getContext('2d');
+    if (!og) return null;
+    og.imageSmoothingEnabled = false;
+    if (opts.cpu) {
+      const cv = document.createElement('canvas');
+      cv.width = W;
+      cv.height = H;
+      const c2 = cv.getContext('2d', { willReadFrequently: true });
+      if (!c2) return null;
+      c2.clearRect(0, 0, W, H);
+      aiRoom.drawBackgroundInto(new Canvas2dAiTarget(c2), room, at, alpha);
+      og.drawImage(cv, x, y, w, h, 0, 0, w, h);
+    } else {
+      const comp = glAiCompositor();
+      if (!comp) return null;
+      comp.track(aiRoom);
+      if (!comp.begin(W, H)) return null;
+      aiRoom.drawBackgroundInto(comp, room, at, alpha);
+      const px = comp.readback();
+      if (px.w !== W || px.h !== H) return null;
+      const img = og.createImageData(w, h);
+      for (let r = 0; r < h; r++) {
+        const src = ((y + r) * W + x) * 4;
+        img.data.set(px.rgba.subarray(src, src + w * 4), r * w * 4);
+      }
+      og.putImageData(img, 0, 0);
+    }
+    return out.toDataURL('image/png');
+  },
+  aiWobbleCheck: (opts: { alpha?: number; minRun?: number } = {}) => {
+    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
+    const comp = glAiCompositor();
+    if (!comp) return { webgl: false };
+    const art = aiRoom.backgroundArt(room);
+    if (!art) return { webgl: true, noArt: true };
+    const S = aiRoom.scale;
+    const geom = roomGeometry(room);
+    const W = geom.nativeW * S;
+    const H = geom.nativeH * S;
+    const alpha = opts.alpha ?? 0;
+    const minRun = opts.minRun ?? 160;
+
+    comp.track(aiRoom);
+    if (!comp.begin(W, H)) return { webgl: true, unsupported: true };
+    aiRoom.drawBackgroundInto(comp, room, count, alpha);
+    const gpu = comp.readback();
+    if (gpu.w !== W || gpu.h !== H) return { webgl: true, dimMismatch: true };
+
+    const grab = (img: { width: number; height: number }): Uint8ClampedArray | null => {
+      const cv = document.createElement('canvas');
+      cv.width = W;
+      cv.height = H;
+      const g = cv.getContext('2d', { willReadFrequently: true });
+      if (!g) return null;
+      g.clearRect(0, 0, W, H);
+      g.drawImage(img as CanvasImageSource, 0, 0);
+      return g.getImageData(0, 0, W, H).data;
+    };
+    const bgPx = grab(art.bg);
+    const wallPx = grab(art.wall);
+    if (!bgPx || !wallPx) return { webgl: true, noCanvas: true };
+
+    const wobbles = room.wamp !== 0;
+    const w: AiWobble = {
+      wamp: room.wamp, wper: room.wper, wspd: room.wspd, count, time: count + alpha,
+    };
+    const phase = wobblePhase(w);
+    const banded = wobbles ? faithfulWobbleShifts(w, geom.nativeH) : null;
+
+    let oracleMax = 0;
+    let bandedMax = 0;
+    let sq = 0;
+    let n = 0;
+    const estimates = new Int32Array(H).fill(0x7fffffff);
+    let scored = 0;
+    let exact = 0;
+
+    for (let y = 0; y < H; y++) {
+      const sh = wobbles ? smoothWobbleShift(y, S, w, phase) : 0;
+      const f = Math.floor(sh);
+      const frac = sh - f;
+      const kBand = banded ? banded[Math.min(geom.nativeH - 1, Math.floor(y / S))]! * S : 0;
+      const rowOff = y * W * 4;
+      // Longest fully-transparent wall run on this row (where composite === background).
+      let bestLen = 0, bestStart = -1, runStart = -1;
+      for (let x = 0; x <= W; x++) {
+        const clear = x < W && wallPx[rowOff + x * 4 + 3] === 0;
+        if (clear) { if (runStart < 0) runStart = x; }
+        else if (runStart >= 0) {
+          if (x - runStart > bestLen) { bestLen = x - runStart; bestStart = runStart; }
+          runStart = -1;
+        }
+      }
+      for (let x = 0; x < W; x++) {
+        const o = rowOff + x * 4;
+        const wa = wallPx[o + 3]! / 255;
+        // BG_FS, restated in FP64: bilerp the background, then wall over it.
+        const c0 = Math.min(Math.max(x + f, 0), W - 1);
+        const c1 = Math.min(Math.max(x + f + 1, 0), W - 1);
+        const cb = Math.min(Math.max(x + kBand, 0), W - 1);
+        for (let ch = 0; ch < 3; ch++) {
+          const a = bgPx[rowOff + c0 * 4 + ch]!;
+          const b = bgPx[rowOff + c1 * 4 + ch]!;
+          const bg = wobbles ? a + (b - a) * frac : a;
+          const want = wallPx[o + ch]! * wa + bg * (1 - wa);
+          const got = gpu.rgba[o + ch]!;
+          const d = Math.abs(want - got);
+          if (d > oracleMax) oracleMax = d;
+          sq += d * d;
+          n++;
+          const wantB = wallPx[o + ch]! * wa + bgPx[rowOff + cb * 4 + ch]! * (1 - wa);
+          const dB = Math.abs(wantB - got);
+          if (dB > bandedMax) bandedMax = dB;
+        }
+      }
+      // Best INTEGER shift of this row against its own source row, and its residual.
+      if (bestLen >= minRun) {
+        const span = Math.min(bestLen, 800);
+        const lim = Math.ceil((room.wamp / 2) * S) + 2;
+        let bestD = 0, bestErr = Infinity;
+        for (let d = -lim; d <= lim; d++) {
+          let err = 0;
+          for (let x = bestStart; x < bestStart + span; x += 2) {
+            const src = Math.min(Math.max(x + d, 0), W - 1);
+            err += Math.abs(gpu.rgba[rowOff + x * 4 + 1]! - bgPx[rowOff + src * 4 + 1]!);
+            if (err >= bestErr) break;
+          }
+          if (err < bestErr) { bestErr = err; bestD = d; }
+        }
+        estimates[y] = bestD;
+        scored++;
+        if (bestErr === 0) exact++;
+      }
+    }
+
+    // Does the estimated shift vary WITHIN a native band? (Banded ⇒ never.)
+    let bands = 0, varying = 0;
+    for (let i = 0; i * S + S <= H; i++) {
+      let ok = true;
+      let vary = false;
+      const first = estimates[i * S]!;
+      for (let r = 0; r < S; r++) {
+        const e = estimates[i * S + r]!;
+        if (e === 0x7fffffff) { ok = false; break; }
+        if (e !== first) vary = true;
+      }
+      if (!ok) continue;
+      bands++;
+      if (vary) varying++;
+    }
+
+    return {
+      webgl: true,
+      w: W, h: H, scale: S, wobbles, alpha,
+      wamp: room.wamp, wper: room.wper, wspd: room.wspd,
+      oracleMax,
+      oracleRmse: Math.sqrt(sq / Math.max(1, n)),
+      bandedMax,
+      scoredRows: scored,
+      exactRows: scored ? exact / scored : 1,
+      bands,
+      bandsVarying: bands ? varying / bands : 0,
+    };
+  },
+  aiGlParity: (opts: { stillWater?: boolean } = {}) => {
     if (!room || !aiRoom || aiRoomNum !== curNum) return null;
     const comp = glAiCompositor();
     if (!comp) return { webgl: false };
@@ -6619,21 +6887,37 @@ window.addEventListener('keydown', unlockAudio, { once: true });
         big: { bodyFrame: TL_NAHORU[1]!, headFrame: HL_TLACI },
       },
     };
-    const cv = document.createElement('canvas');
-    cv.width = w;
-    cv.height = h;
-    const c2 = cv.getContext('2d', { willReadFrequently: true });
-    if (!c2) return { webgl: true, noCanvas: true };
-    c2.setTransform(1, 0, 0, 1, 0, 0);
-    c2.clearRect(0, 0, w, h);
-    aiRoom.drawInto(new Canvas2dAiTarget(c2), room, f); // scratch target: see aiRenderBench
-    const cpu = new Uint8Array(c2.getImageData(0, 0, w, h).data.buffer.slice(0));
-    comp.track(aiRoom);
-    comp.begin(w, h);
-    aiRoom.drawInto(comp, room, f);
-    const gpu = comp.readback();
-    if (gpu.w !== w || gpu.h !== h) return { webgl: true, dimMismatch: true };
-    return { webgl: true, w, h, ...glChannelDiff(cpu, gpu.rgba, w) };
+    // STILL WATER. The two backends deliberately sample the wobble differently now (the
+    // GPU per fragment at ×S, canvas-2D at 1998's quantization), so a wobbling room can
+    // no longer be byte-compared — in 70 of 72 rooms. Rather than widen the tolerance and
+    // lose the net for EVERYTHING ELSE, the comparison is made with the wave switched
+    // off: `wamp = 0` puts both backends on the identical `texelFetch(x)` path, and every
+    // other primitive — wall alpha compositing, items, fish, mirror, rope, wreck,
+    // dissolve, the classic-sprite fallback — is then held to exactly the gate it was
+    // held to before. Rooms 46 and 66 already have `wamp === 0`, so they run this probe
+    // untouched and act as the control that the override itself is not what produces the
+    // match. Restored in `finally`: a probe must not leave the room's water switched off.
+    const savedWamp = room.wamp;
+    if (opts.stillWater) room.wamp = 0;
+    try {
+      const cv = document.createElement('canvas');
+      cv.width = w;
+      cv.height = h;
+      const c2 = cv.getContext('2d', { willReadFrequently: true });
+      if (!c2) return { webgl: true, noCanvas: true };
+      c2.setTransform(1, 0, 0, 1, 0, 0);
+      c2.clearRect(0, 0, w, h);
+      aiRoom.drawInto(new Canvas2dAiTarget(c2), room, f); // scratch target: see aiRenderBench
+      const cpu = new Uint8Array(c2.getImageData(0, 0, w, h).data.buffer.slice(0));
+      comp.track(aiRoom);
+      comp.begin(w, h);
+      aiRoom.drawInto(comp, room, f);
+      const gpu = comp.readback();
+      if (gpu.w !== w || gpu.h !== h) return { webgl: true, dimMismatch: true };
+      return { webgl: true, w, h, stillWater: opts.stillWater === true, ...glChannelDiff(cpu, gpu.rgba, w) };
+    } finally {
+      room.wamp = savedWamp;
+    }
   },
   // Test probe: same, through the ENHANCED (FFNG truecolor) art source.
   // `enh` reports whether the FFNG masters were actually engaged for this room.

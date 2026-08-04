@@ -31,8 +31,8 @@ import {
   uniformLocations,
   type Uni,
 } from './glCommon.js';
-import { aiImagePatch, aiImageRevision } from './aiTarget.js';
-import type { AiImage, AiTarget } from './aiTarget.js';
+import { aiImagePatch, aiImageRevision, wobblePhase } from './aiTarget.js';
+import type { AiImage, AiTarget, AiWobble } from './aiTarget.js';
 
 /** Opaque colour fill (the darkness room, the elevator rope). */
 const FILL_FS = `#version 300 es
@@ -42,13 +42,35 @@ out vec4 outColor;
 void main() { outColor = vec4(uColor, 1.0); }`;
 
 /**
- * Wall over the water-wobbled background, in ONE opaque pass.
+ * Wall over the water-wobbled background, in ONE opaque pass — and the one place the
+ * `ai` tier renders the water at the resolution of its art rather than at 1998's.
  *
- * Kresli2's wobble is `dest[j] = bg[j + k]` for the row's shift k, clamped at both
- * edges — the CPU draws that as horizontal bands of ×S rows, which is the same
- * per-pixel rule this evaluates directly. `uShift` carries k per NATIVE row, already
- * rounded on the CPU: this shader must not re-derive `sin` (that is what makes the
- * classic tier's GPU background delicate, and the AI tier has no reason to inherit it).
+ * Kresli2's wobble is `dest[j] = bg[j + k]` for the row's shift k. The 1998 engine
+ * indexed a bitmap with k, so k was quantized three ways: one value per NATIVE row,
+ * rounded to a whole NATIVE pixel, advanced once per 12.5 Hz logic tick. Magnified ×4
+ * that is a 4-scaled-pixel step, held across runs of a dozen or more scaled rows, lurching
+ * eight times a second — the one element of the tier that visibly was not hi-res, on
+ * screen in 70 of 72 rooms. None of those quantizations is part of the RULE; they are
+ * the sampling. So this evaluates the rule directly instead:
+ *
+ *   - per FRAGMENT, from the scaled row's own centre expressed as a native-row
+ *     coordinate — `(y + 0.5)/S - 0.5`, whose mean over a band is the native row index,
+ *     so the wave is resampled, not translated;
+ *   - as a FRACTIONAL shift in scaled pixels, linearly interpolated between the two
+ *     source columns it falls between;
+ *   - at `count + alpha`, the sub-tick fraction the loop already uses for fish motion.
+ *
+ * Interpolating by hand (two `texelFetch` + `mix`) rather than binding a LINEAR sampler
+ * is deliberate: hardware filtering carries only 8 sub-texel bits and the exact result
+ * is vendor-dependent, whereas this is FP32 arithmetic that a JS oracle can reproduce
+ * exactly. It also leaves the texture's own NEAREST/CLAMP state alone, which the LODE
+ * wreck's in-place patches share.
+ *
+ * `uPhase` arrives pre-reduced into [0, 2π) — see `wobblePhase` in aiTarget.ts for why
+ * a FP32 `sin` must not be handed a raw `count/wspd`.
+ *
+ * With `uWobble == 0` (rooms 46 and 66) this is a plain `texelFetch`, bit-identical to
+ * the canvas-2D path — which is what the CPU↔GPU parity probe compares.
  *
  * The wall is then composited over it here rather than as a second blended draw, which
  * is exactly what canvas-2D's premultiplied `drawImage` of a straight-alpha wall
@@ -59,18 +81,23 @@ precision highp float;
 precision highp int;
 uniform sampler2D uBg;
 uniform sampler2D uWall;
-uniform highp isampler2D uShift;
 uniform int uScale, uBgW, uWobble;
+uniform float uAmpS, uPer, uPhase;
 out vec4 outColor;
 void main() {
   int x = int(gl_FragCoord.x);
   int y = int(gl_FragCoord.y);
-  int sx = x;
+  vec3 bg;
   if (uWobble == 1) {
-    int k = texelFetch(uShift, ivec2(y / uScale, 0), 0).r;
-    sx = clamp(x + k * uScale, 0, uBgW - 1);
+    float row = (float(y) + 0.5) / float(uScale) - 0.5;
+    float sh = uAmpS * sin(row / uPer + uPhase);
+    float f = floor(sh);
+    int s0 = clamp(x + int(f), 0, uBgW - 1);
+    int s1 = clamp(x + int(f) + 1, 0, uBgW - 1);
+    bg = mix(texelFetch(uBg, ivec2(s0, y), 0).rgb, texelFetch(uBg, ivec2(s1, y), 0).rgb, sh - f);
+  } else {
+    bg = texelFetch(uBg, ivec2(x, y), 0).rgb;
   }
-  vec3 bg = texelFetch(uBg, ivec2(sx, y), 0).rgb;
   vec4 w = texelFetch(uWall, ivec2(x, y), 0);
   outColor = vec4(w.rgb * w.a + bg * (1.0 - w.a), 1.0);
 }`;
@@ -213,7 +240,6 @@ export class GlAiScreen implements AiTarget {
   private readonly fsVao: WebGLVertexArrayObject;
   private readonly rectVao: WebGLVertexArrayObject;
   private readonly randTex: WebGLTexture;
-  private readonly shiftTex: WebGLTexture;
 
   /**
    * One texture per source bitmap, for the LIFE OF THE CONTEXT.
@@ -262,7 +288,7 @@ export class GlAiScreen implements AiTarget {
     this.mirrorProg = linkProgram(gl, QUAD_VS, MIRROR_FS, 'aPos', 'ai');
     this.presentProg = linkProgram(gl, QUAD_VS, PRESENT_FS, 'aPos', 'ai');
     this.fillUni = uniformLocations(gl, this.fillProg, ['uColor', 'uRect']);
-    this.bgUni = uniformLocations(gl, this.bgProg, ['uBg', 'uWall', 'uShift', 'uScale', 'uBgW', 'uWobble']);
+    this.bgUni = uniformLocations(gl, this.bgProg, ['uBg', 'uWall', 'uScale', 'uBgW', 'uWobble', 'uAmpS', 'uPer', 'uPhase']);
     this.spriteUni = uniformLocations(gl, this.spriteProg, ['uSprite', 'uX', 'uY', 'uW', 'uMirror', 'uRect']);
     this.disintUni = uniformLocations(gl, this.disintProg, ['uSprite', 'uRand', 'uX', 'uY', 'uScale', 'uNativeW', 'uRozpad', 'uRect']);
     this.mirrorUni = uniformLocations(gl, this.mirrorProg, ['uSrc', 'uMask', 'uRx0', 'uRx1', 'uRy0', 'uRy1', 'uDx0', 'uDx1', 'uK', 'uMX', 'uMY', 'uMW', 'uMH']);
@@ -275,15 +301,6 @@ export class GlAiScreen implements AiTarget {
     gl.bindTexture(gl.TEXTURE_2D, this.randTex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, 256, 1, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, RANDPOLE);
-    nearestClamp(gl);
-
-    // Allocated 1×1 up front, not left empty: a room with no water wobble never uploads
-    // to it, yet `background()` still binds it to BG_FS's `highp isampler2D`. The shader
-    // guards the FETCH, not the binding, and an incomplete texture bound to an integer
-    // sampler is exactly the sort of thing implementations are free to treat differently.
-    this.shiftTex = gl.createTexture()!;
-    gl.bindTexture(gl.TEXTURE_2D, this.shiftTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, 1, 1, 0, gl.RED_INTEGER, gl.SHORT, new Int16Array(1));
     nearestClamp(gl);
   }
 
@@ -510,15 +527,9 @@ export class GlAiScreen implements AiTarget {
   }
 
   /** `sig` is ignored: the composite is one fullscreen pass, so caching it would cost more than it saves. */
-  background(_sig: string, bg: AiImage, wall: AiImage, shifts: Int16Array | null, scale: number): void {
+  background(_sig: string, bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number): void {
     const gl = this.gl;
     const u = this.bgUni;
-    if (shifts) {
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, this.shiftTex);
-      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16I, shifts.length, 1, 0, gl.RED_INTEGER, gl.SHORT, shifts);
-    }
     gl.disable(gl.BLEND);
     gl.useProgram(this.bgProg);
     gl.activeTexture(gl.TEXTURE0);
@@ -527,12 +538,17 @@ export class GlAiScreen implements AiTarget {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.texture(wall));
     gl.uniform1i(u.uWall!, 1);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, this.shiftTex);
-    gl.uniform1i(u.uShift!, 2);
     gl.uniform1i(u.uScale!, scale);
     gl.uniform1i(u.uBgW!, bg.width);
-    gl.uniform1i(u.uWobble!, shifts ? 1 : 0);
+    gl.uniform1i(u.uWobble!, wobble ? 1 : 0);
+    // Amplitude is pre-multiplied by the scale so the shader works entirely in scaled
+    // pixels, and the phase is pre-reduced in FP64 (wobblePhase) so the FP32 `sin` never
+    // sees a large argument. Uploaded even when the room does not wobble: a uniform left
+    // at whatever the previous room set is exactly the sort of state that survives a
+    // `uWobble` guard being edited later.
+    gl.uniform1f(u.uAmpS!, wobble ? (wobble.wamp / 2) * scale : 0);
+    gl.uniform1f(u.uPer!, wobble ? wobble.wper : 1);
+    gl.uniform1f(u.uPhase!, wobble ? wobblePhase(wobble) : 0);
     this.drawFullscreen();
   }
 

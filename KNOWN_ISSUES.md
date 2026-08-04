@@ -82,6 +82,45 @@ These playable rooms have **no known solution** to replay (they were never in th
   `SOLUTION_ROOMS`. A brute-force engine solver is infeasible (e.g. SPUNT is 50×35 with 10
   movable objects — the state space is far too large).
 
+## Rendering: 🟡 the `ai` tier's water wobble differs between the two backends
+
+- **Symptom:** in the **AI-upscaled** tier only, the water wobble looks different depending
+  on which room compositor painted the frame. On the GPU (WebGL, the default) it is smooth;
+  on the canvas-2D fallback it steps in blocks, exactly as the 1998 engine drew it.
+  `classic` and `enhanced` are identical on both backends and are unaffected.
+- **This is deliberate, not a defect.** The 1998 engine displaced background row `i` by
+  `round(wamp/2 · sin(i/wper + count/wspd))` NATIVE pixels — one value per native row,
+  rounded to a whole native pixel, advanced once per 12.5 Hz logic tick. Magnified ×4 that
+  is a 4-scaled-pixel step, held across runs of a dozen or more scaled rows, lurching eight
+  times a second: the one element of a tier built on hi-res art that was still native
+  resolution, on screen in 70 of the 72 rooms. None of those three quantizations is part of
+  the RULE — they are how a 1998 bitmap index sampled it. `GlAiScreen` therefore evaluates
+  the same curve per fragment, at a fractional shift, at `count + alpha`. The tier already
+  does exactly this for the spec=1 mirror (`roomAi.ts`, drawMirror: sub-pixel reflection,
+  "a free win from having real hi-res art"). Game state, timing and logic are untouched.
+- **Why canvas-2D does not follow:** it composites the background as horizontal band blits
+  and caches the whole ×S composite on `faze|count`. Matching the spatial half would be
+  thousands of `drawImage` calls per rebuild; matching the temporal half would miss that
+  cache on *every* display frame and re-blit a 2400×2100 canvas at the display rate. It is
+  the fallback path — no WebGL2, context loss, the CPU-only frame effects — and it keeps
+  the faithful sampling instead.
+- **Side effect worth knowing:** Delphi's `Round` is banker's, so `round(±2.5) = ±2`. The
+  quantized peak displacement was 8 scaled px where the data (`wamp/2 = 2.5`) asks for 10.
+  The smooth wobble swings ~25 % wider — that is the FFR value finally being honoured, not
+  an amplitude change; `wamp`/`wper`/`wspd` are untouched game data.
+- **Where to look:** `AiTarget.background` (`src/render/aiTarget.ts`) documents the split;
+  `BG_FS` in `src/render/glRoomAi.ts` is the smooth path; `faithfulWobbleShifts` /
+  `Canvas2dAiTarget.paint` is the faithful one. The rule itself has one definition,
+  `waterShift` in `src/render/framebuffer.ts`.
+- **How it is guarded:** `tools/test-gl-room-ai.mjs` compares the two backends with
+  `wamp = 0` forced (still water), so everything else stays byte-exact at the same gate;
+  step 6 then pins the smooth curve against an independent JS reimplementation of the
+  shader, scores it against the banded expectation as a negative control, and measures
+  smoothness on the pixels alone. `test/roomAi.test.ts` pins the continuous rule against
+  the faithful `waterShift` at every band mid-row.
+- **The UI does not claim otherwise:** the software-renderer notice says the water is drawn
+  at the original resolution, and the dev-bar Renderer picker says the same.
+
 ## Excluded by design (not issues)
 
 - **SCORE #72** — non-playable results screen.

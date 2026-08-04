@@ -4,13 +4,23 @@
  * Mirrors the enhanced (FFNG truecolor) room look at S× resolution from the
  * AI-upscaled masters staged under public/enhanced-ai/<JMENO>/ (built by
  * tools/studio/build-ai.mjs, which supersedes tools/build-room-ai.mjs for this tier).
- * Like worldMapAi it is PURELY a higher-resolution rendering of the identical game
- * state: item positions, the water-wobble, fish body/head frames and the slide
- * interpolation are all delegated from the same engine that drives the faithful
- * compositor — this file only paints them bigger, from bigger art. It renders with
- * canvas-2D drawImage into a ready-made S×-sized 2D context (the #screen canvas),
- * so the browser does the alpha compositing and the caller CSS-scales the result
- * down to the room's display box.
+ * Like worldMapAi it renders the IDENTICAL GAME STATE — item positions, fish body/head
+ * frames, the water-wave parameters and the slide interpolation are all delegated from
+ * the same engine that drives the faithful compositor; this file paints them bigger,
+ * from bigger art. It renders with canvas-2D drawImage into a ready-made S×-sized 2D
+ * context (the #screen canvas), so the browser does the alpha compositing and the caller
+ * CSS-scales the result down to the room's display box.
+ *
+ * Where it is NOT merely "the same pixels, larger": having real hi-res art lets an
+ * effect the 1998 engine could only evaluate on the native pixel grid be evaluated on
+ * THIS one. Nothing about the effect's rule changes — only the resolution it is sampled
+ * at. Two do this, both on the GPU backend:
+ *   - the spec=1 mirror reflects with sub-pixel accuracy (drawMirror, below);
+ *   - the water wobble is evaluated per fragment, at a fractional shift, at the sub-tick
+ *     time (glRoomAi.ts's BG_FS). The canvas-2D fallback keeps the faithful 1998
+ *     sampling of it — the tier's one backend-dependent difference, documented on
+ *     `AiTarget.background`.
+ * Game state, timing and logic are untouched by both.
  *
  * Scope: the wall-over-wobbled background and the object + fish sprites in item
  * z-order, PLUS the effects the faithful path draws from index read-back — the
@@ -26,9 +36,8 @@
  * overlay), all of which the faithful compositor must draw instead. classic/enhanced
  * never touch it.
  */
-import { delphiRound } from './framebuffer.js';
 import { Canvas2dAiTarget, aiImageRevision, markAiImageChanged } from './aiTarget.js';
-import type { AiImage, AiTarget } from './aiTarget.js';
+import type { AiImage, AiTarget, AiWobble } from './aiTarget.js';
 import { darkestIndex } from './renderRoom.js';
 import { walkRoom, FSIZE, type RoomWalkSink, type FishFrame } from './roomWalk.js';
 import { FISH_BODY_FILE, FISH_HEAD_FILE, frameIndex } from './enhancedArtSource.js';
@@ -282,6 +291,13 @@ interface AiFish {
 /** Per-frame inputs the caller already computes for the faithful render. */
 export interface AiRoomFrame {
   count: number;
+  /**
+   * Sub-tick interpolation fraction (0..1) — the SAME `alpha` the loop already uses to
+   * interpolate fish motion between logic ticks (main.ts:1952). Read-only here: it moves
+   * no game state, it only lets the GPU sample the water wave at display resolution
+   * instead of at 12.5 Hz. Optional so a probe that does not care can omit it.
+   */
+  alpha?: number;
   slide: number;
   fishAnim: { little: FishFrame; big: FishFrame };
 }
@@ -556,23 +572,33 @@ export class AiRoom {
   get nativeHeight(): number { return Math.round(this.bg[0]!.height / this.scale); }
 
   /**
-   * Per-NATIVE-row horizontal wobble shift for this frame, or null when the room does
-   * not wobble (Kresli2: dest[j] = bg[j+k]).
+   * The background + wall art the next background pass would use, or null for a
+   * gspec=2 darkness room (which paints no art at all).
    *
-   * Computed here, once, for BOTH backends — the canvas-2D target turns it into
-   * horizontal band blits and the GPU target into a texture lookup, but neither
-   * re-derives `sin` for itself. That is deliberate: the classic tier's GPU background
-   * has to reproduce a `sin` in FP32 GLSL to match the CPU, and the isolated
-   * glBgParity probe exists precisely because that is fragile. This tier does not
-   * inherit the problem.
+   * Exposed for the wobble oracle: a probe that reproduces BG_FS in JS needs the SOURCE
+   * images, not the composite, or it is comparing the implementation with itself.
    */
-  private wobbleShifts(room: Room, count: number): Int16Array | null {
+  backgroundArt(room: Room): { bg: AiImage; wall: AiImage } | null {
+    if (room.gspec === 2) return null;
+    const faze = room.wallItem.afaze;
+    this.syncWreck(room);
+    const bgIdx = Math.min(faze, this.bg.length - 1);
+    const bg: AiImage = (bgIdx === 0 && this.wreckBg) ? this.wreckBg : this.bg[bgIdx]!;
+    return { bg, wall: this.wall[Math.min(faze, this.wall.length - 1)]! };
+  }
+
+  /**
+   * The room's water-wave data for this frame, or null when it does not wobble.
+   *
+   * Deliberately DATA, not a computed shift table: the two backends now sample this
+   * wave differently — canvas-2D at 1998's quantization, the GPU per fragment at ×S —
+   * and that split is documented once, on `AiTarget.background`, rather than being
+   * pre-decided here for both. `time` carries the sub-tick fraction; `count` carries the
+   * logic tick the composite cache keys on.
+   */
+  private wobbleFor(room: Room, count: number, alpha: number): AiWobble | null {
     if (room.wamp === 0) return null;
-    const { wamp, wper, wspd } = room;
-    const H = this.nativeHeight;
-    const out = new Int16Array(H);
-    for (let i = 0; i < H; i++) out[i] = delphiRound((wamp / 2) * Math.sin(i / wper + count / wspd));
-    return out;
+    return { wamp: room.wamp, wper: room.wper, wspd: room.wspd, count, time: count + alpha };
   }
 
   /**
@@ -596,7 +622,20 @@ export class AiRoom {
    * every coordinate multiplied by `scale` on the way out.
    */
   drawInto(t: AiTarget, room: Room, f: AiRoomFrame): void {
-    walkRoom(this.sink(t), room, f.count, f.slide, f.fishAnim);
+    walkRoom(this.sink(t, f.alpha ?? 0), room, f.count, f.slide, f.fishAnim);
+  }
+
+  /**
+   * Just the wall-over-wobbled-background layer, no items and no fish — the ×S twin of
+   * the faithful path's `renderRoomBackgroundRgba`.
+   *
+   * Exists so a probe can hold the water rule to a hand-computed expectation without the
+   * sprites on top of it. Comparing the FULL frame cannot do that: the wobble is the only
+   * thing being pinned, and every other primitive would have to be reproduced by the
+   * oracle too, which is how an oracle becomes a copy of the implementation.
+   */
+  drawBackgroundInto(t: AiTarget, room: Room, count: number, alpha = 0): void {
+    this.paintBackground(t, room, count, alpha);
   }
 
   /**
@@ -604,11 +643,11 @@ export class AiRoom {
    * scale enters. The walk emits native coordinates (an item's cell origin plus its
    * slide offset); everything below multiplies them out to backing-store pixels.
    */
-  private sink(t: AiTarget): RoomWalkSink {
+  private sink(t: AiTarget, alpha: number): RoomWalkSink {
     const S = this.scale;
     const px = (cell: number, shift: number): number => (cell * FSIZE + shift) * S;
     return {
-      background: (room, count) => this.paintBackground(t, room, count),
+      background: (room, count) => this.paintBackground(t, room, count, alpha),
       item: (room, it, index, sx, sy) => this.drawItem(t, it, index, px(it.x, sx), px(it.y, sy), room),
       fish: (room, which, it, sx, sy, frame) =>
         this.drawFish(t, room, which, px(it.x, sx), px(it.y, sy), frame, it),
@@ -627,7 +666,7 @@ export class AiRoom {
    * glowing dog eyes) and the fish silhouettes are drawn on top, so those are the
    * parts worth having at S×.
    */
-  private paintBackground(t: AiTarget, room: Room, count: number): void {
+  private paintBackground(t: AiTarget, room: Room, count: number, alpha: number): void {
     if (room.gspec === 2) {
       const d = room.palette[darkestIndex(room.palette)] ?? { r: 0, g: 0, b: 0 };
       t.fill(d.r, d.g, d.b);
@@ -640,15 +679,19 @@ export class AiRoom {
     // wreckBackgrounds[0] (LODE ships a single background frame).
     const bg: AiImage = (bgIdx === 0 && this.wreckBg) ? this.wreckBg : this.bg[bgIdx]!;
     const wall = this.wall[Math.min(faze, this.wall.length - 1)]!;
-    const shifts = this.wobbleShifts(room, count);
+    const wobble = this.wobbleFor(room, count, alpha);
     // The composite depends only on the wall's animation phase and — when the room
     // wobbles — the logic tick; the fish interpolate BETWEEN ticks, so a target that
-    // can cache the composite skips it on most frames. The background's REVISION is in
-    // the key because LODE's is mutable: the wreck changes its pixels without changing
-    // the image object, and a target caching on `sig` alone would keep re-blitting the
-    // undamaged composite. (LODE happens to wobble, so `count` would mask this most of
-    // the time — which is luck, not correctness.)
-    t.background(`${faze}|${shifts === null ? 0 : count}|${aiImageRevision(bg)}`, bg, wall, shifts, this.scale);
+    // can cache the composite skips it on most frames. Note the key carries `count`, NOT
+    // `wobble.time`: the sub-tick term exists for the GPU, which composites every frame
+    // anyway, and putting it in here would miss the canvas-2D cache on every display
+    // frame — which is exactly why that backend keeps the faithful tick-rate wobble.
+    // The background's REVISION is in the key because LODE's is mutable: the wreck
+    // changes its pixels without changing the image object, and a target caching on
+    // `sig` alone would keep re-blitting the undamaged composite. (LODE happens to
+    // wobble, so `count` would mask this most of the time — which is luck, not
+    // correctness.)
+    t.background(`${faze}|${wobble === null ? 0 : count}|${aiImageRevision(bg)}`, bg, wall, wobble, this.scale);
   }
 
   /**

@@ -24,7 +24,7 @@
  * change is that each index write goes through `put`, which also updates `rgba`.
  */
 import { FFR_EXTRA } from '../data/ffr.js';
-import { delphiRound, RANDPOLE, cpuMirror, cpuDrawRope } from './framebuffer.js';
+import { delphiRound, waterShift, RANDPOLE, cpuMirror, cpuDrawRope } from './framebuffer.js';
 import type { FfrBitmap } from '../data/ffr.js';
 import type { CompositeTarget, TruecolorTarget } from './framebuffer.js';
 import type { ArtSource } from './artSource.js';
@@ -185,7 +185,7 @@ export class RgbaScreen implements TruecolorTarget {
     for (let i = 0; i < ih; i++) {
       const sy = y + i;
       if (sy < 0 || sy >= this.height) continue;
-      const k = delphiRound((wamp / 2) * Math.sin(i / wper + count / wspd));
+      const k = delphiRound(waterShift(i, count, wamp, wper, wspd));
       const wRow = i * iw;
       const bgRow = i * bg.w + (k + FFR_EXTRA);
       const drow = sy * this.width;
@@ -271,7 +271,7 @@ export class RgbaScreen implements TruecolorTarget {
     for (let i = 0; i < ih; i++) {
       const sy = y + i;
       if (sy < 0 || sy >= this.height) continue;
-      const k = delphiRound((wamp / 2) * Math.sin(i / wper + count / wspd));
+      const k = delphiRound(waterShift(i, count, wamp, wper, wspd));
       const wRow = i * iw;
       const bgRow = i * bg.w + (k + FFR_EXTRA);
       const drow = sy * this.width;
@@ -326,7 +326,7 @@ export class RgbaScreen implements TruecolorTarget {
     const W = this.width;
     for (let i = 0; i < ih; i++) {
       if (i >= this.height) break;
-      const k = delphiRound((wamp / 2) * Math.sin(i / wper + count / wspd));
+      const k = delphiRound(waterShift(i, count, wamp, wper, wspd));
       const wRow = i * iw;
       const bgRow = i * classicBg.w + (k + FFR_EXTRA);
       const drow = i * W;

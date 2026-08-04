@@ -47,6 +47,25 @@ export function delphiRound(x: number): number {
 }
 
 /**
+ * The 1998 water wobble, UNROUNDED (Kresli2, URoom.pas:25123): row `i` of the
+ * background is displaced horizontally by `(wamp/2)·sin(i/wper + count/wspd)` native
+ * pixels. Every caller applies `delphiRound` to it, because the original engine indexed
+ * a bitmap with it — the rounding is the *sampling*, not the rule.
+ *
+ * Extracted so the rule has ONE definition. It had three identical inline copies
+ * (blit2, blitZX, RgbaScreen.blit2Rgba), and the `ai` tier now samples the same curve
+ * continuously (glRoomAi.ts BG_FS) — which is only defensible if its test can pin itself
+ * against the faithful definition by IMPORTING it rather than restating it. A restated
+ * copy cannot catch the bug it is guarding; see the note on `dissolveKeeps`.
+ *
+ * `i` is a float on purpose: the faithful callers pass integer native rows, the `ai`
+ * tier's oracle passes the sub-row coordinate of a scaled row.
+ */
+export function waterShift(i: number, count: number, wamp: number, wper: number, wspd: number): number {
+  return (wamp / 2) * Math.sin(i / wper + count / wspd);
+}
+
+/**
  * The minimal write surface the subtitle renderer needs: a framebuffer it can
  * poke individual palette-index pixels into. Both `IndexedScreen` and the
  * RGBA compositor implement it, so baked (classic) subtitles work on either.
@@ -302,7 +321,7 @@ export class IndexedScreen implements CompositeTarget {
     for (let i = 0; i < ih; i++) {
       const sy = y + i;
       if (sy < 0 || sy >= this.height) continue;
-      const k = delphiRound((wamp / 2) * Math.sin(i / wper + count / wspd));
+      const k = delphiRound(waterShift(i, count, wamp, wper, wspd));
       const wRow = i * iw;
       const bgRow = i * bg.w + (k + FFR_EXTRA);
       const drow = sy * this.width;
@@ -407,7 +426,7 @@ export class IndexedScreen implements CompositeTarget {
     for (let i = 0; i < ih; i++) {
       const sy = y + i;
       if (sy < 0 || sy >= this.height) continue;
-      const k = delphiRound((wamp / 2) * Math.sin(i / wper + count / wspd));
+      const k = delphiRound(waterShift(i, count, wamp, wper, wspd));
       const wRow = i * iw;
       const bgRow = i * bg.w + (k + FFR_EXTRA);
       const drow = sy * this.width;

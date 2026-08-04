@@ -36,6 +36,8 @@ import {
   RANDPOLE,
   cpuDrawRope,
   cpuMirror,
+  delphiRound,
+  waterShift,
   IndexedScreen,
   type CompositeTarget,
 } from '../src/render/framebuffer.js';
@@ -46,8 +48,17 @@ import { darkestIndex } from '../src/render/renderRoom.js';
 import { AI_ROOM_SCALE, aiRoomGateAllows } from '../src/render/roomAi.js';
 import { FISH_BODY_FILE, frameIndex } from '../src/render/enhancedArtSource.js';
 import { AiRoom } from '../src/render/roomAi.js';
-import { Canvas2dAiTarget, aiImagePatch, aiImageRevision, dissolveKeeps, markAiImageChanged } from '../src/render/aiTarget.js';
-import type { AiTarget } from '../src/render/aiTarget.js';
+import {
+  Canvas2dAiTarget,
+  aiImagePatch,
+  aiImageRevision,
+  dissolveKeeps,
+  faithfulWobbleShifts,
+  markAiImageChanged,
+  smoothWobbleShift,
+  wobblePhase,
+} from '../src/render/aiTarget.js';
+import type { AiTarget, AiWobble } from '../src/render/aiTarget.js';
 import { FSIZE as FSIZE_PX } from '../src/render/renderRoom.js';
 import { Dir } from '../src/core/dir.js';
 import { makeRoom } from './roomBuilder.js';
@@ -431,6 +442,124 @@ describe('RANDPOLE dissolve table (framebuffer.ts:26)', () => {
     expect(RANDPOLE[0]).toBe(184);
     expect(RANDPOLE[1]).toBe(228);
     expect(RANDPOLE[255]).toBe(182);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// 8b. The `ai` tier's CONTINUOUS water wobble, pinned against the FAITHFUL rule.
+//
+//     The GPU background pass (glRoomAi.ts BG_FS) no longer looks up a rounded shift
+//     per native row: it evaluates the wave per fragment, at a fractional shift, at a
+//     sub-tick time. That is a resampling of the 1998 curve, not a new curve — and the
+//     only way to say so with a test is to hold it against the faithful definition
+//     rather than against the other AI backend (which is now deliberately allowed to
+//     differ). `waterShift` is IMPORTED from framebuffer.ts, where blit2 / blitZX /
+//     blit2Rgba read it; a re-stated copy here could not catch a wrong curve.
+//
+//     Every wamp/wper/wspd combination that actually occurs in the 72 shipped rooms is
+//     covered, not just the common one.
+// ---------------------------------------------------------------------------
+describe('ai-tier smooth wobble vs the faithful rule (aiTarget.ts / framebuffer.ts:blit2)', () => {
+  const S = AI_ROOM_SCALE;
+  // The 12 distinct (wamp, wper, wspd) triples across 001..072.ffr.
+  const WAVES: [number, number, number][] = [
+    [4, 12, 5], [5, 10, 5], [3, 10, 5], [6, 10, 5], [8, 20, 12], [5, 20, 3],
+    [2, 6, 4], [5, 10, 4], [4, 10, 5], [0, 12, 7], [7, 11, 7], [0, 1, 1],
+  ];
+  const wave = (t: [number, number, number], time: number): AiWobble =>
+    ({ wamp: t[0], wper: t[1], wspd: t[2], count: Math.floor(time), time });
+
+  it('a scaled row centred on native row i has EXACTLY the faithful displacement there', () => {
+    // (y + 0.5)/S - 0.5 === i  <=>  y === i*S + (S-1)/2, the band's mid-row.
+    for (const t of WAVES) {
+      for (const count of [0, 1, 7, 40, 199]) {
+        const w = wave(t, count);
+        const phase = wobblePhase(w);
+        for (let i = 0; i < 60; i++) {
+          const y = i * S + (S - 1) / 2;
+          // smoothWobbleShift is in SCALED px; the faithful rule is in NATIVE px.
+          expect(smoothWobbleShift(y, S, w, phase) / S).toBeCloseTo(
+            waterShift(i, count, t[0], t[1], t[2]),
+            9,
+          );
+        }
+      }
+    }
+  });
+
+  it('rounds back to the faithful integer shift at every band mid-row (no drift)', () => {
+    for (const t of WAVES) {
+      for (let count = 0; count < 50; count++) {
+        const w = wave(t, count);
+        const phase = wobblePhase(w);
+        const faithful = faithfulWobbleShifts(w, 120);
+        for (let i = 0; i < 120; i++) {
+          const y = i * S + (S - 1) / 2;
+          // `+ 0` normalises IEEE -0 (Math.floor(-0) keeps the sign; an Int16Array
+          // element is always +0), which is a signed-zero artifact, not a disagreement.
+          expect(delphiRound(smoothWobbleShift(y, S, w, phase) / S) + 0).toBe(faithful[i]);
+        }
+      }
+    }
+  });
+
+  it('resamples the curve rather than translating the image (a band averages to its native row)', () => {
+    // The half-pixel centring is easy to drop, and dropping it shifts the WHOLE
+    // background up by half a native row — a bug no smoothness check would notice.
+    for (const S2 of [2, 3, 4, 8]) {
+      for (let i = 0; i < 20; i++) {
+        let sum = 0;
+        for (let r = 0; r < S2; r++) sum += (i * S2 + r + 0.5) / S2 - 0.5;
+        expect(sum / S2).toBeCloseTo(i, 12);
+      }
+    }
+  });
+
+  it('is CONTINUOUS across a band: adjacent scaled rows differ, unlike the faithful table', () => {
+    const w = wave([5, 10, 5], 40); // the 60-room default
+    const phase = wobblePhase(w);
+    const faithful = faithfulWobbleShifts(w, 40);
+    let smoothPairs = 0;
+    for (let i = 0; i < 40; i++) {
+      for (let r = 0; r + 1 < S; r++) {
+        const a = smoothWobbleShift(i * S + r, S, w, phase);
+        const b = smoothWobbleShift(i * S + r + 1, S, w, phase);
+        if (a !== b) smoothPairs++;
+      }
+    }
+    // Every within-band pair moves; the faithful table cannot move within a band at all.
+    expect(smoothPairs).toBe(40 * (S - 1));
+    for (let i = 0; i < 40; i++) expect(Number.isInteger(faithful[i])).toBe(true);
+  });
+
+  it('advances with the sub-tick fraction, and count+1 with alpha 0 equals count with alpha 1', () => {
+    const t: [number, number, number] = [5, 10, 5];
+    const at = wobblePhase(wave(t, 40));
+    const mid = wobblePhase(wave(t, 40.5));
+    const next = wobblePhase(wave(t, 41));
+    expect(mid).not.toBe(at);
+    expect(mid).not.toBe(next);
+    // Continuity across the tick boundary: alpha is a fraction OF the tick, nothing else.
+    expect(Math.sin(41 / t[2])).toBeCloseTo(Math.sin(next), 12);
+  });
+
+  it('reduces the phase into [0, 2pi) without changing the wave (a FP32 sin must not see a huge argument)', () => {
+    const t: [number, number, number] = [5, 10, 5];
+    for (const time of [0, 40, 45_000, 450_000]) {
+      const w = wave(t, time);
+      const phase = wobblePhase(w);
+      expect(phase).toBeGreaterThanOrEqual(0);
+      expect(phase).toBeLessThan(Math.PI * 2);
+      expect(Math.sin(phase)).toBeCloseTo(Math.sin(time / t[2]), 9);
+    }
+  });
+
+  it('a wamp=0 room has no displacement at all (rooms 46 and 66 — the parity control)', () => {
+    const w = wave([0, 12, 7], 40.37);
+    const phase = wobblePhase(w);
+    for (let y = 0; y < 40; y++) expect(smoothWobbleShift(y, S, w, phase) + 0).toBe(0);
+    expect([...faithfulWobbleShifts(w, 20)]).toEqual(Array(20).fill(0));
   });
 });
 
