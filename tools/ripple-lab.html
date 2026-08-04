@@ -84,6 +84,19 @@
       <h2>Strength &amp; shape</h2>
       <div id="sliders"></div>
 
+      <h2>Idle cost</h2>
+      <p class="note">
+        How often an IDLE room repaints for the water (GPU path only). Pure perf/smoothness
+        trade — measured idle renderer CPU in room 3: 30fps 1.05&nbsp;%, 20fps 0.74&nbsp;%,
+        15fps 0.56&nbsp;%, against 0.51&nbsp;% on <code>main</code>. Only applies when
+        nothing is moving; play is already at full rate.
+      </p>
+      <label class="row">
+        <span class="top"><span class="name">water wake</span><span class="val" id="wamsv"></span></span>
+        <span class="hint">lower ms = smoother idle water, more CPU</span>
+        <input type="range" id="wams" min="16" max="80" step="1" />
+      </label>
+
       <h2>Trains</h2>
       <div class="btns">
         <button id="now">Start a train now</button>
@@ -159,6 +172,11 @@
         }
         const { offsetTicks, ...shown } = t;
         json.value = JSON.stringify(shown, null, 2);
+        if (ff.waterAnimMs) {
+          const ms = ff.waterAnimMs();
+          wams.value = String(ms);
+          document.getElementById('wamsv').textContent = `${ms} ms (${(1000 / ms).toFixed(0)} fps)`;
+        }
       }
 
       const DEFAULTS = { periodTicks: 60, jitter: 0.5, lifeTicks: 48, halfWidth: 25, amp: 0.8, freq: 6, carrier: 0.4, max: 2 };
@@ -173,6 +191,12 @@
       };
       document.getElementById('copy').onclick = () => navigator.clipboard?.writeText(json.value);
       roomSel.onchange = () => ff?.enterRoomAwait(Number(roomSel.value));
+      const wams = document.getElementById('wams');
+      wams.addEventListener('input', () => {
+        if (!ff) return;
+        ff.waterAnimMs(Number(wams.value));
+        document.getElementById('wamsv').textContent = `${wams.value} ms (${(1000 / Number(wams.value)).toFixed(0)} fps)`;
+      });
 
       // The game publishes __ff at the very end of boot, so poll for it rather than
       // racing the iframe's load event.

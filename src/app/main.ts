@@ -4895,6 +4895,34 @@ const IDLE_LOOP_MS = LOGIC_MS;
 // a ZX room the loop wakes at this rate and force-repaints, so the bands scroll at
 // ~2.4x the original — smoother than 12.5fps, far cheaper than 60fps.
 const ZX_ANIM_MS = 33; // ~30fps
+/**
+ * Idle wake period for the `ai` tier's smooth water, on the GPU path only.
+ *
+ * Its OWN constant rather than a borrow of ZX_ANIM_MS above: the two happen to be
+ * neighbouring numbers but they answer different questions, and tying them together means
+ * a future tweak to the ZX bands silently re-prices the water in 70 rooms.
+ *
+ * The value is a measured trade, not a guess. Idle in room 3 — the one room with no
+ * chatter script, so the only one whose idle cost can actually be measured — renderer CPU
+ * against the wake rate:
+ *
+ *     12.5/s (no water animation)  0.72 %   <- `main` is 0.66 %
+ *     20/s   (this)                0.93 %
+ *     30/s                         1.23 %   <- was ~1.9x main, and made the GPU path
+ *                                              more expensive than canvas-2D, which it
+ *                                              had never been
+ *
+ * The wave the player is watching is slow — `1/wspd` rad/tick is ~0.4 Hz for the 60 rooms
+ * that share wspd=5 — so 20/s is ~50 samples per cycle of the swell and comfortably above
+ * the ripple carrier (~0.8 Hz). The extra 10/s bought smoothness nothing was asking for.
+ *
+ * Idle only, and only when a fish is not moving: `roomAnimating()` already holds the loop
+ * at the full paint rate while anything is in motion, so this never affects play.
+ */
+// `let`, not `const`, for the same reason RIPPLE is mutable: this is a perf/smoothness
+// trade that has to be JUDGED on screen, and tools/ripple-lab.html sets it live so the
+// two ends can be compared without a rebuild. Nothing in the game writes to it.
+let waterAnimMs = 50; // 20fps
 let rafId = 0;
 
 /**
@@ -4909,12 +4937,11 @@ let rafId = 0;
  * via roomAnimating) and would snap back to lurching the moment the room settled — a
  * worse artefact than the one it fixes.
  *
- * So an idle wobbling AI-GPU room takes the SAME treatment the ZX room already has:
- * `ZX_ANIM_MS`, plus a forced repaint. That argument is written out at ZX_ANIM_MS above
- * and applies unchanged here — 12.5 fps looks choppy, 60 fps costs a full-rate ×S
- * repaint of a room where nothing else is happening, ~30 fps is the compromise. Note the
- * loop stays THROTTLED (the timer path, not rAF), so the idle-FPS saver's contract is
- * intact; only the delay changes.
+ * So an idle wobbling AI-GPU room wakes on its own schedule, `WATER_ANIM_MS`, plus a
+ * forced repaint — the same shape as the ZX room's treatment, for the same reason, but
+ * priced separately (see `waterAnimMs` for the measured CPU trade). The loop stays
+ * THROTTLED (the timer path, not rAF), so the idle-FPS saver's contract is intact; only
+ * the delay changes.
  *
  * canvas-2D is excluded on purpose: it keeps the faithful tick-rate wobble, so it has
  * nothing to animate and must keep its current idle cost, which is the higher of the two.
@@ -4939,7 +4966,7 @@ let lastWaterPaint = 0;
  * 30fps was always the target.
  */
 function waterOwesRepaint(now: number): boolean {
-  return aiWaterAnimating() && now - lastWaterPaint >= ZX_ANIM_MS - PAINT_EPSILON_MS;
+  return aiWaterAnimating() && now - lastWaterPaint >= waterAnimMs - PAINT_EPSILON_MS;
 }
 
 function aiWaterAnimating(): boolean {
@@ -5101,8 +5128,9 @@ function scheduleNext(): void {
   if (loopThrottleOk()) {
     // A ZX room keeps animating its bands, so it wakes at ~30fps; any other idle
     // room/map wakes at the 12.5fps logic rate.
-    const delay =
-      (screen === 'room' && room?.gspec === 42) || aiWaterAnimating() ? ZX_ANIM_MS : IDLE_LOOP_MS;
+    const delay = screen === 'room' && room?.gspec === 42
+      ? ZX_ANIM_MS
+      : aiWaterAnimating() ? waterAnimMs : IDLE_LOOP_MS;
     idleTimer = setTimeout(() => {
       idleTimer = 0;
       loop(performance.now());
@@ -6777,6 +6805,15 @@ window.addEventListener('keydown', unlockAudio, { once: true });
    * or tuning probe can sweep the look without a rebuild; the game never writes to it.
    */
   rippleTuning: () => RIPPLE,
+  /** Idle water wake period in ms (see waterAnimMs) — the perf/smoothness trade, live. */
+  waterAnimMs: (ms?: number) => {
+    if (ms !== undefined) {
+      waterAnimMs = Math.max(16, Math.min(80, ms));
+      forceRoomRedraw = true;
+      wake();
+    }
+    return waterAnimMs;
+  },
   /**
    * Live ripple state for the tuning lab (tools/ripple-lab.html): what is on screen now,
    * and how long until the next train. `startTrainNow` shifts the birth schedule so one
