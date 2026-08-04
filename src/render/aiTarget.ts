@@ -23,7 +23,7 @@
  * top-down, y-down space — the same space canvas-2D uses, which the GL target
  * reproduces rather than exposing GL's bottom-up convention upward.
  */
-import { RANDPOLE, delphiRound, waterShift } from './framebuffer.js';
+import { RANDPOLE, delphiRound, waterShift, waterShiftAtPhase } from './framebuffer.js';
 
 /**
  * The water wobble as the two `ai` backends receive it: the room's FFR wave data, plus
@@ -97,7 +97,11 @@ export interface RippleTuning {
   freq: number;
   /** Carrier phase speed, radians per tick — how fast the crests themselves flow. */
   carrier: number;
-  /** Hard cap on how many trains may overlap. */
+  /**
+   * How many trains may overlap. Clamped to `RIPPLE_GPU_SLOTS` when the list is built —
+   * the GPU path has a fixed number of uniform slots and would otherwise drop the excess
+   * silently, which would also desync the JS oracle that scores it.
+   */
   max: number;
   /**
    * Shifts the birth schedule, in ticks. Zero in the game; the ripple lab sets it to
@@ -115,6 +119,17 @@ export interface RippleTuning {
  * `lifeTicks` is 2·`periodTicks`, which is what makes ripples overlap in pairs rather
  * than arriving as separated events.
  */
+/**
+ * How many ripple trains the GPU path can carry at once.
+ *
+ * The single definition of that number: `glRoomAi.ts` sizes its uniform arrays, its
+ * upload buffers and its GLSL loop bound from this, and `activeRipples` clamps to it. It
+ * used to be a literal 3 repeated in four places (a JS const, two GLSL array sizes and a
+ * loop bound) against a tuning cap of 2 — an arrangement where raising the cap dropped
+ * trains on the floor with no error.
+ */
+export const RIPPLE_GPU_SLOTS = 3;
+
 export const RIPPLE: RippleTuning = {
   periodTicks: 60,
   jitter: 0.5,
@@ -199,6 +214,7 @@ function rippleHash(n: number, salt: number): number {
 export function activeRipples(w: AiWobble, nativeHeight: number, t: RippleTuning = RIPPLE): Ripple[] {
   if (w.wamp === 0 || t.amp <= 0 || t.lifeTicks <= 0 || t.periodTicks <= 0) return [];
   const out: Ripple[] = [];
+  const cap = Math.min(t.max, RIPPLE_GPU_SLOTS);
   const clock = w.time + t.offsetTicks;
   // A train born at birthTick(n) is alive while clock - birthTick(n) is in [0, life).
   // birthTick sits within ±jitter·period/2 of n·period, so bracket `n` by that much and
@@ -207,7 +223,7 @@ export function activeRipples(w: AiWobble, nativeHeight: number, t: RippleTuning
   const slack = t.periodTicks * 0.5 + 1;
   const hi = Math.floor((clock + slack) / t.periodTicks);
   const lo = Math.ceil((clock - t.lifeTicks - slack) / t.periodTicks) - 1;
-  for (let n = hi; n >= lo && out.length < t.max; n--) {
+  for (let n = hi; n >= lo && out.length < cap; n--) {
     const age = clock - birthTick(n, t);
     if (age < 0 || age >= t.lifeTicks) continue;
     const u = age / t.lifeTicks;
@@ -250,7 +266,10 @@ export function smoothWobbleShift(
   ripples: readonly Ripple[] = [],
 ): number {
   const row = (y + 0.5) / scale - 0.5;
-  let sh = (w.wamp / 2) * Math.sin(row / w.wper + phase);
+  // The base swell is the FAITHFUL rule, imported — not restated. Only the phase
+  // differs (pre-reduced, see wobblePhase), which is why framebuffer.ts splits
+  // `waterShiftAtPhase` out of `waterShift`.
+  let sh = waterShiftAtPhase(row, phase, w.wamp, w.wper);
   for (const r of ripples) {
     const e = (row - r.c) / r.halfW;
     // Band (group) and crests (phase) are separate: the envelope follows `r.c`, the

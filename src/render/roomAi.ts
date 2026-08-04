@@ -62,6 +62,24 @@ import { FFR_EXTRA, type FfrBitmap } from '../data/ffr.js';
 export const AI_ROOM_SCALE = 4;
 
 /**
+ * Does this room's background actually have moving water on screen?
+ *
+ * Two ways it does not, and BOTH matter to the caller that asks: rooms 46 and 66 carry
+ * `wamp === 0` in their FFR data, and a gspec=2 darkness room paints a flat fill with no
+ * background at all (see `paintBackground`) — CHODBA is the case that bites, because it
+ * has `wamp = 5` and only becomes dark when the player switches the light off, so a
+ * `wamp`-only test says "animating" for a frame that cannot change by a single pixel.
+ *
+ * Exported because the render loop needs the same answer to decide whether an idle room
+ * is worth waking for (main.ts `aiWaterAnimating`), and that decision costs a ×S
+ * composite per wake. One definition, so the loop and the compositor cannot disagree
+ * about whether there is any water.
+ */
+export function aiWaterVisible(room: Room): boolean {
+  return room.gspec !== 2 && room.wamp !== 0;
+}
+
+/**
  * The purely-data half of the "may the AI compositor draw this frame?" rule, split out
  * of main.ts's aiRoomRenderActive so it has ONE definition that tests can import. The
  * caller supplies the module state it cannot see (tier, loaded art, current room).
@@ -608,7 +626,7 @@ export class AiRoom {
    * logic tick the composite cache keys on.
    */
   private wobbleFor(room: Room, count: number, alpha: number): AiWobble | null {
-    if (room.wamp === 0) return null;
+    if (!aiWaterVisible(room)) return null;
     return { wamp: room.wamp, wper: room.wper, wspd: room.wspd, count, time: count + alpha };
   }
 

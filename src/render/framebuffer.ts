@@ -47,22 +47,39 @@ export function delphiRound(x: number): number {
 }
 
 /**
+ * The 1998 water wobble as a function of an already-reduced PHASE — the shape of the
+ * curve, with nothing said about where the phase came from.
+ *
+ * This split exists because the two consumers legitimately supply the phase differently:
+ * the faithful path passes `count/wspd` raw (`waterShift` below), while the `ai` tier
+ * must pre-reduce it into [0, 2π) in FP64 before handing it to an FP32 shader, or a long
+ * session degrades the sine (see `wobblePhase` in aiTarget.ts). Everything else — the
+ * amplitude, the row scaling, the sine itself — is shared, so it lives here once. An
+ * earlier revision of this PR restated the whole expression in `smoothWobbleShift`, which
+ * silently contradicted the paragraph below.
+ */
+export function waterShiftAtPhase(i: number, phase: number, wamp: number, wper: number): number {
+  return (wamp / 2) * Math.sin(i / wper + phase);
+}
+
+/**
  * The 1998 water wobble, UNROUNDED (Kresli2, URoom.pas:25123): row `i` of the
  * background is displaced horizontally by `(wamp/2)·sin(i/wper + count/wspd)` native
  * pixels. Every caller applies `delphiRound` to it, because the original engine indexed
  * a bitmap with it — the rounding is the *sampling*, not the rule.
  *
- * Extracted so the rule has ONE definition. It had three identical inline copies
- * (blit2, blitZX, RgbaScreen.blit2Rgba), and the `ai` tier now samples the same curve
- * continuously (glRoomAi.ts BG_FS) — which is only defensible if its test can pin itself
- * against the faithful definition by IMPORTING it rather than restating it. A restated
- * copy cannot catch the bug it is guarding; see the note on `dissolveKeeps`.
+ * Extracted so the rule has ONE definition. It had five identical inline copies — `blit2`
+ * and `blitZX` in BOTH `IndexedScreen` and `RgbaScreen`, plus `RgbaScreen.blit2Rgba` —
+ * and the `ai` tier now samples the same curve continuously (glRoomAi.ts BG_FS), which is
+ * only defensible if the continuous path is built from this definition rather than a
+ * restatement of it. A restated copy cannot catch the bug it is guarding; see the note on
+ * `dissolveKeeps`.
  *
  * `i` is a float on purpose: the faithful callers pass integer native rows, the `ai`
  * tier's oracle passes the sub-row coordinate of a scaled row.
  */
 export function waterShift(i: number, count: number, wamp: number, wper: number, wspd: number): number {
-  return (wamp / 2) * Math.sin(i / wper + count / wspd);
+  return waterShiftAtPhase(i, count / wspd, wamp, wper);
 }
 
 /**

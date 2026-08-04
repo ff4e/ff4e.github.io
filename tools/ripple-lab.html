@@ -125,7 +125,7 @@
       const SLIDERS = [
         ['amp', 0, 1.5, 0.01, 'peak height, as a fraction of the room’s own wamp/2'],
         ['freq', 1, 14, 0.5, 'ripple frequency, as a multiple of the base 1/wper'],
-        ['carrier', 0, 4, 0.05, 'how fast the crests flow, rad/tick (≈2 Hz at 1.2)'],
+        ['carrier', 0, 4, 0.05, 'how fast the crests flow, rad/tick (crest Hz = carrier/2π × 12.5)'],
         ['halfWidth', 10, 200, 1, 'height of the travelling band, native rows (sigma)'],
         ['lifeTicks', 8, 200, 1, 'how long one train takes to rise (12.5 ticks = 1 s)'],
         ['periodTicks', 12, 500, 1, 'MEAN gap between trains (12.5 ticks = 1 s)'],
@@ -179,10 +179,20 @@
         }
       }
 
-      const DEFAULTS = { periodTicks: 60, jitter: 0.5, lifeTicks: 48, halfWidth: 25, amp: 0.8, freq: 6, carrier: 0.4, max: 2 };
+      // Snapshotted from the LIVE tuning the first time the game connects, rather than
+      // written out here. A hand-copied literal is a second home for the shipped values
+      // that drifts the moment RIPPLE is retuned — and it also silently omitted
+      // `offsetTicks`, so "Reset" left the birth schedule shifted forever after anyone
+      // pressed "Start a train now".
+      let DEFAULTS = null;
+      let DEFAULT_WATER_MS = null;
       document.getElementById('now').onclick = () => ff?.startTrainNow();
       document.getElementById('off').onclick = () => { if (ff) { ff.rippleTuning().amp = 0; sync(); } };
-      document.getElementById('reset').onclick = () => { if (ff) { Object.assign(ff.rippleTuning(), DEFAULTS); sync(); } };
+      document.getElementById('reset').onclick = () => {
+        if (ff && DEFAULTS) { Object.assign(ff.rippleTuning(), DEFAULTS, { offsetTicks: 0 }); sync(); }
+        if (ff) ff.waterAnimMs(DEFAULT_WATER_MS);
+        sync();
+      };
       document.getElementById('continuous').onclick = () => {
         if (!ff) return;
         const t = ff.rippleTuning();
@@ -205,6 +215,8 @@
         const now = w && w.__ff;
         if (now && now !== ff) {
           ff = now;
+          if (!DEFAULTS) DEFAULTS = { ...ff.rippleTuning() };
+          if (DEFAULT_WATER_MS === null) DEFAULT_WATER_MS = ff.waterAnimMs();
           sync();
           ff.enterRoomAwait(Number(roomSel.value));
         }

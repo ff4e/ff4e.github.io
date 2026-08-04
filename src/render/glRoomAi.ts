@@ -31,11 +31,8 @@ import {
   uniformLocations,
   type Uni,
 } from './glCommon.js';
-import { activeRipples, aiImagePatch, aiImageRevision, wobblePhase } from './aiTarget.js';
+import { RIPPLE_GPU_SLOTS, activeRipples, aiImagePatch, aiImageRevision, wobblePhase } from './aiTarget.js';
 import type { AiImage, AiTarget, AiWobble } from './aiTarget.js';
-
-/** Must match the `uRip` array length in BG_FS and RippleTuning.max's ceiling. */
-const MAX_RIPPLES = 3;
 
 /** Opaque colour fill (the darkness room, the elevator rope). */
 const FILL_FS = `#version 300 es
@@ -103,8 +100,8 @@ uniform sampler2D uBg;
 uniform sampler2D uWall;
 uniform int uScale, uBgW, uWobble, uRipN;
 uniform float uAmp, uPer, uPhase;
-uniform vec4 uRip[3];
-uniform float uRipPh[3];
+uniform vec4 uRip[${RIPPLE_GPU_SLOTS}];
+uniform float uRipPh[${RIPPLE_GPU_SLOTS}];
 out vec4 outColor;
 void main() {
   int x = int(gl_FragCoord.x);
@@ -113,7 +110,7 @@ void main() {
   if (uWobble == 1) {
     float row = (float(y) + 0.5) / float(uScale) - 0.5;
     float sh = uAmp * sin(row / uPer + uPhase);
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < ${RIPPLE_GPU_SLOTS}; i++) {
       if (i >= uRipN) break;
       float e = (row - uRip[i].x) / uRip[i].y;
       sh += uRip[i].z * exp(-0.5 * e * e) * sin(row * uRip[i].w + uRipPh[i]);
@@ -269,8 +266,8 @@ export class GlAiScreen implements AiTarget {
   private readonly rectVao: WebGLVertexArrayObject;
   private readonly randTex: WebGLTexture;
   /** Scratch for the per-frame `uRip` upload — allocated once, not per frame. */
-  private readonly ripBuf = new Float32Array(MAX_RIPPLES * 4);
-  private readonly ripPhBuf = new Float32Array(MAX_RIPPLES);
+  private readonly ripBuf = new Float32Array(RIPPLE_GPU_SLOTS * 4);
+  private readonly ripPhBuf = new Float32Array(RIPPLE_GPU_SLOTS);
 
   /**
    * One texture per source bitmap, for the LIFE OF THE CONTEXT.
@@ -585,7 +582,7 @@ export class GlAiScreen implements AiTarget {
     // The whole array is written every frame, expired slots included: leaving a dead
     // ripple's numbers behind a shrinking uRipN is invisible until something reorders the
     // loop, and then it is a ghost that only appears on some frames.
-    for (let i = 0; i < MAX_RIPPLES; i++) {
+    for (let i = 0; i < RIPPLE_GPU_SLOTS; i++) {
       const r = rips[i];
       const o = i * 4;
       this.ripBuf[o] = r ? r.c : 0;
@@ -594,7 +591,7 @@ export class GlAiScreen implements AiTarget {
       this.ripBuf[o + 3] = r ? r.k : 0;
       this.ripPhBuf[i] = r ? r.phase : 0;
     }
-    gl.uniform1i(u.uRipN!, Math.min(rips.length, MAX_RIPPLES));
+    gl.uniform1i(u.uRipN!, Math.min(rips.length, RIPPLE_GPU_SLOTS));
     gl.uniform4fv(u['uRip[0]']!, this.ripBuf);
     gl.uniform1fv(u['uRipPh[0]']!, this.ripPhBuf);
     this.drawFullscreen();

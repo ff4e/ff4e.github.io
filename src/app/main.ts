@@ -85,7 +85,7 @@ import {
 import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
 import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
 import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
-import { loadAiRoom, aiRoomGateAllows, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
+import { loadAiRoom, aiRoomGateAllows, aiWaterVisible, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
 import { Canvas2dAiTarget, RIPPLE, activeRipples, faithfulWobbleShifts, nextRippleBirth, smoothWobbleShift, wobblePhase } from '../render/aiTarget.js';
 import type { AiWobble } from '../render/aiTarget.js';
@@ -5019,7 +5019,11 @@ function aiWaterAnimating(): boolean {
   return (
     screen === 'room' &&
     room !== null &&
-    room.wamp !== 0 &&
+    // Not just `wamp !== 0`: a gspec=2 darkness room paints a flat fill and never
+    // evaluates the wave, and CHODBA reaches that state with wamp = 5 the moment the
+    // player switches the light off. Asking the compositor's own predicate keeps the
+    // loop from waking 20x/s for a frame that cannot change.
+    aiWaterVisible(room) &&
     lastRoomBackend === 'webgl' &&
     // NOTE: the water deliberately keeps animating while a vector subtitle waves in.
     // An earlier revision suppressed it there, because with the water repainting on
