@@ -170,7 +170,8 @@ const MUTATIONS = [
   // probe can kill any of these. They are pinned in roomAi.test.ts against `waterShift`
   // imported from framebuffer.ts — the faithful definition — and these prove that bites.
   // (The GLSL half of the same rule cannot be reached from vitest; it is pinned in the
-  // browser by tools/test-gl-room-ai.mjs step 6, whose own mutations are recorded there.)
+  // browser by tools/test-gl-room-ai.mjs step 6, and tools/mutate-gl-room-ai.mjs is the
+  // sibling harness that proves THAT step bites.)
   { rule: 'wobble: the scaled row is centred before becoming a native row', file: T,
     tests: ['test/roomAi.test.ts'],
     from: '  const row = (y + 0.5) / scale - 0.5;', to: '  const row = y / scale;' },

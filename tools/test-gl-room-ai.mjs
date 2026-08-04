@@ -313,6 +313,11 @@ try {
 //
 //    Room 46 runs the same probe as the control: it has wamp=0 in the data, so it must
 //    still read exactly like the old banded world (exactRows 1, bandsVarying 0).
+//
+//    These three are mutation-checked by tools/mutate-gl-room-ai.mjs, which breaks BG_FS
+//    four ways (centring, interpolation, direction, and a regression to the 1998
+//    sampling) and asserts this step goes red for each. A gate nobody has tried to defeat
+//    is a gate nobody knows the strength of.
 try {
   await enter(3);
   const smooth = await p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
