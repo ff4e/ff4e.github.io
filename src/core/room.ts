@@ -59,7 +59,6 @@ export interface Item {
    * room load; undefined until then.
    */
   initSpec?: number;
-  faziVen: number; // fazi_ven: exit-slide countdown for a spec=9 item (Spec9)
   visible: boolean;
   stoned: boolean; // "Stoned": anchored to the floor (zkameneni_pevnych)
   onBig: number; // support code w.r.t. the big fish (zavislosti_nezkamenelych)
@@ -152,6 +151,16 @@ export function forEachWreckPixel(
 
 /** Disintegration counter set when a fish dies (zac_rozpad, URoom.pas:439). */
 export const ZAC_ROZPAD = 400;
+
+/**
+ * Safety caps on the two gravity fixed-points. Neither has a bound in the Delphi —
+ * both provably terminate on a sane room — but in a browser an unbounded spin is a
+ * frozen tab with no diagnosis, so overrunning throws instead. Sized far above any
+ * real room: nothing can fall further than the room is tall (51x36 at the largest),
+ * and the crush fixed-point can only flip two booleans, so it settles in a pass or two.
+ */
+const MAX_SETTLE_PASSES = 1000;
+const MAX_CRUSH_PASSES = 100;
 
 /**
  * Grid mirroring the Pascal FArray[-1..maxfx, -1..maxfy]. Stored with a +1
@@ -252,6 +261,13 @@ export class Room {
   gspec = 0;
   /** vytlacit (URoom.pas:1445): how many spec=9 items still need pushing out (gspec=9). */
   vytlacit = 1;
+  /**
+   * fazi_ven (URoom.pas:265): how many frames the current exit-slide runs for. It is
+   * a ROOM field, not an item one — `TItem` (URoom.pas:95) has no `fazi_ven`, so
+   * Spec9's `fazi_ven:=3*a` inside its `with Items[i]^ do` writes this, and marking
+   * two items in one pass leaves the LAST one's value (URoom.pas:2449-2452).
+   */
+  faziVen = 0;
 
   /**
    * StdKrajniHlaska state (URoom.pas:2984): edge-of-room fish comments. `bylaukraje`
@@ -302,7 +318,6 @@ export class Room {
       dir: Dir.no,
       moved: 0,
       spec: 0,
-      faziVen: 0,
       visible: true,
       stoned: false,
       onBig: 0,
@@ -388,6 +403,20 @@ export class Room {
     return clone;
   }
 
+  /**
+   * A pushed-out item is gone: `odstran_vytlacene` (URoom.pas:24035) parks it at
+   * (-100,-100) with spec=11, and every physics pass then skips it with
+   * `(gspec<>9)or(spec<>11)` — priprav_pole (URoom.pas:26394), zkameneni_pevnych
+   * (:26591), zavislosti_nezkamenelych (:26641) and all three item loops of padani
+   * (:26690, :26705, :26739). Without that guard the -100 coordinates index the
+   * occupancy grid far outside its bounds, so the next gravity pass reads a
+   * non-existent cell and dies — the GRAL push-out hang (the game loop stops
+   * rescheduling and the tab freezes).
+   */
+  private pushedOut(it: Item): boolean {
+    return this.gspec === 9 && it.spec === 11;
+  }
+
   /** priprav_pole (URoom.pas:26375): rebuild the occupancy grid from item positions. */
   buildGrid(): void {
     const g = this.grid;
@@ -411,6 +440,7 @@ export class Room {
       const includeFish =
         (i !== this.bigIdx || includeBig) && (i !== this.littleIdx || includeLittle);
       if (!includeFish) continue;
+      if (this.pushedOut(it)) continue; // (gspec<>9)or(spec<>11), URoom.pas:26394
       for (const f of it.fields) g.set(it.x + f.x, it.y + f.y, i);
     }
   }
@@ -542,6 +572,7 @@ export class Room {
       changed = false;
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
+        if (this.pushedOut(it)) continue; // URoom.pas:26591
         if (it.stoned || it.kind === Kind.little || it.kind === Kind.big) continue;
         let becomes = false;
         for (let j = 0; j < it.fields.length && !becomes; j++) {
@@ -580,6 +611,7 @@ export class Room {
       changed = false;
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
+        if (this.pushedOut(it)) continue; // URoom.pas:26641
         if (it.stoned || it.kind === Kind.little || it.kind === Kind.big) continue;
         for (const f of it.fields) {
           const pom = this.grid.get(it.x + f.x, it.y + f.y + 1);
@@ -617,7 +649,13 @@ export class Room {
     const velkaZila = this.alive.big;
     let malaPom: boolean;
     let velkaPom: boolean;
+    // The crush fixed-point is bounded too (see fallToRest): only two fish can die,
+    // so it converges in at most a couple of passes. A spin would hang the tab.
+    let guard = 0;
     do {
+      if (++guard > MAX_CRUSH_PASSES) {
+        throw new Error(`padani crush loop did not converge after ${MAX_CRUSH_PASSES} passes`);
+      }
       this.petrify();
       this.computeSupport();
       malaPom = this.alive.little;
@@ -625,6 +663,7 @@ export class Room {
 
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
+        if (this.pushedOut(it)) continue; // URoom.pas:26690
         if (it.stoned || !notFish(it)) continue;
         if (it.onBig === 0) {
           if (it.onLittle > 0 && it.kind === Kind.heavy) this.alive.little = false;
@@ -638,6 +677,7 @@ export class Room {
       }
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
+        if (this.pushedOut(it)) continue; // URoom.pas:26705
         if (it.stoned || !notFish(it)) continue;
         if (it.onBig > 0 && it.onLittle > 0) {
           if (it.kind === Kind.heavy && !this.alive.big) this.alive.little = false;
@@ -669,6 +709,7 @@ export class Room {
     this.dopad = 0;
     for (let i = 1; i <= this.itemCount; i++) {
       const it = this.items[i]!;
+      if (this.pushedOut(it)) continue; // URoom.pas:26739
       if (it.stoned || !notFish(it)) continue;
       if ((it.onLittle === 0 || !this.alive.little) && (it.onBig === 0 || !this.alive.big)) {
         vysl = true;
@@ -677,6 +718,8 @@ export class Room {
     }
     for (let i = 1; i <= this.itemCount; i++) {
       const it = this.items[i]!;
+      // NOTE: the Delphi deliberately has NO (gspec<>9)or(spec<>11) guard on this
+      // last loop (URoom.pas:26749) — a pushed-out item still gets its Moved reset.
       if (it.moved === 2 && it.dir === Dir.no && notFish(it)) {
         if (this.dopad === 0) this.dopad = 1;
         if (it.kind === Kind.heavy) this.dopad = 2;
@@ -686,9 +729,25 @@ export class Room {
     return vysl;
   }
 
-  /** while padani do posun_predmety (URoom.pas:1937/24250): settle gravity. */
+  /**
+   * while padani do posun_predmety (URoom.pas:1937/24250): settle gravity.
+   *
+   * Bounded on purpose. Gravity always terminates (every pass moves at least one
+   * item down a cell, and the room is finite), so overrunning means the physics
+   * state is corrupt — and an unbounded spin here freezes the browser tab, the
+   * worst failure mode a player can hit. Throw a diagnosable error instead.
+   */
   fallToRest(): void {
-    while (this.padani()) this.commitMove();
+    let guard = 0;
+    while (this.padani()) {
+      this.commitMove();
+      if (++guard > MAX_SETTLE_PASSES) {
+        throw new Error(
+          `fallToRest did not settle after ${MAX_SETTLE_PASSES} passes ` +
+            `(room ${this.width}x${this.height}, gspec=${this.gspec})`,
+        );
+      }
+    }
   }
 
   /** priprav_dalsi_pohyb (URoom.pas:26505): clear every item's pending dir. */

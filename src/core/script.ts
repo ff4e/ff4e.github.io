@@ -436,10 +436,14 @@ export class Script {
 
   /**
    * Spec9 (URoom.pas:2439): mark item `idx` (an a×b block) as exiting once a fish
-   * pushes it to a room edge (spec:=9, dir toward the edge, faziVen slide frames).
+   * pushes it to a room edge (spec:=9, dir toward the edge, 3*a/3*b slide frames).
    * When the last-needed item reaches the edge (kolikjede === room.vytlacit), both
    * fish acknowledge with a "jo!" cheer (or the chewing-gum gag). SPUNT drives this;
    * the host's gspec=9 handling then slides the item off and wins.
+   *
+   * `fazi_ven` is a ROOM field (URoom.pas:265) — `TItem` (URoom.pas:95) has none — so
+   * the assignment inside Spec9's `with Items[i]^ do` writes the room's, and marking
+   * two items in one pass leaves only the LAST one's frame count.
    */
   spec9(idx: number, a: number, b: number): void {
     if (!this.atRest) return; // gstav<>stav_klid then exit (URoom.pas:2441)
@@ -447,26 +451,26 @@ export class Script {
     if (it.spec === 11 || it.spec === 9) return;
     let kolikjede = 0;
     // Four INDEPENDENT edge checks (URoom.pas:2449-2452): at a corner more than one
-    // fires and the LAST match wins (overwrites dir/faziVen) — not an else-if chain.
+    // fires and the LAST match wins (overwrites dir/fazi_ven) — not an else-if chain.
     if (it.x === 0) {
       it.spec = 9;
       it.dir = Dir.left;
-      it.faziVen = 3 * a;
+      this.room.faziVen = 3 * a;
     }
     if (it.y === 0) {
       it.spec = 9;
       it.dir = Dir.up;
-      it.faziVen = 3 * b;
+      this.room.faziVen = 3 * b;
     }
     if (it.x + a === this.room.width) {
       it.spec = 9;
       it.dir = Dir.right;
-      it.faziVen = 3 * a;
+      this.room.faziVen = 3 * a;
     }
     if (it.y + b === this.room.height) {
       it.spec = 9;
       it.dir = Dir.down;
-      it.faziVen = 3 * b;
+      this.room.faziVen = 3 * b;
     }
     if (it.spec === 9) kolikjede++;
     if (kolikjede === this.room.vytlacit && kolikjede > 0 && this.alive('little') && this.alive('big')) {
