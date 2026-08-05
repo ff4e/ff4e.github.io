@@ -15,7 +15,7 @@
  */
 import { parseFfr, type FfrRoom, type FfrBitmap } from '../data/ffr.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
-import { parseFft, indexFft, type FftEntry } from '../data/fft.js';
+import { parseFft, type FftEntry } from '../data/fft.js';
 import { Room, ITEM_WATER, ITEM_WALL } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
 import {
@@ -1440,15 +1440,12 @@ let ffr: FfrRoom | null = null;
 let room: Room | null = null;
 let font: FontData | null = null;
 let subs: SubtitleSystem | null = null;
-let fftEntries: FftEntry[] = [];
-let chatFft: FftEntry[] = []; // global x03 ambient-chatter subtitles (ob-*)
-let deathFft: FftEntry[] = []; // global x02 death-commentary subtitles (smrt-*)
 /**
- * The two lines the 1998 release referenced but shipped without (public/restored/,
- * built by tools/build-restored-sounds.ts) — `pyr-m-nudi` and `jes-v-potvora2`.
- * Kept out of the room packages so `public/data/**` stays the 1998 release verbatim.
+ * The current room's FFT, in file order. Only the order-sensitive uses need this:
+ * every by-name lookup goes through `audio.entry()`, which already indexes every
+ * loaded package and so needs no per-package copy here.
  */
-let restoredFft: FftEntry[] = [];
+let fftEntries: FftEntry[] = [];
 // Player options (volume sliders + subtitle language), persisted across sessions
 // (settings.ts). Subtitles extend the port's cz/en with an off state (tit_no);
 // `titDef` remembers the last cz/en pick — the one language used for the titles,
@@ -2313,11 +2310,9 @@ function scriptTalk(name: string, prior: number): number {
     const dur = audio.duration(name);
     return dur > 0 ? Math.max(1, Math.round((dur - TALKING_MEZ_SEC) / LOGIC_SEC)) : DEFAULT_LINE_TICKS;
   }
-  const entry =
-    fftEntries.find((e) => e.name === name) ??
-    chatFft.find((e) => e.name === name) ??
-    deathFft.find((e) => e.name === name) ??
-    restoredFft.find((e) => e.name === name);
+  // The room's FFT arrives before its FFS, so it is consulted directly: during that
+  // window audio has no room package yet but the subtitle is already known.
+  const entry = fftEntries.find((e) => e.name === name) ?? audio.entry(name);
   if (entry && subs && subsOn()) {
     const t = subLang() === 'cz' ? entry.cz : entry.en;
     // globtit (Talk, URoom.pas:654): substitute a '@' placeholder with the room's
@@ -2901,6 +2896,74 @@ async function loadRoom(num: number): Promise<void> {
 }
 
 /**
+ * Fetch one sound package: its .fft index and its .ffs bodies. Null if either is
+ * missing — every package is optional, and losing one costs its lines, never the game.
+ */
+async function fetchSoundPkg(
+  fftUrl: string,
+  ffsUrl: string,
+  deferred = false,
+): Promise<{ fft: Uint8Array; ffs: Uint8Array } | null> {
+  // A `deferred` package holds chatter, never anything the player is waiting on, so it
+  // asks the browser to schedule it behind everything else: x01 alone is 0.74 MB, and
+  // it must not compete with the room art or the next room's voices. `priority` is an
+  // optional RequestInit field — browsers that lack it ignore it.
+  const init = deferred ? ({ priority: 'low' } as RequestInit) : undefined;
+  try {
+    const [fft, ffs] = await Promise.all([
+      fetch(fftUrl, init).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(fftUrl)))),
+      fetch(ffsUrl, init).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(ffsUrl)))),
+    ]);
+    return { fft: new Uint8Array(fft), ffs: new Uint8Array(ffs) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch a package and keep it for the whole session (x00/x02/x03, x01, restored). The
+ * audio engine then holds the only parsed copy: an FFT record carries both the sample
+ * and its subtitle, so nothing else needs to index it to render a line.
+ */
+async function loadSoundPkg(
+  id: string,
+  fftUrl: string,
+  ffsUrl: string,
+  deferred = false,
+): Promise<boolean> {
+  const pkg = await fetchSoundPkg(fftUrl, ffsUrl, deferred);
+  if (!pkg) return false;
+  audio.loadGlobal(id, pkg.fft, pkg.ffs);
+  return true;
+}
+
+/**
+ * x01: the eight "you are at the edge of the level" remarks (`cil-m/v-hlaska0..3`)
+ * that StdKrajniHlaska speaks. `initsounds` (URoom.pas:1018-1021) loads it on top of
+ * the room package, and only in a depth-15 room — the last room of a leg — releasing
+ * it again with KillMem(3) when the room closes (:1583).
+ *
+ * So it is fetched on first entry to a leg-final room, and then KEPT rather than
+ * reloaded per room. Keeping it is not a deviation: the eight rooms whose scripts call
+ * stdKrajniHlaska are EXACTLY the eight depth-15 rooms (pinned by a test), so no other
+ * room can ask for a `cil-*` name and the wider scope is unobservable — whereas
+ * re-fetching 0.74 MB on every leg-final entry is not.
+ *
+ * Until this landed the port never fetched x01 at all, so all eight names resolved to
+ * nothing and the border remark was silent, subtitles included, in every leg-final room.
+ */
+let borderLinesLoading = false;
+function loadBorderLines(num: number): void {
+  if (borderLinesLoading || depthOfRoom(num) !== 15) return;
+  borderLinesLoading = true;
+  void loadSoundPkg('x01', '/data/Title/x01.fft', '/data/Sound/x01.ffs', true).then((ok) => {
+    if (ok) return;
+    borderLinesLoading = false; // let the next leg-final room try again
+    console.warn('[audio] x01 unavailable — the leg-final border remarks stay silent');
+  });
+}
+
+/**
  * Fetch the room's voice package (.ffs).
  *
  * Fire-and-forget and guarded on `curNum`: the player can be in a different room by
@@ -2939,6 +3002,7 @@ function armRoomVoices(settled: boolean): void {
 
 function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): void {
   if (curNum !== num || screen !== 'room') return;
+  loadBorderLines(num);
   let pending = voiceLoads.get(nnn);
   if (pending === undefined) {
     pending = fetch(`/data/Sound/${nnn}.ffs`)
@@ -2949,7 +3013,7 @@ function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): void {
   }
   void pending.then((buf) => {
     if (curNum !== num) return;
-    if (buf) audio.setRoom(fftBytes, new Uint8Array(buf));
+    if (buf) audio.setRoom(nnn, fftBytes, new Uint8Array(buf));
     roomVoicesSettled = true;
     markVoicesSettled();
     wake(); // the dialogue queue was held on this; let it run on the next frame
@@ -6043,40 +6107,13 @@ try {
 await ensureDeskyData();
 
 setLoadingMsg('Loading sound…');
-try {
-  const [gfft, gffs] = await Promise.all([
-    fetch('/data/Title/x00.fft').then((r) => r.arrayBuffer()),
-    fetch('/data/Sound/x00.ffs').then((r) => r.arrayBuffer()),
-  ]);
-  audio.loadGlobal(new Uint8Array(gfft), new Uint8Array(gffs));
-} catch {
-  /* effects optional */
-}
-// Global ambient-chatter package (x03: the "ob-*" idle lines the fish say when
-// left alone — StdKecej / vyber_hlasku). Subtitles into chatFft, voices into audio.
-try {
-  const [cfft, cffs] = await Promise.all([
-    fetch('/data/Title/x03.fft').then((r) => r.arrayBuffer()),
-    fetch('/data/Sound/x03.ffs').then((r) => r.arrayBuffer()),
-  ]);
-  const cfftBytes = new Uint8Array(cfft);
-  chatFft = parseFft(cfftBytes);
-  audio.loadGlobal(cfftBytes, new Uint8Array(cffs));
-} catch {
-  /* chatter optional */
-}
-// Global death-commentary package (x02: the "smrt-*" lines the survivor says when
-// its partner dies — StdSmrt). Subtitles into deathFft, voices into audio.
-try {
-  const [dfft, dffs] = await Promise.all([
-    fetch('/data/Title/x02.fft').then((r) => r.arrayBuffer()),
-    fetch('/data/Sound/x02.ffs').then((r) => r.arrayBuffer()),
-  ]);
-  const dfftBytes = new Uint8Array(dfft);
-  deathFft = parseFft(dfftBytes);
-  audio.loadGlobal(dfftBytes, new Uint8Array(dffs));
-} catch {
-  /* death lines optional */
+// The persistent global packages, in the order the original loads them: x00 effects,
+// x03 ambient chatter (the "ob-*" idle lines, StdKecej / vyber_hlasku) and x02 death
+// commentary (the "smrt-*" lines, StdSmrt). Each is optional — a missing one costs
+// its lines, never the game. Kept sequential, as before: they are large, and the boot
+// path is what the UI probes' 5 s budget is measured against.
+for (const id of ['x00', 'x03', 'x02']) {
+  await loadSoundPkg(id, `/data/Title/${id}.fft`, `/data/Sound/${id}.ffs`);
 }
 setLoadingMsg('Loading the world…');
 await loadRoom(7);
@@ -6087,28 +6124,22 @@ if (!panel || !worldMap) {
   showFatal('Some core game files are missing. Please try again, or check the installation.');
   throw new Error('missing critical assets: ' + (!panel ? 'panel ' : '') + (!worldMap ? 'worldMap' : ''));
 }
-// The two restored lines (see restoredFft). A separate package rather than a patched
-// 025/063, so the committed 1998 data stays byte-for-byte what ALTAR released; it is
-// loaded as a global because its two names are room-prefixed and cannot collide.
+// The two lines the 1998 release referenced but shipped without (public/restored/,
+// built by tools/build-restored-sounds.ts) — `pyr-m-nudi` and `jes-v-potvora2`. A
+// package of its own rather than a patched 025/063, so the committed 1998 data stays
+// byte-for-byte what ALTAR released.
 //
-// Fetched AFTER boot and off the critical path, not with the globals above: each of
-// those is a serialized round trip before the game can start, and this is two chatter
-// lines in two rooms that are not room 7. Landing a moment late costs nothing; making
-// boot wait for it costs every player, and the room 25/63 packages take longer to
-// arrive than this does anyway.
-void (async () => {
-  try {
-    const [rfft, rffs] = await Promise.all([
-      fetch('/restored/restored.fft').then((r) => r.arrayBuffer()),
-      fetch('/restored/restored.ffs').then((r) => r.arrayBuffer()),
-    ]);
-    const rfftBytes = new Uint8Array(rfft);
-    restoredFft = parseFft(rfftBytes);
-    audio.loadGlobal(rfftBytes, new Uint8Array(rffs));
-  } catch {
-    /* restored lines optional */
-  }
-})();
+// Fetched AFTER boot and off the critical path: each awaited package above is another
+// serialized round trip before the game can start, and loading this one inline was
+// measured pushing UI probes past their 5 s boot budget. The cost of that choice is
+// real but small — if a player reaches room 25 or 63 before it lands, that one line
+// keeps the 1998 silence, so the failure mode is the status quo ante, not a break.
+void loadSoundPkg('restored', '/restored/restored.fft', '/restored/restored.ffs', true).then(
+  (ok) => {
+    if (!ok) console.warn('[audio] restored package unavailable — PYRAMIDA/JESKYNE keep the 1998 silence');
+  },
+);
+
 // Boot: on first run, auto-play the intro (logo → intro) before the map, then
 // flip the persisted flag so later runs go straight to the map (the original's
 // START→NO first-run gate, UMain.pas:677-682). The intro is always replayable
@@ -6431,6 +6462,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   // bulk of an entry's bytes and nothing visual needs it), so a probe that asserts on
   // a room-specific SOUND must wait for this rather than for the room itself.
   roomAudioReady: () => audio.roomLoaded,
+  /** How many sounds a named package currently answers for (probe: x01 in a leg-final). */
+  soundPkgSize: (id: string) => audio.entryCount(id),
   script: () => (activeScript ? { pokus: activeScript.s.pokus, dialog: activeScript.s.isDialog() } : null),
   itemState: (i: number) => {
     const it = room?.items[i];
@@ -7349,8 +7382,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
       noFlush,
     };
   },
-  chatCount: () => chatFft.length,
-  deathBank: () => deathFft.length,
+  chatCount: () => audio.entryCount('x03'),
+  deathBank: () => audio.entryCount('x02'),
   roomDepth: () => roomDepth,
   killFish: (which: 'little' | 'big') => {
     room?.killFish(which);

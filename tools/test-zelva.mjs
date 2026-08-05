@@ -12,6 +12,11 @@ await withApp(async ({ p, expect }) => {
   );
   expect(await p.evaluate(() => window.__ff.script() !== null), 'ZELVA has an active script');
 
+  // ZELVA is one of the eight leg-final rooms, so StdKrajniHlaska's border remarks
+  // (`cil-*-hlaska*`, x01) have to resolve here. The port never fetched x01 at all
+  // until this landed, so all eight were silent, subtitles included.
+  await p.waitForFunction(() => window.__ff.soundPkgSize('x01') === 8, { timeout: 60000 });
+
   // Possess the little fish and send it a few cells to the left of where it starts.
   const start = await p.evaluate(() => window.__ff.fishCell('little'));
   const target = { x: Math.max(1, start.x - 5), y: start.y };
