@@ -8,7 +8,7 @@
  * rendered frame would have ~the same (few hundred) colours as classic instead
  * of thousands.
  */
-import { selectRoom, withApp } from './ui-lib.mjs';
+import { budget, selectRoom, withApp } from './ui-lib.mjs';
 
 /** Count unique RGB colours currently on the room canvas. */
 async function canvasColors(p) {
@@ -92,8 +92,8 @@ await withApp(async ({ p, expect }) => {
     await p.evaluate((m) => window.__ff.setGraphics(m), 'enhanced');
     // Wait for the art to load (fails loudly if it never does — the fallback bug).
     const loaded = await p
-      .waitForFunction(() => window.__ff && window.__ff.enhancedActive && window.__ff.enhancedActive(), {
-        timeout: 12000,
+      .waitForFunction(() => window.__ff && window.__ff.enhancedActive && window.__ff.enhancedActive(), null, {
+        timeout: budget(12000),
       })
       .then(() => true)
       .catch(() => false);

@@ -8,7 +8,7 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; skips (pass)
  * if the environment has no WebGL2.
  */
-import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { budget, exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 
 const b = await launchBrowser({ gl: true });
@@ -46,7 +46,7 @@ for (const [num, wantGl] of cases) {
   await waitRoom(p, 15);
   // Wait for the backend/fallback to settle to the expected state (deterministic,
   // no fixed sleep) — a frame must render and set glActive first.
-  const settled = await p.waitForFunction((want) => window.__ff.glActive() === want, wantGl, { timeout: 4000 }).then(() => true).catch(() => false);
+  const settled = await p.waitForFunction((want) => window.__ff.glActive() === want, wantGl, { timeout: budget(4000) }).then(() => true).catch(() => false);
   const gl = await p.evaluate(() => window.__ff.glActive());
   if (!settled || gl !== wantGl) { ok = false; console.log(`  FAIL room ${num}: glActive=${gl} want=${wantGl}`); }
 }
@@ -54,7 +54,7 @@ for (const [num, wantGl] of cases) {
 // Toggle back to CPU: the GL canvas must go inactive.
 await p.evaluate(() => { window.__ff.setRenderer('cpu'); window.__ff.enterRoomAwait(3); });
 await waitRoom(p, 15);
-const wentCpu = await p.waitForFunction(() => window.__ff.glActive() === false, null, { timeout: 4000 }).then(() => true).catch(() => false);
+const wentCpu = await p.waitForFunction(() => window.__ff.glActive() === false, null, { timeout: budget(4000) }).then(() => true).catch(() => false);
 if (!wentCpu) { ok = false; console.log('  FAIL: glActive still true after switching to CPU'); }
 
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }

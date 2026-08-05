@@ -27,7 +27,7 @@
  * and at the bottom tier 5px against that same ~36. A stall and a teleport become the
  * two sides of one assertion.
  */
-import { waitRoom, withApp, tickSleep } from './ui-lib.mjs';
+import { budget, tickSleep, waitRoom, withApp } from './ui-lib.mjs';
 
 const FSIZE = 15;
 const HOLD_TICKS = 20; // ~1.6s of GAME time — long enough to climb all three tiers
@@ -56,7 +56,7 @@ await withApp(async ({ p, expect }) => {
 
   await p.evaluate(() => window.__ff.enterRoomAwait(30)); // RECYCLED — open water
   await waitRoom(p, 0);
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(5000) });
 
   // Still worth a quiet page: anything streaming or decoding (enhanced art, audio)
   // costs rendered frames, and while a dropped frame no longer breaks the assertions

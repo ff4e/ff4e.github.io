@@ -32,7 +32,7 @@
  *
  * Runs its own ANGLE browser for WebGL2; skips (pass) where WebGL2 is unavailable.
  */
-import { exitProbe, gotoApp, launchBrowser, waitRoom, waitTicks } from './ui-lib.mjs';
+import { budget, exitProbe, gotoApp, launchBrowser, waitRoom, waitTicks } from './ui-lib.mjs';
 
 const MAX_CHANNEL_DELTA = 1; // same gate and same reason as test-gl-room-ai.mjs
 
@@ -62,8 +62,8 @@ const expect = (cond, msg) => {
 async function enterLode() {
   await p.evaluate(() => window.__ff.enterRoomAwait(19));
   await waitRoom(p, 0);
-  await p.waitForFunction(() => window.__ff.roomArtPending() === false, { timeout: 30000 });
-  await p.waitForFunction(() => window.__ff.aiRoomLoaded(), { timeout: 30000 });
+  await p.waitForFunction(() => window.__ff.roomArtPending() === false, null, { timeout: budget(30000) });
+  await p.waitForFunction(() => window.__ff.aiRoomLoaded(), null, { timeout: budget(30000) });
 }
 
 await enterLode();
@@ -85,7 +85,7 @@ expect(await p.evaluate(() => window.__ff.aiWreckDigest()) === null, 'at rest: n
 // to 106x77), and dropping the first one everywhere would let a replay that ignored
 // `swap.phase` pass every check in this file.
 await p.evaluate(() => window.__ff.dropShip(3));
-await p.waitForFunction(() => window.__ff.wreckState().changed > 0, { timeout: 15000 });
+await p.waitForFunction(() => window.__ff.wreckState().changed > 0, null, { timeout: budget(15000) });
 const startCount = await p.evaluate(() => window.__ff.count());
 await waitTicks(p, startCount, 4); // several ticks in: the sprite has eroded, not just landed
 

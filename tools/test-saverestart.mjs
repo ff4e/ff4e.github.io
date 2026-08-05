@@ -6,7 +6,7 @@
  * the saved posHash. (The 1998 game has no single-move undo: Backspace = Restart.)
  * Launched with autoplay allowed so the game clock runs headless.
  */
-import { exitProbe, gotoApp, launchBrowser, selectRoom, tickSleep } from './ui-lib.mjs';
+import { budget, exitProbe, gotoApp, launchBrowser, selectRoom, tickSleep } from './ui-lib.mjs';
 const DIR = { up: 1, down: 2, left: 3, right: 4 };
 const b = await launchBrowser();
 const p = await b.newPage({ viewport: { width: 1600, height: 620 } });
@@ -16,12 +16,12 @@ p.on('pageerror', (e) => errs.push('PE:' + e.message));
 await p.addInitScript(() => { try { localStorage.setItem('ff.devEnabled', '1'); } catch {} }); // enable dev pane (room dropdown)
 await gotoApp(p);
 await selectRoom(p, 7); // UTES
-await p.waitForFunction(() => window.__ff && window.__ff.posHash, { timeout: 5000 });
+await p.waitForFunction(() => window.__ff && window.__ff.posHash, null, { timeout: budget(5000) });
 await p.evaluate(() => window.__ff.load && localStorage.removeItem('ff.save.7'));
 await tickSleep(p, 4);
 
 async function idle() {
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(5000) });
 }
 async function press(w, d) {
   await p.evaluate(({ w, d }) => window.__ff.press(w, d), { w, d });
@@ -57,7 +57,7 @@ for (const [w, d] of [['little', 'down'], ['little', 'left'], ['big', 'right']])
 const hAfter = await hash();
 await p.evaluate(() => window.__ff.load());
 // Load is a fast-forward animation (loadmode); wait for it to finish before hashing.
-await p.waitForFunction(() => !window.__ff.loading(), { timeout: 5000 });
+await p.waitForFunction(() => !window.__ff.loading(), null, { timeout: budget(5000) });
 await idle();
 const hLoad = await hash();
 const mLoad = await moves();

@@ -11,19 +11,19 @@
  * Asserts behaviour (the fish steps toward the click) rather than the arithmetic, so it
  * stays honest if the conversion is rewritten.
  */
-import { withApp } from './ui-lib.mjs';
+import { budget, withApp } from './ui-lib.mjs';
 
 const TIERS = ['classic', 'enhanced', 'ai'];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap(), { timeout: 15000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap(), null, { timeout: budget(15000) });
 
   for (const tier of TIERS) {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier);
     await p.evaluate(() => window.__ff.enterRoomAwait(1));
-    await p.waitForFunction(() => window.__ff.roomNum() === 1, { timeout: 15000 });
-    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier, { timeout: 15000 });
-    await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 20000 });
+    await p.waitForFunction(() => window.__ff.roomNum() === 1, null, { timeout: budget(15000) });
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier, { timeout: budget(15000) });
+    await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(20000) });
 
     const st = await p.evaluate(() => window.__ff.state());
     expect(st.little !== null && st.big !== null, `[${tier}] both fish are present`);
@@ -46,7 +46,7 @@ await withApp(async ({ p, expect }) => {
     const o = st[other];
     const a = await clientOf(o.x, o.y);
     await p.mouse.click(a.x, a.y);
-    await p.waitForFunction((w) => window.__ff.state().active === w, other, { timeout: 6000 }).catch(() => {});
+    await p.waitForFunction((w) => window.__ff.state().active === w, other, { timeout: budget(6000) }).catch(() => {});
     expect(
       (await p.evaluate(() => window.__ff.state().active)) === other,
       `[${tier}] clicking the ${other} fish selects it (cell ${o.x},${o.y})`,
@@ -54,14 +54,14 @@ await withApp(async ({ p, expect }) => {
 
     // Selecting a fish plays a short "peek" at it, and clickCell ignores input while
     // the engine is not idle — so wait for it to settle before clicking again.
-    await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 10000 });
+    await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(10000) });
 
     // ...and back, so a stuck-on-one-fish failure cannot pass either.
     const first = st.active;
     const f = st[first];
     const b = await clientOf(f.x, f.y);
     await p.mouse.click(b.x, b.y);
-    await p.waitForFunction((w) => window.__ff.state().active === w, first, { timeout: 6000 }).catch(() => {});
+    await p.waitForFunction((w) => window.__ff.state().active === w, first, { timeout: budget(6000) }).catch(() => {});
     expect(
       (await p.evaluate(() => window.__ff.state().active)) === first,
       `[${tier}] clicking the ${first} fish selects it back (cell ${f.x},${f.y})`,

@@ -7,7 +7,7 @@
  * Not WebGL-dependent, but lives here (tools/test-*.mjs) because it needs a real
  * browser document + document.fonts.
  */
-import { exitProbe, gotoApp, launchBrowser } from './ui-lib.mjs';
+import { budget, exitProbe, gotoApp, launchBrowser } from './ui-lib.mjs';
 
 
 const b = await launchBrowser();
@@ -29,7 +29,7 @@ async function freshPage(subfont) {
   await gotoApp(p);
   await p.waitForFunction(() => window.__ff && window.__ff.count);
   // Fonts load asynchronously at startup; wait for subFontReady.
-  await p.waitForFunction(() => window.__ff.subFontReady && window.__ff.subFontReady(), { timeout: 8000 }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.subFontReady && window.__ff.subFontReady(), null, { timeout: budget(8000) }).catch(() => {});
   return p;
 }
 

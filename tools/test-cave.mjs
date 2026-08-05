@@ -3,7 +3,7 @@
  *   - GRAL (64) confirms its gspec=9 push-out mode + a vytlacit count > 1 (many chalices).
  *   - roompole persists across a RESTART: ZAVAL (60) bumps roompole[1] each attempt
  *     (TRoom.Restart doesn't clear roompole), so a restart increments it. */
-import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 const ROOMS = [
   [59, 'BOTTLES'], [60, 'ZAVAL'], [61, 'TRUHLA'],
@@ -11,7 +11,7 @@ const ROOMS = [
 ];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   for (const [num, name] of ROOMS) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
     await waitRoom(p, 0);

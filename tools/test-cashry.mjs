@@ -7,12 +7,12 @@
  * count, the figure survives across sessions, and the room you are currently in
  * has not been added yet. The port used to report wall-clock since page load.
  */
-import { waitRoom, withApp } from './ui-lib.mjs';
+import { budget, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.evaluate(() => localStorage.removeItem('ff.playtime'));
   await p.reload();
-  await p.waitForFunction(() => window.__ff && window.__ff.screen, { timeout: 10000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.screen, null, { timeout: budget(10000) });
 
   expect((await p.evaluate(() => window.__ff.casHry())) === 0, 'a fresh profile has no play time');
 
@@ -31,7 +31,7 @@ await withApp(async ({ p, expect }) => {
   );
 
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(5000) });
   const banked = await p.evaluate(() => window.__ff.playTime());
   expect(banked['7'] >= 600, `leaving the room banks its time (got ${banked['7']}ms)`);
   const afterOne = await p.evaluate(() => window.__ff.casHry());
@@ -42,7 +42,7 @@ await withApp(async ({ p, expect }) => {
   await waitRoom(p, 0);
   await p.waitForTimeout(500);
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(5000) });
   const two = await p.evaluate(() => window.__ff.playTime());
   expect(two['1'] > 0 && two['7'] > 0, 'each room banks its own time');
   expect(
@@ -53,7 +53,7 @@ await withApp(async ({ p, expect }) => {
   // ---- the whole point: it survives a session ---------------------------------
   const before = await p.evaluate(() => window.__ff.casHry());
   await p.reload();
-  await p.waitForFunction(() => window.__ff && window.__ff.casHry, { timeout: 10000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.casHry, null, { timeout: budget(10000) });
   const after = await p.evaluate(() => window.__ff.casHry());
   expect(
     Math.abs(after - before) < 1e-9,

@@ -83,7 +83,14 @@ const EXCLUSIVE = new Set([
   'test-tierperf.mjs',
 ]);
 
-const jobs = Math.max(1, Number(process.env.FF_UI_JOBS) || Math.min(8, Math.max(2, cpus().length - 2)));
+// Pool width. Sized by measurement, and the right number went DOWN once the probes
+// stopped failing early: a probe is mostly waiting on the GAME clock, which is
+// wall-clock driven and shares the machine, so an extra worker slows every other
+// worker's clock rather than buying throughput. Measured on this 10-core machine with
+// the suite green (81/81): 8 workers 443/427s, 6 workers 394/407s, 5 workers 438s —
+// and at 6 the total probe-seconds are ~510s LOWER than at 8, i.e. nearly every probe
+// finishes sooner. `cores - 2` used to give 8 here, which is past the knee.
+const jobs = Math.max(1, Number(process.env.FF_UI_JOBS) || Math.min(8, Math.max(2, Math.round(cpus().length * 0.6))));
 
 // Deadlock backstop for a single probe (see runProbe). The slowest probe is ~150s.
 const PROBE_TIMEOUT_MS = Math.max(60000, Number(process.env.FF_UI_PROBE_TIMEOUT_MS) || 600000);

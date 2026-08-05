@@ -1,9 +1,9 @@
 /** UI probe: PYRAMIDA (room 25). Runs many ticks so the pharaoh/stela/worm animate
  *  (the worm crawls by writing its own X/Y) without error; confirms items exist,
  *  malar(1)=little fish, and the worm actually moves. */
-import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoomAwait(25));
   await waitRoom(p, 0);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'PYRAMIDA has an active script');

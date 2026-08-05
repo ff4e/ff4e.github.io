@@ -3,28 +3,28 @@
  * with the demo and *persists* after it ends (InitKufrDemo/DoneKufrDemo), and the
  * demo is skippable by clicking or pressing Escape (zrus_kufr).
  */
-import { waitRoom, waitTicks, withApp, tickSleep } from './ui-lib.mjs';
+import { budget, tickSleep, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
 
   async function startDemo() {
     await p.evaluate(() => window.__ff.enterRoomAwait(2)); // KUFRIK
     await waitRoom(p, 0);
     await p.evaluate(() => window.__ff.startCutscene());
-    await p.waitForFunction(() => window.__ff.cutsceneActive(), { timeout: 5000 });
+    await p.waitForFunction(() => window.__ff.cutsceneActive(), null, { timeout: budget(5000) });
   }
 
   // 1) The looping 'kufrik' music starts with the demo.
   await startDemo();
-  await p.waitForFunction(() => window.__ff.music() === 'kufrik', { timeout: 20000 }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.music() === 'kufrik', null, { timeout: budget(20000) }).catch(() => {});
   expect((await p.evaluate(() => window.__ff.music())) === 'kufrik', "the 'kufrik' music plays during the demo");
 
   // 2) A click skips the demo, and the music keeps playing afterward.
   await p.evaluate(() =>
     document.getElementById('screen').dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true })),
   );
-  await p.waitForFunction(() => !window.__ff.cutsceneActive(), { timeout: 5000 }).catch(() => {});
+  await p.waitForFunction(() => !window.__ff.cutsceneActive(), null, { timeout: budget(5000) }).catch(() => {});
   expect(!(await p.evaluate(() => window.__ff.cutsceneActive())), 'clicking skips the demo');
   await tickSleep(p, 4);
   expect((await p.evaluate(() => window.__ff.music())) === 'kufrik', 'the music keeps playing after the demo is skipped');
@@ -32,7 +32,7 @@ await withApp(async ({ p, expect }) => {
   // 3) Escape also skips the demo.
   await startDemo();
   await p.keyboard.press('Escape');
-  await p.waitForFunction(() => !window.__ff.cutsceneActive(), { timeout: 5000 }).catch(() => {});
+  await p.waitForFunction(() => !window.__ff.cutsceneActive(), null, { timeout: budget(5000) }).catch(() => {});
   expect(!(await p.evaluate(() => window.__ff.cutsceneActive())), 'Escape skips the demo');
   expect((await p.evaluate(() => window.__ff.music())) === 'kufrik', 'the music still plays after an Escape skip');
 

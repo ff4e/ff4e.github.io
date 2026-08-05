@@ -16,7 +16,7 @@
  * not milliseconds, so they hold on any machine — but both sides are sampled over
  * wall-clock windows, so this probe runs exclusively (see run-ui-tests.mjs).
  */
-import { selectRoom, withApp } from './ui-lib.mjs';
+import { budget, selectRoom, withApp } from './ui-lib.mjs';
 
 const SUBSTEPS = 5; // must match SUB_SUBSTEPS in src/render/subtitles.ts
 
@@ -54,7 +54,7 @@ async function sample(p, ms) {
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
-  await p.waitForFunction(() => window.__ff.subFontReady(), { timeout: 20000 });
+  await p.waitForFunction(() => window.__ff.subFontReady(), null, { timeout: budget(20000) });
   // Turn the idle saver off so the room really does repaint on every rAF: that is
   // the situation the gate has to survive (it is also what happens with the saver
   // on whenever the fish is moving).
@@ -104,7 +104,7 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), 'Watch out for the crab.');
   // Wait on the actual state, not on a guessed timeout: the wave-in and the scroll
   // to cilys take a different number of ticks for every line.
-  await p.waitForFunction(() => !window.__ff.subsAnimating(), { timeout: 8000 });
+  await p.waitForFunction(() => !window.__ff.subsAnimating(), null, { timeout: budget(8000) });
   const settled = await sample(p, 800);
   expect(settled.frames > 10, `settled: frames really were rendered (${settled.frames})`);
   expect(settled.ticks > 5, `settled: the game really was ticking (${settled.ticks})`);

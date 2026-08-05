@@ -5,7 +5,7 @@
  * best count is read from ff.scores, Cancel closes, Run launches, Replay animates
  * a stored best solution, and a cheat-only room has Replay disabled.
  */
-import { waitRoom, withApp } from './ui-lib.mjs';
+import { budget, waitRoom, withApp } from './ui-lib.mjs';
 
 // Button centres in 640×480 map space (icons at y=222..268; Run 258-, Replay 301-,
 // Cancel 344-); Fish-House room 1's node is at KulXY (320,121).
@@ -15,7 +15,7 @@ const CANCEL = [365, 244];
 const ROOM1_NODE = [320, 121];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap(), { timeout: 8000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap(), null, { timeout: budget(8000) });
   const reset = () =>
     p.evaluate(() => {
       ['ff.solved', 'ff.cheated', 'ff.scores', 'ff.best'].forEach((k) => localStorage.removeItem(k));
@@ -69,7 +69,7 @@ await withApp(async ({ p, expect }) => {
   // Control: room 1's ruler head (hlava soudce) speaks during normal idle play
   // (per-step 1/50 chance, vitejte1.ts:253) — proves this room DOES talk, so the
   // silent-replay assertion below is meaningful and not vacuously true.
-  await p.waitForFunction(() => window.__ff.lines() > 0, { timeout: 10000 });
+  await p.waitForFunction(() => window.__ff.lines() > 0, null, { timeout: budget(10000) });
   expect((await p.evaluate(() => window.__ff.lines())) > 0, 'room 1 speaks during normal play');
 
   // Back to the map; Replay arms the best-solution playback. replaymode is armed in a
@@ -79,7 +79,7 @@ await withApp(async ({ p, expect }) => {
   await click(ROOM1_NODE);
   await p.waitForTimeout(80);
   await click(REPLAY);
-  await p.waitForFunction(() => window.__ff.replayActive(), { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.replayActive(), null, { timeout: budget(5000) });
   expect((await screen()) === 'room', 'Replay entered the room');
   expect(await p.evaluate(() => window.__ff.replayActive()), 'Replay armed best-solution playback');
 
@@ -120,7 +120,7 @@ await withApp(async ({ p, expect }) => {
   await p.waitForTimeout(500); // ~620ms total
   const fazeMid = await p.evaluate(() => window.__ff.mapInfoFaze());
   expect(fazeMid < 20, `odometer not yet settled ~620ms in — would be 27 if per-paint (faze=${fazeMid})`);
-  await p.waitForFunction(() => window.__ff.mapInfoFaze() >= 27, { timeout: 4000 });
+  await p.waitForFunction(() => window.__ff.mapInfoFaze() >= 27, null, { timeout: budget(4000) });
   expect(true, 'odometer settles within ~2.7s');
 
   // Single language setting: the room-name plaques follow the subtitle language
@@ -128,10 +128,10 @@ await withApp(async ({ p, expect }) => {
   await click(CANCEL);
   await p.waitForTimeout(60);
   await p.evaluate(() => window.__ff.panelAction(21)); // subtitles -> English
-  await p.waitForFunction(() => window.__ff.deskyLang() === 'en', { timeout: 3000 });
+  await p.waitForFunction(() => window.__ff.deskyLang() === 'en', null, { timeout: budget(3000) });
   expect((await p.evaluate(() => window.__ff.deskyLang())) === 'en', 'English subtitles -> English plaques');
   await p.evaluate(() => window.__ff.panelAction(20)); // subtitles -> Czech
-  await p.waitForFunction(() => window.__ff.deskyLang() === 'cz', { timeout: 3000 });
+  await p.waitForFunction(() => window.__ff.deskyLang() === 'cz', null, { timeout: budget(3000) });
   expect((await p.evaluate(() => window.__ff.deskyLang())) === 'cz', 'Czech subtitles -> Czech plaques');
   await p.evaluate(() => window.__ff.panelAction(22)); // subtitles off -> plaques keep last language
   await p.waitForTimeout(120);

@@ -1,21 +1,18 @@
 /** UI probe: ZELVA (room 37) telepathic possession (natvrdo). Forcing a possession
  *  makes the host auto-swim the seized fish toward the target and ignore player
  *  input, releasing the fish (natvrdo -> 0) once it arrives. */
-import { waitTicks, withApp } from './ui-lib.mjs';
+import { budget, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoomAwait(37));
-  await p.waitForFunction(
-    () => window.__ff.screen() === 'room' && window.__ff.count() > 0,
-    { timeout: 5000 },
-  );
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, null, { timeout: budget(5000) });
   expect(await p.evaluate(() => window.__ff.script() !== null), 'ZELVA has an active script');
 
   // ZELVA is one of the eight leg-final rooms, so StdKrajniHlaska's border remarks
   // (`cil-*-hlaska*`, x01) have to resolve here. The port never fetched x01 at all
   // until this landed, so all eight were silent, subtitles included.
-  await p.waitForFunction(() => window.__ff.soundPkgSize('x01') === 8, { timeout: 60000 });
+  await p.waitForFunction(() => window.__ff.soundPkgSize('x01') === 8, null, { timeout: budget(60000) });
 
   // Possess the little fish and send it a few cells to the left of where it starts.
   const start = await p.evaluate(() => window.__ff.fishCell('little'));
@@ -39,7 +36,7 @@ await withApp(async ({ p, expect }) => {
   // Player input must be ignored while possessed: an arrow key does nothing on its own,
   // but the host walks the fish toward the target and clears natvrdo on arrival.
   await p
-    .waitForFunction(() => window.__ff.natvrdo() === 0, { timeout: 15000 })
+    .waitForFunction(() => window.__ff.natvrdo() === 0, null, { timeout: budget(15000) })
     .catch(() => {});
   const end = await p.evaluate(() => window.__ff.fishCell('little'));
   expect(await p.evaluate(() => window.__ff.natvrdo()) === 0, 'possession released after arrival');

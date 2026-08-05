@@ -41,7 +41,7 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; if the environment
  * has no WebGL2 it skips (pass), so CI without a GPU still passes.
  */
-import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { budget, exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 const MAX_CHANNEL_DELTA = 1; // see the header: browser-vs-GL blend rounding, nothing more
 
@@ -118,7 +118,7 @@ await p.waitForFunction(() => window.__ff && window.__ff.count);
 async function enter(num) {
   await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
   await waitRoom(p, 0);
-  await p.waitForFunction(() => window.__ff.roomArtPending() === false, { timeout: 30000 });
+  await p.waitForFunction(() => window.__ff.roomArtPending() === false, null, { timeout: budget(30000) });
 }
 
 let ok = true;
@@ -342,7 +342,7 @@ async function wobbleAt(num) {
   if (wobbles) {
     const born = await p.evaluate(() => { window.__ff.startTrainNow(); return window.__ff.count(); });
     const half = await p.evaluate(() => Math.round(window.__ff.rippleTuning().lifeTicks / 2));
-    await p.waitForFunction((t) => window.__ff.count() >= t, born + half, { timeout: 30000 });
+    await p.waitForFunction((t) => window.__ff.count() >= t, born + half, { timeout: budget(30000) });
   }
   return p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
 }

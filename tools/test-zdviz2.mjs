@@ -3,10 +3,10 @@
  * Programky runs many ticks without error, and confirms malar (7) = little fish,
  * velkar (8) = big fish (the painters; original look_at only works for the fish).
  */
-import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoomAwait(28));
   await waitRoom(p, 0);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'ZDVIZ2 has an active script');

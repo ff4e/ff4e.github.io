@@ -3,7 +3,7 @@
  *   - DISKETA (70) is gspec=9 (push-out); ZX (66) is gspec=42 (emulator render mode).
  *   - ZAVER (71) locks player input (zavermode) during its finale cutscene.
  *   - WIN (68) starts in normal play (gspec=0) with the young fish controllable. */
-import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 const ROOMS = [
   [65, 'TETRIS'], [66, 'ZX'], [67, 'WARCR2'], [68, 'WIN'],
@@ -11,7 +11,7 @@ const ROOMS = [
 ];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   for (const [num, name] of ROOMS) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
     await waitRoom(p, 0);

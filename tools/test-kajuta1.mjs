@@ -1,12 +1,12 @@
 /** UI probe: KAJUTA1 (room 45) gspec=3/4 screen-shove easter egg. Armed (gspec=3), a
  *  blocked big-fish push against the left border slides the view (screenShoveX<0) and
  *  sets gspec=4 — mirroring the original moving the OS window. */
-import { waitRoom, withApp } from './ui-lib.mjs';
+import { budget, waitRoom, withApp } from './ui-lib.mjs';
 
 const DIR_LEFT = 3; // Dir.left
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoomAwait(45));
   await waitRoom(p, 0);
 

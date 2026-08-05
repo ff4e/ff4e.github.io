@@ -84,6 +84,25 @@ export function exitProbe(code) {
   process.stdout.write('', () => process.exit(code));
 }
 
+/**
+ * The probe line that threw, appended to the failure message.
+ *
+ * A wait that times out reports `page.waitForFunction: Timeout 30000ms exceeded` and
+ * nothing else — and a probe has up to fifteen waits in it. Recovering which one fired
+ * used to mean re-running the probe under an instrumented harness; the frame is already
+ * in the error, so print it. Only frames inside a probe are useful (the top frames are
+ * Playwright's own), and a missing stack must not itself throw.
+ */
+function failureSite(e) {
+  const frame = (e?.stack ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .find((l) => /tools[/\\]test-[\w-]+\.mjs:\d+/.test(l));
+  if (!frame) return '';
+  const at = frame.match(/(test-[\w-]+\.mjs:\d+:\d+)/);
+  return at ? `  [at ${at[1]}]` : '';
+}
+
 export async function withApp(fn, opts = {}) {
   const b = await launchBrowser();
   const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
@@ -158,7 +177,7 @@ export async function withApp(fn, opts = {}) {
     await fn({ p, expect });
   } catch (e) {
     ok = false;
-    console.log('  FAIL threw: ' + (e?.message ?? e));
+    console.log('  FAIL threw: ' + (e?.message ?? e) + failureSite(e));
   }
   if (errs.length) {
     ok = false;
@@ -172,15 +191,16 @@ export async function withApp(fn, opts = {}) {
 /**
  * Wait until a fish move settles back to the idle phase.
  *
- * The options object is the THIRD argument. Passed as the second — as this call
- * used to be — it is taken as the predicate's `arg` and silently ignored, so the
- * "5000" here was never in force and every caller was really getting Playwright's
- * 30s default. Keeping 30s rather than "fixing" it down to 5s: a move settles in
- * ~10 game ticks, but the clock slows under an 8-way parallel run, and a timeout
- * is a backstop, not an assertion.
+ * The options object is the THIRD argument. Passed as the second it lands in Playwright's
+ * `arg` slot and the timeout is silently discarded — the mistake this call used to make,
+ * and 240 others across the probes did too. `test/uiProbeWaits.test.ts` now fails the
+ * build if it comes back.
+ *
+ * A move settles in ~10 game ticks; `budget` turns that nominal into a backstop that
+ * survives an 8-way parallel run.
  */
 export async function idle(p) {
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: 30000 });
+  await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(10 * TICK_MS) });
 }
 
 // ── Waiting on GAME time ──────────────────────────────────────────────────────
@@ -206,19 +226,50 @@ export async function idle(p) {
 export const TICK_MS = 80;
 
 /**
- * Generous budget for `ticks` game ticks: 12× nominal, never below 30s.
+ * Generous budget for a wait whose nominal duration on an idle machine is `nominalMs`:
+ * 30× nominal, never below 60s, never above 5 minutes.
  *
- * Sized from measurement, not taste. On a deliberately loaded machine (4 CPU hogs
- * + the 8-way probe pool) the observed clock ran at 1.5-3 ticks/s against a
- * nominal 12.5 — a 4-8x slowdown — and the old 4x/10s budget turned that into
- * fake failures (`ZDVIZ1 ran 28 ticks` where 30 were asked for). 12x covers it
- * with headroom.
+ * Sized from measurement, not taste. Tracing every wait in the suite alone and again in
+ * the 8-way pool put the contention factor between 4× and 22×, median ≈ 8×. The tail is
+ * what matters here, not the median, and the tail gets worse than the pool alone: this
+ * machine also runs a second suite from a sibling worktree from time to time, and under
+ * the pool plus four CPU hogs the game clock was seen at 0.5 ticks/s against a nominal
+ * 12.5 — a 25× slowdown — with test-finale's win countdown overrunning a 12× budget
+ * outright. 30× covers the worst condition measured; the 60s floor covers the short
+ * waits, where a multiple of almost nothing is still almost nothing.
  *
- * Being generous is free: every wait below returns the moment the clock reaches
- * its target, so a fast machine never pays the budget. It is only spent when the
- * clock is genuinely stuck — which is a real defect, and worth waiting to prove.
+ * The 5-minute ceiling is where the runner's own 10-minute per-probe backstop takes over:
+ * past that point a wait is no longer distinguishing "slow machine" from "wedged", and
+ * the longest wait ever observed in the suite was 197s.
+ *
+ * Being generous is free: every wait returns the moment its condition holds, so a fast
+ * machine never pays the budget. Measured, not assumed — with every budget in the suite
+ * forced to 240s, not one wait in three full runs ever timed out, and the wall clock did
+ * not move. It is only spent when the condition genuinely never arrives, which is a real
+ * defect and worth waiting to prove.
+ *
+ * And it weakens nothing. The probe's own assertion still decides pass/fail; the timeout
+ * is a backstop, not a check. A budget sized just above the nominal duration is not a
+ * check either — it is a race, and it is the timeout that loses, reporting a fake failure
+ * while the assertion below it would have passed.
+ *
+ * Pass the NOMINAL duration, not the budget you want: keeping the honest number at the
+ * call site is what lets the next reader see how much slack there is, and lets this one
+ * function be re-tuned when the machine or the pool changes.
  */
-export const tickBudget = (ticks) => Math.max(30000, Math.ceil(ticks * TICK_MS * 12));
+export const budget = (nominalMs) => Math.min(300000, Math.max(60000, Math.ceil(nominalMs * 30)));
+
+/**
+ * Generous budget for `ticks` game ticks — `budget()` applied to their nominal duration,
+ * so it inherits the same 60s floor and 5-minute ceiling. The longest wait in the suite
+ * asks for 250 ticks (240s), still under the ceiling; the floor is what covers the short
+ * ones, where `test-gral-pushout` was seen getting 15 of 20 ticks in 30s (0.5 ticks/s).
+ *
+ * On a deliberately loaded machine (4 CPU hogs + the 8-way probe pool) the observed clock
+ * ran at 0.5-3 ticks/s against a nominal 12.5 — a 4-25x slowdown — and a 4x/10s budget
+ * turned that into fake failures (`ZDVIZ1 ran 28 ticks` where 30 were asked for).
+ */
+export const tickBudget = (ticks) => budget(ticks * TICK_MS);
 
 /**
  * Wait for the game clock to advance `ticks` from `start`. Never throws — the
@@ -367,7 +418,7 @@ export async function selectRoom(p, num, minCount = 0) {
       window.__ff.roomNum() === n &&
       window.__ff.screen() === 'room',
     [Number(num), seq],
-    { timeout: 30000 },
+    { timeout: budget(4000) },
   );
   if (minCount > 0) await waitRoom(p, minCount);
 }

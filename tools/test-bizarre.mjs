@@ -1,6 +1,6 @@
 /** UI probe: the "First Bizarre Things" branch (rooms 30-37). Each room loads, has
  *  an active script, and runs 40 ticks of Programky without throwing. */
-import { waitTicks, withApp } from './ui-lib.mjs';
+import { budget, waitTicks, withApp } from './ui-lib.mjs';
 
 const ROOMS = [
   [30, 'RECYCLED'],
@@ -14,13 +14,10 @@ const ROOMS = [
 ];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   for (const [num, name] of ROOMS) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
-    await p.waitForFunction(
-      () => window.__ff.screen() === 'room' && window.__ff.count() > 0,
-      { timeout: 5000 },
-    );
+    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, null, { timeout: budget(5000) });
     expect(await p.evaluate(() => window.__ff.script() !== null), `${name} has an active script`);
     const start = await p.evaluate(() => window.__ff.count());
     await waitTicks(p, start, 40);

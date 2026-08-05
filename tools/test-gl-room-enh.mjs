@@ -7,7 +7,7 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; skips (pass)
  * if the environment has no WebGL2.
  */
-import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { budget, exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 // Enhanced full-room render is byte-exact vs the CPU oracle too (FFNG sprites use
 // hard 0/255 alpha, so the GL blend reproduces the CPU integer blend exactly).
@@ -37,7 +37,7 @@ await waitRoom(p, 15);
 // Ensure the FFNG masters actually load — else this whole suite would silently
 // compare classic-fallback CPU vs classic-fallback GPU and prove nothing about
 // the enhanced path. Room 3 (PRVNI) has truecolor art; require it to engage.
-await p.waitForFunction(() => window.__ff.enhancedActive(), { timeout: 10000 }).catch(() => {});
+await p.waitForFunction(() => window.__ff.enhancedActive(), null, { timeout: budget(10000) }).catch(() => {});
 const cap = await p.evaluate(() => window.__ff.glEnhParity());
 if (!cap || cap.webgl === false) {
   console.log('  SKIP: WebGL2 not available in this environment');
@@ -59,7 +59,7 @@ for (let num = 1; num <= 72; num++) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
     await waitRoom(p, 15);
     // Give the enhanced masters time to decode (or settle as classic fallback).
-    await p.waitForFunction(() => window.__ff.enhancedLoaded() || window.__ff.count() > 40, { timeout: 6000 }).catch(() => {});
+    await p.waitForFunction(() => window.__ff.enhancedLoaded() || window.__ff.count() > 40, null, { timeout: budget(6000) }).catch(() => {});
     const r = await p.evaluate(() => window.__ff.glEnhParity());
     if (!r || !r.webgl) continue;
     if (r.unsupported) { ok = false; unsupported++; console.log(`  FAIL room ${num}: unexpectedly unsupported on GPU`); continue; }
@@ -72,7 +72,7 @@ for (let num = 1; num <= 72; num++) {
 }
 // Exercise LODE's mutable enhanced background/sprite copies, not just its resting frame.
 await p.evaluate(() => window.__ff.enterRoomAwait(19));
-await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.enhancedActive(), { timeout: 10000 });
+await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.enhancedActive(), null, { timeout: budget(10000) });
 const wreckBefore = await p.evaluate(() => window.__ff.roomBgFrameHash('enhanced'));
 await p.evaluate(() => window.__ff.dropShip(0));
 // Same gate as tools/test-gl-live.mjs: poll the BACKGROUND-only hash for a real delta.
@@ -81,7 +81,7 @@ await p.evaluate(() => window.__ff.dropShip(0));
 // without the wreck ever rendering.
 let wreckVisible = true;
 try {
-  await p.waitForFunction((h) => window.__ff.roomBgFrameHash('enhanced') !== h, wreckBefore, { timeout: 8000, polling: 50 });
+  await p.waitForFunction((h) => window.__ff.roomBgFrameHash('enhanced') !== h, wreckBefore, { timeout: budget(8000), polling: 50 });
 } catch (e) {
   if (e.name !== 'TimeoutError') throw e;
   wreckVisible = false;
