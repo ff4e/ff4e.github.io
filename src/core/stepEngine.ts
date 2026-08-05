@@ -15,7 +15,7 @@ import { Dir } from './dir.js';
 import { Room } from './room.js';
 import type { RoomScript, Script } from './script.js';
 import { exitCheer } from './ambient.js';
-import { moveChar } from './record.js';
+import { moveChar, pushOutMarker } from './record.js';
 
 export type Which = 'little' | 'big';
 export type Phase = 'idle' | 'move' | 'fall' | 'turn' | 'exit' | 'cork' | 'kuk';
@@ -318,18 +318,16 @@ export class StepEngine {
       if (this.animFrame >= this.corkExit.total) {
         let removed = 0;
         for (let i = 1; i <= room.itemCount; i++) {
-          const it = room.items[i]!;
-          if (it.spec !== 9) continue;
-          it.spec = 11; // hidden / gone — and skipped by every physics pass from here
-          it.x = -100;
-          it.y = -100;
-          it.dir = Dir.no;
-          room.vytlacit--;
+          if (room.items[i]!.spec !== 9) continue;
+          room.removePushedOut(i); // hidden / gone — skipped by every physics pass now
+          // ToRecord('q'+index) (URoom.pas:24044-24047): a load/undo replays fish moves
+          // only, so the removal has to be in the record or it is lost on restore.
+          this.srecord += pushOutMarker(i);
           removed++;
         }
         this.corkExit = null;
         if (room.vytlacit <= 0 && removed > 0) this.triggerWin(20); // countdown:=20
-        // gstav := stav_ma_padat (URoom.pas:24901): whatever the departed item was
+        // gstav := stav_ma_padat (URoom.pas:24904): whatever the departed item was
         // holding up now falls. The port used to drop straight back to idle, so the
         // room only settled on the player's next move.
         if (room.padani()) {

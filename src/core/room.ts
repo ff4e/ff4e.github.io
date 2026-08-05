@@ -153,16 +153,6 @@ export function forEachWreckPixel(
 export const ZAC_ROZPAD = 400;
 
 /**
- * Safety caps on the two gravity fixed-points. Neither has a bound in the Delphi —
- * both provably terminate on a sane room — but in a browser an unbounded spin is a
- * frozen tab with no diagnosis, so overrunning throws instead. Sized far above any
- * real room: nothing can fall further than the room is tall (51x36 at the largest),
- * and the crush fixed-point can only flip two booleans, so it settles in a pass or two.
- */
-const MAX_SETTLE_PASSES = 1000;
-const MAX_CRUSH_PASSES = 100;
-
-/**
  * Grid mirroring the Pascal FArray[-1..maxfx, -1..maxfy]. Stored with a +1
  * offset so the -1 border index is valid; cells hold an item index, ITEM_WALL,
  * or ITEM_WATER. Sized to -1..RWidth+1 / -1..RHeight+1 so priprav_hledani's
@@ -406,15 +396,36 @@ export class Room {
   /**
    * A pushed-out item is gone: `odstran_vytlacene` (URoom.pas:24035) parks it at
    * (-100,-100) with spec=11, and every physics pass then skips it with
-   * `(gspec<>9)or(spec<>11)` — priprav_pole (URoom.pas:26394), zkameneni_pevnych
-   * (:26591), zavislosti_nezkamenelych (:26641) and all three item loops of padani
-   * (:26690, :26705, :26739). Without that guard the -100 coordinates index the
+   * `(gspec<>9)or(spec<>11)` — priprav_pole (URoom.pas:26395), zkameneni_pevnych
+   * (:26591), zavislosti_nezkamenelych (:26642) and all three item loops of padani
+   * (:26688, :26705, :26740). Without that guard the -100 coordinates index the
    * occupancy grid far outside its bounds, so the next gravity pass reads a
    * non-existent cell and dies — the GRAL push-out hang (the game loop stops
    * rescheduling and the tab freezes).
+   *
+   * The test is on spec=11 alone, exactly as in the original, so it also covers the
+   * two items LODE hides this way (`objekty`/`maska`, URoom.pas:7996-8003): in a
+   * gspec=9 room those are out of the physics too. That is a behaviour change for
+   * LODE — before this they fell down column 0 and occupied a cell — and it is the
+   * faithful one.
    */
   private pushedOut(it: Item): boolean {
     return this.gspec === 9 && it.spec === 11;
+  }
+
+  /**
+   * odstran_vytlacene's per-item removal (URoom.pas:24037-24048): a pushed-out item
+   * is hidden (spec=11), parked off-room and struck off the push-out count. Shared by
+   * the live exit-slide and the record replay of its 'q' marker (URoom.pas:24184-24199),
+   * which is the only way a move-only re-simulation can reproduce it.
+   */
+  removePushedOut(i: number): void {
+    const it = this.items[i]!;
+    it.spec = 11;
+    it.x = -100;
+    it.y = -100;
+    it.dir = Dir.no; // it is not sliding any more; nothing may draw it mid-slide
+    this.vytlacit--;
   }
 
   /** priprav_pole (URoom.pas:26375): rebuild the occupancy grid from item positions. */
@@ -440,7 +451,7 @@ export class Room {
       const includeFish =
         (i !== this.bigIdx || includeBig) && (i !== this.littleIdx || includeLittle);
       if (!includeFish) continue;
-      if (this.pushedOut(it)) continue; // (gspec<>9)or(spec<>11), URoom.pas:26394
+      if (this.pushedOut(it)) continue; // (gspec<>9)or(spec<>11), URoom.pas:26395
       for (const f of it.fields) g.set(it.x + f.x, it.y + f.y, i);
     }
   }
@@ -611,7 +622,7 @@ export class Room {
       changed = false;
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
-        if (this.pushedOut(it)) continue; // URoom.pas:26641
+        if (this.pushedOut(it)) continue; // URoom.pas:26642
         if (it.stoned || it.kind === Kind.little || it.kind === Kind.big) continue;
         for (const f of it.fields) {
           const pom = this.grid.get(it.x + f.x, it.y + f.y + 1);
@@ -649,13 +660,7 @@ export class Room {
     const velkaZila = this.alive.big;
     let malaPom: boolean;
     let velkaPom: boolean;
-    // The crush fixed-point is bounded too (see fallToRest): only two fish can die,
-    // so it converges in at most a couple of passes. A spin would hang the tab.
-    let guard = 0;
     do {
-      if (++guard > MAX_CRUSH_PASSES) {
-        throw new Error(`padani crush loop did not converge after ${MAX_CRUSH_PASSES} passes`);
-      }
       this.petrify();
       this.computeSupport();
       malaPom = this.alive.little;
@@ -663,7 +668,7 @@ export class Room {
 
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
-        if (this.pushedOut(it)) continue; // URoom.pas:26690
+        if (this.pushedOut(it)) continue; // URoom.pas:26688
         if (it.stoned || !notFish(it)) continue;
         if (it.onBig === 0) {
           if (it.onLittle > 0 && it.kind === Kind.heavy) this.alive.little = false;
@@ -709,7 +714,7 @@ export class Room {
     this.dopad = 0;
     for (let i = 1; i <= this.itemCount; i++) {
       const it = this.items[i]!;
-      if (this.pushedOut(it)) continue; // URoom.pas:26739
+      if (this.pushedOut(it)) continue; // URoom.pas:26740
       if (it.stoned || !notFish(it)) continue;
       if ((it.onLittle === 0 || !this.alive.little) && (it.onBig === 0 || !this.alive.big)) {
         vysl = true;
@@ -719,7 +724,7 @@ export class Room {
     for (let i = 1; i <= this.itemCount; i++) {
       const it = this.items[i]!;
       // NOTE: the Delphi deliberately has NO (gspec<>9)or(spec<>11) guard on this
-      // last loop (URoom.pas:26749) — a pushed-out item still gets its Moved reset.
+      // last loop (URoom.pas:26746) — a pushed-out item still gets its Moved reset.
       if (it.moved === 2 && it.dir === Dir.no && notFish(it)) {
         if (this.dopad === 0) this.dopad = 1;
         if (it.kind === Kind.heavy) this.dopad = 2;
@@ -729,25 +734,9 @@ export class Room {
     return vysl;
   }
 
-  /**
-   * while padani do posun_predmety (URoom.pas:1937/24250): settle gravity.
-   *
-   * Bounded on purpose. Gravity always terminates (every pass moves at least one
-   * item down a cell, and the room is finite), so overrunning means the physics
-   * state is corrupt — and an unbounded spin here freezes the browser tab, the
-   * worst failure mode a player can hit. Throw a diagnosable error instead.
-   */
+  /** while padani do posun_predmety (URoom.pas:1937/24250): settle gravity. */
   fallToRest(): void {
-    let guard = 0;
-    while (this.padani()) {
-      this.commitMove();
-      if (++guard > MAX_SETTLE_PASSES) {
-        throw new Error(
-          `fallToRest did not settle after ${MAX_SETTLE_PASSES} passes ` +
-            `(room ${this.width}x${this.height}, gspec=${this.gspec})`,
-        );
-      }
-    }
+    while (this.padani()) this.commitMove();
   }
 
   /** priprav_dalsi_pohyb (URoom.pas:26505): clear every item's pending dir. */

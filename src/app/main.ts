@@ -146,7 +146,7 @@ import {
 import { newChatter, tickChatter, type ChatterState } from '../core/chatter.js';
 import { stdSmrt, newDeathState, type DeathState } from '../core/deathlines.js';
 import { maybeBubble } from '../core/ambient.js';
-import { movesOf, lengthOfRecord } from '../core/record.js';
+import { movesOf, lengthOfRecord, stepsOf, type RecordStep } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
 import { KufrDemo } from '../intro/kufrDemo.js';
 import { parseHelpCap, AKCE, KDO, type CapAction } from '../intro/helpCap.js';
@@ -2018,7 +2018,7 @@ let showmodeSave: { rec: string; snapshot: ScriptSnapshot | null } | null = null
 // the saved move record over several ticks at LoadSpeed moves/tick (a visible rewind-
 // and-replay), rather than teleporting. Drives both player F3 and the demo's reload.
 let loadmode: {
-  moves: { which: 'little' | 'big'; dir: number }[];
+  steps: RecordStep[];
   idx: number;
   speed: number;
   snapshot: ScriptSnapshot | null;
@@ -3152,6 +3152,17 @@ function applyMoveInstant(which: 'little' | 'big', dir: number): boolean {
 }
 
 /**
+ * Apply one recorded step of a move-only re-simulation (load / undo). A move is
+ * re-run through the physics; a push-out is re-applied from its record marker,
+ * because prog() — which marks the item spec=9 — does not run on this path
+ * (the 'q' case of the original's replay dispatch, URoom.pas:24184).
+ */
+function applyRecordStep(st: RecordStep): void {
+  if (st.kind === 'pushOut') room?.removePushedOut(st.idx);
+  else applyMoveInstant(st.which, st.dir);
+}
+
+/**
  * Rebuild the room and replay a move record (load / undo). When `animated` (the
  * player F3 and the demo's reload), the replay is fast-forwarded over several ticks
  * at LoadSpeed moves/tick (TRoom.Load loadmode, URoom.pas:24102) so the fish visibly
@@ -3179,18 +3190,18 @@ function restore(
   engine.exiting = null;
   engine.animFrame = 0;
   engine.srecord = ''; // rebuilt by the replayed moves
-  const moves = movesOf(rec);
+  const steps = stepsOf(rec);
   if (animated) {
     // LoadSpeed := size div 150, clamped 5..50 (URoom.pas:1927). `size` is the save
     // byte count; the record length is our proxy.
     const speed = Math.max(5, Math.min(50, Math.floor(rec.length / 150)));
-    loadmode = { moves, idx: 0, speed, snapshot };
+    loadmode = { steps, idx: 0, speed, snapshot };
     setInfo();
     return;
   }
-  for (const m of moves) {
+  for (const st of steps) {
     if (room.anyFishDead || room.won) break;
-    applyMoveInstant(m.which, m.dir);
+    applyRecordStep(st);
   }
   // Restore the script's "already said"/progress Vars so loading doesn't re-fire
   // dialogue the fish have already spoken (the original re-derives these during a
@@ -3207,16 +3218,15 @@ function restore(
 function advanceLoadmode(): void {
   if (!loadmode || !room || !engine) return;
   let applied = 0;
-  while (applied < loadmode.speed && loadmode.idx < loadmode.moves.length) {
+  while (applied < loadmode.speed && loadmode.idx < loadmode.steps.length) {
     if (room.anyFishDead || room.won) {
-      loadmode.idx = loadmode.moves.length;
+      loadmode.idx = loadmode.steps.length;
       break;
     }
-    const m = loadmode.moves[loadmode.idx++]!;
-    applyMoveInstant(m.which, m.dir);
+    applyRecordStep(loadmode.steps[loadmode.idx++]!);
     applied++;
   }
-  if (loadmode.idx >= loadmode.moves.length) {
+  if (loadmode.idx >= loadmode.steps.length) {
     // LoadDone (URoom.pas:1789): re-apply progress Vars, settle, resume play.
     if (loadmode.snapshot && activeScript) activeScript.s.applySnapshot(loadmode.snapshot);
     room.clearAllDirs();
@@ -4133,6 +4143,9 @@ function enterRoom(num: number, replay?: string): Promise<void> {
   select.value = String(num);
   const p = loadRoom(num);
   if (replay) {
+    // movesOf, not stepsOf: this replay drives the REAL game loop (tryStep), so the
+    // room's prog() marks the item and the exit-slide removes it exactly as in play —
+    // re-applying the record's push-out markers here would remove it twice.
     const moves = movesOf(replay);
     void p.then(() => {
       // Arm the best-solution playback once the fresh room is built (loadRoom resets
@@ -4858,6 +4871,15 @@ function step(): boolean {
       returnFromRoom();
       return true;
     }
+    // The hold does not freeze the room: the original decrements countdown and then
+    // still runs the gstav machine (`if countdown>0 then dec(countdown)` at
+    // URoom.pas:24349, followed by its `repeat`), so anything still in motion when the
+    // room was won finishes on screen. A gspec=9 push-out is the case that needs it —
+    // it wins the room AND enters stav_ma_padat on the same tick (URoom.pas:24904), so
+    // whatever the departed item held up would otherwise hang in the air until the map
+    // came back. `advance()` is inert while idle: its swim/possession branches are all
+    // gated on `!room.won`.
+    engine.advance();
     return false;
   }
   // Zvuky_okoli (URoom.pas:23736): ambient bubbles — 5%/tick if none are sounding
