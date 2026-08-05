@@ -71,7 +71,7 @@ describe('SPUNT cork (Spec9 push-out)', () => {
     const cork = s.item(R.spunt);
     expect(cork.spec).toBe(9);
     expect(cork.dir).toBe(Dir.left);
-    expect(cork.faziVen).toBe(18); // 3 * a (a = 6)
+    expect(s.room.faziVen).toBe(18); // 3 * a (a = 6); fazi_ven is a ROOM field (URoom.pas:265)
   });
 
   it('cheers "jo!" from both fish when the cork is pushed out', () => {

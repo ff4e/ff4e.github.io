@@ -15,7 +15,7 @@ import { Dir } from './dir.js';
 import { Room } from './room.js';
 import type { RoomScript, Script } from './script.js';
 import { exitCheer } from './ambient.js';
-import { moveChar } from './record.js';
+import { moveChar, pushOutMarker } from './record.js';
 
 export type Which = 'little' | 'big';
 export type Phase = 'idle' | 'move' | 'fall' | 'turn' | 'exit' | 'cork' | 'kuk';
@@ -59,7 +59,9 @@ export class StepEngine {
   active: Which = 'little';
   exiting: { which: Which; dir: number } | null = null;
   exitFrames = 8; // stav_ven length for the fish currently exiting (fazi_ven)
-  corkExit: { idx: number; total: number } | null = null;
+  /** stav_ven for gspec=9: the room-level fazi_ven the exit-slide runs for
+   *  (URoom.pas:24899). Which items go out is read off spec=9 at removal time. */
+  corkExit: { total: number } | null = null;
   swim: { which: Which; tx: number; ty: number } | null = null;
   winCountdown = 0;
   /** Set once a win is triggered (fish exit / gspec=9 push-out / script onWin). The
@@ -260,12 +262,14 @@ export class StepEngine {
     if (this.phase === 'move') this.jizda++;
     else if (this.phase !== 'turn') this.jizda = 0;
     if (room.tlaceno) this.jizda = 0;
-    // gspec=9 (SPUNT/MAPA/POHON/DISKETA): a spec=9 item shoved to the edge starts its
-    // exit-slide (kontroluj_vytlaceni, URoom.pas:24375).
+    // gspec=9 (LODE/SPUNT/ZELVA/BARELY/MAPA/POHON/GRAL/DISKETA): any spec=9 item shoved
+    // to the edge starts the exit-slide (kontroluj_vytlaceni, URoom.pas:24022/24375).
+    // The check is a plain "is anything marked?" — every marked item rides the SAME
+    // room-level fazi_ven and they all leave together in odstran_vytlacene.
     if (room.gspec === 9 && !this.corkExit && this.phase === 'idle') {
       for (let i = 1; i <= room.itemCount; i++) {
         if (room.items[i]!.spec === 9) {
-          this.corkExit = { idx: i, total: Math.max(1, room.items[i]!.faziVen) };
+          this.corkExit = { total: Math.max(1, room.faziVen) };
           this.phase = 'cork';
           this.animFrame = 0;
           break;
@@ -306,19 +310,32 @@ export class StepEngine {
         if (room.won) this.triggerWin();
       }
     } else if (this.phase === 'cork' && this.corkExit) {
-      // gspec=9 exit-slide (URoom.pas:24899): the pushed item slides off over its
-      // faziVen frames, is removed, and the room is won once vytlacit hits 0.
+      // gspec=9 exit-slide (stav_ven, URoom.pas:24899): the marked items slide off over
+      // fazi_ven frames, then odstran_vytlacene (URoom.pas:24035) removes EVERY spec=9
+      // item in one pass — decrementing vytlacit once per item — and the room is won
+      // (countdown:=20) when vytlacit reaches 0.
       this.animFrame++;
       if (this.animFrame >= this.corkExit.total) {
-        const it = room.items[this.corkExit.idx]!;
-        it.spec = 11; // hidden / gone
-        it.x = -100;
-        it.y = -100;
-        it.dir = Dir.no;
-        room.vytlacit--;
+        let removed = 0;
+        for (let i = 1; i <= room.itemCount; i++) {
+          if (room.items[i]!.spec !== 9) continue;
+          room.removePushedOut(i); // hidden / gone — skipped by every physics pass now
+          // ToRecord('q'+index) (URoom.pas:24044-24047): a load/undo replays fish moves
+          // only, so the removal has to be in the record or it is lost on restore.
+          this.srecord += pushOutMarker(i);
+          removed++;
+        }
         this.corkExit = null;
-        this.phase = 'idle';
-        if (room.vytlacit <= 0) this.triggerWin(20); // gspec=9 push-out win: countdown:=20
+        if (room.vytlacit <= 0 && removed > 0) this.triggerWin(20); // countdown:=20
+        // gstav := stav_ma_padat (URoom.pas:24904): whatever the departed item was
+        // holding up now falls. The port used to drop straight back to idle, so the
+        // room only settled on the player's next move.
+        if (room.padani()) {
+          this.animFrame = 0;
+          this.phase = 'fall';
+        } else {
+          this.phase = 'idle';
+        }
       }
     } else if (this.phase === 'kuk') {
       // stav_kuk (URoom.pas:24817): the peek-at-player pose plays for fazi_kuk ticks,

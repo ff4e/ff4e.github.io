@@ -103,7 +103,7 @@ describe('LODE Spec9 (URoom.pas:19488/19640)', () => {
     const it = s.item(BUH1);
     expect(it.spec).toBe(9);
     expect(it.dir).toBe(Dir.right);
-    expect(it.faziVen).toBe(15); // 3 * a (a = 5)
+    expect(s.room.faziVen).toBe(15); // 3 * a (a = 5); fazi_ven is a ROOM field (URoom.pas:265)
   });
 
   it('marks buh2 (6x6) when it is pushed against the left edge', () => {
@@ -113,7 +113,7 @@ describe('LODE Spec9 (URoom.pas:19488/19640)', () => {
     const it = s.item(BUH2);
     expect(it.spec).toBe(9);
     expect(it.dir).toBe(Dir.left);
-    expect(it.faziVen).toBe(18); // 3 * a (a = 6)
+    expect(s.room.faziVen).toBe(18); // 3 * a (a = 6); fazi_ven is a ROOM field (URoom.pas:265)
   });
 
   it('cheers "jo!" from both fish when a god reaches the edge', () => {

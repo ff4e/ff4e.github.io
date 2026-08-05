@@ -59,7 +59,6 @@ export interface Item {
    * room load; undefined until then.
    */
   initSpec?: number;
-  faziVen: number; // fazi_ven: exit-slide countdown for a spec=9 item (Spec9)
   visible: boolean;
   stoned: boolean; // "Stoned": anchored to the floor (zkameneni_pevnych)
   onBig: number; // support code w.r.t. the big fish (zavislosti_nezkamenelych)
@@ -252,6 +251,13 @@ export class Room {
   gspec = 0;
   /** vytlacit (URoom.pas:1445): how many spec=9 items still need pushing out (gspec=9). */
   vytlacit = 1;
+  /**
+   * fazi_ven (URoom.pas:265): how many frames the current exit-slide runs for. It is
+   * a ROOM field, not an item one — `TItem` (URoom.pas:95) has no `fazi_ven`, so
+   * Spec9's `fazi_ven:=3*a` inside its `with Items[i]^ do` writes this, and marking
+   * two items in one pass leaves the LAST one's value (URoom.pas:2449-2452).
+   */
+  faziVen = 0;
 
   /**
    * StdKrajniHlaska state (URoom.pas:2984): edge-of-room fish comments. `bylaukraje`
@@ -302,7 +308,6 @@ export class Room {
       dir: Dir.no,
       moved: 0,
       spec: 0,
-      faziVen: 0,
       visible: true,
       stoned: false,
       onBig: 0,
@@ -388,6 +393,41 @@ export class Room {
     return clone;
   }
 
+  /**
+   * A pushed-out item is gone: `odstran_vytlacene` (URoom.pas:24035) parks it at
+   * (-100,-100) with spec=11, and every physics pass then skips it with
+   * `(gspec<>9)or(spec<>11)` — priprav_pole (URoom.pas:26395), zkameneni_pevnych
+   * (:26591), zavislosti_nezkamenelych (:26642) and all three item loops of padani
+   * (:26688, :26705, :26740). Without that guard the -100 coordinates index the
+   * occupancy grid far outside its bounds, so the next gravity pass reads a
+   * non-existent cell and dies — the GRAL push-out hang (the game loop stops
+   * rescheduling and the tab freezes).
+   *
+   * The test is on spec=11 alone, exactly as in the original, so it also covers the
+   * two items LODE hides this way (`objekty`/`maska`, URoom.pas:7996-8003): in a
+   * gspec=9 room those are out of the physics too. That is a behaviour change for
+   * LODE — before this they fell down column 0 and occupied a cell — and it is the
+   * faithful one.
+   */
+  private pushedOut(it: Item): boolean {
+    return this.gspec === 9 && it.spec === 11;
+  }
+
+  /**
+   * odstran_vytlacene's per-item removal (URoom.pas:24037-24048): a pushed-out item
+   * is hidden (spec=11), parked off-room and struck off the push-out count. Shared by
+   * the live exit-slide and the record replay of its 'q' marker (URoom.pas:24184-24199),
+   * which is the only way a move-only re-simulation can reproduce it.
+   */
+  removePushedOut(i: number): void {
+    const it = this.items[i]!;
+    it.spec = 11;
+    it.x = -100;
+    it.y = -100;
+    it.dir = Dir.no; // it is not sliding any more; nothing may draw it mid-slide
+    this.vytlacit--;
+  }
+
   /** priprav_pole (URoom.pas:26375): rebuild the occupancy grid from item positions. */
   buildGrid(): void {
     const g = this.grid;
@@ -411,6 +451,7 @@ export class Room {
       const includeFish =
         (i !== this.bigIdx || includeBig) && (i !== this.littleIdx || includeLittle);
       if (!includeFish) continue;
+      if (this.pushedOut(it)) continue; // (gspec<>9)or(spec<>11), URoom.pas:26395
       for (const f of it.fields) g.set(it.x + f.x, it.y + f.y, i);
     }
   }
@@ -542,6 +583,7 @@ export class Room {
       changed = false;
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
+        if (this.pushedOut(it)) continue; // URoom.pas:26591
         if (it.stoned || it.kind === Kind.little || it.kind === Kind.big) continue;
         let becomes = false;
         for (let j = 0; j < it.fields.length && !becomes; j++) {
@@ -580,6 +622,7 @@ export class Room {
       changed = false;
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
+        if (this.pushedOut(it)) continue; // URoom.pas:26642
         if (it.stoned || it.kind === Kind.little || it.kind === Kind.big) continue;
         for (const f of it.fields) {
           const pom = this.grid.get(it.x + f.x, it.y + f.y + 1);
@@ -625,6 +668,7 @@ export class Room {
 
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
+        if (this.pushedOut(it)) continue; // URoom.pas:26688
         if (it.stoned || !notFish(it)) continue;
         if (it.onBig === 0) {
           if (it.onLittle > 0 && it.kind === Kind.heavy) this.alive.little = false;
@@ -638,6 +682,7 @@ export class Room {
       }
       for (let i = 1; i <= this.itemCount; i++) {
         const it = this.items[i]!;
+        if (this.pushedOut(it)) continue; // URoom.pas:26705
         if (it.stoned || !notFish(it)) continue;
         if (it.onBig > 0 && it.onLittle > 0) {
           if (it.kind === Kind.heavy && !this.alive.big) this.alive.little = false;
@@ -669,6 +714,7 @@ export class Room {
     this.dopad = 0;
     for (let i = 1; i <= this.itemCount; i++) {
       const it = this.items[i]!;
+      if (this.pushedOut(it)) continue; // URoom.pas:26740
       if (it.stoned || !notFish(it)) continue;
       if ((it.onLittle === 0 || !this.alive.little) && (it.onBig === 0 || !this.alive.big)) {
         vysl = true;
@@ -677,6 +723,8 @@ export class Room {
     }
     for (let i = 1; i <= this.itemCount; i++) {
       const it = this.items[i]!;
+      // NOTE: the Delphi deliberately has NO (gspec<>9)or(spec<>11) guard on this
+      // last loop (URoom.pas:26746) — a pushed-out item still gets its Moved reset.
       if (it.moved === 2 && it.dir === Dir.no && notFish(it)) {
         if (this.dopad === 0) this.dopad = 1;
         if (it.kind === Kind.heavy) this.dopad = 2;
