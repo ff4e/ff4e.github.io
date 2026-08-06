@@ -86,7 +86,7 @@ await withApp(async ({ p, expect }) => {
   // loading overlay (mapArtHolding, main.ts) — and that overlay swallows pointer
   // events. The mouse-driven hover below is about the map, so wait for the map to
   // actually be presented rather than racing its load.
-  await p.waitForFunction(() => window.__ff.mapEverPainted());
+  await p.waitForFunction(() => window.__ff.mapPresented());
 
   // Corner hit-test: each corner colour maps to its action (Exit stays unwired).
   const corners = await p.evaluate(() => ({
