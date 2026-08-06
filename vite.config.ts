@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig } from 'vitest/config';
 import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
@@ -27,4 +27,7 @@ export default defineConfig({
   },
   server: { host: '127.0.0.1', port: 5173 },
   build: { copyPublicDir: false, target: 'es2022' },
+  // The unit suite runs against a seeded Math.random so a failure always means a real
+  // defect, never a 1-in-100 draw (see test/rng.ts). The game itself is untouched.
+  test: { setupFiles: ['./test/rng.setup.ts'] },
 });

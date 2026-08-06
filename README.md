@@ -194,6 +194,32 @@ Automated, deterministic, **non-AI** (no LLM/vision at runtime — plain asserti
 `npm run test:all` chains `typecheck && test && test:ui` — the one command to run before
 considering a change done (it stops at the first failing phase).
 
+### Randomness in the unit suite
+
+The game keeps the original's real randomness (Pascal's `random`, `URoom.pas`): `Script.random`
+(`src/core/script.ts`) calls `Math.random()` and nothing in `src/` was changed for the tests.
+The unit suite instead installs a **seeded** `Math.random` from `test/rng.setup.ts`, so a unit
+failure always means a real defect and never a 1-in-100 draw. Every draw in the port goes
+through `Math.random` — the room scripts, the ZX band width, the sound-variant pick, the host's
+chatter — so the one swap covers all of them.
+
+- **A stream per test**, seeded from the test's file + name, so a test never depends on how many
+  draws the tests before it happened to make.
+- **`FF_TEST_SEED`** (default `1`) picks the base seed, so the whole suite can be swept through
+  different draw sequences:
+
+      for s in $(seq 1 200); do FF_TEST_SEED=$s npx vitest run || break; done
+
+  Run that after touching anything RNG-adjacent — a fixed seed proves reproducibility, a sweep
+  proves the tests do not depend on which way a draw went.
+- **A test that needs a specific draw says so**, with `pinRandom(...values)` (exact next draws)
+  or `pinRandomRange(lo, hi)` (squeeze every draw for the rest of the test — the readable way to
+  keep a rare easter egg from firing, or to make it fire). See `test/kajuta1.test.ts` for both
+  sides of one draw.
+- **Never pin `Math.random` to a constant.** Some generators redraw until they get a different
+  value (the idle-chatter picker in `main.ts`), so a constant hangs the suite. Both helpers above
+  stay varied by construction, which is why they exist instead of `vi.spyOn(Math, 'random')`.
+
 ### How the UI suite runs — read this before adding a probe
 
 `tools/run-ui-tests.mjs` builds the app (`vite build`, ~2s), serves the result on a port it
