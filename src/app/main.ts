@@ -2439,12 +2439,19 @@ function scriptTalk(name: string, prior: number): number {
 /** Launch the briefcase story cutscene (InitKufrDemo), loading its assets once. */
 async function startCutscene(): Promise<void> {
   if (cutscene || !font) return;
+  // The room this launch belongs to. Every await below is a window in which the
+  // player can leave (or restart into another room), and what lands afterwards must
+  // not be installed over whatever they went to — the same rule the room-change hold
+  // enforces for the script clock. `screen` alone is not enough: a room→room change
+  // keeps it on 'room'.
+  const seq = roomLoadSeq;
+  const stale = (): boolean => cutscene !== null || !font || screen !== 'room' || roomLoadSeq !== seq;
   // The demo is narration over pictures, and every caption's length comes from its
   // voice sample (cutsceneCaption -> audio.duration). Starting it before the room's
   // voice package has landed would run the whole story at the flat DEFAULT_LINE_TICKS
   // fallback — silent, and several times too fast to read.
   await roomVoicesReady;
-  if (cutscene || !font || screen !== 'room') return;
+  if (stale()) return;
   clearHeldKey(); // the briefcase cutscene takes over
   if (!cutsceneAssets) {
     const [bmp, pck, scr] = await Promise.all([
@@ -2453,6 +2460,11 @@ async function startCutscene(): Promise<void> {
       fetch('/data/Intro/script.txt').then((r) => r.text()),
     ]);
     cutsceneAssets = { bmp: new Uint8Array(bmp), pck: new Uint8Array(pck), script: scr };
+    // ~1 MB of story assets, fetched once per session: the first launch is easily
+    // long enough to leave the room in. Without this the demo's looping 'kufrik'
+    // music started AFTER showMap()'s KillSnd (and the cutscene installed itself over
+    // the world map), because nothing in DoneKufrDemo ever stops that track.
+    if (stale()) return;
   }
   const demo = new KufrDemo(cutsceneAssets.bmp, cutsceneAssets.pck, cutsceneAssets.script);
   cutsceneSubs = new SubtitleSystem(font, demo.palette, Math.floor(demo.width / 15), demo.width, demo.height);
@@ -5447,7 +5459,21 @@ function loop(now: number): void {
   // roomArtPending() rather than `graphics === 'enhanced'`: every tier that draws
   // truecolor art needs the identical hold while that art is still loading, and the
   // ai tier additionally waits for its upscale (see roomArtPending).
-  const holding = screen !== 'map' && !cutscene && roomArtPending();
+  //
+  // `roomLoading` is the same rule one step earlier, and it is a correctness one, not
+  // just an anti-flash one. enterRoom() flips `screen` to 'room' and runs its KillSnd
+  // synchronously, but loadRoom() then AWAITS the new room's core assets — and until
+  // buildRoom() swaps them, `room`/`activeScript`/`engine` are still the room the
+  // player just left. Ticking those is a window the original cannot have: Spust
+  // (UMain.pas:248) does KillSnd and constructs the new room without re-entering
+  // Jedeme. The outgoing room's Programky ran on after the KillSnd that was supposed
+  // to silence it, and every script that re-arms a loop on `!playing(p)` did exactly
+  // that — SMETAK's alarm clock (smetak.ts:204), MOTOR's engine (motor.ts:84),
+  // BARELY, BATYSKAF — leaving a looping effect sounding under the NEXT room, because
+  // that KillSnd is the only thing a room change ever does about it (buildRoom only
+  // re-kills on a restart). The stage is painted black for this whole window anyway,
+  // so nothing was showing the ticks either.
+  const holding = screen !== 'map' && !cutscene && (roomLoading || roomArtPending());
   // The minigame is modal in the original, so the room's timer does not run while
   // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
   tickTetris(dt);
