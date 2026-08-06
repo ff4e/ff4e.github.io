@@ -33,6 +33,9 @@
  * they are listed in EXCLUSIVE below and run alone, after the pool has drained,
  * each in its own freshly launched browser. If you add a probe that asserts on
  * wall-clock rates, add it there — do not relax its bounds.
+ *
+ * The preview server's port is picked per run (see FIXED_PORT below) so that two
+ * worktrees of this repo can run the suite concurrently.
  */
 import { spawn } from 'node:child_process';
 import {
@@ -47,14 +50,30 @@ import {
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { cpus } from 'node:os';
+import { createServer } from 'node:net';
 import { chromium } from 'playwright';
 
 const HOST = '127.0.0.1';
-// A dedicated test port + a freshly-spawned server every run, so the UI tests
+const urlFor = (p) => `http://${HOST}:${p}/`;
+
+// A freshly-spawned server on a port of OUR choosing every run, so the UI tests
 // always validate the CURRENT build — never a stale dev server the developer
 // happens to have open on 5173 (that reuse hid the SPA-fallback regression).
-const PORT = 5273;
-const BASE = `http://${HOST}:${PORT}/`;
+//
+// The port is picked PER RUN rather than fixed, because this repo is normally
+// checked out as several git worktrees (one directory per branch) and a fixed port
+// let two concurrent suites wreck each other: the loser aborted with "port already
+// in use", or — worse — the winner's server was torn down mid-suite and probes
+// reported bogus `Failed to fetch` / `ERR_CONNECTION_REFUSED` failures that
+// disappeared when re-run individually. Choosing a port costs nothing and gives up
+// none of the freshness guarantee: we still spawn our own `--strictPort` server and
+// still never adopt one that is already listening.
+//
+// Set FF_UI_PORT to pin the port anyway (handy when something outside the runner
+// has to know it in advance, e.g. a manual probe run against a hand-started server).
+const FIXED_PORT = Number(process.env.FF_UI_PORT) || null;
+// The port this run actually got. Assigned by startPreview(), read by runProbe().
+let port = FIXED_PORT;
 const toolsDir = dirname(fileURLToPath(import.meta.url));
 const root = dirname(toolsDir);
 
@@ -120,22 +139,57 @@ function writeTimings(t) {
   }
 }
 
-async function isUp() {
+/**
+ * Ask the OS for a free port: bind :0, note what we got, release it.
+ *
+ * This deliberately does NOT scan for "a port that looks unused" — the kernel will
+ * not hand the same ephemeral port to two live listeners, so two suites starting at
+ * the same instant get different ports, which is the entire point.
+ *
+ * Releasing before vite binds leaves a TOCTOU window, so the caller must be able to
+ * retry; that is much cheaper than holding the socket, which would make vite's own
+ * `--strictPort` bind fail every time.
+ */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.unref();
+    probe.on('error', reject);
+    probe.listen(0, HOST, () => {
+      const got = probe.address().port;
+      probe.close(() => resolve(got));
+    });
+  });
+}
+
+async function isUp(p) {
   try {
-    const r = await fetch(BASE);
+    const r = await fetch(urlFor(p));
     return r.ok;
   } catch {
     return false;
   }
 }
 
-async function waitUp(timeoutMs) {
+/**
+ * Wait for OUR preview server to answer on `p`.
+ *
+ * Returns why it stopped, because the two failures need different handling: with
+ * `--strictPort` a lost port race kills vite immediately (retry elsewhere), while a
+ * live-but-silent server is a real problem worth reporting at once.
+ *
+ * A dead vite is never "up": whatever answers on that port afterwards belongs to
+ * somebody else, and running the suite against it is precisely the stale-server
+ * failure this runner exists to prevent.
+ */
+async function waitUp(p, timeoutMs) {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
-    if (await isUp()) return true;
+    if (!server || server.exitCode !== null) return 'exited';
+    if ((await isUp(p)) && server.exitCode === null) return 'up';
     await new Promise((r) => setTimeout(r, 400));
   }
-  return false;
+  return 'timeout';
 }
 
 /** Run a command to completion, resolving with its exit code. */
@@ -164,7 +218,7 @@ function runProbe(file, env) {
     const c = spawn('node', [join('tools', file)], {
       cwd: root,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, FF_UI_PORT: String(PORT), ...env },
+      env: { ...process.env, FF_UI_PORT: String(port), ...env },
     });
     let out = '';
     let note = '';
@@ -213,8 +267,8 @@ async function runPool(files, limit, env, results) {
   await Promise.all(Array.from({ length: Math.min(limit, files.length) }, worker));
 }
 
-// Always spawn a fresh server on the dedicated test port (strict, so we never
-// silently bind elsewhere) — never reuse whatever might be on the dev port.
+// Always spawn a fresh server on a port we picked ourselves (strict, so we never
+// silently bind elsewhere) — never reuse whatever might already be listening.
 let server = null;
 let plainServer = null;
 let angleServer = null;
@@ -222,7 +276,8 @@ let angleServer = null;
 /**
  * Tear down everything we started. Safe to call more than once, and safe to call
  * before any of it exists — every exit path goes through here, because leaving an
- * orphaned `vite preview` behind wedges port 5273 for the next run.
+ * orphaned `vite preview` behind wedges its port (and, since it answers on a port
+ * we may later be handed again, could serve a stale build to a future run).
  */
 async function cleanup() {
   await plainServer?.close().catch(() => {});
@@ -248,13 +303,60 @@ async function die(msg) {
   process.exit(1);
 }
 
+/**
+ * Get our own preview server listening, and return the port it got.
+ *
+ * On an auto-picked port, losing the race to bind it is expected-but-rare (another
+ * suite, or anything else, grabbed it in the gap between our probe socket closing
+ * and vite binding), so we simply ask for another one. Only that case retries: a
+ * server that starts and then never answers is a real fault, and reporting it after
+ * one 30s wait beats reporting it after eight.
+ *
+ * An explicit FF_UI_PORT is never second-guessed: it is a deliberate choice, so a
+ * clash there is an error the developer wants to hear about rather than something
+ * to silently route around.
+ */
+async function startPreview() {
+  const attempts = FIXED_PORT ? 1 : 8;
+  for (let i = 0; i < attempts; i++) {
+    const p = FIXED_PORT ?? (await freePort());
+    if (await isUp(p)) {
+      if (FIXED_PORT) await die(`port ${p} is already in use; stop the process on it and retry`);
+      continue;
+    }
+    console.log(`[test:ui] starting fresh vite preview server on ${urlFor(p)} …`);
+    // `detached` puts vite in its own PROCESS GROUP so cleanup can kill the whole group.
+    // `npx` spawns the real vite as a CHILD, so killing only the npx wrapper orphaned it —
+    // the orphan kept holding the port and, with --strictPort, the next run's own vite
+    // then failed to bind while waitUp happily connected to the ORPHAN (serving a stale
+    // build). When that orphan later died, probes mid-run saw ERR_CONNECTION_REFUSED.
+    server = spawn('npx', ['vite', 'preview', '--port', String(p), '--strictPort', '--host', HOST], {
+      cwd: root,
+      stdio: 'ignore',
+      detached: true,
+    });
+    const why = await waitUp(p, 30000);
+    if (why === 'up') return p;
+    // It exited or went silent; either way don't leave it behind.
+    await cleanup();
+    if (why === 'timeout') await die(`preview server on port ${p} did not come up`);
+    if (FIXED_PORT)
+      await die(`vite could not bind FF_UI_PORT ${p}; stop whatever is holding it and retry`);
+    console.log(`[test:ui] port ${p} was taken before vite could bind it; trying another…`);
+  }
+  await die(`could not start a preview server on a free port after ${attempts} attempts`);
+}
+
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
     void cleanup().finally(() => process.exit(130));
   });
 }
 
-if (await isUp()) await die(`port ${PORT} is already in use; stop the process on it and retry`);
+// Only meaningful for a pinned port — fail before the build rather than after it.
+// An auto-picked port is chosen below, once there is something to serve.
+if (FIXED_PORT && (await isUp(FIXED_PORT)))
+  await die(`port ${FIXED_PORT} is already in use; stop the process on it and retry`);
 
 // Serve a PRODUCTION BUILD, not the dev server. The dev server is a single node
 // process that transpiles and serves ~120 unbundled ES modules on every page
@@ -286,18 +388,7 @@ for (const entry of readdirSync(join(root, 'public'))) {
   symlinkSync(join('..', 'public', entry), link);
 }
 
-console.log('[test:ui] starting fresh vite preview server…');
-// `detached` puts vite in its own PROCESS GROUP so cleanup can kill the whole group.
-// `npx` spawns the real vite as a CHILD, so killing only the npx wrapper orphaned it —
-// the orphan kept holding port 5273 and, with --strictPort, the next run's own vite
-// then failed to bind while waitUp happily connected to the ORPHAN (serving a stale
-// build). When that orphan later died, probes mid-run saw ERR_CONNECTION_REFUSED.
-server = spawn('npx', ['vite', 'preview', '--port', String(PORT), '--strictPort', '--host', HOST], {
-  cwd: root,
-  stdio: 'ignore',
-  detached: true,
-});
-if (!(await waitUp(30000))) await die('preview server did not come up');
+port = await startPreview();
 
 const all = readdirSync(toolsDir)
   .filter((f) => /^test-.*\.mjs$/.test(f))
