@@ -18,7 +18,7 @@
  * instead (line-shared code path, plus the test-gl-* parity suite). We drive a
  * throttled / failed FFR fetch via page routing to open the async window on demand.
  */
-import { waitRoom, withApp, tickSleep, waitFrames } from './ui-lib.mjs';
+import { tickSleep, waitFrames, waitRoom, withApp } from './ui-lib.mjs';
 
 // Fraction of non-black pixels on #screen: ~0 while the stage is cleared black,
 // large once a room's tiles are painted. Reads the whole frame once and samples a
@@ -46,7 +46,7 @@ const ffrGlob = (n) => `**/Graphic/${String(n).padStart(3, '0')}.ffr`;
 
 await withApp(
   async ({ p, expect }) => {
-    await p.waitForFunction(() => window.__ff && typeof window.__ff.enterRoom === 'function', { timeout: 8000 });
+    await p.waitForFunction(() => window.__ff && typeof window.__ff.enterRoom === 'function');
 
     // --- Establish a bright, fully-loaded "previous" room (ZDVIZ1, gold). ---
     await p.evaluate(() => window.__ff.enterRoomAwait(20));
@@ -69,7 +69,7 @@ await withApp(
     // Wait for the loading STATE rather than for a slice of the 2000ms throttle — the
     // condition the sample below depends on is `roomLoading`, so wait on that — and then
     // for the frames that clear the stage, since the sample reads pixels.
-    await p.waitForFunction(() => window.__ff.roomLoading(), { timeout: 10000 }).catch(() => {});
+    await p.waitForFunction(() => window.__ff.roomLoading()).catch(() => {});
     await waitFrames(p, 3);
     expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'screen switches to room synchronously on enter');
     const loadingFill = await stageFill(p);
@@ -80,7 +80,7 @@ await withApp(
     // ...and the black stage is not what the player is looking at: the post-boot
     // loading overlay is armed on room entry and covers it once the wait is real
     // (2000ms here, well past the ~200ms threshold).
-    await p.waitForFunction(() => window.__ff.loadingVisible(), { timeout: 10000 });
+    await p.waitForFunction(() => window.__ff.loadingVisible());
     expect(true, 'the loading overlay covers a slow room entry');
 
     // Let the throttled load finish: the freshly-built room now paints.
@@ -110,7 +110,7 @@ await withApp(
         () => 'err',
       ),
     );
-    await p.waitForFunction(() => window.__ff.loadingVisible(), { timeout: 10000 });
+    await p.waitForFunction(() => window.__ff.loadingVisible());
     expect(true, 'the overlay is up while the doomed load is in flight');
     const failRes = await failStarted;
     expect(failRes === 'err', 'a failed room load rejects (loadRoom rethrows after finally)');

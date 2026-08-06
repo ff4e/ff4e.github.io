@@ -4,7 +4,7 @@
  * input for that fish is dropped: it must not move. Once busy clears, input works again.
  * This drives the actual DOM keydown handler (not just __ff.press) end-to-end.
  */
-import { withApp, forTicks, tickSleep } from './ui-lib.mjs';
+import { forTicks, tickSleep, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   const press = (code) =>
@@ -15,10 +15,8 @@ await withApp(async ({ p, expect }) => {
 
   // A plain standard room; RECYCLED(30) has a freely-movable little fish.
   await p.evaluate(() => window.__ff.enterRoomAwait(30));
-  await p.waitForFunction(() => window.__ff && window.__ff.screen() === 'room' && window.__ff.count() > 0, {
-    timeout: 5000,
-  });
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.screen() === 'room' && window.__ff.count() > 0);
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
 
   const before = await p.evaluate(() => window.__ff.fishCell('little'));
 
@@ -42,14 +40,10 @@ await withApp(async ({ p, expect }) => {
   await press('KeyJ');
   await tickSleep(p, 2);
   await press('KeyJ');
-  await p.waitForFunction(
-    (b) => {
+  await p.waitForFunction((b) => {
       const c = window.__ff.fishCell('little');
       const s = window.__ff.state();
       return c.x !== b.x || c.y !== b.y || s.phase !== 'idle' || !s.little.facingRight;
-    },
-    before,
-    { timeout: 3000 },
-  );
+    }, before);
   expect(true, 'input resumes once the fish is no longer busy');
 });

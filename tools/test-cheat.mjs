@@ -4,7 +4,7 @@
  * covers the entry machine (X arms it, a dead-end letter parks it), the room
  * codes, and the two codes that only work from the map.
  */
-import { selectRoom, waitRoom, withApp, tickSleep } from './ui-lib.mjs';
+import { selectRoom, tickSleep, waitRoom, withApp } from './ui-lib.mjs';
 
 /** Type a code as a player would — the leading X arms the machine. */
 async function typeCode(p, code) {
@@ -14,7 +14,6 @@ async function typeCode(p, code) {
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES (Fish House room index 6 -> global 7)
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => {
     localStorage.removeItem('ff.solved');
     localStorage.removeItem('ff.cheated');
@@ -144,12 +143,12 @@ await withApp(async ({ p, expect }) => {
   await typeCode(p, 'xwemaketherules'); // the OLD, misspelt form must not work
   expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'the misspelt code does nothing');
   for (const ch of 'xwemaketherulez') await p.keyboard.press(ch);
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   expect(await p.evaluate(() => window.__ff.cheatedRooms().includes(1)), 'xwemaketherulez solved room 1');
 
   // ---- xscore: map-screen only ------------------------------------------------
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   await typeCode(p, 'xscore');
   await waitRoom(p, 0);
   expect((await p.$eval('#room', (el) => el.value)) === '72', 'xscore opens the SCORE room (72)');
@@ -166,7 +165,7 @@ await withApp(async ({ p, expect }) => {
 
   // ---- xultraviolence: every later room opens with a hook already falling -----
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   expect((await p.evaluate(() => window.__ff.ultraviolence())) === false, 'ultraviolence starts off');
   await typeCode(p, 'xultraviolence');
   expect(
@@ -279,7 +278,7 @@ await withApp(async ({ p, expect }) => {
   // The wind-down takes faze back through -2 to -1 (INTERLACED_OFF); wait for the
   // state, not for a duration that assumes how fast the clock is running.
   await p
-    .waitForFunction(() => window.__ff.interlacedFaze() === -1, null, { timeout: 30000 })
+    .waitForFunction(() => window.__ff.interlacedFaze() === -1)
     .catch(() => {});
   expect(
     (await p.evaluate(() => window.__ff.interlacedFaze())) === -1,
@@ -336,7 +335,7 @@ await withApp(async ({ p, expect }) => {
   await typeCode(p, 'xsilent');
   expect((await p.evaluate(() => window.__ff.silentFilm())).on === true, 'silent film on');
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   expect(
     (await p.evaluate(() => window.__ff.silentFilm())).on === false,
     'returning to the map ends silent film (so the menu is not left muted)',

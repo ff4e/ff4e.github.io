@@ -201,7 +201,7 @@ port, and runs the probes **concurrently**. It used to run them one at a time, e
 cold Chromium, which took ~15 minutes; it now takes ~3, with the same probes and the same
 assertions.
 
-- **A worker pool** runs `FF_UI_JOBS` probes at once (default: `max(2, cores−2)`, capped at 8 — more is
+- **A worker pool** runs `FF_UI_JOBS` probes at once (default: `round(cores × 0.6)`, floored at 2 and capped at 8 — more is
   counterproductive, because the game clock is wall-clock driven and slows under load). Each
   probe is still its own `node` process with its own browser context, so the isolation probes
   rely on (localStorage, saved games) is unchanged. Output is buffered per probe.

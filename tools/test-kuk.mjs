@@ -8,10 +8,8 @@ import { withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.enterRoomAwait(3)); // PRAVIDLA / cellar — both fish, no early dialogue
-  await p.waitForFunction(() => window.__ff && window.__ff.screen() === 'room' && window.__ff.count() > 0, {
-    timeout: 5000,
-  });
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.screen() === 'room' && window.__ff.count() > 0);
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
 
   // Select the little fish; read the frame synchronously in the same tick, before the
   // 2-tick peek animation advances.
@@ -25,7 +23,7 @@ await withApp(async ({ p, expect }) => {
   expect(snap.head === 0, `peek hides the head (saw headFrame ${snap.head})`);
 
   // The peek is brief: it returns to rest, off the turned frame.
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 2000 });
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
   const restBody = await p.evaluate(() => window.__ff.state().littleFrame.bodyFrame);
   expect(restBody !== 10, `after the peek the fish returns to a resting body frame (saw ${restBody})`);
 });

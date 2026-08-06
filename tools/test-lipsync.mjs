@@ -3,17 +3,16 @@
  * mouth frames (0/5/6); both click-to-talk (UTES) and scripted dialogue (PRVNI)
  * animate the talking head.
  */
-import { selectRoom, withApp, forTicks, tickSleep } from './ui-lib.mjs';
+import { forTicks, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   // Click-to-talk on UTES.
   await selectRoom(p, 7);
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   // The room's .ffs voice package is fetched after its art (it is the bulk of an
   // entry's bytes and nothing visual needs it), so the room being live does not mean
   // its voices are. Lip-sync is driven by a voice actually sounding, so wait for the
   // package — this pins the same behaviour, it just stops racing the download.
-  await p.waitForFunction(() => window.__ff.roomAudioReady(), { timeout: 30000 });
+  await p.waitForFunction(() => window.__ff.roomAudioReady());
   await tickSleep(p, 4);
   await p.evaluate(() => window.__ff.talk('little'));
   // The mouth frames cycle on the game tick, so watch a window of ticks — 40 * 80ms
@@ -26,8 +25,7 @@ await withApp(async ({ p, expect }) => {
 
   // Scripted dialogue on PRVNI.
   await selectRoom(p, 1);
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
-  await p.waitForFunction(() => window.__ff.roomAudioReady(), { timeout: 30000 });
+  await p.waitForFunction(() => window.__ff.roomAudioReady());
   const h2 = new Set();
   await forTicks(p, 120, async () => {
     const s = await p.evaluate(() => ({ l: window.__ff.heads().little, b: window.__ff.heads().big }));

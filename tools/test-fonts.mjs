@@ -27,9 +27,8 @@ async function freshPage(subfont) {
     } catch {}
   }, subfont ?? null);
   await gotoApp(p);
-  await p.waitForFunction(() => window.__ff && window.__ff.count);
   // Fonts load asynchronously at startup; wait for subFontReady.
-  await p.waitForFunction(() => window.__ff.subFontReady && window.__ff.subFontReady(), { timeout: 8000 }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.subFontReady && window.__ff.subFontReady()).catch(() => {});
   return p;
 }
 

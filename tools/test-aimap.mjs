@@ -28,9 +28,9 @@ const REGION_HASH = (x, y, w, h) => {
 };
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap(), { timeout: 8000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   expect((await p.evaluate(() => window.__ff.screen())) === 'map', 'on the map screen');
 
   const canvasSize = () =>
@@ -76,7 +76,7 @@ await withApp(async ({ p, expect }) => {
 
   // enhanced (default): native-resolution map, and it is actually DRAWN.
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
-  await p.waitForFunction(() => document.querySelector('#screen').width === 640, { timeout: 5000 });
+  await p.waitForFunction(() => document.querySelector('#screen').width === 640);
   let s = await canvasSize();
   expect(s.w === 640 && s.h === 480, `enhanced map is 640x480 (got ${s.w}x${s.h})`);
   const enh = await stats(null);
@@ -88,7 +88,7 @@ await withApp(async ({ p, expect }) => {
 
   // ai: the backing store grows to the 4x AI composite — and it, too, is really drawn.
   await p.evaluate(() => window.__ff.setGraphics('ai'));
-  await p.waitForFunction(() => document.querySelector('#screen').width === 2560, { timeout: 8000 });
+  await p.waitForFunction(() => document.querySelector('#screen').width === 2560);
   s = await canvasSize();
   expect(s.w === 2560 && s.h === 1920, `ai map is 2560x1920 (got ${s.w}x${s.h})`);
   const ai = await stats(null);
@@ -108,9 +108,9 @@ await withApp(async ({ p, expect }) => {
     window.__ff.markBest(1, '0'.repeat(20));
     window.__ff.openMapInfo(1);
   });
-  await p.waitForFunction(() => window.__ff.mapInfoRoom() === 1, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.mapInfoRoom() === 1);
   // Wait for the panel to actually reach the CANVAS, not merely for the state to flip.
-  await p.waitForFunction((h) => window.REGION_HASH(170, 150, 300, 200) !== h, before, { timeout: 5000 });
+  await p.waitForFunction((h) => window.REGION_HASH(170, 150, 300, 200) !== h, before);
   s = await canvasSize();
   expect(s.w === 2560 && s.h === 1920, 'ai record panel stays hi-res');
   expect((await p.evaluate(() => window.__ff.mapInfoRoom())) === 1, 'room 1 record panel open');
@@ -126,16 +126,16 @@ await withApp(async ({ p, expect }) => {
   const runRect = { x: 262, y: 232, w: 40, h: 28 };
   const runBefore = await hash(runRect);
   await p.mouse.move(rect.left + 279 * rect.sx, rect.top + 245 * rect.sy);
-  await p.waitForFunction(() => window.__ff.mapInfoHover() === 'run', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.mapInfoHover() === 'run');
   expect((await p.evaluate(() => window.__ff.mapInfoHover())) === 'run', 'Run button hovered under ai');
-  await p.waitForFunction((h) => window.REGION_HASH(262, 232, 40, 28) !== h, runBefore, { timeout: 5000 });
+  await p.waitForFunction((h) => window.REGION_HASH(262, 232, 40, 28) !== h, runBefore);
   expect((await hash(runRect)) !== runBefore, 'hovering the Run button actually repaints it');
 
   await p.evaluate(() => window.__ff.closeMapInfo());
 
   // Toggle back to enhanced: the map repaints to native resolution, still drawn.
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
-  await p.waitForFunction(() => document.querySelector('#screen').width === 640, { timeout: 5000 });
+  await p.waitForFunction(() => document.querySelector('#screen').width === 640);
   s = await canvasSize();
   expect(s.w === 640 && s.h === 480, 'toggling back to enhanced restores 640x480');
   const back = await stats(null);

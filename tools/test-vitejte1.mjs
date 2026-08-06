@@ -2,9 +2,8 @@
  *  scheduler to fire (delay ~80-160) and the crab audience to react, without
  *  error; confirms items exist, malar(9)=little, velkar(10)=big, and that the
  *  ruler eventually speaks (playing 302) or animates its face. */
-import { waitRoom, withApp, forTicks } from './ui-lib.mjs';
+import { forTicks, waitRoom, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoomAwait(21));
   await waitRoom(p, 0);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'VITEJTE1 has an active script');

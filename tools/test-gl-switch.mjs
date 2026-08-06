@@ -8,7 +8,7 @@
  * Runs its own headless Chromium with ANGLE so WebGL2 is available; skips (pass)
  * if the environment has no WebGL2.
  */
-import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, observed, waitRoom } from './ui-lib.mjs';
 
 
 const b = await launchBrowser({ gl: true });
@@ -18,7 +18,6 @@ p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
 await gotoApp(p);
-await p.waitForFunction(() => window.__ff && window.__ff.count);
 
 // Force classic art + WebGL backend at runtime.
 await p.evaluate(() => { window.__ff.setGraphics('classic'); window.__ff.setRenderer('webgl'); });
@@ -46,7 +45,9 @@ for (const [num, wantGl] of cases) {
   await waitRoom(p, 15);
   // Wait for the backend/fallback to settle to the expected state (deterministic,
   // no fixed sleep) — a frame must render and set glActive first.
-  const settled = await p.waitForFunction((want) => window.__ff.glActive() === want, wantGl, { timeout: 4000 }).then(() => true).catch(() => false);
+  const settled = await observed(
+    p.waitForFunction((want) => window.__ff.glActive() === want, wantGl),
+  );
   const gl = await p.evaluate(() => window.__ff.glActive());
   if (!settled || gl !== wantGl) { ok = false; console.log(`  FAIL room ${num}: glActive=${gl} want=${wantGl}`); }
 }
@@ -54,7 +55,9 @@ for (const [num, wantGl] of cases) {
 // Toggle back to CPU: the GL canvas must go inactive.
 await p.evaluate(() => { window.__ff.setRenderer('cpu'); window.__ff.enterRoomAwait(3); });
 await waitRoom(p, 15);
-const wentCpu = await p.waitForFunction(() => window.__ff.glActive() === false, null, { timeout: 4000 }).then(() => true).catch(() => false);
+const wentCpu = await observed(
+  p.waitForFunction(() => window.__ff.glActive() === false),
+);
 if (!wentCpu) { ok = false; console.log('  FAIL: glActive still true after switching to CPU'); }
 
 if (errs.length) { ok = false; console.log('  console errors:', errs.slice(0, 4)); }

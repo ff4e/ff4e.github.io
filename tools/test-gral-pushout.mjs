@@ -42,11 +42,7 @@ await withApp(async ({ p, expect }) => {
 
   // The exit-slide (stav_ven) runs for fazi_ven frames, then odstran_vytlacene
   // removes the item: spec=11, parked at (-100,-100).
-  await p.waitForFunction(
-    (i) => window.__ff.itemState(i).spec === 11,
-    CHALICE,
-    { timeout: 30000 },
-  );
+  await p.waitForFunction((i) => window.__ff.itemState(i).spec === 11, CHALICE);
   const gone = await p.evaluate((i) => window.__ff.itemState(i), CHALICE);
   expect(gone.x === -100 && gone.y === -100, 'the pushed-out chalice was parked off-room');
   const left = await p.evaluate(() => window.__ff.vytlacit());

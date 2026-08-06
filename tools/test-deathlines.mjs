@@ -7,7 +7,6 @@
 import { idle, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
 
   // The global x02 death-commentary bank loaded (subtitles + voices).
   expect((await p.evaluate(() => window.__ff.deathBank())) > 0, 'x02 death-line subtitle bank loaded');
@@ -36,7 +35,7 @@ await withApp(async ({ p, expect }) => {
 
   // A death-commentary line is spoken (the room may add its own line too; over the
   // window at least one line fires).
-  await p.waitForFunction((b) => window.__ff.lines() > b, before, { timeout: 6000 }).catch(() => {});
+  await p.waitForFunction((b) => window.__ff.lines() > b, before).catch(() => {});
   expect((await p.evaluate(() => window.__ff.lines())) > before, 'the survivor speaks after the partner dies');
 
   // Once the skeleton fully disintegrates, the fish must NOT be drawn again (the
@@ -81,7 +80,7 @@ await withApp(async ({ p, expect }) => {
   await enter(1);
   await p.evaluate(() => window.__ff.killFish('little'));
   await p.evaluate(() => window.__ff.killFish('big'));
-  await p.waitForFunction(() => window.__ff.count() < 5, null, { timeout: 6000 }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.count() < 5).catch(() => {});
   const restarted = await p.evaluate(() => window.__ff.count() < 20 && window.__ff.screen() === 'room');
   expect(restarted, 'both fish dead auto-restarts the room');
 }, { cpu: true, graphics: 'enhanced' });

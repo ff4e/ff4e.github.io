@@ -14,13 +14,9 @@ const ROOMS = [
 ];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   for (const [num, name] of ROOMS) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
-    await p.waitForFunction(
-      () => window.__ff.screen() === 'room' && window.__ff.count() > 0,
-      { timeout: 5000 },
-    );
+    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0);
     expect(await p.evaluate(() => window.__ff.script() !== null), `${name} has an active script`);
     const start = await p.evaluate(() => window.__ff.count());
     await waitTicks(p, start, 40);

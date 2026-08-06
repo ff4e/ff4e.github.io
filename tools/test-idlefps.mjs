@@ -10,18 +10,18 @@
 import { withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.throttleInfo, { timeout: 8000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.throttleInfo);
   await p.evaluate(() => window.__ff.enterRoomAwait(12));
-  await p.waitForFunction(() => window.__ff.screen() === 'room', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'room');
 
   // A settled room throttles to the idle timer (the low, ~12.5fps wake rate).
-  await p.waitForFunction(() => window.__ff.throttleInfo().throttleOk === true, { timeout: 6000 });
+  await p.waitForFunction(() => window.__ff.throttleInfo().throttleOk === true);
   expect(await p.evaluate(() => window.__ff.throttleInfo().throttleOk), 'a settled room idle-throttles');
 
   // Holding a movement key legitimately keeps the loop at full rate.
   await p.keyboard.down('KeyL');
   await p
-    .waitForFunction(() => window.__ff.throttleInfo().heldState !== 0, { timeout: 10000 })
+    .waitForFunction(() => window.__ff.throttleInfo().heldState !== 0)
     .catch(() => {});
   const held = await p.evaluate(() => window.__ff.throttleInfo());
   expect(held.heldState !== 0, 'the held key is registered');
@@ -30,9 +30,7 @@ await withApp(async ({ p, expect }) => {
   // The window loses focus with the key still down (the keyup is never delivered).
   await p.evaluate(() => window.dispatchEvent(new Event('blur')));
   await p
-    .waitForFunction(() => window.__ff.throttleInfo().heldState === 0 && window.__ff.throttleInfo().throttleOk, {
-      timeout: 10000,
-    })
+    .waitForFunction(() => window.__ff.throttleInfo().heldState === 0 && window.__ff.throttleInfo().throttleOk)
     .catch(() => {});
   const after = await p.evaluate(() => window.__ff.throttleInfo());
   expect(after.heldState === 0, `the held key is dropped on blur (heldState=${after.heldState})`);
@@ -43,7 +41,7 @@ await withApp(async ({ p, expect }) => {
   // Hiding the tab must also drop a held key (same stranded-rAF hazard).
   await p.keyboard.down('KeyJ');
   await p
-    .waitForFunction(() => window.__ff.throttleInfo().heldState !== 0, { timeout: 10000 })
+    .waitForFunction(() => window.__ff.throttleInfo().heldState !== 0)
     .catch(() => {});
   expect(await p.evaluate(() => window.__ff.throttleInfo().heldState !== 0), 'second held key registered');
   await p.evaluate(() => {
@@ -51,7 +49,7 @@ await withApp(async ({ p, expect }) => {
     document.dispatchEvent(new Event('visibilitychange'));
   });
   await p
-    .waitForFunction(() => window.__ff.throttleInfo().heldState === 0, { timeout: 10000 })
+    .waitForFunction(() => window.__ff.throttleInfo().heldState === 0)
     .catch(() => {});
   expect(
     await p.evaluate(() => window.__ff.throttleInfo().heldState === 0),

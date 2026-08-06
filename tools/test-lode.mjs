@@ -3,7 +3,6 @@
  *  the room edge marks room 19 solved (Spec9 -> host exit-slide -> win). */
 import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoomAwait(19));
   await waitRoom(p, 3);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'LODE has an active script');
@@ -21,7 +20,7 @@ await withApp(async ({ p, expect }) => {
     localStorage.setItem(k, JSON.stringify(o));
   });
   await p.evaluate(() => window.__ff.load());
-  await p.waitForFunction(() => !window.__ff.loading(), { timeout: 10000 }).catch(() => {});
+  await p.waitForFunction(() => !window.__ff.loading()).catch(() => {});
   expect(await p.evaluate(() => window.__ff.gspec()) === 9, 'a stale gspec=0 save does not re-break LODE');
   // Run a bit so the gods' battleship theatre ticks without error.
   const start = await p.evaluate(() => window.__ff.count());
@@ -29,7 +28,7 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.count())) - start >= 40, 'LODE ran 40 ticks without error');
   // Push buh2 (item 1, the 6x6 god) to the left edge -> Spec9 marks it -> host slides + wins.
   await p.evaluate(() => window.__ff.moveItem(1, 0, window.__ff.itemState(1).y));
-  await p.waitForFunction(() => window.__ff.solvedRooms().includes(19), null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.solvedRooms().includes(19));
   expect(await p.evaluate(() => window.__ff.solvedRooms().includes(19)), 'pushing a god out wins the room');
   console.log('LODE OK: gspec=9 push-out win verified');
 });

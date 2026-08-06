@@ -17,6 +17,7 @@
  * ff.devEnabled=1 and runs a single page.
  */
 import { chromium } from 'playwright';
+import { WAIT_BACKSTOP } from './ui-lib.mjs';
 
 const port = process.env.FF_UI_PORT ?? '5173';
 const url = `http://127.0.0.1:${port}/`;
@@ -30,6 +31,9 @@ const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-requ
 
 const newGatedPage = async (devEnabled) => {
   const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
+  // This probe drives its own page instead of going through gotoApp, so it has to opt
+  // into the same wait backstop the rest of the suite gets.
+  p.setDefaultTimeout(WAIT_BACKSTOP);
   const errs = [];
   p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
   p.on('pageerror', (e) => errs.push('PE:' + e.message));
@@ -41,7 +45,7 @@ const newGatedPage = async (devEnabled) => {
     }
   }, devEnabled);
   await p.goto(url, { waitUntil: 'networkidle' });
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap(), { timeout: 8000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap());
   return { p, errs };
 };
 
@@ -114,16 +118,16 @@ const newGatedPage = async (devEnabled) => {
     }
   });
   await p.goto(url, { waitUntil: 'networkidle' });
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap(), { timeout: 8000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap());
   expect((await p.evaluate(() => window.__ff.screen())) === 'map', 'a returning player boots straight to the map');
   await p.evaluate(() => window.__ff.clearSoundLog());
   // Replay the intro from the map's top-left corner (a single, ungated movie).
   await p.evaluate(() => window.__ff.clickMapCorner(20, 20));
-  await p.waitForFunction(() => window.__ff.screen() === 'intro', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'intro');
   // The session's FIRST keydown skips the single movie to the map AND unlocks audio.
   await p.keyboard.press('Space');
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
-  await p.waitForFunction(() => window.__ff.music() === 'menu', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
+  await p.waitForFunction(() => window.__ff.music() === 'menu');
   const menuStarts = await p.evaluate(
     () => window.__ff.soundLog().filter((s) => s.name.includes('menu') && s.name.includes('music-loop')).length,
   );
@@ -146,17 +150,14 @@ const newGatedPage = async (devEnabled) => {
   await p.selectOption('#graphics', 'ai');
   expect((await p.evaluate(() => window.__ff.graphics())) === 'ai', 'combobox switches the level to AI-upscaled');
   // Wait for the AI HEAD-probe to resolve so the resolver reports the upscale.
-  await p.waitForFunction(() => window.__ff.logoMovieUrl().includes('logo_ai'), { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.logoMovieUrl().includes('logo_ai'));
   // Click "Click to start"; the logo that plays must be the AI upscale.
   await p.click('#intro-start');
-  await p.waitForFunction(
-    () => {
+  await p.waitForFunction(() => {
       const v = document.getElementById('intro-video');
       const s = v && v.getAttribute('src');
       return !!s && s.includes('logo');
-    },
-    { timeout: 5000 },
-  );
+    });
   const src = await p.evaluate(() => document.getElementById('intro-video').getAttribute('src'));
   expect(src.includes('logo_ai.mp4'), `the played logo is the AI upscale after picking AI on the splash (got ${src})`);
   if (errs.length) {

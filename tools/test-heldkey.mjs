@@ -5,7 +5,7 @@
  * keydown does NOT OS-auto-repeat, so a single held keydown that travels several cells
  * can only be the engine's own repeat; a tap moves at most one cell.
  */
-import { waitRoom, withApp, forTicks, tickSleep } from './ui-lib.mjs';
+import { forTicks, tickSleep, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   const key = (type, code) =>
@@ -14,7 +14,7 @@ await withApp(async ({ p, expect }) => {
       c: code,
     });
   const cell = () => p.evaluate(() => window.__ff.fishCell('little'));
-  const waitIdle = () => p.waitForFunction(() => window.__ff.phase() === 'idle', { timeout: 5000 });
+  const waitIdle = () => p.waitForFunction(() => window.__ff.phase() === 'idle');
   const dist = (a, b) => Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 
   await p.evaluate(() => window.__ff.enterRoomAwait(30)); // RECYCLED — open water

@@ -32,7 +32,6 @@ await p.addInitScript(() => {
   } catch {}
 });
 await gotoApp(p);
-await p.waitForFunction(() => window.__ff && window.__ff.count);
 
 let ok = true;
 let tested = 0, skipped = 0, unsupported = 0, worstOver = 0, worstRoom = 0, worstMax = 0;

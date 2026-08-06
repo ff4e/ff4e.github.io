@@ -7,7 +7,6 @@
 import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
 
   for (const room of [3, 4, 6, 8]) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), room);

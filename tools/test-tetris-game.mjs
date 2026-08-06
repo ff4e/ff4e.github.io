@@ -7,7 +7,7 @@
  * keyboard until Escape. This checks the launch, the freeze, the controls, the
  * persistent hiscore table and the close.
  */
-import { selectRoom, waitRoom, withApp } from './ui-lib.mjs';
+import { selectRoom, withApp } from './ui-lib.mjs';
 
 async function typeCode(p, code) {
   for (const ch of code) await p.keyboard.press(ch);
@@ -19,27 +19,24 @@ await withApp(async ({ p, expect }) => {
   const tetrisTicks = async (n) => {
     const t0 = await p.evaluate(() => window.__ff.tetris().tick);
     await p
-      .waitForFunction(([s, k]) => window.__ff.tetris() && window.__ff.tetris().tick >= s + k, [t0, n], {
-        timeout: 30000,
-      })
+      .waitForFunction(([s, k]) => window.__ff.tetris() && window.__ff.tetris().tick >= s + k, [t0, n])
       .catch(() => {});
     return (await p.evaluate(() => window.__ff.tetris().tick)) - t0;
   };
 
   await p.evaluate(() => localStorage.removeItem('ff.tetris'));
   await selectRoom(p, 7); // UTES
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
 
   // ---- launch from a room -----------------------------------------------------
   expect((await p.evaluate(() => window.__ff.tetris())) === null, 'the minigame starts closed');
   await typeCode(p, 'xtetris');
-  await p.waitForFunction(() => window.__ff.tetris() !== null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris() !== null);
   const t0 = await p.evaluate(() => window.__ff.tetris());
   expect(t0.rychlost === 11, 'it opens at the slowest speed');
   expect(t0.gameover === false, 'and not already over');
 
   // It runs its own 55ms clock: a piece appears and starts falling.
-  await p.waitForFunction(() => window.__ff.tetris().druh > 0, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris().druh > 0);
   const spawned = await p.evaluate(() => window.__ff.tetris());
   expect(spawned.filled === 4, 'a four-cell piece is on the board');
   // Wait for the minigame's OWN clock to run, not for 900ms of wall time — on a
@@ -109,11 +106,11 @@ await withApp(async ({ p, expect }) => {
 
   // ---- close ------------------------------------------------------------------
   await p.keyboard.press('Escape');
-  await p.waitForFunction(() => window.__ff.tetris() === null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris() === null);
   expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'Escape returns to the room');
   const resumed = await p.evaluate(() => window.__ff.count());
   await p
-    .waitForFunction((n) => window.__ff.count() > n, resumed, { timeout: 30000 })
+    .waitForFunction((n) => window.__ff.count() > n, resumed)
     .catch(() => {});
   expect(
     (await p.evaluate(() => window.__ff.count())) > resumed,
@@ -122,9 +119,9 @@ await withApp(async ({ p, expect }) => {
 
   // ---- launch from the map, and persist a hiscore -----------------------------
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   await typeCode(p, 'xtetris');
-  await p.waitForFunction(() => window.__ff.tetris() !== null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris() !== null);
   expect(
     (await p.evaluate(() => window.__ff.tetris())) !== null,
     'xtetris opens the minigame from the map too',
@@ -150,11 +147,11 @@ await withApp(async ({ p, expect }) => {
   expect(JSON.parse(saved)[0] === end.score, 'with this game at the top');
 
   await p.keyboard.press('Escape');
-  await p.waitForFunction(() => window.__ff.tetris() === null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris() === null);
 
   // A later game sees the stored table.
   await typeCode(p, 'xtetris');
-  await p.waitForFunction(() => window.__ff.tetris() !== null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris() !== null);
   await p.evaluate(() => {
     for (let i = 0; i < 20000; i++) {
       const s = window.__ff.tetris();
@@ -169,11 +166,11 @@ await withApp(async ({ p, expect }) => {
     'the second game sees the first one in the table',
   );
   await p.keyboard.press('Escape');
-  await p.waitForFunction(() => window.__ff.tetris() === null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris() === null);
 
   // ---- the game-over blink runs on the 55ms game clock, not the paint rate ----
   await typeCode(p, 'xtetris');
-  await p.waitForFunction(() => window.__ff.tetris() !== null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris() !== null);
   await p.evaluate(() => {
     for (let i = 0; i < 20000; i++) {
       const s = window.__ff.tetris();
@@ -238,9 +235,7 @@ await withApp(async ({ p, expect }) => {
     p.evaluate(() => ({ hash: window.__ff.tetrisBoardHash().hash, blik: window.__ff.tetris().blikani }));
   const blinkA = await blinkState();
   await p
-    .waitForFunction((b) => window.__ff.tetris() && (window.__ff.tetris().blikani % 18 < 9) !== (b % 18 < 9), blinkA.blik, {
-      timeout: 30000,
-    })
+    .waitForFunction((b) => window.__ff.tetris() && (window.__ff.tetris().blikani % 18 < 9) !== (b % 18 < 9), blinkA.blik)
     .catch(() => {});
   const blinkC = await blinkState();
   expect(
@@ -248,7 +243,7 @@ await withApp(async ({ p, expect }) => {
     `but it does blink on the 55ms game clock (blikani ${blinkA.blik} -> ${blinkC.blik})`,
   );
   await p.keyboard.press('Escape');
-  await p.waitForFunction(() => window.__ff.tetris() === null, { timeout: 5000 });
+  await p.waitForFunction(() => window.__ff.tetris() === null);
 
   console.log('Tetris OK: launch from room + map, own clock, room frozen, controls, painting, hiscore, close');
 });

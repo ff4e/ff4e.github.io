@@ -54,7 +54,7 @@ async function sample(p, ms) {
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
-  await p.waitForFunction(() => window.__ff.subFontReady(), { timeout: 20000 });
+  await p.waitForFunction(() => window.__ff.subFontReady());
   // Turn the idle saver off so the room really does repaint on every rAF: that is
   // the situation the gate has to survive (it is also what happens with the saver
   // on whenever the fish is moving).
@@ -104,7 +104,7 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), 'Watch out for the crab.');
   // Wait on the actual state, not on a guessed timeout: the wave-in and the scroll
   // to cilys take a different number of ticks for every line.
-  await p.waitForFunction(() => !window.__ff.subsAnimating(), { timeout: 8000 });
+  await p.waitForFunction(() => !window.__ff.subsAnimating());
   const settled = await sample(p, 800);
   expect(settled.frames > 10, `settled: frames really were rendered (${settled.frames})`);
   expect(settled.ticks > 5, `settled: the game really was ticking (${settled.ticks})`);

@@ -102,7 +102,6 @@ await p.addInitScript(() => {
   } catch {}
 });
 await gotoApp(p);
-await p.waitForFunction(() => window.__ff && window.__ff.count);
 
 /**
  * Wait until the room is built AND its AI art has landed (the tier holds the frame).
@@ -118,7 +117,7 @@ await p.waitForFunction(() => window.__ff && window.__ff.count);
 async function enter(num) {
   await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
   await waitRoom(p, 0);
-  await p.waitForFunction(() => window.__ff.roomArtPending() === false, { timeout: 30000 });
+  await p.waitForFunction(() => window.__ff.roomArtPending() === false);
 }
 
 let ok = true;
@@ -342,7 +341,7 @@ async function wobbleAt(num) {
   if (wobbles) {
     const born = await p.evaluate(() => { window.__ff.startTrainNow(); return window.__ff.count(); });
     const half = await p.evaluate(() => Math.round(window.__ff.rippleTuning().lifeTicks / 2));
-    await p.waitForFunction((t) => window.__ff.count() >= t, born + half, { timeout: 30000 });
+    await p.waitForFunction((t) => window.__ff.count() >= t, born + half);
   }
   return p.evaluate(() => window.__ff.aiWobbleCheck({ alpha: 0.5 }));
 }

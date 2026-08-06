@@ -2,9 +2,8 @@
  *  verifies one descends and catches a fish (control passes to the survivor), and
  *  that catching BOTH fish restarts the room (count resets). Also checks hooks
  *  clear on room change. */
-import { waitRoom, withApp, forTicks } from './ui-lib.mjs';
+import { forTicks, waitRoom, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoomAwait(7)); // UTES
   await waitRoom(p, 3);
 

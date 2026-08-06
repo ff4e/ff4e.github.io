@@ -6,7 +6,7 @@ import { idle, selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // enter UTES
-  await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), { timeout: 8000 });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel());
   expect(await p.evaluate(() => window.__ff.hasPanel()), 'panel.ffp loaded');
 
   // Hit-test the known regions (panel coords) -> region ids (Uovl.pas oblmysi).

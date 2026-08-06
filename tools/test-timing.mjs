@@ -12,11 +12,10 @@
  * four CPU hogs). Pinning the clock to that ceiling instead is load-independent AND
  * tighter: on an idle machine it demands >= ~9.4 ticks/s where the old floor demanded 8.
  */
-import { selectRoom, withApp, forTicks } from './ui-lib.mjs';
+import { forTicks, selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 1); // PRVNI
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
 
   // Measure ticks, elapsed time and RENDERED FRAMES over the same 3-second window.
   const m = await p.evaluate(

@@ -6,7 +6,6 @@ import { waitRoom, withApp } from './ui-lib.mjs';
 const DIR_LEFT = 3; // Dir.left
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, { timeout: 5000 });
   await p.evaluate(() => window.__ff.enterRoomAwait(45));
   await waitRoom(p, 0);
 

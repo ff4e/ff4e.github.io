@@ -4,7 +4,7 @@
  * optimisation (the overlay stays empty when no subtitle is showing). Asserts
  * painted-vs-empty, never pixel-exact positions or wave timing, so it is not flaky.
  */
-import { selectRoom, withApp, tickSleep } from './ui-lib.mjs';
+import { selectRoom, tickSleep, withApp } from './ui-lib.mjs';
 
 /** Count of non-transparent pixels on the #subs overlay (capped, for speed). */
 async function overlayPixels(p) {
@@ -24,7 +24,7 @@ await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES — has both fish
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
   await p
-    .waitForFunction(() => window.__ff.enhancedActive && window.__ff.enhancedActive(), { timeout: 12000 })
+    .waitForFunction(() => window.__ff.enhancedActive && window.__ff.enhancedActive())
     .catch(() => {});
   await tickSleep(p, 3);
 
