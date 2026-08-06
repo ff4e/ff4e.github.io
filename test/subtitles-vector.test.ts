@@ -10,7 +10,8 @@ import type { FontData } from '../src/render/font.js';
 import type { FfrPaletteEntry } from '../src/data/ffr.js';
 
 const CHAR_W = 10; // every glyph (incl. space) advances 10px in the mock context
-const SUB_FONT_PX = 23; // must match subtitles.ts
+const SUB_SCALE = 1.2; // must match subtitles.ts
+const SUB_FONT_PX = 23 * SUB_SCALE; // must match subtitles.ts
 
 /** A fake font: fixed 10px advance, plus the two speaker colours we assert on. */
 const fakeFont = {
@@ -301,14 +302,15 @@ describe('sub-tick animation (the wave is interpolated between logic ticks)', ()
     // tick, which is the whole specification of the interpolation. Anything that
     // overshoots the next tick, lags, or mis-scales `frac` lands off this curve.
     const UNDERTITLE = 15;
-    const SUB_BASELINE_OFF = -6;
+    const SUB_BASELINE_OFF = -6 * SUB_SCALE;
     const expected = (cas: number, frac: number, index: number) => {
       const p = cas * 5 - index;
       if (p < 0) return null; // not revealed yet
       // The line was added at count 0 with ys = 0 and cilys = BASETITLE - ROWTITLE,
       // and has not been ticked, so PosunTitulky's next step is ys - SPEEDTITLE.
-      const ys = 0 + (Math.max(-26, 0 - 2) - 0) * frac;
-      const amp = UNDERTITLE - ys;
+      // The vector path then takes the whole vertical geometry through SUB_SCALE.
+      const ys = (0 + (Math.max(-26, 0 - 2) - 0) * frac) * SUB_SCALE;
+      const amp = UNDERTITLE * SUB_SCALE - ys;
       const dy = p < 50 ? ((amp * (50 - p)) / 50) * Math.cos((3.5 * Math.PI * p) / 50) : 0;
       return ys + SCREEN_H + SUB_BASELINE_OFF + dy;
     };
