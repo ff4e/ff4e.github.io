@@ -4,10 +4,9 @@
  * crystals, the universal agent, the PC/door animations — executes for many
  * ticks without throwing. The harness hard-fails on any console/page error.
  */
-import { budget, forTicks, waitRoom, withApp } from './ui-lib.mjs';
+import { forTicks, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoom(62));
   await waitRoom(p, 0);
 

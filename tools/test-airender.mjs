@@ -17,7 +17,7 @@
  * dissolve, where the mirror axis falls — must match. Any of those mutations moves
  * pixels and shows up as a large structural difference.
  */
-import { budget, withApp } from './ui-lib.mjs';
+import { withApp } from './ui-lib.mjs';
 
 /**
  * Grab #screen downsampled to native 640×480-space luminance.
@@ -69,7 +69,7 @@ function grossFrac(a, b, t = 60) {
  */
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap(), null, { timeout: budget(15000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
   await p.evaluate(`window.GRAB = ${GRAB.toString()}`);
 
   /**
@@ -82,12 +82,12 @@ await withApp(async ({ p, expect }) => {
    * requiring it to advance guarantees a completed frame in this tier.
    */
   const waitPainted = async (tier) => {
-    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier, { timeout: budget(20000) });
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier);
     const c0 = Number((await p.evaluate(() => window.__ff.paintedRoomSig())).split('|')[0]);
     await p.waitForFunction(([t, c]) => {
         const sig = window.__ff.paintedRoomSig() || '';
         return sig.includes(`|${t}|`) && Number(sig.split('|')[0]) >= c + 2;
-      }, [tier, c0], { timeout: budget(20000) });
+      }, [tier, c0]);
   };
 
   /** Rooms chosen to exercise the compositor branches the unit tests cannot reach. */
@@ -101,7 +101,7 @@ await withApp(async ({ p, expect }) => {
     // --- faithful (enhanced) reference -------------------------------------
     await p.evaluate(() => window.__ff.setGraphics('enhanced'));
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), r.n);
-    await p.waitForFunction((n) => window.__ff.roomNum() === n, r.n, { timeout: budget(15000) });
+    await p.waitForFunction((n) => window.__ff.roomNum() === n, r.n);
     // Wait for a room frame actually PAINTED in this tier. Waiting on roomNum alone
     // samples while #screen is still the map-sized canvas, and waiting on a fixed sleep
     // would silently pass against an app that never rendered.
@@ -115,7 +115,7 @@ await withApp(async ({ p, expect }) => {
     // --- AI tier, same room, same state ------------------------------------
     await p.evaluate(() => window.__ff.setGraphics('ai'));
     await waitPainted('ai');
-    await p.waitForFunction((w) => document.querySelector('#screen').width === w * 4, size.w, { timeout: budget(15000) });
+    await p.waitForFunction((w) => document.querySelector('#screen').width === w * 4, size.w);
     const aiGrab = await p.evaluate(([w, h]) => window.GRAB(w, h), [size.w, size.h]);
 
     expect(aiGrab.length === ref.length, `room ${r.n}: grabs are the same size`);
@@ -142,7 +142,7 @@ await withApp(async ({ p, expect }) => {
   // it directly too, since it is the single most expensive silent failure in this tier.
   await p.evaluate(() => window.__ff.setGraphics('ai'));
   await p.evaluate(() => window.__ff.enterRoomAwait(1));
-  await p.waitForFunction(() => window.__ff.roomNum() === 1, null, { timeout: budget(15000) });
+  await p.waitForFunction(() => window.__ff.roomNum() === 1);
   await waitPainted('ai');
   const fishMoved = await p.evaluate(async () => {
     const c = document.querySelector('#screen');

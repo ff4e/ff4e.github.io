@@ -2,15 +2,14 @@
  * UI test: per-room music. The correct rybky track loops per room (cHud mapping),
  * cHud=-1 rooms are silent, and switching rooms swaps the track.
  */
-import { budget, selectRoom, withApp } from './ui-lib.mjs';
+import { observed, selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.music, null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.music);
 
   async function check(room, want) {
     await selectRoom(p, room);
-    await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
-    await p.waitForFunction((w) => window.__ff.music() === w, want, { timeout: budget(60000) }).catch(() => {});
+    await p.waitForFunction((w) => window.__ff.music() === w, want).catch(() => {});
     const got = await p.evaluate(() => window.__ff.music());
     expect(got === want, `room ${room}: music='${got}' (want '${want}')`);
   }
@@ -25,12 +24,10 @@ await withApp(async ({ p, expect }) => {
   // (musicSnd), not the looping musicSrc. Regression guard: without the fallback the
   // intro is silent and the band "sings" with no backing.
   await selectRoom(p, 13);
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   // The wait is the assertion — see test-ves: re-reading a "is playing" flag after the
   // wait races the sample ending.
-  const playing = await p
-    .waitForFunction(() => window.__ff.playingPrior(-998), null, { timeout: budget(60000) })
-    .then(() => true)
-    .catch(() => false);
+  const playing = await observed(
+    p.waitForFunction(() => window.__ff.playingPrior(-998)),
+  );
   expect(playing, 'DRAKAR1 intro music (rybky04) plays via the Music/ fallback');
 });

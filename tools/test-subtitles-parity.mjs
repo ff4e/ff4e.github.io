@@ -19,7 +19,7 @@
  * This is the guard for any future rewrite of the renderer (glyph atlas, WebGL,
  * CSS): if it changes what is on screen, this fails.
  */
-import { budget, forTicks, selectRoom, withApp } from './ui-lib.mjs';
+import { forTicks, observed, selectRoom, withApp } from './ui-lib.mjs';
 
 // Layout constants — must match src/render/subtitles.ts.
 const K = {
@@ -125,15 +125,14 @@ async function installReference(p) {
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
-  await p.waitForFunction(() => window.__ff.subFontReady(), null, { timeout: budget(20000) });
+  await p.waitForFunction(() => window.__ff.subFontReady());
   await installReference(p);
   await p.evaluate(() => window.__ff.clearSubtitles());
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'M'), LINE_A);
   await p.evaluate((s) => window.__ff.pushSubtitle(s, 'V'), LINE_B);
-  const onScreen = await p
-    .waitForFunction(() => window.__ff.subsActive(), null, { timeout: budget(10000) })
-    .then(() => true)
-    .catch(() => false);
+  const onScreen = await observed(
+    p.waitForFunction(() => window.__ff.subsActive()),
+  );
   expect(onScreen, 'parity: subtitles are on screen');
 
   // ── Phase 1: frozen line state, swept over ticks x sub-tick fractions.

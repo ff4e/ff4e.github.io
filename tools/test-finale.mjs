@@ -10,26 +10,25 @@
 import { budget, selectRoom, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
 
   // forceExit is a no-op unless the engine is idle (main.ts:4338), so a room still
   // settling on entry would silently swallow the exit and hang the win. Wait for idle
   // before each forced exit, and re-issue if the first attempt didn't take.
   const exitFish = async (which) => {
-    await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(6000) });
+    await p.waitForFunction(() => window.__ff.phase() === 'idle');
     await p.evaluate((w) => window.__ff.forceExit(w, 3), which);
     await p
-      .waitForFunction((w) => window.__ff.state().venku[w], which, { timeout: budget(4000) })
+      .waitForFunction((w) => window.__ff.state().venku[w], which)
       .catch(async () => {
-        await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(6000) });
+        await p.waitForFunction(() => window.__ff.phase() === 'idle');
         await p.evaluate((w) => window.__ff.forceExit(w, 3), which);
-        await p.waitForFunction((w) => window.__ff.state().venku[w], which, { timeout: budget(6000) });
+        await p.waitForFunction((w) => window.__ff.state().venku[w], which);
       });
   };
   const winCurrentRoom = async () => {
     await exitFish('little');
     await exitFish('big');
-    await p.waitForFunction(() => window.__ff.state().won, null, { timeout: budget(5000) });
+    await p.waitForFunction(() => window.__ff.state().won);
   };
   const enterAndWin = async (room) => {
     await selectRoom(p, room);
@@ -38,7 +37,7 @@ await withApp(async ({ p, expect }) => {
         window.__ff.count() > 0 &&
         !window.__ff.state().won &&
         !window.__ff.state().venku.little &&
-        !window.__ff.state().venku.big, null, { timeout: budget(5000) });
+        !window.__ff.state().venku.big);
     await winCurrentRoom();
   };
 
@@ -46,9 +45,9 @@ await withApp(async ({ p, expect }) => {
   //     leg page and returns to the MAP (no finale) — the pre-existing behaviour. ---
   await p.evaluate(() => localStorage.removeItem('ff.solved'));
   await enterAndWin(19); // leg 1 final (depth 15), but rooms 1..70 not all solved
-  await p.waitForFunction(() => window.__ff.screen() === 'legimage', null, { timeout: budget(6000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'legimage', null, { timeout: budget(15000) });
   await p.click('#screen');
-  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(3000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   expect(
     (await p.evaluate(() => window.__ff.screen())) === 'map',
     'incomplete game: a leg-final win returns to the map, not the finale',
@@ -62,13 +61,13 @@ await withApp(async ({ p, expect }) => {
   });
   await p.evaluate(() => window.__ff.showMap());
   await enterAndWin(19); // leg 1 final; game is now fully solved
-  await p.waitForFunction(() => window.__ff.screen() === 'legimage', null, { timeout: budget(6000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'legimage', null, { timeout: budget(15000) });
   expect(
     (await p.evaluate(() => window.__ff.legImage())) === 1,
     'completing on a leg-final still shows that leg story page first',
   );
   await p.click('#screen'); // dismiss the story page -> chain into ZAVER (not the map)
-  await p.waitForFunction(() => window.__ff.zaverMode(), null, { timeout: budget(6000) });
+  await p.waitForFunction(() => window.__ff.zaverMode());
   expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'dismissing the final leg page enters a room');
   expect(await p.evaluate(() => window.__ff.zaverMode()), 'the ZAVER finale (room 71) auto-launches after the last leg page');
 
@@ -79,7 +78,7 @@ await withApp(async ({ p, expect }) => {
   let sawLegImage = false;
   await enterAndWin(7); // Fish House room 7 (depth < 15), all 70 already solved
   // Give the win countdown time to return; it should reach the MAP, never ZAVER/legimage.
-  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(6000) }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.screen() === 'map').catch(() => {});
   if ((await p.evaluate(() => window.__ff.screen())) === 'legimage') sawLegImage = true;
   expect(!sawLegImage, 'a non-leg-final completion shows no leg story page');
   expect(

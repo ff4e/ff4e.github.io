@@ -10,7 +10,7 @@
  * the wrong factor, because the manifest, the per-scale fish set or a WebP asset failed
  * to load. None of those raise an error on their own — the room still draws.
  */
-import { budget, withApp } from './ui-lib.mjs';
+import { withApp } from './ui-lib.mjs';
 
 // A spread of room sizes: these span every bucket the adaptive path would produce.
 const ROOMS = [
@@ -25,7 +25,6 @@ await withApp(async ({ p, expect }) => {
   const errors = [];
   p.on('pageerror', (e) => errors.push(String(e)));
 
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   // The pixel assertions below sample #screen directly, which only the canvas-2D
   // backend paints — with the GPU backend the composite lives in GlAiScreen's FBO. That
   // is a real constraint of reading pixels, not a gap: the backend-independent half of
@@ -42,7 +41,7 @@ await withApp(async ({ p, expect }) => {
     expect(Number.isInteger(scale) && scale >= 4, `${room.name} ai.json declares a scale (x${scale})`);
 
     await p.evaluate((id) => window.__ff.enterRoomAwait(id), room.id);
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, null, { timeout: budget(8000) });
+    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0);
 
     // The shipped background is authored at native × scale, so it is the ground truth
     // for what the compositor should have allocated.
@@ -63,7 +62,7 @@ await withApp(async ({ p, expect }) => {
       .waitForFunction((want) => {
           const c = document.querySelector('#screen');
           return c && c.width === want.w && c.height === want.h ? { w: c.width, h: c.height } : null;
-        }, bg, { timeout: budget(25000) })
+        }, bg)
       .then((h) => h.jsonValue())
       .catch(() => null);
 
@@ -115,25 +114,25 @@ await withApp(async ({ p, expect }) => {
   for (const mode of ['cpu', 'webgl']) {
     await p.evaluate((m) => window.__ff.setRenderer(m), mode);
     await p.evaluate((id) => window.__ff.enterRoomAwait(id), ROOMS[0].id);
-    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, null, { timeout: budget(8000) });
+    await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0);
     const hi = await p.waitForFunction(() => {
       const g = window.__ff.roomGeom();
       return g && g.upscale > 1 ? g.upscale : null;
-    }, undefined, { timeout: budget(20000) }).then((h) => h.jsonValue()).catch(() => null);
+    }, undefined).then((h) => h.jsonValue()).catch(() => null);
     expect(hi !== null, `[${mode}] AI room composites at x${hi} before the effect`);
 
     await p.evaluate(() => window.__ff.typeCheat('XINTERLACED'));
     const lo = await p.waitForFunction(() => {
       const g = window.__ff.roomGeom();
       return g && g.upscale === 1 ? 1 : null;
-    }, undefined, { timeout: budget(8000) }).then((h) => h.jsonValue()).catch(() => null);
+    }, undefined).then((h) => h.jsonValue()).catch(() => null);
     expect(lo !== null, `[${mode}] AI path yields to a frame effect (x${hi} -> x${lo})`);
 
     await p.evaluate(() => window.__ff.typeCheat('XINTERLACED'));
     const restored = await p.waitForFunction((was) => {
       const g = window.__ff.roomGeom();
       return g && g.upscale === was ? was : null;
-    }, hi, { timeout: budget(8000) }).then((h) => h.jsonValue()).catch(() => null);
+    }, hi).then((h) => h.jsonValue()).catch(() => null);
     expect(restored !== null, `[${mode}] AI path resumes once the effect ends (x${restored})`);
   }
 

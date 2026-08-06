@@ -11,14 +11,15 @@
  * ~15 minutes while the CPU sat idle >47 % of the wall clock. Three things fixed
  * that, none of which touch a single assertion:
  *
- *  1. A worker pool runs FF_UI_JOBS probes at once (default: max(2, cores-2), capped 8).
+ *  1. A worker pool runs FF_UI_JOBS probes at once (default: round(cores * 0.6), floored
+ *     at 2 and capped at 8 — see the note on `jobs` below).
  *     Each probe is still its own `node` process with its own browser CONTEXT, so
  *     the isolation the probes rely on (localStorage, cookies, saved games) is
  *     unchanged. Probe output is buffered and printed as one block on completion,
  *     so parallel logs never interleave.
  *  2. Two shared browser SERVERS are launched once here and advertised over
  *     FF_WS_PLAIN / FF_WS_ANGLE; `ui-lib.mjs` connects to them instead of paying
- *     for a cold `chromium.launch()` in all 63 probes. Two servers, not one,
+ *     for a cold `chromium.launch()` in all 81 probes. Two servers, not one,
  *     because the WebGL probes need ANGLE/Metal and the CPU-oracle probes must
  *     NOT get those flags (they could change 2D rasterization).
  *     Single-sample A/B when this was added: 164s with, 226s without. Treat that
@@ -28,7 +29,7 @@
  *     tail doesn't strand the pool at the end of the run.
  *
  * Probes whose assertions measure real time (tick rate, idle-throttle, animation
- * pacing, per-frame motion) cannot share the machine with 8 busy Chromiums, so
+ * pacing, per-frame motion) cannot share the machine with a poolful of busy Chromiums, so
  * they are listed in EXCLUSIVE below and run alone, after the pool has drained,
  * each in its own freshly launched browser. If you add a probe that asserts on
  * wall-clock rates, add it there — do not relax its bounds.
@@ -86,10 +87,14 @@ const EXCLUSIVE = new Set([
 // Pool width. Sized by measurement, and the right number went DOWN once the probes
 // stopped failing early: a probe is mostly waiting on the GAME clock, which is
 // wall-clock driven and shares the machine, so an extra worker slows every other
-// worker's clock rather than buying throughput. Measured on this 10-core machine with
-// the suite green (81/81): 8 workers 443/427s, 6 workers 394/407s, 5 workers 438s —
-// and at 6 the total probe-seconds are ~510s LOWER than at 8, i.e. nearly every probe
-// finishes sooner. `cores - 2` used to give 8 here, which is past the knee.
+// worker's clock rather than buying throughput.
+//
+// CALIBRATED, NOT DERIVED. The evidence is one 10-core machine with the suite green
+// (81/81): 8 workers 443/427s, 6 workers 394/407s, 5 workers 438s — and at 6 the total
+// probe-seconds are ~510s LOWER than at 8, i.e. nearly every probe finishes sooner.
+// `cores - 2` used to give 8 here, which is past the knee. The 0.6 ratio is a way of
+// carrying "6 on this box" to other core counts, not a law; nothing has been measured on
+// a 4-core CI runner or a 32-core workstation. Set FF_UI_JOBS if your machine disagrees.
 const jobs = Math.max(1, Number(process.env.FF_UI_JOBS) || Math.min(8, Math.max(2, Math.round(cpus().length * 0.6))));
 
 // Deadlock backstop for a single probe (see runProbe). The slowest probe is ~150s.

@@ -6,10 +6,9 @@
  * (with the snapshot) preserves them, and that a legacy plain-record save (no
  * snapshot) still re-fires — proving the snapshot is what fixes it.
  */
-import { budget, forTicks, tickSleep, waitRoom, withApp } from './ui-lib.mjs';
+import { forTicks, tickSleep, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
 
   // Collect the set of line names that fire over a window of GAME time. Dialogue is
   // scheduled in ticks, so a wall-clock window is the wrong unit twice over: it makes
@@ -31,7 +30,7 @@ await withApp(async ({ p, expect }) => {
     await p.evaluate(() => window.__ff.enterRoomAwait(1)); // PRVNI (intro dialogue)
     await waitRoom(p, 0);
     await p.evaluate(() => localStorage.removeItem('ff.save.1'));
-    await p.waitForFunction(() => window.__ff.lines() >= 2, null, { timeout: budget(15000) }).catch(() => {});
+    await p.waitForFunction(() => window.__ff.lines() >= 2).catch(() => {});
   }
 
   // --- new save (with the script snapshot): loading does not re-fire dialogue ---
@@ -39,7 +38,7 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.save());
   await tickSleep(p, 11); // let the current line finish
   await p.evaluate(() => window.__ff.load());
-  await p.waitForFunction(() => !window.__ff.loading(), null, { timeout: budget(5000) });
+  await p.waitForFunction(() => !window.__ff.loading());
   const refiredNew = await collectRefired(42);
   expect(refiredNew.length === 0, `new save/load does not re-say dialogue (heard: [${refiredNew.join(', ')}])`);
 
@@ -48,7 +47,7 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => localStorage.setItem('ff.save.1', window.__ff.record())); // legacy format
   await tickSleep(p, 11);
   await p.evaluate(() => window.__ff.load());
-  await p.waitForFunction(() => !window.__ff.loading(), null, { timeout: budget(5000) });
+  await p.waitForFunction(() => !window.__ff.loading());
   const refiredLegacy = await collectRefired(42);
   expect(refiredLegacy.length > 0, `a legacy save (no snapshot) DOES re-say dialogue (heard: [${refiredLegacy.join(', ')}])`);
 
@@ -68,7 +67,7 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.save());
   await tickSleep(p, 6);
   await p.evaluate(() => window.__ff.load());
-  await p.waitForFunction(() => !window.__ff.loading(), null, { timeout: budget(5000) });
+  await p.waitForFunction(() => !window.__ff.loading());
   const refiredKufr = await collectRefired(42);
   const intro = refiredKufr.filter((n) => ['kuf-m-je', 'kuf-v-noco', 'kuf-v-hod'].includes(n));
   expect(intro.length === 0, `KUFRIK: loading does not repeat the intro banter (heard: [${refiredKufr.join(', ')}])`);

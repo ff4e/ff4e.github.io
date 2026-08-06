@@ -1,9 +1,8 @@
 /** UI probe: SLOUPY (room 23, colonnade). Runs many ticks so the wave state
  *  machines fire (writing afaze across items 9..50) without error; confirms the
  *  row/statue/figure items exist and malar(7)=little, velkar(8)=big. */
-import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoomAwait(23));
   await waitRoom(p, 0);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'SLOUPY has an active script');

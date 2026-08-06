@@ -11,11 +11,13 @@
  * animated at 12.5fps in `ai` and 60+fps in `enhanced` — measured at 19.2 against 39.9
  * overlay repaints/sec — with nothing logged and every unit test green.
  *
- * This asserts an absolute FLOOR per tier — repaints and loop rAF ticks both well above
- * the 12.5Hz logic rate — rather than comparing the two tiers to each other. A tier ratio
- * looks like the sharper check and is not: `ai` costs about twice the CPU of `enhanced`,
- * so under contention it legitimately drops to ~0.6 of it while `enhanced` stays at 60/s,
- * and the comparison fails on a correct build. See the note above the mechanism block.
+ * This asserts, per tier, that the overlay repaints SEVERAL TIMES PER LOGIC TICK while a
+ * line waves in, and that the loop is never allowed to idle-throttle for the duration.
+ * Both are measured in game ticks, not seconds, so a busy machine cannot move them: a
+ * per-second bound was tried and failed on correct builds, reading anywhere from 14/s to
+ * 60/s depending only on how loaded the machine was. A cross-tier ratio is not the answer
+ * either — `ai` costs about twice the CPU of `enhanced` and legitimately falls behind it
+ * under contention. See the note beside the assertions.
  *
  * It also pins the `ai` tier's SMALLER subtitle (`aiSubScale`): the overlay draws in
  * native game pixels in every tier, which sizes the text for 1998 bitmap art and reads
@@ -23,45 +25,74 @@
  * line positions are shared with the faithful bitmap path and must not move — so it is
  * checked on the rendered INK rather than on any internal number.
  */
-import { budget, withApp } from './ui-lib.mjs';
+import { withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap(), null, { timeout: budget(15000) });
-
-  // Count the LOOP's own rAF callbacks. When the idle throttle engages, the loop
-  // reschedules itself with setTimeout instead of requestAnimationFrame, so the rAF
-  // rate collapses to ~0 — a far crisper signal than the overlay repaint rate, which
-  // other optimisations can partially prop up.
-  await p.evaluate(() => {
-    const orig = window.requestAnimationFrame.bind(window);
-    window.__rafs = 0;
-    window.requestAnimationFrame = (cb) => orig((t) => { window.__rafs++; return cb(t); });
-  });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
 
   /** Overlay repaints AND loop rAF ticks per second while a line is waving in. */
   const measure = async (tier) => {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier);
     await p.evaluate(() => window.__ff.enterRoomAwait(1));
-    await p.waitForFunction(() => window.__ff.roomNum() === 1, null, { timeout: budget(15000) });
-    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier, { timeout: budget(15000) });
+    await p.waitForFunction(() => window.__ff.roomNum() === 1);
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier);
     // Wait until the room is genuinely IDLE first. While the fish are still falling
     // into place, roomAnimating() keeps the loop on rAF on its own and masks the bug
     // entirely — the throttle only engages once nothing else is moving.
-    await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(20000) });
+    await p.waitForFunction(() => window.__ff.phase() === 'idle');
     await p.evaluate(() => window.__ff.talk('little'));
-    await p.waitForFunction(() => window.__ff.subsActive(), null, { timeout: budget(8000) });
-    // Sample the throttle DECISION as well as the rates. `loopThrottleOk()` is false
-    // exactly while a vector line is waving in (main.ts), and `onTimer` says whether the
-    // loop actually rescheduled itself off requestAnimationFrame — so this is the bug
-    // itself, as a boolean, with no wall clock in it.
-    const a = await p.evaluate(() => ({
-      n: window.__ff.subPaints(), r: window.__rafs, t: performance.now(),
-      throttleOk: window.__ff.throttleInfo().throttleOk, onTimer: window.__ff.throttleInfo().onTimer,
-    }));
-    await new Promise((r) => setTimeout(r, 1500));
-    const b = await p.evaluate(() => ({ n: window.__ff.subPaints(), r: window.__rafs, t: performance.now(), active: window.__ff.subsActive() }));
-    const secs = (b.t - a.t) / 1000;
-    return { fps: (b.n - a.n) / secs, raf: (b.r - a.r) / secs, active: b.active, throttleOk: a.throttleOk, onTimer: a.onTimer };
+    await p.waitForFunction(() => window.__ff.subsActive());
+    // Sample ACROSS the wave, not at its start. Two things are watched:
+    //
+    //  - overlay repaints against LOGIC TICKS in the same window. That is the unit this
+    //    probe really cares about — "the line animates BETWEEN ticks" — and because both
+    //    counts come from the same window, the machine's speed cancels out of the ratio.
+    //    A repaints-per-second figure cannot do this: measured on a correct build it
+    //    ranges from 14/s to 60/s depending only on how busy the machine is.
+    //  - `loopThrottleOk()`, the throttle DECISION itself, and `onTimer`, whether the
+    //    loop actually left requestAnimationFrame for the idle timer. Sampled at every
+    //    frame of the window, because the bug does not have to be present at t=0: a wave
+    //    that throttles a third of the way in is still the same defect, and `talk()`
+    //    calls `wake()` (main.ts), which clears `idleTimer` and so guarantees
+    //    `onTimer === false` for the first frame no matter what the throttle decides.
+    //
+    // The probe's own rAF chain keeps being delivered even when the game loop leaves rAF,
+    // so this sampler still runs (and still reports) in exactly the broken case.
+    const w = await p.evaluate(
+      (ms) =>
+        new Promise((done) => {
+          const t0 = performance.now();
+          const start = { n: window.__ff.subPaints(), c: window.__ff.count(), l: window.__ff.throttleInfo().loops };
+          let everThrottleOk = false;
+          let everOnTimer = false;
+          const finish = () => {
+            const info = window.__ff.throttleInfo();
+            everThrottleOk = everThrottleOk || info.throttleOk;
+            everOnTimer = everOnTimer || info.onTimer;
+            done({
+              paints: window.__ff.subPaints() - start.n,
+              ticks: window.__ff.count() - start.c,
+              loops: window.__ff.throttleInfo().loops - start.l,
+              ms: performance.now() - t0,
+              active: window.__ff.subsActive(),
+              everThrottleOk,
+              everOnTimer,
+            });
+          };
+          // Poll on a TIMER, not on rAF: a rAF-driven sampler keeps its own frame chain
+          // alive and would sit inside the very scheduling this is trying to observe.
+          const step = () => {
+            const info = window.__ff.throttleInfo();
+            everThrottleOk = everThrottleOk || info.throttleOk;
+            everOnTimer = everOnTimer || info.onTimer;
+            if (performance.now() - t0 >= ms) finish();
+            else setTimeout(step, 16);
+          };
+          setTimeout(step, 16);
+        }),
+      1500,
+    );
+    return w;
   };
 
   /**
@@ -76,7 +107,7 @@ await withApp(async ({ p, expect }) => {
    */
   const overlayBox = async (tier) => {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier);
-    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier, { timeout: budget(15000) });
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier);
     return p.evaluate(() => {
       const c = document.querySelector('#screen');
       const s = document.querySelector('#subs');
@@ -94,51 +125,57 @@ await withApp(async ({ p, expect }) => {
 
   expect(enh.active, 'the enhanced line is still on screen for the whole sample');
   expect(ai.active, 'the ai line is still on screen for the whole sample');
-  // ── The decisive check, and it is not a rate ──
+  // ── What is actually asserted, and why none of it is a rate ──
   //
-  // The regression was `loopThrottleOk()` returning true in the `ai` tier while a vector
-  // line was still waving in, which sends the loop to the 80ms idle timer instead of rAF.
-  // Both halves of that are observable directly: the decision (`throttleOk`) and its
-  // consequence (`onTimer`). Neither depends on how fast the machine happens to be, so
-  // this holds on a machine under any load — which is the whole point, because every
-  // wall-clock form of this check has been measured flaking on a correct build.
-  expect(
-    enh.throttleOk === false && enh.onTimer === false,
-    `enhanced keeps the loop on rAF while the line settles (throttleOk=${enh.throttleOk}, onTimer=${enh.onTimer})`,
-  );
-  expect(
-    ai.throttleOk === false && ai.onTimer === false,
-    `ai keeps the loop on rAF while the line settles (throttleOk=${ai.throttleOk}, onTimer=${ai.onTimer})`,
-  );
-  // The rates are kept only as a liveness floor — "something is still being drawn" —
-  // deliberately far below any healthy value. They used to be 20/s and 30/s, which is a
-  // demand for a healthy frame rate from a machine the suite does not control: measured
-  // on a CORRECT build they read 14.3/s and 29.6/s under contention and failed. Throttled,
-  // the loop is on a timer and these collapse to ~0, so a floor of 5 separates the two
-  // states with room to spare; the booleans above are what actually decides.
-  expect(enh.fps > 5, `enhanced subtitles are being drawn (${enh.fps.toFixed(1)}/s)`);
-  expect(ai.fps > 5, `ai subtitles are being drawn (${ai.fps.toFixed(1)}/s)`);
-  expect(enh.raf > 5, `enhanced keeps taking rAF callbacks (${enh.raf.toFixed(1)}/s)`);
-  expect(ai.raf > 5, `ai keeps taking rAF callbacks (${ai.raf.toFixed(1)}/s)`);
-  // The cross-tier ratio (ai.fps / enh.fps > 0.7) used to be asserted here and was
-  // REMOVED, because it conflated two claims and only one of them is a requirement.
+  // Every per-second form of this check has been measured failing on a CORRECT build:
+  // repaints read 14/s to 60/s depending only on how busy the machine is. Per-TICK forms
+  // fail too, and that is worth recording because it is not obvious: measured on a correct
+  // `ai` build the loop ran between 1.4 and 5.3 iterations per logic tick depending on
+  // load, while the throttle bug itself reads ~1.8 — the healthy and broken ranges
+  // OVERLAP, so no tick-relative bound can separate them here.
   //
-  // What it was written to catch is the throttle bug — and the two floors above catch
-  // that outright: throttled, `fps` collapses to the 12.5Hz logic rate and `raf` to ~0.
-  // What it ALSO demanded is that the `ai` tier be as cheap per frame as `enhanced`,
-  // which it is not and was never meant to be: `ai` composites an xS FBO and costs
-  // roughly twice the CPU. Measured on a correct build, the ratio reads 0.81-0.83 cold
-  // and alone, 0.59-0.66 in the 8-way pool, and 0.24 on a machine still hot from a
-  // previous probe — against a bound of 0.7. In every one of those failures `enhanced`
-  // was still at a full 59.9/s, so this was not a slow machine being misread: it was the
-  // ai tier honestly failing to match a tier that costs half as much.
+  // What does separate them are two things with no clock in them at all.
+  for (const [tier, m] of [['enhanced', enh], ['ai', ai]]) {
+    // 1. The throttle DECISION, watched for the whole wave rather than sampled once at
+    //    the start. `loopThrottleOk()` is false exactly while a vector line is waving in
+    //    (main.ts), and `onTimer` says the loop actually left rAF for the idle timer.
+    //    Sampled across the window because the bug need not be present at t=0 — a wave
+    //    that throttles a third of the way in is the same defect — and because `talk()`
+    //    calls `wake()`, which clears `idleTimer` and so guarantees `onTimer === false`
+    //    on the first frame no matter what the loop then decides.
+    expect(
+      m.everThrottleOk === false,
+      `[${tier}] the loop is never allowed to idle-throttle while the line waves in`,
+    );
+    expect(m.everOnTimer === false, `[${tier}] the loop never leaves rAF for the idle timer while the line waves in`);
+    // 2. Overlay repaints against LOOP ITERATIONS. Both counters are incremented by the
+    //    same loop in the same window (`loopTicks` at main.ts:5308, `subOverlayPaints` at
+    //    :4784), so the machine's speed divides out exactly — this is a ratio of the
+    //    loop against itself, not against a clock. It catches the failure the throttle
+    //    booleans cannot: capping the OVERLAY repaint while leaving the loop on rAF
+    //    would keep `throttleOk` false and still leave the line juddering.
+    //    Measured while a line waves in: 0.50 in `enhanced` (the loop runs at the
+    //    display's 120Hz and MAX_PAINT_FPS lets half of those through), 0.67-0.87 in
+    //    `ai`, and ~1.0 on a 60Hz display. An overlay capped to the water rate reads
+    //    ~0.25, so 0.4 sits below every healthy figure and above the fault.
+    expect(
+      m.paints >= m.loops * 0.4,
+      `[${tier}] the overlay repaints on the frames the loop draws (${m.paints} repaints / ${m.loops} loop iterations)`,
+    );
+  }
+  // The window has to contain real game time, or the ratios above are vacuous.
+  expect(enh.ticks >= 5 && ai.ticks >= 5, `the sample window covers real game time (enhanced ${enh.ticks} ticks, ai ${ai.ticks} ticks)`);
+  // A cross-tier ratio (ai.fps / enh.fps > 0.7) used to stand here. It is gone because it
+  // measured the wrong thing: two per-second rates, sampled in different windows, divided.
+  // Measured on a CORRECT build it read 0.81-0.83 cold and alone, 0.59-0.66 in the pool
+  // and 0.24 on a machine still hot from another probe — while `enhanced` sat at a full
+  // 59.9/s throughout. That is not a slow machine being misread; it is the `ai` tier
+  // honestly failing to match a tier that costs half as much (it composites a xS FBO),
+  // which is not a defect and is not something this suite should require.
   //
-  // Note that also rules out the obvious rescue of gating the assertion on the control
-  // tier being healthy — the control WAS healthy every time it failed.
-  //
-  // It sat in EXCLUSIVE and flaked anyway (3/9, then 1/5 idle and 2/3 loaded here). The
-  // lane guarantees no other probe, not a cool machine, and it runs last — after the
-  // pool has held all ten cores for five minutes.
+  // The repaints-per-tick bound above keeps what the ratio was actually reaching for —
+  // "the ai overlay animates faster than the tick" — without asking the two tiers to cost
+  // the same, and without a wall clock anywhere in it.
 
   // ── the MECHANISM behind the smoothness, asserted directly ──
   //
@@ -149,7 +186,7 @@ await withApp(async ({ p, expect }) => {
   // smoothness back from 0.60 to ~0.95 when it was introduced.
   await p.evaluate(() => window.__ff.setGraphics('ai'));
   await p.evaluate(() => window.__ff.talk('little'));
-  await p.waitForFunction(() => window.__ff.subsActive(), null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff.subsActive());
   const capWindowMs = 1500;
   const r0 = await p.evaluate(() => ({ n: window.__ff.throttleInfo().roomPaints, t: performance.now() }));
   await new Promise((r) => setTimeout(r, capWindowMs));
@@ -176,8 +213,8 @@ await withApp(async ({ p, expect }) => {
   // wave phase — sampling live would compare different moments of the wave-in.
   const inkBox = async (tier) => {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier);
-    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier, { timeout: budget(15000) });
-    await p.waitForFunction(() => window.__ff.subsActive(), null, { timeout: budget(8000) });
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier);
+    await p.waitForFunction(() => window.__ff.subsActive());
     await p.waitForTimeout(400);
     return p.evaluate(() => {
       const c = document.getElementById('subs');
@@ -199,7 +236,7 @@ await withApp(async ({ p, expect }) => {
   };
 
   await p.evaluate(() => window.__ff.talk('little'));
-  await p.waitForFunction(() => window.__ff.subsActive(), null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff.subsActive());
   await p.waitForTimeout(2200); // let the wave finish so the ink is the settled line
   const enhInk = await inkBox('enhanced');
   const aiInk = await inkBox('ai');

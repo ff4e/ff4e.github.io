@@ -22,7 +22,7 @@
  *   3. a held movement key forces full rate                  — in every tier
  *   4. releasing it settles back to the idle timer           — in every tier
  */
-import { budget, withApp } from './ui-lib.mjs';
+import { withApp } from './ui-lib.mjs';
 
 /** Tiers, and whether they draw subtitles through the vector overlay. */
 const TIERS = [
@@ -32,25 +32,25 @@ const TIERS = [
 ];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.throttleInfo, null, { timeout: budget(15000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.throttleInfo);
 
   for (const tier of TIERS) {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier.id);
     await p.evaluate(() => window.__ff.enterRoomAwait(1));
-    await p.waitForFunction(() => window.__ff.roomNum() === 1, null, { timeout: budget(15000) });
-    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier.id, { timeout: budget(15000) });
+    await p.waitForFunction(() => window.__ff.roomNum() === 1);
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier.id);
 
     // 1. Settled room → idle throttle. Wait for the fish to stop falling into place
     //    first; while anything is moving the loop legitimately stays at full rate.
-    await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(20000) });
-    await p.waitForFunction(() => window.__ff.throttleInfo().throttleOk === true, null, { timeout: budget(10000) }).catch(() => {});
+    await p.waitForFunction(() => window.__ff.phase() === 'idle');
+    await p.waitForFunction(() => window.__ff.throttleInfo().throttleOk === true).catch(() => {});
     const settled = await p.evaluate(() => window.__ff.throttleInfo());
     expect(settled.throttleOk === true, `[${tier.id}] a settled room idle-throttles (phase=${settled.phase})`);
 
     // 2. A subtitle waving in animates BETWEEN logic ticks, so the vector tiers must
     //    leave the idle timer for the ~1.5s it takes to settle.
     await p.evaluate(() => window.__ff.talk('little'));
-    await p.waitForFunction(() => window.__ff.subsActive(), null, { timeout: budget(10000) }).catch(() => {});
+    await p.waitForFunction(() => window.__ff.subsActive()).catch(() => {});
     // Sample repeatedly: the line has to be caught while it is still WAVING, not after
     // it has settled (at which point throttling again is correct in every tier).
     let sawFullRate = false;
@@ -71,15 +71,15 @@ await withApp(async ({ p, expect }) => {
 
     // 3. A held movement key forces full rate, in every tier.
     await p.keyboard.down('KeyL');
-    await p.waitForFunction(() => window.__ff.throttleInfo().heldState !== 0, null, { timeout: budget(10000) }).catch(() => {});
+    await p.waitForFunction(() => window.__ff.throttleInfo().heldState !== 0).catch(() => {});
     const held = await p.evaluate(() => window.__ff.throttleInfo());
     expect(held.heldState !== 0, `[${tier.id}] the held key is registered`);
     expect(held.throttleOk === false, `[${tier.id}] the loop runs at full rate while a key is held`);
 
     // 4. ...and settles back to the idle timer afterwards, so no tier is left spinning.
     await p.keyboard.up('KeyL').catch(() => {});
-    await p.waitForFunction(() => window.__ff.throttleInfo().heldState === 0, null, { timeout: budget(10000) }).catch(() => {});
-    await p.waitForFunction(() => window.__ff.throttleInfo().throttleOk === true, null, { timeout: budget(15000) }).catch(() => {});
+    await p.waitForFunction(() => window.__ff.throttleInfo().heldState === 0).catch(() => {});
+    await p.waitForFunction(() => window.__ff.throttleInfo().throttleOk === true).catch(() => {});
     const done = await p.evaluate(() => window.__ff.throttleInfo());
     expect(done.throttleOk === true, `[${tier.id}] the loop returns to the idle timer (phase=${done.phase}, held=${done.heldState})`);
   }

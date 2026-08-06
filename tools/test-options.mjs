@@ -3,11 +3,11 @@
  * scroll open/close state machine, the three volume sliders, the subtitle
  * cz/en/off buttons, the help overlay, and cross-reload persistence.
  */
-import { budget, reloadApp, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
+import { reloadApp, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // enter UTES
-  await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel());
   await tickSleep(p, 3);
 
   // Starts on the normal panel (o_normal).
@@ -16,7 +16,7 @@ await withApp(async ({ p, expect }) => {
 
   // Click the corner button -> scrolls up to the options sub-panel.
   await p.evaluate(() => window.__ff.panelAction(16));
-  await p.waitForFunction(() => window.__ff.optionsOpen(), null, { timeout: budget(3000) });
+  await p.waitForFunction(() => window.__ff.optionsOpen());
   expect(true, 'corner button scrolls to options (o_options)');
 
   // Volume sliders: a click at the right edge maxes the index, left edge zeroes it.
@@ -53,7 +53,7 @@ await withApp(async ({ p, expect }) => {
   // Help button opens the help overlay; pages load; arrows page; a key closes it.
   await p.evaluate(() => window.__ff.panelAction(23));
   expect((await p.evaluate(() => window.__ff.helpOpen())) === true, 'help overlay opens');
-  await p.waitForFunction(() => window.__ff.helpPageCount() > 0, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.helpPageCount() > 0);
   const pages = await p.evaluate(() => window.__ff.helpPageCount());
   expect(pages === 10, `help has 10 pages (got ${pages})`);
   expect((await p.evaluate(() => window.__ff.helpPage())) === 0, 'help starts on page 0');
@@ -66,14 +66,14 @@ await withApp(async ({ p, expect }) => {
 
   // Corner button again -> scrolls back down to the normal panel.
   await p.evaluate(() => window.__ff.panelAction(16));
-  await p.waitForFunction(() => window.__ff.panelOstav() === 0, null, { timeout: budget(3000) });
+  await p.waitForFunction(() => window.__ff.panelOstav() === 0);
   expect(true, 'corner button scrolls back to o_normal');
 
   // Persistence: settings survive a reload.
   await p.evaluate(() => window.__ff.panelAction ? window.__ff.toggleOptions() : null);
   await reloadApp(p);
   await selectRoom(p, 7);
-  await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel());
   const v = await p.evaluate(() => window.__ff.volumes());
   expect(v.effect === 0 && v.voice === 7 && v.music === 12, `volumes persisted (${JSON.stringify(v)})`);
   expect((await p.evaluate(() => window.__ff.subtitleMode())) === 'en', 'subtitle mode persisted');
@@ -83,7 +83,7 @@ await withApp(async ({ p, expect }) => {
   // the full-screen help pages, hiding them). Faithful analogue of the original where
   // FHelp shows as its own top-level window over the panel.
   await p.evaluate(() => window.__ff.showMap());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   await p.evaluate(() => window.__ff.openMapOptions());
   expect((await p.evaluate(() => window.__ff.mapOverlay())) === 'options', 'map Options overlay opens');
   expect((await p.evaluate(() => window.__ff.optionsOpen())) === true, 'panel is on the options face over the map');

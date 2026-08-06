@@ -18,7 +18,6 @@
 import { budget, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
 
   await p.evaluate(() => window.__ff.enterRoomAwait(2));
   await waitRoom(p, 3);
@@ -41,19 +40,19 @@ await withApp(async ({ p, expect }) => {
 
   await p.evaluate(() => window.__ff.forceShowmode());
   expect(await p.evaluate(() => window.__ff.showmodeState().flag), 'showmode flag set on start');
-  await p.waitForFunction(() => window.__ff.showmodeState().active, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.showmodeState().active);
   const total = await p.evaluate(() => window.__ff.showmodeState().total);
   expect(total > 1000, `help.cap loaded (${total} recorded actions)`);
   console.log(`showmode started (${total} actions)`);
 
   const idx0 = await p.evaluate(() => window.__ff.showmodeState().idx);
-  await p.waitForFunction((i) => window.__ff.showmodeState().idx >= i + 20, idx0, { timeout: budget(10000) });
+  await p.waitForFunction((i) => window.__ff.showmodeState().idx >= i + 20, idx0);
   console.log('replay advancing');
 
   await p.waitForFunction((s) => {
     const l = window.__ff.fishCell('little');
     return l && (l.x !== s.little.x || l.y !== s.little.y);
-  }, startCells, { timeout: budget(12000) });
+  }, startCells);
   const moved = await p.evaluate(() => window.__ff.fishCell('little'));
   expect(
     moved.x !== startCells.little.x || moved.y !== startCells.little.y,
@@ -61,7 +60,7 @@ await withApp(async ({ p, expect }) => {
   );
   console.log(`fish auto-moved (${startCells.little.x},${startCells.little.y} -> ${moved.x},${moved.y})`);
 
-  await p.waitForFunction(() => window.__ff.showmodeState().helptext >= 2, null, { timeout: budget(15000) });
+  await p.waitForFunction(() => window.__ff.showmodeState().helptext >= 2);
   const ht = await p.evaluate(() => window.__ff.showmodeState().helptext);
   expect(ht >= 2, `tutorial subtitles fired (helptext=${ht})`);
   console.log(`tutorial subtitles firing (helptext=${ht})`);
@@ -71,18 +70,18 @@ await withApp(async ({ p, expect }) => {
   console.log('player input blocked during demo');
 
   await p.keyboard.press('Backspace');
-  await p.waitForFunction(() => !window.__ff.showmodeState().active && !window.__ff.showmodeState().flag, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => !window.__ff.showmodeState().active && !window.__ff.showmodeState().flag);
   expect(!(await p.evaluate(() => window.__ff.showmodeState().active)), 'Backspace ended the demonstration');
   console.log('player restart ended the demo');
 
   // ---- Part 2: death-restart synchronisation (from a clean spawn start) ----
   // The room is back to normal play at spawn; force the demo again and kill both fish
   // early so the replay runs the death countdown through to the recorded restart.
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && !window.__ff.showmodeState().active, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && !window.__ff.showmodeState().active);
   await p.evaluate(() => window.__ff.forceShowmode());
-  await p.waitForFunction(() => window.__ff.showmodeState().active, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.showmodeState().active);
   // Let a couple of actions pass (fish at spawn), then kill both fish.
-  await p.waitForFunction(() => window.__ff.showmodeState().idx >= 3, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.showmodeState().idx >= 3);
   await p.evaluate(() => {
     window.__ff.killFish('little');
     window.__ff.killFish('big');
@@ -94,10 +93,19 @@ await withApp(async ({ p, expect }) => {
   // NB: the options object must be the THIRD argument — as the second it is taken
   // as the predicate's `arg` and silently ignored, leaving Playwright's 30s default
   // (which this wait, ~290 replayed actions at ~12.5/s, outgrows under a parallel run).
-  await p.waitForFunction(() => window.__ff.showmodeState().active && window.__ff.showmodeState().idx >= 289, null, { timeout: budget(90000) });
+  // Traced at 82-197s in the pool against 25s alone: ~290 recorded actions, replayed one
+  // per idle step, so it stretches with the game clock. The only wait in the suite that
+  // genuinely outruns the backstop.
+  await p.waitForFunction(() => window.__ff.showmodeState().active && window.__ff.showmodeState().idx >= 289, null, {
+    timeout: budget(25000),
+  });
   // Past the restart run: the room was rebuilt (fish back to spawn) and the demo
   // continues — help7 ("Nyní začínáme znovu") fires (helptext >= 7).
-  await p.waitForFunction(() => window.__ff.showmodeState().active && window.__ff.showmodeState().helptext >= 7, null, { timeout: budget(60000) });
+  // Same replay, a little further on (traced at 19.5s in the pool); budgeted with the
+  // same headroom because it is the same clock.
+  await p.waitForFunction(() => window.__ff.showmodeState().active && window.__ff.showmodeState().helptext >= 7, null, {
+    timeout: budget(10000),
+  });
   expect(await p.evaluate(() => window.__ff.showmodeState().active), 'demo survived + stayed synced through the death-restart');
   const afterRestart = await p.evaluate(() => window.__ff.fishCell('little'));
   expect(

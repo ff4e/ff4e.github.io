@@ -7,13 +7,12 @@
  * manifest or a WebP failed to load — nothing errors in that case, the panel just
  * renders soft, so only the backing size reveals it.
  */
-import { budget, waitFrames, withApp } from './ui-lib.mjs';
+import { waitFrames, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   const errs = [];
   p.on('pageerror', (e) => errs.push(String(e)));
 
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.setRenderer('cpu'));
 
   const size = async () => p.evaluate(() => {
@@ -24,14 +23,14 @@ await withApp(async ({ p, expect }) => {
   // enhanced: the faithful composite, native size.
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
   await p.evaluate(() => window.__ff.enterRoomAwait(1));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0);
   // Wait for the panel to reach its native size rather than sleeping towards it: the
   // repaint happens on a frame, and a flat sleep is a race with the machine.
   await p
     .waitForFunction(() => {
       const c = document.querySelector('#panel');
       return c && c.width === 155 && c.height === 395;
-    }, null, { timeout: budget(600) })
+    })
     .catch(() => {});
   const nat = await size();
   expect(nat && nat.w === 155 && nat.h === 395, `enhanced panel is native 155x395 (got ${JSON.stringify(nat)})`);
@@ -41,7 +40,7 @@ await withApp(async ({ p, expect }) => {
   const hi = await p.waitForFunction(() => {
     const c = document.querySelector('#panel');
     return c && c.width === 620 && c.height === 1580 ? { w: c.width, h: c.height } : null;
-  }, undefined, { timeout: budget(20000) }).then((h) => h.jsonValue()).catch(() => null);
+  }, undefined).then((h) => h.jsonValue()).catch(() => null);
   expect(hi !== null, `ai panel is 620x1580 (got ${JSON.stringify(await size())})`);
 
   // The panel must actually be PAINTED, not just resized — a blank canvas would pass
@@ -59,7 +58,7 @@ await withApp(async ({ p, expect }) => {
   // Switching back must restore the faithful size, not leave the hi-res store behind.
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
   await p
-    .waitForFunction(() => document.querySelector('#panel')?.width === 155, null, { timeout: budget(500) })
+    .waitForFunction(() => document.querySelector('#panel')?.width === 155)
     .catch(() => {});
   const back = await size();
   expect(back && back.w === 155, `switching back restores 155x395 (got ${JSON.stringify(back)})`);
@@ -72,7 +71,7 @@ await withApp(async ({ p, expect }) => {
   // the only way to exercise the backlog path deterministically.
   await p.evaluate(() => window.__ff.setGraphics('ai'));
   await p.evaluate(() => window.__ff.enterRoomAwait(1));
-  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0, null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0);
   await new Promise((r) => setTimeout(r, 2500));
   const rolled = await p.evaluate(async (stallMs) => {
     const c = document.querySelector('#panel');
@@ -107,7 +106,7 @@ await withApp(async ({ p, expect }) => {
     await p.evaluate((g) => window.__ff.setGraphics(g), tier);
     // The credits are a MAP overlay — from a room they would not draw at all.
     await p.evaluate(() => window.__ff.showMap());
-    await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(8000) });
+    await p.waitForFunction(() => window.__ff.screen() === 'map');
     await p.evaluate(() => window.__ff.openCredits());
   };
   const stripEl = () => p.evaluate(() => {
@@ -123,7 +122,7 @@ await withApp(async ({ p, expect }) => {
   const faithful = await p.waitForFunction(() => {
     const c = document.querySelector('#screen');
     return c && c.width === 640 ? { w: c.width, h: c.height } : null;
-  }, undefined, { timeout: budget(20000) }).then((h) => h.jsonValue()).catch(() => null);
+  }, undefined).then((h) => h.jsonValue()).catch(() => null);
   expect(faithful !== null, `enhanced credits paint #screen at 640x480 (got ${JSON.stringify(faithful)})`);
   const fInk = await p.evaluate(() => {
     const c = document.querySelector('#screen');
@@ -142,7 +141,7 @@ await withApp(async ({ p, expect }) => {
   const layers = await p.waitForFunction(() => {
     const i = document.querySelector('#stagebox img[style*="scaleY"]');
     return i && i.naturalWidth === 2560 ? true : null;
-  }, undefined, { timeout: budget(20000) }).then(() => stripEl()).catch(() => null);
+  }, undefined).then(() => stripEl()).catch(() => null);
   expect(layers !== null, `ai credits mount the 2560-wide GPU layers (got ${JSON.stringify(await stripEl())})`);
   // The strip must be TALLER than the window it scrolls through, else nothing rolls.
   expect(layers && layers.stripH > layers.h * 2, `ai strip is a tall scroll (${layers?.stripH}px in a ${layers?.h}px box)`);
@@ -153,11 +152,7 @@ await withApp(async ({ p, expect }) => {
   // The roll must actually advance — and via the transform, not a repaint.
   const t0 = (await stripEl()).transform;
   await p
-    .waitForFunction(
-      (was) => document.querySelector('#stagebox img[style*="scaleY"]')?.style.transform !== was,
-      t0,
-      { timeout: budget(700) },
-    )
+    .waitForFunction((was) => document.querySelector('#stagebox img[style*="scaleY"]')?.style.transform !== was, t0)
     .catch(() => {});
   const t1 = (await stripEl()).transform;
   expect(t0 !== t1, `ai credits scroll (${t0} → ${t1})`);
@@ -173,14 +168,10 @@ await withApp(async ({ p, expect }) => {
   const resizeTo = async (width, height) => {
     await p.setViewportSize({ width, height });
     await p
-      .waitForFunction(
-        (w) => {
+      .waitForFunction((w) => {
           const i = document.querySelector('#stagebox img[style*="scaleY"]');
           return window.innerWidth === w && i !== null && i.parentElement.getBoundingClientRect().width > 0;
-        },
-        width,
-        { timeout: budget(500) },
-      )
+        }, width)
       .catch(() => {});
     // One more frame, so the box is measured after the layout that resize triggered.
     await waitFrames(p, 2);
@@ -194,7 +185,7 @@ await withApp(async ({ p, expect }) => {
   // Closing must restore the canvas, or every later screen would be invisible.
   await p.evaluate(() => window.__ff.closeMapOverlay());
   await p
-    .waitForFunction(() => document.querySelector('#screen').style.display !== 'none', null, { timeout: budget(300) })
+    .waitForFunction(() => document.querySelector('#screen').style.display !== 'none')
     .catch(() => {});
   expect(await p.evaluate(() => document.querySelector('#screen').style.display !== 'none'),
     'closing the credits restores the game canvas');

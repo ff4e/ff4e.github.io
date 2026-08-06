@@ -2,11 +2,11 @@
  * UI test: the control-panel HUD (panel.ffp). Asserts the panel loaded, the
  * mouse hit-regions map correctly, and buttons dispatch (fish-select/swap/move).
  */
-import { budget, idle, selectRoom, withApp } from './ui-lib.mjs';
+import { idle, selectRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // enter UTES
-  await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel(), null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel());
   expect(await p.evaluate(() => window.__ff.hasPanel()), 'panel.ffp loaded');
 
   // Hit-test the known regions (panel coords) -> region ids (Uovl.pas oblmysi).

@@ -1,9 +1,8 @@
 /** UI probe: VES (room 26, jukebox). Runs past count=65 so the head sings (snd
  *  301) and the three amps kick off looping music (musiccyc 50/51/52) without
  *  error; confirms the amp/head/crab items exist and the music channels sound. */
-import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { observed, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoomAwait(26));
   await waitRoom(p, 0);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'VES has an active script');
@@ -24,7 +23,7 @@ await withApp(async ({ p, expect }) => {
   // strikes up the gig again (snd 301 at zac1=30, amps from zac2=65). Regression guard:
   // buildRoom used to leave the loops sounding across a restart.
   await p.evaluate(() => window.__ff.restart());
-  await p.waitForFunction(() => window.__ff.count() >= 1 && window.__ff.count() < 20, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.count() >= 1 && window.__ff.count() < 20);
   const silent = await p.evaluate(() => ({
     p50: window.__ff.playingPrior(50), p51: window.__ff.playingPrior(51),
     p52: window.__ff.playingPrior(52), p301: window.__ff.playingPrior(301),
@@ -37,18 +36,14 @@ await withApp(async ({ p, expect }) => {
   // true only while the sample is actually playing, so a second `evaluate` a moment later
   // legitimately reads false once the (short) vocal has finished. Observed as a flake —
   // the wait succeeded and the re-read reported "the head never struck up".
-  const sang = await p
-    .waitForFunction(() => window.__ff.playingPrior(301), null, { timeout: budget(8000) })
-    .then(() => true)
-    .catch(() => false);
+  const sang = await observed(
+    p.waitForFunction(() => window.__ff.playingPrior(301)),
+  );
   expect(sang, 'the head strikes up again after the restart');
-  const amps = await p
-    .waitForFunction(
+  const amps = await observed(
+    p.waitForFunction(
       () => window.__ff.playingPrior(50) || window.__ff.playingPrior(51) || window.__ff.playingPrior(52),
-      null,
-      { timeout: budget(10000) },
-    )
-    .then(() => true)
-    .catch(() => false);
+    ),
+  );
   expect(amps, 'the amp music resumes after the head sings');
 });

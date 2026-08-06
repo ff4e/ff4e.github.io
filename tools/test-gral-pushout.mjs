@@ -16,7 +16,7 @@
  * is exactly why GRAL hung where LODE/SPUNT (vytlacit=1, room won and left at once)
  * did not.
  */
-import { budget, idle, selectRoom, tickSleep, waitTicks, withApp } from './ui-lib.mjs';
+import { idle, selectRoom, tickSleep, waitTicks, withApp } from './ui-lib.mjs';
 
 const DIR = { up: 1, down: 2, left: 3, right: 4 };
 const PUSH_38 = 'RRUUURRRUUUUUULLLULUUUURRURRUURRRUUUULLLLLLLL';
@@ -42,7 +42,7 @@ await withApp(async ({ p, expect }) => {
 
   // The exit-slide (stav_ven) runs for fazi_ven frames, then odstran_vytlacene
   // removes the item: spec=11, parked at (-100,-100).
-  await p.waitForFunction((i) => window.__ff.itemState(i).spec === 11, CHALICE, { timeout: budget(30000) });
+  await p.waitForFunction((i) => window.__ff.itemState(i).spec === 11, CHALICE);
   const gone = await p.evaluate((i) => window.__ff.itemState(i), CHALICE);
   expect(gone.x === -100 && gone.y === -100, 'the pushed-out chalice was parked off-room');
   const left = await p.evaluate(() => window.__ff.vytlacit());

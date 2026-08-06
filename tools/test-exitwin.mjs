@@ -3,11 +3,10 @@
  * animation solves the room (venku -> won) and records it in the solved-set
  * progression (which lights the map + unlocks branches).
  */
-import { budget, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
+import { selectRoom, tickSleep, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => localStorage.removeItem('ff.solved'));
   await tickSleep(p, 4);
 
@@ -15,16 +14,16 @@ await withApp(async ({ p, expect }) => {
 
   // Send the little fish out of the left edge (wait for idle first — forceExit is a
   // no-op unless the engine is idle, main.ts:4338).
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(6000) });
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
   await p.evaluate(() => window.__ff.forceExit('little', 3));
-  await p.waitForFunction(() => window.__ff.state().venku.little, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.state().venku.little);
   expect(await p.evaluate(() => window.__ff.state().venku.little), 'little fish exited');
   expect(!(await p.evaluate(() => window.__ff.state().won)), 'not won with one fish still in');
 
   // Send the big fish out too -> the room is solved.
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(6000) });
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
   await p.evaluate(() => window.__ff.forceExit('big', 3));
-  await p.waitForFunction(() => window.__ff.state().won, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.state().won);
   expect(await p.evaluate(() => window.__ff.state().won), 'both fish out => room won');
 
   // The exit cheer plays as a tracked voice line; model a still-playing line with a
@@ -33,7 +32,7 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.pushSubtitle('The fish is delivering a long farewell line', 'M'));
 
   // Winning records the room in the persisted progression (room 7).
-  await p.waitForFunction(() => window.__ff.solvedRooms().includes(7), null, { timeout: budget(3000) }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.solvedRooms().includes(7)).catch(() => {});
   expect(await p.evaluate(() => window.__ff.solvedRooms().includes(7)), 'solved room recorded in progression');
 
   // The move count is recorded as the room result (RoomVysl := LengthOfRecord).
@@ -62,6 +61,6 @@ await withApp(async ({ p, expect }) => {
 
   // Once the line clears, the held countdown releases and the room returns to the map.
   await p.evaluate(() => window.__ff.clearSubtitles());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(5000) }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.screen() === 'map').catch(() => {});
   expect(await p.evaluate(() => window.__ff.screen() === 'map'), 'returns to the map once the exit line finishes');
 });

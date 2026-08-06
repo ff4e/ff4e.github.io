@@ -10,7 +10,7 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { budget, exitProbe, gotoApp, launchBrowser, waitRoom, tickSleep } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, tickSleep, waitRoom } from './ui-lib.mjs';
 
 const ROOM = 6; // KOSTE — two fish, several items, normal (gspec=0)
 
@@ -21,7 +21,6 @@ p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); } catch {} });
 await gotoApp(p);
-await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate(() => window.__ff.setGraphics('classic'));
 
 await p.evaluate((n) => window.__ff.enterRoomAwait(n), ROOM);
@@ -72,7 +71,7 @@ await p.evaluate(() => window.__ff.dropShip(0));
 // it can only have come from the wreck.
 let wreckVisible = true;
 try {
-  await p.waitForFunction((h) => window.__ff.roomBgFrameHash('classic') !== h, wreckBefore, { timeout: budget(8000), polling: 50 });
+  await p.waitForFunction((h) => window.__ff.roomBgFrameHash('classic') !== h, wreckBefore, { polling: 50 });
 } catch (e) {
   if (e.name !== 'TimeoutError') throw e;
   wreckVisible = false;

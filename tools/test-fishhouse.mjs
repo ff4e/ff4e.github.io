@@ -4,10 +4,9 @@
  * data without error. Covers the four rooms added to complete the branch
  * (PRAVIDLA 3, VRAK 4, KOSTE 6, WC 8) plus the pre-existing ones for good measure.
  */
-import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
 
   for (const room of [3, 4, 6, 8]) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), room);

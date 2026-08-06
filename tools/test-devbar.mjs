@@ -5,10 +5,10 @@
  *  - The Renderer picker defaults to WebGL and reflects the live backend.
  *  - The Graphics picker defaults to enhanced, follows the E hotkey cycle, and drives setGraphics on change.
  */
-import { budget, withApp } from './ui-lib.mjs';
+import { withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.screen, null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.screen);
   const roomVal = () => p.$eval('#room', (el) => el.value);
   const rendVal = () => p.$eval('#renderer', (el) => el.value);
   const gfxVal = () => p.$eval('#graphics', (el) => el.value);
@@ -84,11 +84,11 @@ await withApp(async ({ p, expect }) => {
 
   // Entering a room selects it in the picker.
   await p.evaluate(() => window.__ff.enterRoomAwait(12));
-  await p.waitForFunction(() => window.__ff.screen() === 'room', null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'room');
   expect((await roomVal()) === '12', `Room picker follows into room 12 (got "${await roomVal()}")`);
 
   // Escape back to the map re-syncs the picker to "map".
   await p.keyboard.press('Escape');
-  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   expect((await roomVal()) === 'map', `Room picker returns to "map" after Escape (got "${await roomVal()}")`);
 });

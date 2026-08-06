@@ -7,7 +7,7 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { budget, exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, waitRoom } from './ui-lib.mjs';
 
 const ROOM = 6; // KOSTE — two fish, normal room
 const FSIZE = 15; // native cell size (render/renderRoom.ts)
@@ -24,12 +24,11 @@ await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('f
 // make the probe skip itself with a misleading "WebGL2 not available".
 await p.addInitScript(() => { try { localStorage.setItem('ff.graphics', 'enhanced'); } catch {} });
 await gotoApp(p);
-await p.waitForFunction(() => window.__ff && window.__ff.count);
 await p.evaluate((n) => window.__ff.enterRoomAwait(n), ROOM);
 await waitRoom(p, 20);
 
 await p.evaluate(() => window.__ff.setRenderer('webgl'));
-await p.waitForFunction(() => window.__ff.glActive(), null, { timeout: budget(10000) }).catch(() => {});
+await p.waitForFunction(() => window.__ff.glActive()).catch(() => {});
 if (!(await p.evaluate(() => window.__ff.glActive()))) {
   console.log('  SKIP: WebGL2 not available in this environment');
   console.log('PASS');
@@ -71,7 +70,7 @@ else {
   const cy = target.top + ny * (target.rh / target.ch);
   await p.mouse.click(cx, cy);
   await p
-    .waitForFunction((w) => window.__ff.state().active === w, other, { timeout: budget(10000) })
+    .waitForFunction((w) => window.__ff.state().active === w, other)
     .catch(() => {});
   const active = await p.evaluate(() => window.__ff.state().active);
   if (active !== other) { ok = false; console.log(`  FAIL: click on ${other} fish did not select it (active=${active})`); }

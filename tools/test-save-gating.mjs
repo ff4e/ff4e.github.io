@@ -4,14 +4,13 @@
  * one is alive with the other already out — and greys the panel button when it
  * refuses. The port used to save unconditionally from F2 and the panel.
  */
-import { budget, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
+import { selectRoom, tickSleep, withApp } from './ui-lib.mjs';
 
 const SEDY = 0; // grey / disabled
 const ORANZOVY = 1; // orange / available
 
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => localStorage.removeItem('ff.save.7'));
   await tickSleep(p, 3);
 
@@ -46,7 +45,7 @@ await withApp(async ({ p, expect }) => {
 
   // ---- a fish that has swum OUT does not block saving -------------------------
   await p.evaluate(() => window.__ff.enterRoomAwait(7));
-  await p.waitForFunction(() => window.__ff && window.__ff.count() > 0, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.count() > 0);
   await p.evaluate(() => localStorage.removeItem('ff.save.7'));
   await p.evaluate(() => window.__ff.exitFish && window.__ff.exitFish('little'));
   await tickSleep(p, 2);

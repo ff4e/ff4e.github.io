@@ -4,10 +4,10 @@
  * persisted introSeen flag, the corner hit-test, and the credits/options
  * overlays — all without actually playing the (large) MP4s (we skip through).
  */
-import { budget, reloadApp, withApp } from './ui-lib.mjs';
+import { reloadApp, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap(), null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap());
 
   // First run (fresh localStorage): boot lands on the intro, gated by the splash.
   expect(await p.evaluate(() => window.__ff.screen()) === 'intro', 'first run boots into the intro');
@@ -66,10 +66,10 @@ await withApp(async ({ p, expect }) => {
   // Click "Click to start" to begin, then skip through the movies (logo → intro) to
   // the map — now that playback has begun, skipping advances as usual.
   await p.click('#intro-start');
-  await p.waitForFunction(() => !window.__ff.introSeen() && window.__ff.screen() === 'intro', null, { timeout: budget(5000) });
+  await p.waitForFunction(() => !window.__ff.introSeen() && window.__ff.screen() === 'intro');
   await p.evaluate(() => window.__ff.skipIntro()); // skip the logo → intro
   await p.evaluate(() => window.__ff.skipIntro()); // skip the intro → map
-  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
   expect(await p.evaluate(() => window.__ff.introSeen()) === true, 'introSeen persists after the intro finishes');
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'intro is no longer active on the map');
   expect(
@@ -79,7 +79,7 @@ await withApp(async ({ p, expect }) => {
 
   // A reload with introSeen persisted goes straight to the map — no intro.
   await reloadApp(p);
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap(), null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.hasMap());
   expect(await p.evaluate(() => window.__ff.screen()) === 'map', 'second boot skips straight to the map');
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'no intro on the second boot');
 
@@ -106,19 +106,19 @@ await withApp(async ({ p, expect }) => {
   });
   const moveFrac = (fx, fy) => p.mouse.move(canvasBox.x + canvasBox.w * fx, canvasBox.y + canvasBox.h * fy);
   await moveFrac(0.06, 0.06); // top-left → intro
-  await p.waitForFunction(() => window.__ff.mapHover() === 'intro', null, { timeout: budget(10000) }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.mapHover() === 'intro').catch(() => {});
   expect(await p.evaluate(() => window.__ff.mapHover()) === 'intro', 'hovering the top-left corner lights intro');
   expect(await p.evaluate(() => document.getElementById('screen').style.cursor) === 'pointer', 'a corner shows a pointer cursor');
   await moveFrac(0.5, 0.5); // interior → no corner
-  await p.waitForFunction(() => window.__ff.mapHover() === null, null, { timeout: budget(10000) }).catch(() => {});
+  await p.waitForFunction(() => window.__ff.mapHover() === null).catch(() => {});
   expect(await p.evaluate(() => window.__ff.mapHover()) === null, 'the map interior clears the corner highlight');
 
   // Top-left corner replays the intro (just intro.avi, not gated).
   await p.evaluate(() => window.__ff.clickMapCorner(20, 20));
-  await p.waitForFunction(() => window.__ff.screen() === 'intro', null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'intro');
   expect(await p.evaluate(() => window.__ff.introPlaying()), 'the intro replays from the top-left corner');
   await p.evaluate(() => window.__ff.skipIntro());
-  await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
 
   // Options corner opens the Options panel over the map; Esc/close returns.
   await p.evaluate(() => window.__ff.clickMapCorner(620, 470));
@@ -129,7 +129,7 @@ await withApp(async ({ p, expect }) => {
 
   // Credits corner rolls the credits (async asset load); a click dismisses them.
   await p.evaluate(() => window.__ff.clickMapCorner(20, 470));
-  await p.waitForFunction(() => window.__ff.mapOverlay() === 'credits', null, { timeout: budget(8000) });
+  await p.waitForFunction(() => window.__ff.mapOverlay() === 'credits');
   expect(await p.evaluate(() => window.__ff.creditMode()) >= 0, 'the credits roll is advancing');
   await p.evaluate(() => window.__ff.closeMapOverlay());
   expect(await p.evaluate(() => window.__ff.mapOverlay()) === 'none', 'the credits close');

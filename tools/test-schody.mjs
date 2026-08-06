@@ -4,10 +4,9 @@
  * snail state machines, incl. the FArray grid query) executes for many ticks
  * without throwing — the harness hard-fails on any console/page error.
  */
-import { budget, forTicks, waitRoom, withApp } from './ui-lib.mjs';
+import { forTicks, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoom(5));
   await waitRoom(p, 0);
 

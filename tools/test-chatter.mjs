@@ -9,10 +9,9 @@
  * chatter bank (subtitles + voices) actually loaded, a chatter timer is wired up in a
  * live room, and the TrepatRoom shake jitters the real canvas.
  */
-import { budget, forTicks, idle, tickSleep, waitRoom, withApp } from './ui-lib.mjs';
+import { forTicks, idle, tickSleep, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
 
   // The global x03 chatter bank loaded (subtitles + voices).
   expect((await p.evaluate(() => window.__ff.chatCount())) > 0, 'x03 chatter subtitle bank loaded');

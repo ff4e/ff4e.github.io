@@ -4,7 +4,7 @@
  *   - CHODBA (56) starts LIT (gspec 0); toggling gspec to 2 makes a guard dog glow
  *     (spec=2) — the darkness renderer's cue.
  *   - MOTOR (54) exposes a live screenOffset (the circular screen wobble hook). */
-import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 const ROOMS = [
   [52, 'REAKTOR'], [53, 'PAPRSKY'], [54, 'MOTOR'], [55, 'STEEL'],
@@ -12,7 +12,6 @@ const ROOMS = [
 ];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   for (const [num, name] of ROOMS) {
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
     await waitRoom(p, 0);

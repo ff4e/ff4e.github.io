@@ -11,7 +11,7 @@
  *
  * Runs its own headless Chromium with ANGLE; skips (pass) without WebGL2.
  */
-import { budget, exitProbe, gotoApp, launchBrowser, tickSleep, waitFrames, waitRoom } from './ui-lib.mjs';
+import { exitProbe, gotoApp, launchBrowser, tickSleep, waitFrames, waitRoom } from './ui-lib.mjs';
 
 const KUFRIK = 2; // the briefcase room — its demo is the only cutscene
 
@@ -22,16 +22,15 @@ p.on('pageerror', (e) => errs.push('PE:' + e.message));
 p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
 await p.addInitScript(() => { try { const o = JSON.parse(localStorage.getItem('ff.options') || '{}'); o.introSeen = true; localStorage.setItem('ff.options', JSON.stringify(o)); localStorage.setItem('ff.devEnabled', '1'); } catch {} }); // dev pane on: arms the r/e/f hotkeys this probe presses
 await gotoApp(p);
-await p.waitForFunction(() => window.__ff && window.__ff.count);
 
 await p.evaluate((n) => window.__ff.enterRoomAwait(n), KUFRIK);
 await waitRoom(p, 5);
 await p.evaluate(() => window.__ff.setGraphics('enhanced'));
 await p.evaluate(() => window.__ff.setRenderer('webgl'));
-await p.waitForFunction(() => window.__ff.renderer() === 'webgl', null, { timeout: budget(10000) }).catch(() => {});
+await p.waitForFunction(() => window.__ff.renderer() === 'webgl').catch(() => {});
 
 await p.evaluate(() => window.__ff.startCutscene());
-await p.waitForFunction(() => window.__ff.cutsceneActive(), null, { timeout: budget(8000) });
+await p.waitForFunction(() => window.__ff.cutsceneActive());
 await tickSleep(p, 5); // let a couple of demo frames play (they advance on the tick)
 
 // Capability gate: if WebGL2 is unavailable the parity probe reports {webgl:false}.
@@ -67,7 +66,7 @@ else console.log(`  OK   #screen/#screen-gl/#subs share one box, GL shown (${r.g
 // --- GAP 3: live toggles ----------------------------------------------------
 // R -> cpu: the cutscene must switch to the 2D fallback (GL canvas hidden).
 await p.keyboard.press('r');
-await p.waitForFunction(() => window.__ff.renderer() === 'cpu', null, { timeout: budget(10000) }).catch(() => {});
+await p.waitForFunction(() => window.__ff.renderer() === 'cpu').catch(() => {});
 await waitFrames(p, 3); // the GL canvas is hidden by the next PAINT, not by the state write
 if ((await p.evaluate(() => window.__ff.renderer())) !== 'cpu') fail('R did not switch renderer to cpu during cutscene');
 else if (!(await p.evaluate(() => window.__ff.cutsceneActive()))) fail('cutscene ended after pressing R');
@@ -78,7 +77,7 @@ else {
   else console.log('  OK   R -> cpu: 2D fallback, #screen-gl hidden, still playing');
 }
 await p.keyboard.press('r'); // back to webgl
-await p.waitForFunction(() => window.__ff.renderer() === 'webgl', null, { timeout: budget(10000) }).catch(() => {});
+await p.waitForFunction(() => window.__ff.renderer() === 'webgl').catch(() => {});
 await waitFrames(p, 3);
 
 // E cycles classic → enhanced → ai → classic. The smooth GPU path needs the
@@ -88,9 +87,9 @@ await waitFrames(p, 3);
 await p.keyboard.press('e');
 // Two presses, waiting for each landing rather than sleeping a fixed 150ms: with
 // three tiers, one press from enhanced only reaches `ai`.
-await p.waitForFunction(() => window.__ff.graphics() === 'ai', null, { timeout: budget(10000) }).catch(() => {});
+await p.waitForFunction(() => window.__ff.graphics() === 'ai').catch(() => {});
 await p.keyboard.press('e');
-await p.waitForFunction(() => window.__ff.graphics() === 'classic', null, { timeout: budget(10000) }).catch(() => {});
+await p.waitForFunction(() => window.__ff.graphics() === 'classic').catch(() => {});
 await waitFrames(p, 3);
 if ((await p.evaluate(() => window.__ff.graphics())) !== 'classic') fail('E did not cycle graphics to classic during cutscene');
 else {
@@ -100,7 +99,7 @@ else {
 }
 await p.keyboard.press('e'); // back to enhanced
 await p
-  .waitForFunction(() => document.getElementById('screen-gl').style.display === 'block', null, { timeout: budget(10000) })
+  .waitForFunction(() => document.getElementById('screen-gl').style.display === 'block')
   .catch(() => {});
 r = await rects();
 if (r.glDisp !== 'block') fail(`back to enhanced: #screen-gl display=${r.glDisp} (expected block)`);
@@ -109,14 +108,14 @@ else console.log('  OK   E -> enhanced: GPU present restored');
 // F -> font cycles.
 const f0 = await p.evaluate(() => window.__ff.subFont().idx);
 await p.keyboard.press('f');
-await p.waitForFunction((n) => window.__ff.subFont().idx !== n, f0, { timeout: budget(10000) }).catch(() => {});
+await p.waitForFunction((n) => window.__ff.subFont().idx !== n, f0).catch(() => {});
 const f1 = await p.evaluate(() => window.__ff.subFont().idx);
 if (f1 === f0) fail(`F did not cycle the font during cutscene (stayed ${f0})`);
 else console.log(`  OK   F -> font cycled (${f0} -> ${f1})`);
 
 // Escape still skips.
 await p.keyboard.press('Escape');
-await p.waitForFunction(() => !window.__ff.cutsceneActive(), null, { timeout: budget(10000) }).catch(() => {});
+await p.waitForFunction(() => !window.__ff.cutsceneActive()).catch(() => {});
 await waitFrames(p, 3);
 if (await p.evaluate(() => window.__ff.cutsceneActive())) fail('Escape did not skip the cutscene');
 else console.log('  OK   Escape skipped the cutscene');

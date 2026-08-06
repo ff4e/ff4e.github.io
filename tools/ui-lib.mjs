@@ -39,13 +39,13 @@ export async function launchBrowser(opts = {}) {
  * boot (main.ts), after the world map, the panel and every other critical asset
  * has loaded — so this is a strictly *stronger* condition than the
  * `waitUntil: 'networkidle'` it replaces, and far cheaper: networkidle lingers
- * half a second past the last request, on every one of the 63 probes.
+ * half a second past the last request, on every one of the 81 probes.
  *
  * Boot failure is handled explicitly: `showFatal()` reveals #fatal and `__ff` is
  * never published, so waiting on `__ff` alone would burn the whole timeout and
  * then report a bare "timeout exceeded" instead of the actual problem.
  */
-export async function appReady(p, timeout = 60000) {
+export async function appReady(p, timeout = WAIT_BACKSTOP) {
   await p.waitForFunction(
     () => window.__ff !== undefined || document.getElementById('fatal')?.hidden === false,
     null,
@@ -57,8 +57,16 @@ export async function appReady(p, timeout = 60000) {
   }
 }
 
-/** Open the app on the runner's port and wait until it has finished booting. */
+/**
+ * Open the app on the runner's port and wait until it has finished booting.
+ *
+ * Also installs the one wait backstop this page will use. It goes here rather than in
+ * `withApp` because a dozen probes (the WebGL ones, test-fonts, test-ai-wreck) drive their
+ * own page and never call `withApp` — they would otherwise silently keep Playwright's 30s
+ * default, which is the very mismatch this replaced.
+ */
 export async function gotoApp(p) {
+  p.setDefaultTimeout(WAIT_BACKSTOP);
   const port = process.env.FF_UI_PORT ?? '5173';
   await p.goto(`http://127.0.0.1:${port}/`, { waitUntil: 'domcontentloaded' });
   await appReady(p);
@@ -88,7 +96,7 @@ export function exitProbe(code) {
  * The probe line that threw, appended to the failure message.
  *
  * A wait that times out reports `page.waitForFunction: Timeout 30000ms exceeded` and
- * nothing else — and a probe has up to fifteen waits in it. Recovering which one fired
+ * nothing else — and a probe has up to eighteen waits in it. Recovering which one fired
  * used to mean re-running the probe under an instrumented harness; the frame is already
  * in the error, so print it. Only frames inside a probe are useful (the top frames are
  * Playwright's own), and a missing stack must not itself throw.
@@ -189,6 +197,28 @@ export async function withApp(fn, opts = {}) {
 }
 
 /**
+ * Did a wait see its condition inside its budget? Use where the WAIT IS THE ASSERTION.
+ *
+ * For a transient condition — a sound playing, a line on screen — re-reading it after the
+ * wait is a race with the thing itself: `test-ves` waited for the head to sing, the wait
+ * succeeded, and the separate re-read a moment later reported failure because the vocal
+ * had finished. The wait already observed it; that is the evidence.
+ *
+ * A bare `.catch(() => false)` would do this, and is wrong: it also swallows a predicate
+ * that THREW. A renamed hook would then be reported as "the head never sang" instead of
+ * as the TypeError it is. Only a timeout means "the condition did not happen".
+ */
+export async function observed(wait) {
+  try {
+    await wait;
+    return true;
+  } catch (e) {
+    if (e?.name !== 'TimeoutError') throw e;
+    return false;
+  }
+}
+
+/**
  * Wait until a fish move settles back to the idle phase.
  *
  * The options object is the THIRD argument. Passed as the second it lands in Playwright's
@@ -196,11 +226,11 @@ export async function withApp(fn, opts = {}) {
  * and 240 others across the probes did too. `test/uiProbeWaits.test.ts` now fails the
  * build if it comes back.
  *
- * A move settles in ~10 game ticks; `budget` turns that nominal into a backstop that
- * survives an 8-way parallel run.
+ * No timeout here: a move settles in ~10 game ticks, well inside the page-wide
+ * WAIT_BACKSTOP, and a number that is never reached teaches the next reader nothing.
  */
 export async function idle(p) {
-  await p.waitForFunction(() => window.__ff.phase() === 'idle', null, { timeout: budget(10 * TICK_MS) });
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
 }
 
 // ── Waiting on GAME time ──────────────────────────────────────────────────────
@@ -226,48 +256,50 @@ export async function idle(p) {
 export const TICK_MS = 80;
 
 /**
- * Generous budget for a wait whose nominal duration on an idle machine is `nominalMs`:
- * 30× nominal, never below 60s, never above 5 minutes.
+ * The backstop every wait gets by default, applied once per page in `gotoApp`.
  *
- * Sized from measurement, not taste. Tracing every wait in the suite alone and again in
- * the 8-way pool put the contention factor between 4× and 22×, median ≈ 8×. The tail is
- * what matters here, not the median, and the tail gets worse than the pool alone: this
- * machine also runs a second suite from a sibling worktree from time to time, and under
- * the pool plus four CPU hogs the game clock was seen at 0.5 ticks/s against a nominal
- * 12.5 — a 25× slowdown — with test-finale's win countdown overrunning a 12× budget
- * outright. 30× covers the worst condition measured; the 60s floor covers the short
- * waits, where a multiple of almost nothing is still almost nothing.
+ * A wait's timeout is not a check — the probe's own assertion decides pass/fail — so the
+ * only job this number has is to stop a genuinely stuck condition from hanging the probe
+ * forever. Sizing it per call site was tried and was worse than useless: 241 of 297 sites
+ * had their number in Playwright's `arg` slot where it was silently discarded, so the
+ * source said one thing and the suite did another for years.
  *
- * The 5-minute ceiling is where the runner's own 10-minute per-probe backstop takes over:
- * past that point a wait is no longer distinguishing "slow machine" from "wedged", and
- * the longest wait ever observed in the suite was 197s.
- *
- * Being generous is free: every wait returns the moment its condition holds, so a fast
- * machine never pays the budget. Measured, not assumed — with every budget in the suite
- * forced to 240s, not one wait in three full runs ever timed out, and the wall clock did
- * not move. It is only spent when the condition genuinely never arrives, which is a real
- * defect and worth waiting to prove.
- *
- * And it weakens nothing. The probe's own assertion still decides pass/fail; the timeout
- * is a backstop, not a check. A budget sized just above the nominal duration is not a
- * check either — it is a race, and it is the timeout that loses, reporting a fake failure
- * while the assertion below it would have passed.
- *
- * Pass the NOMINAL duration, not the budget you want: keeping the honest number at the
- * call site is what lets the next reader see how much slack there is, and lets this one
- * function be re-tuned when the machine or the pool changes.
+ * 60s is ~8x the slowest ordinary wait measured in an 8-way parallel run, and small enough
+ * that a probe which trips several of these still reports its own failure before the
+ * runner's 10-minute per-probe backstop kills it (see PROBE_TIMEOUT_MS in run-ui-tests).
+ * That upper bound is the real constraint: `expect` does not throw, so a broken probe runs
+ * every remaining wait, and a budget generous enough to look safe in isolation turns a
+ * readable assertion failure into "probe exceeded 600s and was killed".
  */
-export const budget = (nominalMs) => Math.min(300000, Math.max(60000, Math.ceil(nominalMs * 30)));
+export const WAIT_BACKSTOP = 60000;
 
 /**
- * Generous budget for `ticks` game ticks — `budget()` applied to their nominal duration,
- * so it inherits the same 60s floor and 5-minute ceiling. The longest wait in the suite
- * asks for 250 ticks (240s), still under the ceiling; the floor is what covers the short
- * ones, where `test-gral-pushout` was seen getting 15 of 20 ticks in 30s (0.5 ticks/s).
+ * A LARGER budget for the few waits that genuinely need one: 12x the nominal duration on
+ * an idle machine, never below the backstop, never above 5 minutes.
+ *
+ * Only for waits measured to outrun WAIT_BACKSTOP under load — a story page that arrives
+ * after a 30-tick win countdown, a replay that has to reach its 289th recorded action.
+ * Everything else inherits the backstop and says nothing, because a number that is never
+ * reached teaches the next reader nothing.
+ *
+ * 12x is from measurement: tracing every wait alone and again in the 8-way pool put the
+ * contention factor at 4-22x, median ~8x. The game clock is the reason it is that wide —
+ * it is wall-clock driven and never fast-forwards a backlog, so under load the game simply
+ * runs slower and every game-time wait stretches with it.
+ */
+export const budget = (nominalMs) => Math.min(300000, Math.max(WAIT_BACKSTOP, Math.ceil(nominalMs * 12)));
+
+/**
+ * Budget for a wait on `ticks` of GAME time — `budget()` applied to their nominal duration.
  *
  * On a deliberately loaded machine (4 CPU hogs + the 8-way probe pool) the observed clock
  * ran at 0.5-3 ticks/s against a nominal 12.5 — a 4-25x slowdown — and a 4x/10s budget
  * turned that into fake failures (`ZDVIZ1 ran 28 ticks` where 30 were asked for).
+ *
+ * Below ~62 ticks the backstop dominates and this returns WAIT_BACKSTOP. That is the
+ * intended shape, not a lost parameter: a short tick wait needs no more than the backstop,
+ * and the multiplier only starts to matter for the long ones (the suite's longest asks for
+ * 250 ticks, i.e. 240s).
  */
 export const tickBudget = (ticks) => budget(ticks * TICK_MS);
 
@@ -377,6 +409,10 @@ export async function forTicks(p, ticks, sample, everyMs = 60) {
  * flat allowance for the asynchronous room load itself (assets are fetched from
  * the shared preview server, which several probes are hitting at once).
  *
+ * The budget comes from `minCount` so it still means something if a caller ever asks for a
+ * long run-in; for the counts callers actually use (<= 25 ticks) it resolves to the plain
+ * backstop, which already covers the asynchronous room load.
+ *
  * `!roomLoading()` is the load-complete gate, and it is not optional: enterRoom()
  * sets `screen = 'room'` synchronously but loads the room asynchronously, so for
  * a moment `screen() === 'room' && count() > 0` is satisfied by the PREVIOUS
@@ -387,7 +423,7 @@ export async function waitRoom(p, minCount = 0) {
   await p.waitForFunction(
     (n) => window.__ff.screen() === 'room' && !window.__ff.roomLoading() && window.__ff.count() > n,
     minCount,
-    { timeout: tickBudget(minCount) + 20000 },
+    { timeout: tickBudget(minCount) },
   );
 }
 
@@ -418,7 +454,6 @@ export async function selectRoom(p, num, minCount = 0) {
       window.__ff.roomNum() === n &&
       window.__ff.screen() === 'room',
     [Number(num), seq],
-    { timeout: budget(4000) },
   );
   if (minCount > 0) await waitRoom(p, minCount);
 }

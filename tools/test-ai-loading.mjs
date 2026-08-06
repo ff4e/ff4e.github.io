@@ -20,7 +20,7 @@
  * post-build reset — which fails deterministically while the hold is working perfectly.
  * That is what sank the equivalent probe in the first attempt at this task.
  */
-import { budget, waitFrames, waitRoom, withApp } from './ui-lib.mjs';
+import { waitFrames, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(
   async ({ p, expect }) => {
@@ -95,49 +95,58 @@ await withApp(
     });
 
     // --- The room builds (core assets are cached); the AI art is still gated. ---
-    await p.waitForFunction(() => !window.__ff.roomLoading() && window.__ff.roomNum() === 1, null, { timeout: budget(30000) });
+    await p.waitForFunction(() => !window.__ff.roomLoading() && window.__ff.roomNum() === 1);
     expect(await p.evaluate(() => window.__ff.roomArtPending()), 'the AI art is still pending after the room is built');
 
     // --- The overlay explains the wait (armed on a delay, so this is not instant). ---
-    await p.waitForFunction(() => window.__ff.loadingVisible(), null, { timeout: budget(10000) });
+    await p.waitForFunction(() => window.__ff.loadingVisible());
     expect(true, 'the loading overlay appears on the map→room path while the AI art loads');
 
     // --- Gameplay is frozen behind it. Sampled AFTER the build, so buildRoom()'s
-    //     `count = 0` cannot be mistaken for the clock running. Frames are counted
-    //     alongside, because "the clock did not advance" is only evidence of the hold
-    //     if the game loop was actually running to advance it.
+    //     `count = 0` cannot be mistaken for the clock running.
     //
-    //     The window closes on BOTH a frame count and a minimum duration, not on a frame
-    //     RATE. `frames > 10 in 600ms` was a demand for >16.7fps from a probe running in
-    //     the 8-way pool, and it failed on a correct build (1/5 idle, 1/3 loaded). Load
-    //     can only make this version's window longer, never thinner: it ends when the
-    //     loop has delivered 12 frames AND at least 600ms of clock has passed, which is
-    //     ~7 logic ticks the hold has to swallow. ---
+    //     The GAME LOOP's own iteration counter is what proves the clock being frozen
+    //     means something: if the loop had stopped, `count` would hold still for a
+    //     reason that has nothing to do with the art hold, and this check would pass
+    //     vacuously. Counting the probe's own rAF chain cannot show that — the browser
+    //     keeps delivering those frames whether the loop is alive or not.
+    //
+    //     The window closes on loop iterations AND a minimum duration, never on a RATE:
+    //     `frames > 10 in 600ms` was a demand for >16.7fps from a probe in the worker
+    //     pool, and it failed on a correct build (1/5 idle, 1/3 loaded). Load can only
+    //     make this window longer, never thinner. The cap is what lets it FAIL rather
+    //     than hang: without it, a stopped loop never resolves the promise and the probe
+    //     runs into the runner's kill instead of naming the problem. ---
     const frozenFrom = await p.evaluate(() => window.__ff.count());
-    const window600 = await p.evaluate(
-      ([wantFrames, minMs]) => new Promise((done) => {
-        let n = 0;
-        const t0 = performance.now();
-        const step = () => {
-          n++;
-          const ms = performance.now() - t0;
-          if (n >= wantFrames && ms >= minMs) done({ frames: n, ms });
-          else requestAnimationFrame(step);
-        };
-        requestAnimationFrame(step);
-      }),
-      [12, 600],
+    const held = await p.evaluate(
+      ([wantLoops, minMs, capMs]) =>
+        new Promise((done) => {
+          const t0 = performance.now();
+          const loops0 = window.__ff.throttleInfo().loops;
+          const report = () => ({
+            loops: window.__ff.throttleInfo().loops - loops0,
+            ms: performance.now() - t0,
+          });
+          const step = () => {
+            const r = report();
+            if (r.loops >= wantLoops && r.ms >= minMs) done(r);
+            else if (r.ms >= capMs) done(r);
+            else setTimeout(step, 16);
+          };
+          setTimeout(step, 16);
+        }),
+      [12, 600, 15000],
     );
     const frozenTo = await p.evaluate(() => window.__ff.count());
     expect(
-      window600.frames >= 12 && window600.ms >= 600,
-      `the game loop kept running during the freeze window (${window600.frames} frames over ${Math.round(window600.ms)}ms)`,
+      held.loops >= 12 && held.ms >= 600,
+      `the game loop kept running during the freeze window (${held.loops} loop iterations over ${Math.round(held.ms)}ms)`,
     );
     expect(frozenTo === frozenFrom, `gameplay stays frozen while the final AI art loads (${frozenFrom} -> ${frozenTo})`);
 
     // === Release the AI art: the room appears, in AI art, for the first time. ===
     releaseAi();
-    await p.waitForFunction(() => !window.__ff.loadingVisible() && window.__ff.aiRoomActive(), null, { timeout: budget(60000) });
+    await p.waitForFunction(() => !window.__ff.loadingVisible() && window.__ff.aiRoomActive());
     await waitFrames(p, 3);
     const final = await p.evaluate(() => {
       window.__sampling = false;
@@ -171,13 +180,13 @@ await withApp(
     const kosteGate = new Promise((r) => { releaseKoste = r; });
     await p.route('**/enhanced-ai/KOSTE/**', async (route) => { await kosteGate; await route.continue().catch(() => {}); });
     await p.evaluate(() => window.__ff.enterRoom(6));
-    await p.waitForFunction(() => window.__ff.roomArtPending() && window.__ff.roomNum() === 6, null, { timeout: budget(30000) });
+    await p.waitForFunction(() => window.__ff.roomArtPending() && window.__ff.roomNum() === 6);
     await p.evaluate(() => window.__ff.setGraphics('classic'));
     expect(
       !(await p.evaluate(() => window.__ff.roomArtPending())),
       'switching tier mid-load releases the hold immediately — no waiter to cancel',
     );
-    await p.waitForFunction(() => !window.__ff.loadingVisible(), null, { timeout: budget(10000) });
+    await p.waitForFunction(() => !window.__ff.loadingVisible());
     expect(true, 'the overlay comes down when the switched-to tier is ready');
 
     // === Switching an ALREADY-PRESENTED room INTO the ai tier must hold too. ===
@@ -201,7 +210,7 @@ await withApp(
     const duringSwitch = await p.evaluate(() => document.getElementById('screen').width);
     expect(duringSwitch === beforeSwitch, `no AI repaint while the switched-to art is still loading (${duringSwitch}px)`);
     releaseKoste();
-    await p.waitForFunction(() => window.__ff.aiRoomActive() && !window.__ff.roomArtPending(), null, { timeout: budget(60000) });
+    await p.waitForFunction(() => window.__ff.aiRoomActive() && !window.__ff.roomArtPending());
     await waitFrames(p, 3);
     const afterSwitch = await p.evaluate(() => document.getElementById('screen').width);
     expect(afterSwitch > 1000, `the room repaints in AI art once it arrives (${afterSwitch}px)`);
@@ -212,7 +221,7 @@ await withApp(
     // share the pipe with this entry and could push it past the 200ms threshold,
     // turning a real assertion into a flaky one.
     await waitRoom(p, 0);
-    await p.waitForFunction(() => window.__ff.roomAudioReady(), null, { timeout: budget(60000) }).catch(() => {});
+    await p.waitForFunction(() => window.__ff.roomAudioReady()).catch(() => {});
     await p.evaluate(() => window.__ff.enterRoomAwait(1));
     await waitRoom(p, 0);
     await p.evaluate(() => window.__ff.showMap());

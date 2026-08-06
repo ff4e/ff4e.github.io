@@ -5,12 +5,12 @@
  * active fish toward the click — and that clicking a fish only *selects* it (no
  * talk trigger). Drives real DOM key/mouse events plus the __ff hooks.
  */
-import { budget, idle, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
+import { idle, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.state, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff && window.__ff.state);
   await selectRoom(p, 7); // UTES — both fish alive, open water
-  await p.waitForFunction(() => window.__ff.state() && window.__ff.count() > 0, null, { timeout: budget(5000) });
+  await p.waitForFunction(() => window.__ff.state() && window.__ff.count() > 0);
   await tickSleep(p, 3);
   const state = () => p.evaluate(() => window.__ff.state());
 
@@ -32,9 +32,7 @@ await withApp(async ({ p, expect }) => {
   await p.keyboard.press('ArrowLeft');
   // The held-key rework dispatches the move on the next rest tick, so wait for it to
   // start and settle rather than sampling the instant the key is released.
-  await p.waitForFunction((x0) => window.__ff.state().little.x !== x0 || window.__ff.phase() !== 'idle', lx0, {
-    timeout: budget(3000),
-  });
+  await p.waitForFunction((x0) => window.__ff.state().little.x !== x0 || window.__ff.phase() !== 'idle', lx0);
   await idle(p);
   const lx1 = (await state()).little.x;
   expect(lx1 === lx0 - 1, `ArrowLeft moves the active (little) fish left (${lx0} -> ${lx1})`);

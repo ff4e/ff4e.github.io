@@ -5,10 +5,9 @@
  * big fish (the original look_at only works for the fish, so the painters must BE
  * the fish; see zdviz1.ts).
  */
-import { budget, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
+import { waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.count, null, { timeout: budget(5000) });
   await p.evaluate(() => window.__ff.enterRoomAwait(20));
   await waitRoom(p, 0);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'ZDVIZ1 has an active script');
