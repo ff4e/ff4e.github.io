@@ -82,6 +82,11 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap());
   expect(await p.evaluate(() => window.__ff.screen()) === 'map', 'second boot skips straight to the map');
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'no intro on the second boot');
+  // In the `ai` tier the map is withheld until its own art lands, behind the boot
+  // loading overlay (mapArtHolding, main.ts) — and that overlay swallows pointer
+  // events. The mouse-driven hover below is about the map, so wait for the map to
+  // actually be presented rather than racing its load.
+  await p.waitForFunction(() => window.__ff.mapPresented());
 
   // Corner hit-test: each corner colour maps to its action (Exit stays unwired).
   const corners = await p.evaluate(() => ({

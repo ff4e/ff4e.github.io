@@ -403,9 +403,11 @@ function setLoadingMsg(msg: string): void {
 // painted the frame the overlay was covering, and leaving the room screen (map,
 // story page, cutscene) takes it down with no separate teardown call — both of which
 // a push-based version had to hand-roll, and could get wrong by forgetting a site.
-const ROOM_LOADING_DELAY_MS = 200;
+const LOADING_DELAY_MS = 200;
 /** When the current room entry started, or 0 when no entry is in progress. */
 let roomLoadingSince = 0;
+/** When the map's overlay becomes visible, or 0 while the map is not waiting. */
+let mapLoadingDueAt = 0;
 
 /** Arm the overlay for a room entry (the loop reveals it if the wait is real). */
 function beginRoomLoadingUi(num: number): void {
@@ -421,12 +423,43 @@ function beginRoomLoadingUi(num: number): void {
 /**
  * Show or hide the overlay for the frame that has just been painted. Called from
  * loop() AFTER the draw branch, so hiding it can never expose an unpainted stage.
+ *
+ * Serves BOTH holds — the room's art tier and the `ai` tier's world map — off their
+ * own live-state predicates. There is one overlay, so it gets one owner: two syncs
+ * writing `hidden` would fight over it on any frame where both had an opinion.
+ *
+ * The map's whole overlay state is DERIVED here, where the room's is pushed from
+ * beginRoomLoadingUi(). That is not an inconsistency but the same principle applied
+ * to a one-shot: a room entry re-runs its begin() every time, while the map's art
+ * loads at most once per session, so a pushed arm could not re-arm anything when the
+ * player leaves the `ai` tier (or the map screen) mid-load and comes back. Derived,
+ * every return to the wait re-arms — and re-labels — for free. Note the room's begin()
+ * can overwrite the message while the map's load is still in flight, which is exactly
+ * the case a pushed map label would have got wrong.
  */
-function syncRoomLoadingUi(now: number): void {
+function syncLoadingUi(now: number): void {
   if (!booted || !loadingEl) return;
-  const waiting = screen === 'room' && (roomLoading || roomArtPending());
-  if (!waiting) roomLoadingSince = 0;
-  const show = waiting && roomLoadingSince !== 0 && now - roomLoadingSince >= ROOM_LOADING_DELAY_MS;
+  const roomWaiting = screen === 'room' && (roomLoading || roomArtPending());
+  const mapWaiting = mapArtHolding();
+  if (!roomWaiting) roomLoadingSince = 0;
+  if (!mapWaiting) mapLoadingDueAt = 0;
+  else if (mapLoadingDueAt === 0) {
+    // Delay the spinner only over a map that is ALREADY ON SCREEN — a switch into the
+    // tier, where the player is looking at a perfectly good map and an instant (local)
+    // load must not flash anything at them. When the map is not up yet the stage holds
+    // black, or the room/intro we just left, so waiting 200ms to say so would only
+    // present something the player is not being taken to.
+    mapLoadingDueAt = now + (mapPresented ? LOADING_DELAY_MS : 0);
+    setLoadingMsg('Loading the world map…');
+    // The boot splash's title and attribution belong to boot — so keep them in the one
+    // case where this IS boot still running: the overlay never came down between boot
+    // and the map's first frame. Every other arm is a spinner being (re)shown mid-game,
+    // where the splash would read as a restart, exactly as a room entry's does.
+    if (loadingEl.hidden) loadingEl.classList.add('inroom');
+  }
+  const show =
+    (roomWaiting && roomLoadingSince !== 0 && now - roomLoadingSince >= LOADING_DELAY_MS) ||
+    (mapWaiting && now >= mapLoadingDueAt);
   if (loadingEl.hidden === show) loadingEl.hidden = !show;
 }
 
@@ -1834,19 +1867,91 @@ async function ensureAiPanel(): Promise<void> {
 }
 
 /**
+ * ── The `ai` tier's world map: load it once, and hold the map until it lands ──
+ *
+ * The AI map art is 2.36 MB against 0.59 MB for the faithful BMPs, so on a slow link
+ * there are seconds between the two being ready. The draw used to kick the load off and
+ * paint whatever was ready, which put the faithful map up first and visibly swapped it
+ * for the AI one a beat later — measured at 28.0s of enhanced map on screen (Slow 4G,
+ * cold cache), on the first screen of the game. It is the same defect rooms had before
+ * aiPending/roomArtPending(), and it gets the same three pieces: a live-state predicate,
+ * a hold in the draw branch, and the loading overlay over the wait.
+ */
+let aiMapTried = false; // one-shot: the load is started at most once per session
+let aiMapPending = false; // that load is in flight (independent of the tier on screen)
+/**
+ * Is a map frame the thing currently on screen?
+ *
+ * Not "has a map ever been painted": the question it answers is whether withholding the
+ * map leaves the player looking at a map (a tier switch — delay the spinner, it is a
+ * fine thing to keep looking at) or at the room, story page, credits or blank stage they
+ * are being taken away from (show the overlay at once, there is nothing to preserve).
+ * Set by drawMap()'s paint and cleared in loop(), where every branch that takes #screen
+ * over is already distinguished — see there. It also decides when the reveal starts.
+ */
+let mapPresented = false;
+
+/**
+ * Whether the map is still waiting for the art tier it will actually paint.
+ *
+ * The map's counterpart of roomArtPending(), and a PREDICATE over live state for the
+ * same reason: press E for `enhanced` mid-load and the hold releases itself on the very
+ * next frame — no generation counter, no waiter set, nothing to cancel — and pressing E
+ * back re-applies it just as cheaply.
+ */
+function mapArtPending(): boolean {
+  return graphics === 'ai' && aiMapPending;
+}
+
+/** Whether THIS frame must withhold the map because its final art is still loading. */
+function mapArtHolding(): boolean {
+  // The credits overlay replaces the map on the same screen, so while it is up there is
+  // no map to withhold and nothing to explain.
+  return screen === 'map' && mapOverlay !== 'credits' && mapArtPending();
+}
+
+/**
+ * Start the `ai` tier's world-map load the first time the map is (about to be) on
+ * screen.
+ *
+ * Still lazy — a player on classic/enhanced never fetches any of it — but no longer
+ * kicked off from inside drawMap(): the draw is now the thing the hold suppresses, so
+ * it cannot also be the thing that starts the load. Starting the load is ALL it does;
+ * the overlay that covers the wait is derived in syncLoadingUi(), because this runs
+ * once per session and the wait can be arrived at more than once.
+ */
+function beginMapArt(): void {
+  if (aiMapTried || graphics !== 'ai' || !worldMap) return;
+  aiMapTried = true;
+  aiMapPending = true;
+  void ensureAiWorldMap();
+}
+
+/**
  * Load the hi-res world-map art once, on first use in the `ai` tier.
  *
  * Deliberately lazy, unlike the eager call this replaced: that one ran at boot in EVERY
- * tier, so a player on `classic` (the default) still downloaded 2.54 MB of *_ai art and
- * retained ~43 MB of decoded bitmaps plus two 2560×1920 canvases, concurrently with the
- * intro's own media. It self-cancels to null on any missing/undecodable asset, so the
- * `ai` level cleanly falls back to the faithful CPU composite.
+ * tier, so a player on `classic` still downloaded 2.36 MB of *_ai art and retained
+ * ~43 MB of decoded bitmaps plus two 2560×1920 canvases, concurrently with the intro's
+ * own media. It self-cancels to null on any missing/undecodable asset, so the `ai` level
+ * cleanly falls back to the faithful CPU composite.
  */
-let aiMapTried = false;
 async function ensureAiWorldMap(): Promise<void> {
-  if (!worldMap) return;
-  aiWorldMap = await loadAiWorldMap('/data/', worldMap);
-  mapSig = null; // force a repaint so the map switches to the AI art once ready
+  try {
+    if (!worldMap) return;
+    aiWorldMap = await loadAiWorldMap('/data/', worldMap);
+  } finally {
+    // Unconditional, so the hold cannot outlive the load on ANY exit. Note this is
+    // NOT what saves the ordinary failure: loadAiWorldMap catches everything it does —
+    // fetch, decode, and the AiWorldMap construction — and resolves null, so a missing
+    // or undecodable asset returns here normally and the `ai` tier falls back to the
+    // faithful composite. What the finally covers is the guard above, and a future
+    // loadAiWorldMap that rejects instead. Either would otherwise leave aiMapPending
+    // set and withhold the map for the rest of the session.
+    aiMapPending = false;
+    mapSig = null; // force a repaint so the map switches to the AI art once ready
+    wake();
+  }
 }
 
 /** Load the hi-res credits art once (see creditsAi.ts). */
@@ -3561,13 +3666,20 @@ function drawMap(): void {
   if (!worldMap) return;
   // Advance the reachable-node pulse ~every 140ms (kPul cadence, UMain.pas timer).
   const pulse = Math.floor(performance.now() / 140);
+  // The reveal is wall-clock driven, so the `ai` tier's art hold would have traced it
+  // out behind the loading overlay and handed the player a map that never animated.
+  // Start it on the frame that actually reaches them — which is this one, since the
+  // hold withholds this call entirely. Gated on arrival: switching tier over a map that
+  // is already up must not re-trace a reveal the player has watched once already.
+  if (!mapPresented) mapRevealStart = performance.now();
   // The reveal (Depth, UMain.pas): from -3, +1 per ~60ms, tracing the map in from
   // the start; once it passes the deepest room the whole enabled map is shown.
   const depth = Math.floor((performance.now() - mapRevealStart) / 60) - 3;
   const cs = contentScaleFor(MAP_W, MAP_H);
   // The `ai` graphics level draws the map from AI-upscaled art re-composited at 4x,
   // so the backing store is 4x larger (still CSS-scaled to the same display box).
-  if (graphics === 'ai' && !aiMapTried) { aiMapTried = true; void ensureAiWorldMap(); }
+  // Reaching here at all means the art for this tier is ready: loop() withholds the
+  // draw while mapArtHolding(), so the map is only ever presented in its final art.
   const useAi = graphics === 'ai' && aiWorldMap !== null;
   const cw = useAi ? AI_MAP_W : MAP_W;
   const ch = useAi ? AI_MAP_H : MAP_H;
@@ -3604,6 +3716,7 @@ function drawMap(): void {
   if (sig + sigT === mapSig) return; // nothing visibly changed — skip the redraw entirely
   mapSig = sig + sigT;
   perfPaint++; // an actual map paint (past the cache check)
+  mapPresented = true; // a map frame is now the thing on screen (see syncLoadingUi)
   const panelOpen = mapInfoRoom !== null;
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
@@ -5358,6 +5471,13 @@ function loop(now: number): void {
   // cutscene is left out of the hide list because drawCutscene() manages the GL
   // canvas itself (it may present a smooth-upscaled frame there).
   if (helpOpen || screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
+  // Exactly one branch below owns #screen for this frame, and every branch other than
+  // the map's blits over whatever the map left there — help, the story page, the
+  // credits roll, a cutscene, a room. So "is a map frame the thing on screen" is
+  // derived here, in one place, rather than cleared at each of those sites; drawMap()
+  // sets it back when it paints. During the map's own art hold this leaves it alone,
+  // which is the point: it still says whether there is a map under the wait.
+  if (helpOpen || screen !== 'map' || mapOverlay === 'credits') mapPresented = false;
   if (helpOpen) {
     clearSubOverlay();
     drawHelp();
@@ -5369,6 +5489,10 @@ function loop(now: number): void {
     drawLegImage(); // the leg-completion story page (counts its own one-shot blit)
   } else if (screen === 'map') {
     clearSubOverlay();
+    // Lazy, and here rather than inside drawMap(): every route onto the map runs
+    // through this branch — boot, the intro ending, leaving a room, a tier switch — so
+    // the load starts exactly once without a begin() call bolted onto each of them.
+    beginMapArt();
     // Advance the record-panel odometer on wall-clock time (one faze per Timer1
     // tick, INFO_FAZE_MS) rather than per paint, so its ~2.7s roll is independent
     // of the frame rate. drawMap() only repaints when the faze (part of its sig)
@@ -5379,7 +5503,11 @@ function loop(now: number): void {
     if (mapOverlay === 'credits') {
       drawCredits();
       perfPaint++;
-    } else drawMap(); // counts its own paint (it skips when cached)
+    } else if (!mapArtHolding()) drawMap(); // counts its own paint (it skips when cached)
+    // ...and when it IS holding, nothing is painted: the map is presented once, in the
+    // tier's final art, with syncLoadingUi() below covering the wait. The 2.36 MB of
+    // AI map art against 0.59 MB of faithful BMPs measured 28.0s of enhanced map on
+    // screen before it swapped (Slow 4G, cold cache) — the same defect rooms had.
   } else if (cutscene) {
     drawCutscene(); // manages the GL canvas + subtitle overlay itself
     perfPaint++;
@@ -5453,9 +5581,9 @@ function loop(now: number): void {
     }
   }
   drawPanel();
-  // After every draw branch: the overlay is a view of "is this room still loading",
+  // After every draw branch: the overlay is a view of "is this screen still loading",
   // and hiding it here means the frame underneath has already been painted this tick.
-  syncRoomLoadingUi(now);
+  syncLoadingUi(now);
   updatePerfHud(now);
   scheduleNext();
 }
@@ -6109,8 +6237,9 @@ try {
     files.map((f) => fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b)))),
   );
   worldMap = new WorldMap(bmps[0]!, bmps[1]!, bmps[2]!, bmps.slice(3));
-  // The AI-upscaled map (Phase B) is NOT loaded here: it is fetched lazily on the first
-  // map draw in the `ai` tier (ensureAiWorldMap), so other tiers pay nothing for it.
+  // The AI-upscaled map (Phase B) is NOT loaded here: it is fetched lazily the first
+  // time the map is about to be shown in the `ai` tier (beginMapArt), so other tiers
+  // pay nothing for it.
 } catch {
   /* map optional */
 }
@@ -6169,6 +6298,11 @@ void loadSoundPkg('restored', '/restored/restored.fft', '/restored/restored.ffs'
 if (settings.introSeen) {
   screen = 'map'; // the game opens on the world map
   mapRevealStart = performance.now(); // animate the map in from the start
+  // Start the `ai` tier's map art HERE rather than leaving it to the loop's first
+  // frame, so the hide below already sees the wait: on this path the map's loading
+  // state is boot's loading state, and the overlay simply never comes down between
+  // them. Left to the loop it would hide for a frame and re-show.
+  beginMapArt();
   startMenuMusic(); // menu music (silent until the first user gesture unlocks audio)
 } else {
   playFirstRunIntro();
@@ -6179,7 +6313,9 @@ setInfo();
 booted = true;
 console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
 initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
-if (loadingEl) loadingEl.hidden = true;
+// ...unless the map is still waiting for the art it will be presented in, in which case
+// boot is not over from the player's side and the overlay stays up (see syncLoadingUi).
+if (loadingEl && !mapArtHolding()) loadingEl.hidden = true;
 maybeShowWebglNote();
 requestAnimationFrame(loop);
 
@@ -6352,6 +6488,15 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   // Debug: true while the room is still waiting for the art tier it will PRESENT —
   // the counterpart of roomLoading() for the visual side (see roomArtPending).
   roomArtPending: () => roomArtPending(),
+  // Debug: the same question for the world map — true while the `ai` tier's map art
+  // is in flight, and so while loop() is withholding the map draw (mapArtHolding).
+  mapArtPending: () => mapArtPending(),
+  // Debug: has the `ai` tier's world-map art finished loading? Distinct from
+  // mapArtPending(): a failed load also clears the hold, but leaves this false.
+  aiMapLoaded: () => aiWorldMap !== null,
+  // Debug: is a map frame the thing currently on screen? (What decides whether the
+  // map's overlay goes up at once or on the 200ms delay — see syncLoadingUi.)
+  mapPresented: () => mapPresented,
   // Debug: is the post-boot room-loading overlay on screen right now?
   loadingVisible: () => loadingEl?.hidden === false,
   // Debug: the current room's AI art has finished loading / is actually painting
