@@ -196,11 +196,19 @@ considering a change done (it stops at the first failing phase).
 
 ### How the UI suite runs — read this before adding a probe
 
-`tools/run-ui-tests.mjs` builds the app (`vite build`, ~2s), serves the result on a dedicated
-port, and runs the probes **concurrently**. It used to run them one at a time, each in its own
-cold Chromium, which took ~15 minutes; it now takes ~3, with the same probes and the same
-assertions.
+`tools/run-ui-tests.mjs` builds the app (`vite build`, ~2s), serves the result on a port it
+picks for that run, and runs the probes **concurrently**. It used to run them one at a time,
+each in its own cold Chromium, which took ~15 minutes; it now takes ~3, with the same probes and
+the same assertions.
 
+- **A fresh server on a per-run port.** The runner always serves the build it just made and
+  never adopts a server that happens to be listening (reusing a stale dev server on 5173 once
+  hid an SPA-fallback regression). The port is asked of the OS per run, so several worktrees of
+  this repo can run the suite at the same time; the fixed port this used to use made the second
+  run abort with "port already in use", or — worse — tore the first run's server down mid-suite
+  and produced bogus `Failed to fetch` failures that passed when re-run alone. Set `FF_UI_PORT`
+  to pin a port; a clash on a pinned port is then a hard error rather than something to route
+  around.
 - **A worker pool** runs `FF_UI_JOBS` probes at once (default: `round(cores × 0.6)`, floored at 2 and capped at 8 — more is
   counterproductive, because the game clock is wall-clock driven and slows under load). Each
   probe is still its own `node` process with its own browser context, so the isolation probes
