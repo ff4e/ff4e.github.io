@@ -27,6 +27,26 @@
  * skipped, so rebuilding after changing a few picks is near-instant (--force
  * overrides).
  *
+ * ADDING A FEW SPRITES TO AN EXISTING ROOM — read this before you commit the churn.
+ * The stamp includes the size+mtime of the CACHED variant under tools/studio/cache/,
+ * which is gitignored. So on any machine without that cache — a fresh clone, or after
+ * a cache clear — every stamp misses and a run that should add three sprites re-derives
+ * the whole room. The ncnn upscalers are not bit-deterministic, so the re-derived files
+ * differ from the committed ones by a few hundred bytes each (measured: KOSTE's w.webp
+ * by 2796) with no visual change at all. Committing that is pure churn: unreviewable
+ * binary diffs against a repo already at ~608 MB of GitHub Pages' 1 GB limit.
+ *
+ * The remedy is to keep the bytes that are already committed and take only the new ones:
+ *
+ *   node tools/studio/build-ai.mjs <ROOM>
+ *   git checkout -- $(git diff --name-only -- public/enhanced-ai/<ROOM> | grep '\.webp$')
+ *
+ * then restore the pre-existing keys in that room's .build-stamp.json (git's version
+ * wins for every file that already existed; keep the new files' entries). The result is
+ * honest: an old entry describes the old bytes, which are the ones on disk. It is not
+ * MORE portable than any other stamp in the repo — every stamp references a cache that
+ * only its author has — so this neither fixes nor worsens cross-machine incrementality.
+ *
  * Usage:
  *   node tools/studio/build-ai.mjs PRVNI [ROOM…]   # specific rooms
  *   node tools/studio/build-ai.mjs --all           # every room (+ fish)

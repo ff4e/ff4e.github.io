@@ -40,9 +40,14 @@ const CODENAME_MISSING: Record<string, string> = {
  * `branch_addNode("", "start", ...)` is level 1 and `branch_setEnding("ending", ...)` is
  * the finale — and the two levels reuse the same 29x27 fish house, with byte-identical
  * background/chair/table/pillow PNGs. That is exactly why the error survived: everything
- * ZAVER staged from `start` was correct, so nothing looked broken. The one thing only
- * `ending` has is `pldik`, the little creature under the table (FFR item 7), which was
- * therefore never staged and rendered as a classic sprite in the enhanced and ai tiers.
+ * ZAVER staged from `start` was correct, so nothing looked broken. What only `ending` has
+ * is `pldik`, the little creature under the table (FFR item 7), which was therefore never
+ * staged and rendered as a classic sprite in the enhanced and ai tiers.
+ *
+ * The two dirs are not otherwise interchangeable, in both directions: `start` has the
+ * falling pipe `val_00..08` that ZAVER's room does not contain, and `ending` also carries
+ * a `poster.png` used by the ending CUTSCENE (script/ending/demo_poster.lua), not by the
+ * room — so correcting the codename adds `pldik` to the staged room art and nothing else.
  */
 const CODENAME_WRONG: Record<string, string> = {
   ZAVER: 'ending',

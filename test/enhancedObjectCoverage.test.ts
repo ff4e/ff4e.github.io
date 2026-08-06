@@ -7,18 +7,19 @@ import { ROOMS } from '../src/data/roomTable.js';
 /**
  * Every FFR item that CAN have truecolor art must actually have it staged.
  *
- * This is the check that was missing when the enhanced tier shipped with 21 sprites
- * silently absent — the broom in KOSTE, the blob in REAKTOR, the little creature under
- * ZAVER's table, PARTY2's five window figures and ZX's marching knight. Nothing was
- * broken enough to notice: `EnhancedArtSource.drawItem` falls through to `classicItem`
- * for an item with no manifest entry, and `AiRoom` does the same, so those objects simply
- * rendered as 1998 palette bitmaps inside an otherwise truecolor (and, at the ai tier,
- * ×4) room. No 404, no exception, no failing test.
+ * This is the check that was missing when the enhanced tier shipped with nine object
+ * animations (93 frames) silently absent — the broom in KOSTE, the blob in REAKTOR, the
+ * little creature under ZAVER's table, PARTY2's five window figures and ZX's marching
+ * knight. Nothing was broken enough to notice: `EnhancedArtSource.drawItem` falls through
+ * to `classicItem` for an item with no manifest entry, and `AiRoom` does the same, so
+ * those objects simply rendered as 1998 palette bitmaps inside an otherwise truecolor
+ * (and, at the ai tier, ×4) room. No 404, no exception, no failing test.
  *
- * The gap was invisible to the tier's own comparisons too: the ai manifest was IDENTICAL
- * to the enhanced manifest in all three rooms, which reads as "the upscaler processed
- * everything it was given" — and it had. The only comparison that finds this is against
- * the room's own FFR item list, which is what this file does.
+ * The gap was invisible to the tier's own comparisons too: in every affected room the ai
+ * manifest was IDENTICAL to the enhanced manifest, which reads as "the upscaler processed
+ * everything it was given" — and it had. Both were missing the same objects. The only
+ * comparison that finds this is against the room's own FFR item list, which is what this
+ * file does.
  *
  * The remaining gaps are pinned in EXPECTED_GAPS rather than merely tolerated, so that
  * closing one (or opening a new one) has to be a deliberate edit.
@@ -32,9 +33,11 @@ const haveArt = existsSync(ENHANCED) && existsSync(AI);
 /**
  * Non-fish items that legitimately have no truecolor sprite, by room -> item -> why.
  *
- * All four reasons are "FFNG has no art for it", never "we forgot": three of them are
- * items FFNG models without a sprite at all, and SCORE has no FFNG level whatsoever.
- * WIN's pair is the one open judgement call rather than a settled gap.
+ * None of these is "we forgot", but they are not all the same kind of gap either:
+ * LODE's is an item FFNG does not model at all and the engine never draws; WIN's
+ * `spuntik` is modelled with no sprite attached; SCORE has no FFNG level whatsoever;
+ * and WIN's elderly fish DO have art, as fish animation sets, so they are the one open
+ * judgement call rather than a settled gap.
  */
 const EXPECTED_GAPS: Record<string, Record<number, string>> = {
   // `maska`, the LODE falling-ship stencil. spec=11 for the room's whole life
@@ -134,6 +137,37 @@ describe.skipIf(!haveArt)('ai object coverage', () => {
       const ai = manifestItems(join(AI, room.jmeno, 'ai.json'));
       if (enhanced === null || ai === null) return; // room not in one of the tiers
       expect([...enhanced].filter((j) => !ai.has(j)).sort((a, b) => a - b)).toEqual([]);
+    });
+  }
+});
+
+/**
+ * Every frame an enhanced manifest names must exist on disk.
+ *
+ * `aiShippedArt.test.ts` has had this check for `public/enhanced-ai` since that tier
+ * shipped; the enhanced tier it is derived FROM never had one. The asymmetry is not
+ * academic — a manifest entry pointing at a missing PNG behaves exactly like no entry at
+ * all (`loadEnhancedObjects` drops frames that fail to fetch, and an object left with
+ * zero valid frames is discarded), so the object falls back to its classic bitmap in
+ * both tiers. That is precisely the symptom this whole file exists to catch, and without
+ * this it was caught only for the nine items named in RECOVERED.
+ */
+describe.skipIf(!haveArt)('enhanced frame files', () => {
+  for (const room of ROOMS) {
+    it(`${room.num} ${room.jmeno} references only files that exist`, () => {
+      const path = join(ENHANCED, room.jmeno, 'objects.json');
+      if (!existsSync(path)) return; // room has no enhanced art at all
+      const parsed = JSON.parse(readFileSync(path, 'utf8')) as {
+        objects?: { item: number; frames: string[] }[];
+      };
+      const missing: string[] = [];
+      for (const o of parsed.objects ?? []) {
+        expect(o.frames.length, `item ${o.item} has no frames`).toBeGreaterThan(0);
+        for (const f of o.frames) {
+          if (!existsSync(join(ENHANCED, room.jmeno, 'obj', f))) missing.push(`item ${o.item}: ${f}`);
+        }
+      }
+      expect(missing).toEqual([]);
     });
   }
 });
