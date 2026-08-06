@@ -232,7 +232,14 @@ export class Script {
 
   // ----- context helpers used by the ported room programs -----
 
-  /** Pascal random(n): 0..n-1 (random(<=0) = 0). */
+  /**
+   * Pascal random(n): 0..n-1 (random(<=0) = 0).
+   *
+   * Deliberately NOT an injected `rnd` like stepEngine/ambient/hooks/lode-game take: the
+   * player must get real randomness, and the unit suite gets determinism by seeding the
+   * global `Math.random` instead (test/rng.ts), which covers this and every other draw in
+   * the port without an opt-in seam that a new test could forget to use.
+   */
   random(n: number): number {
     return n <= 0 ? 0 : Math.floor(Math.random() * n);
   }

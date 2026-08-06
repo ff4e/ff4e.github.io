@@ -17,7 +17,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { makeRoom, type ItemSpec } from './roomBuilder.js';
-import { pinRandomRange } from './rng.js';
+import { pinRandomHighest, pinRandomLowest } from './rng.js';
 import { Script } from '../src/core/script.js';
 import { parseFft } from '../src/data/fft.js';
 import { decodeSound } from '../src/audio/ffs.js';
@@ -74,7 +74,7 @@ describe('BOTTLES skull remark (URoom.pas:14493)', () => {
   }
 
   it('says the recorded big-fish line, never the unrecorded bot-m-lebka', () => {
-    pinRandomRange(0, 0.005); // random(2) -> 0, the restored branch
+    pinRandomLowest(); // random(2) -> 0, the restored branch
     const { s, said } = armed();
     BOTTLES.prog(s);
     drain(s);
@@ -83,7 +83,7 @@ describe('BOTTLES skull remark (URoom.pas:14493)', () => {
   });
 
   it('keeps the other half of the coin flip untouched', () => {
-    pinRandomRange(0.99, 1); // random(2) -> 1
+    pinRandomHighest(); // random(2) -> 1
     const { s, said } = armed();
     BOTTLES.prog(s);
     drain(s);
@@ -111,7 +111,7 @@ describe('POTOPENA steel-door remark (URoom.pas:11587)', () => {
   }
 
   it('says pot-v-nehnu, never the unrecorded pot-v-pohnu', () => {
-    pinRandomRange(0, 0.005);
+    pinRandomLowest();
     const { s, said } = armed();
     POTOPENA.prog(s);
     drain(s);
@@ -120,7 +120,7 @@ describe('POTOPENA steel-door remark (URoom.pas:11587)', () => {
   });
 
   it('keeps the other half of the coin flip untouched', () => {
-    pinRandomRange(0.99, 1);
+    pinRandomHighest();
     const { s, said } = armed();
     POTOPENA.prog(s);
     drain(s);

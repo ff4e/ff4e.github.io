@@ -3,11 +3,11 @@
  * POSSESSION decision (`natvrdo` set when both fish have idled, a floor sits above the
  * chosen fish, and a far reachable target exists), the turtle demanding the fish be
  * released (pozadavek 7) while possessed, the little fish's delayed "it's a turtle!"
- * line, and the gspec=9 push-out marking. RNG is pinned via pinRandomRange where needed.
+ * line, and the gspec=9 push-out marking. RNG is pinned via pinRandomLowest where needed.
  */
 import { describe, it, expect } from 'vitest';
 import { makeRoom, type ItemSpec } from './roomBuilder.js';
-import { pinRandomRange } from './rng.js';
+import { pinRandomLowest } from './rng.js';
 import { Script } from '../src/core/script.js';
 import { Dir } from '../src/core/dir.js';
 import { ZELVA } from '../src/rooms/zelva.js';
@@ -46,7 +46,7 @@ function zelva(): { s: Script; spy: Spy } {
 
 describe('ZELVA telepathic possession', () => {
   it('seizes a fish (natvrdo) once both idle, a ceiling is above it, and a far target is reachable', () => {
-    pinRandomRange(0, 0.005); // → picks the little fish, target (1,1)
+    pinRandomLowest(); // → picks the little fish, target (1,1)
     const { s } = zelva();
     s.vars(0)[MAIN_BLBNOUT] = 0; // possession timer elapsed
     s.room.idle.little = 41; // both fish have idled > 40
@@ -57,7 +57,7 @@ describe('ZELVA telepathic possession', () => {
   });
 
   it('does not possess while the fish are still active (idle <= 40)', () => {
-    pinRandomRange(0, 0.005);
+    pinRandomLowest();
     const { s } = zelva();
     s.vars(0)[MAIN_BLBNOUT] = 0;
     s.room.idle.little = 10; // just moved
