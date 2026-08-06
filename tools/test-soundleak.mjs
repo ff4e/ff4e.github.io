@@ -25,6 +25,8 @@ import { selectRoom, withApp } from './ui-lib.mjs';
 const SMETAK = 43; // "Real Chaos" — the ticking alarm clock, prior 940
 const TIKTAK = 940;
 const UTES = 7; // any other room; its .ffr is the one we hold
+const KUFRIK = 2; // the briefcase story demo lives here
+const PRVNI = 1; // the room entered while the demo's assets are still in flight
 
 await withApp(
   async ({ p, expect }) => {
@@ -96,6 +98,72 @@ await withApp(
     // pause for the swap and not a stuck clock.
     const resumed = await p.evaluate(() => window.__ff.count());
     await p.waitForFunction((n) => window.__ff.count() > n, resumed);
+
+    // === The same rule for the other thing that lands late: the KUFRIK cutscene. ===
+    //
+    // startCutscene() fetches 5.3 MB of story assets (demo.pck alone is 4.9 MB) once
+    // per session, and nothing in DoneKufrDemo ever stops the looping 'kufrik' track it
+    // starts. Leave the room during that fetch and the demo used to install itself —
+    // and its music — over wherever the player went, after showMap()'s KillSnd.
+    //
+    // The room->room path is the sharp case: `screen` is back on 'room' by then, so
+    // only "a room change is in flight" (roomLoading) or "one completed" (roomLoadSeq)
+    // can tell this launch it is stale.
+    let releaseDemo;
+    let sawDemoRequest;
+    const demoHeld = new Promise((r) => (releaseDemo = r));
+    // Resolved by the route handler, so "the fetch has started" is an event we await
+    // rather than a flag we poll.
+    const demoRequested = new Promise((r) => (sawDemoRequest = r));
+    await p.route('**/data/Intro/demo.pck', async (route) => {
+      sawDemoRequest();
+      await demoHeld;
+      await route.continue().catch(() => {});
+    });
+
+    await selectRoom(p, KUFRIK);
+    await p.evaluate(() => window.__ff.startCutscene());
+    // The wait is the assertion: the story assets really are in flight (they are cached
+    // per session, so this is the one launch that can be held).
+    await demoRequested;
+
+    await p.evaluate(() => window.__ff.showMap());
+    await p.waitForFunction(() => window.__ff.screen() === 'map');
+
+    let releasePrvni;
+    const prvniHeld = new Promise((r) => (releasePrvni = r));
+    await p.route('**/data/Graphic/001.ffr', async (route) => {
+      await prvniHeld;
+      await route.continue().catch(() => {});
+    });
+    const entering2 = selectRoom(p, PRVNI);
+    await p.waitForFunction(() => window.__ff.roomLoading());
+
+    releaseDemo(); // the story assets land mid-swap, into a room that is not KUFRIK
+    const loopsBefore = await p.evaluate(() => window.__ff.throttleInfo().loops);
+    await p.waitForFunction((n) => window.__ff.throttleInfo().loops > n + 30, loopsBefore);
+
+    const demo = await p.evaluate(() => ({
+      cutscene: window.__ff.cutsceneActive(),
+      music: window.__ff.music(),
+    }));
+    expect(!demo.cutscene, 'the KUFRIK demo does not install itself over the room being entered');
+    expect(demo.music !== 'kufrik', `the demo's music does not start either (music='${demo.music}')`);
+
+    releasePrvni();
+    await entering2;
+    await p.unroute('**/data/Graphic/001.ffr').catch(() => {});
+    await p.unroute('**/data/Intro/demo.pck').catch(() => {});
+
+    const settled = await p.evaluate(() => ({
+      cutscene: window.__ff.cutsceneActive(),
+      music: window.__ff.music(),
+      room: window.__ff.roomNum(),
+    }));
+    expect(
+      !settled.cutscene && settled.music !== 'kufrik',
+      `room ${settled.room} is free of the abandoned demo (music='${settled.music}')`,
+    );
   },
   // Pin the tier: `ai` would add its own art hold on top of the load window and blur
   // which of the two this probe is exercising.

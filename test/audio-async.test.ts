@@ -218,8 +218,7 @@ describe('a track killed while it is loading never arrives', () => {
   });
 });
 
-describe('a reservation owns only itself', () => {
-  it('does not extend a sound already playing on the same priority', async () => {
+describe('a reservation owns only itself', () => {  it('does not extend a sound already playing on the same priority', async () => {
     const engine = newEngine();
     seed(engine, 'sm-x-tiktak', 0.001); // a 1ms effect, so its end is observable
     engine.snd('sm-x-tiktak', 10);
@@ -247,6 +246,40 @@ describe('a reservation owns only itself', () => {
 
     expect(sources).toHaveLength(1);
     expect(engine.playing(10)).toBe(true);
+  });
+
+  it('talking(prior) follows the reservation too — it gates dialogue advance', async () => {
+    const engine = newEngine();
+    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    // talking() is what advances the dialogue queue and drives lip-sync, so it must
+    // agree with playing() about a sound that has been asked for (RSound.pas:933 reads
+    // the same channels playing() does — a claimed channel counts for both).
+    expect(engine.talking(10)).toBe(true);
+
+    await gate.fail();
+
+    expect(engine.talking(10)).toBe(false);
+  });
+
+  it('KillSnd cancels effect reservations but spares the room-music channel', async () => {
+    const engine = newEngine();
+    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')); // an effect-priority request
+    void engine.playMusic('rybky05', MUSIC_URL('rybky05'), 1000); // the -999 loop
+    expect(engine.playing(10)).toBe(true);
+    expect(engine.playing(MUSIC_PRIOR)).toBe(true);
+
+    // TRoom.Restart's KillExcept(-999) (URoom.pas:1588): a restart silences the room
+    // but keeps its music — including a track still on its way.
+    engine.killVoices();
+
+    expect(engine.playing(10)).toBe(false);
+    expect(engine.playing(MUSIC_PRIOR)).toBe(true);
+
+    await gate.settle(1); // the -999 track lands after the KillSnd and still installs
+    expect(engine.currentMusic).toBe('rybky05');
+
+    await gate.settle(0); // ...the killed effect request does not
+    expect(engine.playing(10)).toBe(false);
   });
 });
 
