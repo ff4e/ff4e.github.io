@@ -19,6 +19,7 @@ import { encodePng } from '../src/render/png.js';
 import { EnhancedArtSource } from '../src/render/enhancedArtSource.js';
 import { decodeEnhancedArt } from '../src/render/enhancedDecode.js';
 import { roomByName, roomByNumber, type RoomDesc } from '../src/data/roomTable.js';
+import { jmenoToCodename } from './lib/ffngCodename.js';
 
 const DATA_DIR = process.env.FF_DATA_DIR ?? join(homedir(), '.cache', 'ffng-orig', 'extracted', 'MAINDIR');
 const ENHANCED_DIR =
@@ -26,19 +27,6 @@ const ENHANCED_DIR =
   '/Applications/Fillets.app/Contents/Resources/fillets/share/games/fillets-ng/images';
 const OUT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'out');
 const MAPPING = join(dirname(fileURLToPath(import.meta.url)), '..', 'test', 'fixtures', 'solutions', 'mapping.tsv');
-
-/** jmeno -> FFNG codename (image dir), from the port's solutions mapping.tsv. */
-function jmenoToCodename(): Map<string, string> {
-  const m = new Map<string, string>();
-  const lines = readFileSync(MAPPING, 'utf8').split('\n').slice(1);
-  for (const line of lines) {
-    const [slug, , jmenoCol] = line.split('\t');
-    if (!slug || !jmenoCol) continue;
-    // Ambiguous rows list multiple jmeno separated by '|'; map each to the slug.
-    for (const jm of jmenoCol.split('|')) m.set(jm.trim(), slug.trim());
-  }
-  return m;
-}
 
 /** Locate a room's `-w`/`-p` PNGs inside its FFNG image dir. */
 function enhancedFiles(codename: string): { wall: string; bg: string } | null {
@@ -67,7 +55,7 @@ if (!target) {
 }
 
 const desc = resolveRoom(target);
-const codename = jmenoToCodename().get(desc.jmeno);
+const codename = jmenoToCodename(MAPPING).get(desc.jmeno);
 if (!codename) throw new Error(`no codename mapping for ${desc.jmeno}`);
 const files = enhancedFiles(codename);
 if (!files) throw new Error(`no enhanced -w/-p PNGs for ${desc.jmeno} (${codename})`);

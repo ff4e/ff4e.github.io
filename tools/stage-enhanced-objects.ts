@@ -2,7 +2,8 @@
  * Stage enhanced OBJECT sprites (Phase 3a) for each room, driven by FFNG's
  * script/<codename>/models.lua. For every `addModel("item_*", X, Y, ...)` +
  * `addItemAnim(var, "images/<codename>/<file>.png")` pair it:
- *   - matches the FFR item by position (X == xStart, Y == yStart),
+ *   - matches the FFR item by position (X == xStart, Y == yStart), or by the
+ *     explicit ITEM_OVERRIDES entry where FFNG's authored cell disagrees,
  *   - collects the sprite's animation frames (`<base>_00..0N.png`, or one file),
  *   - copies them to public/enhanced/<JMENO>/obj/,
  *   - records the mapping in public/enhanced/<JMENO>/objects.json.
@@ -17,6 +18,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parseFfr } from '../src/data/ffr.js';
 import { ROOMS } from '../src/data/roomTable.js';
+import { jmenoToCodename } from './lib/ffngCodename.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const IMAGES_DIR =
@@ -36,22 +38,42 @@ interface ObjEntry {
   item?: number;
 }
 
-function jmenoToCodename(): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const line of readFileSync(MAPPING, 'utf8').split('\n').slice(1)) {
-    const [slug, , jmenoCol] = line.split('\t');
-    if (!slug || !jmenoCol) continue;
-    for (const jm of jmenoCol.split('|')) m.set(jm.trim(), slug.trim());
-  }
-  // Rooms missing from mapping.tsv (codename verified via script/<cn>/models.lua).
-  const overrides: Record<string, string> = {
-    ZELVA: 'turtle', BARELY: 'barrel', GRAL: 'grail', PARTY2: 'party2',
-    POHON: 'propulsion', SPUNT: 'atlantis', LODE: 'gods', DISKETA: 'floppy', MAPA: 'map',
-    CHODBA: 'corridor',
-  };
-  for (const [jmeno, cn] of Object.entries(overrides)) if (!m.has(jmeno)) m.set(jmeno, cn);
-  return m;
-}
+/**
+ * Models whose authored grid cell does NOT equal their FFR item's (xStart,yStart),
+ * keyed by room and then by the MODEL's own "x,y" -> the FFR item index it really is.
+ *
+ * Why this exists: the positional match below is the whole binding rule, and a model one
+ * cell off is silently dropped as decor. That quietly cost 21 sprites — every one of them
+ * present in fillets-ng-data, and every one of them rendering as a classic bitmap inside
+ * an otherwise truecolor (and, at the ai tier, ×4) room. They are listed explicitly
+ * rather than fixed by loosening the matcher to "nearest model of the same shape",
+ * because a looser rule re-derives the bindings of all 72 rooms and could silently move
+ * art that is already correct; this table can only ADD.
+ *
+ * Each entry is pinned by three independent signals, not by proximity: the item's cell
+ * SHAPE equals the model's, the FFNG sprite NAME is the item's Delphi name, and the frame
+ * count implied by the FFR bitmap range equals the number of FFNG frame files.
+ *
+ *  - KOSTE 2   `metla`, the broom               — FFNG (21,6)  vs FFR (20,6)
+ *  - REAKTOR 18 `pld`, the blob creature        — FFNG (3,16)  vs FFR (3,15)
+ *  - ZX 13     `knight`, the marching knightik  — FFNG (42,2)  vs FFR (41,2)
+ *  - PARTY2 18..22, the window figures — a different miss: the FFR co-locates ALL SIX
+ *    figures at (22,16) and reveals them one at a time (they are spec=11 until the script
+ *    shows them), while FFNG spreads them along row 17. Only `kuk` (item 17) is authored
+ *    at (22,16), so the other five never matched. The order below is models.lua order,
+ *    confirmed against the FFR bitmap ranges: items 17..22 want 24/7/7/22/15/2 frames and
+ *    kuk/ruka/frkavec/hnat/lahev/frk ship exactly 24/7/7/22/15/2.
+ *
+ * ZAVER's creature needs no entry — `pldik` is authored at exactly the FFR item's cell.
+ * It was missing because the ROOM resolved to the wrong FFNG level; see
+ * CODENAME_WRONG in lib/ffngCodename.ts.
+ */
+const ITEM_OVERRIDES: Record<string, Record<string, number>> = {
+  KOSTE: { '21,6': 2 },
+  REAKTOR: { '3,16': 18 },
+  ZX: { '42,2': 13 },
+  PARTY2: { '21,17': 18, '23,17': 19, '25,17': 20, '27,17': 21, '29,17': 22 },
+};
 
 /** Parse models.lua: addModel(...) followed by addItemAnim(var, ".../<file>.png"). */
 function parseModels(lua: string, codename: string, imgDir: string): ObjEntry[] {
@@ -87,7 +109,7 @@ function parseModels(lua: string, codename: string, imgDir: string): ObjEntry[] 
   return out;
 }
 
-const map = jmenoToCodename();
+const map = jmenoToCodename(MAPPING);
 let rooms = 0;
 let objects = 0;
 const warnings: string[] = [];
@@ -121,13 +143,32 @@ for (const room of ROOMS) {
       else posToItems.set(key, [j]);
     }
     const cursor = new Map<string, number>();
+    const overrides = ITEM_OVERRIDES[room.jmeno] ?? {};
     for (const e of entries) {
       const key = `${e.x},${e.y}`;
+      // An explicit override wins over the positional match: it exists precisely
+      // because FFNG's authored cell is not the item's, so the lookup below would
+      // either miss or (worse) land on some unrelated item that happens to sit there.
+      const forced = overrides[key];
+      if (forced !== undefined) {
+        e.item = forced;
+        continue;
+      }
       const items = posToItems.get(key);
       if (items && items.length > 0) {
         const c = cursor.get(key) ?? 0;
         e.item = items[Math.min(c, items.length - 1)]!;
         cursor.set(key, c + 1);
+      }
+    }
+    // An override naming an item this room does not have is a typo in the table,
+    // and would otherwise ship as a manifest entry the runtime silently ignores.
+    for (const [key, idx] of Object.entries(overrides)) {
+      if (idx < 1 || idx > ffr.itemCount) {
+        throw new Error(`ITEM_OVERRIDES[${room.jmeno}]["${key}"] = ${idx}: no such item (1..${ffr.itemCount})`);
+      }
+      if (!entries.some((e) => `${e.x},${e.y}` === key)) {
+        throw new Error(`ITEM_OVERRIDES[${room.jmeno}]["${key}"]: no models.lua model at that position`);
       }
     }
     matched = entries.filter((e) => e.item !== undefined);
