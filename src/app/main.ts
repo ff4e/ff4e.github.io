@@ -2439,12 +2439,24 @@ function scriptTalk(name: string, prior: number): number {
 /** Launch the briefcase story cutscene (InitKufrDemo), loading its assets once. */
 async function startCutscene(): Promise<void> {
   if (cutscene || !font) return;
+  // The room this launch belongs to. Every await below is a window in which the
+  // player can leave (or restart into another room), and what lands afterwards must
+  // not be installed over whatever they went to — the same rule the room-change hold
+  // enforces for the script clock.
+  //
+  // Three conditions, because none alone is enough: `screen` misses a room→room change
+  // (it stays 'room'); `roomLoadSeq` only counts loads that COMPLETED, so it misses the
+  // window where the next room's assets are still in flight; and `roomLoading` alone
+  // misses a change that has already finished.
+  const seq = roomLoadSeq;
+  const stale = (): boolean =>
+    cutscene !== null || !font || screen !== 'room' || roomLoading || roomLoadSeq !== seq;
   // The demo is narration over pictures, and every caption's length comes from its
   // voice sample (cutsceneCaption -> audio.duration). Starting it before the room's
   // voice package has landed would run the whole story at the flat DEFAULT_LINE_TICKS
   // fallback — silent, and several times too fast to read.
   await roomVoicesReady;
-  if (cutscene || !font || screen !== 'room') return;
+  if (stale()) return;
   clearHeldKey(); // the briefcase cutscene takes over
   if (!cutsceneAssets) {
     const [bmp, pck, scr] = await Promise.all([
@@ -2453,6 +2465,12 @@ async function startCutscene(): Promise<void> {
       fetch('/data/Intro/script.txt').then((r) => r.text()),
     ]);
     cutsceneAssets = { bmp: new Uint8Array(bmp), pck: new Uint8Array(pck), script: scr };
+    // 5.3 MB of story assets (demo.pck alone is 4.9 MB), fetched once per session: the
+    // first launch is easily long enough to leave the room in. Without this the demo's
+    // looping 'kufrik' music started AFTER showMap()'s KillSnd (and the cutscene
+    // installed itself over the world map), because nothing in DoneKufrDemo ever stops
+    // that track — it only restores music_volume (URoom.pas:2914).
+    if (stale()) return;
   }
   const demo = new KufrDemo(cutsceneAssets.bmp, cutsceneAssets.pck, cutsceneAssets.script);
   cutsceneSubs = new SubtitleSystem(font, demo.palette, Math.floor(demo.width / 15), demo.width, demo.height);
@@ -3148,16 +3166,32 @@ function talk(which: 'little' | 'big'): void {
   audio.play(entry.name, 1, MLUVI_PRIOR[which], 'voice'); // voice at the fish's mluvi priority (drives lip-sync)
 }
 
+/**
+ * Is the room in a state to accept a command? `roomLoading` is part of that: while a
+ * room change is in flight, `room`/`engine` still point at the room the player LEFT
+ * (loadRoom only swaps them after its await), so a command dispatched here would drive
+ * a room that is about to be discarded. The original cannot reach that state at all —
+ * `Spust` disables the timer before it replaces `Room` (UMain.pas:247-249) — and the
+ * simulation is already held for the same window in `loop()`. Gating here as well is
+ * what makes the outgoing room unreachable by construction rather than by the accident
+ * that no input path happens to emit a sound.
+ */
 const idle = (): boolean =>
-  room !== null && engine !== null && engine.phase === 'idle' && !room.anyFishDead && !room.won;
+  room !== null &&
+  engine !== null &&
+  !roomLoading &&
+  engine.phase === 'idle' &&
+  !room.anyFishDead &&
+  !room.won;
 
 /**
  * gstav in [stav_nic, stav_klid] (URoom.pas:24432): the original only dequeues a
  * command — including save and load — while the room is at rest, so neither can
  * land mid-animation. Looser than `idle()`, which also excludes a dead fish and a
- * won room; this is only the animation gate.
+ * won room; this is only the animation gate — plus the same room-swap exclusion, so a
+ * save cannot bank the OUTGOING room's state under the room number being entered.
  */
-const atRest = (): boolean => engine !== null && engine.phase === 'idle';
+const atRest = (): boolean => engine !== null && !roomLoading && engine.phase === 'idle';
 
 /** DalsiPrikaz busy gate (URoom.pas:27002-27016): a fish command is dropped while that
  *  fish is busy (mid-dialogue, turned to face the player). */
@@ -5438,21 +5472,37 @@ function loop(now: number): void {
   // load the game just slows down.
   if (acc > LOGIC_MS * (MAX_STEPS_PER_FRAME + 1)) acc = LOGIC_MS;
   let steps = 0;
-  // While the anti-flash hold is active (draw() is holding the previous frame until
-  // this room's art loads), pause the simulation too, so the
-  // room's scripts/gravity/subtitle timers/audio don't advance under a frame that
-  // was never shown — keeping logic in sync with the first visible frame (as classic
-  // mode inherently is). acc keeps accumulating but the backlog guard above drops it,
-  // so there's no fast-forward catch-up when the hold releases.
-  // roomArtPending() rather than `graphics === 'enhanced'`: every tier that draws
-  // truecolor art needs the identical hold while that art is still loading, and the
-  // ai tier additionally waits for its upscale (see roomArtPending).
-  const holding = screen !== 'map' && !cutscene && roomArtPending();
+  // While a hold is active, pause the simulation too, so the room's
+  // scripts/gravity/subtitle timers/audio don't advance under a frame the player was
+  // never shown — keeping logic in sync with the first visible frame (as classic mode
+  // inherently is). acc keeps accumulating but the backlog guard above drops it, so
+  // there's no fast-forward catch-up when the hold releases. Two holds share this
+  // predicate because they want the identical thing of the clock, though they present
+  // differently (the art hold keeps the PREVIOUS frame; roomLoading paints black):
+  //
+  // roomArtPending() — the anti-flash hold, while draw() holds the previous frame until
+  // this room's art lands. Expressed as roomArtPending() rather than
+  // `graphics === 'enhanced'` because every tier that draws truecolor art needs the
+  // identical hold, and the ai tier additionally waits for its upscale.
+  // `roomLoading` is the same rule one step earlier, and it is a correctness one, not
+  // just an anti-flash one. enterRoom() flips `screen` to 'room' and runs its KillSnd
+  // synchronously, but loadRoom() then AWAITS the new room's core assets — and until
+  // buildRoom() swaps them, `room`/`activeScript`/`engine` are still the room the
+  // player just left. Ticking those is a window the original cannot have: Spust
+  // disables the game timer BEFORE it kills the sound and builds the new room
+  // (`Timer1.Enabled:=false; KillSnd; Room:=TRoom.Create(...)`, UMain.pas:247-249),
+  // so no Programky runs across the swap. Here the outgoing room's Programky ran on
+  // after the KillSnd that was supposed to silence it, and every script that re-arms a
+  // loop on `!playing(p)` did exactly that — SMETAK's alarm clock (smetak.ts:204),
+  // MOTOR's engine (motor.ts:84), BARELY, BATYSKAF — leaving a looping effect sounding
+  // under the NEXT room, because that KillSnd is the only thing a room change ever does
+  // about it (buildRoom only re-kills on a restart).
+  const simPaused = screen !== 'map' && !cutscene && (roomLoading || roomArtPending());
   // The minigame is modal in the original, so the room's timer does not run while
   // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
   tickTetris(dt);
   const frozen = tetrisModal();
-  while (!holding && !frozen && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
+  while (!simPaused && !frozen && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
     acc -= LOGIC_MS;
     steps++;
     if (step()) {

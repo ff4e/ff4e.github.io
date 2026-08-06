@@ -47,6 +47,23 @@ export class AudioEngine {
   private cache = new Map<string, AudioBuffer>();
   /** Active voices by priority, with the wall-clock time they finish. */
   private activeUntil = new Map<number, number>();
+  /**
+   * Starts whose sample is still being fetched/decoded, as a set of request ids per
+   * priority — a priority with a non-empty set counts as sounding (see `reserve`).
+   *
+   * Kept OUT of `activeUntil`, which holds real end times: a placeholder written there
+   * would both extend a sound already playing on the priority and, if the load then
+   * failed, leave the priority sounding forever with nothing to end it.
+   *
+   * Ids rather than a count, because a stale start has to recognise itself. The
+   * original claims its mixer channel synchronously (Sound, RSound.pas:674), so a
+   * started sound is either playing or it never started; here the room can change — or
+   * a script can call `KSnd(prior)` — while the bytes are in flight. A kill drops every
+   * id on the priority, so a start whose id is gone when it lands installs nothing, and
+   * it cannot mistake a LATER request's claim for its own.
+   */
+  private pending = new Map<number, Set<number>>();
+  private nextReservation = 0;
   /** Every currently-playing one-shot source (for KillSnd). */
   private voices = new Set<AudioBufferSourceNode>();
   /** Sources tracked per priority, so a single priority can be stopped (KSnd). */
@@ -271,6 +288,50 @@ export class AudioEngine {
     this.activeUntil.set(prior, loop ? Infinity : performance.now() + buf.duration * 1000);
   }
 
+  /**
+   * Claim a priority for a start whose sample is not decoded yet, and return the
+   * reservation id the caller must still hold when it lands.
+   *
+   * `Sound()` (RSound.pas:674) takes its mixer channel and writes `priority:=prior;
+   * flen:=d` before it returns, so `Playing(prior)` (RSound.pas:924) is true on the
+   * very next tick — for an in-memory sample AND for one streamed off disk. Reserving
+   * here reproduces that: a script that guards on `playing(prior)` must not be able to
+   * observe the gap between asking for a sound and the bytes arriving.
+   */
+  private reserve(prior: number): number {
+    const id = ++this.nextReservation;
+    let ids = this.pending.get(prior);
+    if (!ids) {
+      ids = new Set();
+      this.pending.set(prior, ids);
+    }
+    ids.add(id);
+    return id;
+  }
+
+  /** Is this reservation still the one that was made — i.e. has no kill dropped it? */
+  private holds(prior: number, id: number): boolean {
+    return this.pending.get(prior)?.has(id) ?? false;
+  }
+
+  /**
+   * Drop one reservation — the load failed (`Sound()` likewise claims no channel for a
+   * file it cannot open: it exits with `flen` still 0, RSound.pas:709/722, and
+   * `Playing` only counts channels with `flen>0`), or the real source is about to take
+   * over. A kill has already dropped every id on the priority, so a superseded start
+   * deletes nothing here and cannot touch a later request's claim.
+   */
+  private release(prior: number, id: number): void {
+    const ids = this.pending.get(prior);
+    if (!ids?.delete(id)) return;
+    if (ids.size === 0) this.pending.delete(prior);
+  }
+
+  /** Drop every reservation on a priority (a kill happened). */
+  private clearReserved(prior: number): void {
+    this.pending.delete(prior);
+  }
+
   /** True if `name` resolves to an entry in the room/global sound packages. */
   hasPackaged(name: string): boolean {
     const pkgs = this.pkgs;
@@ -303,6 +364,15 @@ export class AudioEngine {
     loop: boolean,
   ): Promise<void> {
     const ctx = this.ensureCtx();
+    // Claim the priority before the first await, so `playing(prior)` is true from the
+    // tick that asked for the track — see reserve(). KORALY is the room that showed
+    // why: it cues `music('rybky08', 10)` at score-step 19 (koraly.ts:373) and its own
+    // faithful rule `if cinnost>20 and cinnost<80 and not playing(10) then cinnost:=80`
+    // (koraly.ts:408 = URoom.pas:15576) reads that flag 160 ms later. `rybky08` is in no
+    // sound package, so it comes down this path: a 740 KB fetch plus a decode inside two
+    // logic ticks. Lose that race and the octopus jumps to the end of its animation
+    // while the music, arriving afterwards, plays on over a still puppet.
+    const claim = this.reserve(prior);
     let buf = this.musicBufs.get(name);
     if (!buf) {
       try {
@@ -314,10 +384,18 @@ export class AudioEngine {
         const bytes = await fetch(url, { priority: 'low' } as RequestInit).then((r) => r.arrayBuffer());
         buf = await ctx.decodeAudioData(bytes.slice(0));
       } catch {
+        this.release(prior, claim);
         return; // track not present / decode failed — stay silent
       }
       this.musicBufs.set(name, buf);
     }
+    // Killed while it was loading (a room change, or the script's own KSnd(prior)):
+    // the request is stale and must not install a source over the silence that was
+    // asked for. The reservation went with the kill.
+    if (!this.holds(prior, claim)) return;
+    // Hand the reservation over to the real source. Nothing awaits in between, so
+    // playing(prior) is never observably false across the handover.
+    this.release(prior, claim);
     this.logSound(name + ' (music-file)', volume);
     this.startTracked(buf, prior, loop, volume, 'music');
   }
@@ -328,6 +406,7 @@ export class AudioEngine {
     // KSnd(-999) targets the looping room music (a distinct source, not a voice) —
     // plus any tracked source that was started on that priority (a packaged band track).
     if (prior === MUSIC_PRIOR) this.stopMusic();
+    this.clearReserved(prior); // cancel any start still fetching/decoding for it
     const set = this.priorSources.get(prior);
     if (set) {
       for (const src of set) {
@@ -352,6 +431,17 @@ export class AudioEngine {
         /* already stopped */
       }
     }
+    // Cancel every start still fetching/decoding — otherwise a track requested a
+    // moment before this KillSnd installs itself after it, under the next room. The
+    // room-music channel is exempt because THIS port's killVoices() is not the
+    // original's KillSnd (which does kill -999 too, RSound.pas:954): it is the
+    // voices-only half, paired with stopMusic() in killAll(), and its lone caller that
+    // keeps the music is the restart — TRoom.Restart's KillExcept(-999)
+    // (URoom.pas:1588, RSound.pas:962). So an in-flight -999 start must survive here,
+    // exactly as the sounding one does at the end of this method.
+    for (const prior of [...this.pending.keys()]) {
+      if (prior !== MUSIC_PRIOR) this.clearReserved(prior);
+    }
     this.voices.clear();
     this.priorSources.clear();
     this.activeUntil.clear();
@@ -367,6 +457,10 @@ export class AudioEngine {
 
   /** playing(prior) (RSound.pas): is a voice of this priority still sounding? */
   playing(prior: number): boolean {
+    // A reserved priority counts as sounding: the original's channel is claimed by
+    // Sound() before it returns, so there is no tick on which a requested sound reads
+    // back as silent (see reserve).
+    if (this.pending.has(prior)) return true;
     const until = this.activeUntil.get(prior);
     return until !== undefined && performance.now() < until;
   }
@@ -377,6 +471,7 @@ export class AudioEngine {
    * A looping effect (SndCyc, activeUntil=Infinity) always counts as talking.
    */
   talking(prior: number): boolean {
+    if (this.pending.has(prior)) return true;
     const until = this.activeUntil.get(prior);
     if (until === undefined) return false;
     if (until === Infinity) return true;
@@ -418,6 +513,14 @@ export class AudioEngine {
     // Claim this start. Any later start — or any stopMusic() — bumps the counter, so
     // when this decode resolves it can tell whether it is still the current intent.
     const gen = ++this.musicGen;
+    // Same reservation as playMusicFile, on the room-music channel: MusicCycle claims
+    // its mixer channel synchronously, so `playing(-999)` must be true from the tick
+    // that asked for the track. KANKAN re-cues on exactly that flag —
+    // `if (!s.playing(MUSIC_PRIOR)) s.musiccyc(s.musName, MUSIC_PRIOR)` (kankan.ts:216)
+    // — and would otherwise re-request the track on every tick of its first load.
+    // stopMusic() above dropped any previous claim on this channel, so this start is
+    // the only one holding it; `musicGen` is what tells it whether it still is.
+    const claim = this.reserve(MUSIC_PRIOR);
     try {
       const ctx = this.ensureCtx();
       let buf = this.musicBufs.get(name);
@@ -434,6 +537,7 @@ export class AudioEngine {
       // name also covers "stopped, then asked for the same track again", where the
       // name matches but this start is no longer the one that should install itself.
       if (this.musicGen !== gen) return;
+      this.release(MUSIC_PRIOR, claim); // handed over to the source started below
       this.logSound(name + ' (music-loop)', 1);
       const nativeRate = (buf as AudioBuffer & { _rate?: number })._rate ?? 22050;
       const src = ctx.createBufferSource();
@@ -449,6 +553,16 @@ export class AudioEngine {
       this.musicSrc = src;
       this.musicGain = g;
       this.activeUntil.set(MUSIC_PRIOR, Infinity); // MusicCycle(-999): playing(-999) true
+    } catch {
+      // The track could not be fetched or decoded, so nothing will ever sound on this
+      // channel — hand the reservation back rather than leaving playing(-999) stuck
+      // true. `Sound()` does the same by never claiming a channel for a file it cannot
+      // open: it exits with `flen` still 0 (RSound.pas:709/722). Only the start that is
+      // still current may do this.
+      if (this.musicGen === gen) {
+        this.musicName = '';
+        this.release(MUSIC_PRIOR, claim);
+      }
     } finally {
       // Only the start that is still current may release the flag; a superseded one
       // must leave it to whoever replaced it.
@@ -475,6 +589,7 @@ export class AudioEngine {
     this.musicSrc = null;
     this.musicGain = null;
     this.musicName = '';
+    this.clearReserved(MUSIC_PRIOR); // any in-flight start is cancelled below
     // Invalidate any in-flight start: without this, a decode that resolves after this
     // stop would install itself over the silence the caller just asked for.
     this.musicGen++;
