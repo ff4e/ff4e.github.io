@@ -12,11 +12,12 @@
  *
  * The sweep behind all of it is `tools/sweep-sounds.ts`.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { makeRoom, type ItemSpec } from './roomBuilder.js';
+import { pinRandomHighest, pinRandomLowest } from './rng.js';
 import { Script } from '../src/core/script.js';
 import { parseFft } from '../src/data/fft.js';
 import { decodeSound } from '../src/audio/ffs.js';
@@ -27,8 +28,6 @@ import { encodeSound, quantize } from '../tools/lib/ffsEncode.js';
 import { BOTTLES } from '../src/rooms/bottles.js';
 import { POTOPENA } from '../src/rooms/potopena.js';
 import { ZAVER } from '../src/rooms/zaver.js';
-
-afterEach(() => vi.restoreAllMocks());
 
 /** Build a script whose queued dialogue is recorded rather than played. */
 function spied(items: ItemSpec[], w = 40, h = 30): { s: Script; said: string[] } {
@@ -75,7 +74,7 @@ describe('BOTTLES skull remark (URoom.pas:14493)', () => {
   }
 
   it('says the recorded big-fish line, never the unrecorded bot-m-lebka', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0); // random(2) -> 0, the restored branch
+    pinRandomLowest(); // random(2) -> 0, the restored branch
     const { s, said } = armed();
     BOTTLES.prog(s);
     drain(s);
@@ -84,7 +83,7 @@ describe('BOTTLES skull remark (URoom.pas:14493)', () => {
   });
 
   it('keeps the other half of the coin flip untouched', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.99); // random(2) -> 1
+    pinRandomHighest(); // random(2) -> 1
     const { s, said } = armed();
     BOTTLES.prog(s);
     drain(s);
@@ -112,7 +111,7 @@ describe('POTOPENA steel-door remark (URoom.pas:11587)', () => {
   }
 
   it('says pot-v-nehnu, never the unrecorded pot-v-pohnu', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0);
+    pinRandomLowest();
     const { s, said } = armed();
     POTOPENA.prog(s);
     drain(s);
@@ -121,7 +120,7 @@ describe('POTOPENA steel-door remark (URoom.pas:11587)', () => {
   });
 
   it('keeps the other half of the coin flip untouched', () => {
-    vi.spyOn(Math, 'random').mockReturnValue(0.99);
+    pinRandomHighest();
     const { s, said } = armed();
     POTOPENA.prog(s);
     drain(s);

@@ -194,6 +194,49 @@ Automated, deterministic, **non-AI** (no LLM/vision at runtime — plain asserti
 `npm run test:all` chains `typecheck && test && test:ui` — the one command to run before
 considering a change done (it stops at the first failing phase).
 
+### Randomness in the unit suite
+
+The game keeps the original's real randomness (Pascal's `random`, `URoom.pas`): `Script.random`
+(`src/core/script.ts`) calls `Math.random()` and no game behaviour was changed for the tests.
+The unit suite instead installs a **seeded** `Math.random` from `test/rng.setup.ts`, so a unit
+failure always means a real defect and never a 1-in-100 draw. Every draw the port makes at
+runtime goes through `Math.random` — the room scripts, the ZX band width, the sound-variant
+pick, the host's lip-sync and blink — so the one swap covers all of them.
+
+- **A stream per test**, seeded from the test's file + name, so a test never depends on how many
+  draws the tests before it happened to make. The seed is installed by `beforeAll`/`beforeEach`,
+  so it covers hooks and test bodies; a draw in a file's module body or a `describe` callback
+  runs before any hook and is *not* seeded (no file does this today). Tests within a file must
+  run serially — `test.concurrent` would share one stream.
+- **Where the code under test takes an `rnd`, inject it.** `StepEngine`, `ambient`, `hooks` and
+  `lode-game` all accept a random function, and several tests pass `{ random: () => 0 }`. That
+  stays the house style, and the pins below do *not* reach those draws, because they never call
+  `Math.random`. The seeded global is the floor for everything that has no seam.
+- **A test that needs a draw to go one way says so**, with `pinRandomLowest()` (every draw is
+  `0`, so `random(100) < 1` is certain) or `pinRandomHighest()` (every draw is `n - 1`, so it is
+  impossible). Both are exact for every `n` the port uses. See `test/kajuta1.test.ts` for the
+  two sides of one draw.
+- **Never stub `Math.random` to a constant.** The idle-chatter picker redraws until it gets a
+  group different from the last three (`src/core/chatter.ts:235-237`, `URoom.pas:3370`), so a
+  constant spins forever and hangs the suite. Both pins stay varied by construction, which is
+  why they exist instead of `vi.spyOn(Math, 'random')` — and a test in `test/rng.test.ts` fails
+  if a direct stub comes back.
+- **`FF_TEST_SEED`** (default `1`) picks the base seed. Sweep the suite through different draw
+  sequences after touching anything RNG-adjacent:
+
+      npm run test:seeds              # seeds 1..100
+      FF_SEEDS=500 npm run test:seeds
+
+  A fixed seed proves reproducibility; a sweep proves the tests do not depend on which way a
+  draw went. A failing test prints the `FF_TEST_SEED=... npx vitest run ...` line that
+  reproduces it. Run a sweep on an **idle** machine: it is hundreds of full suites back to
+  back, and under heavy load the suite's default 5s per-test timeout can trip on the slowest
+  tests (`render-parity`), which looks like a sweep failure but is the contention class, not a
+  draw. Re-run the reported seed in isolation before believing it.
+- **The UI suite is deliberately left on real randomness.** `npm run test:ui` drives the built
+  app in a browser, where the randomness is part of what is being validated; `setupFiles` is
+  vitest-only and does not reach it.
+
 ### How the UI suite runs — read this before adding a probe
 
 `tools/run-ui-tests.mjs` builds the app (`vite build`, ~2s), serves the result on a port it
