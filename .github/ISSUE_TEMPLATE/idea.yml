@@ -1,0 +1,25 @@
+name: Idea or wish
+description: Something you'd like the port to do
+title: "[idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Ideas are welcome, with one standing caveat: this is a **faithful port** of the
+        1998 Delphi original, so anything that changes how the game plays is unlikely to
+        land. Anything about the port itself — the browser side, the controls, the
+        graphics tiers, the subtitles, the site — is fair game.
+  - type: textarea
+    id: idea
+    attributes:
+      label: The idea
+      description: What would you like, and what would it be good for?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Which build you're playing (the game's feedback form fills this in).
+      placeholder: Fish Fillets 4ever 1.0.18

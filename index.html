@@ -139,7 +139,100 @@
       html[data-unsupported] .stage,
       html[data-unsupported] #devbar,
       html[data-unsupported] #info,
+      html[data-unsupported] #feedbar,
       html[data-unsupported] #perfhud { display: none; }
+      /* Feedback bar: the player's only way to reach the author, and the only piece of
+         modern chrome in the player's view. It is a flex SIBLING of .stage, never an
+         overlay on it, so it cannot touch the 1998 art at any window size — the stage
+         simply gets ~24px less height and the layout code rescales (src/app/feedback.ts
+         explains why it isn't in the game's own panel or on the world map). Kept
+         whisper-quiet until you look for it. */
+      #feedbar {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        padding: 4px 8px;
+        font: 11px/1.4 system-ui, sans-serif;
+        color: #cdd;
+        opacity: 0.45;
+        transition: opacity 0.15s;
+      }
+      #feedbar:hover, #feedbar:focus-within { opacity: 1; }
+      #feedbar button {
+        background: none;
+        border: none;
+        border-bottom: 1px dotted #667;
+        color: inherit;
+        font: inherit;
+        padding: 0;
+        cursor: pointer;
+      }
+      #feedbar button:hover { color: #9dd; border-bottom-color: #9dd; }
+      /* The feedback form. A real <dialog>, so the browser gives us the modal backdrop,
+         the focus trap and Esc-to-close; the game's keyboard is blocked while it is up
+         (main.ts checks isOpen()), because every letter key otherwise drives a fish or
+         feeds the cheat buffer. */
+      #feedback {
+        width: min(720px, 92vw);
+        max-height: 88vh;
+        border: 1px solid #44445a;
+        border-radius: 10px;
+        background: #14141e;
+        color: #cdd;
+        font: 13px/1.5 system-ui, sans-serif;
+        padding: 0;
+      }
+      #feedback::backdrop { background: #000a; }
+      #feedback .fb-body { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; }
+      #feedback h2 { margin: 0; font: 600 18px/1.2 system-ui, sans-serif; }
+      #feedback p { margin: 0; opacity: 0.8; }
+      #feedback label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+      #feedback textarea {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 5.5em;
+        resize: vertical;
+        background: #0d0d14;
+        color: #cdd;
+        border: 1px solid #3a3a4a;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font: 13px/1.5 system-ui, sans-serif;
+      }
+      #feedback-preview {
+        margin: 0;
+        max-height: 34vh;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #0d0d14;
+        border: 1px solid #2a2a3a;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+        opacity: 0.9;
+      }
+      #feedback-note:empty { display: none; }
+      #feedback-note { color: #e9c46a; }
+      #feedback-status:empty { display: none; }
+      #feedback-status { opacity: 0.75; }
+      .fb-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+      .fb-btn {
+        display: inline-block;
+        padding: 8px 16px;
+        font: 600 13px/1 system-ui, sans-serif;
+        color: #cdd;
+        background: #1a2a2a;
+        border: 1px solid #3a5a5a;
+        border-radius: 7px;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .fb-btn:hover { background: #244; }
+      .fb-btn.ghost { background: none; border-color: #3a3a4a; }
+      .fb-btn.ghost:hover { background: #22222e; }
       /* Re-used for room entry after boot: the title and the attribution belong to
          the boot splash, and would read as "the game restarted" mid-play. */
       #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
@@ -255,6 +348,39 @@
       <canvas id="panel" title="control panel"></canvas>
     </div>
     <div id="info"></div>
+    <!-- The player's way to reach the author. Outside the game canvas by construction
+         (a flex sibling of .stage), so it never covers the original art. -->
+    <div id="feedbar">
+      <span id="feedbar-build"></span>
+      <span>·</span>
+      <button id="feedback-open" type="button">Found a bug? Send feedback</button>
+    </div>
+    <dialog id="feedback" aria-labelledby="feedback-title">
+      <div class="fb-body">
+        <h2 id="feedback-title">Send feedback</h2>
+        <p>
+          Nothing leaves your browser until you pick one of the buttons at the bottom. The
+          box below the form is the whole message — read it, and change your mind if you
+          want to.
+        </p>
+        <div class="fb-row">
+          <label><input type="radio" name="feedback-kind" value="bug" checked> Something went wrong</label>
+          <label><input type="radio" name="feedback-kind" value="idea"> An idea or a wish</label>
+        </div>
+        <label for="feedback-what">What happened? What did you expect instead?</label>
+        <textarea id="feedback-what" placeholder="The little fish got stuck in the wall after I pushed the crate left…"></textarea>
+        <p>This will be sent:</p>
+        <pre id="feedback-preview"></pre>
+        <p id="feedback-note"></p>
+        <div class="fb-row">
+          <a id="feedback-issue" class="fb-btn" href="#" target="_blank" rel="noopener noreferrer">Open a GitHub issue</a>
+          <a id="feedback-email" class="fb-btn" href="#">Send an email</a>
+          <button id="feedback-copy" class="fb-btn ghost" type="button">Copy report</button>
+          <button id="feedback-close" class="fb-btn ghost" type="button">Close</button>
+        </div>
+        <p id="feedback-status" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
     <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>

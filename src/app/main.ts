@@ -107,6 +107,7 @@ import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
 import { loadAiPanel, type AiPanel } from '../render/panelAi.js';
 import { loadAiCredits, type AiCredits } from '../render/creditsAi.js';
 import { initAnalytics } from '../platform/analytics.js';
+import { initFeedback, type FeedbackUi } from './feedback.js';
 import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
 import { parseFfp, type FfpPanel } from '../data/ffp.js';
 import {
@@ -738,6 +739,9 @@ let infoPanelAssets: InfoPanelAssets | null = null;
 let deskyData: DeskyData | null = null;
 let deskyLang: 'cz' | 'en' | null = null;
 let helpOpen = false; // true while the help-screens overlay is shown (akce_help / ToggleHelp)
+// The feedback form (src/app/feedback.ts). Wired at the end of boot; until then, and
+// if its markup is missing, it simply reports itself closed.
+let feedback: FeedbackUi | null = null;
 const helpScreens = new HelpScreens(); // the control-help pages (Help.pas), lazily loaded
 let worldMap: WorldMap | null = null; // the branch-map screen
 // AI-upscaled world-map compositor (Phase B), lazily loaded when the map assets
@@ -5656,6 +5660,13 @@ function loop(now: number): void {
 
 window.addEventListener('keydown', (e) => {
   wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
+  // The feedback form owns the keyboard while it is up. It is a modal <dialog>, so the
+  // browser already keeps pointer and focus out of the game — but a keydown inside it
+  // still bubbles to window, and every letter here either drives a fish or feeds the
+  // cheat buffer (Uovl.pas:744). Without this, typing "what happened" swims the fish
+  // around behind the form and can trip a cheat. Escape is left alone: the dialog's own
+  // handler closes it.
+  if (feedback?.isOpen()) return;
   // While the intro movie plays, swallow input; any key skips the current movie
   // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603). Two exceptions:
   // a bare modifier keydown must NOT skip (otherwise arming Ctrl+Alt+D during the
@@ -6379,6 +6390,26 @@ setInfo();
 booted = true;
 console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
 initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
+// The feedback form. Reads the live game state only when the player opens it — there is
+// no collection before that, and nothing is ever sent without a click (see feedback.ts).
+feedback = initFeedback({
+  build: { version: __APP_VERSION__, hash: __BUILD_HASH__, date: __BUILD_DATE__ },
+  webgl2: () => webgl2Available(),
+  game: () => {
+    const desc = screen === 'room' && curNum > 0 ? ROOMS[curNum - 1] : undefined;
+    return {
+      screen,
+      roomNum: screen === 'room' && curNum > 0 ? curNum : null,
+      roomName: desc?.jmeno ?? null,
+      roomTitle: desc?.en ?? null,
+      graphics,
+      renderer,
+      subtitles: settings.subtitles,
+      moves: lengthOfRecord(engine?.srecord ?? ''),
+      record: engine?.srecord ?? '',
+    };
+  },
+});
 // ...unless the map is still waiting for the art it will be presented in, in which case
 // boot is not over from the player's side and the overlay stays up (see syncLoadingUi).
 if (loadingEl && !mapArtHolding()) loadingEl.hidden = true;
@@ -6540,6 +6571,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   titDef: () => settings.titDef,
   // Help overlay (for UI probes): open/close + page state.
   helpOpen: () => helpOpen,
+  // Feedback form (for UI probes): open/close, plus the payload and links exactly as
+  // the player sees them. Read-only — nothing here sends anything.
+  feedbackOpen: () => feedback?.isOpen() ?? false,
+  openFeedback: (kind?: 'bug' | 'idea') => feedback?.open(kind),
+  closeFeedback: () => feedback?.close(),
+  feedbackPreview: () => feedback?.preview() ?? '',
+  feedbackLinks: () => feedback?.links() ?? { issue: '', email: '' },
+  feedbackNote: () => feedback?.note() ?? '',
   openHelp: () => openHelp(),
   closeHelp: () => closeHelp(),
   helpPage: () => helpScreens.page,
