@@ -158,6 +158,22 @@ import {
   type StageLayout,
   type FitMode,
 } from './layout.js';
+import { isUnsupportedDevice, showUnsupportedNotice } from './deviceGate.js';
+
+// Phones are refused here, before a single byte of game ART is fetched. (The engine
+// bundle itself has already been downloaded — this statement is inside it — so the claim
+// is about the ~600 MB of art, not about every byte.) The game has no touch scheme (see
+// deviceGate.ts), and the block is absolute — there is deliberately no override, so this
+// must come before every other side effect in the module.
+//
+// The never-settling await is what stops the rest of this file: it is a top-level-await
+// module, so there is no function to return from, and throwing would surface a scary
+// console error (and trip the probes' pageerror capture) for what is a normal,
+// intentional refusal.
+if (typeof window !== 'undefined' && isUnsupportedDevice(window)) {
+  showUnsupportedNotice(document);
+  await new Promise<never>(() => {});
+}
 
 // Display scaling (public-release Phase 1). The stage box + side panel are scaled
 // together to fill the viewport (`stage`, recomputed on resize/fullscreen); each

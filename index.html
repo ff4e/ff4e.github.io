@@ -134,6 +134,12 @@
         padding: 24px;
       }
       .overlay[hidden] { display: none; }
+      /* A refused device must not show the game's chrome behind the notice — the dev
+         bar is interactive and the stage would sit there as a dead black box. */
+      html[data-unsupported] .stage,
+      html[data-unsupported] #devbar,
+      html[data-unsupported] #info,
+      html[data-unsupported] #perfhud { display: none; }
       /* Re-used for room entry after boot: the title and the attribution belong to
          the boot splash, and would read as "the game restarted" mid-play. */
       #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
@@ -189,6 +195,19 @@
       <h1>Couldn't load the game</h1>
       <p id="fatal-msg">Some game files failed to load. Check your connection and try again.</p>
       <button id="fatal-reload" class="btn" type="button">Reload</button>
+    </div>
+    <!-- Phone refusal. The game has no touch controls and phone-sized targets are
+         unusable, so it does not boot on a touch-only, phone-sized screen. Tablets are
+         deliberately allowed (src/app/deviceGate.ts). -->
+    <div id="unsupported" class="overlay" hidden>
+      <h1>Fish Fillets 4ever doesn't fit on a phone</h1>
+      <p>
+        The game is played with a mouse and a keyboard — you click a fish to pick it, click
+        the water to swim there, right-click to shove, and the keys do the rest. There is
+        no touch control scheme, and on a phone-sized screen the controls are too small to
+        hit.
+      </p>
+      <p>Come back on a computer — or a tablet, which is just big enough — and it will be waiting.</p>
     </div>
     <!-- Non-blocking note when WebGL2 is unavailable (CPU renderer active). -->
     <div id="webgl-note" hidden>
