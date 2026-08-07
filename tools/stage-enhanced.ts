@@ -19,6 +19,7 @@ import { parseFfr } from '../src/data/ffr.js';
 import { Room } from '../src/core/room.js';
 import { renderRoomState, FSIZE } from '../src/render/renderRoom.js';
 import { ROOMS } from '../src/data/roomTable.js';
+import { jmenoToCodename } from './lib/ffngCodename.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ENHANCED_DIR =
@@ -28,35 +29,6 @@ const SCRIPT_DIR = join(dirname(ENHANCED_DIR), 'script');
 const DATA_DIR = process.env.FF_DATA_DIR ?? join(homedir(), '.cache', 'ffng-orig', 'extracted', 'MAINDIR');
 const MAPPING = join(ROOT, 'test', 'fixtures', 'solutions', 'mapping.tsv');
 const OUT_ROOT = join(ROOT, 'public', 'enhanced');
-
-function jmenoToCodename(): Map<string, string> {
-  const m = new Map<string, string>();
-  for (const line of readFileSync(MAPPING, 'utf8').split('\n').slice(1)) {
-    const [slug, , jmenoCol] = line.split('\t');
-    if (!slug || !jmenoCol) continue;
-    for (const jm of jmenoCol.split('|')) m.set(jm.trim(), slug.trim());
-  }
-  // Rooms whose FFNG codename mapping.tsv doesn't cover (verified via their
-  // script/<cn>/models.lua createRoom background filename).
-  for (const [jmeno, cn] of Object.entries(CODENAME_OVERRIDE)) {
-    if (!m.has(jmeno)) m.set(jmeno, cn);
-  }
-  return m;
-}
-
-/** jmeno -> FFNG codename for rooms missing from mapping.tsv. */
-const CODENAME_OVERRIDE: Record<string, string> = {
-  ZELVA: 'turtle',
-  BARELY: 'barrel',
-  GRAL: 'grail',
-  PARTY2: 'party2',
-  POHON: 'propulsion',
-  SPUNT: 'atlantis',
-  LODE: 'gods',
-  DISKETA: 'floppy',
-  MAPA: 'map',
-  CHODBA: 'corridor',
-};
 
 /**
  * The room's background + wall PNG filenames from its models.lua — authoritative
@@ -81,7 +53,7 @@ function pngSize(path: string): { w: number; h: number } {
   return { w: d.readUInt32BE(16), h: d.readUInt32BE(20) };
 }
 
-const map = jmenoToCodename();
+const map = jmenoToCodename(MAPPING);
 let staged = 0;
 let skipped = 0;
 const warnings: string[] = [];

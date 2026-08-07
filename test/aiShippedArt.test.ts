@@ -22,7 +22,20 @@ import { join } from 'node:path';
  */
 
 const AI = join(process.cwd(), 'public/enhanced-ai');
+const ENHANCED = join(process.cwd(), 'public/enhanced');
 const haveTier = existsSync(AI);
+
+/**
+ * Width/height/alpha out of a PNG IHDR — the upscaler's INPUT, and therefore the
+ * reference the shipped WebP is checked against. Colour type 4 (grey+alpha) and 6
+ * (RGBA) carry a channel; 0/2 do not, and 3 (palette) only via a tRNS chunk.
+ */
+function pngInfo(file: string): { w: number; h: number; alpha: boolean } {
+  const b = readFileSync(file);
+  const colorType = b.readUInt8(25);
+  const alpha = colorType === 4 || colorType === 6 || (colorType === 3 && b.includes('tRNS'));
+  return { w: b.readUInt32BE(16), h: b.readUInt32BE(20), alpha };
+}
 
 /** Width/height/alpha straight out of a WebP RIFF header (no decoder needed). */
 function webpInfo(file: string): { w: number; h: number; alpha: boolean } {
@@ -92,6 +105,37 @@ describe.skipIf(!haveTier)('shipped room manifests', () => {
         const bg = webpInfo(join(AI, room, man.bg[0]!));
         expect(bg.w % man.scale, `bg ${bg.w} vs x${man.scale}`).toBe(0);
         expect(bg.h % man.scale, `bg ${bg.h} vs x${man.scale}`).toBe(0);
+      });
+
+      it('preserves object-sprite transparency and the declared scale', () => {
+        // The same failure this file's header describes for the panel, one layer down and
+        // just as silent: a sprite whose transparency is lost paints an opaque rectangle
+        // over the room, and one at the wrong scale lands offset from the position the
+        // walk computes. Neither throws, 404s, nor fails any other check — the existing
+        // alpha and size assertions covered only the panel and the background.
+        //
+        // The invariant is "matches the source", NOT "has alpha": plenty of shipped
+        // sprites are fully opaque rectangles (BATHROOM's crate, BATYSKAF's hull) whose
+        // PNG is truecolor-without-alpha, and the encoder correctly drops the channel.
+        // Requiring alpha unconditionally would fail 29 rooms that are perfectly fine.
+        //
+        // The enhanced PNG is the upscaler's input, so it is also the only honest
+        // reference for "×scale": object sprites take no layer padding
+        // (tools/studio/lib/upscale.mjs pads only the desky/kufr layer kinds), which
+        // makes the relation exact rather than approximate.
+        for (const o of man.objects ?? []) {
+          for (const f of o.frames) {
+            const src = join(ENHANCED, room, f.replace(/\.webp$/, '.png'));
+            if (!existsSync(src)) continue; // no enhanced counterpart to compare against
+            const png = pngInfo(src);
+            const info = webpInfo(join(AI, room, f));
+            expect(info.alpha, `${room}/${f} alpha vs its source PNG`).toBe(png.alpha);
+            expect([info.w, info.h], `${room}/${f} vs ${png.w}x${png.h} x${man.scale}`).toEqual([
+              png.w * man.scale,
+              png.h * man.scale,
+            ]);
+          }
+        }
       });
     });
   }
