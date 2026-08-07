@@ -134,6 +134,12 @@
         padding: 24px;
       }
       .overlay[hidden] { display: none; }
+      /* A refused device must not show the game's chrome behind the notice — the dev
+         bar is interactive and the stage would sit there as a dead black box. */
+      html[data-unsupported] .stage,
+      html[data-unsupported] #devbar,
+      html[data-unsupported] #info,
+      html[data-unsupported] #perfhud { display: none; }
       /* Re-used for room entry after boot: the title and the attribution belong to
          the boot splash, and would read as "the game restarted" mid-play. */
       #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
@@ -189,6 +195,16 @@
       <h1>Couldn't load the game</h1>
       <p id="fatal-msg">Some game files failed to load. Check your connection and try again.</p>
       <button id="fatal-reload" class="btn" type="button">Reload</button>
+    </div>
+    <!-- Phone/tablet refusal. The game is keyboard-only, so it does not boot on a
+         device with no mouse-class pointer (src/app/deviceGate.ts). -->
+    <div id="unsupported" class="overlay" hidden>
+      <h1>Fish Fillets 4ever needs a PC or a Mac</h1>
+      <p>
+        The game is played entirely with the keyboard — the arrow keys swim the fish, and
+        there is no touch control scheme. It will not run on a phone or a tablet.
+      </p>
+      <p>Come back on a desktop or a laptop and it will be waiting.</p>
     </div>
     <!-- Non-blocking note when WebGL2 is unavailable (CPU renderer active). -->
     <div id="webgl-note" hidden>
