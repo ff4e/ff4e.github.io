@@ -115,7 +115,20 @@ export async function withApp(fn, opts = {}) {
   const b = await launchBrowser();
   const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
   const errs = [];
-  p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
+  // `opts.ignoreConsole` is a RegExp of console errors this probe expects to see, matched
+  // against the message text AND the URL it came from (a failed request logs a generic
+  // "Failed to load resource…" text and names the resource only in its location).
+  // It exists for the one honest case: a probe that deliberately breaks an asset to
+  // prove the graceful fallback around it. Chromium logs a failed request as a console
+  // error, so without this the only testable failure mode is a 200 of garbage (a decode
+  // failure) — and "the art 404s" is the case a player actually hits on a half-deployed
+  // site. Deliberately narrow: everything not matched is still a probe failure.
+  const ignore = opts.ignoreConsole ?? null;
+  p.on('console', (m) => {
+    if (m.type() !== 'error') return;
+    if (ignore && (ignore.test(m.text()) || ignore.test(m.location()?.url ?? ''))) return;
+    errs.push(m.text());
+  });
   p.on('pageerror', (e) => errs.push('PE:' + e.message));
   // By default, boot as a returning player (skip the first-run intro): the intro
   // is a full-screen overlay that swallows input, so tests that drive keys/mouse

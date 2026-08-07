@@ -140,9 +140,14 @@
       html[data-unsupported] #devbar,
       html[data-unsupported] #info,
       html[data-unsupported] #perfhud { display: none; }
-      /* Re-used for room entry after boot: the title and the attribution belong to
-         the boot splash, and would read as "the game restarted" mid-play. */
-      #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
+      /* Re-used for room entry after boot: the title, the fish's line and the
+         attribution belong to the boot splash, and would read as "the game
+         restarted" mid-play. A room entry is a couple of seconds behind a 200ms
+         arming delay, which is far too short to read a joke off — what belongs
+         there is the crab (motion: something is happening) and the room name. */
+      #loading.inroom h1,
+      #loading.inroom #loading-fun,
+      #loading.inroom #loading-credit { display: none; }
       .overlay h1 { margin: 0; font: 600 26px/1.2 system-ui, sans-serif; letter-spacing: 0.5px; }
       .overlay p { margin: 0; max-width: 34em; opacity: 0.85; }
       .spinner {
@@ -150,8 +155,56 @@
         border: 4px solid #2a2a3a; border-top-color: #6cc; animation: spin 0.9s linear infinite;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
-      #loading-msg { opacity: 0.7; font: 13px/1.4 system-ui, sans-serif; min-height: 1.4em; }
-      #loading-credit { opacity: 0.45; font: 11px/1.5 system-ui, sans-serif; max-width: 30em; }
+      /* ── The dancing crab ──────────────────────────────────────────────────
+         KORALY's balalaika dancer, standing in for the CSS spinner: an animating
+         creature already says "something is happening", and it says it in the
+         game's own voice rather than in a browser's.
+
+         FIDELITY: the 1998 original has no loading screen at all, so this whole
+         overlay is port chrome. Using the AI-upscaled art here is therefore NOT a
+         fidelity violation, not even for a player on the `classic` tier — there is
+         no original to be unfaithful to. Please do not "fix" it to the 30x15
+         native sprite.
+
+         THE LOOP IS THE GAME'S LOOP, and only two frames of the ten. In KORALY the
+         crabs dance to the octopus's balalaika (crabDance, src/rooms/koraly.ts:96
+         <- URoom.pas:15498+): `afaze 0` is standing still, `afaze 1` is an idle
+         blink while the tune is silent, `2..5` are eye-only twitches, and the LEAD
+         crab — the one everybody else copies — alternates exactly `7` and `9` on
+         `count % 4` for as long as the music plays. Those are the two claw-raise
+         poses (left claw up, right claw up), i.e. the only pair in the set that
+         reads as movement at a glance. So the dance below is 7 and 9 held two game
+         ticks each (2 x 80ms = 160ms), which is the crab's real step, not an
+         invented one — and it costs 7 kB instead of the 35 kB of all ten frames.
+
+         The swap is a plain opacity flip between two stacked <img>s rather than a
+         sprite sheet, because an <img> is the only version of this that can report
+         a failure: the load handler in the inline script below reveals the crab
+         only once BOTH frames have decoded, so a 404, an offline boot or a corrupt
+         file leaves the spinner exactly as it is today. The loading screen is the
+         thing that explains a slow start; it must never become the reason for one. */
+      #loading-crab { position: relative; width: 180px; height: 90px; display: none; }
+      #loading.hascrab #loading-crab { display: block; }
+      #loading.hascrab .spinner { display: none; }
+      #loading-crab img {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        animation: crabBeatA 320ms steps(1, end) infinite;
+      }
+      #loading-crab .krab-b { animation-name: crabBeatB; }
+      @keyframes crabBeatA { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+      @keyframes crabBeatB { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+      /* The fish's line: the big text on the splash. The technical phase below it
+         stays — it is diagnostics, and when a boot hangs "Loading sound…" is the
+         only thing that says where. min-height holds two lines so a rotation into
+         a longer line does not shuffle the layout under the reader. */
+      #loading-fun {
+        display: flex; align-items: center; justify-content: center;
+        font: 500 24px/1.4 system-ui, sans-serif;
+        max-width: 20em; min-height: 2.8em; opacity: 0.92;
+      }
+      @media (max-width: 560px) { #loading-fun { font-size: 19px; } }
+      #loading-msg { opacity: 0.55; font: 15px/1.4 system-ui, sans-serif; min-height: 1.4em; }
+      #loading-credit { opacity: 0.45; font: 12px/1.5 system-ui, sans-serif; max-width: 30em; }
       #loading-credit a { color: inherit; }
       .btn {
         padding: 12px 26px; font: 600 16px/1 system-ui, sans-serif;
@@ -184,12 +237,119 @@
          page while the game assets fetch. Hidden by the app once boot completes. -->
     <div id="loading" class="overlay">
       <h1>Fish Fillets 4ever</h1>
+      <!-- Frames 07 and 09 of KORALY's crab: the two claw-raise poses its lead
+           dancer alternates to the balalaika. See the #loading-crab CSS above for
+           why these two, and why an <img> pair rather than a sprite sheet. -->
+      <div id="loading-crab" aria-hidden="true">
+        <img class="krab-a" src="/enhanced-ai/KORALY/obj/krab_07.webp" alt="" />
+        <img class="krab-b" src="/enhanced-ai/KORALY/obj/krab_09.webp" alt="" />
+      </div>
       <div class="spinner"></div>
+      <div id="loading-fun">Nafukujeme vodu…</div>
       <div id="loading-msg">Loading…</div>
       <div id="loading-credit">
         A fan port of ALTAR's 1998 <em>Fish Fillets</em>. Not affiliated with ALTAR interactive.
       </div>
     </div>
+    <script>
+      /* Boot-splash chrome, inline because the overlay is painted BEFORE the module
+         bundle arrives — which is the entire point of the overlay, so anything it
+         has to do on its own has to live here rather than in main.ts.
+
+         Two jobs: put the fish's line up in the player's language and rotate it
+         while the wait lasts, and reveal the dancing crab once its art has actually
+         decoded. Both degrade to the screen as it was — spinner plus status line —
+         and nothing here may throw into the boot path. */
+      (function () {
+        // The fish's voice: the small one is curious and anxious, the big one
+        // deadpan and grumpy, and that bickering is the game's humour. Czech is the
+        // game's original language, so each line is written in Czech first and the
+        // English is made to carry the joke rather than translate it word for word.
+        var LINES = [
+          { cz: 'Nafukujeme vodu…', en: 'Inflating the water…' },
+          { cz: 'Velká ryba si zase stěžuje.', en: 'The big fish is complaining again.' },
+          { cz: 'Leštíme šupiny.', en: 'Polishing the scales.' },
+          { cz: 'Malá ryba: ‚Už tam budem?‘', en: 'Little fish: “Are we there yet?”' },
+          { cz: 'Podpíráme kredenc. Nikdo ať se nehýbe.', en: 'Holding the cupboard up. Nobody move.' },
+          { cz: 'Krab tančí. Nerušit.', en: 'The crab is dancing. Do not interrupt.' },
+          {
+            cz: 'Malá ryba: ‚Není to nebezpečné?‘ Velká ryba: ‚Je.‘',
+            en: 'Little fish: “Is this dangerous?” Big fish: “Yes.”',
+          },
+          { cz: 'Stěhujeme nábytek. Zase.', en: 'Moving the furniture. Again.' },
+          { cz: 'Klíč je pod tou skříní. Vždycky je.', en: 'The key is under that wardrobe. It always is.' },
+          { cz: 'Počítáme bubliny. Zatím jich je hodně.', en: 'Counting the bubbles. Plenty so far.' },
+        ];
+        var loading = document.getElementById('loading');
+        var fun = document.getElementById('loading-fun');
+
+        // Which language, resolved exactly as subLang() does (src/app/main.ts) off
+        // the same persisted settings (src/core/settings.ts — key 'ff.options',
+        // `subtitles` with `titDef` remembering the last non-off choice, both
+        // defaulting to Czech). Duplicated on purpose: this runs before any module
+        // exists to import it, and test/loadingScreen.test.ts pins the two together.
+        var lang = 'cz';
+        try {
+          var opts = JSON.parse(localStorage.getItem('ff.options') || '{}');
+          var pick = opts.subtitles === 'off' ? opts.titDef : opts.subtitles;
+          if (pick === 'cz' || pick === 'en') lang = pick;
+        } catch (e) {
+          /* storage unavailable or corrupt — keep the default language */
+        }
+
+        // Shuffled, then walked in order: a fresh draw each time would repeat a line
+        // back to back, which on a long boot is exactly when it is noticed.
+        var order = LINES.map(function (_, i) {
+          return i;
+        });
+        for (var i = order.length - 1; i > 0; i--) {
+          var j = Math.floor(Math.random() * (i + 1));
+          var swap = order[i];
+          order[i] = order[j];
+          order[j] = swap;
+        }
+        var at = 0;
+        var show = function () {
+          if (fun) fun.textContent = LINES[order[at]][lang];
+        };
+        show();
+        setInterval(function () {
+          // Only while the splash is really on screen. The overlay is re-used for
+          // room entry, where the fish's line is hidden (#loading.inroom) — rotating
+          // behind that would drop the player into the middle of a line on the next
+          // boot-shaped wait, which is the one place the rotation is read.
+          if (!loading || loading.hidden || loading.className.indexOf('inroom') >= 0) return;
+          at = (at + 1) % order.length;
+          show();
+        }, 5000);
+
+        // The crab replaces the spinner only once BOTH of its frames have decoded.
+        // A 404, an offline boot or a corrupt file therefore costs nothing: the
+        // screen stays exactly what it is today. Same shape as the optional
+        // subtitle fonts (main.ts) — an asset that improves the thing it is part of
+        // must never be able to break it.
+        var crab = document.getElementById('loading-crab');
+        var frames = crab ? crab.getElementsByTagName('img') : [];
+        var pending = frames.length;
+        var usable = pending > 0;
+        var decoded = function () {
+          if (!usable || --pending > 0) return;
+          loading.className += ' hascrab';
+        };
+        var broken = function () {
+          usable = false;
+        };
+        for (var f = 0; f < frames.length; f++) {
+          if (frames[f].complete) {
+            if (frames[f].naturalWidth) decoded();
+            else broken();
+          } else {
+            frames[f].onload = decoded;
+            frames[f].onerror = broken;
+          }
+        }
+      })();
+    </script>
     <!-- Fatal boot error (missing/broken assets). Shown by the app on failure. -->
     <div id="fatal" class="overlay" hidden>
       <h1>Couldn't load the game</h1>
