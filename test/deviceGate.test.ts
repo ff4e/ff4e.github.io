@@ -48,7 +48,7 @@ describe('isUnsupportedDevice', () => {
   it('fails OPEN when the browser answers nothing', () => {
     // An old browser without `any-pointer` support matches neither query. Refusing a
     // desktop is unrecoverable (there is no override); letting a phone through only
-    // postpones the refusal to the first keypress, so lean this way.
+    // postpones the refusal to the first shove it cannot right-click, so lean this way.
     expect(isUnsupportedDevice(win([]))).toBe(false);
   });
 

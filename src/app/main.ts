@@ -161,9 +161,9 @@ import {
 import { isUnsupportedDevice, showUnsupportedNotice } from './deviceGate.js';
 
 // Phones and tablets are refused here, before a single byte of game art is fetched.
-// The game is keyboard-only (see deviceGate.ts), and the block is absolute — there is
-// deliberately no override, so this must come before every other side effect in the
-// module.
+// The game wants a mouse and a keyboard and has no touch scheme (see deviceGate.ts), and
+// the block is absolute — there is deliberately no override, so this must come before
+// every other side effect in the module.
 //
 // The never-settling await is what stops the rest of this file: it is a top-level-await
 // module, so there is no function to return from, and throwing would surface a scary

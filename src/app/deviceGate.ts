@@ -1,10 +1,15 @@
 /**
- * Device gate: Fish Fillets is a keyboard game, so it runs on a PC or a Mac only.
+ * Device gate: Fish Fillets wants a mouse, so it runs on a PC or a Mac only.
  *
- * The original is driven entirely by the arrow keys, Space, Esc and a handful of
- * letter hotkeys (UMain.pas' key handler), and the port keeps that: there is no touch
- * control scheme to fall back on. A phone or tablet would download the art and then
- * be unable to move a fish, so the gate refuses before any of that is fetched.
+ * The port keeps the original's two input schemes and adds neither: the keyboard drives
+ * the fish directly (UMain.pas' key handler), and the mouse does the rest — left-click a
+ * fish to select it, left-click water to swim there (`akce_go`), right-click to drive the
+ * active fish a step in that direction and so shove things (`ZaznamenejPrikazRoom`,
+ * mbRight). Both assume a pointer that can hover and right-click. There is no touch
+ * scheme, and a tap cannot express the right-click that pushes an object at all.
+ *
+ * So a phone or tablet would download the art and then be unable to finish a room. The
+ * gate refuses before any of that is fetched.
  *
  * WHAT IS DETECTED, AND WHY IT IS THE POINTER AND NOT THE USER AGENT
  *
@@ -22,8 +27,9 @@
  * It FAILS OPEN. If neither query matches — an old browser without `any-pointer`, or a
  * headless environment that reports nothing — the device is treated as supported. A
  * desktop player wrongly refused entry has no way past it (the block is deliberately
- * absolute), whereas a phone wrongly let in merely meets the same wall at the first
- * keypress. The asymmetry decides which way to lean.
+ * absolute), whereas a phone wrongly let in merely meets the same wall the first time a
+ * room needs a shove and there is no right-click to give it. The asymmetry decides which
+ * way to lean.
  */
 
 /** The overlay explaining why the game will not start. Markup lives in index.html. */
