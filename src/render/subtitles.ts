@@ -24,8 +24,23 @@ const BORDERTITLE = 20;
 const SILTITBORDER = 15;
 
 // Enhanced (vector) subtitle rendering.
-const SUB_FONT_PX = 23; // native-pixel font size for the FreeSans-Bold overlay
-const SUB_BASELINE_OFF = -6; // nudges the vector baseline to sit like the bitmap line
+/**
+ * How much larger the vector overlay draws than the bitmap line it replaces.
+ *
+ * Applied to the WHOLE vertical geometry of the vector path — glyph size, row pitch,
+ * baseline nudge and wave amplitude — never to a subset. Scaling the font alone would
+ * collide: Czech text with diacritics measures 25.0-26.9px tall at SUB_FONT_PX across
+ * the four subtitle faces, against a ROWTITLE pitch of 26, so it already fills the row;
+ * at 1.2 it measures 30.0-32.3px and stacked lines would overlap by 4-6px.
+ *
+ * The bitmap path (`draw`, the classic tier) is deliberately untouched: it renders the
+ * game's own font at the original's exact geometry (ROWTITLE/UNDERTITLE, URoom.pas:140-161)
+ * and must stay byte-exact. So this scales at render time in `drawVector` only, and does
+ * NOT change ROWTITLE, which the shared tick logic uses to place both.
+ */
+const SUB_SCALE = 1.2;
+const SUB_FONT_PX = 23 * SUB_SCALE; // native-pixel font size for the FreeSans-Bold overlay
+const SUB_BASELINE_OFF = -6 * SUB_SCALE; // nudges the vector baseline to sit like the bitmap line
 /**
  * Sub-tick animation steps for the enhanced overlay. The wave-in and the line scroll
  * are functions of the 12.5/s logic tick, which on its own looks stepped; the port
@@ -345,10 +360,13 @@ export class SubtitleSystem {
       const bottom = `rgb(${Math.round(r * 0.42)},${Math.round(g * 0.42)},${Math.round(b * 0.42)})`;
       // y here mirrors PisStringF: the line's on-screen top is ys (+screenH the
       // caller already folds into the transform origin at 0). y0 is the wave's
-      // rest line; (y0 - y) == UNDERTITLE - ys drives the wave amplitude.
-      const ys = this.renderYs(t, frac);
+      // rest line; (y0 - y) == UNDERTITLE - ys drives the wave amplitude. Both are
+      // taken through SUB_SCALE so the row pitch and the wave grow with the glyphs
+      // (see SUB_SCALE); the tick logic behind renderYs stays at the original's
+      // geometry, because the bitmap path draws from the same numbers.
+      const ys = this.renderYs(t, frac) * SUB_SCALE;
       const baseline = ys + this.screenH + SUB_BASELINE_OFF;
-      const amp = UNDERTITLE - ys;
+      const amp = UNDERTITLE * SUB_SCALE - ys;
       const cas = count - t.startcount + frac;
       const x0 = (this.screenW - line.total) / 2;
       // The gradient is anchored to the glyph's own baseline, so glyphs that share

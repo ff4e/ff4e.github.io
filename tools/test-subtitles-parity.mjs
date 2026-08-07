@@ -22,9 +22,15 @@
 import { forTicks, observed, selectRoom, withApp } from './ui-lib.mjs';
 
 // Layout constants — must match src/render/subtitles.ts.
+// SUB_SCALE is the enhanced overlay's enlargement over the bitmap line it replaces; it
+// multiplies the WHOLE vertical geometry (glyph size, row pitch, baseline, wave), so the
+// reference below has to take it through every one of them or the comparison is not of
+// the same picture.
+const SUB_SCALE = 1.2;
 const K = {
-  SUB_FONT_PX: 23,
-  SUB_BASELINE_OFF: -6,
+  SUB_SCALE,
+  SUB_FONT_PX: 23 * SUB_SCALE,
+  SUB_BASELINE_OFF: -6 * SUB_SCALE,
   BORDERTITLE: 20,
   UNDERTITLE: 15,
   SPEEDTITLE: 2,
@@ -73,11 +79,11 @@ async function installReference(p) {
         // PosunTitulky moves the line SPEEDTITLE px per tick toward cilys, so its
         // position part-way through a tick is exactly that fraction of the step.
         const ys =
-          frac === 0 || t.ys <= t.cilys
+          (frac === 0 || t.ys <= t.cilys
             ? t.ys
-            : t.ys + (Math.max(t.cilys, t.ys - K.SPEEDTITLE) - t.ys) * frac;
+            : t.ys + (Math.max(t.cilys, t.ys - K.SPEEDTITLE) - t.ys) * frac) * K.SUB_SCALE;
         const baseline = ys + st.screenH + K.SUB_BASELINE_OFF;
-        const amp = K.UNDERTITLE - ys;
+        const amp = K.UNDERTITLE * K.SUB_SCALE - ys;
         const cas = at - t.startcount + frac;
         let x = (st.screenW - total) / 2;
         let index = 0;
