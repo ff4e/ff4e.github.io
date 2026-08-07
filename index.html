@@ -196,17 +196,18 @@
       <p id="fatal-msg">Some game files failed to load. Check your connection and try again.</p>
       <button id="fatal-reload" class="btn" type="button">Reload</button>
     </div>
-    <!-- Phone/tablet refusal. The game is built for a mouse and keyboard and has no
-         touch controls, so it does not boot on a device without a mouse-class
-         pointer (src/app/deviceGate.ts). -->
+    <!-- Phone refusal. The game has no touch controls and phone-sized targets are
+         unusable, so it does not boot on a touch-only, phone-sized screen. Tablets are
+         deliberately allowed (src/app/deviceGate.ts). -->
     <div id="unsupported" class="overlay" hidden>
-      <h1>Fish Fillets 4ever needs a PC or a Mac</h1>
+      <h1>Fish Fillets 4ever doesn't fit on a phone</h1>
       <p>
         The game is played with a mouse and a keyboard — you click a fish to pick it, click
         the water to swim there, right-click to shove, and the keys do the rest. There is
-        no touch control scheme, so it will not run on a phone or a tablet.
+        no touch control scheme, and on a phone-sized screen the controls are too small to
+        hit.
       </p>
-      <p>Come back on a desktop or a laptop and it will be waiting.</p>
+      <p>Come back on a computer — or a tablet, which is just big enough — and it will be waiting.</p>
     </div>
     <!-- Non-blocking note when WebGL2 is unavailable (CPU renderer active). -->
     <div id="webgl-note" hidden>
