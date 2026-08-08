@@ -7,10 +7,12 @@ GPL-2.0-or-later.
 ## Feedback
 
 Play it at **<https://ff4e.github.io/>**. If something goes wrong, or you want something,
-the bar under the game has a **Send feedback** button. It writes the report for you — what
-you type, the room you were in, the build, the renderer, and the **move record** for that
-room, so the moves that led to the bug can be replayed instead of guessed at — shows you
-the finished message, and then offers three ways out, none of which happen on their own:
+open the **Options** panel — right-click the control panel in a room, or the *Options*
+corner of the world map — and use the **Send feedback** strip at the bottom of it. It
+writes the report for you — what you type, the room you were in, the build, the renderer,
+and the **move record** for that room, so the moves that led to the bug can be replayed
+instead of guessed at — shows you the finished message, and then offers three ways out,
+none of which happen on their own:
 
 - **Open a GitHub issue** — prefills [the bug or idea form](.github/ISSUE_TEMPLATE/).
 - **Send an email** — `mailto:` to `fish_fillets@icloud.com`, no account needed.
@@ -21,8 +23,8 @@ on GitHub Pages — so a report only leaves the browser when you click one of th
 the whole payload is on screen before you do. An *idea* collects only the version number; the
 browser diagnostics above are gathered for bug reports and nowhere else. See
 [`src/platform/feedback.ts`](src/platform/feedback.ts) (what a report may contain, and why)
-and [`src/app/feedback.ts`](src/app/feedback.ts) (why the button is page chrome and not a
-button in the game).
+and [`src/app/feedback.ts`](src/app/feedback.ts) (why it lives under the Options panel and
+is never painted onto the original artwork).
 
 One honest limit: the game's `random()` is **unseeded** (`src/core/script.ts`), so replaying a
 move record will not reproduce a bug that depended on a random draw. The record still pins
@@ -347,7 +349,7 @@ the same assertions.
 - `src/render/renderRoom.ts` — static room compositor (faithful `TRoom.Priprav` resting frame).
 - `src/render/png.ts` — dependency-free RGBA PNG encoder.
 - `src/platform/feedback.ts` — what a player's report contains and the three links out (pure).
-- `src/app/feedback.ts` — the feedback bar + form, and why they are page chrome and not game chrome.
+- `src/app/feedback.ts` — the feedback strip under the Options panel + the form, and why it sits there.
 - `tools/gen-room-table.py` — regenerates `roomTable.ts` from the original Pascal.
 - `tools/dump-ffr.ts` — M0 verification CLI (parse + size-check a room or all rooms).
 - `tools/render-room.ts` — M1 verification CLI (render a room / all rooms to PNG).

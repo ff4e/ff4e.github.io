@@ -5,26 +5,33 @@
  *
  * WHERE THE AFFORDANCE LIVES, AND WHY IT IS NOT IN THE GAME
  *
- * Three places could plausibly host it, and two of them are worse than they look:
+ * It is a slim strip hanging under the control panel, shown ONLY while the Options
+ * face is open — the same place a player already goes for the volume sliders, the
+ * subtitle language and the help screens, i.e. for everything that is *about* the game
+ * rather than *in* it. While the game is being played there is no modern chrome on
+ * screen at all.
  *
- *  - **The control panel.** It is the original's own 155×395 bitmap (`FFP`, drawn by
- *    composePanel/composeOptions), and the port draws exactly the buttons ALTAR drew.
- *    A "report a problem" button there means either inventing 1998 art that does not
- *    exist or painting over art that does. This is a faithful port; that is the whole
- *    of the objection.
- *  - **A world-map corner.** The map's corner buttons are not laid out in code — they
- *    are read out of the original's mask bitmap (`cornerAction`, worldMap.ts:224,
- *    UMain.pas:1636), so a new corner means a new hotspot on shipped 1998 artwork.
- *    Worse, it would only be reachable FROM the map: a player who hits a bug in a room
- *    would have to leave the room to report it, and leaving the room throws away the
- *    move record (`engine.srecord`) that makes the report reproducible. The one
- *    diagnostic worth having is the one that placement destroys.
+ * Three details make that placement honest rather than merely convenient:
  *
- * So it lives in the page's own chrome, in a slim bar under the stage — outside the
- * canvas by construction (it is a flex sibling of `.stage`, so it can never overlap
- * the art, at any window size or scale), present on every screen, and able to read the
- * live record without disturbing the game. It costs the stage ~24 CSS px of height,
- * which the layout absorbs automatically (relayout() measures the row, not the window).
+ *  - It is **not painted into the panel bitmap.** The panel is the original's own
+ *    155×395 art (`FFP`, drawn by composePanel/composeOptions) and the port draws
+ *    exactly the buttons ALTAR drew. The strip is HTML hanging *below* that art, never
+ *    over it — measured against the panel's box by the UI probe at five window sizes.
+ *  - It is **absolutely positioned**, so it contributes nothing to the panel column's
+ *    size. The stage layout is computed from the panel's 155×395 (layout.ts), and
+ *    opening Options must not resize the game; the probe pins that too.
+ *  - It follows the panel **into both of its homes**: beside the play area in a room,
+ *    and floating over the world map when Options is opened from the map corner (the
+ *    column is what floats, not the canvas).
+ *
+ * A world-map corner was the other candidate and is worse. The map's corner buttons are
+ * not laid out in code — they are read out of the original's mask bitmap
+ * (`cornerAction`, worldMap.ts:224, UMain.pas:1636), so a new corner means a new hotspot
+ * on shipped 1998 artwork. And it would only be reachable FROM the map: a player who
+ * hits a bug in a room would have to leave the room to report it, and leaving the room
+ * throws away the move record (`engine.srecord`) that makes the report reproducible. The
+ * one diagnostic worth having is the one that placement destroys. From the Options face
+ * the record is still live, because Options opens over the room without leaving it.
  *
  * NOTHING IS SENT AUTOMATICALLY. The form shows the finished report, in full, before
  * any of the three exits is offered. Both send buttons are ordinary links, so the

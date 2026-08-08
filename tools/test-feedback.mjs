@@ -5,11 +5,15 @@
  * The payload builder is pinned in isolation (test/feedback.test.ts). What only a real
  * browser can show is the part that matters here:
  *
- *  - the affordance exists in the player's view and is OUTSIDE the game canvas — this
- *    is a faithful port and a modern button over the 1998 art would be a defect, so the
- *    bar's box is measured against the canvas's rather than taken on trust;
+ *  - the strip belongs to the OPTIONS face: absent while the game is being played, and
+ *    present in both places the panel lives (beside a room, and floating over the map);
+ *  - it never touches the 1998 art, and opening Options never MOVES the game — both
+ *    measured against the real boxes at several window shapes rather than taken on
+ *    trust, because the stage scale is derived from the available area;
  *  - the form shows the finished report before offering any way to send it, and that
- *    report really does carry the room and the move record the player just made;
+ *    report really does carry the room and the move record the player just made —
+ *    which is the point of hanging this off Options rather than off a map corner:
+ *    Options opens over the room, so the record is still live;
  *  - the two send buttons are ordinary links whose hrefs are well-formed — asserted
  *    without following them, because following them would be the one thing this feature
  *    promises never to do on its own;
@@ -21,6 +25,23 @@
  *    move record the report is about.
  */
 import { idle, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
+
+/** The strip's box, or null when it is hidden (which is a result, not a failure). */
+const barBox = (p) =>
+  p.evaluate(() => {
+    const e = document.getElementById('feedbar');
+    if (!e || e.hidden || e.getClientRects().length === 0) return null;
+    const b = e.getBoundingClientRect();
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
+  });
+
+const boxOf = (p, sel) =>
+  p.evaluate((s) => {
+    const e = document.querySelector(s);
+    if (!e) return null;
+    const b = e.getBoundingClientRect();
+    return { x: b.x, y: b.y, width: b.width, height: b.height };
+  }, sel);
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.state);
@@ -35,13 +56,52 @@ await withApp(async ({ p, expect }) => {
     }
   });
 
-  // ── The affordance is in the player's view, and not on the art ────────────────
   const overlaps = (a, b) =>
     a !== null && b !== null && a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
-  // Checked at several window shapes, not one: the stage scale is derived from the
-  // available area (computeStageLayout), so "outside the canvas" at 1200×640 says
-  // nothing about a short or a narrow window — and being outside it at EVERY size is
-  // the actual claim being made about not touching the 1998 art.
+
+  // ── It is not there while the game is being played ────────────────────────────
+  expect((await barBox(p)) === null, 'on the map, with Options closed, there is no modern chrome on screen');
+  await selectRoom(p, 7); // UTES — both fish alive, open water
+  await p.waitForFunction(() => window.__ff.state() && window.__ff.count() > 0);
+  await tickSleep(p, 3);
+  expect((await barBox(p)) === null, 'in a room, with Options closed, there is no modern chrome on screen');
+
+  // ── Make a real move record, THEN open Options over the room ──────────────────
+  // Options opens over the room without leaving it, so the record is still live. That
+  // is the whole reason the strip hangs here and not off a world-map corner.
+  await p.keyboard.press('Digit1'); // active = little
+  await idle(p);
+  const x0 = await p.evaluate(() => window.__ff.state().little.x);
+  await p.keyboard.press('ArrowLeft');
+  await p.waitForFunction((x) => window.__ff.state().little.x !== x || window.__ff.phase() !== 'idle', x0);
+  await idle(p);
+  const record = await p.evaluate(() => window.__ff.record());
+  expect(record.length > 0, `the room has a move record to attach (${JSON.stringify(record)})`);
+
+  const gameBefore = JSON.stringify({
+    screen: await boxOf(p, '#screen'),
+    panel: await boxOf(p, '#panel'),
+    box: await boxOf(p, '#stagebox'),
+  });
+  await p.evaluate(() => window.__ff.toggleOptions());
+  await p.waitForFunction(() => window.__ff.optionsOpen());
+  await p.waitForFunction(() => {
+    const e = document.getElementById('feedbar');
+    return e && !e.hidden;
+  });
+  const gameAfter = JSON.stringify({
+    screen: await boxOf(p, '#screen'),
+    panel: await boxOf(p, '#panel'),
+    box: await boxOf(p, '#stagebox'),
+  });
+  // The strip is absolutely positioned for exactly this reason: the stage layout is
+  // computed from the panel's 155×395 (layout.ts), so a strip that took up space would
+  // rescale the whole game the moment a player opened Options.
+  expect(gameBefore === gameAfter, 'opening Options does not move or resize the game');
+
+  // ── It hangs under the panel, and never on the art ────────────────────────────
+  // Checked at several window shapes: the stage scale is derived from the available
+  // area, so "below the panel" at one size says nothing about a short or narrow window.
   for (const vp of [
     { width: 900, height: 420 },
     { width: 1920, height: 1080 },
@@ -54,31 +114,32 @@ await withApp(async ({ p, expect }) => {
     // CSS width, so wait for that write rather than for a wall-clock guess. Every step
     // above changes it, so this is always a real signal.
     await p.waitForFunction((w) => document.getElementById('stagebox').style.width !== w, was);
-    const bar = await p.locator('#feedbar').boundingBox();
-    const canvasBox = await p.locator('#screen').boundingBox();
-    const panelBox = await p.locator('#panel').boundingBox();
+    const bar = await barBox(p);
+    const canvasBox = await boxOf(p, '#screen');
+    const panelBox = await boxOf(p, '#panel');
     const at = `${vp.width}×${vp.height}`;
-    expect(bar !== null && bar.height > 0, `${at}: the feedback bar is on screen for a player`);
-    expect(!overlaps(bar, canvasBox), `${at}: the bar does not cover the game canvas`);
-    expect(!overlaps(bar, panelBox), `${at}: the bar does not cover the control panel`);
+    expect(bar !== null && bar.height > 0, `${at}: the strip is on screen while Options is open`);
+    expect(!overlaps(bar, canvasBox), `${at}: the strip does not cover the game canvas`);
+    // Below the panel, not on it: the panel is ALTAR's own 155×395 bitmap.
+    expect(!overlaps(bar, panelBox), `${at}: the strip does not cover the control panel`);
+    expect(
+      bar.y >= panelBox.y + panelBox.height - 0.5,
+      `${at}: the strip hangs UNDER the panel (bar ${Math.round(bar.y)} vs panel bottom ${Math.round(panelBox.y + panelBox.height)})`,
+    );
+    // Never wider than the window it is a footer of.
+    expect(
+      bar.width <= panelBox.width + 0.5,
+      `${at}: the strip is no wider than the panel (${Math.round(bar.width)} vs ${Math.round(panelBox.width)})`,
+    );
   }
   expect(
     (await p.locator('#feedbar-build').textContent()).trim().startsWith('v'),
-    'the bar names the build, so a report has a version even without the form',
+    'the strip names the build, so a report has a version even without the form',
   );
-
-  // ── Make a real move record to attach ─────────────────────────────────────────
-  await selectRoom(p, 7); // UTES — both fish alive, open water
-  await p.waitForFunction(() => window.__ff.state() && window.__ff.count() > 0);
-  await tickSleep(p, 3);
-  await p.keyboard.press('Digit1'); // active = little
-  await idle(p);
-  const x0 = await p.evaluate(() => window.__ff.state().little.x);
-  await p.keyboard.press('ArrowLeft');
-  await p.waitForFunction((x) => window.__ff.state().little.x !== x || window.__ff.phase() !== 'idle', x0);
-  await idle(p);
-  const record = await p.evaluate(() => window.__ff.record());
-  expect(record.length > 0, `the room has a move record to attach (${JSON.stringify(record)})`);
+  expect(
+    (await p.evaluate(() => window.__ff.record())) === record,
+    'Options opened over the room, so the record is still the one being reported',
+  );
 
   // ── Opening the form ──────────────────────────────────────────────────────────
   expect(!(await p.evaluate(() => window.__ff.feedbackOpen())), 'the form starts closed');
@@ -184,6 +245,42 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => !window.__ff.feedbackOpen());
   await p.keyboard.press('Digit2');
   expect((await p.evaluate(() => window.__ff.state())).active === 'big', 'the game has its keyboard back');
+
+  // ── It follows the panel into its other home, over the world map ──────────────
+  // The panel column is what floats there, not the canvas, so the strip travels with
+  // the window it is a footer of rather than being left behind beside the stage.
+  await p.evaluate(() => {
+    window.__ff.showMap();
+    window.__ff.openMapOptions();
+  });
+  await p.waitForFunction(() => window.__ff.mapOverlay() === 'options');
+  await p.waitForFunction(() => {
+    const e = document.getElementById('feedbar');
+    return e !== null && !e.hidden && e.getBoundingClientRect().width > 0;
+  });
+  {
+    const bar = await barBox(p);
+    const panelBox = await boxOf(p, '#panel');
+    const mapBox = await boxOf(p, '#screen');
+    expect(
+      bar !== null && Math.abs(bar.y - (panelBox.y + panelBox.height)) < 12,
+      'over the map, the strip floats with the panel it belongs to',
+    );
+    expect(Math.abs(bar.width - panelBox.width) < 1, 'and is still exactly the panel’s width');
+    // It DOES sit over the map art here — the whole floating panel does, by design
+    // (daOptions is modal over the map, UMain.pas:1120) — so the only thing to check
+    // is that it stays within the panel's own footprint horizontally.
+    expect(
+      mapBox !== null && bar.x >= panelBox.x - 0.5 && bar.x + bar.width <= panelBox.x + panelBox.width + 0.5,
+      'and never spreads wider than the floating panel',
+    );
+  }
+  await p.evaluate(() => window.__ff.closeMapOverlay());
+  await p.waitForFunction(() => {
+    const e = document.getElementById('feedbar');
+    return e === null || e.hidden;
+  });
+  expect((await barBox(p)) === null, 'closing Options takes the strip away again');
 
   // ── And nothing was sent ──────────────────────────────────────────────────────
   expect(offOrigin.length === 0, `nothing left the page (${offOrigin.slice(0, 3).join(', ') || 'no off-origin requests'})`);

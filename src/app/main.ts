@@ -384,6 +384,10 @@ let subOverlaySig = '';
 let subOverlayGate = true;
 const panelCanvas = document.getElementById('panel') as HTMLCanvasElement;
 const panelCtx = panelCanvas.getContext('2d')!;
+// The panel's column wrapper (the canvas plus the feedback strip that hangs under the
+// Options face). This is what floats over the map, so the strip travels with it.
+const panelCol = document.getElementById('panelcol') as HTMLElement;
+const feedbar = document.getElementById('feedbar') as HTMLElement | null;
 const select = document.getElementById('room') as HTMLSelectElement;
 const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null;
 const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
@@ -3607,20 +3611,26 @@ function drawPanel(): void {
   const asMapOverlay = screen === 'map' && mapOverlay === 'options';
   const visible = screen === 'room' || asMapOverlay;
   panelCanvas.style.display = visible ? '' : 'none';
+  // The feedback strip belongs to the Options face and hangs under it (index.html).
+  // It is shown only while those options are actually on screen, so nothing modern is
+  // in view while the game is being played — and it is absolutely positioned, so it
+  // never changes the panel column's size and cannot move the game when it appears.
+  if (feedbar) feedbar.hidden = !(visible && ostav === O_OPTIONS);
   // Float the panel over the map when opened from the Options corner; otherwise
-  // it sits statically beside the play area (its normal in-room position).
+  // it sits statically beside the play area (its normal in-room position). The COLUMN
+  // is what floats, not the canvas, so the strip travels with the panel it belongs to.
   if (asMapOverlay) {
-    panelCanvas.style.position = 'fixed';
-    panelCanvas.style.left = '50%';
-    panelCanvas.style.top = '50%';
-    panelCanvas.style.transform = 'translate(-50%, -50%)';
-    panelCanvas.style.zIndex = '50';
-  } else if (panelCanvas.style.position === 'fixed') {
-    panelCanvas.style.position = '';
-    panelCanvas.style.left = '';
-    panelCanvas.style.top = '';
-    panelCanvas.style.transform = '';
-    panelCanvas.style.zIndex = '';
+    panelCol.style.position = 'fixed';
+    panelCol.style.left = '50%';
+    panelCol.style.top = '50%';
+    panelCol.style.transform = 'translate(-50%, -50%)';
+    panelCol.style.zIndex = '50';
+  } else if (panelCol.style.position === 'fixed') {
+    panelCol.style.position = '';
+    panelCol.style.left = '';
+    panelCol.style.top = '';
+    panelCol.style.transform = '';
+    panelCol.style.zIndex = '';
   }
   if (!visible) return;
   // Composing the panel (155×395) + palette→RGBA + putImageData is pure per-frame

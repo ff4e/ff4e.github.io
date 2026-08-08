@@ -45,6 +45,11 @@
         flex: 0 0 auto;
       }
       #panel { cursor: pointer; flex: 0 0 auto; }
+      /* The panel column: the control panel with the feedback strip hanging under it.
+         The strip is `position: absolute` so it contributes NOTHING to the column's
+         size — the stage layout is computed from the panel's 155×395 and must stay
+         that way, or opening Options would resize the game. */
+      #panelcol { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; }
       /* Player view = game only. Controls + info bar are dev/tuning chrome, hidden
          by default and revealed with the `` ` `` hotkey (body.dev). */
       .controls { display: none; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; padding: 6px 8px; }
@@ -139,27 +144,46 @@
       html[data-unsupported] .stage,
       html[data-unsupported] #devbar,
       html[data-unsupported] #info,
-      html[data-unsupported] #feedbar,
       html[data-unsupported] #perfhud { display: none; }
-      /* Feedback bar: the player's only way to reach the author, and the only piece of
-         modern chrome in the player's view. It is a flex SIBLING of .stage, never an
-         overlay on it, so it cannot touch the 1998 art at any window size — the stage
-         simply gets ~24px less height and the layout code rescales (src/app/feedback.ts
-         explains why it isn't in the game's own panel or on the world map). Kept
-         whisper-quiet until you look for it. */
+      /* Feedback strip: the player's only way to reach the author, and the only piece
+         of modern chrome anywhere near the game. It hangs directly under the control
+         panel and is shown ONLY while the Options face is open — which is where a
+         player already goes for everything that is about the game rather than in it.
+         Absolutely positioned, so it costs the main window no space at all, and it
+         never draws on ALTAR's artwork (src/app/feedback.ts). */
       #feedbar {
-        flex: 0 0 auto;
+        position: absolute;
+        top: 100%;
+        /* Exactly the panel's width — the column's width IS the panel's — so the strip
+           reads as a footer of the Options window and can never stick out past it, at
+           any stage scale. Absolutely positioned, so it adds nothing to the column and
+           opening Options cannot move the game. */
+        left: 0;
+        right: 0;
         display: flex;
-        align-items: center;
+        align-items: baseline;
         justify-content: center;
-        gap: 10px;
-        padding: 4px 8px;
-        font: 11px/1.4 system-ui, sans-serif;
+        flex-wrap: wrap;
+        gap: 3px 8px;
+        margin-top: 4px;
+        padding: 3px 6px;
+        box-sizing: border-box;
+        text-align: center;
+        border-radius: 0 0 6px 6px;
+        /* A backing, because this strip sits over two very different things: black
+           letterboxing in a room, and the map's brown artwork when Options is opened
+           from the map corner. Without it the text is legible against one and lost
+           against the other. */
+        background: #0b0b12b0;
+        backdrop-filter: blur(3px);
+        font: 11px/1.5 system-ui, sans-serif;
         color: #cdd;
-        opacity: 0.45;
+        opacity: 0.8;
         transition: opacity 0.15s;
       }
+      #feedbar[hidden] { display: none; }
       #feedbar:hover, #feedbar:focus-within { opacity: 1; }
+      #feedbar-build { opacity: 0.7; font-variant-numeric: tabular-nums; }
       #feedbar button {
         background: none;
         border: none;
@@ -345,16 +369,18 @@
     </div>
     <div class="stage">
       <canvas id="screen"></canvas>
-      <canvas id="panel" title="control panel"></canvas>
+      <!-- The control panel and the strip that hangs under it. The strip is the
+           player's way to reach the author; it belongs to the Options face and is
+           hidden the rest of the time (src/app/feedback.ts explains the placement). -->
+      <div id="panelcol">
+        <canvas id="panel" title="control panel"></canvas>
+        <div id="feedbar" hidden>
+          <span id="feedbar-build"></span>
+          <button id="feedback-open" type="button">Send feedback</button>
+        </div>
+      </div>
     </div>
     <div id="info"></div>
-    <!-- The player's way to reach the author. Outside the game canvas by construction
-         (a flex sibling of .stage), so it never covers the original art. -->
-    <div id="feedbar">
-      <span id="feedbar-build"></span>
-      <span>·</span>
-      <button id="feedback-open" type="button">Found a bug? Send feedback</button>
-    </div>
     <dialog id="feedback" aria-labelledby="feedback-title">
       <div class="fb-body">
         <h2 id="feedback-title">Send feedback</h2>
