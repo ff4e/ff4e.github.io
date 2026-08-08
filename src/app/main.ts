@@ -90,6 +90,8 @@ import type { AiRoomFrame } from '../render/roomAi.js';
 import { Canvas2dAiTarget, RIPPLE, activeRipples, faithfulWobbleShifts, nextRippleBirth, smoothWobbleShift, wobblePhase } from '../render/aiTarget.js';
 import type { AiWobble } from '../render/aiTarget.js';
 import { withLoadSlot } from '../render/loadSlot.js';
+import { assetBlob, decodeAsset, fetchAsset, isPngResponse, isTransient } from '../render/assetFetch.js';
+import { loadEnhancedObjects } from '../render/enhancedObjects.js';
 import {
   hitInfoButton,
   drawInfoPanel,
@@ -708,6 +710,9 @@ let aiPanel: AiPanel | null = null;
 let aiCredits: AiCredits | null = null;
 let aiPanelTried = false;
 let aiCreditsTried = false;
+// ...and whether that one load is in flight, so the retry below cannot start a second.
+let aiPanelPending = false;
+let aiCreditsPending = false;
 // Last display box the AI credit layers were sized for, so layout() runs on resize
 // rather than every frame.
 let creditsLayoutW = 0;
@@ -1652,6 +1657,7 @@ const GRAPHICS_LEVELS: readonly GraphicsLevel[] = ['classic', 'enhanced', 'ai'];
 function setGraphics(level: GraphicsLevel): void {
   graphics = level;
   localStorage.setItem('ff.graphics', graphics);
+  if (graphics === 'ai') retryAiOneShots();
   if (enhancedArtActive() && curNum) void ensureEnhancedArt(curNum);
   if (graphics === 'ai' && curNum) {
     // Hold the frame we already have until the AI art lands, rather than repainting
@@ -1665,12 +1671,86 @@ function setGraphics(level: GraphicsLevel): void {
     aiPendingNum = 0;
     aiRoom = null;
   }
+  syncTierNote(); // the note is about the AI tier; leaving it takes the note down
   if (graphicsSelect) graphicsSelect.value = graphics;
   forceRoomRedraw = true;
   mapSig = null; // repaint the map so switching to/from the AI level shows immediately
   wake();
   setInfo();
 }
+
+/**
+ * ── The one-shot AI loads, and the second chance they did not have ────────────
+ *
+ * The world map, the HUD panel and the credits art each load ONCE per session, latched by
+ * a `…Tried` flag. Every one of those flags is set BEFORE its load resolves — it has to
+ * be, since the trigger is a draw path that runs every frame and a flag set afterwards
+ * would start a load per frame until the first one landed. The cost is that a load which
+ * FAILS is indistinguishable from one that succeeded: the flag stays set, and there is no
+ * second attempt for the rest of the session. It is the room bug's shape again, minus the
+ * cache.
+ *
+ * It cannot be fixed by clearing the flag where the load fails, for the reason the flag
+ * exists: `beginMapArt()` is called from the map's draw branch, so a failure that cleared
+ * it would retry on the very next frame, and a player sitting on the map with a flaky
+ * connection would fire a request per frame.
+ *
+ * So the retry is hung on a DISCRETE, player-initiated event instead — selecting the `ai`
+ * tier. It is rare, it is deliberate, and it is already the gesture a player makes when
+ * the tier does not look right (it is the one Martin tried). One retry per switch cannot
+ * storm, and because it is bounded, it does not need the transient/absent distinction the
+ * caches need: re-asking once for an asset that is genuinely missing costs one request.
+ *
+ * Only loads that have not SUCCEEDED are retried (`aiPanel` etc. still null), so this
+ * never re-downloads art that is already up, and only ones not in flight, so it cannot
+ * start a duplicate.
+ *
+ * `aiKufrTried` is deliberately absent: it is already reset in disposeAiKufr(), so the
+ * cutscene art gets a fresh attempt every time the cutscene is entered.
+ */
+function retryAiOneShots(): void {
+  if (!aiWorldMap && !aiMapPending) aiMapTried = false;
+  if (!aiPanel && !aiPanelPending) aiPanelTried = false;
+  if (!aiCredits && !aiCreditsPending) aiCreditsTried = false;
+}
+
+/**
+ * ── The tell: the selected tier is not the tier being drawn ────────────────────
+ *
+ * A tier that fails to load falls back to the one below it, and the fallback is silent
+ * and correct-looking — the room renders, nothing is broken, the setting still says `ai`.
+ * That is precisely the report this fix came from: "the Graphics was on AI upscaled but
+ * the real graphics was just Enhanced… I had to restart the app." There was no way to
+ * tell what had happened, and nothing to do about it.
+ *
+ * So say it, in the same non-blocking register as #webgl-note (which exists for the same
+ * kind of problem: a capability the player selected is not the one in use).
+ *
+ * Only a FAILED load gets a note, not an absent one. A room that ships no AI art (SCORE)
+ * also draws one tier down, but that is by design, permanent, and nothing the player can
+ * act on — a toast about it would be pure nag. A failure is temporary and has an action
+ * attached, which is what the note says.
+ */
+type TierNoteState = 'ok' | 'absent' | 'failed';
+let tierNoteState: TierNoteState = 'ok';
+let tierNoteDismissed = false;
+
+function setTierNote(state: TierNoteState): void {
+  tierNoteState = state;
+  if (state !== 'failed') tierNoteDismissed = false; // a fresh failure deserves a fresh note
+  syncTierNote();
+}
+
+function syncTierNote(): void {
+  const note = document.getElementById('tier-note');
+  if (!note) return;
+  note.hidden = !(tierNoteState === 'failed' && graphics === 'ai' && !tierNoteDismissed);
+}
+
+document.getElementById('tier-note-x')?.addEventListener('click', () => {
+  tierNoteDismissed = true;
+  syncTierNote();
+});
 
 // Set once if a GPU backend throws, disabling it for the session (the CPU compositor
 // takes over) so a driver/context failure can never wedge rendering.
@@ -1744,25 +1824,14 @@ interface RoomEnhanced {
 }
 const enhancedCache = new Map<string, RoomEnhanced>(); // jmeno -> art + objects (art null = no master)
 
-interface ObjManifestEntry {
-  item: number;
-  frames: string[];
-}
-
-/**
- * The dev server serves index.html (HTTP 200) for a missing asset, so `res.ok`
- * is not enough to know a file exists — verify the content-type is an image.
- */
-function isPngResponse(res: Response): boolean {
-  return res.ok && (res.headers.get('content-type') ?? '').startsWith('image/');
-}
-
 /**
  * Decode a PNG Response into straight RGBA using the browser's native decoder
  * (createImageBitmap + a 2D canvas) — no `node:zlib`, unlike the Node tools.
  */
 async function decodePngResponse(res: Response): Promise<{ w: number; h: number; rgba: Uint8Array }> {
-  const bmp = await createImageBitmap(await res.blob());
+  // A body that stops mid-download rejects here, not at fetch — transient, not missing.
+  const blob = await assetBlob(res.url, res);
+  const bmp = await decodeAsset(res.url, () => createImageBitmap(blob));
   const w = bmp.width;
   const h = bmp.height;
   const off = document.createElement('canvas');
@@ -1779,8 +1848,9 @@ async function decodePngResponse(res: Response): Promise<{ w: number; h: number;
 /**
  * Load (and cache) the enhanced background masters + object sprites for a room,
  * staged under public/enhanced/<JMENO>/ (w.png, p.png, objects.json + obj/*.png).
- * A missing master or decode failure caches an empty result so the room silently
- * falls back to classic. Applies to `num` iff it is still current when resolved.
+ * A room with no master caches an empty result so it silently falls back to classic;
+ * a load that merely FAILED is not cached, so the next entry retries. Applies to `num`
+ * iff it is still current when resolved.
  */
 async function ensureEnhancedArt(num: number): Promise<void> {
   const jmeno = ROOMS[num - 1]?.jmeno;
@@ -1802,8 +1872,8 @@ async function ensureEnhancedArt(num: number): Promise<void> {
     // index HTML with 200 for missing files, so ok/status is not enough).
     const isPng = isPngResponse;
     const [w, p] = await Promise.all([
-      fetch(`/enhanced/${jmeno}/w.png`),
-      fetch(`/enhanced/${jmeno}/p.png`),
+      fetchAsset(`/enhanced/${jmeno}/w.png`),
+      fetchAsset(`/enhanced/${jmeno}/p.png`),
     ]);
     let art: EnhancedArt | null = null;
     if (isPng(w) && isPng(p)) {
@@ -1814,8 +1884,8 @@ async function ensureEnhancedArt(num: number): Promise<void> {
         const bgs = [bg0.rgba];
         for (let f = 1; ; f++) {
           const [wf, pf] = await Promise.all([
-            fetch(`/enhanced/${jmeno}/w${f}.png`),
-            fetch(`/enhanced/${jmeno}/p${f}.png`),
+            fetchAsset(`/enhanced/${jmeno}/w${f}.png`),
+            fetchAsset(`/enhanced/${jmeno}/p${f}.png`),
           ]);
           if (!isPng(wf) || !isPng(pf)) break;
           const [wd, pd] = await Promise.all([decodePngResponse(wf), decodePngResponse(pf)]);
@@ -1826,7 +1896,7 @@ async function ensureEnhancedArt(num: number): Promise<void> {
         art = { w: wall0.w, h: wall0.h, wall: walls, bg: bgs };
       }
     }
-    const objects = await loadEnhancedObjects(jmeno);
+    const objects = await loadEnhancedObjects('/', jmeno, decodePngResponse);
     const result: RoomEnhanced = { art, objects };
     enhancedCache.set(jmeno, result);
     if (curNum === num) {
@@ -1834,51 +1904,34 @@ async function ensureEnhancedArt(num: number): Promise<void> {
       enhancedObjects = objects;
       enhancedPending = false;
     }
-  } catch {
-    enhancedCache.set(jmeno, { art: null, objects: [] });
+  } catch (e) {
     if (curNum === num) {
       enhancedArt = null;
       enhancedObjects = [];
       enhancedPending = false;
     }
+    // The same distinction the AI tier now draws, one tier down, and for the same
+    // reason: this catch used to write a negative cache entry unconditionally, so one
+    // aborted request — for a background master OR for a single object sprite, since
+    // that rejection lands here too — left the room in 1998 bitmaps for the rest of the
+    // session with no way back but a reload. A blip teaches us nothing, so cache nothing.
+    if (isTransient(e)) {
+      console.warn(`enhanced art load failed for ${jmeno} (will retry): ${e.message}`);
+      return;
+    }
+    console.error(`enhanced art unavailable for ${jmeno}:`, e);
+    enhancedCache.set(jmeno, { art: null, objects: [] });
   }
-}
-
-/** Decode a room's enhanced object sprites from its objects.json manifest. */
-async function loadEnhancedObjects(jmeno: string): Promise<EnhancedObject[]> {
-  const res = await fetch(`/enhanced/${jmeno}/objects.json`);
-  // The dev server serves index.html (200) for a missing manifest, so verify it
-  // is actually JSON before parsing.
-  if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return [];
-  const manifest = (await res.json()) as { objects?: ObjManifestEntry[] };
-  const entries = manifest.objects ?? [];
-  // One entry at a time was a per-object round trip: with the AI loads parallelised
-  // this waterfall became the thing the first frame waits on (2.2s at a 150ms RTT
-  // against 1.2s for the whole AI set). The sprites are independent, so fetch them
-  // all at once and let the browser schedule.
-  const loaded = await Promise.all(
-    entries.map(async (e): Promise<EnhancedObject | null> => {
-      if (typeof e.item !== 'number' || !Array.isArray(e.frames)) return null;
-      const frames = await Promise.all(
-        e.frames.map(async (f) =>
-          withLoadSlot(async () => {
-            const r = await fetch(`/enhanced/${jmeno}/obj/${f}`);
-            if (!isPngResponse(r)) return null;
-            const d = await decodePngResponse(r);
-            return { w: d.w, h: d.h, rgba: d.rgba };
-          }),
-        ),
-      );
-      const valid = frames.filter((f): f is { w: number; h: number; rgba: Uint8Array } => f !== null);
-      return valid.length > 0 ? { item: e.item, frames: valid } : null;
-    }),
-  );
-  return loaded.filter((o): o is EnhancedObject => o !== null);
 }
 
 /** Load the hi-res panel art once (see panelAi.ts); null ⇒ keep the faithful path. */
 async function ensureAiPanel(): Promise<void> {
-  aiPanel = await loadAiPanel('/');
+  aiPanelPending = true;
+  try {
+    aiPanel = await loadAiPanel('/');
+  } finally {
+    aiPanelPending = false;
+  }
   if (aiPanel) panelSig = null;   // force a repaint at the new resolution
 }
 
@@ -1972,7 +2025,12 @@ async function ensureAiWorldMap(): Promise<void> {
 
 /** Load the hi-res credits art once (see creditsAi.ts). */
 async function ensureAiCredits(): Promise<void> {
-  aiCredits = await loadAiCredits('/');
+  aiCreditsPending = true;
+  try {
+    aiCredits = await loadAiCredits('/');
+  } finally {
+    aiCreditsPending = false;
+  }
   // The pointer handlers live on #screen, which this path hides (display:none) while
   // its own overlay is up — a hidden element gets no pointer events, so "click anywhere
   // to dismiss" silently stopped working in the ai tier while the keyboard still did.
@@ -1986,8 +2044,10 @@ async function ensureAiCredits(): Promise<void> {
 
 /**
  * Load (and cache) the AI-upscaled art for a room (public/enhanced-ai/<JMENO>/), for the
- * `ai` graphics level. A missing set caches null so the room falls back to the enhanced
- * render. Applies to `num` iff it is still the current room when the load resolves.
+ * `ai` graphics level. A room with no AI art caches null so it falls back to the enhanced
+ * render; a room whose load merely FAILED is not cached at all, so entering it again (or
+ * switching the tier) retries. Applies to `num` iff it is still the current room when the
+ * load resolves.
  */
 async function ensureAiRoom(num: number): Promise<void> {
   const jmeno = ROOMS[num - 1]?.jmeno;
@@ -1999,14 +2059,34 @@ async function ensureAiRoom(num: number): Promise<void> {
   if (pending === undefined) {
     pending = loadAiRoom('/', jmeno);
     // Registered BEFORE the first await so a concurrent caller joins this load rather
-    // than starting its own. Don't cache a rejection — loadAiRoom resolves null on
-    // failure, but a throw would otherwise poison the room for the session.
-    pending.catch(() => aiRoomCache.delete(jmeno));
+    // than starting its own.
+    //
+    // Dropping the entry on rejection is the fix for "one network blip locks a room out
+    // of the AI tier for the whole session". The line looked like this before, too — but
+    // it was paired with a loadAiRoom that caught EVERYTHING and resolved null, so it
+    // could never fire: a null produced by a transient fetch error stayed cached, every
+    // later ensureAiRoom joined it, and the room drew enhanced art while `graphics` still
+    // said 'ai'. Nothing cleared the entry (setGraphics nulls aiRoom, not the cache), so
+    // switching tiers away and back did nothing and only reloading the app helped.
+    // loadAiRoom now rejects for a transient failure and resolves null only for a genuine
+    // absence, which is exactly the line this catch wants to draw.
+    //
+    // The identity check matters: by the time this runs the entry may already have been
+    // evicted and a fresh load registered under the same key, and deleting THAT would
+    // throw away a good room.
+    pending.catch(() => { if (aiRoomCache.get(jmeno) === pending) aiRoomCache.delete(jmeno); });
     aiRoomCache.set(jmeno, pending);
   }
   try {
     const loaded = await pending;
     if (curNum === num) { aiRoom = loaded; aiRoomNum = num; }
+    if (curNum === num) setTierNote(loaded === null ? 'absent' : 'ok');
+  } catch {
+    // Transient: this entry is already out of the cache (above), so the next room entry
+    // or tier switch retries. Swallowed rather than propagated because every caller does
+    // `void ensureAiRoom(...)` — the room falls back to the enhanced render meanwhile,
+    // which is what the tell below tells the player.
+    if (curNum === num) setTierNote('failed');
   } finally {
     // In a finally: a room whose AI art is missing or fails to decode must release
     // the hold too (it falls back to the enhanced render), or it would never paint.
@@ -6569,6 +6649,11 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   // this frame. Two different questions — the art can be loaded while the frame is
   // withheld by the aiRoomRenderActive gate (hooks, ZX, frame effects…).
   aiRoomLoaded: () => aiRoom !== null && aiRoomNum === curNum,
+  // Debug: the art-tier tell. 'failed' means the selected tier's load did not get an
+  // answer (and was therefore NOT cached — the next entry retries); 'absent' means the
+  // room genuinely has no art at that tier; 'ok' means it loaded.
+  tierNote: () => tierNoteState,
+  tierNoteVisible: () => document.getElementById('tier-note')?.hidden === false,
   aiRoomActive: () => room !== null && aiRoomRenderActive(room),
   // Debug: the room number that is actually built and running (curNum) — not the
   // one currently being loaded.

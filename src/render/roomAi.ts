@@ -53,6 +53,7 @@ import { darkestIndex } from './renderRoom.js';
 import { walkRoom, FSIZE, type RoomWalkSink, type FishFrame } from './roomWalk.js';
 import { FISH_BODY_FILE, FISH_HEAD_FILE, frameIndex } from './enhancedArtSource.js';
 import { withLoadSlot } from './loadSlot.js';
+import { assetBlob, assetJson, decodeAsset, fetchAsset, isTransient, reportMissingAsset } from './assetFetch.js';
 import { wreckDamage, type WreckDamage } from './artSource.js';
 import { forEachWreckPixel, wreckFrame } from '../core/room.js';
 import type { Room, Item, WreckSwap } from '../core/room.js';
@@ -334,9 +335,26 @@ export interface AiRoomFrame {
 
 /**
  * Fetch + decode the AI room art from `${base}enhanced-ai/<jmeno>/` (background,
- * wall, object sprites) plus the shared `${base}enhanced-ai/_fish/` set. Resolves to
- * an AiRoom when every asset decoded, or null when any is missing/undecodable
- * (⇒ the caller falls back to the enhanced/classic render). Never throws.
+ * wall, object sprites) plus the shared `${base}enhanced-ai/_fish/` set.
+ *
+ * ── Three outcomes, not two ───────────────────────────────────────────────────
+ *  - **an AiRoom** — every asset decoded.
+ *  - **null** — this room's AI art is ABSENT (no `ai.json`, an unparseable one, or a
+ *    listed file the server answered 404 for). A stable fact about the deployment: the
+ *    caller falls back to the enhanced render and SHOULD cache this.
+ *  - **rejects with `TransientAssetError`** — the load never got an answer (network
+ *    error, aborted connection, 5xx, a body that arrived truncated). Nothing was learned,
+ *    so the caller MUST NOT cache it.
+ *
+ * It used to resolve null for both of the last two, which is what let a single network
+ * blip lock a room out of the `ai` tier for the whole session: `ensureAiRoom` cached the
+ * null, every later entry joined the cached promise, and the room drew enhanced art while
+ * the setting still said `ai` — with no way back short of reloading the app.
+ *
+ * The tier stays ATOMIC per room: a room's AI set is generated whole, so a hole in it
+ * means the set is broken, and the enhanced tier underneath is a complete fallback. (The
+ * enhanced tier, which is deliberately incomplete, draws that line per OBJECT instead —
+ * see loadEnhancedObjects.)
  */
 interface AiManifest {
   scale: number;
@@ -346,31 +364,37 @@ interface AiManifest {
 }
 
 export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | null> {
+  // Decoded bitmaps are memoised BY URL for the duration of this load. Manifests bind
+  // the same sprite file to several item indices (7019 frame references across the
+  // shipped tier resolve to only 2397 distinct files), and without this each reference
+  // produced its own ImageBitmap that the room then retained for the session.
+  const decoded = new Map<string, Promise<ImageBitmap>>();
+  const bmp = (url: string): Promise<ImageBitmap> => {
+    let p = decoded.get(url);
+    if (!p) { p = bmpShared(url); decoded.set(url, p); }
+    return p;
+  };
+  const dir = `${base}enhanced-ai/${jmeno}/`;
   try {
-    // Decoded bitmaps are memoised BY URL for the duration of this load. Manifests bind
-    // the same sprite file to several item indices (7019 frame references across the
-    // shipped tier resolve to only 2397 distinct files), and without this each reference
-    // produced its own ImageBitmap that the room then retained for the session.
-    const decoded = new Map<string, Promise<ImageBitmap>>();
-    const bmp = (url: string): Promise<ImageBitmap> => {
-      let p = decoded.get(url);
-      if (!p) { p = bmpShared(url); decoded.set(url, p); }
-      return p;
-    };
-    const dir = `${base}enhanced-ai/${jmeno}/`;
     // ai.json carries the room's scale and the shipped filenames. The shipped tier is
     // uniform ×4 today (ADAPTIVE_SCALE is off in tools/studio/lib/upscale.mjs), but the
     // scale is read rather than assumed so re-enabling it needs no runtime change — and
     // the filenames must be read regardless, since the tier ships WebP, not PNG.
-    const res = await fetch(`${dir}ai.json`);
+    const manUrl = `${dir}ai.json`;
+    const res = await fetchAsset(manUrl);
+    // No manifest ⇒ this room has no AI art. A real state, not a fault: SCORE ships
+    // that way (it has no FFNG level at all), so this stays silent and cacheable.
     if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
-    const man = (await res.json()) as AiManifest;
+    const man = await assetJson<AiManifest>(manUrl, res);
     const scale = Number(man.scale) || AI_ROOM_SCALE;
     if (!man.bg?.length || !man.wall?.length) return null;
     const bgLoad = Promise.all(man.bg.map((f) => bmp(dir + f)));
     const wallLoad = Promise.all(man.wall.map((f) => bmp(dir + f)));
     const objectLoads = (man.objects ?? []).map(async (e): Promise<AiObject | null> => {
       if (typeof e.item !== 'number' || !Array.isArray(e.frames) || e.frames.length === 0) return null;
+      // Whole-frame-list or nothing: `frames` is indexed directly by the animation
+      // phase (frameIndex), so a short list would not be a missing picture but the
+      // WRONG picture for every phase after the gap. Promise.all gives that for free.
       return { item: e.item, frames: await Promise.all(e.frames.map((f) => bmp(dir + f))) };
     });
     // The fish set exists per scale, since the fish are drawn into this room's ×S
@@ -388,11 +412,27 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
     const owned = await Promise.all([...decoded.values()]);
     return new AiRoom(bg, wall, objects, fish, scale, owned);
   } catch (e) {
-    // Returning null falls back to the enhanced tier, which is the right behaviour for
-    // a user with a partial download — but it also hides a genuinely broken build, so
-    // say why rather than silently rendering the wrong tier.
-    console.warn(`AI tier unavailable for ${jmeno}:`, e);
+    // Whatever landed before the failure is owned by nobody now — and since a transient
+    // failure is retried on the next room entry, leaking it is no longer a one-off.
+    await closeDecoded(decoded);
+    if (isTransient(e)) {
+      // Rethrow so the caller does NOT cache this: nothing was learned about the room's
+      // art, and remembering "no AI art" from a blip is exactly the desync bug.
+      console.warn(`AI tier load failed for ${jmeno} (will retry): ${e.message}`);
+      throw e;
+    }
+    // The manifest promised files the server does not have. That is a broken build or a
+    // broken deploy, and its only other symptom is this room quietly rendering one tier
+    // down — so it is cached (retrying cannot help) but never silent.
+    reportMissingAsset(`AI tier for ${jmeno}`, String((e as Error)?.message ?? e));
     return null;
+  }
+}
+
+/** Close every bitmap a failed load had already decoded (the AiRoom that would have owned them was never built). */
+async function closeDecoded(decoded: Map<string, Promise<ImageBitmap>>): Promise<void> {
+  for (const settled of await Promise.allSettled([...decoded.values()])) {
+    if (settled.status === 'fulfilled') settled.value.close();
   }
 }
 
@@ -400,8 +440,12 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
  *  set), which therefore must not be owned — or disposed — by any single AiRoom. */
 async function bmpShared(url: string): Promise<ImageBitmap> {
   return withLoadSlot(async () => {
-    const res = await fetch(url);
+    const res = await fetchAsset(url);
+    // An answer that is not an image: the file is not there (or the dev server served
+    // its SPA fallback for it). Deterministic — a plain Error, so the room is cached
+    // as "no AI art" rather than retried forever.
     if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${url}: ${res.status}`);
+    const blob = await assetBlob(url, res);
     // `premultiplyAlpha: 'none'` is load-bearing, not a default spelled out. With the
     // browser's own choice ('default') Chrome hands back PREMULTIPLIED pixels, and
     // texImage2D from an ImageBitmap takes the bitmap's own alpha mode — the GPU
@@ -409,7 +453,7 @@ async function bmpShared(url: string): Promise<ImageBitmap> {
     // edge came out darkened toward the background (measured: a 160,95,44 edge pixel
     // rendering as 105,61,32). canvas-2D is unaffected either way, so nothing else in
     // the tier could have caught it.
-    return createImageBitmap(await res.blob(), { premultiplyAlpha: 'none' });
+    return decodeAsset(url, () => createImageBitmap(blob, { premultiplyAlpha: 'none' }));
   });
 }
 
@@ -452,8 +496,13 @@ function sharedAiFish(base: string, scale: number, bmp: (u: string) => Promise<I
 }
 
 async function loadAiFish(dir: string, bmp: (u: string) => Promise<ImageBitmap>): Promise<AiFish> {
-  const res = await fetch(`${dir}manifest.json`);
-  const m = (await res.json()) as Record<'small' | 'big', Record<'left' | 'right', string[]>>;
+  const url = `${dir}manifest.json`;
+  // Through fetchAsset so a blip on the shared set is labelled transient too: this load
+  // is awaited inside loadAiRoom, and a room must not be cached as "no AI art" because
+  // the fish manifest hiccuped.
+  const res = await fetchAsset(url);
+  if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) throw new Error(`${url}: ${res.status}`);
+  const m = await assetJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(url, res);
   const side = async (size: 'small' | 'big', facing: 'left' | 'right'): Promise<AiFishSide> => {
     const map: AiFishSide = new Map();
     await Promise.all((m[size]?.[facing] ?? []).map(async (f) =>

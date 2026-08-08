@@ -115,8 +115,23 @@ export async function withApp(fn, opts = {}) {
   const b = await launchBrowser();
   const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
   const errs = [];
-  p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
-  p.on('pageerror', (e) => errs.push('PE:' + e.message));
+  // Errors a probe DELIBERATELY provokes (`opts.allowErrors`, a RegExp).
+  //
+  // A page error normally fails the probe, and that default is load-bearing — it is how
+  // this suite catches the exceptions nobody thought to assert on. But a probe that
+  // breaks an asset ON PURPOSE, to test how the game copes, cannot live with it: the
+  // thing it is testing IS the error. Rather than deleting the check for those probes,
+  // matching errors are diverted here and handed to the probe, which then has to ASSERT
+  // it saw them. That makes the exemption stronger than the default, not weaker: an
+  // allowed error that never arrives is a failure, and an error outside the allowlist
+  // still fails the probe as usual.
+  const allowed = [];
+  const keep = (t) => {
+    if (opts.allowErrors?.test(t)) allowed.push(t);
+    else errs.push(t);
+  };
+  p.on('console', (m) => m.type() === 'error' && keep(m.text()));
+  p.on('pageerror', (e) => keep('PE:' + e.message));
   // By default, boot as a returning player (skip the first-run intro): the intro
   // is a full-screen overlay that swallows input, so tests that drive keys/mouse
   // must not sit behind it. The intro test opts into first-run via { firstRun: true }.
@@ -182,7 +197,7 @@ export async function withApp(fn, opts = {}) {
     // way it is reported with the console/page errors collected above rather than
     // escaping as an unhandled rejection with no context.
     await gotoApp(p);
-    await fn({ p, expect });
+    await fn({ p, expect, allowed });
   } catch (e) {
     ok = false;
     console.log('  FAIL threw: ' + (e?.message ?? e) + failureSite(e));

@@ -158,15 +158,20 @@
         color: #cdd; background: #1a2a2a; border: 1px solid #3a5a5a; border-radius: 8px; cursor: pointer;
       }
       .btn:hover { background: #244; }
-      /* Non-blocking toast (e.g. the software-renderer note). */
-      #webgl-note {
+      /* Non-blocking toasts (software-renderer note, art-tier note). Stacked in a
+         column so a second one appears above the first instead of on top of it. */
+      #notes {
         position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 150;
+        display: flex; flex-direction: column-reverse; align-items: center; gap: 8px;
+        pointer-events: none;
+      }
+      .note {
         background: #1a1a28cc; color: #cdd; border: 1px solid #44445a; border-radius: 8px;
         padding: 8px 14px; font: 12px/1.4 system-ui, sans-serif; display: flex; align-items: center; gap: 12px;
-        backdrop-filter: blur(4px);
+        max-width: min(680px, 90vw); backdrop-filter: blur(4px); pointer-events: auto;
       }
-      #webgl-note[hidden] { display: none; }
-      #webgl-note button { background: none; border: none; color: #8cc; cursor: pointer; font: inherit; }
+      .note[hidden] { display: none; }
+      .note button { background: none; border: none; color: #8cc; cursor: pointer; font: inherit; }
       kbd.key { background: #222; border: 1px solid #556; border-radius: 4px; padding: 2px 7px; font: 600 12px/1 ui-monospace, monospace; }
       /* Dev perf HUD — shown only in dev mode (body.dev, toggled with `). */
       #perfhud {
@@ -209,10 +214,19 @@
       </p>
       <p>Come back on a computer — or a tablet, which is just big enough — and it will be waiting.</p>
     </div>
-    <!-- Non-blocking note when WebGL2 is unavailable (CPU renderer active). -->
-    <div id="webgl-note" hidden>
-      <span>Running on the software renderer (WebGL unavailable) — the game may run slower, and in the AI-upscaled tier the water is drawn at the original resolution.</span>
-      <button id="webgl-note-x" type="button">Dismiss</button>
+    <!-- Non-blocking notes. Both say the same kind of thing: what you selected is not
+         what is on screen, and why. -->
+    <div id="notes">
+      <!-- WebGL2 unavailable (CPU renderer active). -->
+      <div id="webgl-note" class="note" hidden>
+        <span>Running on the software renderer (WebGL unavailable) — the game may run slower, and in the AI-upscaled tier the water is drawn at the original resolution.</span>
+        <button id="webgl-note-x" type="button">Dismiss</button>
+      </div>
+      <!-- The selected art tier failed to load and the room is drawn one tier down. -->
+      <div id="tier-note" class="note" hidden>
+        <span>The AI-upscaled art didn't load, so this is the enhanced art. It will try again when you re-enter the room, or when you switch the graphics setting away and back.</span>
+        <button id="tier-note-x" type="button">Dismiss</button>
+      </div>
     </div>
     <div id="intro-layer" hidden>
       <video id="intro-video" playsinline></video>
