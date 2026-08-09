@@ -357,6 +357,9 @@ the same assertions.
 - `tools/gen-room-table.py` — regenerates `roomTable.ts` from the original Pascal.
 - `tools/dump-ffr.ts` — M0 verification CLI (parse + size-check a room or all rooms).
 - `tools/render-room.ts` — M1 verification CLI (render a room / all rooms to PNG).
+- `tools/preview-server.mjs` — the shared `vite build` + `vite preview`-on-a-free-port machinery.
+- `tools/capture-digest.mjs` — byte-exact behavioural fingerprint, comparable across git revisions.
+  The safety net for the `main.ts` split; read its header for what it does and does not cover.
 
 ### Map of `src/app/main.ts`
 

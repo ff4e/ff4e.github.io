@@ -29,6 +29,25 @@ there is no separate private repo. Keep it clean and public-safe.
 - If you extract code out of `main.ts` into a new module, delete its row and add the module to the
   `## Layout` bullet list instead.
 
+## Restructuring `src/app/main.ts` — the rules for that series
+
+`main.ts` is being split into modules over a series of PRs (see the map in `README.md`). Two rules apply
+to every PR in that series, and the second one applies to *everyone else* too:
+
+- **`window.__ff` is frozen while the series runs.** No PR that MOVES code may add, remove, rename or
+  change the shape of an `__ff` key. All 85 UI probes assert on that object, so it is the only external
+  oracle a refactor of `main.ts` has — and an oracle that moves with the code proves nothing. If you need
+  a new probe hook, ship it as its own PR, before or after a move, never inside one.
+- **Prove it, don't assert it.** Every code-moving PR must show a byte-identical
+  `node tools/capture-digest.mjs` result against its base commit:
+
+      git checkout <base> && node tools/capture-digest.mjs --out /tmp/before.json
+      git checkout <branch> && node tools/capture-digest.mjs --out /tmp/after.json
+      node tools/capture-digest.mjs --compare /tmp/before.json /tmp/after.json
+
+  Read the header of that file before trusting it: it covers game state and background pixels, not the
+  pixels of animating items.
+
 ## Assets & licensing
 
 - Everything shipped under `public/data/` descends from ALTAR's original 1998 Fish Fillets data,
