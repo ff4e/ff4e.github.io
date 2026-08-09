@@ -58,7 +58,8 @@ to every PR in that series, and the second one applies to *everyone else* too:
       node tools/capture-digest.mjs --compare /tmp/before.json /tmp/after.json
 
   Read the header of that file before trusting it: it covers game state and background pixels, not the
-  pixels of animating items.
+  pixels of animating items or tick-driven logic. Note `--compare` is a deep comparison of the recorded
+  values, not a byte comparison of the files.
 
 ## Running and checking your work
 
@@ -71,8 +72,9 @@ to every PR in that series, and the second one applies to *everyone else* too:
   `npm run test:ui -- cheat options`. The full suite is ~315 s; three probes are ~15 s. Use the filter for
   the inner loop and the full suite before you open the PR — a filtered run says `PARTIAL RUN` in its
   summary and is not a gate.
-- **CI** (`.github/workflows/checks.yml`) runs `typecheck` and the unit suite on every push. It cannot run
-  the browser probes, because they need the copyrighted game data, so those stay a local pre-PR step.
+- **CI** (`.github/workflows/checks.yml`) runs `typecheck`, the unit suite and `vite build` on every push.
+  It does not run the browser probes — not for lack of data (`public/data/` is committed) but because they
+  take ~6 minutes and the `test-gl-*` ones need macOS/Metal. They stay a local pre-PR step.
 
 ### How much checking does a change need?
 

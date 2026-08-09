@@ -2,17 +2,16 @@
  * The cheats: the typed codes, the sprite and film effects they switch on, and the
  * hidden Tetris minigame.
  *
- * A fifth of main.ts by weight and almost none of its change traffic — 4 of the last
- * 25 commits to that file touched any of it. Nothing a normal change needs to read,
- * which is exactly why it is worth moving out of the way.
+ * ~6 % of main.ts by weight and almost none of its change traffic — 4 of the last 25
+ * commits to that file touched any of it. Nothing a normal change needs to read, which
+ * is exactly why it is worth moving out of the way.
  *
  * ── The seam ──────────────────────────────────────────────────────────────────
  * This module OWNS its state (which cheats are on, the reshaped sprites, the Tetris
  * board) and exports it with plain `export let`. Those are ES module LIVE bindings, so
- * a reader in main.ts still writes `silentFilm` and still sees the current value — no
- * getter, no accessor, no ceremony — and cannot assign it back, which is what we want:
- * the cheats own their flags. That is why 60 references in main.ts are untouched by
- * this move.
+ * a reader in main.ts still sees the current value of `silentFilm` with no getter and no
+ * accessor, and cannot assign it back — which is what we want: the cheats own their
+ * flags. That is why the references in main.ts are untouched by this move.
  *
  * What the cheats need FROM the game — the current room, the engine, the audio, a
  * handful of callbacks — arrives through `initCheats()` as a host of getters. One-way

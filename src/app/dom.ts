@@ -1,7 +1,7 @@
 /**
  * The DOM the app draws into: the element handles and their 2D contexts.
  *
- * These are the most-read declarations in `main.ts` — 24 of its 39 regions touch one —
+ * These are the most-read declarations in `main.ts` — most of its regions touch one —
  * and nothing writes them, because they are all `const`. That combination is what makes
  * this the one seam in that file with no cost at all: importers get a read-only view and
  * no setter has to be exported.

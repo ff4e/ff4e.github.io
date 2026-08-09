@@ -220,18 +220,21 @@ Automated, deterministic, **non-AI** (no LLM/vision at runtime — plain asserti
     npm run test:all # typecheck + unit + UI, in sequence, fail-fast (the full gate)
     npm run test:solutions # replay known FFNG solutions per room (needs $FFNG_DATA)
 
-`npm run test:all` chains `typecheck && test && test:ui` — the one command to run before
-considering a change done (it stops at the first failing phase).
+`npm run test:all` chains `typecheck && test && test:ui` — the full gate, and what to run
+before opening a PR (it stops at the first failing phase). For smaller changes CONTRIBUTING.md
+has a table of how much checking is actually warranted; a docs-only change needs none of this.
 
 The full UI suite is ~315 s, so for the inner loop pass a pattern and run only what your
 change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a gate. See
 CONTRIBUTING.md for how much checking a given change actually needs, and for the
 `KNOWN_FLAKY` retry rule.
 
-`typecheck` and the unit suite also run in CI on every push
-(`.github/workflows/checks.yml`). The browser probes cannot: they need the original game
-data, which is copyrighted and not in the repo. Without it the unit suite still covers
-1522 of its 1590 tests, which is what makes that job worth having.
+`typecheck`, the unit suite and `vite build` also run in CI on every push
+(`.github/workflows/checks.yml`). The browser probes do not — not for lack of data
+(`public/data/` is committed) but because the suite takes ~6 minutes and the `test-gl-*`
+probes need macOS/Metal. A few unit tests need the original extracted data
+(`$FFNG_DATA`), which genuinely is not in the repo; they skip themselves, and 1529 of
+1597 still run without it.
 
 ### Randomness in the unit suite
 
@@ -405,10 +408,10 @@ name rather than trusting the range.
 | 982–1074 | Graphics tier, renderer, dev flags | `setGraphics`, `setRenderer`, `setRenderOnDirty`, `setDevEnabled` | Tier selection, CPU vs WebGL, render-on-dirty, the dev pane. |
 | 1075–1152 | Art wiring | `initArt` | Hands `art.ts` its view of the game. The art loading itself is in that module. |
 | 1153–1298 | Engine, audio & mode state | `audio`, `engine`, `activeScript`, `chatter`, `cutscene`, `showmode`, `hooks`, `KEYS` | The mutable core: step engine, script, dialogue, the three playback modes, and the key tables. |
-| 1299–1507 | Room construction | `buildRoom`, `setInfo`, `applySubFont`, `scriptTalk` | Turns parsed FFR data into a live `Room` + `StepEngine`. Everything room-related funnels through here. |
+| 1299–1507 | Room construction | `buildRoom`, `setInfo`, `applySubFont`, `scriptTalk` | Turns parsed FFR data into a live `Room` + `StepEngine`, and refreshes the info line. Room *loading*, audio, movement and drawing are elsewhere. |
 | 1508–1996 | Cutscene, showmode, replay | `startCutscene`, `startShowmode`, `advanceShowmode`, `applyCapAction`, `ensureAiKufr`, `drawCutscene` | The KUFRIK demo, the `.cap` demonstration player, record replay, and the cutscene compositor. |
 | 1997–2255 | Room load & audio wiring | `loadRoom`, `fetchSoundPkg`, `loadSoundPkg`, `loadRoomVoices`, `startRoomMusic`, `talk` | Fetch FFR/FFS/FFT for a room, arm its voices, start its music. **Hot.** |
-| 2256–2447 | Movement & input dispatch | `tryStep`, `beginHeldMove`, `dispatchHeldMove`, `wallShove`, `restore`, `restartRoom` | The `KeyRoom` held-key state machine and how a keypress becomes a game step. |
+| 2256–2447 | Movement, replay & restart | `tryStep`, `beginHeldMove`, `dispatchHeldMove`, `wallShove`, `applyRecordStep`, `restore`, `advanceLoadmode`, `restartRoom` | The `KeyRoom` held-key state machine and how a keypress becomes a game step — plus replaying a saved record (`loadmode`) and restarting a room. |
 | 2448–2525 | Save/load game | `saveGame`, `loadGame`, `saveExists`, `canSave`, `onWinBookkeeping` | In-room save slots and what happens on a win. |
 | 2526–2730 | Control panel | `panelState`, `optionsState`, `tickPanelScroll`, `togglePanelOptions`, `openHelp`, `drawPanel` | The side panel: its buttons, the options scroll animation, the help overlay. |
 | 2731–2977 | World map drawing | `ensureDeskyData`, `openMapInfo`, `drawMap`, `aiPlaqueFor`, `drawMapOverlays` | The branch map, its name plaques, and the record info panel (krokoměr). |
@@ -421,9 +424,9 @@ name rather than trusting the range.
 | 4256–4442 | `loop()` | `loop` | The rAF callback: which screen paints, how many logic steps run, when to sleep. |
 | 4443–4668 | Keyboard | `keydown` / `keyup` listeners | Every key binding, including cheats, dev keys and modal handling. |
 | 4669–4972 | Pointer | `cellFromEvent`, `clickCell`, `dirToward`, `clickMapAt`, `panelCoords` | Fish selection and click-to-swim target (the pathfinding is in `stepEngine.ts`), map and panel hit-testing. |
-| 4973–5061 | Dev bar & window wiring | `populateRooms`, `resize` / `fullscreenchange` / dpr watchers | The dev-only room picker and the relayout triggers. |
+| 4973–5061 | Dev bar & window wiring | `populateRooms`, `fitSelect`, `rendererSelect`, `graphicsSelect`, `idleDirtyToggle`, `winRoomBtn`, `resize` / `fullscreenchange` / dpr watchers | The dev-only controls — room picker, fit mode, renderer, graphics tier, idle-render toggle, win-room — and the relayout triggers. |
 | 5062–5224 | Boot | `await FontData.load`, `parseFfp`, `loadSoundPkg`, `loadRoom(7)`, `initFeedback`, `requestAnimationFrame(loop)` | The top-level-await boot sequence, in load order. What is critical vs. optional is documented inline. |
-| 5225–5692 | `window.__ff` host | `debugHooks` | The getters the debug hooks read the game through. The hooks themselves are in `debugHooks.ts`. |
+| 5225–5692 | `window.__ff` host | `debugHooks` | The 144-member host the debug hooks read the game through: getters, plus eleven setters for the values probes deliberately write. The hooks themselves are in `debugHooks.ts`. |
 
 Regions marked **Hot** are the ones recent history keeps returning to: the loading overlay, room load and
 the frame pacing. That came from bucketing the diff hunks of the 25 commits before the split by line — a
@@ -438,7 +441,7 @@ taking `main.ts` from 88 k to 61 k.
 
 ### Map of `src/render/`
 
-The renderer is 28 files and ~84 k tokens — the second-largest area after `src/app`. The split runs along
+The renderer is 28 files and ~84 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
 two axes at once (which **art tier**: classic / enhanced / `ai`; and which **backend**: CPU or WebGL), which
 is what makes it hard to guess where something lives. This table is the shortcut.
 

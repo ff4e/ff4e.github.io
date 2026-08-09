@@ -1,7 +1,7 @@
 /**
  * `window.__ff` — the app's debug/test interface.
  *
- * 215 entries, and every one of the 85 UI probes in tools/ reads this object. It is
+ * 216 entries, and every one of the 85 UI probes in tools/ reads this object. It is
  * effectively the public API of the game for testing, which is why CONTRIBUTING.md
  * freezes its shape while main.ts is being split: it is the only external oracle a
  * refactor of that file has, and an oracle that moves with the code proves nothing.
@@ -40,7 +40,7 @@ import { Room } from '../core/room.js';
 import { Script } from '../core/script.js';
 import type { RoomScript, ScriptSnapshot } from '../core/script.js';
 import { saveSettings } from '../core/settings.js';
-import type { GraphicsLevel, SubtitleMode } from '../core/settings.js';
+import type { GraphicsLevel, Settings, SubtitleMode } from '../core/settings.js';
 import { MOVE_FRAMES, StepEngine, exitFramesFor } from '../core/stepEngine.js';
 import type { TetrisKey } from '../core/tetris.js';
 import type { FfpPanel } from '../data/ffp.js';
@@ -238,7 +238,7 @@ export interface DebugHost {
   readonly setGraphics: (level: GraphicsLevel) => void;
   readonly setRenderOnDirty: (v: boolean) => void;
   readonly setSubtitleMode: (mode: SubtitleMode) => void;
-  readonly settings: import("/Users/martinobratil/RiderProjects/ff4e-split-main/src/core/settings").Settings;
+  readonly settings: Settings;
   readonly showLegImage: (leg: number, pending?: { room: number; replay?: string; }) => Promise<void>;
   readonly showMap: () => void;
   readonly showmode: { actions: CapAction[]; idx: number; } | null;

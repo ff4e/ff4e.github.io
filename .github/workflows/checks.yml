@@ -5,11 +5,22 @@
 # trusted — and a skipped check whenever that felt too expensive.
 #
 # What it deliberately does NOT do is run the browser probes (`npm run test:ui`).
-# Those need the original game data, which is copyrighted and not in the repo. That
-# is not a reason to have no CI: measured on 2026-08-09, with no game data present at
-# all, `vitest run` still passes 1522 of 1590 tests in 3.3 seconds — the data-dependent
-# ones skip themselves cleanly (see test/solutions.test.ts). So this covers typecheck
-# plus 96% of the unit suite, and the UI probes stay a local, pre-PR gate.
+# The reason is NOT missing data — `public/data/` is committed (318 files), so the
+# probes could in principle run here. It is that the suite takes ~5-6 minutes plus a
+# Playwright browser download, and the ten `test-gl-*` probes ask Chromium for
+# `--use-angle=metal`, which is macOS-only; on a Linux runner they would not be
+# testing the backend they exist to test. So the probes stay a local pre-PR gate, and
+# adding a macOS job later is a real option rather than an impossibility.
+#
+# The unit suite, by contrast, is nearly free. A few of its tests need the ORIGINAL
+# extracted game data ($FFNG_DATA, ~/.cache/ffng-orig) which is genuinely not in the
+# repo; those skip themselves cleanly (see test/solutions.test.ts). Measured without
+# it: 1529 of 1597 pass in ~3 seconds.
+#
+# `vite build` runs too. `tsc --noEmit` does not link or resolve assets, so a bundling
+# break (a bad import path, an esbuild-only failure) passes typecheck and fails only
+# when somebody serves the app — which, without this step, would be nobody until the
+# release tag.
 name: Checks
 
 on:
@@ -39,3 +50,5 @@ jobs:
       # The unit suite seeds Math.random per file and per test (test/rng.setup.ts), so
       # this is deterministic without pinning a seed here.
       - run: npm run test
+      # Not covered by typecheck: bundling, asset resolution, esbuild-only failures.
+      - run: npm run build

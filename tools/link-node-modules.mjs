@@ -46,7 +46,7 @@ if (argv.includes('--unlink')) {
   process.exit(0);
 }
 
-/** An explicit --from, else the sibling worktree with the largest install. */
+/** An explicit --from, else the first sibling worktree with a real install. */
 function findSource() {
   const at = argv.indexOf('--from');
   if (at !== -1) {

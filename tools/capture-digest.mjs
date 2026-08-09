@@ -225,6 +225,83 @@ async function capture(port) {
     out.rooms[num] = { atEntry, afterMoves, afterRestart };
   }
 
+  // ── Beyond the room ──────────────────────────────────────────────────────────
+  // The scenario above drives only room entry, movement and restart, which leaves
+  // several extracted modules structurally unexercised: nothing ever saved, opened
+  // the panel, reached the map, or fired a cheat. Those are cheap `__ff` calls and
+  // they are where persist.ts, cheats.ts and art.ts's map path actually live.
+  out.extras = await p.evaluate(async () => {
+    const ff = window.__ff;
+    const r = {};
+
+    // persist.ts: a real save -> move -> load round-trip, which is the only path that
+    // exercises the save slots rather than just reading them at boot.
+    await ff.enterRoomAwait(7);
+    while (ff.phase() !== 'idle') await new Promise((x) => setTimeout(x, 40));
+    r.canSave = ff.canSave();
+    const before = ff.posHash();
+    ff.save();
+    ff.press('little', 3);
+    while (ff.phase() !== 'idle') await new Promise((x) => setTimeout(x, 40));
+    const moved = ff.posHash();
+    ff.load();
+    while (ff.loading()) await new Promise((x) => setTimeout(x, 40));
+    while (ff.phase() !== 'idle') await new Promise((x) => setTimeout(x, 40));
+    r.saveRoundTrip = { moveChangedIt: moved !== before, loadRestoredIt: ff.posHash() === before };
+    r.hasSave = ff.hasSave();
+
+    // persist.ts again: the forced-record path (__ff.markBest -> forceBest), which the
+    // split rewrote and which nothing else here touches.
+    ff.markBest(7, 'JJDKD');
+    r.bestRecord7 = ff.bestRecord(7);
+    r.score7 = ff.scores()['7'] ?? null;
+
+    // cheats.ts: the Tetris minigame and a typed cheat, neither previously reached.
+    ff.typeCheat('XTETRIS');
+    for (let i = 0; i < 40 && !ff.tetris(); i++) await new Promise((x) => setTimeout(x, 50));
+    r.tetrisOpened = ff.tetris() !== null;
+    r.tetrisBoard = ff.tetrisBoardHash();
+    ff.closeTetris();
+    r.tetrisClosed = ff.tetris() === null;
+    r.ultraviolence = ff.ultraviolence();
+    r.silentFilm = ff.silentFilm();
+    r.interlacedFaze = ff.interlacedFaze();
+
+    // The panel: the options face scrolls open over ~100ms per frame on wall-clock, so
+    // only the settled end state is recorded — sampling mid-scroll would be a timer race.
+    r.panelBefore = ff.panelOstav();
+    ff.toggleOptions();
+    for (let i = 0; i < 40 && !ff.optionsOpen(); i++) await new Promise((x) => setTimeout(x, 50));
+    r.optionsOpened = ff.optionsOpen();
+    ff.toggleOptions();
+    for (let i = 0; i < 40 && ff.optionsOpen(); i++) await new Promise((x) => setTimeout(x, 50));
+    r.optionsClosed = !ff.optionsOpen();
+
+    // glPlumbing.ts would otherwise get NO coverage at all: the capture pins the CPU
+    // backend for determinism, so the GPU compositors are never built. Switch to WebGL
+    // just long enough to composite one frame on both paths and compare them. The value
+    // recorded is a DIFFERENCE, not a colour — so it does not depend on what this
+    // machine's GPU produces, and is 0 unless the two paths diverged.
+    ff.setRenderer('webgl');
+    for (let i = 0; i < 40 && !ff.glActive(); i++) await new Promise((x) => setTimeout(x, 50));
+    r.glActive = ff.glActive();
+    try {
+      const par = ff.glBgParity();
+      r.glBgParity = par && typeof par === 'object' ? { webgl: par.webgl, max: par.max ?? null } : par;
+    } catch (e) {
+      r.glBgParity = 'threw: ' + (e?.message ?? e);
+    }
+    ff.setRenderer('cpu');
+
+    ff.showMap();
+    for (let i = 0; i < 60 && ff.mapArtPending(); i++) await new Promise((x) => setTimeout(x, 50));
+    r.screenAfterShowMap = ff.screen();
+    r.hasMap = ff.hasMap();
+    r.mapPresented = ff.mapPresented();
+    r.solvedRooms = ff.solvedRooms();
+    return r;
+  });
+
   out.consoleErrors = errs;
   await b.close().catch(() => {});
   return out;
@@ -287,7 +364,7 @@ let code = 0;
 try {
   await buildApp(log);
   port = await startPreview({ log });
-  log(`capturing (${ROOMS.length} rooms)…`);
+  log(`capturing (${ROOMS.length} rooms + save/cheats/panel/map)…`);
   const first = stable(await capture(port));
   if (first.consoleErrors.length) {
     console.error('[digest] the app logged console errors — the capture is not trustworthy:');

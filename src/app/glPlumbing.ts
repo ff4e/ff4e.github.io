@@ -15,9 +15,9 @@
  * is now a call to markGlFailed(). Everything else this module exports is read
  * through ES live bindings, so main.ts sees current values with no accessors.
  *
- * initGlPlumbing() is called from main.ts at the point this code used to sit; module
- * scope is side-effect-free apart from two canvas listeners for WebGL context loss,
- * which is where they have to be.
+ * initGlPlumbing() is called from main.ts at the point this code used to sit, and module
+ * scope here is entirely side-effect-free — including the context-loss listeners, which
+ * initGlPlumbing() attaches rather than module scope. See its comment for why.
  */
 import { Room } from '../core/room.js';
 import type { ArtSource } from '../render/artSource.js';
@@ -49,9 +49,41 @@ export interface GlPlumbingHost {
 
 let host!: GlPlumbingHost;
 
-/** Hand this module its view of the game. Called once, from main.ts, during boot. */
+/**
+ * Hand this module its view of the game, and arm the context-loss handlers.
+ *
+ * The listeners are attached HERE rather than at module scope. An imported module is
+ * evaluated before any statement of its importer, so registering them at module scope
+ * put them ahead of main.ts's phone gate — which is supposed to precede every side
+ * effect. They were harmless there (glCanvas is detached until buildStage() runs, and a
+ * detached canvas cannot lose a context it never had), but "harmless because of a
+ * second fact" is a worse invariant than "does not happen". Called once, during boot.
+ */
 export function initGlPlumbing(h: GlPlumbingHost): void {
   host = h;
+
+  // WebGL context loss (GPU reset, driver reclaim, tab backgrounding) does NOT
+  // throw — it fires an event and makes subsequent GL calls silently no-op, which
+  // would otherwise leave a blank canvas. Handle it as the real per-frame fallback
+  // net: disable the GPU backend for now (→ the dispatch takes the CPU path and
+  // hides #screen-gl automatically) and drop the dead compositor so it is rebuilt
+  // on the next explicit enable. preventDefault() lets the browser restore the
+  // context; on restore we allow a fresh GlScreen to be created.
+  glCanvas.addEventListener('webglcontextlost', (e) => {
+    e.preventDefault();
+    glFailed = true;
+    glAiFailed = true;
+    roomGl.reset();
+    aiGl.reset();
+    console.warn('[ff] WebGL context lost; falling back to the CPU compositor. Press R to retry WebGL.');
+    host.setInfo();
+  });
+  glCanvas.addEventListener('webglcontextrestored', () => {
+    // Allow a rebuild, but stay on CPU until the user re-enables WebGL (R), so a
+    // flapping context can never thrash the render path.
+    roomGl.reset();
+    aiGl.reset();
+  });
 }
 
 
@@ -147,21 +179,6 @@ export const glAiCompositor = (): GlAiScreen | null => aiGl.get();
 // hides #screen-gl automatically) and drop the dead compositor so it is rebuilt
 // on the next explicit enable. preventDefault() lets the browser restore the
 // context; on restore we allow a fresh GlScreen to be created.
-glCanvas.addEventListener('webglcontextlost', (e) => {
-  e.preventDefault();
-  glFailed = true;
-  glAiFailed = true;
-  roomGl.reset();
-  aiGl.reset();
-  console.warn('[ff] WebGL context lost; falling back to the CPU compositor. Press R to retry WebGL.');
-  host.setInfo();
-});
-glCanvas.addEventListener('webglcontextrestored', () => {
-  // Allow a rebuild, but stay on CPU until the user re-enables WebGL (R), so a
-  // flapping context can never thrash the render path.
-  roomGl.reset();
-  aiGl.reset();
-});
 
 /**
  * Clear the WebGL disabled-for-session state so both GPU backends can run again.
