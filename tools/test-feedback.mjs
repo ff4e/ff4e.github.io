@@ -249,10 +249,14 @@ await withApp(async ({ p, expect }) => {
   // ── It follows the panel into its other home, over the world map ──────────────
   // The panel column is what floats there, not the canvas, so the strip travels with
   // the window it is a footer of rather than being left behind beside the stage.
-  await p.evaluate(() => {
-    window.__ff.showMap();
-    window.__ff.openMapOptions();
+  await p.evaluate(() => window.__ff.showMap());
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
+  await p.waitForFunction(() => {
+    const e = document.getElementById('feedbar');
+    return e === null || e.hidden;
   });
+  const mapClosed = await boxOf(p, '#screen');
+  await p.evaluate(() => window.__ff.openMapOptions());
   await p.waitForFunction(() => window.__ff.mapOverlay() === 'options');
   await p.waitForFunction(() => {
     const e = document.getElementById('feedbar');
@@ -261,7 +265,7 @@ await withApp(async ({ p, expect }) => {
   {
     const bar = await barBox(p);
     const panelBox = await boxOf(p, '#panel');
-    const mapBox = await boxOf(p, '#screen');
+    const mapOpen = await boxOf(p, '#screen');
     expect(
       bar !== null && Math.abs(bar.y - (panelBox.y + panelBox.height)) < 12,
       'over the map, the strip floats with the panel it belongs to',
@@ -271,8 +275,16 @@ await withApp(async ({ p, expect }) => {
     // (daOptions is modal over the map, UMain.pas:1120) — so the only thing to check
     // is that it stays within the panel's own footprint horizontally.
     expect(
-      mapBox !== null && bar.x >= panelBox.x - 0.5 && bar.x + bar.width <= panelBox.x + panelBox.width + 0.5,
+      bar.x >= panelBox.x - 0.5 && bar.x + bar.width <= panelBox.x + panelBox.width + 0.5,
       'and never spreads wider than the floating panel',
+    );
+    // The map must not TWITCH when Options opens over it. The panel column has to be
+    // `display: none` off-screen, not merely emptied: a zero-width column left in the
+    // flex row still claims the row's gap, so the map sat half a gap off-centre and
+    // then slid right the instant Options floated the column out of the flow.
+    expect(
+      JSON.stringify(mapOpen) === JSON.stringify(mapClosed),
+      `opening Options over the map does not move the map (${JSON.stringify(mapClosed)} → ${JSON.stringify(mapOpen)})`,
     );
   }
   await p.evaluate(() => window.__ff.closeMapOverlay());
@@ -281,6 +293,10 @@ await withApp(async ({ p, expect }) => {
     return e === null || e.hidden;
   });
   expect((await barBox(p)) === null, 'closing Options takes the strip away again');
+  expect(
+    JSON.stringify(await boxOf(p, '#screen')) === JSON.stringify(mapClosed),
+    'and closing it puts the map back exactly where it was',
+  );
 
   // ── And nothing was sent ──────────────────────────────────────────────────────
   expect(offOrigin.length === 0, `nothing left the page (${offOrigin.slice(0, 3).join(', ') || 'no off-origin requests'})`);

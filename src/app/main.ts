@@ -3610,7 +3610,13 @@ function drawPanel(): void {
   if (!panel) return;
   const asMapOverlay = screen === 'map' && mapOverlay === 'options';
   const visible = screen === 'room' || asMapOverlay;
-  panelCanvas.style.display = visible ? '' : 'none';
+  // Hide the COLUMN, not just the canvas inside it. `display: none` takes an element
+  // out of the flex row entirely, and with it the row's gap; hiding only the canvas
+  // would leave a zero-width column still claiming that gap, so the map sat half a gap
+  // off-centre and then jumped right the moment Options floated the column out of the
+  // flow. (That is exactly what happened when the column was introduced — the canvas
+  // used to be the flex item itself, and hiding it removed the gap for free.)
+  panelCol.style.display = visible ? '' : 'none';
   // The feedback strip belongs to the Options face and hangs under it (index.html).
   // It is shown only while those options are actually on screen, so nothing modern is
   // in view while the game is being played — and it is absolutely positioned, so it
