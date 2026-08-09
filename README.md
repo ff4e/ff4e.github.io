@@ -409,7 +409,7 @@ function/const name rather than trusting the range.
 | 5907–6210 | Pointer | `cellFromEvent`, `clickCell`, `dirToward`, `clickMapAt`, `mapCoords`, `panelCoords` | Fish selection and click-to-swim target (the pathfinding itself is in `stepEngine.ts`), map node hit-testing, panel button hit-testing. |
 | 6211–6291 | Dev bar & window wiring | `populateRooms`, `resize` / `fullscreenchange` / dpr watchers | The dev-only room picker and the relayout triggers. |
 | 6292–6448 | Boot | `await FontData.load`, `parseFfp`, `loadSoundPkg`, `loadRoom(7)`, `initFeedback`, `requestAnimationFrame(loop)` | The top-level-await boot sequence, in load order. What is critical vs. optional is documented inline. |
-| 6449–7798 | `window.__ff` test hook | `__ff` | 215 entries — a sixth of the file. **85 of the 87 UI probes read this object**, so changing a key's shape changes the probes. |
+| 6449–7798 | `window.__ff` test hook | `__ff` | 215 entries — a sixth of the file. **All 85 UI probes in `tools/` read this object**, so changing a key's shape changes the probes. |
 
 Regions marked **Hot** are where the last 15 commits to this file actually landed
 (`git log -15 -- src/app/main.ts`, hunks bucketed by line): the loading overlay, the art-tier loading,
