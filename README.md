@@ -202,7 +202,7 @@ down everything else.
 ## Run
 
     npm install
-    npm run dev                     # browser host at http://127.0.0.1:5173 (with sound)
+    npm run dev                     # browser host on a FREE port (it prints the URL), with sound
     npm run dump-ffr -- --all       # M0: validate all 72 FFR (byte-exact, DFFR sizes)
     npm run render-room -- UTES     # M1: render a room's resting frame -> out/UTES.png
     npm run test-move -- UTES       # headless movement/push probe + render (exploratory)
@@ -216,11 +216,22 @@ Automated, deterministic, **non-AI** (no LLM/vision at runtime — plain asserti
 
     npm test        # unit + physics (Vitest, headless, no browser, no game data needed)
     npm run test:ui # browser/integration (Playwright; builds the app and serves it)
+    npm run test:ui -- cheat options   # ...or just the probes whose name matches
     npm run test:all # typecheck + unit + UI, in sequence, fail-fast (the full gate)
     npm run test:solutions # replay known FFNG solutions per room (needs $FFNG_DATA)
 
 `npm run test:all` chains `typecheck && test && test:ui` — the one command to run before
 considering a change done (it stops at the first failing phase).
+
+The full UI suite is ~315 s, so for the inner loop pass a pattern and run only what your
+change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a gate. See
+CONTRIBUTING.md for how much checking a given change actually needs, and for the
+`KNOWN_FLAKY` retry rule.
+
+`typecheck` and the unit suite also run in CI on every push
+(`.github/workflows/checks.yml`). The browser probes cannot: they need the original game
+data, which is copyrighted and not in the repo. Without it the unit suite still covers
+1522 of its 1590 tests, which is what makes that job worth having.
 
 ### Randomness in the unit suite
 
@@ -364,6 +375,7 @@ the same assertions.
 - `tools/dump-ffr.ts` — M0 verification CLI (parse + size-check a room or all rooms).
 - `tools/render-room.ts` — M1 verification CLI (render a room / all rooms to PNG).
 - `tools/preview-server.mjs` — the shared `vite build` + `vite preview`-on-a-free-port machinery.
+- `tools/dev-server.mjs` — `npm run dev`: the dev server on a free port, printing what it serves.
 - `tools/capture-digest.mjs` — byte-exact behavioural fingerprint, comparable across git revisions.
   The safety net for the `main.ts` split; read its header for what it does and does not cover.
 

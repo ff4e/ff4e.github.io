@@ -8,7 +8,7 @@
   "scripts": {
     "dump-ffr": "tsx tools/dump-ffr.ts",
     "render-room": "tsx tools/render-room.ts",
-    "dev": "vite",
+    "dev": "node tools/dev-server.mjs",
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",

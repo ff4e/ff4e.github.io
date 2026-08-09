@@ -48,6 +48,47 @@ to every PR in that series, and the second one applies to *everyone else* too:
   Read the header of that file before trusting it: it covers game state and background pixels, not the
   pixels of animating items.
 
+## Running and checking your work
+
+- **`npm run dev`** picks a free port, binds it strictly, and prints both the URL and the directory it is
+  serving. Do not go back to a bare `vite`: this repo is normally a dozen-plus worktrees, several with a
+  server up, and a dev server that silently moves off 5173 means the probes and mutation harnesses (which
+  default to 5173) end up testing *somebody else's worktree*. That has produced a bogus "7 mutations
+  SURVIVED" here before.
+- **`npm run test:ui -- <pattern>…`** runs only the probes whose filename matches, e.g.
+  `npm run test:ui -- cheat options`. The full suite is ~315 s; three probes are ~15 s. Use the filter for
+  the inner loop and the full suite before you open the PR — a filtered run says `PARTIAL RUN` in its
+  summary and is not a gate.
+- **CI** (`.github/workflows/checks.yml`) runs `typecheck` and the unit suite on every push. It cannot run
+  the browser probes, because they need the copyrighted game data, so those stay a local pre-PR step.
+
+### How much checking does a change need?
+
+Match the gate to the risk rather than paying the full 5.7 minutes for a typo:
+
+| Change | Run |
+| --- | --- |
+| Docs only | nothing (CI covers it) |
+| Logic with unit coverage | `npm run typecheck && npm run test` |
+| Anything reaching the DOM, the loop, or a screen | the above + relevant `npm run test:ui -- <pattern>` |
+| Before opening the PR | the full `npm run test:ui` |
+| Render-path changes | also the relevant mutation harness (`tools/mutate-*.mjs`), and report survivors |
+
+### Flaky probes
+
+`tools/run-ui-tests.mjs` has a `KNOWN_FLAKY` list of probes that may be retried, with the reason and the
+owner of the fix. **Only probes on that list are ever retried**, and a retried pass is reported as `FLAKY`
+with every failed attempt printed — never as a silent pass. A probe that has not flaked before is reporting
+a real regression the first time it fails.
+
+Do not add a probe to that list to quiet a failure you have not diagnosed. Prove it is pre-existing first;
+the cheap way is a paired A/B — two preview servers, one per revision, alternating runs so both sides see
+the same machine load.
+
+Retrying is mitigation, not a fix, and the entry should say how well it works. The current one still fails
+a full run about two times in five, which is deliberate: a probe that unreliable should be able to go red,
+because burying it under six attempts teaches everyone to distrust the suite instead of fixing the bug.
+
 ## Assets & licensing
 
 - Everything shipped under `public/data/` descends from ALTAR's original 1998 Fish Fillets data,

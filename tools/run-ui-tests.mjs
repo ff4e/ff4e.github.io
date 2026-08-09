@@ -85,6 +85,36 @@ const ANGLE_ARGS = ['--use-gl=angle', '--use-angle=metal', ...PLAIN_ARGS];
 // is both cheaper (it goes back in the pool) and stronger than a quiet lane.
 // test-smoothness used to sit here for exactly that reason and flaked anyway — the
 // lane guarantees no other PROBE, not a quiet machine — so it was reworked instead.
+/**
+ * Probes known to fail intermittently for reasons that are NOT the change under test,
+ * and how many extra attempts each may have.
+ *
+ * Retries are dangerous and this list is deliberately narrow, because a retry is a way
+ * to make a real failure disappear. Two rules keep that from happening:
+ *
+ *   1. ONLY probes named here are ever retried. A probe that has never flaked before is
+ *      reporting a regression the first time it fails, and it is reported as a failure.
+ *      Never add a probe here to quiet a failure you have not diagnosed.
+ *   2. A retried pass is NOT a silent pass. It is reported as FLAKY, counted separately
+ *      in the summary, and the failed attempts are printed. If a probe here stops being
+ *      flaky, the summary stops mentioning it and the entry should be deleted.
+ *
+ * Each entry needs a reason and, where known, who owns the fix.
+ */
+const KNOWN_FLAKY = new Map([
+  // "a cached room entry never flashes the loading overlay" — fails on a clean main.
+  // Measured 2026-08-09 with a paired A/B (two preview servers, alternating runs so both
+  // revisions saw the same machine load): base 4/10, unrelated branch 5/10. Owned by the
+  // fish_fillets_cached_entry_flash work; delete this entry when that lands.
+  //
+  // Two retries MITIGATE it and do not fix it: over five filtered runs the outcome was
+  // 1 clean pass, 2 flaky passes, and 2 runs where all three attempts failed. The count
+  // is deliberately not raised further — a probe this unreliable should be able to go
+  // red, because burying it under six attempts teaches everyone to distrust the suite
+  // instead of fixing the bug.
+  ['test-ai-loading.mjs', 2],
+]);
+
 const EXCLUSIVE = new Set([
   'test-timing.mjs', // asserts the game clock keeps up with wall clock, frame budget permitting
   'test-idlefps.mjs', // asserts the render loop drops to the idle timer
@@ -183,8 +213,33 @@ function runProbe(file, env) {
 
 function report(r) {
   const why = r.note ? ` (${r.note})` : '';
-  console.log(`\n=== ${r.t} — ${(r.ms / 1000).toFixed(1)}s — ${r.ok ? 'PASS' : 'FAIL'}${why} ===`);
+  const verdict = r.ok ? (r.flaky ? `FLAKY (passed after ${r.flaky} retr${r.flaky === 1 ? 'y' : 'ies'})` : 'PASS') : 'FAIL';
+  console.log(`\n=== ${r.t} — ${(r.ms / 1000).toFixed(1)}s — ${verdict}${why} ===`);
   process.stdout.write(r.out.endsWith('\n') || r.out === '' ? r.out : r.out + '\n');
+}
+
+/**
+ * Run one probe, retrying it only if it is on the KNOWN_FLAKY list.
+ *
+ * The output of every failed attempt is kept and printed, so a "flaky pass" still shows
+ * you what went wrong — the point is to stop a known-bad probe from failing the run, not
+ * to hide it.
+ */
+async function runProbeWithRetries(file, env) {
+  const extra = KNOWN_FLAKY.get(file) ?? 0;
+  let r = await runProbe(file, env);
+  if (r.ok || extra === 0) return r;
+  const attempts = [r];
+  for (let i = 0; i < extra && !r.ok; i++) {
+    r = await runProbe(file, env);
+    attempts.push(r);
+  }
+  // Total the time actually spent, so the summary does not under-report a probe that
+  // cost three runs, and the scheduler still learns a single run's duration.
+  const spent = attempts.reduce((s, a) => s + a.ms, 0);
+  return r.ok
+    ? { ...r, flaky: attempts.length - 1, ms: spent, out: attempts.map((a) => a.out).join('\n') }
+    : { ...r, ms: spent, note: `${attempts.length} attempts, all failed${r.note ? `; ${r.note}` : ''}` };
 }
 
 /** Worker pool: `limit` probes in flight, longest-first. */
@@ -194,7 +249,7 @@ async function runPool(files, limit, env, results) {
     for (;;) {
       const i = next++;
       if (i >= files.length) return;
-      const r = await runProbe(files[i], env);
+      const r = await runProbeWithRetries(files[i], env);
       report(r);
       results.push(r);
     }
@@ -251,9 +306,26 @@ try {
   await die(e instanceof PreviewError ? e.message : String(e?.message ?? e));
 }
 
-const all = readdirSync(toolsDir)
+/**
+ * Run a SUBSET: `npm run test:ui -- cheat options` runs every probe whose filename
+ * contains "cheat" or "options".
+ *
+ * For the inner loop. The whole suite is 315s wall, and a session fixing one bug
+ * usually cares about three probes — paying 315s per iteration is what makes people
+ * stop checking. The full run is still what a PR needs; this is for the twenty runs
+ * before it.
+ *
+ * A pattern that matches nothing is an error, not an empty green run: silently passing
+ * zero probes is the one outcome that would let a typo look like success.
+ */
+const patterns = process.argv.slice(2).filter((a) => !a.startsWith('-'));
+const every = readdirSync(toolsDir)
   .filter((f) => /^test-.*\.mjs$/.test(f))
   .sort();
+const all = patterns.length ? every.filter((f) => patterns.some((p) => f.includes(p))) : every;
+if (!all.length) await die(`no probe matches ${patterns.map((p) => `"${p}"`).join(', ')}`);
+if (patterns.length)
+  console.log(`[test:ui] filtered to ${all.length}/${every.length} probes: ${all.join(', ')}`);
 
 const timings = readTimings();
 // Longest-first so the long tail starts early; unknown probes go first (they are
@@ -296,12 +368,19 @@ writeTimings(timings);
 
 results.sort((a, b) => a.t.localeCompare(b.t));
 const failed = results.filter((r) => !r.ok);
+const flaky = results.filter((r) => r.ok && r.flaky);
 console.log('\n──────── UI test summary ────────');
 for (const r of results)
   console.log(
-    `  ${r.ok ? 'PASS' : 'FAIL'}  ${(r.ms / 1000).toFixed(1).padStart(6)}s  ${r.t}${r.note ? `  (${r.note})` : ''}`,
+    `  ${r.ok ? (r.flaky ? 'FLAKY' : 'PASS ') : 'FAIL '} ${(r.ms / 1000).toFixed(1).padStart(6)}s  ${r.t}${r.note ? `  (${r.note})` : ''}`,
   );
 console.log(`${results.length - failed.length}/${results.length} passed in ${wall.toFixed(1)}s wall`);
+// Never let a retried pass slip by unmentioned: it is a green run that cost extra
+// attempts, and if the reason ever changes somebody has to notice.
+for (const r of flaky)
+  console.log(`  FLAKY: ${r.t} failed ${r.flaky}x then passed — see KNOWN_FLAKY in this file`);
+if (patterns.length)
+  console.log(`  PARTIAL RUN: ${all.length} of ${every.length} probes (filtered). Not a full gate.`);
 console.log('  slowest:');
 for (const r of [...results].sort((a, b) => b.ms - a.ms).slice(0, 5))
   console.log(`    ${(r.ms / 1000).toFixed(1).padStart(6)}s  ${r.t}`);
