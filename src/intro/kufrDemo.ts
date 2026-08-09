@@ -219,3 +219,15 @@ export class KufrDemo {
 export function samplesToFrames(samples: number): number {
   return Math.max(30, Math.round((samples / FFS_SAMPLE_RATE) * 60));
 }
+
+/**
+ * The `ai` tier's cutscene art: one upscaled atlas plus the region and frame order
+ * needed to cut frames out of it. Loaded by main.ts and read by the debug hooks, so it
+ * lives with the cutscene player rather than inside either of them.
+ */
+export interface AiKufr {
+  base: ImageBitmap;
+  scale: number;
+  region: { x: number; y: number; w: number; h: number };
+  order: string[];
+}

@@ -20,6 +20,14 @@ export type VolumeBus = 'effect' | 'voice' | 'music';
 export type SubtitleMode = 'cz' | 'en' | 'off';
 
 /**
+ * Which art tier the game draws in: the 1998 palette art, the truecolor enhanced art,
+ * or the upscaled `ai` art. Persisted under `ff.graphics`. Lives here with the other
+ * persisted-preference unions so that main.ts and the debug hooks can both name it
+ * without either importing the other.
+ */
+export type GraphicsLevel = 'classic' | 'enhanced' | 'ai';
+
+/**
  * The levels the ORIGINAL boots with (RSound.pas:33-35 snd_volume=48,
  * talk_volume=64, music_volume=27, read into tahlo by PrectiZvuk, Uovl.pas:286):
  * snd -> 48 (index 11), talk -> 64 (index 12), music -> 27 (index 9).
