@@ -6,7 +6,10 @@
  *
  *  1) Unexplained black screen. draw() holds the previous frame while the room's art
  *     loads, but arriving from the map there IS no previous frame, so the hold rendered
- *     as a black stage. The delayed #loading overlay now covers that window.
+ *     as a black stage. There is now no such window on this path at all: a launch off the
+ *     map keeps the map on screen with the original's parchment over it until the room can
+ *     be drawn (beginMapLaunch, main.ts — test-parchment.mjs owns that). The delayed
+ *     #loading overlay stays for the entries with no map to keep.
  *  2) Visible enhanced→AI pop. The `ai` tier used to paint as soon as the ENHANCED art
  *     landed and then swap to the AI upscale a beat later (measured at 9-14s apart over
  *     Slow 4G). aiPending/roomArtPending() now hold the frame until the AI art is up.
@@ -39,9 +42,12 @@ await withApp(
     // what was painted, not about who won that race.
     for (const glob of gated) await p.route(glob, async (route) => { await aiGate; await route.continue().catch(() => {}); });
 
+    // Completed loads BEFORE this entry, so the waits below can tell the load this entry
+    // causes from the one that already happened (see where it is used).
+    const loadsBefore = await p.evaluate(() => window.__ff.roomLoads());
+
     // Watch EVERY frame for the invariant that kills symptom 2, and watch what was
-    // actually PAINTED rather than what the state flags claim.
-    //
+    // actually PAINTED rather than what the state flags claim.    //
     // The oracle is the #screen backing store: on the CANVAS-2D backend (pinned via
     // `{ cpu: true }` below) roomGeometry() sizes it to nativeW×4 only when the AI
     // compositor is the path drawing this frame, so a room painted in enhanced/classic
@@ -95,12 +101,28 @@ await withApp(
     });
 
     // --- The room builds (core assets are cached); the AI art is still gated. ---
-    await p.waitForFunction(() => !window.__ff.roomLoading() && window.__ff.roomNum() === 1);
+    // Anchored on the count of COMPLETED loads, not on roomLoading() alone: an entry off
+    // the map does not begin its load until the map has painted the parchment over it
+    // (beginMapLaunch, main.ts), so `!roomLoading() && roomNum() === 1` is still satisfied
+    // by the PREVIOUS entry for a frame or two — and the clock sampled inside that window
+    // is then reset by the build that follows, which is the sampling trap the note above
+    // is about, reached by a different route.
+    await p.waitForFunction(
+      (before) =>
+        window.__ff.roomLoads() > before && !window.__ff.roomLoading() && window.__ff.roomNum() === 1,
+      loadsBefore,
+    );
     expect(await p.evaluate(() => window.__ff.roomArtPending()), 'the AI art is still pending after the room is built');
 
-    // --- The overlay explains the wait (armed on a delay, so this is not instant). ---
-    await p.waitForFunction(() => window.__ff.loadingVisible());
-    expect(true, 'the loading overlay appears on the map→room path while the AI art loads');
+    // --- The wait is explained by the ORIGINAL's own indicator, not by an overlay: an
+    //     entry launched from the map keeps the map on screen with the parchment blitted
+    //     over it (UMain.pas:1489, and test-parchment.mjs), so symptom 1 has no black
+    //     stage left to cover here. The overlay stays for the entries with no map to keep.
+    await p.waitForFunction(() => window.__ff.mapLaunching() === 1);
+    expect(
+      !(await p.evaluate(() => window.__ff.loadingVisible())),
+      'the map→room path holds the map, so no full-screen overlay goes up over it',
+    );
 
     // --- Gameplay is frozen behind it. Sampled AFTER the build, so buildRoom()'s
     //     `count = 0` cannot be mistaken for the clock running.

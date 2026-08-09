@@ -748,7 +748,8 @@ let worldMap: WorldMap | null = null; // the branch-map screen
 let aiWorldMap: AiWorldMap | null = null;
 let mapOverlayCanvas: HTMLCanvasElement | null = null;
 let mapOverlayCtx: CanvasRenderingContext2D | null = null;
-let screen: 'map' | 'room' | 'intro' | 'legimage' = 'room'; // which screen is showing
+type Screen = 'map' | 'room' | 'intro' | 'legimage';
+let screen: Screen = 'room'; // which screen is showing
 // Leg-completion story image (obrazek, UMain.pas:831 zobraz_obrazek): the full-screen
 // "case file" page shown over a frozen map when the last room of a leg (depth 15) is
 // won. `legImage` holds the decoded page (null = none); `legImageNum` is the leg (1..8)
@@ -1896,6 +1897,15 @@ async function ensureAiPanel(): Promise<void> {
 let aiMapTried = false; // one-shot: the load is started at most once per session
 let aiMapPending = false; // that load is in flight (independent of the tier on screen)
 /**
+ * Which screen the map's art load was started FROM.
+ *
+ * The difference between preloading the map and waiting for it, in one value: 'intro' means
+ * the 2.54 MB was fetched while a movie was still playing, 'map' means the player is on the
+ * map watching it arrive. Recorded rather than derived because the start is a one-shot
+ * event, and by the next frame the screen has usually moved on.
+ */
+let aiMapStartedOn: Screen | null = null;
+/**
  * Is a map frame the thing currently on screen?
  *
  * Not "has a map ever been painted": the question it answers is whether withholding the
@@ -1940,6 +1950,7 @@ function beginMapArt(): void {
   if (aiMapTried || graphics !== 'ai' || !worldMap) return;
   aiMapTried = true;
   aiMapPending = true;
+  aiMapStartedOn = screen;
   void ensureAiWorldMap();
 }
 
@@ -3139,8 +3150,26 @@ function armRoomVoices(settled: boolean): void {
   roomVoicesReady = new Promise<void>((resolve) => { markVoicesSettled = resolve; });
 }
 
+/**
+ * Is `num` the room the player is being taken to?
+ *
+ * Guards the two things a room load starts once its art has landed — its voice package and
+ * its music — against being installed over a room the player has since left. `curNum` alone
+ * is not enough: they leave for the map (or a story page) and `curNum` still names the room
+ * they came from.
+ *
+ * The screen test is not literally `screen === 'room'` because a launch off the world map
+ * holds the map on screen for the whole load (see beginMapLaunch) — the same window in
+ * which this resolves. Delphi starts the room's music inside the blocking Spust, with the
+ * map still painted, so being on the map here means the entry is in progress, not aborted.
+ */
+function enteringRoom(num: number): boolean {
+  if (curNum !== num) return false;
+  return screen === 'room' || mapLaunch?.room === num;
+}
+
 function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): void {
-  if (curNum !== num || screen !== 'room') return;
+  if (!enteringRoom(num)) return;
   loadBorderLines(num);
   let pending = voiceLoads.get(nnn);
   if (pending === undefined) {
@@ -3161,7 +3190,7 @@ function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): void {
 
 /** Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it. */
 function startRoomMusic(num: number): void {
-  if (curNum !== num || screen !== 'room') return;
+  if (!enteringRoom(num)) return;
   const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
   if (music) void audio.playMusic(music.name, `/data/Music/${music.name}.wav`, music.loopSample);
   else audio.stopMusic();
@@ -3711,6 +3740,75 @@ function closeMapInfo(): void {
   wake();
 }
 
+// ── The room-entry parchment (Menu/loading.BMP, UMain.pas:1489-1493) ──────────
+//
+// Clicking a room on the world map does NOT take the stage away in the original. It
+// sets doAkce:=daRun, and the map's very next paint draws itself with RTable zeroed
+// (fully unlit, no room balls — the same state the record panel puts it in), the
+// clicked room's name plaque, and this 192x161 parchment blitted at (227,160). Only
+// then does doAkce flip to daRealyRun and Spust() run the blocking load, so on a
+// single-threaded Delphi the parchment simply sits on the map for the whole wait.
+// It is a room-entry indicator ON THE MAP, not a boot splash.
+//
+// It is an opaque pre-composited RECTANGLE, not a sprite: `kresli` is a plain rect
+// blit with no colour key, and the dark map layer is baked into the parchment's own
+// border (measured mean per-pixel border difference 0.97 against mapa-0, 21.26
+// against mapa-1). So where the map is lit, the original overwrites it with the
+// unlit version — which is consistent, because the map under it is unlit anyway.
+const PARCHMENT_X = 227;
+const PARCHMENT_Y = 160;
+/** The native parchment (null until boot loads it, or if it is missing). */
+let parchment: { w: number; h: number; rgba: Uint8ClampedArray } | null = null;
+/** The native parchment as a canvas, for the AI path's fallback blit (built on demand). */
+let parchmentCanvas: HTMLCanvasElement | null = null;
+
+/** Blit the parchment opaquely into a map-sized RGBA buffer (kresli, UMain.pas:1489). */
+function blitParchment(rgba: Uint8ClampedArray): void {
+  if (!parchment) return;
+  const { w, h, rgba: src } = parchment;
+  for (let r = 0; r < h; r++) {
+    rgba.set(src.subarray(r * w * 4, (r + 1) * w * 4), ((PARCHMENT_Y + r) * MAP_W + PARCHMENT_X) * 4);
+  }
+}
+
+/**
+ * Blit the parchment onto the hi-res `ai` map context.
+ *
+ * Prefers the upscaled asset, which is built by the map's OWN pipeline
+ * (tools/build-map-ai.mjs, Real-ESRGAN x4plus, the same model mapa-0/mapa-1 use) and
+ * upscaled IN PLACE on mapa-0 before being cropped back out — because the parchment's
+ * border is map background, and upscaling the bare rectangle would give the model a
+ * different neighbourhood for those pixels than mapa-0_ai got, leaving a seam.
+ *
+ * Falls back to the native rectangle scaled x4 nearest-neighbour if the upscale is
+ * missing, which is the same shape as the name plaques' fallback: the ai tier is
+ * additive, and a missing asset costs resolution, never the indicator.
+ */
+function blitParchmentAi(c: CanvasRenderingContext2D): void {
+  const ai = aiWorldMap?.loading;
+  c.imageSmoothingEnabled = false;
+  if (ai) {
+    c.drawImage(ai, PARCHMENT_X * AI_MAP_SCALE, PARCHMENT_Y * AI_MAP_SCALE);
+    return;
+  }
+  if (!parchment) return;
+  if (!parchmentCanvas) {
+    parchmentCanvas = document.createElement('canvas');
+    parchmentCanvas.width = parchment.w;
+    parchmentCanvas.height = parchment.h;
+    parchmentCanvas
+      .getContext('2d')!
+      .putImageData(new ImageData(new Uint8ClampedArray(parchment.rgba), parchment.w, parchment.h), 0, 0);
+  }
+  c.drawImage(
+    parchmentCanvas,
+    PARCHMENT_X * AI_MAP_SCALE,
+    PARCHMENT_Y * AI_MAP_SCALE,
+    parchment.w * AI_MAP_SCALE,
+    parchment.h * AI_MAP_SCALE,
+  );
+}
+
 /** Render the world-map screen to the main canvas. */
 function drawMap(): void {
   if (!worldMap) return;
@@ -3759,7 +3857,7 @@ function drawMap(): void {
   const infoFazeKey = Math.min(mapInfoFaze, INFO_SETTLE_FAZE);
   const sig =
     `${useAi ? 'ai' : 'n'}|${pulse % 6}|${Math.min(depth, worldMap.maxDepth + 1)}|${mapHoverCorner ?? ''}|${solved.size}|${cheated.size}|${cheated.size ? 1 : 0}` +
-    `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}`;
+    `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}|${mapLaunch?.room ?? ''}`;
   // The minigame is modal over the map too (UMain.pas:1764), and animates, so its
   // frame counter joins the cache key.
   const sigT = tetris ? `|ttr${tetrisTick}` : '';
@@ -3767,7 +3865,13 @@ function drawMap(): void {
   mapSig = sig + sigT;
   perfPaint++; // an actual map paint (past the cache check)
   mapPresented = true; // a map frame is now the thing on screen (see syncLoadingUi)
+  // A room launch (daRun/daReplay) darkens the map exactly as an open record panel
+  // does — Delphi zeroes RTable for all three cases in the same statement
+  // (UMain.pas:1445) and skips the room balls with it — and it draws the launching
+  // room's name plaque over that (KresliDesku, :1484).
+  const launching = mapLaunch !== null;
   const panelOpen = mapInfoRoom !== null;
+  const unlit = panelOpen || launching;
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
   // only the name plaque and panel stand out. Nodes (balls) are skipped too.
@@ -3780,8 +3884,8 @@ function drawMap(): void {
       depth,
       cheated,
       hoverCorner: mapHoverCorner,
-      drawNodes: !panelOpen,
-      litRegions: !panelOpen,
+      drawNodes: !unlit,
+      litRegions: !unlit,
     });
     // Record-panel *artwork* (krokoměr bg + hovered icon + disabled-Replay grey) is
     // drawn straight onto the hi-res ctx from the AI-upscaled bitmaps; the odometer
@@ -3792,7 +3896,7 @@ function drawMap(): void {
     }
     // Name plaque from the upscaled art, drawn straight on the hi-res ctx. Falls back
     // to the native overlay below whenever its art is missing or still loading.
-    const plaqueRoom = mapInfoRoom ?? mapHoverRoom;
+    const plaqueRoom = mapLaunch?.room ?? mapInfoRoom ?? mapHoverRoom;
     const plaque = plaqueRoom !== null ? aiPlaqueFor(plaqueRoom) : null;
     if (plaque) {
       ctx.imageSmoothingEnabled = false;
@@ -3810,10 +3914,20 @@ function drawMap(): void {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(mapOverlayCanvas, 0, 0, cw, ch);
     }
+    // Last, over the plaque: Delphi draws the plaque and then the parchment
+    // (UMain.pas:1484 then :1489), and the two rectangles overlap.
+    if (launching) {
+      blitParchmentAi(ctx);
+      mapLaunch!.painted = true; // daRun -> daRealyRun: the load may now start
+    }
     return;
   }
-  const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !panelOpen, !panelOpen);
+  const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !unlit, !unlit);
   drawMapOverlays(rgba);
+  if (launching) {
+    blitParchment(rgba);
+    mapLaunch!.painted = true; // daRun -> daRealyRun: the load may now start
+  }
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
 }
 
@@ -3893,7 +4007,7 @@ async function loadAiPlaque(key: string): Promise<void> {
 function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, skipPlaque = false): boolean {
   if (!worldMap) return false;
   let drew = false;
-  const plaqueRoom = mapInfoRoom ?? mapHoverRoom;
+  const plaqueRoom = mapLaunch?.room ?? mapInfoRoom ?? mapHoverRoom;
   if (plaqueRoom !== null && deskyData && !skipPlaque) {
     const deska = deskyData.byRoom.get(plaqueRoom);
     if (deska) {
@@ -4152,11 +4266,30 @@ function playIntroMovies(resolvers: Array<() => string>, gated: boolean, onFinis
 
 /** The first-run intro (logo → intro), after which the flag flips so it won't auto-play again. */
 function playFirstRunIntro(): void {
-  playIntroMovies([logoMovie, introMovie], true, () => {
-    settings.introSeen = true;
-    saveSettings(settings);
-    showMap();
-  });
+  playIntroMovies(
+    [
+      logoMovie,
+      // The `ai` world map is 2.54 MB and lands on the screen this intro ENDS on, so a
+      // first-run player used to reach the map and wait for it. Start it here, as the
+      // last movie begins — resolvers are called at play time (IntroPlayer.playCurrent),
+      // so this needs no new hook and cannot fire if the player never gets this far.
+      //
+      // Deliberately NOT the eager boot load this replaced (see ensureAiWorldMap): that
+      // one ran in EVERY tier, so a `classic` player paid 2.54 MB and ~43 MB of decoded
+      // bitmaps for art they never saw, and it ran alongside BOTH movies. beginMapArt is
+      // tier-gated and this overlaps one movie, the one after which the map is next.
+      () => {
+        beginMapArt();
+        return introMovie();
+      },
+    ],
+    true,
+    () => {
+      settings.introSeen = true;
+      saveSettings(settings);
+      showMap();
+    },
+  );
 }
 
 /** Replay just the intro movie from the map's top-left corner (daIntro plays FilmAvi only). */
@@ -4291,13 +4424,37 @@ function drawCredits(): void {
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), credits.w, credits.h), 0, 0);
 }
 
-/** Enter a room from the map (or the dev dropdown); KillSnd first (Spust, UMain.pas:248).
- *  `replay` is the best-solution move record to play back animated (map "Replay"). */
+/**
+ * Enter a room (Spust, UMain.pas:248).
+ *
+ * TWO routes, because the original has two. From the WORLD MAP a launch is `daRun`:
+ * the map stays on screen and repaints with the parchment over it, and the load runs
+ * behind that (see beginMapLaunch — this is the faithful one, and the one a player
+ * ever sees). Everywhere else — the dev room picker, the story-page chain, SCORE,
+ * ZAVER, Escape-restart — there is no map to keep, so the stage goes to the room
+ * immediately and the delayed loading overlay explains the wait, exactly as before.
+ *
+ * `replay` is the best-solution move record to play back animated (map "Replay").
+ */
 function enterRoom(num: number, replay?: string): Promise<void> {
+  if (canLaunchFromMap()) return beginMapLaunch(num, replay);
+  return startRoom(num, replay, true);
+}
+
+/**
+ * The load itself: KillSnd, then the room's assets (Spust, UMain.pas:248-249).
+ *
+ * `takeStage` is what separates the two routes above — false leaves `screen` on the
+ * map for the launch flow, which flips it in loop() once the room can actually be
+ * painted.
+ */
+function startRoom(num: number, replay: string | undefined, takeStage: boolean): Promise<void> {
   wake();
   stopRoomClock(); // bank the outgoing room's time before the switch
-  screen = 'room';
-  beginRoomLoadingUi(num); // delayed; a cached entry lands before it ever shows
+  if (takeStage) {
+    screen = 'room';
+    beginRoomLoadingUi(num); // delayed; a cached entry lands before it ever shows
+  }
   startRoomClock(num); // TRoom.Start: casstartu := Date+Time
   mapHoverCorner = null; // drop any map corner hover on leaving the map
   mapHoverRoom = null;
@@ -4317,6 +4474,113 @@ function enterRoom(num: number, replay?: string): Promise<void> {
     });
   }
   return p;
+}
+
+// ── Launching a room FROM the world map (daRun -> daRealyRun) ─────────────────
+//
+// The port used to flip `screen` to 'room' synchronously here, which blacked the stage
+// for the whole 17-27s a cold entry costs on a slow link (measured, Slow 4G) — and the
+// delayed full-screen overlay existed to explain that black. The original never blacks
+// anything: it paints the map with the parchment and loads behind it (see the
+// PARCHMENT_X comment). This is that, and it is the only route that can be, because it
+// is the only one with a map on screen to keep.
+//
+// Three states, one object: armed (waiting for the parchment frame), started (the load
+// is running under it), and gone. Keeping it in one nullable rather than in three flags
+// is what lets drawMap, the input guards and loop() all ask the same question.
+interface MapLaunch {
+  room: number;
+  replay?: string | undefined;
+  /** Has a map frame carrying the parchment been painted yet? (daRun -> daRealyRun) */
+  painted: boolean;
+  /** Has Spust been run — i.e. is the room load in flight under the parchment? */
+  started: boolean;
+  /** Hands the load's outcome to the promise beginMapLaunch returned (see there). */
+  settle: (load: Promise<void>) => void;
+  done: Promise<void>;
+}
+let mapLaunch: MapLaunch | null = null;
+
+/**
+ * Can this entry keep the map on screen?
+ *
+ * Everything here is about there being a MAP FRAME to draw the parchment onto: the map
+ * screen, already presented (so we are not holding an unpainted stage in front of the
+ * player), not covered by the credits/options overlay, not still waiting for its own
+ * art — and the parchment itself decoded. That last one keeps the art optional in the
+ * house style: without it this route would show a dark map and no indicator at all, so
+ * a missing/undecodable loading.BMP simply falls back to the pre-existing overlay.
+ */
+function canLaunchFromMap(): boolean {
+  return (
+    screen === 'map' &&
+    mapPresented &&
+    mapOverlay === 'none' &&
+    !mapArtHolding() &&
+    parchment !== null &&
+    !inShowmode()
+  );
+}
+
+/** daRun: arm the launch and let the map repaint. The load waits for that paint. */
+function beginMapLaunch(num: number, replay?: string): Promise<void> {
+  if (mapLaunch) return mapLaunch.done; // a launch is already running; ignore the second click
+  // The promise settles with the LOAD, not with the handover to the room screen — so
+  // enterRoom() keeps meaning exactly what it meant before this route existed: the room is
+  // built and live. It is live a beat before it is shown here (that beat is the parchment),
+  // and a caller that wants the stage should ask for the stage.
+  let settle!: (load: Promise<void>) => void;
+  const done = new Promise<void>((resolve, reject) => {
+    settle = (load) => load.then(resolve, reject);
+  });
+  mapLaunch = { room: num, replay, painted: false, started: false, settle, done };
+  mapSig = null; // the map now draws unlit, with the plaque and the parchment
+  wake();
+  return done;
+}
+
+/**
+ * Drive an armed launch, called from loop()'s map branch after the map has drawn.
+ *
+ * daRealyRun: the load starts only once a frame carrying the parchment has been
+ * painted, which is the ordering UMain.pas:1489-1493 has (the paint sets daRealyRun,
+ * and Spust runs after that paint returns). Then the room takes the stage on the first
+ * frame it can be drawn in its final art — `roomArtPending()` as well as `roomLoading`,
+ * so the map hands straight over to the room and the stage is never black between them.
+ *
+ * Note the two are separate events: the promise enterRoom() returned settles with the
+ * LOAD, while the handover can be several seconds later in the `ai` tier.
+ */
+function tickMapLaunch(): void {
+  const l = mapLaunch;
+  if (!l) return;
+  if (!l.painted) return;
+  if (!l.started) {
+    l.started = true;
+    const load = startRoom(l.room, l.replay, false);
+    // A load that THREW has no room to hand over to, and the condition below can only
+    // release once whatever `roomArtPending()` is still watching settles — which for a
+    // failed entry is the PREVIOUS room's art, since loadRoom throws before it re-arms
+    // either flag. Take the stage instead: that is exactly what this entry did before the
+    // launch route existed (the previous room stays shown), and it is what stops a failure
+    // from leaving the player behind a parchment with the input swallowed.
+    void load.catch(() => finishMapLaunch(l));
+    l.settle(load);
+    return;
+  }
+  if (roomLoading || roomArtPending()) return;
+  finishMapLaunch(l);
+}
+
+/** Hand the stage from the map to the room the launch `l` loaded, and end the launch. */
+function finishMapLaunch(l: MapLaunch): void {
+  if (mapLaunch !== l) return; // already handed over
+  mapLaunch = null;
+  screen = 'room';
+  select.value = String(l.room);
+  forceRoomRedraw = true;
+  mapSig = null; // the next map visit must not reuse the parchment frame
+  wake();
 }
 
 /** Dispatch a control-panel button (ZaznamenejPrikazMysi, Uovl.pas:630).
@@ -5423,6 +5687,10 @@ function loopThrottleOk(): boolean {
     );
   }
   if (screen === 'map' && worldMap && mapOverlay === 'none') {
+    // A launch is a short-lived state that ends on a condition nothing repaints for
+    // (the room's assets landing), so keep the loop at full rate until it does —
+    // otherwise the handover waits up to a whole idle tick behind the parchment.
+    if (mapLaunch) return false;
     // Keep 60fps while the record-panel odometer is still rolling (so its wall-clock
     // faze advance is sampled smoothly); once settled it can idle-throttle again.
     if (mapInfoRoom !== null && mapInfoFaze < INFO_SETTLE_FAZE) return false;
@@ -5574,6 +5842,11 @@ function loop(now: number): void {
     // tier's final art, with syncLoadingUi() below covering the wait. The 2.36 MB of
     // AI map art against 0.59 MB of faithful BMPs measured 28.0s of enhanced map on
     // screen before it swapped (Slow 4G, cold cache) — the same defect rooms had.
+    //
+    // A room launch runs AFTER the draw for the same reason the draw runs at all here:
+    // the parchment has to be on a painted frame before Spust, and the room only takes
+    // the stage on a frame it can be drawn in (tickMapLaunch).
+    tickMapLaunch();
   } else if (cutscene) {
     drawCutscene(); // manages the GL canvas + subtitle overlay itself
     perfPaint++;
@@ -5656,6 +5929,15 @@ function loop(now: number): void {
 
 window.addEventListener('keydown', (e) => {
   wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
+  // A room launch off the map is BLOCKING in the original (Spust runs inside the timer
+  // handler, so no message is dispatched until the room is up). Swallow the keyboard
+  // for as long as the parchment is on the map — the map's own pointer handlers do the
+  // same. Anything else would let Escape, a cheat code or a tier switch act on a map
+  // that is already on its way out.
+  if (mapLaunch) {
+    e.preventDefault();
+    return;
+  }
   // While the intro movie plays, swallow input; any key skips the current movie
   // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603). Two exceptions:
   // a bare modifier keydown must NOT skip (otherwise arming Ctrl+Alt+D during the
@@ -5995,6 +6277,10 @@ canvas.addEventListener('mousedown', (e) => {
   // World map: a corner "button" (intro/credits/options) or a room node.
   if (screen === 'map') {
     if (!worldMap) return;
+    // A launch is BLOCKING in the original — Spust runs inside the timer handler, so
+    // no message is processed until the room is up. Nothing on the map is clickable
+    // while the parchment is on it.
+    if (mapLaunch) return;
     // A click anywhere during the credits roll dismisses it (UMain.pas:1595).
     if (mapOverlay === 'credits') {
       closeMapOverlay();
@@ -6077,7 +6363,7 @@ function mapCoords(e: MouseEvent): { mx: number; my: number } {
 // under the cursor and show a pointer over clickable spots (corners + room nodes).
 // The Exit corner is unwired on the web, so it neither lights nor points.
 canvas.addEventListener('mousemove', (e) => {
-  if (screen !== 'map' || !worldMap || mapOverlay !== 'none') {
+  if (screen !== 'map' || !worldMap || mapOverlay !== 'none' || mapLaunch) {
     if (mapHoverCorner) mapHoverCorner = null;
     return;
   }
@@ -6308,6 +6594,17 @@ try {
   // pay nothing for it.
 } catch {
   /* map optional */
+}
+// The room-entry parchment (Menu/loading.BMP, UMain.pas:1489). Its own try: the map
+// above is a CRITICAL asset, and folding this 32 kB indicator into that Promise.all
+// would turn a missing parchment into a fatal boot. Without it, enterRoom simply falls
+// back to the full-screen overlay (canLaunchFromMap).
+try {
+  const buf = await fetch('/data/Menu/loading.BMP').then((r) => r.arrayBuffer());
+  const bmp = parseBmp(new Uint8Array(buf));
+  parchment = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
+} catch {
+  /* parchment optional — room entry keeps the overlay */
 }
 // World-map record info panel assets (krokoměr background, button icons, digit
 // glyphs) + the level name-plaque data for the current language (UMain.pas:341).
@@ -6560,9 +6857,18 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   // Debug: has the `ai` tier's world-map art finished loading? Distinct from
   // mapArtPending(): a failed load also clears the hold, but leaves this false.
   aiMapLoaded: () => aiWorldMap !== null,
+  // Debug: which screen the map's art load was started from — 'intro' when it was
+  // preloaded behind a movie, 'map' when the player is waiting for it.
+  mapArtStartedOn: () => aiMapStartedOn,
   // Debug: is a map frame the thing currently on screen? (What decides whether the
   // map's overlay goes up at once or on the 200ms delay — see syncLoadingUi.)
   mapPresented: () => mapPresented,
+  // Debug: the room a map launch is running for (daRun/daRealyRun), else null — the
+  // window in which the map stays on screen with the parchment over it.
+  mapLaunching: () => mapLaunch?.room ?? null,
+  // Debug: is the parchment art available at all? (Without it enterRoom falls back to
+  // the full-screen overlay — see canLaunchFromMap.)
+  parchmentReady: () => parchment !== null,
   // Debug: is the post-boot room-loading overlay on screen right now?
   loadingVisible: () => loadingEl?.hidden === false,
   // Debug: the current room's AI art has finished loading / is actually painting

@@ -9,6 +9,7 @@ import { reloadApp, withApp } from './ui-lib.mjs';
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap());
 
+
   // First run (fresh localStorage): boot lands on the intro, gated by the splash.
   expect(await p.evaluate(() => window.__ff.screen()) === 'intro', 'first run boots into the intro');
   expect(await p.evaluate(() => window.__ff.introPlaying()), 'intro is active on first run');
@@ -71,6 +72,16 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.skipIntro()); // skip the intro → map
   await p.waitForFunction(() => window.__ff.screen() === 'map');
   expect(await p.evaluate(() => window.__ff.introSeen()) === true, 'introSeen persists after the intro finishes');
+  // The map the intro ENDS on used to start fetching its `ai` art only once the player got
+  // there, so a first run met a 2.54 MB wait on arrival. It now starts as the LAST movie
+  // begins — still tier-gated, and still one movie's worth of overlap rather than the eager
+  // boot load that was removed for costing every tier that art alongside both movies.
+  if (await p.evaluate(() => window.__ff.graphics() === 'ai')) {
+    const startedOn = await p.evaluate(() => window.__ff.mapArtStartedOn());
+    // Read off recorded state rather than sampled per frame: the start is a one-shot event
+    // between two skips, and a rAF sampler can miss the frame it happened on entirely.
+    expect(startedOn === 'intro', `the ai world map is fetched during the intro (started on ${startedOn})`);
+  }
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'intro is no longer active on the map');
   expect(
     await p.evaluate(() => document.getElementById('intro-cover').hasAttribute('hidden')),

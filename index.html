@@ -141,7 +141,13 @@
       html[data-unsupported] #info,
       html[data-unsupported] #perfhud { display: none; }
       /* Re-used for room entry after boot: the title and the attribution belong to
-         the boot splash, and would read as "the game restarted" mid-play. */
+         the boot splash, and would read as "the game restarted" mid-play. The crab
+         stays — it is the indicator, and a room entry is exactly the wait it is
+         there for. Note a room launched FROM THE MAP does not reach this overlay at
+         all: it keeps the map on screen and draws the original's parchment over it
+         (main.ts beginMapLaunch). What is left here are the entries with no map to
+         keep — the dev picker, the story-page chain, SCORE, ZAVER — where the room
+         name is the whole message. */
       #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
       .overlay h1 { margin: 0; font: 600 26px/1.2 system-ui, sans-serif; letter-spacing: 0.5px; }
       .overlay p { margin: 0; max-width: 34em; opacity: 0.85; }
@@ -150,8 +156,50 @@
         border: 4px solid #2a2a3a; border-top-color: #6cc; animation: spin 0.9s linear infinite;
       }
       @keyframes spin { to { transform: rotate(360deg); } }
-      #loading-msg { opacity: 0.7; font: 13px/1.4 system-ui, sans-serif; min-height: 1.4em; }
-      #loading-credit { opacity: 0.45; font: 11px/1.5 system-ui, sans-serif; max-width: 30em; }
+      /* ── The dancing crab ──────────────────────────────────────────────────
+         KORALY's balalaika dancer, standing in for the CSS spinner: an animating
+         creature already says "something is happening", and it says it in the
+         game's own voice rather than in a browser's.
+
+         FIDELITY: the 1998 original's loading art is a parchment drawn on the
+         WORLD MAP when a room launches (Menu/loading.BMP — the port draws it, see
+         main.ts PARCHMENT_X). It has no counterpart for a boot download, which the
+         1998 game did not have, so this splash is port chrome either way. Using the
+         AI-upscaled sprite here is therefore not a fidelity violation even for a
+         player on the `classic` tier — there is no original to be unfaithful to.
+
+         THE LOOP IS THE GAME'S LOOP, and only two frames of the ten. In KORALY the
+         crabs dance to the octopus's balalaika (crabDance, src/rooms/koraly.ts:96
+         <- URoom.pas:15498+): `afaze 0` is standing still, `afaze 1` is an idle
+         blink while the tune is silent, `2..5` are eye-only twitches, and the LEAD
+         crab — the one the others copy while they have floor beneath them —
+         alternates exactly `7` and `9` on `count % 4` for as long as the music
+         plays. So the dance below is 7 and 9 held two game ticks each (2 x 80ms =
+         160ms, and LOGIC_MS really is 80ms), which is the crab's own step rather
+         than an invented one — and it costs 7 kB instead of the 35 kB of all ten.
+
+         The swap is a plain opacity flip between two stacked <img>s rather than a
+         sprite sheet, because an <img> is the only version of this that can report
+         a failure: the load handler in the inline script below reveals the crab
+         only once BOTH frames have decoded, so a 404, an offline boot or a corrupt
+         file leaves the spinner exactly as it is. The loading screen is the thing
+         that explains a slow start; it must never become the reason for one. */
+      #loading-crab { position: relative; width: 180px; height: 90px; display: none; }
+      #loading.hascrab #loading-crab { display: block; }
+      #loading.hascrab .spinner { display: none; }
+      #loading-crab img {
+        position: absolute; inset: 0; width: 100%; height: 100%;
+        animation: crabBeatA 320ms steps(1, end) infinite;
+      }
+      #loading-crab .krab-b { animation-name: crabBeatB; }
+      @keyframes crabBeatA { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+      @keyframes crabBeatB { 0%, 100% { opacity: 0; } 50% { opacity: 1; } }
+      /* Bigger than the 13px/11px this used to be: at that size the splash read as a
+         browser's progress chrome. The status line stays a status line — it is
+         diagnostics, and when a boot hangs "Loading sound…" is the only thing that
+         says where. */
+      #loading-msg { opacity: 0.7; font: 15px/1.4 system-ui, sans-serif; min-height: 1.4em; }
+      #loading-credit { opacity: 0.45; font: 12px/1.5 system-ui, sans-serif; max-width: 30em; }
       #loading-credit a { color: inherit; }
       .btn {
         padding: 12px 26px; font: 600 16px/1 system-ui, sans-serif;
@@ -184,12 +232,53 @@
          page while the game assets fetch. Hidden by the app once boot completes. -->
     <div id="loading" class="overlay">
       <h1>Fish Fillets 4ever</h1>
+      <!-- Frames 07 and 09 of KORALY's crab: the two claw-raise poses its lead
+           dancer alternates to the balalaika. See the #loading-crab CSS above for
+           why these two, and why an <img> pair rather than a sprite sheet. -->
+      <div id="loading-crab" aria-hidden="true">
+        <img class="krab-a" src="/enhanced-ai/KORALY/obj/krab_07.webp" alt="" />
+        <img class="krab-b" src="/enhanced-ai/KORALY/obj/krab_09.webp" alt="" />
+      </div>
       <div class="spinner"></div>
       <div id="loading-msg">Loading…</div>
       <div id="loading-credit">
         A fan port of ALTAR's 1998 <em>Fish Fillets</em>. Not affiliated with ALTAR interactive.
       </div>
     </div>
+    <script>
+      /* Reveal the crab once its art has actually decoded. Inline because the overlay
+         is painted BEFORE the module bundle arrives — which is the entire point of the
+         overlay, so anything it has to do on its own has to live here rather than in
+         main.ts.
+
+         A 404, an offline boot or a corrupt file therefore costs nothing: the screen
+         stays the spinner plus the status line. Same shape as the optional subtitle
+         fonts (main.ts) — an asset that improves the thing it is part of must never be
+         able to break it. Nothing here may throw into the boot path. */
+      (function () {
+        var loading = document.getElementById('loading');
+        var crab = document.getElementById('loading-crab');
+        var frames = crab ? crab.getElementsByTagName('img') : [];
+        var pending = frames.length;
+        var usable = pending > 0;
+        var decoded = function () {
+          if (!usable || --pending > 0) return;
+          loading.className += ' hascrab';
+        };
+        var broken = function () {
+          usable = false;
+        };
+        for (var f = 0; f < frames.length; f++) {
+          if (frames[f].complete) {
+            if (frames[f].naturalWidth) decoded();
+            else broken();
+          } else {
+            frames[f].onload = decoded;
+            frames[f].onerror = broken;
+          }
+        }
+      })();
+    </script>
     <!-- Fatal boot error (missing/broken assets). Shown by the app on failure. -->
     <div id="fatal" class="overlay" hidden>
       <h1>Couldn't load the game</h1>
