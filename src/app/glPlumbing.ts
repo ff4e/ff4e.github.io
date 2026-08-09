@@ -55,11 +55,19 @@ export function initGlPlumbing(h: GlPlumbingHost): void {
 }
 
 
-/**
- * WebGL disabled-for-this-session, per backend. Owned here because this is the GL
- * layer: it is what sets them on a failed draw or a lost context, and what clears
- * them in enableWebgl(). Readers elsewhere import the live bindings.
- */
+// Set once if a GPU backend throws, disabling it for the session (the CPU compositor
+// takes over) so a driver/context failure can never wedge rendering.
+//
+// One flag PER backend, because they fail independently and share nothing but the
+// context. Collapsing them was wrong in both directions: the `ai` tier's ×S buffers are
+// an order of magnitude larger than the faithful compositor's, so an AI-only allocation
+// failure would have disabled the GPU for `classic`/`enhanced` where it was working
+// fine — and conversely, an AI compositor that never built at all left this flag false,
+// so the HUD reported a per-frame CPU fallback forever instead of a disabled backend.
+//
+// They live in this module because this is the GL layer: it sets them on a failed draw
+// or a lost context and clears them in enableWebgl(). Readers elsewhere import the live
+// bindings.
 export let glFailed = false;
 export let glAiFailed = false;
 

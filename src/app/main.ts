@@ -1058,15 +1058,6 @@ function setGraphics(level: GraphicsLevel): void {
   setInfo();
 }
 
-// Set once if a GPU backend throws, disabling it for the session (the CPU compositor
-// takes over) so a driver/context failure can never wedge rendering.
-//
-// One flag PER backend, because they fail independently and share nothing but the
-// context. Collapsing them was wrong in both directions: the `ai` tier's ×S buffers are
-// an order of magnitude larger than the faithful compositor's, so an AI-only allocation
-// failure would have disabled the GPU for `classic`/`enhanced` where it was working
-// fine — and conversely, an AI compositor that never built at all left this flag false,
-// so the HUD reported a per-frame CPU fallback forever instead of a disabled backend.
 let enhancedArt: EnhancedArt | null = null; // decoded art for the current room (null = classic)
 let enhancedObjects: EnhancedObject[] = []; // decoded truecolor object sprites for the current room
 let curNum = 0; // current room number, for enhanced-art lookup
