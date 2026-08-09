@@ -376,6 +376,7 @@ the same assertions.
 - `tools/render-room.ts` — M1 verification CLI (render a room / all rooms to PNG).
 - `tools/preview-server.mjs` — the shared `vite build` + `vite preview`-on-a-free-port machinery.
 - `tools/dev-server.mjs` — `npm run dev`: the dev server on a free port, printing what it serves.
+- `tools/link-node-modules.mjs` — share one `node_modules` between worktrees (opt-in, lockfile-checked).
 - `tools/capture-digest.mjs` — byte-exact behavioural fingerprint, comparable across git revisions.
   The safety net for the `main.ts` split; read its header for what it does and does not cover.
 
@@ -434,6 +435,55 @@ change, budget it against the region, not the file.
 (`app/persist.ts`), the cheats and Tetris (`app/cheats.ts`), the `__ff` hook bodies (`app/debugHooks.ts`),
 the render plumbing (`app/glPlumbing.ts`) and the art loading (`app/art.ts`) — together about 27 k tokens,
 taking `main.ts` from 88 k to 61 k.
+
+### Map of `src/render/`
+
+The renderer is 28 files and ~84 k tokens — the second-largest area after `src/app`. The split runs along
+two axes at once (which **art tier**: classic / enhanced / `ai`; and which **backend**: CPU or WebGL), which
+is what makes it hard to guess where something lives. This table is the shortcut.
+
+Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is drawn, in what order" and
+"what colour is it", and almost everything else is an implementation of one side of that.
+
+| File | tok | What it is |
+| --- | --- | --- |
+| **The two seams everything else hangs off** | | |
+| `roomWalk.ts` | 2.0 k | ONE traversal deciding what is drawn, in what order, at what coordinates — a port of `TRoom.Priprav`. Replayed by both the faithful and the `ai` renderers, so a rule fixed here is fixed for both. |
+| `artSource.ts` | 1.2 k | The pluggable seam deciding *what colour / which pixels*. The only thing that differs between the classic and enhanced looks. |
+| **CPU compositing** | | |
+| `framebuffer.ts` | 4.7 k | The 8-bit palette-indexed screen and the Delphi blitters (`Kresli`/`KresliRev`/`Kresli2`/`KresliR`). |
+| `rgbaScreen.ts` | 3.4 k | The same compositing, but keeping a live RGBA plane beside the index plane — the CPU target for the truecolor tiers. |
+| `renderRoom.ts` | 4.2 k | The faithful room renderer: entry points, fish frames, the resting-pose compositor. |
+| `classicArtSource.ts` | 0.4 k | The 256-colour palette look. |
+| `enhancedArtSource.ts` | 3.0 k | The FFNG truecolor look. |
+| **The `ai` tier** | | |
+| `roomAi.ts` | 12.8 k | The hi-res AI room compositor — the largest file here, and the one whose rules the mutation harness pins. |
+| `aiTarget.ts` | 7.4 k | The surface `roomAi` paints onto: the canvas-2D target, plus the water wobble and ripple maths. |
+| `worldMapAi.ts` | 1.6 k | The `ai` world map. |
+| `panelAi.ts` | 1.7 k | The `ai` control panel. |
+| `creditsAi.ts` | 1.8 k | The `ai` end credits (GPU-composited). |
+| **WebGL** | | |
+| `glScreen.ts` | 10.9 k | The GPU compositor for classic/enhanced, from palette-INDEX art through an MRT colour+index framebuffer. |
+| `glRoomAi.ts` | 8.2 k | The GPU compositor for the `ai` tier, from straight RGBA at ×S. Holds `BG_FS`, the water shader `tools/mutate-gl-room-ai.mjs` mutates. |
+| `glCommon.ts` | 1.1 k | The WebGL2 plumbing both of the above share. |
+| **Screens and chrome** | | |
+| `worldMap.ts` | 2.3 k | The branch map (`UMain.pas PaintBox1Paint`). |
+| `mapInfo.ts` | 2.1 k | The map's record info panel (krokoměr). |
+| `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
+| `credits.ts` | 0.8 k | The scrolling end credits. |
+| `help.ts` | 0.6 k | The control-help screens (`Help.pas`). |
+| `subtitles.ts` | 5.4 k | Colour mapping, glyph rendering, and the scrolling line. |
+| `font.ts` | 0.9 k | The bitmap font from the original `Chars.dat`/`Chartab.dat`/`Charcol.dat`. |
+| `tetrisRender.ts` | 1.3 k | The Tetris minigame's picture. |
+| `filmEffects.ts` | 1.1 k | Full-frame effects for the `xsilent` and `xinterlaced` cheats. |
+| **Assets in and out** | | |
+| `pngDecode.ts` | 1.6 k | PNG decoder for the truecolor art path. |
+| `png.ts` | 0.5 k | PNG encoder (used by the verification CLIs, not the game). |
+| `enhancedDecode.ts` | 0.2 k | Node-only helper to build `EnhancedArt` from PNG bytes. |
+| `loadSlot.ts` | 0.5 k | A FIFO gate for asset fetch+decode, so one room's ~190 requests don't stampede. |
+
+Token counts are rounded and will age; they are here to say *which files are big*, not to be exact. The
+file list itself is checked by `test/readme-map.test.ts`, so a new module cannot be added without a row.
 
 ## Original data
 
