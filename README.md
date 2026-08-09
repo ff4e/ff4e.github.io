@@ -344,6 +344,8 @@ the same assertions.
 
 ## Layout
 
+- `src/app/main.ts` — the browser host: boot, the frame loop, every screen and all input.
+  7 800 lines, 18 % of the source — **see the map below before you open it**.
 - `src/data/binReader.ts` — little-endian sequential reader modelling Pascal `blockread`.
 - `src/data/ffr.ts` — FFR parser (faithful port of `TRoom.Init`, incl. `ReadBitMap`/`ReadBitMapExtra`).
 - `src/data/roomTable.ts` — the 72-room `Desc[]` table, auto-generated from `zaklad.pas`.
@@ -355,6 +357,64 @@ the same assertions.
 - `tools/gen-room-table.py` — regenerates `roomTable.ts` from the original Pascal.
 - `tools/dump-ffr.ts` — M0 verification CLI (parse + size-check a room or all rooms).
 - `tools/render-room.ts` — M1 verification CLI (render a room / all rooms to PNG).
+
+### Map of `src/app/main.ts`
+
+`main.ts` is the largest file in the project by a wide margin — ~7 800 lines, ~87 k tokens — and most
+changes to this game land somewhere inside it. Reading it front to back to change 90 lines is the single
+biggest cost in this repo, so this table exists to let you jump straight to the region you need.
+
+It is a top-level-`await` module: everything below runs at import time, top to bottom, and the ordering
+is deliberate (the device gate must precede every side effect; state must be declared before the boot
+block awaits it). Line numbers drift — **the anchor names are the durable part**, so grep for the
+function/const name rather than trusting the range.
+
+| Lines | Region | Anchors — grep these | What lives here |
+| --- | --- | --- | --- |
+| 1–15 | File docblock | — | The `URoom.pas` tick state machine this file reproduces, and the keyboard scheme. |
+| 16–162 | Imports | — | 56 import statements. The only part safe to skim. |
+| 163–177 | Device gate | `isUnsupportedDevice` | Phones are refused here, before any art is fetched, via a never-settling `await`. Must stay first. |
+| 178–300 | Stage layout & timing constants | `computeStageLayout`, `contentScaleFor`, `roomGeometry`, `LOGIC_MS` | How the stage box + side panel are scaled to the viewport; the 80 ms game tick and volume constants. |
+| 301–410 | DOM handles | `canvas`, `glCanvas`, `subCanvas`, `panelCanvas`, `select`, `loadingEl` | Every element and 2D context the rest of the file draws into, plus the dev-bar controls. |
+| 411–546 | Loading overlay & fatal errors | `setLoadingMsg`, `beginRoomLoadingUi`, `syncLoadingUi`, `showFatal`, `relayout` | The boot/room-load overlay, its 200 ms anti-flash delay, and the fatal-error screen. **Hot.** |
+| 547–604 | Intro movies | `IntroPlayer`, `probeAiMovies`, `logoMovie`, `introMovie` | Logo/intro `.mp4` playback and the per-tier movie URL choice. |
+| 605–685 | Subtitle DOM overlay | `applySubScale`, `syncSubOverlay`, `subOverlaySignature`, `clearSubOverlay` | The vector-subtitle layer drawn on its own canvas above the game. |
+| 686–784 | Screen & overlay state | `ostav`, `screen`, `mapOverlay`, `mapInfoRoom`, `worldMap`, `legImage` | The mutable globals for panel/options/credits/map-info/help/leg-image. Read this before touching any screen. |
+| 785–1010 | Save & score persistence | `loadSet`, `saveSet`, `loadScores`, `recordScore`, `loadPlayTime`, `casHry`, `bestRecords` | `localStorage` schema: solved/cheated rooms, best move counts, per-room play time, best records. |
+| 1013–1070 | Typed cheat codes | `roomCheats`, `mapCheats`, `cheatMegabomb`, `ultraviolence` | The `Uovl.pas:744` / `UMain.pas:1750` cheat entry and its flags. |
+| 1071–1322 | Sprite cheats & film effects | `undeadSet`, `morphSet`, `cheatStorm`, `cheatSilent`, `cheatInterlaced`, `applyFrameEffects` | UNDEAD/MORPH sprite reshaping, the storm/silent-film/interlace post-effects, `blitTetris`. |
+| 1323–1495 | Tetris minigame | `openTetris`, `tickTetris`, `tetrisHiscores`, `applyMapCheat` | The hidden Tetris board (55 ms tick) and the map-side cheat dispatch. |
+| 1496–1579 | Room state & settings | `ffr`, `room`, `subs`, `settings`, `subsOn`, `setSubtitleMode`, `applyVolumeSettings` | The current room's parsed data plus subtitle/volume settings. |
+| 1580–1691 | Graphics tier, renderer, dev flags | `GraphicsLevel`, `setGraphics`, `setRenderer`, `setRenderOnDirty`, `setDevEnabled` | `classic`/`enhanced`/`ai` tier selection, CPU vs WebGL, render-on-dirty. |
+| 1692–2074 | Room art loading (enhanced + AI) | `ensureEnhancedArt`, `loadEnhancedObjects`, `ensureAiRoom`, `aiRoomCache`, `beginMapArt`, `clearAiPending` | Async art fetch/decode, the 3-entry AI room cache, and the pending/holding flags the loading overlay reads. **Hot.** |
+| 2075–2102 | Enhanced fish sprites | `loadFishSprites` | Truecolor fish sprite manifest + decode. |
+| 2103–2167 | Engine, audio & mode state | `audio`, `engine`, `activeScript`, `chatter`, `deathState`, `cutscene`, `showmode`, `loadmode`, `replaymode` | The rest of the mutable core: step engine, script, dialogue, and the three playback modes. |
+| 2168–2248 | Hooks, key maps, fish selection | `hooks`, `KEYS`, `ARROWS`, `swapActive`, `selectFish` | The script hook system and the raw key → fish/direction tables. |
+| 2249–2463 | Room construction | `buildRoom`, `setInfo`, `applySubFont`, `scriptTalk` | Turns parsed FFR data into a live `Room` + `StepEngine`. Everything room-related funnels through `buildRoom`. |
+| 2464–2785 | Cutscene, showmode, replay | `startCutscene`, `startShowmode`, `advanceShowmode`, `applyCapAction`, `advanceReplay` | The KUFRIK demo, the `.cap` demonstration player, and record replay. |
+| 2786–2958 | Cutscene art & painting | `ensureAiKufr`, `loadAiKufrFrame`, `drawCutscene` | AI-tier cutscene frames (24-frame cache) and the cutscene compositor. |
+| 2959–3202 | Room load & audio wiring | `loadRoom`, `fetchSoundPkg`, `loadSoundPkg`, `loadRoomVoices`, `startRoomMusic`, `talk` | Fetch FFR/FFS/FFT for a room, arm its voices, start its music. **Hot.** |
+| 3203–3418 | Movement & input dispatch | `tryStep`, `beginHeldMove`, `dispatchHeldMove`, `wallShove`, `applyRecordStep`, `restore`, `restartRoom` | The `KeyRoom` held-key state machine and how a keypress becomes a game step. |
+| 3419–3496 | Save/load game | `saveGame`, `loadGame`, `saveExists`, `canSave`, `onWinBookkeeping` | In-room save slots and what happens on a win. |
+| 3497–3701 | Control panel | `panelState`, `optionsState`, `tickPanelScroll`, `togglePanelOptions`, `openHelp`, `drawPanel` | The side panel: its buttons, the options scroll animation, the help overlay. |
+| 3702–3948 | World map drawing | `ensureDeskyData`, `openMapInfo`, `drawMap`, `aiPlaqueFor`, `drawMapOverlays` | The branch map, its name plaques, and the record info panel (krokoměr). |
+| 3949–4319 | Map navigation & story screens | `showMap`, `returnFromRoom`, `showLegImage`, `drawLegImage`, `playFirstRunIntro`, `openCredits`, `drawCredits` | Entering/leaving the map, leg-completion pages, intro replay, the credits roll. |
+| 4320–4507 | Room entry & fish animation | `enterRoom`, `panelAction`, `updateLipSync`, `fishFrameFor` | The map → room transition, panel button actions, and which sprite frame each fish shows. |
+| 4508–4797 | Renderer plumbing | `classicArtFor`, `enhancedArtFor`, `lazyCompositor`, `roomGl`, `aiGl`, `enableWebgl`, `drawGpu`, `drawAiGpu`, `glParityCompare` | Art sources per tier, the WebGL compositors, and the CPU/GPU parity probes. |
+| 4798–4980 | The frame painter | `draw`, `updateRoomSubOverlay` | One room frame, all three tiers, CPU and GPU. Everything on screen during play is painted from here. |
+| 4981–5190 | The logic tick | `step`, `tickBlink`, `hracNespi` | One 80 ms game step: script, engine, dialogue, death handling, screensaver. |
+| 5191–5493 | Frame pacing & perf | `roomLoading`, `roomLoadSeq`, `IDLE_LOOP_MS`, `updatePerfHud`, `roomAnimating`, `loopThrottleOk`, `scheduleNext`, `wake` | The idle throttle (60 fps ↔ 12.5 fps), the water/ZX wake rates, and the perf HUD. |
+| 5494–5680 | `loop()` | `loop` | The rAF callback: which screen paints, how many logic steps run, when to sleep. |
+| 5681–5906 | Keyboard | `keydown` / `keyup` listeners | Every key binding, including cheats, dev keys and modal handling. |
+| 5907–6210 | Pointer | `cellFromEvent`, `clickCell`, `dirToward`, `clickMapAt`, `mapCoords`, `panelCoords` | Fish selection and click-to-swim target (the pathfinding itself is in `stepEngine.ts`), map node hit-testing, panel button hit-testing. |
+| 6211–6291 | Dev bar & window wiring | `populateRooms`, `resize` / `fullscreenchange` / dpr watchers | The dev-only room picker and the relayout triggers. |
+| 6292–6448 | Boot | `await FontData.load`, `parseFfp`, `loadSoundPkg`, `loadRoom(7)`, `initFeedback`, `requestAnimationFrame(loop)` | The top-level-await boot sequence, in load order. What is critical vs. optional is documented inline. |
+| 6449–7798 | `window.__ff` test hook | `__ff` | 215 entries — a sixth of the file. **85 of the 87 UI probes read this object**, so changing a key's shape changes the probes. |
+
+Regions marked **Hot** are where the last 15 commits to this file actually landed
+(`git log -15 -- src/app/main.ts`, hunks bucketed by line): the loading overlay, the art-tier loading,
+and room load together take a large share of the edits, while the cheats, Tetris, cutscene and map-drawing
+regions are near-untouched. If you are budgeting a change, budget it against the region, not the file.
 
 ## Original data
 
