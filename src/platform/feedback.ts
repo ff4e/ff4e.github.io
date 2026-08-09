@@ -7,7 +7,7 @@
  *   1. a prefilled **GitHub issue** (structured, public, needs an account),
  *   2. a prefilled **email** (`mailto:`, no account, may open nothing on a machine
  *      with no mail client configured),
- *   3. **copy to clipboard**, the fallback that always works.
+ *   3. **copy to clipboard**, the fallback for when neither of those works.
  *
  * GitHub alone was rejected deliberately: requiring an account would filter out most
  * of this game's audience.
@@ -415,22 +415,53 @@ function query(params: Record<string, string>): string {
     .join('&');
 }
 
-/** Shorten the player's text until the link fits, or until there is none left. */
+/**
+ * The longest prefix of the player's text for which the link still fits.
+ *
+ * A bisection, not "shave off the overflow and try again". The overflow is measured in
+ * PERCENT-ENCODED characters while a cut removes RAW ones, and those are not the same
+ * currency: a Czech diacritic encodes to six characters and an emoji to twelve, so
+ * subtracting one from the other over-cuts by the encoding factor. That is not a
+ * rounding error for this game's audience — measured on random long Czech reports, ~10%
+ * lost their move record to the KEEP_DESCRIPTION floor in `fitUrl` while a link that
+ * kept BOTH the record and a longer description was available, and the form then told
+ * the player the record "is too long to fit in a link", which was untrue.
+ *
+ * The URL's length grows monotonically with the description, so the longest fitting
+ * prefix is exactly what a bisection finds — and it finds it in ~12 rounds of `make`
+ * rather than the heuristic's 60, without any convergence argument to get wrong.
+ */
 function clampToFit(
   make: (input: ReportInput) => string,
   input: ReportInput,
   budget: number,
 ): { url: string; description: string } {
-  let description = input.description;
-  let url = make(input);
-  // Each round removes at least half the overflow (every character dropped removes at
-  // least one from the URL), so this converges well inside the bound.
-  for (let i = 0; i < 60 && description.length > 0 && url.length > budget; i++) {
-    const cut = Math.max(8, Math.ceil((url.length - budget) / 2));
-    description = clampText(description, Math.max(0, description.length - cut));
-    url = make({ ...input, description: description + CLAMP_MARK });
+  const full = make(input);
+  if (full.length <= budget) return { url: full, description: input.description };
+
+  const at = (n: number): { url: string; description: string } => {
+    // clampText may return n-1 characters (never splitting a surrogate pair), which
+    // keeps the search monotonic — it only ever shortens.
+    const description = clampText(input.description, n);
+    return { url: make({ ...input, description: description + CLAMP_MARK }), description };
+  };
+
+  let lo = 0;
+  let hi = input.description.length;
+  // The zero-length case is the floor: if even that is over budget, it is what gets
+  // returned and `fitUrl` reports the link as oversize rather than pretending.
+  let best = at(0);
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const cand = at(mid);
+    if (cand.url.length <= budget) {
+      best = cand;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
   }
-  return { url, description };
+  return best;
 }
 
 /**

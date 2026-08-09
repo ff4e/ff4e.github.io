@@ -150,7 +150,9 @@
          panel and is shown ONLY while the Options face is open — which is where a
          player already goes for everything that is about the game rather than in it.
          Absolutely positioned, so it costs the main window no space at all, and it
-         never draws on ALTAR's artwork (src/app/feedback.ts). */
+         never painted into ALTAR's own panel bitmap, and in a room it stays off the
+         game canvas entirely — over the map it rides with the floating Options panel,
+         which is already modal over the map art (src/app/feedback.ts). */
       #feedbar {
         position: absolute;
         top: 100%;

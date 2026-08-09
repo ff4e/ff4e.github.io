@@ -16,15 +16,17 @@ none of which happen on their own:
 
 - **Open a GitHub issue** — prefills [the bug or idea form](.github/ISSUE_TEMPLATE/).
 - **Send an email** — `mailto:` to `fish_fillets@icloud.com`, no account needed.
-- **Copy report** — the fallback that always works; paste it wherever you like.
+- **Copy report** — for when neither of those works; paste it wherever you like. (If the
+  browser blocks the clipboard, the report is on screen to copy by hand.)
 
 **Nothing is ever sent automatically.** There is no server behind this — the site is static
 on GitHub Pages — so a report only leaves the browser when you click one of those three, and
-the whole payload is on screen before you do. An *idea* collects only the version number; the
-browser diagnostics above are gathered for bug reports and nowhere else. See
+the whole payload is on screen before you do. An *idea* collects only which build it was
+written against (version, hash and date); the room and browser diagnostics above are
+gathered for bug reports and nowhere else. See
 [`src/platform/feedback.ts`](src/platform/feedback.ts) (what a report may contain, and why)
 and [`src/app/feedback.ts`](src/app/feedback.ts) (why it lives under the Options panel and
-is never painted onto the original artwork).
+is never painted into the original panel bitmap).
 
 One honest limit: the game's `random()` is **unseeded** (`src/core/script.ts`), so replaying a
 move record will not reproduce a bug that depended on a random draw. The record still pins

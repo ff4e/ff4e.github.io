@@ -164,17 +164,39 @@ describe('collectFacts — what a report may contain', () => {
 });
 
 describe('buildReport — the text the player is shown', () => {
-  it('leads with what the player wrote, then where, record and diagnostics', () => {
+  it('leads with what the player wrote, then where, record and diagnostics — in that order', () => {
     const r = buildReport({ kind: 'bug', description: 'the fish sank', facts: facts() });
-    expect(r.body).toContain('### What happened\n\nthe fish sank');
-    expect(r.body).toContain('Room 34 — KORALY (Corals)');
-    expect(r.body).toContain('3 moves');
-    expect(r.body).toContain('IKJL');
-    expect(r.body).toContain('Fish Fillets 4ever 1.0.18 (868c920, built 2026-08-07)');
-    expect(r.body).toContain('graphics: ai · renderer: webgl · WebGL2: yes');
-    expect(r.body).toContain('subtitles: cz');
-    expect(r.body).toContain('window 1512×850 · screen 1512×982');
-    expect(r.body).toContain('TestBrowser/1.0');
+    // Pinned WHOLE, not by substring. Every `toContain` here used to pass just as
+    // happily with the sections swapped, or with an extra line spliced into the
+    // diagnostics that the player was never shown — which is the one thing this
+    // feature promises cannot happen. An exact match is the only assertion that
+    // actually says "this, and nothing else, is what gets sent".
+    expect(r.body).toBe(
+      [
+        '### What happened',
+        '',
+        'the fish sank',
+        '',
+        '### Where',
+        '',
+        'Room 34 — KORALY (Corals)',
+        '',
+        '### Move record',
+        '',
+        '3 moves:',
+        '',
+        '    IKJL',
+        '',
+        '### Diagnostics',
+        '',
+        'Fish Fillets 4ever 1.0.18 (868c920, built 2026-08-07)',
+        'graphics: ai · renderer: webgl · WebGL2: yes',
+        'subtitles: cz',
+        'window 1512×850 · screen 1512×982',
+        'Mozilla/5.0 (Macintosh) TestBrowser/1.0',
+        '',
+      ].join('\n'),
+    );
   });
 
   it('says nothing at all about a fact it does not have', () => {
@@ -215,12 +237,25 @@ describe('buildReport — the text the player is shown', () => {
 
   it('keeps the block and the issue fields telling the same story', () => {
     const r = buildReport({ kind: 'bug', description: 'the fish sank', facts: facts() });
-    for (const value of Object.values(r.fields)) {
-      if (value) expect(r.body).toContain(value.split('\n')[0]!);
-    }
+    // Exact values, not first lines. The block is what the player READS and the fields
+    // are what GitHub RECEIVES; a first-line check let a whole extra paragraph be
+    // appended to a field without any test noticing, which would mean the player was
+    // shown one thing and something else was filed.
     expect(r.fields[BUG_FIELDS.what]).toBe('the fish sank');
     expect(r.fields[BUG_FIELDS.where]).toBe('Room 34 — KORALY (Corals)');
-    expect(r.fields[BUG_FIELDS.record]).toContain('IKJL');
+    expect(r.fields[BUG_FIELDS.record]).toBe('3 moves:\n\n    IKJL');
+    expect(r.fields[BUG_FIELDS.diagnostics]).toBe(
+      [
+        'Fish Fillets 4ever 1.0.18 (868c920, built 2026-08-07)',
+        'graphics: ai · renderer: webgl · WebGL2: yes',
+        'subtitles: cz',
+        'window 1512×850 · screen 1512×982',
+        'Mozilla/5.0 (Macintosh) TestBrowser/1.0',
+      ].join('\n'),
+    );
+    // …and every field is present verbatim in the block, so nothing can be filed that
+    // was not on screen.
+    for (const value of Object.values(r.fields)) if (value) expect(r.body).toContain(value);
   });
 
   it('names the screen a player was on when it was not a room', () => {
@@ -238,21 +273,39 @@ describe('the three exits', () => {
   it('files against the repo’s own issue form, not a blank issue', () => {
     const { url } = buildIssueUrl(input);
     expect(url.startsWith(`https://github.com/${FEEDBACK_REPO}/issues/new?`)).toBe(true);
-    expect(url).toContain(`template=${encodeURIComponent(BUG_TEMPLATE)}`);
-    expect(url).toContain(`${BUG_FIELDS.what}=`);
-    expect(new URL(url).searchParams.get(BUG_FIELDS.record)).toContain('IKJL');
-    const idea = buildIssueUrl({ kind: 'idea', description: 'a hint button', facts: collectFacts(env(), 'idea') });
-    expect(idea.url).toContain(`template=${encodeURIComponent(IDEA_TEMPLATE)}`);
-    expect(new URL(idea.url).searchParams.get(IDEA_FIELDS.idea)).toBe('a hint button');
+    const q = new URL(url).searchParams;
+    expect(q.get('template')).toBe(BUG_TEMPLATE);
+    // The link carries EXACTLY the report the player was shown — every field, whole,
+    // and no extra parameter beyond the template and the title. A substring check here
+    // let an unshown line be smuggled into a field and still pass.
+    const r = buildReport(input);
+    expect(q.get('title')).toBe(r.title);
+    for (const [id, value] of Object.entries(r.fields)) expect(q.get(id)).toBe(value || null);
+    expect([...q.keys()].sort()).toEqual(
+      ['template', 'title', ...Object.values(BUG_FIELDS).filter((id) => r.fields[id])].sort(),
+    );
+
+    const ideaInput = { kind: 'idea' as const, description: 'a hint button', facts: collectFacts(env(), 'idea') };
+    const iq = new URL(buildIssueUrl(ideaInput).url).searchParams;
+    const ir = buildReport(ideaInput);
+    expect(iq.get('template')).toBe(IDEA_TEMPLATE);
+    expect(iq.get(IDEA_FIELDS.idea)).toBe('a hint button');
+    for (const [id, value] of Object.entries(ir.fields)) expect(iq.get(id)).toBe(value || null);
+    expect([...iq.keys()].sort()).toEqual(
+      ['template', 'title', ...Object.values(IDEA_FIELDS).filter((id) => ir.fields[id])].sort(),
+    );
   });
 
   it('mails the one dedicated address, with the whole report as the body', () => {
     const { url } = buildMailtoUrl(input);
     expect(url.startsWith(`mailto:${FEEDBACK_EMAIL}?`)).toBe(true);
     const q = new URLSearchParams(url.slice(url.indexOf('?') + 1));
-    expect(q.get('subject')).toBe('[bug] KORALY (room 34)');
-    expect(q.get('body')).toContain('IKJL');
-    expect(q.get('body')).toContain('the fish sank');
+    const r = buildReport(input);
+    // Byte for byte the report on screen — an email that says more than the preview did
+    // would break the only promise this feature makes.
+    expect(q.get('subject')).toBe(r.title);
+    expect(q.get('body')).toBe(r.body);
+    expect([...q.keys()].sort()).toEqual(['body', 'subject']);
   });
 
   it('escapes a description that would otherwise break the query string', () => {
@@ -372,11 +425,59 @@ describe('links that would not fit', () => {
   });
 
   it('always hands the clipboard the complete report, whatever the links dropped', () => {
-    const fb = buildFeedback({ kind: 'bug', description: 'stuck', facts: flailing(20000) });
+    const f = flailing(20000);
+    const fb = buildFeedback({ kind: 'bug', description: 'stuck', facts: f });
     expect(fb.issue.recordOmitted).toBe(true);
     expect(fb.email.recordOmitted).toBe(true);
-    expect(fb.report.body).toContain('IKJL'.repeat(10)); // the record itself, in full
+    // The WHOLE record, asserted whole. Checking a 40-character prefix passed happily
+    // with the clipboard copy truncated — which would silently defeat the one exit that
+    // is supposed to carry everything.
+    expect(fb.report.body).toContain(`${f.moves} moves:\n\n    ${f.record}`);
+    expect(fb.report.body).toBe(buildReport({ kind: 'bug', description: 'stuck', facts: f }).body);
     expect(fb.report.body).not.toContain('too long for this link');
+  });
+
+  it('keeps the record for a long CZECH report — the audience this game actually has', () => {
+    // The cut is applied in raw characters while the budget is spent in percent-encoded
+    // ones, so a naive "shave off the overflow" over-cuts by the encoding factor: `č`
+    // costs six URL characters, not one. That drove the surviving description under the
+    // KEEP_DESCRIPTION floor and made fitUrl throw the move record away — on ~10% of
+    // long Czech reports — while telling the player it was "too long to fit in a link".
+    const czech = 'Rybka se zasekla ve zdi, když jsem posunul bednu doleva — pokaždé jinak. ';
+    let description = '';
+    while (description.length < 1551) description += czech;
+    description = description.slice(0, 1551);
+    const link = buildIssueUrl({ kind: 'bug', description, facts: flailing(1904) });
+    expect(link.url.length).toBeLessThanOrEqual(MAX_ISSUE_URL);
+    expect(link.recordOmitted).toBe(false);
+    expect(link.oversize).toBe(false);
+    expect(new URL(link.url).searchParams.get(BUG_FIELDS.record)).toContain('IKJLIKJL');
+  });
+
+  it('keeps as much of the text as the budget truly allows, at any encoding density', () => {
+    // The bisection's contract, stated as the thing that actually matters: when the
+    // text has to be cut, the finished link sits within ONE character's encoded width
+    // of the budget — nothing usable is left on the table. A character costs 1 URL
+    // character as ASCII, 6 as a Czech diacritic, 9 as CJK and 12 as an astral emoji,
+    // which is precisely the spread the old subtract-the-overflow loop got wrong: it
+    // cut in raw characters against an overflow counted in encoded ones, and threw away
+    // several times more of the player's words than it needed to.
+    for (const [filler, encodedWidth] of [
+      ['x', 1],
+      ['č', 6],
+      ['愛', 9],
+      ['🐟', 12],
+    ] as const) {
+      const link = buildMailtoUrl({ kind: 'bug', description: filler.repeat(4000), facts: facts() });
+      expect(link.clamped, filler).toBe(true);
+      expect(link.oversize, filler).toBe(false);
+      expect(link.recordOmitted, `${filler}: a 4-move record never needs sacrificing`).toBe(false);
+      expect(link.url.length, filler).toBeLessThanOrEqual(MAX_MAILTO_URL);
+      expect(
+        MAX_MAILTO_URL - link.url.length,
+        `${filler}: within one character of the budget, i.e. nothing wasted`,
+      ).toBeLessThan(encodedWidth);
+    }
   });
 
   it('holds up under 500 random reports', () => {

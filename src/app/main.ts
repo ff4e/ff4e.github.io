@@ -151,7 +151,7 @@ import { movesOf, lengthOfRecord, stepsOf, type RecordStep } from '../core/recor
 import { roomScript } from '../rooms/index.js';
 import { KufrDemo } from '../intro/kufrDemo.js';
 import { parseHelpCap, AKCE, KDO, type CapAction } from '../intro/helpCap.js';
-import { ROOMS } from '../data/roomTable.js';
+import { ROOMS, roomByNumber } from '../data/roomTable.js';
 import {
   computeStageLayout,
   contentScale as fitScale,
@@ -3621,7 +3621,11 @@ function drawPanel(): void {
   // It is shown only while those options are actually on screen, so nothing modern is
   // in view while the game is being played — and it is absolutely positioned, so it
   // never changes the panel column's size and cannot move the game when it appears.
-  if (feedbar) feedbar.hidden = !(visible && ostav === O_OPTIONS);
+  // Written through a guard like every other DOM touch in this function: drawPanel runs
+  // per frame, and an unconditional assignment here would be the one line in it that
+  // does style work on an idle room.
+  const wantBar = !(visible && ostav === O_OPTIONS);
+  if (feedbar && feedbar.hidden !== wantBar) feedbar.hidden = wantBar;
   // Float the panel over the map when opened from the Options corner; otherwise
   // it sits statically beside the play area (its normal in-room position). The COLUMN
   // is what floats, not the canvas, so the strip travels with the panel it belongs to.
@@ -5678,10 +5682,10 @@ window.addEventListener('keydown', (e) => {
   wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
   // The feedback form owns the keyboard while it is up. It is a modal <dialog>, so the
   // browser already keeps pointer and focus out of the game — but a keydown inside it
-  // still bubbles to window, and every letter here either drives a fish or feeds the
-  // cheat buffer (Uovl.pas:744). Without this, typing "what happened" swims the fish
-  // around behind the form and can trip a cheat. Escape is left alone: the dialog's own
-  // handler closes it.
+  // still bubbles to window. The fish keys are letters (WASD/IJKL, Uovl.pas:744) and
+  // `X` arms the cheat buffer, so typing "the fish sank while I was pushing a crate"
+  // swims the fish around behind the form — corrupting the very move record the report
+  // is about. Escape is left alone: the dialog's own handler closes it.
   if (feedback?.isOpen()) return;
   // While the intro movie plays, swallow input; any key skips the current movie
   // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603). Two exceptions:
@@ -6412,10 +6416,11 @@ feedback = initFeedback({
   build: { version: __APP_VERSION__, hash: __BUILD_HASH__, date: __BUILD_DATE__ },
   webgl2: () => webgl2Available(),
   game: () => {
-    const desc = screen === 'room' && curNum > 0 ? ROOMS[curNum - 1] : undefined;
+    const inRoom = screen === 'room' && curNum > 0;
+    const desc = inRoom ? roomByNumber(curNum) : undefined;
     return {
       screen,
-      roomNum: screen === 'room' && curNum > 0 ? curNum : null,
+      roomNum: inRoom ? curNum : null,
       roomName: desc?.jmeno ?? null,
       roomTitle: desc?.en ?? null,
       graphics,

@@ -16,7 +16,7 @@
  *  - It is **not painted into the panel bitmap.** The panel is the original's own
  *    155×395 art (`FFP`, drawn by composePanel/composeOptions) and the port draws
  *    exactly the buttons ALTAR drew. The strip is HTML hanging *below* that art, never
- *    over it — measured against the panel's box by the UI probe at five window sizes.
+ *    over it — measured against the panel's box by the UI probe at four window sizes.
  *  - It is **absolutely positioned**, so it contributes nothing to the panel column's
  *    size. The stage layout is computed from the panel's 155×395 (layout.ts), and
  *    opening Options must not resize the game; the probe pins that too.
@@ -180,17 +180,17 @@ export function initFeedback(host: FeedbackHost): FeedbackUi {
     } catch (e) {
       // A broken preview must never take the form with it: the player would lose what
       // they wrote and — since the text survives a close — the button would stay dead
-      // for the rest of the session. Fall back to the bare exits (an empty form, a bare
-      // mailto, and the clipboard, which copies the textarea when there is no report),
-      // never to a stale link that no longer matches what is on screen.
+      // for the rest of the session. Fall back to the UNFILLED exits (the issue-form
+      // chooser and a bare mailto, plus the clipboard, which copies the textarea when
+      // there is no report), never to a stale link that no longer matches the screen.
       current = null;
       preview!.textContent = what!.value;
       issueLink!.href = `https://github.com/${FEEDBACK_REPO}/issues/new/choose`;
       emailLink!.href = `mailto:${FEEDBACK_EMAIL}`;
       if (noteEl) {
         noteEl.textContent =
-          'Something went wrong preparing the links, so they are empty. Use “Copy report” and ' +
-          `paste what you wrote into an issue, or mail it to ${FEEDBACK_EMAIL}.`;
+          'Something went wrong preparing the links, so they will open blank. Use “Copy report” ' +
+          `and paste what you wrote into an issue, or mail it to ${FEEDBACK_EMAIL}.`;
       }
       // Loud on purpose: this should be unreachable, and a UI probe fails on it.
       console.error('feedback: could not build the report', e);

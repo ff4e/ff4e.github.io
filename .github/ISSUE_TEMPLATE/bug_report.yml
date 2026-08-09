@@ -6,10 +6,11 @@ body:
   - type: markdown
     attributes:
       value: |
-        **The quickest way to file this is from inside the game.** The bar under the
-        game has a **Send feedback** button; it fills this form in for you, including
-        the move record for the room you were in, which lets the moves be replayed
-        instead of guessed at.
+        **The quickest way to file this is from inside the game.** Open **Options** —
+        right-click the control panel in a room, or the *Options* corner of the world
+        map — and use the **Send feedback** strip at the bottom of it. It fills this
+        form in for you, including the move record for the room you were in, which lets
+        the moves be replayed instead of guessed at.
 
         You can also write it by hand here — everything below is optional except the
         first box.
