@@ -4,6 +4,34 @@ Faithful web port of the **1998 ALTAR Fish Fillets**, ported line-by-line from t
 Delphi engine source (not the FFNG remake). Published as **Fish Fillets 4ever**.
 GPL-2.0-or-later.
 
+## Feedback
+
+Play it at **<https://ff4e.github.io/>**. If something goes wrong, or you want something,
+open the **Options** panel — right-click the control panel in a room, or the *Options*
+corner of the world map — and use the **Send feedback** strip at the bottom of it. It
+writes the report for you — what you type, the room you were in, the build, the renderer,
+and the **move record** for that room, so the moves that led to the bug can be replayed
+instead of guessed at — shows you the finished message, and then offers three ways out,
+none of which happen on their own:
+
+- **Open a GitHub issue** — prefills [the bug or idea form](.github/ISSUE_TEMPLATE/).
+- **Send an email** — `mailto:` to `fish_fillets@icloud.com`, no account needed.
+- **Copy report** — for when neither of those works; paste it wherever you like. (If the
+  browser blocks the clipboard, the report is on screen to copy by hand.)
+
+**Nothing is ever sent automatically.** There is no server behind this — the site is static
+on GitHub Pages — so a report only leaves the browser when you click one of those three, and
+the whole payload is on screen before you do. An *idea* collects only which build it was
+written against (version, hash and date); the room and browser diagnostics above are
+gathered for bug reports and nowhere else. See
+[`src/platform/feedback.ts`](src/platform/feedback.ts) (what a report may contain, and why)
+and [`src/app/feedback.ts`](src/app/feedback.ts) (why it lives under the Options panel and
+is never painted into the original panel bitmap).
+
+One honest limit: the game's `random()` is **unseeded** (`src/core/script.ts`), so replaying a
+move record will not reproduce a bug that depended on a random draw. The record still pins
+down everything else.
+
 ## Status
 
 - **M0 — format proof (done):** the FFR (room graphics + logic) loader is ported from
@@ -322,6 +350,8 @@ the same assertions.
 - `src/render/framebuffer.ts` — indexed 8-bit screen + blitters (`Kresli`/`KresliRev`/`Kresli2`/`KresliR`).
 - `src/render/renderRoom.ts` — static room compositor (faithful `TRoom.Priprav` resting frame).
 - `src/render/png.ts` — dependency-free RGBA PNG encoder.
+- `src/platform/feedback.ts` — what a player's report contains and the three links out (pure).
+- `src/app/feedback.ts` — the feedback strip under the Options panel + the form, and why it sits there.
 - `tools/gen-room-table.py` — regenerates `roomTable.ts` from the original Pascal.
 - `tools/dump-ffr.ts` — M0 verification CLI (parse + size-check a room or all rooms).
 - `tools/render-room.ts` — M1 verification CLI (render a room / all rooms to PNG).

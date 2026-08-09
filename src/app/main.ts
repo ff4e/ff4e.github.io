@@ -107,6 +107,7 @@ import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
 import { loadAiPanel, type AiPanel } from '../render/panelAi.js';
 import { loadAiCredits, type AiCredits } from '../render/creditsAi.js';
 import { initAnalytics } from '../platform/analytics.js';
+import { initFeedback, type FeedbackUi } from './feedback.js';
 import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
 import { parseFfp, type FfpPanel } from '../data/ffp.js';
 import {
@@ -150,7 +151,7 @@ import { movesOf, lengthOfRecord, stepsOf, type RecordStep } from '../core/recor
 import { roomScript } from '../rooms/index.js';
 import { KufrDemo } from '../intro/kufrDemo.js';
 import { parseHelpCap, AKCE, KDO, type CapAction } from '../intro/helpCap.js';
-import { ROOMS } from '../data/roomTable.js';
+import { ROOMS, roomByNumber } from '../data/roomTable.js';
 import {
   computeStageLayout,
   contentScale as fitScale,
@@ -383,6 +384,10 @@ let subOverlaySig = '';
 let subOverlayGate = true;
 const panelCanvas = document.getElementById('panel') as HTMLCanvasElement;
 const panelCtx = panelCanvas.getContext('2d')!;
+// The panel's column wrapper (the canvas plus the feedback strip that hangs under the
+// Options face). This is what floats over the map, so the strip travels with it.
+const panelCol = document.getElementById('panelcol') as HTMLElement;
+const feedbar = document.getElementById('feedbar') as HTMLElement | null;
 const select = document.getElementById('room') as HTMLSelectElement;
 const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null;
 const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
@@ -738,6 +743,9 @@ let infoPanelAssets: InfoPanelAssets | null = null;
 let deskyData: DeskyData | null = null;
 let deskyLang: 'cz' | 'en' | null = null;
 let helpOpen = false; // true while the help-screens overlay is shown (akce_help / ToggleHelp)
+// The feedback form (src/app/feedback.ts). Wired at the end of boot; until then, and
+// if its markup is missing, it simply reports itself closed.
+let feedback: FeedbackUi | null = null;
 const helpScreens = new HelpScreens(); // the control-help pages (Help.pas), lazily loaded
 let worldMap: WorldMap | null = null; // the branch-map screen
 // AI-upscaled world-map compositor (Phase B), lazily loaded when the map assets
@@ -3602,21 +3610,37 @@ function drawPanel(): void {
   if (!panel) return;
   const asMapOverlay = screen === 'map' && mapOverlay === 'options';
   const visible = screen === 'room' || asMapOverlay;
-  panelCanvas.style.display = visible ? '' : 'none';
+  // Hide the COLUMN, not just the canvas inside it. `display: none` takes an element
+  // out of the flex row entirely, and with it the row's gap; hiding only the canvas
+  // would leave a zero-width column still claiming that gap, so the map sat half a gap
+  // off-centre and then jumped right the moment Options floated the column out of the
+  // flow. (That is exactly what happened when the column was introduced — the canvas
+  // used to be the flex item itself, and hiding it removed the gap for free.)
+  panelCol.style.display = visible ? '' : 'none';
+  // The feedback strip belongs to the Options face and hangs under it (index.html).
+  // It is shown only while those options are actually on screen, so nothing modern is
+  // in view while the game is being played — and it is absolutely positioned, so it
+  // never changes the panel column's size and cannot move the game when it appears.
+  // Written through a guard like every other DOM touch in this function: drawPanel runs
+  // per frame, and an unconditional assignment here would be the one line in it that
+  // does style work on an idle room.
+  const wantBar = !(visible && ostav === O_OPTIONS);
+  if (feedbar && feedbar.hidden !== wantBar) feedbar.hidden = wantBar;
   // Float the panel over the map when opened from the Options corner; otherwise
-  // it sits statically beside the play area (its normal in-room position).
+  // it sits statically beside the play area (its normal in-room position). The COLUMN
+  // is what floats, not the canvas, so the strip travels with the panel it belongs to.
   if (asMapOverlay) {
-    panelCanvas.style.position = 'fixed';
-    panelCanvas.style.left = '50%';
-    panelCanvas.style.top = '50%';
-    panelCanvas.style.transform = 'translate(-50%, -50%)';
-    panelCanvas.style.zIndex = '50';
-  } else if (panelCanvas.style.position === 'fixed') {
-    panelCanvas.style.position = '';
-    panelCanvas.style.left = '';
-    panelCanvas.style.top = '';
-    panelCanvas.style.transform = '';
-    panelCanvas.style.zIndex = '';
+    panelCol.style.position = 'fixed';
+    panelCol.style.left = '50%';
+    panelCol.style.top = '50%';
+    panelCol.style.transform = 'translate(-50%, -50%)';
+    panelCol.style.zIndex = '50';
+  } else if (panelCol.style.position === 'fixed') {
+    panelCol.style.position = '';
+    panelCol.style.left = '';
+    panelCol.style.top = '';
+    panelCol.style.transform = '';
+    panelCol.style.zIndex = '';
   }
   if (!visible) return;
   // Composing the panel (155×395) + palette→RGBA + putImageData is pure per-frame
@@ -5656,6 +5680,13 @@ function loop(now: number): void {
 
 window.addEventListener('keydown', (e) => {
   wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
+  // The feedback form owns the keyboard while it is up. It is a modal <dialog>, so the
+  // browser already keeps pointer and focus out of the game — but a keydown inside it
+  // still bubbles to window. The fish keys are letters (WASD/IJKL, Uovl.pas:744) and
+  // `X` arms the cheat buffer, so typing "the fish sank while I was pushing a crate"
+  // swims the fish around behind the form — corrupting the very move record the report
+  // is about. Escape is left alone: the dialog's own handler closes it.
+  if (feedback?.isOpen()) return;
   // While the intro movie plays, swallow input; any key skips the current movie
   // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603). Two exceptions:
   // a bare modifier keydown must NOT skip (otherwise arming Ctrl+Alt+D during the
@@ -6379,6 +6410,27 @@ setInfo();
 booted = true;
 console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
 initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
+// The feedback form. Reads the live game state only when the player opens it — there is
+// no collection before that, and nothing is ever sent without a click (see feedback.ts).
+feedback = initFeedback({
+  build: { version: __APP_VERSION__, hash: __BUILD_HASH__, date: __BUILD_DATE__ },
+  webgl2: () => webgl2Available(),
+  game: () => {
+    const inRoom = screen === 'room' && curNum > 0;
+    const desc = inRoom ? roomByNumber(curNum) : undefined;
+    return {
+      screen,
+      roomNum: inRoom ? curNum : null,
+      roomName: desc?.jmeno ?? null,
+      roomTitle: desc?.en ?? null,
+      graphics,
+      renderer,
+      subtitles: settings.subtitles,
+      moves: lengthOfRecord(engine?.srecord ?? ''),
+      record: engine?.srecord ?? '',
+    };
+  },
+});
 // ...unless the map is still waiting for the art it will be presented in, in which case
 // boot is not over from the player's side and the overlay stays up (see syncLoadingUi).
 if (loadingEl && !mapArtHolding()) loadingEl.hidden = true;
@@ -6540,6 +6592,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   titDef: () => settings.titDef,
   // Help overlay (for UI probes): open/close + page state.
   helpOpen: () => helpOpen,
+  // Feedback form (for UI probes): open/close, plus the payload and links exactly as
+  // the player sees them. Read-only — nothing here sends anything.
+  feedbackOpen: () => feedback?.isOpen() ?? false,
+  openFeedback: (kind?: 'bug' | 'idea') => feedback?.open(kind),
+  closeFeedback: () => feedback?.close(),
+  feedbackPreview: () => feedback?.preview() ?? '',
+  feedbackLinks: () => feedback?.links() ?? { issue: '', email: '' },
+  feedbackNote: () => feedback?.note() ?? '',
   openHelp: () => openHelp(),
   closeHelp: () => closeHelp(),
   helpPage: () => helpScreens.page,

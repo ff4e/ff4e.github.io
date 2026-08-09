@@ -1,0 +1,51 @@
+name: Bug report
+description: Something in the game went wrong
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **The quickest way to file this is from inside the game.** Open **Options** —
+        right-click the control panel in a room, or the *Options* corner of the world
+        map — and use the **Send feedback** strip at the bottom of it. It fills this
+        form in for you, including the move record for the room you were in, which lets
+        the moves be replayed instead of guessed at.
+
+        You can also write it by hand here — everything below is optional except the
+        first box.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What were you doing, what did you expect, and what happened instead?
+      placeholder: The little fish got stuck in the wall after I pushed the crate left…
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Where
+      description: The room (name and number), or the screen you were on.
+      placeholder: Room 34 — KORALY (Corals)
+  - type: textarea
+    id: move-record
+    attributes:
+      label: Move record
+      description: >-
+        The move record for the room, from the game's feedback form. Each letter is one
+        move, so the whole attempt can be replayed. Leave empty if you don't have one.
+      render: text
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: >-
+        Version, graphics tier, renderer, window size, browser. The in-game form fills
+        this in; there is no need to hunt for it by hand.
+      render: text
+  - type: markdown
+    attributes:
+      value: |
+        A GitHub issue is public. Only put in what you're happy for anyone to read —
+        if you'd rather not, mail it to `fish_fillets@icloud.com` instead.

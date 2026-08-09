@@ -1,0 +1,10 @@
+# The two forms above are the only ways to open an issue from the chooser; a blank
+# issue would arrive with none of the diagnostics that make a report actionable.
+blank_issues_enabled: false
+contact_links:
+  - name: Send feedback from inside the game
+    url: https://ff4e.github.io/
+    about: The Options panel has a Send feedback strip that fills a report in for you — build, room and move record included.
+  - name: Email instead (no GitHub account needed)
+    url: mailto:fish_fillets@icloud.com
+    about: A dedicated address for this port. Say what happened and which room you were in.

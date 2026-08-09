@@ -45,6 +45,11 @@
         flex: 0 0 auto;
       }
       #panel { cursor: pointer; flex: 0 0 auto; }
+      /* The panel column: the control panel with the feedback strip hanging under it.
+         The strip is `position: absolute` so it contributes NOTHING to the column's
+         size — the stage layout is computed from the panel's 155×395 and must stay
+         that way, or opening Options would resize the game. */
+      #panelcol { position: relative; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; }
       /* Player view = game only. Controls + info bar are dev/tuning chrome, hidden
          by default and revealed with the `` ` `` hotkey (body.dev). */
       .controls { display: none; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: center; padding: 6px 8px; }
@@ -140,6 +145,120 @@
       html[data-unsupported] #devbar,
       html[data-unsupported] #info,
       html[data-unsupported] #perfhud { display: none; }
+      /* Feedback strip: the player's only way to reach the author, and the only piece
+         of modern chrome anywhere near the game. It hangs directly under the control
+         panel and is shown ONLY while the Options face is open — which is where a
+         player already goes for everything that is about the game rather than in it.
+         Absolutely positioned, so it costs the main window no space at all, and it
+         never painted into ALTAR's own panel bitmap, and in a room it stays off the
+         game canvas entirely — over the map it rides with the floating Options panel,
+         which is already modal over the map art (src/app/feedback.ts). */
+      #feedbar {
+        position: absolute;
+        top: 100%;
+        /* Exactly the panel's width — the column's width IS the panel's — so the strip
+           reads as a footer of the Options window and can never stick out past it, at
+           any stage scale. Absolutely positioned, so it adds nothing to the column and
+           opening Options cannot move the game. */
+        left: 0;
+        right: 0;
+        display: flex;
+        align-items: baseline;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: 3px 8px;
+        margin-top: 4px;
+        padding: 3px 6px;
+        box-sizing: border-box;
+        text-align: center;
+        border-radius: 0 0 6px 6px;
+        /* A backing, because this strip sits over two very different things: black
+           letterboxing in a room, and the map's brown artwork when Options is opened
+           from the map corner. Without it the text is legible against one and lost
+           against the other. */
+        background: #0b0b12b0;
+        backdrop-filter: blur(3px);
+        font: 11px/1.5 system-ui, sans-serif;
+        color: #cdd;
+        opacity: 0.8;
+        transition: opacity 0.15s;
+      }
+      #feedbar[hidden] { display: none; }
+      #feedbar:hover, #feedbar:focus-within { opacity: 1; }
+      #feedbar-build { opacity: 0.7; font-variant-numeric: tabular-nums; }
+      #feedbar button {
+        background: none;
+        border: none;
+        border-bottom: 1px dotted #667;
+        color: inherit;
+        font: inherit;
+        padding: 0;
+        cursor: pointer;
+      }
+      #feedbar button:hover { color: #9dd; border-bottom-color: #9dd; }
+      /* The feedback form. A real <dialog>, so the browser gives us the modal backdrop,
+         the focus trap and Esc-to-close; the game's keyboard is blocked while it is up
+         (main.ts checks isOpen()), because every letter key otherwise drives a fish or
+         feeds the cheat buffer. */
+      #feedback {
+        width: min(720px, 92vw);
+        max-height: 88vh;
+        border: 1px solid #44445a;
+        border-radius: 10px;
+        background: #14141e;
+        color: #cdd;
+        font: 13px/1.5 system-ui, sans-serif;
+        padding: 0;
+      }
+      #feedback::backdrop { background: #000a; }
+      #feedback .fb-body { display: flex; flex-direction: column; gap: 12px; padding: 20px 22px; }
+      #feedback h2 { margin: 0; font: 600 18px/1.2 system-ui, sans-serif; }
+      #feedback p { margin: 0; opacity: 0.8; }
+      #feedback label { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+      #feedback textarea {
+        width: 100%;
+        box-sizing: border-box;
+        min-height: 5.5em;
+        resize: vertical;
+        background: #0d0d14;
+        color: #cdd;
+        border: 1px solid #3a3a4a;
+        border-radius: 6px;
+        padding: 8px 10px;
+        font: 13px/1.5 system-ui, sans-serif;
+      }
+      #feedback-preview {
+        margin: 0;
+        max-height: 34vh;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        background: #0d0d14;
+        border: 1px solid #2a2a3a;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
+        opacity: 0.9;
+      }
+      #feedback-note:empty { display: none; }
+      #feedback-note { color: #e9c46a; }
+      #feedback-status:empty { display: none; }
+      #feedback-status { opacity: 0.75; }
+      .fb-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+      .fb-btn {
+        display: inline-block;
+        padding: 8px 16px;
+        font: 600 13px/1 system-ui, sans-serif;
+        color: #cdd;
+        background: #1a2a2a;
+        border: 1px solid #3a5a5a;
+        border-radius: 7px;
+        cursor: pointer;
+        text-decoration: none;
+      }
+      .fb-btn:hover { background: #244; }
+      .fb-btn.ghost { background: none; border-color: #3a3a4a; }
+      .fb-btn.ghost:hover { background: #22222e; }
       /* Re-used for room entry after boot: the title and the attribution belong to
          the boot splash, and would read as "the game restarted" mid-play. */
       #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
@@ -252,9 +371,44 @@
     </div>
     <div class="stage">
       <canvas id="screen"></canvas>
-      <canvas id="panel" title="control panel"></canvas>
+      <!-- The control panel and the strip that hangs under it. The strip is the
+           player's way to reach the author; it belongs to the Options face and is
+           hidden the rest of the time (src/app/feedback.ts explains the placement). -->
+      <div id="panelcol">
+        <canvas id="panel" title="control panel"></canvas>
+        <div id="feedbar" hidden>
+          <span id="feedbar-build"></span>
+          <button id="feedback-open" type="button">Send feedback</button>
+        </div>
+      </div>
     </div>
     <div id="info"></div>
+    <dialog id="feedback" aria-labelledby="feedback-title">
+      <div class="fb-body">
+        <h2 id="feedback-title">Send feedback</h2>
+        <p>
+          Nothing leaves your browser until you pick one of the buttons at the bottom. The
+          box below the form is the whole message — read it, and change your mind if you
+          want to.
+        </p>
+        <div class="fb-row">
+          <label><input type="radio" name="feedback-kind" value="bug" checked> Something went wrong</label>
+          <label><input type="radio" name="feedback-kind" value="idea"> An idea or a wish</label>
+        </div>
+        <label for="feedback-what">What happened? What did you expect instead?</label>
+        <textarea id="feedback-what" placeholder="The little fish got stuck in the wall after I pushed the crate left…"></textarea>
+        <p>This will be sent:</p>
+        <pre id="feedback-preview"></pre>
+        <p id="feedback-note"></p>
+        <div class="fb-row">
+          <a id="feedback-issue" class="fb-btn" href="#" target="_blank" rel="noopener noreferrer">Open a GitHub issue</a>
+          <a id="feedback-email" class="fb-btn" href="#">Send an email</a>
+          <button id="feedback-copy" class="fb-btn ghost" type="button">Copy report</button>
+          <button id="feedback-close" class="fb-btn ghost" type="button">Close</button>
+        </div>
+        <p id="feedback-status" role="status" aria-live="polite"></p>
+      </div>
+    </dialog>
     <script type="module" src="/src/app/main.ts"></script>
   </body>
 </html>
