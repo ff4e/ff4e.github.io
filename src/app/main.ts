@@ -160,6 +160,32 @@ import {
   type FitMode,
 } from './layout.js';
 import { isUnsupportedDevice, showUnsupportedNotice } from './deviceGate.js';
+import {
+  buildStage,
+  canvas,
+  ctx,
+  fatalEl,
+  feedbar,
+  fitSelect,
+  glCanvas,
+  graphicsSelect,
+  idleDirtyToggle,
+  info,
+  loadingEl,
+  loadingMsg,
+  panelCanvas,
+  panelCol,
+  panelCtx,
+  perfHud,
+  rendererSelect,
+  select,
+  stageBox,
+  stageRow,
+  subCanvas,
+  subCtx,
+  winRoomBtn,
+  wrap,
+} from './dom.js';
 
 // Phones are refused here, before a single byte of game ART is fetched. (The engine
 // bundle itself has already been downloaded — this statement is inside it — so the claim
@@ -298,57 +324,7 @@ const EFFECT_VOL = 48 / 64;
 // Animation lengths in game ticks (URoom.pas:425-433) — shared with the step-engine.
 const EXIT_CELLS = 5; // cells of travel to slide fully off-screen (render constant)
 
-const canvas = document.getElementById('screen') as HTMLCanvasElement;
-const ctx = canvas.getContext('2d')!;
-// WebGL present surface (P3): a canvas stacked exactly over #screen, shown only
-// while the WebGL backend is active (renderer==='webgl'). #screen stays the
-// layout anchor; this overlay covers it when the GPU presents. Created here so
-// the GlScreen can bind its context lazily on first use.
-const glCanvas = document.createElement('canvas');
-glCanvas.id = 'screen-gl';
-// Enhanced-graphics subtitle overlay: a smooth (non-pixelated) high-DPI canvas
-// laid exactly over the game canvas, so vector subtitles stay crisp above the
-// pixel-art frame. Wrap #screen so the overlay can be absolutely positioned on
-// top; a transparent 1px border matches #screen's border box for pixel-exact
-// alignment.
-const subCanvas = document.createElement('canvas');
-subCanvas.id = 'subs';
-const subCtx = subCanvas.getContext('2d')!;
-// The fixed stage box (sized by relayout): rooms/map/cutscene are centered inside
-// it and letterboxed, so the side panel stays put while the room canvas resizes.
-const stageBox = document.createElement('div');
-stageBox.id = 'stagebox';
-const wrap = document.createElement('div');
-{
-  wrap.style.position = 'relative';
-  wrap.style.display = 'inline-block';
-  wrap.style.lineHeight = '0';
-  // Insert the stage box where #screen sat (inside .stage), then nest the wrap
-  // (which holds #screen + the GL/subtitle overlays) centered within it.
-  canvas.parentNode!.insertBefore(stageBox, canvas);
-  stageBox.appendChild(wrap);
-  wrap.appendChild(canvas);
-  // GL present canvas: absolute over #screen, below the subtitle overlay. It is
-  // purely a display surface — the mouse listeners live on #screen underneath, so
-  // it must not intercept pointer events (else clicking a fish does nothing in
-  // WebGL mode). The subtitle overlay above is transparent to clicks for the same
-  // reason.
-  glCanvas.style.position = 'absolute';
-  glCanvas.style.left = '0';
-  glCanvas.style.top = '0';
-  glCanvas.style.border = '1px solid transparent';
-  glCanvas.style.display = 'none';
-  glCanvas.style.pointerEvents = 'none';
-  wrap.appendChild(glCanvas);
-  subCanvas.style.position = 'absolute';
-  subCanvas.style.left = '0';
-  subCanvas.style.top = '0';
-  subCanvas.style.border = '1px solid transparent';
-  subCanvas.style.background = 'transparent';
-  subCanvas.style.imageRendering = 'auto';
-  subCanvas.style.pointerEvents = 'none';
-  wrap.appendChild(subCanvas);
-}
+buildStage(); // the stage box + the GL/subtitle overlays (see dom.ts: not done at import time)
 // Vector-subtitle font (enhanced mode). All candidates are bundled + OFL-licensed
 // so they render identically on every platform. Mulish Medium is the default — a
 // clean humanist face close to Avenir Next Medium. The previewer (F key) cycles
@@ -382,29 +358,6 @@ let subOverlaySig = '';
 // Perf A/B switch (tools/bench-subtitles.mjs): false replays the pre-gate behaviour,
 // repainting the overlay on every frame that draws it.
 let subOverlayGate = true;
-const panelCanvas = document.getElementById('panel') as HTMLCanvasElement;
-const panelCtx = panelCanvas.getContext('2d')!;
-// The panel's column wrapper (the canvas plus the feedback strip that hangs under the
-// Options face). This is what floats over the map, so the strip travels with it.
-const panelCol = document.getElementById('panelcol') as HTMLElement;
-const feedbar = document.getElementById('feedbar') as HTMLElement | null;
-const select = document.getElementById('room') as HTMLSelectElement;
-const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null;
-const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
-const graphicsSelect = document.getElementById('graphics') as HTMLSelectElement | null;
-const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;
-const winRoomBtn = document.getElementById('winroom') as HTMLButtonElement | null;
-const perfHud = document.getElementById('perfhud') as HTMLElement | null;
-const info = document.getElementById('info') as HTMLDivElement;
-const stageRow = document.querySelector('.stage') as HTMLElement;
-
-// ── Public-release boot UX: loading indicator, fatal-error screen, and a
-// software-renderer note. The loading overlay is present in the HTML (shown before
-// this deferred module runs), so the player never sees a blank page while assets
-// fetch; the app hides it once boot completes.
-const loadingEl = document.getElementById('loading') as HTMLElement | null;
-const loadingMsg = document.getElementById('loading-msg') as HTMLElement | null;
-const fatalEl = document.getElementById('fatal') as HTMLElement | null;
 let booted = false; // true once boot succeeds — before that, any error is fatal
 
 /** Update the loading overlay's status line. */
@@ -6232,9 +6185,13 @@ select.value = 'map'; // the game opens on the world map, so start the picker th
 // Public-release layout: the visible fit-mode control (localStorage-persisted via
 // settings) + responsive stage scaling on resize / fullscreen.
 if (fitSelect) {
-  fitSelect.value = settings.fitMode;
-  fitSelect.addEventListener('change', () => {
-    const v = fitSelect.value;
+  // A local const, because TypeScript will not carry the null-narrowing of an
+  // IMPORTED binding into a closure (an exporting module may reassign it; these
+  // never do). Same one-line dance at the four dev-bar controls below.
+  const el = fitSelect;
+  el.value = settings.fitMode;
+  el.addEventListener('change', () => {
+    const v = el.value;
     settings.fitMode = isFitMode(v) ? v : 'medium';
     saveSettings(settings);
     forceRoomRedraw = true; // the fit scale changes the room canvas size — repaint
@@ -6245,26 +6202,30 @@ if (fitSelect) {
 // driven by the hidden R hotkey; syncDevControls() keeps their displayed value
 // current after a hotkey toggle.
 if (rendererSelect) {
-  rendererSelect.value = renderer;
-  rendererSelect.addEventListener('change', () => setRenderer(rendererSelect.value === 'cpu' ? 'cpu' : 'webgl'));
+  const el = rendererSelect;
+  el.value = renderer;
+  el.addEventListener('change', () => setRenderer(el.value === 'cpu' ? 'cpu' : 'webgl'));
 }
 // Dev-bar graphics-level combobox. Mirrors the E hotkey (setGraphics keeps the
 // select value in sync when E cycles), and is the primary point-and-click switch.
 if (graphicsSelect) {
-  graphicsSelect.value = graphics;
-  graphicsSelect.addEventListener('change', () => {
-    const v = graphicsSelect.value;
+  const el = graphicsSelect;
+  el.value = graphics;
+  el.addEventListener('change', () => {
+    const v = el.value;
     setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
   });
 }
 if (idleDirtyToggle) {
-  idleDirtyToggle.checked = renderOnDirty;
-  idleDirtyToggle.addEventListener('change', () => setRenderOnDirty(idleDirtyToggle.checked));
+  const el = idleDirtyToggle;
+  el.checked = renderOnDirty;
+  el.addEventListener('change', () => setRenderOnDirty(el.checked));
 }
 if (winRoomBtn) {
-  winRoomBtn.addEventListener('click', () => {
+  const el = winRoomBtn;
+  el.addEventListener('click', () => {
     devWinRoom();
-    winRoomBtn.blur(); // drop button focus so a Space/Enter dismiss doesn't re-click it
+    el.blur(); // drop button focus so a Space/Enter dismiss doesn't re-click it
   });
 }
 // Apply the persisted dev-pane state on boot (Ctrl+Alt+D toggles it thereafter).
