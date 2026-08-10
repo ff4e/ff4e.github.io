@@ -1,0 +1,303 @@
+/**
+ * The room-entry parchment, and the launch it belongs to (Menu/loading.BMP,
+ * UMain.pas:1489-1493).
+ *
+ * Clicking a room on the world map does NOT take the stage away in the original. It
+ * sets doAkce:=daRun, and the map's very next paint draws itself with RTable zeroed
+ * (fully unlit, no room balls — the same state the record panel puts it in), the
+ * clicked room's name plaque, and a 192×161 parchment blitted at (227,160). Only
+ * then does doAkce flip to daRealyRun and Spust() run the blocking load, so on a
+ * single-threaded Delphi the parchment simply sits on the map for the whole wait:
+ *
+ *     if (doAkce=daRun)or(doAkce=daReplay) then
+ *       begin
+ *         kresli(Obr,Loading,227,160,192,161,0,0);
+ *         if doAkce=daRun then doAkce:=daRealyRun;
+ *       end
+ *
+ * It is a room-entry indicator ON THE MAP, not a boot splash — which is why this port
+ * shipped Menu/loading.BMP unused for so long: it was looked for at boot, where it
+ * never belonged.
+ *
+ * ── The seam ──────────────────────────────────────────────────────────────────
+ * This is a state machine driven by the frame loop, so it needs to see rather a lot of
+ * the running game — but it WRITES only what a screen transition is: the screen itself,
+ * the two repaint invalidations, and the room picker's value. `startRoom` is the host's
+ * own room entry, called back once a frame carrying the parchment has been painted.
+ *
+ * The three functions main.ts calls are the three moments of a launch: `beginMapLaunch`
+ * (arm it, from enterRoom), `tickMapLaunch` (drive it, from loop) and `blitParchment` /
+ * `blitParchmentAi` (draw it, from drawMap, which also sets `painted`). Everything else
+ * — the input guards, the map's unlit rendering, its cache signature — reads
+ * `mapLaunching()`.
+ *
+ * initRoomLaunch() is called from main.ts at the point this code used to sit. Module
+ * scope is side-effect-free, so nothing runs before main.ts's phone gate.
+ */
+import { parseBmp, bmpToRgba } from '../data/bmp.js';
+import { MAP_W } from '../render/worldMap.js';
+import { AI_MAP_SCALE } from '../render/worldMapAi.js';
+import type { AiWorldMap } from '../render/worldMapAi.js';
+
+/** What this module needs to see of the running game. */
+export interface RoomLaunchHost {
+  /** Is the `ai` world map still loading? (No map frame to draw the parchment onto.) */
+  readonly mapArtHolding: () => boolean;
+  readonly mapOverlay: 'none' | 'options' | 'credits';
+  /** Has a map frame been painted? (Not: is the map the current screen.) */
+  readonly mapPresented: boolean;
+  mapSig: string | null;
+  forceRoomRedraw: boolean;
+  readonly inShowmode: () => boolean;
+  readonly roomArtPending: () => boolean;
+  readonly roomLoading: boolean;
+  screen: 'map' | 'room' | 'intro' | 'legimage';
+  /** The dev room picker, kept in step with the room actually shown. */
+  readonly setRoomPicker: (num: number) => void;
+  /** The host's room entry (Spust): fetch the room and build it. */
+  readonly startRoom: (num: number, replay: string | undefined, takeStage: boolean) => Promise<void>;
+  readonly wake: () => void;
+  readonly aiWorldMap: AiWorldMap | null;
+}
+
+let host!: RoomLaunchHost;
+
+/** Hand this module its view of the game. Called once, from main.ts, during boot. */
+export function initRoomLaunch(h: RoomLaunchHost): void {
+  host = h;
+}
+
+/** kresli(Obr,Loading,227,160,192,161,0,0) — UMain.pas:1489. */
+const PARCHMENT_X = 227;
+const PARCHMENT_Y = 160;
+/** The native parchment (null until boot decodes it, or if it is missing). */
+let parchment: { w: number; h: number; rgba: Uint8ClampedArray } | null = null;
+/** The native parchment as a canvas, for the `ai` path's fallback blit (built on demand). */
+let parchmentCanvas: HTMLCanvasElement | null = null;
+
+/**
+ * Decode the parchment art. Awaited by boot, but never fatal.
+ *
+ * Its own fetch rather than a member of the map's Promise.all: the map is a CRITICAL
+ * asset, and folding this 32 kB indicator in would turn a missing parchment into a fatal
+ * boot. Without it, enterRoom simply falls back to the full-screen overlay — see
+ * canLaunchFromMap().
+ */
+export async function loadParchment(): Promise<void> {
+  try {
+    const buf = await fetch('/data/Menu/loading.BMP').then((r) => r.arrayBuffer());
+    const bmp = parseBmp(new Uint8Array(buf));
+    parchment = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
+  } catch {
+    /* parchment optional — room entry keeps the overlay */
+  }
+}
+
+/** Is the parchment art available at all? (For the `__ff` hook and canLaunchFromMap.) */
+export function parchmentReady(): boolean {
+  return parchment !== null;
+}
+
+/**
+ * Blit the parchment opaquely into a map-sized RGBA buffer (kresli, UMain.pas:1489).
+ *
+ * It is an opaque pre-composited RECTANGLE, not a sprite: `kresli` is a plain rect blit
+ * with no colour key, and the dark map layer is baked into the parchment's own border
+ * (measured mean per-pixel border difference 0.02 against mapa-0, 7.54 against mapa-1).
+ * So where the map is lit the original overwrites it with the unlit version —
+ * consistent, because a launching map is unlit anyway.
+ */
+export function blitParchment(rgba: Uint8ClampedArray): void {
+  if (!parchment) return;
+  const { w, h, rgba: src } = parchment;
+  for (let r = 0; r < h; r++) {
+    rgba.set(src.subarray(r * w * 4, (r + 1) * w * 4), ((PARCHMENT_Y + r) * MAP_W + PARCHMENT_X) * 4);
+  }
+}
+
+/**
+ * Blit the parchment onto the hi-res `ai` map context.
+ *
+ * Prefers the upscaled asset, which is built by the map's OWN pipeline
+ * (tools/build-map-ai.mjs, Real-ESRGAN x4plus, the same model mapa-0/mapa-1 use) and
+ * upscaled IN PLACE on mapa-0 before being cropped back out — because the parchment's
+ * border IS map background, and upscaling the bare rectangle would give the model a
+ * different neighbourhood for those pixels than mapa-0_ai got, leaving a seam.
+ *
+ * Falls back to the native rectangle scaled ×4 nearest-neighbour when the upscale is
+ * missing, which is the same shape as the name plaques' fallback: the `ai` tier is
+ * additive, and a missing asset costs resolution, never the indicator.
+ */
+export function blitParchmentAi(c: CanvasRenderingContext2D): void {
+  const ai = host.aiWorldMap?.loading;
+  c.imageSmoothingEnabled = false;
+  if (ai) {
+    c.drawImage(ai, PARCHMENT_X * AI_MAP_SCALE, PARCHMENT_Y * AI_MAP_SCALE);
+    return;
+  }
+  if (!parchment) return;
+  if (!parchmentCanvas) {
+    parchmentCanvas = document.createElement('canvas');
+    parchmentCanvas.width = parchment.w;
+    parchmentCanvas.height = parchment.h;
+    parchmentCanvas
+      .getContext('2d')!
+      .putImageData(new ImageData(new Uint8ClampedArray(parchment.rgba), parchment.w, parchment.h), 0, 0);
+  }
+  c.drawImage(
+    parchmentCanvas,
+    PARCHMENT_X * AI_MAP_SCALE,
+    PARCHMENT_Y * AI_MAP_SCALE,
+    parchment.w * AI_MAP_SCALE,
+    parchment.h * AI_MAP_SCALE,
+  );
+}
+
+// ── Launching a room FROM the world map (daRun -> daRealyRun) ─────────────────
+//
+// This port used to flip `screen` to 'room' synchronously in enterRoom(), which
+// blacked the stage for the whole 17-27s a cold entry costs on a slow link (measured,
+// Slow 4G) — and the delayed full-screen overlay existed to explain that black. The
+// original never blacks anything: it paints the map with the parchment and loads
+// behind it (see the file docblock). This is that, and it is the only route that can
+// be, because it is the only one with a map on screen to keep.
+//
+// Three states, one object: armed (waiting for the parchment frame), started (the load
+// is running under it), and gone. Keeping it in one nullable rather than in three flags
+// is what lets drawMap, the input guards and loop() all ask the same question.
+interface MapLaunch {
+  room: number;
+  replay?: string | undefined;
+  /** Has a map frame carrying the parchment been painted yet? (daRun -> daRealyRun) */
+  painted: boolean;
+  /** Has Spust been run — i.e. is the room load in flight under the parchment? */
+  started: boolean;
+  /** Hands the load's outcome to the promise beginMapLaunch returned (see there). */
+  settle: (load: Promise<void>) => void;
+  done: Promise<void>;
+}
+let mapLaunch: MapLaunch | null = null;
+
+/**
+ * The room a launch is running for (daRun/daRealyRun), else null.
+ *
+ * The window in which the map stays on screen with the parchment over it. Everything
+ * outside this module asks the question this way: the map draws unlit and plaqued for
+ * it, the input guards go inert, and the frame loop stays at full rate.
+ */
+export function mapLaunching(): number | null {
+  return mapLaunch?.room ?? null;
+}
+
+/** Record that a painted map frame carried the parchment (daRun -> daRealyRun). */
+export function markParchmentPainted(): void {
+  if (mapLaunch) mapLaunch.painted = true;
+}
+
+/**
+ * Can this entry keep the map on screen?
+ *
+ * Everything here is about there being a MAP FRAME to draw the parchment onto: the map
+ * screen, already presented (so we are not holding an unpainted stage in front of the
+ * player), not covered by the credits/options overlay, not still waiting for its own
+ * art — and the parchment itself decoded. That last one keeps the art optional in the
+ * house style: without it this route would show a dark map and no indicator at all, so
+ * a missing/undecodable loading.BMP simply falls back to the pre-existing overlay.
+ */
+export function canLaunchFromMap(): boolean {
+  return (
+    host.screen === 'map' &&
+    host.mapPresented &&
+    host.mapOverlay === 'none' &&
+    !host.mapArtHolding() &&
+    parchment !== null &&
+    !host.inShowmode()
+  );
+}
+
+/** daRun: arm the launch and let the map repaint. The load waits for that paint. */
+export function beginMapLaunch(num: number, replay?: string): Promise<void> {
+  if (mapLaunch) return mapLaunch.done; // a launch is already running; ignore the second click
+  // The promise settles with the LOAD, not with the handover to the room screen — so
+  // enterRoom() keeps meaning exactly what it meant before this route existed: the room
+  // is built and live. It is live a beat before it is SHOWN here (that beat is the
+  // parchment), and a caller that wants the stage should ask for the stage.
+  let settle!: (load: Promise<void>) => void;
+  const done = new Promise<void>((resolve, reject) => {
+    settle = (load) => load.then(resolve, reject);
+  });
+  mapLaunch = { room: num, replay, painted: false, started: false, settle, done };
+  host.mapSig = null; // the map now draws unlit, with the plaque and the parchment
+  host.wake();
+  return done;
+}
+
+/**
+ * Drive an armed launch, called from loop()'s map branch after the map has drawn.
+ *
+ * daRealyRun: the load starts only once a frame carrying the parchment has been
+ * painted, which is the ordering UMain.pas:1489-1493 has (the paint sets daRealyRun,
+ * and Spust runs after that paint returns). Then the room takes the stage on the first
+ * frame it can be drawn in its final art — `roomArtPending()` as well as `roomLoading`,
+ * so the map hands straight over to the room and the stage is never black between them.
+ *
+ * Note the two are separate events: the promise enterRoom() returned settles with the
+ * LOAD, while the handover can be several seconds later in the `ai` tier.
+ */
+export function tickMapLaunch(): void {
+  const l = mapLaunch;
+  if (!l) return;
+  if (!l.painted) return;
+  try {
+    if (!l.started) {
+      l.started = true;
+      const load = host.startRoom(l.room, l.replay, false);
+      // A load that THREW has no room to hand over to, and the condition below can only
+      // release once whatever `roomArtPending()` is still watching settles — which for a
+      // failed entry is the PREVIOUS room's art, since loadRoom throws before it re-arms
+      // either flag. Take the stage instead: that is exactly what this entry did before
+      // the launch route existed, and it is what stops a failure from leaving the player
+      // behind a parchment with the input swallowed.
+      void load.catch(() => finishMapLaunch(l));
+      l.settle(load);
+      return;
+    }
+    if (host.roomLoading || host.roomArtPending()) return;
+    finishMapLaunch(l);
+  } catch (e) {
+    // This is the one thing in loop() that STARTS a room, and loop() reschedules itself
+    // on its last statement — so an exception escaping here takes the game's clock with
+    // it. Measured, by poisoning the room picker's `value` write these two functions
+    // make: the loop stopped dead (3 iterations in 1.5 s against 20), the launch stayed
+    // armed, and the input guards left the player at a parchment that could never be
+    // dismissed. Everywhere else this path is reached from an event handler, where a
+    // throw costs that handler's turn and nothing more.
+    //
+    // Catching is what saves the clock. The three stores then make the recovery immediate
+    // and independent of state the failed entry may have left behind, rather than relying
+    // on the next frame's `roomLoading || roomArtPending()` happening to be false — and
+    // unlike finishMapLaunch() they cannot themselves throw (no DOM, no call).
+    //
+    // The promise is settled with the failure as well, because a caller that awaited
+    // enterRoom() would otherwise wait forever: `settle` is normally handed the load, and
+    // on this path the load never got as far as existing. That matches the direct route,
+    // where loadRoom() rejects and the same callers see it.
+    console.error('room launch failed:', e);
+    mapLaunch = null;
+    host.screen = 'room';
+    host.forceRoomRedraw = true;
+    host.mapSig = null;
+    l.settle(Promise.reject(e instanceof Error ? e : new Error(String(e))));
+  }
+}
+
+/** Hand the stage from the map to the room the launch `l` loaded, and end the launch. */
+function finishMapLaunch(l: MapLaunch): void {
+  if (mapLaunch !== l) return; // already handed over
+  mapLaunch = null;
+  host.screen = 'room';
+  host.setRoomPicker(l.room);
+  host.forceRoomRedraw = true;
+  host.mapSig = null; // the next map visit must not reuse the parchment frame
+  host.wake();
+}
