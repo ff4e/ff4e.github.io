@@ -3608,21 +3608,47 @@ function tickMapLaunch(): void {
   const l = mapLaunch;
   if (!l) return;
   if (!l.painted) return;
-  if (!l.started) {
-    l.started = true;
-    const load = startRoom(l.room, l.replay, false);
-    // A load that THREW has no room to hand over to, and the condition below can only
-    // release once whatever `roomArtPending()` is still watching settles — which for a
-    // failed entry is the PREVIOUS room's art, since loadRoom throws before it re-arms
-    // either flag. Take the stage instead: that is exactly what this entry did before
-    // the launch route existed, and it is what stops a failure from leaving the player
-    // behind a parchment with the input swallowed.
-    void load.catch(() => finishMapLaunch(l));
-    l.settle(load);
-    return;
+  try {
+    if (!l.started) {
+      l.started = true;
+      const load = startRoom(l.room, l.replay, false);
+      // A load that THREW has no room to hand over to, and the condition below can only
+      // release once whatever `roomArtPending()` is still watching settles — which for a
+      // failed entry is the PREVIOUS room's art, since loadRoom throws before it re-arms
+      // either flag. Take the stage instead: that is exactly what this entry did before
+      // the launch route existed, and it is what stops a failure from leaving the player
+      // behind a parchment with the input swallowed.
+      void load.catch(() => finishMapLaunch(l));
+      l.settle(load);
+      return;
+    }
+    if (roomLoading || roomArtPending()) return;
+    finishMapLaunch(l);
+  } catch (e) {
+    // This is the one thing in loop() that STARTS a room, and loop() reschedules itself
+    // on its last statement — so an exception escaping here takes the game's clock with
+    // it. Measured, by poisoning the `select.value` write these two functions make: the
+    // loop stopped dead (3 iterations in 1.5 s against 20), the launch stayed armed, and
+    // the input guards left the player at a parchment that could never be dismissed.
+    // Everywhere else this path is reached from an event handler, where a throw costs
+    // that handler's turn and nothing more.
+    //
+    // Catching is what saves the clock. The three stores then make the recovery immediate
+    // and independent of state the failed entry may have left behind, rather than relying
+    // on the next frame's `roomLoading || roomArtPending()` happening to be false — and
+    // unlike finishMapLaunch() they cannot themselves throw (no DOM, no call).
+    //
+    // The promise is settled with the failure as well, because a caller that awaited
+    // enterRoom() would otherwise wait forever: `settle` is normally handed the load, and
+    // on this path the load never got as far as existing. That matches the direct route,
+    // where loadRoom() rejects and the same callers see it.
+    console.error('room launch failed:', e);
+    mapLaunch = null;
+    screen = 'room';
+    forceRoomRedraw = true;
+    mapSig = null;
+    l.settle(Promise.reject(e instanceof Error ? e : new Error(String(e))));
   }
-  if (roomLoading || roomArtPending()) return;
-  finishMapLaunch(l);
 }
 
 /** Hand the stage from the map to the room the launch `l` loaded, and end the launch. */

@@ -115,8 +115,18 @@ export async function withApp(fn, opts = {}) {
   const b = await launchBrowser();
   const p = await b.newPage({ viewport: { width: 1200, height: 640 } });
   const errs = [];
-  p.on('console', (m) => m.type() === 'error' && errs.push(m.text()));
-  p.on('pageerror', (e) => errs.push('PE:' + e.message));
+  // A probe that deliberately provokes a failure the game is SUPPOSED to log can declare
+  // the message it expects, via `{ allowErrors: /…/ }`. Only matching errors are dropped;
+  // everything else still fails the probe, which is the point — "expected one error"
+  // must not become "ignore this page's console".
+  //
+  // Kept to a regex the probe supplies, rather than a blanket flag, because the failure
+  // being provoked is usually the assertion: test-parchment injects a throw into the room
+  // launch and asserts the game recovers, and the recovery path logs. A flag would have
+  // hidden a genuine second error thrown alongside it.
+  const allowed = (t) => opts.allowErrors instanceof RegExp && opts.allowErrors.test(t);
+  p.on('console', (m) => m.type() === 'error' && !allowed(m.text()) && errs.push(m.text()));
+  p.on('pageerror', (e) => !allowed(e.message) && errs.push('PE:' + e.message));
   // By default, boot as a returning player (skip the first-run intro): the intro
   // is a full-screen overlay that swallows input, so tests that drive keys/mouse
   // must not sit behind it. The intro test opts into first-run via { firstRun: true }.

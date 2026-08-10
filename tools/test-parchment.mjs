@@ -453,6 +453,53 @@ await withApp(
     );
     await p.waitForFunction(() => window.__ff.screen() === 'room', null, { timeout: budget(12000) });
 
+    console.log('7. a launch that throws cannot strand the player');
+    // tickMapLaunch() is the one thing in loop() that STARTS a room, and loop() reschedules
+    // itself on its last statement — so an exception escaping that path takes the game's
+    // clock with it, and a launch swallows input, leaving a parchment that can never be
+    // dismissed. Everywhere else this code is reached from an event handler, where a throw
+    // costs that handler's turn and nothing more.
+    //
+    // Poisons the environment rather than the app: `select.value = String(num)` is a real
+    // DOM write on the launch path, so redefining that property throws exactly where a
+    // freak failure would. Last, and it puts the property back, because everything after
+    // it would inherit a broken room picker.
+    hold = 0;
+    await p.keyboard.press('Escape');
+    await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+    const loops0 = await p.evaluate(() => window.__ff.throttleInfo().loops);
+    await p.evaluate((n) => {
+      const el = document.getElementById('room');
+      Object.defineProperty(el, 'value', {
+        set() { throw new Error('injected: the room picker blew up'); },
+        get() { return String(n); },
+        configurable: true,
+      });
+      // Caught, not awaited: the promise now REJECTS on this path (it used to hang, which
+      // is what wedged an earlier version of this diagnostic), and an unhandled rejection
+      // would fail the probe on its own.
+      window.__ff.enterRoom(n).catch(() => {});
+    }, ROOM);
+    await waitFrames(p, 12);
+    const after = await p.evaluate(() => ({
+      loops: window.__ff.throttleInfo().loops,
+      launching: window.__ff.mapLaunching(),
+      screen: window.__ff.screen(),
+    }));
+    await p.evaluate(() => {
+      delete document.getElementById('room').value; // back to the prototype's accessor
+    });
+    expect(
+      after.launching === null,
+      `a launch that throws ends instead of hanging (mapLaunching ${after.launching})`,
+    );
+    expect(
+      after.loops > loops0 + 5,
+      `the game loop survived it (${after.loops - loops0} iterations after the throw)`,
+    );
   },
-  { cpu: true, graphics: 'enhanced' },
+  // Section 7 injects a throw into the room launch and asserts the game recovers from it.
+  // The recovery path logs the exception (main.ts tickMapLaunch), which is the behaviour
+  // being tested — so that one message is expected. Every other console error still fails.
+  { cpu: true, graphics: 'enhanced', allowErrors: /^room launch failed:/ },
 );
