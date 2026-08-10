@@ -1,3 +1,4 @@
+//#region File docblock | The `URoom.pas` tick state machine this file reproduces, and the keyboard scheme.
 /**
  * Browser host: loads a room's original FFR, renders it with the software-
  * paletted compositor, drives the two fish, and reproduces the engine's animated
@@ -13,6 +14,7 @@
  * Keyboard: small fish I/K/J/L, big fish W/S/A/D. Mouse: click a fish to select,
  * click water to BFS-swim there.
  */
+//#region Imports | The only part safe to skim.
 import { parseFfr, type FfrRoom, type FfrBitmap } from '../data/ffr.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
 import { parseFft, type FftEntry } from '../data/fft.js';
@@ -263,6 +265,7 @@ import {
   tickTetris,
   ultraviolence,
 } from './cheats.js';
+//#region Device gate, stage layout & constants | anchors: isUnsupportedDevice, computeStageLayout, roomGeometry, LOGIC_MS | Phones are refused first, before any art is fetched. Then how the stage is scaled to the viewport, and the 80 ms game tick.
 
 // Phones are refused here, before a single byte of game ART is fetched. (The engine
 // bundle itself has already been downloaded — this statement is inside it — so the claim
@@ -388,6 +391,7 @@ const EFFECT_VOL = 48 / 64;
 // Animation lengths in game ticks (URoom.pas:425-433) — shared with the step-engine.
 const EXIT_CELLS = 5; // cells of travel to slide fully off-screen (render constant)
 
+//#region Stage assembly & subtitle overlay state | anchors: buildStage, subFontIdx, subOverlaySig | Calls into `dom.ts` to nest the canvases, then the vector-subtitle bookkeeping.
 buildStage(); // the stage box + the GL/subtitle overlays (see dom.ts: not done at import time)
 // Vector-subtitle font (enhanced mode). All candidates are bundled + OFL-licensed
 // so they render identically on every platform. Mulish Medium is the default — a
@@ -425,6 +429,7 @@ let subOverlayGate = true;
 let booted = false; // true once boot succeeds — before that, any error is fatal
 
 /** Update the loading overlay's status line. */
+//#region Loading overlay & fatal errors | anchors: setLoadingMsg, beginRoomLoadingUi, syncLoadingUi, showFatal, relayout | The boot/room-load overlay, its 200 ms anti-flash delay, and the fatal-error screen. | Hot
 function setLoadingMsg(msg: string): void {
   if (loadingMsg) loadingMsg.textContent = msg;
 }
@@ -561,6 +566,7 @@ function relayout(): void {
 
 // Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen <video> played
 // before the map on first run, and replayable from the map's top-left corner.
+//#region Intro movies & subtitle overlay | anchors: IntroPlayer, probeAiMovies, syncSubOverlay, clearSubOverlay | Logo/intro `.mp4` playback and the vector-subtitle layer above the game canvas.
 const intro = new IntroPlayer({
   layer: document.getElementById('intro-layer') as HTMLElement,
   video: document.getElementById('intro-video') as HTMLVideoElement,
@@ -700,6 +706,7 @@ function clearSubOverlay(): void {
   subOverlayPainted = false;
 }
 
+//#region Screen & overlay state | anchors: ostav, screen, mapOverlay, mapInfoRoom, worldMap, legImage | The mutable globals for panel/options/credits/map-info/help/leg-image. Read this before touching any screen.
 let panel: FfpPanel | null = null; // the parsed control-panel graphic (panel.ffp)
 let panelPressed = 0; // region currently held down (for the lit-button feedback), or 0
 // Per-frame draw caches: the panel and world-map compositions are re-blitted only
@@ -792,6 +799,7 @@ let mapRevealStart = 0; // wall-clock time the map reveal animation began (Depth
 // Persisted progress: solved/cheated rooms, best move counts, best-solution records
 // and per-room play time. Opened HERE, not at import time — see persist.ts for why the
 // module refuses to load save data at module scope.
+//#region Save store + cheats wiring | anchors: openSaveStore, initCheats | Opens `persist.ts` and hands `cheats.ts` its view of the game, after the gate.
 const {
   solved,
   cheated,
@@ -895,6 +903,7 @@ initCheats({
     forceRoomRedraw = v;
   },
 });
+//#region Room state & settings | anchors: ffr, room, subs, settings, subsOn, setSubtitleMode, applyVolumeSettings | The current room's parsed data plus subtitle/volume settings.
 let ffr: FfrRoom | null = null;
 let room: Room | null = null;
 let font: FontData | null = null;
@@ -979,6 +988,7 @@ function applyVolumeSettings(): void {
 //    thence to classic. enhancedArtActive() (below) still treats ai like enhanced
 //    because enhanced IS that fallback, and supplies the shared truecolor-mode
 //    behaviour (vector subtitles, the anti-flash load hold).
+//#region Graphics tier, renderer, dev flags | anchors: setGraphics, setRenderer, setRenderOnDirty, setDevEnabled | Tier selection, CPU vs WebGL, render-on-dirty, the dev pane.
 let graphics: GraphicsLevel =
   ((): GraphicsLevel => {
     const v = localStorage.getItem('ff.graphics');
@@ -1072,6 +1082,7 @@ function setGraphics(level: GraphicsLevel): void {
 // Art loading for the enhanced and `ai` tiers lives in art.ts. Wired HERE, where that
 // code used to sit. It reads the game through these getters; the three setters are the
 // repaint invalidations it fires when an async load lands.
+//#region Art wiring | anchors: initArt | Hands `art.ts` its view of the game. The art loading itself is in that module.
 initArt({
   get closeMapOverlay() {
     return closeMapOverlay;
@@ -1150,6 +1161,7 @@ async function loadFishSprites(): Promise<void> {
   }
 }
 void loadFishSprites();
+//#region Engine, audio & mode state | anchors: audio, engine, activeScript, chatter, cutscene, showmode, hooks, KEYS | The mutable core: step engine, script, dialogue, the three playback modes, and the key tables.
 const talkIdx = { little: 0, big: 0 };
 const audio = new AudioEngine();
 applyVolumeSettings(); // restore persisted volume levels before any sound plays
@@ -1296,6 +1308,7 @@ function selectFish(which: 'little' | 'big'): void {
   setInfo();
 }
 
+//#region Room construction | anchors: buildRoom, setInfo, applySubFont, scriptTalk | Turns parsed FFR data into a live `Room` + `StepEngine`, and refreshes the info line. Room *loading*, audio, movement and drawing are elsewhere.
 const ffrUrl = (num: number): string => `/data/Graphic/${String(num).padStart(3, '0')}.ffr`;
 
 function setInfo(): void {
@@ -1505,6 +1518,7 @@ function scriptTalk(name: string, prior: number): number {
 }
 
 /** Launch the briefcase story cutscene (InitKufrDemo), loading its assets once. */
+//#region Cutscene, showmode, replay | anchors: startCutscene, startShowmode, advanceShowmode, applyCapAction, ensureAiKufr, drawCutscene | The KUFRIK demo, the `.cap` demonstration player, record replay, and the cutscene compositor.
 async function startCutscene(): Promise<void> {
   if (cutscene || !font) return;
   // The room this launch belongs to. Every await below is a window in which the
@@ -1994,6 +2008,7 @@ function drawCutscene(): void {
   }
 }
 
+//#region Room load & audio wiring | anchors: loadRoom, fetchSoundPkg, loadSoundPkg, loadRoomVoices, startRoomMusic, talk | Fetch FFR/FFS/FFT for a room, arm its voices, start its music. | Hot
 async function loadRoom(num: number): Promise<void> {
   endShowmode(); // a room change ends any KUFRIK demonstration
   forceRoomRedraw = true; // repaint the first frame of the new room
@@ -2253,6 +2268,7 @@ function fishBusy(which: 'little' | 'big'): boolean {
 }
 
 /** Turn-first-then-move; horizontal turns animate (stav_otocka), moves slide. */
+//#region Movement, replay & restart | anchors: tryStep, beginHeldMove, dispatchHeldMove, wallShove, applyRecordStep, restore, advanceLoadmode, restartRoom | The `KeyRoom` held-key state machine and how a keypress becomes a game step — plus replaying a saved record (`loadmode`) and restarting a room.
 function tryStep(which: 'little' | 'big', dir: number): 'moving' | 'turning' | 'blocked' | 'busy' {
   wake(); // resume 60fps if the idle-loop throttle had us sleeping (also covers __ff.press)
   return engine ? engine.press(which, dir) : 'blocked';
@@ -2445,6 +2461,7 @@ function restartRoom(): void {
   setInfo();
 }
 
+//#region Save/load game | anchors: saveGame, loadGame, saveExists, canSave, onWinBookkeeping | In-room save slots and what happens on a win.
 const saveKey = (): string => `ff.save.${select.value}`;
 
 /**
@@ -2523,6 +2540,7 @@ function onWinBookkeeping(_countdown: number): void {
  * panel. Active fish = yellow, available = orange, busy/dead/unavailable = grey,
  * the held button = lit. `pressedDir` lights a pressed D-pad arrow.
  */
+//#region Control panel | anchors: panelState, optionsState, tickPanelScroll, togglePanelOptions, openHelp, drawPanel | The side panel: its buttons, the options scroll animation, the help overlay.
 function panelState(): PanelState {
   const bigDead = !room || !room.alive.big || room.busy.big !== 0;
   const littleDead = !room || !room.alive.little || room.busy.little !== 0;
@@ -2728,6 +2746,7 @@ function drawPanel(): void {
  * where n = 1 (cz) / 2 (en). The language is the shared subtitle language (subLang),
  * so the room-name plaques always match the subtitles/help.
  */
+//#region World map drawing | anchors: ensureDeskyData, openMapInfo, drawMap, aiPlaqueFor, drawMapOverlays | The branch map, its name plaques, and the record info panel (krokoměr).
 async function ensureDeskyData(): Promise<void> {
   const lang = subLang();
   if (deskyLang === lang && deskyData) return;
@@ -2975,6 +2994,7 @@ function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, skipPlaq
 }
 
 /** The menu/map music (SpustHudbu, UMain.pas:217): menu.wav, looped at sample 419772. */
+//#region Map navigation & story screens | anchors: showMap, returnFromRoom, showLegImage, playFirstRunIntro, openCredits, drawCredits | Entering/leaving the map, leg-completion pages, intro replay, the credits roll.
 function startMenuMusic(): void {
   // Swallow load/decode failures here: menu music is non-critical, and during boot
   // an unhandled rejection would otherwise trip the boot-fatal handler.
@@ -3346,6 +3366,7 @@ function drawCredits(): void {
 
 /** Enter a room from the map (or the dev dropdown); KillSnd first (Spust, UMain.pas:248).
  *  `replay` is the best-solution move record to play back animated (map "Replay"). */
+//#region Room entry & fish animation | anchors: enterRoom, panelAction, updateLipSync, fishFrameFor | The map → room transition, panel button actions, and which sprite frame each fish shows.
 function enterRoom(num: number, replay?: string): Promise<void> {
   wake();
   stopRoomClock(); // bank the outgoing room's time before the switch
@@ -3531,6 +3552,7 @@ function fishFrameFor(which: 'little' | 'big'): FishFrame {
 // The rendering plumbing — per-tier art sources, the WebGL compositors, the parity
 // probes — lives in glPlumbing.ts. Wired HERE, where that code used to sit; it reads
 // the game through these getters and writes nothing back.
+//#region Render plumbing wiring | anchors: initGlPlumbing | Hands `glPlumbing.ts` its view of the game. The compositors are in that module.
 initGlPlumbing({
   get aiRoom() {
     return aiRoom;
@@ -3557,6 +3579,7 @@ initGlPlumbing({
     return subs;
   },
 });
+//#region The frame painter | anchors: draw, updateRoomSubOverlay | One room frame, all three tiers, CPU and GPU. Everything on screen during play is painted from here.
 function draw(): void {
   if (!room) return;
   mapSig = null; // this frame paints #screen with the room — invalidate the map cache
@@ -3740,6 +3763,7 @@ function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): 
   }
 }
 
+//#region The logic tick | anchors: step, tickBlink, hracNespi | One 80 ms game step: script, engine, dialogue, death handling, screensaver.
 function tickBlink(): void {
   for (const w of ['little', 'big'] as const) {
     if (blink[w] > 0) blink[w]--;
@@ -3950,6 +3974,7 @@ function step(): boolean {
   return false;
 }
 
+//#region Frame pacing & perf | anchors: roomLoading, roomLoadSeq, IDLE_LOOP_MS, updatePerfHud, roomAnimating, loopThrottleOk, wake | The idle throttle (60 fps ↔ 12.5 fps), the water/ZX wake rates, and the perf HUD. | Hot
 let lastTime = 0;
 let acc = 0;
 // Render-on-dirty bookkeeping: the last room frame's render signature, plus a
@@ -4253,6 +4278,7 @@ function wake(): void {
 
 /** The render loop: steps the game at a fixed timestep, then draws (capped, see
  *  MAX_PAINT_FPS) once per RAF. */
+//#region `loop()` | anchors: loop | The rAF callback: which screen paints, how many logic steps run, when to sleep.
 function loop(now: number): void {
   loopTicks++;
   // Skip this refresh entirely when it would exceed the paint cap. lastTime is left
@@ -4440,6 +4466,7 @@ function loop(now: number): void {
   scheduleNext();
 }
 
+//#region Keyboard | anchors: keydown / keyup listeners | Every key binding, including cheats, dev keys and modal handling.
 window.addEventListener('keydown', (e) => {
   wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
   // The feedback form owns the keyboard while it is up. It is a modal <dialog>, so the
@@ -4666,6 +4693,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearHeldKey();
 });
 
+//#region Pointer | anchors: cellFromEvent, clickCell, dirToward, clickMapAt, panelCoords | Fish selection and click-to-swim target (the pathfinding is in `stepEngine.ts`), map and panel hit-testing.
 function cellFromEvent(e: MouseEvent): { cx: number; cy: number } {
   const rect = canvas.getBoundingClientRect();
   // Convert to NATIVE game pixels, not backing-store pixels. FSIZE below is a native
@@ -4970,6 +4998,7 @@ window.addEventListener('mouseup', () => {
   panelDragBus = null;
 });
 
+//#region Dev bar & window wiring | anchors: populateRooms, fitSelect, rendererSelect, graphicsSelect, idleDirtyToggle, winRoomBtn, resize / fullscreenchange / dpr watchers | The dev-only controls — room picker, fit mode, renderer, graphics tier, idle-render toggle, win-room — and the relayout triggers.
 function populateRooms(): void {
   const mapOpt = document.createElement('option');
   mapOpt.value = 'map';
@@ -5059,6 +5088,7 @@ if (typeof window.matchMedia === 'function') {
   watchDpr();
 }
 
+//#region Boot | anchors: await FontData.load, parseFfp, loadSoundPkg, loadRoom(7), initFeedback, requestAnimationFrame(loop) | The top-level-await boot sequence, in load order. What is critical vs. optional is documented inline.
 font = await FontData.load('/data/Intro');
 setLoadingMsg('Loading fonts…');
 // Enhanced subtitle font (FreeSans Bold, the FFNG subtitle face). Optional: if it
@@ -5222,6 +5252,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
 // for the eleven values probes deliberately write. Assigned to window HERE, at the
 // end of boot, because tools/ui-lib.mjs waits on window.__ff as the signal that boot
 // has completed.
+//#region `window.__ff` host | anchors: debugHooks | The 144-member host the debug hooks read the game through: getters, plus eleven setters for the values probes deliberately write. The hooks themselves are in `debugHooks.ts`.
 (window as unknown as { __ff: unknown }).__ff = debugHooks({
   get O_OPTIONS() {
     return O_OPTIONS;
