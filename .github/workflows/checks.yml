@@ -1,0 +1,54 @@
+# Fast checks on every push and pull request.
+#
+# Why this exists: until now every verification in this repo ran inside somebody's
+# working session, which meant a five-minute wait before a one-line change could be
+# trusted — and a skipped check whenever that felt too expensive.
+#
+# What it deliberately does NOT do is run the browser probes (`npm run test:ui`).
+# The reason is NOT missing data — `public/data/` is committed (318 files), so the
+# probes could in principle run here. It is that the suite takes ~5-6 minutes plus a
+# Playwright browser download, and the ten `test-gl-*` probes ask Chromium for
+# `--use-angle=metal`, which is macOS-only; on a Linux runner they would not be
+# testing the backend they exist to test. So the probes stay a local pre-PR gate, and
+# adding a macOS job later is a real option rather than an impossibility.
+#
+# The unit suite, by contrast, is nearly free. A few of its tests need the ORIGINAL
+# extracted game data ($FFNG_DATA, ~/.cache/ffng-orig) which is genuinely not in the
+# repo; those skip themselves cleanly (see test/solutions.test.ts). Measured without
+# it: 1529 of 1597 pass in ~3 seconds.
+#
+# `vite build` runs too. `tsc --noEmit` does not link or resolve assets, so a bundling
+# break (a bad import path, an esbuild-only failure) passes typecheck and fails only
+# when somebody serves the app — which, without this step, would be nobody until the
+# release tag.
+name: Checks
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A newer push to the same branch makes an in-flight run pointless.
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      # The unit suite seeds Math.random per file and per test (test/rng.setup.ts), so
+      # this is deterministic without pinning a seed here.
+      - run: npm run test
+      # Not covered by typecheck: bundling, asset resolution, esbuild-only failures.
+      - run: npm run build

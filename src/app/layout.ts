@@ -196,3 +196,23 @@ export function contentScale(
   const factor = Math.max(1, Math.min(cap, fill));
   return stageScale * factor;
 }
+
+/**
+ * The measured geometry of one room on screen: its native size, the CSS scale it is
+ * drawn at, and the backing store behind it.
+ *
+ * Computed by roomGeometry() in main.ts and read by the debug hooks, so it lives here
+ * beside StageLayout and contentScale rather than inside either of them.
+ */
+export interface RoomGeometry {
+  nativeW: number;
+  nativeH: number;
+  /** CSS px per NATIVE px (never per backing-store px). */
+  scale: number;
+  cssW: number;
+  cssH: number;
+  backingW: number;
+  backingH: number;
+  /** Backing-store px per native px: 1, or the AI room's upscale factor. */
+  upscale: number;
+}

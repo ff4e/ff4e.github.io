@@ -202,7 +202,7 @@ down everything else.
 ## Run
 
     npm install
-    npm run dev                     # browser host at http://127.0.0.1:5173 (with sound)
+    npm run dev                     # browser host on a FREE port (it prints the URL), with sound
     npm run dump-ffr -- --all       # M0: validate all 72 FFR (byte-exact, DFFR sizes)
     npm run render-room -- UTES     # M1: render a room's resting frame -> out/UTES.png
     npm run test-move -- UTES       # headless movement/push probe + render (exploratory)
@@ -216,11 +216,25 @@ Automated, deterministic, **non-AI** (no LLM/vision at runtime — plain asserti
 
     npm test        # unit + physics (Vitest, headless, no browser, no game data needed)
     npm run test:ui # browser/integration (Playwright; builds the app and serves it)
+    npm run test:ui -- cheat options   # ...or just the probes whose name matches
     npm run test:all # typecheck + unit + UI, in sequence, fail-fast (the full gate)
     npm run test:solutions # replay known FFNG solutions per room (needs $FFNG_DATA)
 
-`npm run test:all` chains `typecheck && test && test:ui` — the one command to run before
-considering a change done (it stops at the first failing phase).
+`npm run test:all` chains `typecheck && test && test:ui` — the full gate, and what to run
+before opening a PR (it stops at the first failing phase). For smaller changes CONTRIBUTING.md
+has a table of how much checking is actually warranted; a docs-only change needs none of this.
+
+The full UI suite is ~315 s, so for the inner loop pass a pattern and run only what your
+change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a gate. See
+CONTRIBUTING.md for how much checking a given change actually needs, and for the
+`KNOWN_FLAKY` retry rule.
+
+`typecheck`, the unit suite and `vite build` also run in CI on every push
+(`.github/workflows/checks.yml`). The browser probes do not — not for lack of data
+(`public/data/` is committed) but because the suite takes ~6 minutes and the `test-gl-*`
+probes need macOS/Metal. A few unit tests need the original extracted data
+(`$FFNG_DATA`), which genuinely is not in the repo; they skip themselves, and 1529 of
+1597 still run without it.
 
 ### Randomness in the unit suite
 
@@ -342,8 +356,23 @@ the same assertions.
   test decodes a ~5 MB WAV and can flake under machine load — re-run in isolation.)
 
 
+## Working here
+
+**[`AGENTS.md`](AGENTS.md)** is the orientation for anyone — human or agent — making changes: setup and the
+port traps, how much checking a change needs, what each test net actually proves (and what it cannot), the
+module-evaluation ordering rule, and the pre-push hygiene. [`CONTRIBUTING.md`](CONTRIBUTING.md) has the
+rules; `AGENTS.md` has the things that cost people time to find out.
+
 ## Layout
 
+- `src/app/main.ts` — the browser host: boot, the frame loop, every screen and all input.
+  ~5 690 lines — **see the map below before you open it**.
+- `src/app/dom.ts` — the element handles and 2D contexts everything else draws into.
+- `src/app/persist.ts` — the localStorage save store (solved rooms, scores, records, play time).
+- `src/app/cheats.ts` — the typed cheat codes, the sprite/film effects, and the Tetris minigame.
+- `src/app/debugHooks.ts` — the `window.__ff` test interface all 85 UI probes read.
+- `src/app/glPlumbing.ts` — the per-tier art sources, the WebGL compositors, and the parity probes.
+- `src/app/art.ts` — enhanced/`ai` art loading, the room art cache, and the anti-flash hold predicates.
 - `src/data/binReader.ts` — little-endian sequential reader modelling Pascal `blockread`.
 - `src/data/ffr.ts` — FFR parser (faithful port of `TRoom.Init`, incl. `ReadBitMap`/`ReadBitMapExtra`).
 - `src/data/roomTable.ts` — the 72-room `Desc[]` table, auto-generated from `zaklad.pas`.
@@ -355,6 +384,128 @@ the same assertions.
 - `tools/gen-room-table.py` — regenerates `roomTable.ts` from the original Pascal.
 - `tools/dump-ffr.ts` — M0 verification CLI (parse + size-check a room or all rooms).
 - `tools/render-room.ts` — M1 verification CLI (render a room / all rooms to PNG).
+- `tools/preview-server.mjs` — the shared `vite build` + `vite preview`-on-a-free-port machinery.
+- `tools/dev-server.mjs` — `npm run dev`: the dev server on a free port, printing what it serves.
+- `tools/link-node-modules.mjs` — share one `node_modules` between worktrees (opt-in, lockfile-checked).
+- `tools/gen-map.mjs` — regenerates the README's `main.ts` map from the `//#region` markers in that file.
+- `tools/capture-digest.mjs` — byte-exact behavioural fingerprint, comparable across git revisions.
+  The safety net for the `main.ts` split; read its header for what it does and does not cover.
+
+### Map of `src/app/main.ts`
+
+`main.ts` is still the largest file in the project — ~5 690 lines, ~61 k tokens — and most changes to this
+game land somewhere inside it. This table exists to let you jump straight to the region you need instead of
+reading it front to back.
+
+It is a top-level-`await` module: everything below runs at import time, top to bottom, and the ordering is
+deliberate (the device gate must precede every side effect; state must be declared before the boot block
+awaits it).
+
+**The table is generated.** Each region is declared by a `//#region` marker at its head in `main.ts`; the
+line ranges are derived from where those markers sit, so ordinary edits never falsify them. To change a
+region's name, anchors or description, edit its marker and run `npm run map:update`. Do not hand-edit
+between the sentinels below.
+
+<!-- MAP:main.ts BEGIN — generated by tools/gen-map.mjs, do not edit by hand -->
+
+*31 regions over 5723 lines. Generated from the `//#region` markers in
+`src/app/main.ts` — edit a marker there, then run `npm run map:update`.*
+
+| Lines | Region | Anchors — grep these | What lives here |
+| --- | --- | --- | --- |
+| 1–16 | File docblock | — | The `URoom.pas` tick state machine this file reproduces, and the keyboard scheme. |
+| 17–267 | Imports | — | The only part safe to skim. |
+| 268–393 | Device gate, stage layout & constants | `isUnsupportedDevice`, `computeStageLayout`, `roomGeometry`, `LOGIC_MS` | Phones are refused first, before any art is fetched. Then how the stage is scaled to the viewport, and the 80 ms game tick. |
+| 394–431 | Stage assembly & subtitle overlay state | `buildStage`, `subFontIdx`, `subOverlaySig` | Calls into `dom.ts` to nest the canvases, then the vector-subtitle bookkeeping. |
+| 432–568 | Loading overlay & fatal errors | `setLoadingMsg`, `beginRoomLoadingUi`, `syncLoadingUi`, `showFatal`, `relayout` | The boot/room-load overlay, its 200 ms anti-flash delay, and the fatal-error screen. **Hot.** |
+| 569–708 | Intro movies & subtitle overlay | `IntroPlayer`, `probeAiMovies`, `syncSubOverlay`, `clearSubOverlay` | Logo/intro `.mp4` playback and the vector-subtitle layer above the game canvas. |
+| 709–801 | Screen & overlay state | `ostav`, `screen`, `mapOverlay`, `mapInfoRoom`, `worldMap`, `legImage` | The mutable globals for panel/options/credits/map-info/help/leg-image. Read this before touching any screen. |
+| 802–905 | Save store + cheats wiring | `openSaveStore`, `initCheats` | Opens `persist.ts` and hands `cheats.ts` its view of the game, after the gate. |
+| 906–990 | Room state & settings | `ffr`, `room`, `subs`, `settings`, `subsOn`, `setSubtitleMode`, `applyVolumeSettings` | The current room's parsed data plus subtitle/volume settings. |
+| 991–1084 | Graphics tier, renderer, dev flags | `setGraphics`, `setRenderer`, `setRenderOnDirty`, `setDevEnabled` | Tier selection, CPU vs WebGL, render-on-dirty, the dev pane. |
+| 1085–1163 | Art wiring | `initArt` | Hands `art.ts` its view of the game. The art loading itself is in that module. |
+| 1164–1310 | Engine, audio & mode state | `audio`, `engine`, `activeScript`, `chatter`, `cutscene`, `showmode`, `hooks`, `KEYS` | The mutable core: step engine, script, dialogue, the three playback modes, and the key tables. |
+| 1311–1520 | Room construction | `buildRoom`, `setInfo`, `applySubFont`, `scriptTalk` | Turns parsed FFR data into a live `Room` + `StepEngine`, and refreshes the info line. Room *loading*, audio, movement and drawing are elsewhere. |
+| 1521–2010 | Cutscene, showmode, replay | `startCutscene`, `startShowmode`, `advanceShowmode`, `applyCapAction`, `ensureAiKufr`, `drawCutscene` | The KUFRIK demo, the `.cap` demonstration player, record replay, and the cutscene compositor. |
+| 2011–2270 | Room load & audio wiring | `loadRoom`, `fetchSoundPkg`, `loadSoundPkg`, `loadRoomVoices`, `startRoomMusic`, `talk` | Fetch FFR/FFS/FFT for a room, arm its voices, start its music. **Hot.** |
+| 2271–2463 | Movement, replay & restart | `tryStep`, `beginHeldMove`, `dispatchHeldMove`, `wallShove`, `applyRecordStep`, `restore`, `advanceLoadmode`, `restartRoom` | The `KeyRoom` held-key state machine and how a keypress becomes a game step — plus replaying a saved record (`loadmode`) and restarting a room. |
+| 2464–2542 | Save/load game | `saveGame`, `loadGame`, `saveExists`, `canSave`, `onWinBookkeeping` | In-room save slots and what happens on a win. |
+| 2543–2748 | Control panel | `panelState`, `optionsState`, `tickPanelScroll`, `togglePanelOptions`, `openHelp`, `drawPanel` | The side panel: its buttons, the options scroll animation, the help overlay. |
+| 2749–2996 | World map drawing | `ensureDeskyData`, `openMapInfo`, `drawMap`, `aiPlaqueFor`, `drawMapOverlays` | The branch map, its name plaques, and the record info panel (krokoměr). |
+| 2997–3368 | Map navigation & story screens | `showMap`, `returnFromRoom`, `showLegImage`, `playFirstRunIntro`, `openCredits`, `drawCredits` | Entering/leaving the map, leg-completion pages, intro replay, the credits roll. |
+| 3369–3554 | Room entry & fish animation | `enterRoom`, `panelAction`, `updateLipSync`, `fishFrameFor` | The map → room transition, panel button actions, and which sprite frame each fish shows. |
+| 3555–3581 | Render plumbing wiring | `initGlPlumbing` | Hands `glPlumbing.ts` its view of the game. The compositors are in that module. |
+| 3582–3765 | The frame painter | `draw`, `updateRoomSubOverlay` | One room frame, all three tiers, CPU and GPU. Everything on screen during play is painted from here. |
+| 3766–3976 | The logic tick | `step`, `tickBlink`, `hracNespi` | One 80 ms game step: script, engine, dialogue, death handling, screensaver. |
+| 3977–4280 | Frame pacing & perf | `roomLoading`, `roomLoadSeq`, `IDLE_LOOP_MS`, `updatePerfHud`, `roomAnimating`, `loopThrottleOk`, `wake` | The idle throttle (60 fps ↔ 12.5 fps), the water/ZX wake rates, and the perf HUD. **Hot.** |
+| 4281–4468 | `loop()` | `loop` | The rAF callback: which screen paints, how many logic steps run, when to sleep. |
+| 4469–4695 | Keyboard | `keydown / keyup listeners` | Every key binding, including cheats, dev keys and modal handling. |
+| 4696–5000 | Pointer | `cellFromEvent`, `clickCell`, `dirToward`, `clickMapAt`, `panelCoords` | Fish selection and click-to-swim target (the pathfinding is in `stepEngine.ts`), map and panel hit-testing. |
+| 5001–5090 | Dev bar & window wiring | `populateRooms`, `fitSelect`, `rendererSelect`, `graphicsSelect`, `idleDirtyToggle`, `winRoomBtn`, `resize / fullscreenchange / dpr watchers` | The dev-only controls — room picker, fit mode, renderer, graphics tier, idle-render toggle, win-room — and the relayout triggers. |
+| 5091–5254 | Boot | `await FontData.load`, `parseFfp`, `loadSoundPkg`, `loadRoom(7)`, `initFeedback`, `requestAnimationFrame(loop)` | The top-level-await boot sequence, in load order. What is critical vs. optional is documented inline. |
+| 5255–5723 | `window.__ff` host | `debugHooks` | The 144-member host the debug hooks read the game through: getters, plus eleven setters for the values probes deliberately write. The hooks themselves are in `debugHooks.ts`. |
+
+<!-- MAP:main.ts END -->
+
+Regions marked **Hot** are the ones recent history keeps returning to: the loading overlay, room load and
+the frame pacing. That came from bucketing the diff hunks of the 25 commits before the split by line — a
+measurement that cannot simply be re-run now, because those line numbers refer to the pre-split file.
+Re-derive it against a commit range that starts after the split, or not at all. If you are budgeting a
+change, budget it against the region, not the file.
+
+**Six regions have moved out** and are no longer in the table: the DOM handles (`app/dom.ts`), the save data
+(`app/persist.ts`), the cheats and Tetris (`app/cheats.ts`), the `__ff` hook bodies (`app/debugHooks.ts`),
+the render plumbing (`app/glPlumbing.ts`) and the art loading (`app/art.ts`) — together about 27 k tokens,
+taking `main.ts` from 88 k to 61 k.
+
+### Map of `src/render/`
+
+The renderer is 28 files and ~84 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
+two axes at once (which **art tier**: classic / enhanced / `ai`; and which **backend**: CPU or WebGL), which
+is what makes it hard to guess where something lives. This table is the shortcut.
+
+Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is drawn, in what order" and
+"what colour is it", and almost everything else is an implementation of one side of that.
+
+| File | tok | What it is |
+| --- | --- | --- |
+| **The two seams everything else hangs off** | | |
+| `roomWalk.ts` | 2.0 k | ONE traversal deciding what is drawn, in what order, at what coordinates — a port of `TRoom.Priprav`. Replayed by both the faithful and the `ai` renderers, so a rule fixed here is fixed for both. |
+| `artSource.ts` | 1.2 k | The pluggable seam deciding *what colour / which pixels*. The only thing that differs between the classic and enhanced looks. |
+| **CPU compositing** | | |
+| `framebuffer.ts` | 4.7 k | The 8-bit palette-indexed screen and the Delphi blitters (`Kresli`/`KresliRev`/`Kresli2`/`KresliR`). |
+| `rgbaScreen.ts` | 3.4 k | The same compositing, but keeping a live RGBA plane beside the index plane — the CPU target for the truecolor tiers. |
+| `renderRoom.ts` | 4.2 k | The faithful room renderer: entry points, fish frames, the resting-pose compositor. |
+| `classicArtSource.ts` | 0.4 k | The 256-colour palette look. |
+| `enhancedArtSource.ts` | 3.0 k | The FFNG truecolor look. |
+| **The `ai` tier** | | |
+| `roomAi.ts` | 12.8 k | The hi-res AI room compositor — the largest file here, and the one whose rules the mutation harness pins. |
+| `aiTarget.ts` | 7.4 k | The surface `roomAi` paints onto: the canvas-2D target, plus the water wobble and ripple maths. |
+| `worldMapAi.ts` | 1.6 k | The `ai` world map. |
+| `panelAi.ts` | 1.7 k | The `ai` control panel. |
+| `creditsAi.ts` | 1.8 k | The `ai` end credits (GPU-composited). |
+| **WebGL** | | |
+| `glScreen.ts` | 10.9 k | The GPU compositor for classic/enhanced, from palette-INDEX art through an MRT colour+index framebuffer. |
+| `glRoomAi.ts` | 8.2 k | The GPU compositor for the `ai` tier, from straight RGBA at ×S. Holds `BG_FS`, the water shader `tools/mutate-gl-room-ai.mjs` mutates. |
+| `glCommon.ts` | 1.1 k | The WebGL2 plumbing both of the above share. |
+| **Screens and chrome** | | |
+| `worldMap.ts` | 2.3 k | The branch map (`UMain.pas PaintBox1Paint`). |
+| `mapInfo.ts` | 2.1 k | The map's record info panel (krokoměr). |
+| `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
+| `credits.ts` | 0.8 k | The scrolling end credits. |
+| `help.ts` | 0.6 k | The control-help screens (`Help.pas`). |
+| `subtitles.ts` | 5.4 k | Colour mapping, glyph rendering, and the scrolling line. |
+| `font.ts` | 0.9 k | The bitmap font from the original `Chars.dat`/`Chartab.dat`/`Charcol.dat`. |
+| `tetrisRender.ts` | 1.3 k | The Tetris minigame's picture. |
+| `filmEffects.ts` | 1.1 k | Full-frame effects for the `xsilent` and `xinterlaced` cheats. |
+| **Assets in and out** | | |
+| `pngDecode.ts` | 1.6 k | PNG decoder for the truecolor art path. |
+| `png.ts` | 0.5 k | PNG encoder (used by the verification CLIs, not the game). |
+| `enhancedDecode.ts` | 0.2 k | Node-only helper to build `EnhancedArt` from PNG bytes. |
+| `loadSlot.ts` | 0.5 k | A FIFO gate for asset fetch+decode, so one room's ~190 requests don't stampede. |
+
+Token counts are rounded and will age; they are here to say *which files are big*, not to be exact. The
+file list itself is checked by `test/readme-map.test.ts`, so a new module cannot be added without a row.
 
 ## Original data
 

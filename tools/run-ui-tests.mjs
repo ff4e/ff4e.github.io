@@ -38,23 +38,20 @@
  * worktrees of this repo can run the suite concurrently.
  */
 import { spawn } from 'node:child_process';
-import {
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-  mkdirSync,
-  rmSync,
-  lstatSync,
-  symlinkSync,
-} from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { cpus } from 'node:os';
-import { createServer } from 'node:net';
 import { chromium } from 'playwright';
-
-const HOST = '127.0.0.1';
-const urlFor = (p) => `http://${HOST}:${p}/`;
+import {
+  HOST,
+  PreviewError,
+  buildApp,
+  isUp,
+  root,
+  startPreview,
+  stopPreview,
+} from './preview-server.mjs';
 
 // A freshly-spawned server on a port of OUR choosing every run, so the UI tests
 // always validate the CURRENT build — never a stale dev server the developer
@@ -75,7 +72,6 @@ const FIXED_PORT = Number(process.env.FF_UI_PORT) || null;
 // The port this run actually got. Assigned by startPreview(), read by runProbe().
 let port = FIXED_PORT;
 const toolsDir = dirname(fileURLToPath(import.meta.url));
-const root = dirname(toolsDir);
 
 // Chromium flags. Keep in sync with ui-lib.mjs (which uses the same two sets when
 // it has to launch a private browser, i.e. when a probe is run directly by hand).
@@ -89,6 +85,36 @@ const ANGLE_ARGS = ['--use-gl=angle', '--use-angle=metal', ...PLAIN_ARGS];
 // is both cheaper (it goes back in the pool) and stronger than a quiet lane.
 // test-smoothness used to sit here for exactly that reason and flaked anyway — the
 // lane guarantees no other PROBE, not a quiet machine — so it was reworked instead.
+/**
+ * Probes known to fail intermittently for reasons that are NOT the change under test,
+ * and how many extra attempts each may have.
+ *
+ * Retries are dangerous and this list is deliberately narrow, because a retry is a way
+ * to make a real failure disappear. Two rules keep that from happening:
+ *
+ *   1. ONLY probes named here are ever retried. A probe that has never flaked before is
+ *      reporting a regression the first time it fails, and it is reported as a failure.
+ *      Never add a probe here to quiet a failure you have not diagnosed.
+ *   2. A retried pass is NOT a silent pass. It is reported as FLAKY, counted separately
+ *      in the summary, and the failed attempts are printed. If a probe here stops being
+ *      flaky, the summary stops mentioning it and the entry should be deleted.
+ *
+ * Each entry needs a reason and, where known, who owns the fix.
+ */
+const KNOWN_FLAKY = new Map([
+  // "a cached room entry never flashes the loading overlay" — fails on a clean main.
+  // Measured 2026-08-09 with a paired A/B (two preview servers, alternating runs so both
+  // revisions saw the same machine load): base 4/10, unrelated branch 5/10. Owned by the
+  // fish_fillets_cached_entry_flash work; delete this entry when that lands.
+  //
+  // Two retries MITIGATE it and do not fix it: over five filtered runs the outcome was
+  // 1 clean pass, 2 flaky passes, and 2 runs where all three attempts failed. The count
+  // is deliberately not raised further — a probe this unreliable should be able to go
+  // red, because burying it under six attempts teaches everyone to distrust the suite
+  // instead of fixing the bug.
+  ['test-ai-loading.mjs', 2],
+]);
+
 const EXCLUSIVE = new Set([
   'test-timing.mjs', // asserts the game clock keeps up with wall clock, frame budget permitting
   'test-idlefps.mjs', // asserts the render loop drops to the idle timer
@@ -140,67 +166,6 @@ function writeTimings(t) {
 }
 
 /**
- * Ask the OS for a free port: bind :0, note what we got, release it.
- *
- * This deliberately does NOT scan for "a port that looks unused" — the kernel will
- * not hand the same ephemeral port to two live listeners, so two suites starting at
- * the same instant get different ports, which is the entire point.
- *
- * Releasing before vite binds leaves a TOCTOU window, so the caller must be able to
- * retry; that is much cheaper than holding the socket, which would make vite's own
- * `--strictPort` bind fail every time.
- */
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const probe = createServer();
-    probe.unref();
-    probe.on('error', reject);
-    probe.listen(0, HOST, () => {
-      const got = probe.address().port;
-      probe.close(() => resolve(got));
-    });
-  });
-}
-
-async function isUp(p) {
-  try {
-    const r = await fetch(urlFor(p));
-    return r.ok;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Wait for OUR preview server to answer on `p`.
- *
- * Returns why it stopped, because the two failures need different handling: with
- * `--strictPort` a lost port race kills vite immediately (retry elsewhere), while a
- * live-but-silent server is a real problem worth reporting at once.
- *
- * A dead vite is never "up": whatever answers on that port afterwards belongs to
- * somebody else, and running the suite against it is precisely the stale-server
- * failure this runner exists to prevent.
- */
-async function waitUp(p, timeoutMs) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < timeoutMs) {
-    if (!server || server.exitCode !== null) return 'exited';
-    if ((await isUp(p)) && server.exitCode === null) return 'up';
-    await new Promise((r) => setTimeout(r, 400));
-  }
-  return 'timeout';
-}
-
-/** Run a command to completion, resolving with its exit code. */
-function run(cmd, args, opts = {}) {
-  return new Promise((resolve) => {
-    const c = spawn(cmd, args, { cwd: root, stdio: 'inherit', ...opts });
-    c.on('exit', (code) => resolve(code ?? 1));
-  });
-}
-
-/**
  * Run one probe, capturing its output so parallel probes don't interleave.
  *
  * Resolves on `close`, not `exit`: `exit` can fire while the stdout/stderr pipes
@@ -248,8 +213,33 @@ function runProbe(file, env) {
 
 function report(r) {
   const why = r.note ? ` (${r.note})` : '';
-  console.log(`\n=== ${r.t} — ${(r.ms / 1000).toFixed(1)}s — ${r.ok ? 'PASS' : 'FAIL'}${why} ===`);
+  const verdict = r.ok ? (r.flaky ? `FLAKY (passed after ${r.flaky} retr${r.flaky === 1 ? 'y' : 'ies'})` : 'PASS') : 'FAIL';
+  console.log(`\n=== ${r.t} — ${(r.ms / 1000).toFixed(1)}s — ${verdict}${why} ===`);
   process.stdout.write(r.out.endsWith('\n') || r.out === '' ? r.out : r.out + '\n');
+}
+
+/**
+ * Run one probe, retrying it only if it is on the KNOWN_FLAKY list.
+ *
+ * The output of every failed attempt is kept and printed, so a "flaky pass" still shows
+ * you what went wrong — the point is to stop a known-bad probe from failing the run, not
+ * to hide it.
+ */
+async function runProbeWithRetries(file, env) {
+  const extra = KNOWN_FLAKY.get(file) ?? 0;
+  let r = await runProbe(file, env);
+  if (r.ok || extra === 0) return r;
+  const attempts = [r];
+  for (let i = 0; i < extra && !r.ok; i++) {
+    r = await runProbe(file, env);
+    attempts.push(r);
+  }
+  // Total the time actually spent, so the summary does not under-report a probe that
+  // cost three runs, and the scheduler still learns a single run's duration.
+  const spent = attempts.reduce((s, a) => s + a.ms, 0);
+  return r.ok
+    ? { ...r, flaky: attempts.length - 1, ms: spent, out: attempts.map((a) => a.out).join('\n') }
+    : { ...r, ms: spent, note: `${attempts.length} attempts, all failed${r.note ? `; ${r.note}` : ''}` };
 }
 
 /** Worker pool: `limit` probes in flight, longest-first. */
@@ -259,7 +249,7 @@ async function runPool(files, limit, env, results) {
     for (;;) {
       const i = next++;
       if (i >= files.length) return;
-      const r = await runProbe(files[i], env);
+      const r = await runProbeWithRetries(files[i], env);
       report(r);
       results.push(r);
     }
@@ -267,9 +257,6 @@ async function runPool(files, limit, env, results) {
   await Promise.all(Array.from({ length: Math.min(limit, files.length) }, worker));
 }
 
-// Always spawn a fresh server on a port we picked ourselves (strict, so we never
-// silently bind elsewhere) — never reuse whatever might already be listening.
-let server = null;
 let plainServer = null;
 let angleServer = null;
 
@@ -283,68 +270,17 @@ async function cleanup() {
   await plainServer?.close().catch(() => {});
   await angleServer?.close().catch(() => {});
   plainServer = angleServer = null;
-  if (server && server.exitCode === null) {
-    // Kill the whole process GROUP: `npx` is only a wrapper and the real vite runs as
-    // its child, so server.kill() left that child holding the port. Fall back to a
-    // plain kill if the group is already gone.
-    try {
-      process.kill(-server.pid, 'SIGTERM');
-    } catch {
-      try { server.kill(); } catch { /* already gone */ }
-    }
-  }
-  server = null;
+  stopPreview();
 }
+
+/** Progress line from the shared preview machinery, tagged like the rest of this runner. */
+const log = (m) => console.log(`[test:ui] ${m}`);
 
 /** Bail out with a message, leaving nothing running behind us. */
 async function die(msg) {
   console.error(`[test:ui] ${msg}`);
   await cleanup();
   process.exit(1);
-}
-
-/**
- * Get our own preview server listening, and return the port it got.
- *
- * On an auto-picked port, losing the race to bind it is expected-but-rare (another
- * suite, or anything else, grabbed it in the gap between our probe socket closing
- * and vite binding), so we simply ask for another one. Only that case retries: a
- * server that starts and then never answers is a real fault, and reporting it after
- * one 30s wait beats reporting it after eight.
- *
- * An explicit FF_UI_PORT is never second-guessed: it is a deliberate choice, so a
- * clash there is an error the developer wants to hear about rather than something
- * to silently route around.
- */
-async function startPreview() {
-  const attempts = FIXED_PORT ? 1 : 8;
-  for (let i = 0; i < attempts; i++) {
-    const p = FIXED_PORT ?? (await freePort());
-    if (await isUp(p)) {
-      if (FIXED_PORT) await die(`port ${p} is already in use; stop the process on it and retry`);
-      continue;
-    }
-    console.log(`[test:ui] starting fresh vite preview server on ${urlFor(p)} …`);
-    // `detached` puts vite in its own PROCESS GROUP so cleanup can kill the whole group.
-    // `npx` spawns the real vite as a CHILD, so killing only the npx wrapper orphaned it —
-    // the orphan kept holding the port and, with --strictPort, the next run's own vite
-    // then failed to bind while waitUp happily connected to the ORPHAN (serving a stale
-    // build). When that orphan later died, probes mid-run saw ERR_CONNECTION_REFUSED.
-    server = spawn('npx', ['vite', 'preview', '--port', String(p), '--strictPort', '--host', HOST], {
-      cwd: root,
-      stdio: 'ignore',
-      detached: true,
-    });
-    const why = await waitUp(p, 30000);
-    if (why === 'up') return p;
-    // It exited or went silent; either way don't leave it behind.
-    await cleanup();
-    if (why === 'timeout') await die(`preview server on port ${p} did not come up`);
-    if (FIXED_PORT)
-      await die(`vite could not bind FF_UI_PORT ${p}; stop whatever is holding it and retry`);
-    console.log(`[test:ui] port ${p} was taken before vite could bind it; trying another…`);
-  }
-  await die(`could not start a preview server on a free port after ${attempts} attempts`);
 }
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
@@ -358,41 +294,38 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 if (FIXED_PORT && (await isUp(FIXED_PORT)))
   await die(`port ${FIXED_PORT} is already in use; stop the process on it and retry`);
 
-// Serve a PRODUCTION BUILD, not the dev server. The dev server is a single node
-// process that transpiles and serves ~120 unbundled ES modules on every page
-// load; with 8 probes booting the app at once it became the suite's bottleneck.
-// `vite build` takes ~2s and collapses that into one bundle. It is also a
-// stricter test than dev: the probes now exercise what actually ships.
-console.log('[test:ui] building the app…');
-if ((await run('npx', ['vite', 'build'], { stdio: 'ignore' })) !== 0) await die('vite build failed');
-
-// `copyPublicDir` is off (copying the large data dir flakes on this machine — see
-// vite.config.ts), so dist/ has no assets. Link each public root in instead, so
-// /data, /enhanced and /fonts resolve exactly as they do under the dev server.
-// Getting this wrong is not silent: the enhanced art 404s and test-enhanced fails
-// its truecolor assertions.
-for (const entry of readdirSync(join(root, 'public'))) {
-  const link = join(root, 'dist', entry);
-  // Only ever replace a link we made ourselves. A real file/dir here is a build
-  // output (`dist/assets`, `dist/index.html`), and silently deleting it to make
-  // room for a public/ entry of the same name would serve a broken app while the
-  // probes reported... something. Fail loudly instead.
-  const existing = lstatSync(link, { throwIfNoEntry: false });
-  if (existing && !existing.isSymbolicLink()) {
-    await die(
-      `public/${entry} collides with build output dist/${entry}; rename the public entry ` +
-        `or stage it under a subdirectory`,
-    );
-  }
-  rmSync(link, { force: true });
-  symlinkSync(join('..', 'public', entry), link);
+try {
+  await buildApp(log);
+} catch (e) {
+  await die(e instanceof PreviewError ? e.message : String(e?.message ?? e));
 }
 
-port = await startPreview();
+try {
+  port = await startPreview({ fixedPort: FIXED_PORT, log });
+} catch (e) {
+  await die(e instanceof PreviewError ? e.message : String(e?.message ?? e));
+}
 
-const all = readdirSync(toolsDir)
+/**
+ * Run a SUBSET: `npm run test:ui -- cheat options` runs every probe whose filename
+ * contains "cheat" or "options".
+ *
+ * For the inner loop. The whole suite is 315s wall, and a session fixing one bug
+ * usually cares about three probes — paying 315s per iteration is what makes people
+ * stop checking. The full run is still what a PR needs; this is for the twenty runs
+ * before it.
+ *
+ * A pattern that matches nothing is an error, not an empty green run: silently passing
+ * zero probes is the one outcome that would let a typo look like success.
+ */
+const patterns = process.argv.slice(2).filter((a) => !a.startsWith('-'));
+const every = readdirSync(toolsDir)
   .filter((f) => /^test-.*\.mjs$/.test(f))
   .sort();
+const all = patterns.length ? every.filter((f) => patterns.some((p) => f.includes(p))) : every;
+if (!all.length) await die(`no probe matches ${patterns.map((p) => `"${p}"`).join(', ')}`);
+if (patterns.length)
+  console.log(`[test:ui] filtered to ${all.length}/${every.length} probes: ${all.join(', ')}`);
 
 const timings = readTimings();
 // Longest-first so the long tail starts early; unknown probes go first (they are
@@ -435,12 +368,19 @@ writeTimings(timings);
 
 results.sort((a, b) => a.t.localeCompare(b.t));
 const failed = results.filter((r) => !r.ok);
+const flaky = results.filter((r) => r.ok && r.flaky);
 console.log('\n──────── UI test summary ────────');
 for (const r of results)
   console.log(
-    `  ${r.ok ? 'PASS' : 'FAIL'}  ${(r.ms / 1000).toFixed(1).padStart(6)}s  ${r.t}${r.note ? `  (${r.note})` : ''}`,
+    `  ${r.ok ? (r.flaky ? 'FLAKY' : 'PASS ') : 'FAIL '} ${(r.ms / 1000).toFixed(1).padStart(6)}s  ${r.t}${r.note ? `  (${r.note})` : ''}`,
   );
 console.log(`${results.length - failed.length}/${results.length} passed in ${wall.toFixed(1)}s wall`);
+// Never let a retried pass slip by unmentioned: it is a green run that cost extra
+// attempts, and if the reason ever changes somebody has to notice.
+for (const r of flaky)
+  console.log(`  FLAKY: ${r.t} failed ${r.flaky}x then passed — see KNOWN_FLAKY in this file`);
+if (patterns.length)
+  console.log(`  PARTIAL RUN: ${all.length} of ${every.length} probes (filtered). Not a full gate.`);
 console.log('  slowest:');
 for (const r of [...results].sort((a, b) => b.ms - a.ms).slice(0, 5))
   console.log(`    ${(r.ms / 1000).toFixed(1).padStart(6)}s  ${r.t}`);

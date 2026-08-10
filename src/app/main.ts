@@ -1,3 +1,4 @@
+//#region File docblock | The `URoom.pas` tick state machine this file reproduces, and the keyboard scheme.
 /**
  * Browser host: loads a room's original FFR, renders it with the software-
  * paletted compositor, drives the two fish, and reproduces the engine's animated
@@ -13,6 +14,7 @@
  * Keyboard: small fish I/K/J/L, big fish W/S/A/D. Mouse: click a fish to select,
  * click water to BFS-swim there.
  */
+//#region Imports | The only part safe to skim.
 import { parseFfr, type FfrRoom, type FfrBitmap } from '../data/ffr.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
 import { parseFft, type FftEntry } from '../data/fft.js';
@@ -131,6 +133,7 @@ import {
   saveSettings,
   busMultiplier,
   VOLUMES,
+  type GraphicsLevel,
   type SubtitleMode,
   type VolumeBus,
 } from '../core/settings.js';
@@ -149,7 +152,7 @@ import { stdSmrt, newDeathState, type DeathState } from '../core/deathlines.js';
 import { maybeBubble } from '../core/ambient.js';
 import { movesOf, lengthOfRecord, stepsOf, type RecordStep } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
-import { KufrDemo } from '../intro/kufrDemo.js';
+import { KufrDemo, type AiKufr } from '../intro/kufrDemo.js';
 import { parseHelpCap, AKCE, KDO, type CapAction } from '../intro/helpCap.js';
 import { ROOMS, roomByNumber } from '../data/roomTable.js';
 import {
@@ -158,8 +161,111 @@ import {
   isFitMode,
   type StageLayout,
   type FitMode,
+  type RoomGeometry,
 } from './layout.js';
 import { isUnsupportedDevice, showUnsupportedNotice } from './deviceGate.js';
+import {
+  buildStage,
+  canvas,
+  ctx,
+  fatalEl,
+  feedbar,
+  fitSelect,
+  glCanvas,
+  graphicsSelect,
+  idleDirtyToggle,
+  info,
+  loadingEl,
+  loadingMsg,
+  panelCanvas,
+  panelCol,
+  panelCtx,
+  perfHud,
+  rendererSelect,
+  select,
+  stageBox,
+  stageRow,
+  subCanvas,
+  subCtx,
+  winRoomBtn,
+  wrap,
+} from './dom.js';
+import { openSaveStore } from './persist.js';
+import { debugHooks } from './debugHooks.js';
+import {
+  classicArtFor,
+  drawAiGpu,
+  drawGpu,
+  enableWebgl,
+  enhancedArtFor,
+  glAiCompositor,
+  glAiFailed,
+  glChannelDiff,
+  glCompositor,
+  glFailed,
+  glParityCompare,
+  initGlPlumbing,
+  markGlFailed,
+} from './glPlumbing.js';
+import {
+  aiCredits,
+  aiPanel,
+  aiPending,
+  aiRoom,
+  aiRoomNum,
+  aiRoomRenderActive,
+  aiWorldMap,
+  beginMapArt,
+  beginRoomArt,
+  curNum,
+  decodePngResponse,
+  enhancedArt,
+  enhancedObjects,
+  enhancedPending,
+  ensureAiCredits,
+  ensureAiPanel,
+  ensureAiRoom,
+  ensureEnhancedArt,
+  initArt,
+  isPngResponse,
+  mapArtHolding,
+  mapArtPending,
+  mapPresented,
+  retargetArtForTier,
+  roomArtPending,
+  setMapPresented,
+} from './art.js';
+import {
+  applyFrameEffects,
+  applyMapCheat,
+  applyRoomCheat,
+  applySpriteCheats,
+  blitTetris,
+  cheatFishSprites,
+  cheatSolveRoom,
+  closeTetris,
+  endSilentFilm,
+  devWinRoom,
+  frameEffectsActive,
+  initCheats,
+  interlacedFaze,
+  mapCheats,
+  megabombFlash,
+  oldWater,
+  resetRoomScopedCheats,
+  roomCheats,
+  setMegabombFlash,
+  silentFilm,
+  spriteCheats,
+  tetris,
+  tetrisArt,
+  tetrisModal,
+  tetrisTick,
+  tickFrameEffects,
+  tickTetris,
+  ultraviolence,
+} from './cheats.js';
+//#region Device gate, stage layout & constants | anchors: isUnsupportedDevice, computeStageLayout, roomGeometry, LOGIC_MS | Phones are refused first, before any art is fetched. Then how the stage is scaled to the viewport, and the 80 ms game tick.
 
 // Phones are refused here, before a single byte of game ART is fetched. (The engine
 // bundle itself has already been downloaded — this statement is inside it — so the claim
@@ -235,19 +341,6 @@ function contentScaleFor(w: number, h: number): number {
  * `scale` converts native → css, which is what any overlay drawing in game coordinates
  * needs; it is deliberately NOT derived from the backing store.
  */
-interface RoomGeometry {
-  nativeW: number;
-  nativeH: number;
-  /** CSS px per NATIVE px (never per backing-store px). */
-  scale: number;
-  cssW: number;
-  cssH: number;
-  backingW: number;
-  backingH: number;
-  /** Backing-store px per native px: 1, or the AI room's upscale factor. */
-  upscale: number;
-}
-
 function roomGeometry(r: Room): RoomGeometry {
   const { w: nativeW, h: nativeH } = roomScreenSize(r);
   const scale = contentScaleFor(nativeW, nativeH);
@@ -298,57 +391,8 @@ const EFFECT_VOL = 48 / 64;
 // Animation lengths in game ticks (URoom.pas:425-433) — shared with the step-engine.
 const EXIT_CELLS = 5; // cells of travel to slide fully off-screen (render constant)
 
-const canvas = document.getElementById('screen') as HTMLCanvasElement;
-const ctx = canvas.getContext('2d')!;
-// WebGL present surface (P3): a canvas stacked exactly over #screen, shown only
-// while the WebGL backend is active (renderer==='webgl'). #screen stays the
-// layout anchor; this overlay covers it when the GPU presents. Created here so
-// the GlScreen can bind its context lazily on first use.
-const glCanvas = document.createElement('canvas');
-glCanvas.id = 'screen-gl';
-// Enhanced-graphics subtitle overlay: a smooth (non-pixelated) high-DPI canvas
-// laid exactly over the game canvas, so vector subtitles stay crisp above the
-// pixel-art frame. Wrap #screen so the overlay can be absolutely positioned on
-// top; a transparent 1px border matches #screen's border box for pixel-exact
-// alignment.
-const subCanvas = document.createElement('canvas');
-subCanvas.id = 'subs';
-const subCtx = subCanvas.getContext('2d')!;
-// The fixed stage box (sized by relayout): rooms/map/cutscene are centered inside
-// it and letterboxed, so the side panel stays put while the room canvas resizes.
-const stageBox = document.createElement('div');
-stageBox.id = 'stagebox';
-const wrap = document.createElement('div');
-{
-  wrap.style.position = 'relative';
-  wrap.style.display = 'inline-block';
-  wrap.style.lineHeight = '0';
-  // Insert the stage box where #screen sat (inside .stage), then nest the wrap
-  // (which holds #screen + the GL/subtitle overlays) centered within it.
-  canvas.parentNode!.insertBefore(stageBox, canvas);
-  stageBox.appendChild(wrap);
-  wrap.appendChild(canvas);
-  // GL present canvas: absolute over #screen, below the subtitle overlay. It is
-  // purely a display surface — the mouse listeners live on #screen underneath, so
-  // it must not intercept pointer events (else clicking a fish does nothing in
-  // WebGL mode). The subtitle overlay above is transparent to clicks for the same
-  // reason.
-  glCanvas.style.position = 'absolute';
-  glCanvas.style.left = '0';
-  glCanvas.style.top = '0';
-  glCanvas.style.border = '1px solid transparent';
-  glCanvas.style.display = 'none';
-  glCanvas.style.pointerEvents = 'none';
-  wrap.appendChild(glCanvas);
-  subCanvas.style.position = 'absolute';
-  subCanvas.style.left = '0';
-  subCanvas.style.top = '0';
-  subCanvas.style.border = '1px solid transparent';
-  subCanvas.style.background = 'transparent';
-  subCanvas.style.imageRendering = 'auto';
-  subCanvas.style.pointerEvents = 'none';
-  wrap.appendChild(subCanvas);
-}
+//#region Stage assembly & subtitle overlay state | anchors: buildStage, subFontIdx, subOverlaySig | Calls into `dom.ts` to nest the canvases, then the vector-subtitle bookkeeping.
+buildStage(); // the stage box + the GL/subtitle overlays (see dom.ts: not done at import time)
 // Vector-subtitle font (enhanced mode). All candidates are bundled + OFL-licensed
 // so they render identically on every platform. Mulish Medium is the default — a
 // clean humanist face close to Avenir Next Medium. The previewer (F key) cycles
@@ -382,32 +426,10 @@ let subOverlaySig = '';
 // Perf A/B switch (tools/bench-subtitles.mjs): false replays the pre-gate behaviour,
 // repainting the overlay on every frame that draws it.
 let subOverlayGate = true;
-const panelCanvas = document.getElementById('panel') as HTMLCanvasElement;
-const panelCtx = panelCanvas.getContext('2d')!;
-// The panel's column wrapper (the canvas plus the feedback strip that hangs under the
-// Options face). This is what floats over the map, so the strip travels with it.
-const panelCol = document.getElementById('panelcol') as HTMLElement;
-const feedbar = document.getElementById('feedbar') as HTMLElement | null;
-const select = document.getElementById('room') as HTMLSelectElement;
-const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null;
-const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
-const graphicsSelect = document.getElementById('graphics') as HTMLSelectElement | null;
-const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;
-const winRoomBtn = document.getElementById('winroom') as HTMLButtonElement | null;
-const perfHud = document.getElementById('perfhud') as HTMLElement | null;
-const info = document.getElementById('info') as HTMLDivElement;
-const stageRow = document.querySelector('.stage') as HTMLElement;
-
-// ── Public-release boot UX: loading indicator, fatal-error screen, and a
-// software-renderer note. The loading overlay is present in the HTML (shown before
-// this deferred module runs), so the player never sees a blank page while assets
-// fetch; the app hides it once boot completes.
-const loadingEl = document.getElementById('loading') as HTMLElement | null;
-const loadingMsg = document.getElementById('loading-msg') as HTMLElement | null;
-const fatalEl = document.getElementById('fatal') as HTMLElement | null;
 let booted = false; // true once boot succeeds — before that, any error is fatal
 
 /** Update the loading overlay's status line. */
+//#region Loading overlay & fatal errors | anchors: setLoadingMsg, beginRoomLoadingUi, syncLoadingUi, showFatal, relayout | The boot/room-load overlay, its 200 ms anti-flash delay, and the fatal-error screen. | Hot
 function setLoadingMsg(msg: string): void {
   if (loadingMsg) loadingMsg.textContent = msg;
 }
@@ -544,6 +566,7 @@ function relayout(): void {
 
 // Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen <video> played
 // before the map on first run, and replayable from the map's top-left corner.
+//#region Intro movies & subtitle overlay | anchors: IntroPlayer, probeAiMovies, syncSubOverlay, clearSubOverlay | Logo/intro `.mp4` playback and the vector-subtitle layer above the game canvas.
 const intro = new IntroPlayer({
   layer: document.getElementById('intro-layer') as HTMLElement,
   video: document.getElementById('intro-video') as HTMLVideoElement,
@@ -683,6 +706,7 @@ function clearSubOverlay(): void {
   subOverlayPainted = false;
 }
 
+//#region Screen & overlay state | anchors: ostav, screen, mapOverlay, mapInfoRoom, worldMap, legImage | The mutable globals for panel/options/credits/map-info/help/leg-image. Read this before touching any screen.
 let panel: FfpPanel | null = null; // the parsed control-panel graphic (panel.ffp)
 let panelPressed = 0; // region currently held down (for the lit-button feedback), or 0
 // Per-frame draw caches: the panel and world-map compositions are re-blitted only
@@ -707,10 +731,6 @@ let panelDragBus: VolumeBus | null = null; // the slider currently being dragged
 // Options panel or the scrolling credits, shown over the world map.
 let mapOverlay: 'none' | 'options' | 'credits' = 'none';
 let credits: Credits | null = null; // the parsed credits assets (lazily loaded)
-// Hi-res AI art for the two UI surfaces. Loaded once, lazily, only while graphics==='ai';
-// null means "not available" and the faithful indexed path is used instead.
-let aiPanel: AiPanel | null = null;
-let aiCredits: AiCredits | null = null;
 let aiPanelTried = false;
 let aiCreditsTried = false;
 // Last display box the AI credit layers were sized for, so layout() runs on resize
@@ -753,7 +773,6 @@ let worldMap: WorldMap | null = null; // the branch-map screen
 // present (else the map falls back to the faithful CPU composite). The overlay
 // canvas draws the record panel + name plaques at native res, nearest-neighbour-
 // scaled over the hi-res map so digits/text stay crisp.
-let aiWorldMap: AiWorldMap | null = null;
 let mapOverlayCanvas: HTMLCanvasElement | null = null;
 let mapOverlayCtx: CanvasRenderingContext2D | null = null;
 let screen: 'map' | 'room' | 'intro' | 'legimage' = 'room'; // which screen is showing
@@ -777,722 +796,114 @@ let legImageAi: ImageBitmap | null = null;
 let legImagePending: { room: number; replay?: string } | null = null;
 let mapRevealStart = 0; // wall-clock time the map reveal animation began (Depth = -3)
 
-/** Current localStorage save-data layout version (ff.schema). Bump when the shape
- *  of any persisted `ff.*` key changes, and add a migration step in migrateSaves().
- *  Declared before migrateSaves() runs: the call below reads SAVE_SCHEMA, so the
- *  const must be initialized first (a later declaration would be in its temporal
- *  dead zone → a swallowed ReferenceError that silently skips the migration). */
-const SAVE_SCHEMA = 1;
-
-migrateSaves();
-const solved = loadSet('ff.solved'); // set of solved (1-based) room numbers, persisted
-const cheated = loadSet('ff.cheated'); // rooms completed via the cheat (shown as kCheat)
-
-/**
- * Version + migrate the persisted save data so a future layout change never strands
- * an existing player's progress. Runs once at boot, before any `ff.*` key is read.
- * Pre-versioning saves (no `ff.schema`) are already in the v1 shape, so they are
- * simply stamped; later bumps add `if (from < N)` steps that transform keys in place.
- */
-function migrateSaves(): void {
-  try {
-    const raw = localStorage.getItem('ff.schema');
-    const from = raw !== null ? Number(raw) : 0;
-    if (from >= SAVE_SCHEMA) return;
-    // from 0 (unversioned) -> 1: no key changes needed (ff.solved/cheated/scores/
-    // best/graphics/renderer/... already match v1); future migrations go here.
-    localStorage.setItem('ff.schema', String(SAVE_SCHEMA));
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-/** Load a persisted set of room numbers from localStorage. */
-function loadSet(key: string): Set<number> {
-  try {
-    const raw = localStorage.getItem(key);
-    if (raw) return new Set<number>(JSON.parse(raw) as number[]);
-  } catch {
-    /* storage unavailable */
-  }
-  return new Set<number>();
-}
-
-/** Persist a set of room numbers. */
-function saveSet(key: string, s: Set<number>): void {
-  try {
-    localStorage.setItem(key, JSON.stringify([...s]));
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-const saveSolved = (): void => saveSet('ff.solved', solved);
-const saveCheated = (): void => saveSet('ff.cheated', cheated);
-
-const scores = loadScores(); // room number -> best (lowest) move count on a genuine solve
-
-/**
- * cascisty (USoutez.pas:697): milliseconds spent INSIDE each room, accumulated
- * across every visit and every session. The original keeps this per room in its
- * competition records and adds the visit's elapsed time when the room closes
- * (zaznamenej_zmeny, UMain.pas:283), then persists the records; ZAVER's finale
- * narrates the total as an hour count. Map/menu/intro time never counts, and a
- * restart does not split a visit (TRoom.Restart leaves casstartu alone).
- */
-const playTime = loadPlayTime();
-/** Date.now() when the current room visit began, or 0 when not in a room. */
-let roomEnterAt = 0;
-/** The room that visit belongs to. */
-let roomClockNum = 0;
-
-/** Load the persisted per-room play time (ms). */
-function loadPlayTime(): Map<number, number> {
-  try {
-    const raw = localStorage.getItem('ff.playtime');
-    if (raw) {
-      const obj = JSON.parse(raw) as Record<string, number>;
-      return new Map(
-        Object.entries(obj)
-          .map(([k, v]) => [Number(k), Number(v)] as [number, number])
-          .filter(([k, v]) => Number.isFinite(k) && Number.isFinite(v) && v >= 0),
-      );
-    }
-  } catch {
-    /* storage unavailable */
-  }
-  return new Map<number, number>();
-}
-
-/** Start timing a visit to room `num` (TRoom.Start: casstartu := Date+Time). Armed
- *  by the player entering a room, not by loadRoom — the boot room is pre-loaded
- *  behind the world map and must not accrue play time. The room number is captured
- *  here rather than read from `curNum` at the end, because `curNum` only updates
- *  once the (async) room load succeeds: leaving during the load would otherwise
- *  bank the time against the room the player just came from. */
-function startRoomClock(num: number): void {
-  roomEnterAt = Date.now();
-  roomClockNum = num;
-}
-
-/**
- * Close a room visit and bank its elapsed time (zaznamenej_zmeny, UMain.pas:283 ->
- * USoutez.pas:695). Called whenever the room is left, for any reason; time in a
- * visit that is never closed is lost, exactly as it is in the original.
- */
-function stopRoomClock(): void {
-  if (!roomEnterAt) return;
-  const elapsed = Date.now() - roomEnterAt;
-  roomEnterAt = 0;
-  const n = roomClockNum;
-  roomClockNum = 0;
-  if (!n || elapsed <= 0) return;
-  playTime.set(n, (playTime.get(n) ?? 0) + elapsed);
-  try {
-    localStorage.setItem('ff.playtime', JSON.stringify(Object.fromEntries(playTime)));
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-/**
- * cas_hry (USoutez.pas:263): the whole game's play time, in Delphi day units —
- * the sum over all rooms of their banked time. The visit in progress is NOT
- * included, matching the original, whose current room has not been recorded yet
- * when ZAVER reads it.
- */
-function casHry(): number {
-  let ms = 0;
-  for (const v of playTime.values()) ms += v;
-  return ms / 86_400_000;
-}
-
-/** Load the persisted per-room best move counts (RoomVysl). */
-function loadScores(): Map<number, number> {
-  try {
-    const raw = localStorage.getItem('ff.scores');
-    if (raw) {
-      const obj = JSON.parse(raw) as Record<string, number>;
-      return new Map(Object.entries(obj).map(([k, v]) => [Number(k), Number(v)]));
-    }
-  } catch {
-    /* storage unavailable */
-  }
-  return new Map<number, number>();
-}
-
-/** Persist the per-room best move counts. */
-function saveScores(): void {
-  try {
-    localStorage.setItem('ff.scores', JSON.stringify(Object.fromEntries(scores)));
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-/** RoomVysl:=LengthOfRecord (URoom.pas:24342): record a solve's move count, keeping the best. */
-function recordScore(roomNum: number, moves: number): void {
-  const prev = scores.get(roomNum);
-  if (prev === undefined || moves < prev) {
-    scores.set(roomNum, moves);
-    saveScores();
-  }
-}
-
-// The best-solution move records (the original's `nej` save slot), keyed by room.
-// Persisted so the map info panel's "Replay" can animate a room's best solution.
-const bestRecords = loadBestRecords();
-
-/** Load the persisted per-room best-solution move records (ff.best). */
-function loadBestRecords(): Map<number, string> {
-  try {
-    const raw = localStorage.getItem('ff.best');
-    if (raw) {
-      const obj = JSON.parse(raw) as Record<string, string>;
-      return new Map(Object.entries(obj).map(([k, v]) => [Number(k), String(v)]));
-    }
-  } catch {
-    /* storage unavailable */
-  }
-  return new Map<number, string>();
-}
-
-/** Persist the per-room best-solution move records. */
-function saveBestRecords(): void {
-  try {
-    localStorage.setItem('ff.best', JSON.stringify(Object.fromEntries(bestRecords)));
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-/** The best-solution record for a room, if one has been stored (enables Replay). */
-function bestRecord(roomNum: number): string | undefined {
-  return bestRecords.get(roomNum);
-}
-
-/**
- * Store a solve's full move record as the room's best when it beats the stored
- * count (mirrors recordScore's keep-minimum guard so record + count stay in sync;
- * the original's `nej` slot). Called on a genuine win with the winning srecord.
- */
-function recordBest(roomNum: number, rec: string, moves: number): void {
-  const prev = scores.get(roomNum);
-  if (prev === undefined || moves <= prev) {
-    bestRecords.set(roomNum, rec);
-    saveBestRecords();
-  }
-}
+// Persisted progress: solved/cheated rooms, best move counts, best-solution records
+// and per-room play time. Opened HERE, not at import time — see persist.ts for why the
+// module refuses to load save data at module scope.
+//#region Save store + cheats wiring | anchors: openSaveStore, initCheats | Opens `persist.ts` and hands `cheats.ts` its view of the game, after the gate.
+const {
+  solved,
+  cheated,
+  scores,
+  playTime,
+  bestRecords,
+  saveSolved,
+  saveCheated,
+  recordScore,
+  recordBest,
+  bestRecord,
+  casHry,
+  startRoomClock,
+  stopRoomClock,
+  forceBest,
+} = openSaveStore();
 
 /**
  * xwemaketherulez (URoom.pas:24666): the original's "solve this room" cheat. Marks
  * the current room completed-via-cheat, records it in the progression, and returns
  * to the map (konec:=1). Handy for testing.
  */
-function cheatSolveRoom(): void {
-  if (screen !== 'room') return;
-  const n = Number(select.value);
-  if (Number.isFinite(n)) {
-    if (!solved.has(n)) cheated.add(n); // genuinely-won rooms stay "solved", not "cheat"
-    saveCheated();
-    showMap();
-  }
-}
-
-/** Dev-only: genuinely win the current room (dev-bar "Win room" button / the W hotkey).
- *  Unlike cheatSolveRoom (xwemaketherulez), which jumps straight to the map and marks the
- *  room "cheated", this drives the real win path — engine.triggerWin -> onWin bookkeeping
- *  (marks the room solved) -> the auto-return countdown -> returnFromRoom — so an
- *  end-of-leg room reveals its story page exactly as a real solve would. Meant purely as a
- *  spot-check aid for the win/story-page flow; armed only while the dev pane is enabled. */
-function devWinRoom(): void {
-  if (!devEnabled || screen !== 'room' || !engine || !room || engine.phase !== 'idle' || room.won) return;
-  engine.triggerWin();
-}
-
-// ---------------------------------------------------------------------------
-// Typed cheat codes (Uovl.pas:744 in a room, UMain.pas:1750 on the map).
-// ---------------------------------------------------------------------------
-
-/** `cheatstring` — the room's entry buffer. Armed by X, parked between codes. */
-const roomCheats = new CheatEntry();
-/** `dircheat` (UMain.pas:1727) — the map's own buffer; the two never share state. */
-const mapCheats = new CheatEntry();
-
-/** ultraviolence (USoutez.pas:24): every room entered from now on spawns a hook
- *  (TRoom.Start, URoom.pas:1503). Armed from the map and never cleared. */
-let ultraviolence = false;
-/** oldamp/oldper/oldspd (URoom.pas:24607): the water params xstorm displaced. */
-let oldWater: { amp: number; per: number; spd: number } | null = null;
-/**
- * The sprite cheats currently applied, in the order they were typed. Both are
- * toggles that rewrite the fish head/body frames, and both survive a restart in
- * the original (TRoom.Restart does not reload the sprites), so the port keeps the
- * state and recomputes the frames from the pristine parsed data whenever the Room
- * is rebuilt. The original's xmorph instead restores the bitmaps it saved when it
- * was switched on (Hlavy1/Tela1, URoom.pas:23832) — indistinguishable unless the
- * two cheats are interleaved, where recomputing is the better-behaved of the two.
- */
-let spriteCheats: ('UNDEAD' | 'MORPH')[] = [];
-/** megabomb (URoom.pas:26192): blank the room white for exactly one painted frame. */
-let megabombFlash = false;
-/** silentfilm (URoom.pas:181): the xsilent cheat's black-and-white movie mode. */
-let silentFilm = false;
-/** interlacedfaze (URoom.pas:195): -1 off, -2 winding down, >=0 the collapse phase. */
-let interlacedFaze = INTERLACED_OFF;
-/** The hidden SCORE bonus room (branch 9, `av:=9; am:=1` — UMain.pas:1774). */
-const SCORE_ROOM = 72;
-
-/**
- * xmegabomb (URoom.pas:24534): kill both fish where they float — light-kind
- * skeletons that erode away — then blank the room white for a frame. The original
- * counts both deaths, kills any speech, and drops whatever the fish were holding.
- */
-function cheatMegabomb(): void {
-  if (!room || !engine) return;
-  for (const which of ['little', 'big'] as const) {
-    if (room.alive[which]) room.killFish(which);
-  }
-  audio.snd('sp-smrt1', 3, false, EFFECT_VOL);
-  audio.snd('sp-smrt2', 3, false, EFFECT_VOL);
-  audio.killVoice(MLUVI_PRIOR.little); // KSnd(mluvi_mala)
-  audio.killVoice(MLUVI_PRIOR.big); // KSnd(mluvi_velka)
-  activeScript?.s.clearDialog(); // Zrus_dialogy
-  room.clearAllDirs();
-  if (room.padani()) {
-    engine.phase = 'fall'; // gstav := stav_ma_padat
-    engine.animFrame = 0;
-  }
-  megabombFlash = true;
-  forceRoomRedraw = true;
-}
-
-/** A head/body frame table, as both `Room.heads` and `Room.bodies` are shaped. */
-type FrameSet = { big: readonly (FfrBitmap | null)[]; small: readonly (FfrBitmap | null)[] };
-/** One facing of the enhanced truecolor fish sprites (both sizes). */
-type FishFacing = { small: Map<string, EnhancedSprite>; big: Map<string, EnhancedSprite> };
-/** The reshaped enhanced sprites while a sprite cheat is on, else null. */
-let cheatFishSprites: FishSprites | null = null;
-
-/** pretoc (URoom.pas:23892) over a whole frame table — the xundead flip. */
-function undeadSet(set: FrameSet): FrameSet {
-  const flip = (frames: readonly (FfrBitmap | null)[]): (FfrBitmap | null)[] =>
-    frames.map((bm) => (bm ? pretoc(bm) : bm));
-  return { big: flip(set.big), small: flip(set.small) };
-}
-
-/** morph (URoom.pas:23832) over a whole frame table — each fish takes the other's
- *  shape. Both halves derive from the ORIGINALS, as the Delphi does via
- *  bmmala1/bmvelka1, so the swap is a genuine exchange rather than a chain. */
-function morphSet(set: FrameSet): FrameSet {
-  return {
-    small: set.small.map((bm, i) => (bm && set.big[i] ? morphShrink(set.big[i]!) : bm)),
-    big: set.big.map((bm, i) => (bm && set.small[i] ? morphStretch(set.small[i]!) : bm)),
-  };
-}
-
-/** The same two transforms over one facing of the enhanced truecolor fish, which
- *  the enhanced art source blits instead of the FFR frames. Sprites are paired by
- *  filename, so a frame present for only one fish is left alone. */
-function undeadFacing(set: FishFacing): FishFacing {
-  const out: FishFacing = { small: new Map(), big: new Map() };
-  for (const size of ['small', 'big'] as const) {
-    for (const [k, v] of set[size]) out[size].set(k, pretocRgba(v));
-  }
-  return out;
-}
-
-function morphFacing(set: FishFacing): FishFacing {
-  const out: FishFacing = { small: new Map(set.small), big: new Map(set.big) };
-  for (const [k, small] of set.small) {
-    const big = set.big.get(k);
-    if (!big) continue;
-    out.small.set(k, morphShrinkRgba(big));
-    out.big.set(k, morphStretchRgba(small));
-  }
-  return out;
-}
-
-/**
- * Recompute the fish sprites: the pristine art, then every active sprite cheat in
- * the order it was typed. Both art sources are covered — the FFR head/body frames
- * the classic renderer uses, and the enhanced truecolor set, which is a wholly
- * separate path (EnhancedArtSource.drawFish) that would otherwise ignore the
- * cheats entirely in the mode the game ships in. Nothing shared is mutated.
- */
-function applySpriteCheats(): void {
-  if (room && ffr) {
-    let heads: FrameSet = ffr.heads;
-    let bodies: FrameSet = ffr.bodies;
-    for (const c of spriteCheats) {
-      const f = c === 'UNDEAD' ? undeadSet : morphSet;
-      heads = f(heads);
-      bodies = f(bodies);
-    }
-    room.heads = heads;
-    room.bodies = bodies;
-  }
-  if (!fishSprites || spriteCheats.length === 0) {
-    cheatFishSprites = null;
-    return;
-  }
-  let left: FishFacing = { small: fishSprites.small.left, big: fishSprites.big.left };
-  let right: FishFacing = { small: fishSprites.small.right, big: fishSprites.big.right };
-  for (const c of spriteCheats) {
-    const f = c === 'UNDEAD' ? undeadFacing : morphFacing;
-    left = f(left);
-    right = f(right);
-  }
-  cheatFishSprites = {
-    small: { left: left.small, right: right.small },
-    big: { left: left.big, right: right.big },
-  };
-}
-
-/** Toggle one of the two sprite cheats (xundead URoom.pas:24573, xmorph :24588). */
-function toggleSpriteCheat(which: 'UNDEAD' | 'MORPH'): void {
-  spriteCheats = spriteCheats.includes(which)
-    ? spriteCheats.filter((c) => c !== which)
-    : [...spriteCheats, which];
-  applySpriteCheats();
-  forceRoomRedraw = true;
-}
-
-/** xstorm (URoom.pas:24607): whip the water up (wamp/wspd/wper = 10/4/6), or put
- *  it back if it is already storming — the original toggles on those exact values. */
-function cheatStorm(): void {
-  if (!room) return;
-  if (room.wamp === 10 && room.wspd === 4 && room.wper === 6 && oldWater) {
-    room.wamp = oldWater.amp;
-    room.wper = oldWater.per;
-    room.wspd = oldWater.spd;
-    oldWater = null;
-  } else {
-    oldWater = { amp: room.wamp, per: room.wper, spd: room.wspd };
-    room.wamp = 10;
-    room.wspd = 4;
-    room.wper = 6;
-  }
-  forceRoomRedraw = true;
-}
-
-/**
- * xsilent (URoom.pas:24641): silent-movie mode — the sound is cut, the picture
- * goes sepia, film grain scratches over it, and every spoken line becomes an
- * intertitle card instead of a subtitle. Typing it again restores the volumes and
- * the colour; so does leaving the room (TRoom.Done, URoom.pas:1513).
- */
-function cheatSilent(): void {
-  if (silentFilm) {
-    endSilentFilm();
-    return;
-  }
-  for (const bus of ['effect', 'voice', 'music'] as const) audio.setBusGain(bus, 0);
-  silentFilm = true;
-  syncScriptMusicVolume(); // music_volume := 0, which room scripts can see (VES)
-  if (subs) {
-    subs.silentFilm = true;
-    subs.silentTime = 0; // cassilenttit := 0
-  }
-  forceRoomRedraw = true;
-}
-
-/**
- * Undo silent-film mode — on a second xsilent, and on leaving the room, which is
- * where the original does it (TRoom.Done, URoom.pas:1513-1518).
- *
- * The original restores its `oldmusic`/`oldsnd`/`oldtalk` snapshot; the port
- * restores the persisted settings instead. They are the same thing unless the
- * player moved a slider while the film was running, in which case restoring the
- * snapshot would leave what you HEAR disagreeing with where the slider SITS —
- * the original re-derives its slider from the volume, so it has no such split.
- */
-function endSilentFilm(): void {
-  if (!silentFilm) return;
-  silentFilm = false;
-  applyVolumeSettings();
-  syncScriptMusicVolume();
-  if (subs) {
-    subs.silentFilm = false;
-    subs.silentTime = 0;
-  }
-  forceRoomRedraw = true;
-}
-
-/** xinterlaced (URoom.pas:24627): start the screen collapsing in on itself, or —
- *  if it already is — ask it to wind down (faze -2 runs one last frame). */
-function cheatInterlaced(): void {
-  interlacedFaze = interlacedFaze >= 0 ? INTERLACED_STOP : INTERLACED_START;
-  forceRoomRedraw = true;
-}
-
-/**
- * Advance the film effects' own counters, once per game tick.
- *
- * These live in `KresliMistnost` in the original (URoom.pas:26200-26205, 26079),
- * which is driven from `Jedeme` — i.e. once per ~80ms logic tick, not once per
- * painted frame. The port paints at up to 60fps, so running them from the render
- * path made the intertitle cards and the interlaced collapse play roughly five
- * times too fast.
- */
-function tickFrameEffects(): void {
-  if (silentFilm && subs && subs.silentTime > 0) subs.silentTime--;
-  if (interlacedFaze !== INTERLACED_OFF) {
-    // `sp-smrt` fires on the phase whose shift passes -10 (URoom.pas:26058).
-    if (interlacedSounds(interlacedFaze)) audio.snd('sp-smrt', -10, false, EFFECT_VOL);
-    interlacedFaze++;
-  }
-}
-
-/** True while a cheat needs the whole finished frame post-processed, which the
- *  GPU path cannot do — those frames render on the CPU instead. */
-function frameEffectsActive(): boolean {
-  return megabombFlash || silentFilm || interlacedFaze !== INTERLACED_OFF || tetris !== null;
-}
-
-/** Blit the minigame's 150x300 board into the middle of an RGBA frame. It has its
- *  own palette, so it goes straight into the colour plane. */
-function blitTetris(rgba: Uint8Array | Uint8ClampedArray, w: number, h: number): void {
-  if (!tetris || !tetrisArt) return;
-  const bw = tetrisArt.hole.w;
-  const bh = tetrisArt.hole.h;
-  const src = tetrisRgba(renderTetris(tetris, tetrisArt), tetrisArt);
-  const ox = Math.floor((w - bw) / 2);
-  const oy = Math.floor((h - bh) / 2);
-  for (let y = 0; y < bh; y++) {
-    const dy = oy + y;
-    if (dy < 0 || dy >= h) continue;
-    for (let x = 0; x < bw; x++) {
-      const dx = ox + x;
-      if (dx < 0 || dx >= w) continue;
-      const s = (y * bw + x) * 4;
-      const d = (dy * w + dx) * 4;
-      rgba[d] = src[s]!;
-      rgba[d + 1] = src[s + 1]!;
-      rgba[d + 2] = src[s + 2]!;
-      rgba[d + 3] = 255;
-    }
-  }
-}
-
-/**
- * The tail of KresliMistnost (URoom.pas:26192-26281): the megabomb flash, the
- * silent-film intertitle card, the grain, and the interlaced collapse — in the
- * original's order, over the finished frame.
- */
-function applyFrameEffects(screen: RgbaScreen, useVecSubs: boolean, grain = true): void {
-  const rnd = (n: number): number => Math.floor(Math.random() * n);
-  const scratch = (s: RgbaScreen): void => {
-    if (grain) sum(s, rnd); // probes disable the random grain to get a stable hash
-  };
-  if (tetris && tetrisArt) {
-    // The minigame sits over the (frozen) room, as its modal window does.
-    blitTetris(screen.rgba, screen.width, screen.height);
-    return;
-  }
-  if (megabombFlash) {
-    // VyplnMistnost(fontcol['w',1]); KresliTitulky — one white frame, then back.
-    megabombFlash = false;
-    forceRoomRedraw = true;
-    screen.fillIndex(subs?.fontcolIndex('w', 1) ?? 255);
-    subs?.draw(screen, count);
-    return;
-  }
-  if (silentFilm && subs?.silentActive) {
-    // The card replaces the room entirely while it runs.
-    screen.fillIndex(subs.fontcolIndex('w', 4));
-    subs.drawSilentTitle(screen);
-    scratch(screen);
-    zcernobilit(screen.rgba);
-    return;
-  }
-  if (!useVecSubs) subs?.draw(screen, count); // baked subtitles (palette-coloured, on top)
-  if (silentFilm) scratch(screen);
-  if (interlacedFaze !== INTERLACED_OFF) {
-    zpracujInterlaced(screen, interlacedFaze, subs?.fontcolIndex('w', 4) ?? 255);
-  }
-  if (silentFilm) zcernobilit(screen.rgba);
-}
-
-/**
- * xtetris (URoom.pas:24564, UMain.pas:1764): the Tetris minigame. The original
- * opens it as a modal window over the game (`Tetris.ShowModal`), which freezes
- * the room's timer until it closes; the port has no windows, so it draws the
- * 150x300 board centred over the frozen room and takes the keyboard until Escape.
- */
-let tetris: TetrisGame | null = null;
-let tetrisArt: TetrisArt | null = null;
-let tetrisLoading = false;
-let tetrisAcc = 0; // ms accumulated toward the next 55ms game tick (Ttr.dfm)
-let tetrisTick = 0; // ticks run, so the map's paint cache knows the board moved
-let tetrisPending = false; // the cheat fired and the board art is still loading
-const TETRIS_TICK_MS = 55;
-
-/** ttr.pic (Ttr.pas:339) — the persistent top-ten, in localStorage here. */
-const tetrisHiscores: HiscoreStore = {
-  load: () => {
-    try {
-      const raw = localStorage.getItem('ff.tetris');
-      return raw ? (JSON.parse(raw) as number[]) : [];
-    } catch {
-      return [];
-    }
+// The cheats — typed codes, sprite/film effects, the Tetris minigame — live in
+// cheats.ts. Wired HERE, where that code used to sit. Every member is a getter, so
+// nothing below is read in its temporal dead zone; see cheats.ts for why the seam
+// runs this way round.
+initCheats({
+  get screen() {
+    return screen;
   },
-  save: (scores) => {
-    try {
-      localStorage.setItem('ff.tetris', JSON.stringify(scores));
-    } catch {
-      /* storage unavailable */
-    }
+  get devEnabled() {
+    return devEnabled;
   },
-};
-
-/** Load the minigame's atlas + well bitmaps and shape table (nacti, Ttr.pas:89). */
-async function ensureTetrisArt(): Promise<TetrisArt | null> {
-  if (tetrisArt || tetrisLoading) return tetrisArt;
-  tetrisLoading = true;
-  try {
-    const [all, hole, txt] = await Promise.all([
-      fetch('/data/Intro/all.BMP').then((r) => r.arrayBuffer()),
-      fetch('/data/Intro/dira.BMP').then((r) => r.arrayBuffer()),
-      fetch('/data/Intro/all.txt').then((r) => r.text()),
-    ]);
-    const shapes = parseShapes(txt);
-    tetrisArt = {
-      all: parseBmp(new Uint8Array(all)),
-      hole: parseBmp(new Uint8Array(hole)),
-      xfont: shapes.xfont,
-      yfont: shapes.yfont,
-    };
-    tetrisShapes = shapes;
-  } catch {
-    tetrisArt = null; // the data is missing: the cheat just does nothing
-  } finally {
-    tetrisLoading = false;
-  }
-  return tetrisArt;
-}
-let tetrisShapes: TetrisShapes | null = null;
-
-/**
- * Open the minigame (Tetris.Create + ShowModal). The original's launch is
- * synchronous; the port has to fetch the board art first, so `tetrisPending`
- * makes the game modal from the instant the code fires — otherwise the room kept
- * running and taking input during the fetch, and the board could pop open on a
- * screen the player had since moved to.
- */
-function openTetris(): void {
-  if (tetris || tetrisPending) return;
-  const screenAtLaunch = screen;
-  tetrisPending = true;
-  wake();
-  void ensureTetrisArt().then(() => {
-    if (!tetrisPending) return; // cancelled (Escape) while the art was loading
-    tetrisPending = false;
-    if (!tetrisArt || !tetrisShapes || tetris || screen !== screenAtLaunch) return;
-    tetris = new TetrisGame(tetrisShapes, (n) => Math.floor(Math.random() * n), tetrisHiscores);
-    tetrisAcc = 0;
-    forceRoomRedraw = true;
-    wake();
-  });
-}
-
-/** Close it (modalresult := mrCancel): the room resumes with no key held
- *  (gstav := stav_klid; keyroom := 0; keyovl := 0 — URoom.pas:24568). */
-function closeTetris(): void {
-  if (!tetris && !tetrisPending) return;
-  tetris = null;
-  tetrisPending = false;
-  clearHeldKey();
-  if (engine) engine.swim = null;
-  forceRoomRedraw = true;
-  wake();
-}
-
-/** True while the minigame owns the game — including the moment between the cheat
- *  firing and its art arriving. */
-function tetrisModal(): boolean {
-  return tetris !== null || tetrisPending;
-}
-
-/** Advance the minigame's own 55ms timer, independent of the game's logic tick. */
-function tickTetris(dtMs: number): void {
-  if (!tetris) return;
-  wake(); // the board animates on its own; never let the idle throttle stall it
-  tetrisAcc += dtMs;
-  let steps = 0;
-  while (tetrisAcc >= TETRIS_TICK_MS && steps < 4) {
-    tetrisAcc -= TETRIS_TICK_MS;
-    steps++;
-    tetrisTick++;
-    tetris.tick();
-  }
-  forceRoomRedraw = true;
-}
-
-/**
- * The in-room cheat dispatch (URoom.pas:24534-24690). Codes 11/12 have no case
- * here — SCORE and ULTRAVIOLENCE only work from the map (UMain.pas:1773-1780).
- */function applyRoomCheat(cheat: Cheat): void {
-  if (screen !== 'room' || !room) return;
-  switch (cheat) {
-    case 'MEGABOMB':
-      cheatMegabomb();
-      break;
-    case 'UNDEAD':
-      toggleSpriteCheat('UNDEAD');
-      break;
-    case 'MORPH':
-      toggleSpriteCheat('MORPH');
-      break;
-    case 'FISHER':
-      hooks.add(room);
-      break;
-    case 'TETRIS':
-      openTetris();
-      break;
-    case 'STORM':
-      cheatStorm();
-      break;
-    case 'INTERLACED':
-      cheatInterlaced();
-      break;
-    case 'SILENT':
-      cheatSilent();
-      break;
-    case 'WEMAKETHERULEZ':
-      cheatSolveRoom();
-      break;
-    case 'IAMACHEATER':
-      // Deliberately nothing: the original's body is `{soutez:=not soutez;}` —
-      // commented out, so the retail build just swallows the code.
-      break;
-    default:
-      break;
-  }
-}
-
-/** The map-screen cheat dispatch (UMain.pas:1760-1782). Only three codes act here. */
-function applyMapCheat(cheat: Cheat): void {
-  switch (cheat) {
-    case 'SCORE':
-      // `av:=9; am:=1; doAkce:=daRun` — run the hidden SCORE bonus room, which is
-      // kept off the map and out of the finale, so this code is the only way in.
-      void enterRoom(SCORE_ROOM);
-      break;
-    case 'TETRIS':
-      // The map screen launches the minigame too (UMain.pas:1764).
-      openTetris();
-      break;
-    case 'ULTRAVIOLENCE':
-      ultraviolence = true;
-      break;
-    default:
-      break;
-  }
-}
-
-
+  get engine() {
+    return engine;
+  },
+  get room() {
+    return room;
+  },
+  get ffr() {
+    return ffr;
+  },
+  get subs() {
+    return subs;
+  },
+  get activeScript() {
+    return activeScript;
+  },
+  get fishSprites() {
+    return fishSprites;
+  },
+  get count() {
+    return count;
+  },
+  get audio() {
+    return audio;
+  },
+  get hooks() {
+    return hooks;
+  },
+  get EFFECT_VOL() {
+    return EFFECT_VOL;
+  },
+  get MLUVI_PRIOR() {
+    return MLUVI_PRIOR;
+  },
+  get solved() {
+    return solved;
+  },
+  get cheated() {
+    return cheated;
+  },
+  get scores() {
+    return scores;
+  },
+  get saveCheated() {
+    return saveCheated;
+  },
+  get showMap() {
+    return showMap;
+  },
+  get enterRoom() {
+    return enterRoom;
+  },
+  get wake() {
+    return wake;
+  },
+  get clearHeldKey() {
+    return clearHeldKey;
+  },
+  get syncScriptMusicVolume() {
+    return syncScriptMusicVolume;
+  },
+  get applyVolumeSettings() {
+    return applyVolumeSettings;
+  },
+  get forceRoomRedraw() {
+    return forceRoomRedraw;
+  },
+  set forceRoomRedraw(v: boolean) {
+    forceRoomRedraw = v;
+  },
+});
+//#region Room state & settings | anchors: ffr, room, subs, settings, subsOn, setSubtitleMode, applyVolumeSettings | The current room's parsed data plus subtitle/volume settings.
 let ffr: FfrRoom | null = null;
 let room: Room | null = null;
 let font: FontData | null = null;
@@ -1577,7 +988,7 @@ function applyVolumeSettings(): void {
 //    thence to classic. enhancedArtActive() (below) still treats ai like enhanced
 //    because enhanced IS that fallback, and supplies the shared truecolor-mode
 //    behaviour (vector subtitles, the anti-flash load hold).
-type GraphicsLevel = 'classic' | 'enhanced' | 'ai';
+//#region Graphics tier, renderer, dev flags | anchors: setGraphics, setRenderer, setRenderOnDirty, setDevEnabled | Tier selection, CPU vs WebGL, render-on-dirty, the dev pane.
 let graphics: GraphicsLevel =
   ((): GraphicsLevel => {
     const v = localStorage.getItem('ff.graphics');
@@ -1660,19 +1071,7 @@ const GRAPHICS_LEVELS: readonly GraphicsLevel[] = ['classic', 'enhanced', 'ai'];
 function setGraphics(level: GraphicsLevel): void {
   graphics = level;
   localStorage.setItem('ff.graphics', graphics);
-  if (enhancedArtActive() && curNum) void ensureEnhancedArt(curNum);
-  if (graphics === 'ai' && curNum) {
-    // Hold the frame we already have until the AI art lands, rather than repainting
-    // the room in enhanced art and then popping to AI — the same rule room entry
-    // follows. Switching away releases it for free: roomArtPending() reads `graphics`.
-    aiPending = aiRoom === null || aiRoomNum !== curNum;
-    aiPendingNum = aiPending ? curNum : 0;
-    void ensureAiRoom(curNum);
-  } else {
-    aiPending = false;
-    aiPendingNum = 0;
-    aiRoom = null;
-  }
+  retargetArtForTier();
   if (graphicsSelect) graphicsSelect.value = graphics;
   forceRoomRedraw = true;
   mapSig = null; // repaint the map so switching to/from the AI level shows immediately
@@ -1680,398 +1079,60 @@ function setGraphics(level: GraphicsLevel): void {
   setInfo();
 }
 
-// Set once if a GPU backend throws, disabling it for the session (the CPU compositor
-// takes over) so a driver/context failure can never wedge rendering.
-//
-// One flag PER backend, because they fail independently and share nothing but the
-// context. Collapsing them was wrong in both directions: the `ai` tier's ×S buffers are
-// an order of magnitude larger than the faithful compositor's, so an AI-only allocation
-// failure would have disabled the GPU for `classic`/`enhanced` where it was working
-// fine — and conversely, an AI compositor that never built at all left this flag false,
-// so the HUD reported a per-frame CPU fallback forever instead of a disabled backend.
-let glFailed = false;
-let glAiFailed = false;
-let enhancedArt: EnhancedArt | null = null; // decoded art for the current room (null = classic)
-let enhancedObjects: EnhancedObject[] = []; // decoded truecolor object sprites for the current room
-let curNum = 0; // current room number, for enhanced-art lookup
-// True from entering a room (in enhanced mode) until its truecolor art has
-// resolved. While true, draw() holds the previous frame instead of painting the
-// classic look, so a room never flashes classic before popping to enhanced.
-let enhancedPending = false;
-// AI room art (Phase C): the S× upscaled masters for the current room, when the ai
-// level is on and every asset loaded. null ⇒ the room falls back to enhanced/classic.
-let aiRoom: AiRoom | null = null;
-let aiRoomNum = 0; // room number aiRoom belongs to (guards async races)
-// The `ai` tier's counterpart to enhancedPending: true from entering a room (or
-// switching to the tier) until that room's AI art has resolved. Without it the room
-// painted as soon as the ENHANCED art landed and then visibly swapped to the AI art
-// a beat later — measured at a 9-14s visible upgrade over Slow 4G.
-let aiPending = false;
-let aiPendingNum = 0; // room aiPending refers to (the tier can change under it)
-
-/**
- * Whether the current room is still waiting for the art tier it will actually paint.
- *
- * Deliberately a PREDICATE over live state rather than something the room-load promise
- * awaits. That is what makes "the player switches tier mid-load" free: press E for
- * classic and enhancedArtActive() is false on the very next frame, so the hold releases
- * itself — no generation counter, no waiter set, nothing to cancel. It also leaves
- * loadRoom()'s meaning (and so waitRoom()/roomLoading()) exactly as it was.
- */
-function roomArtPending(): boolean {
-  if (enhancedArtActive() && enhancedPending) return true;
-  return graphics === 'ai' && aiPending && aiPendingNum === curNum;
-}
-/**
- * jmeno -> loaded AI room (null = no AI art / failed). Keyed on the PROMISE so a second
- * request while a load is in flight joins it instead of starting a duplicate: the entry
- * used to be written only after the await, so cycling tiers with E fired up to five
- * concurrent loads of the same room (590 fetches for 71 distinct URLs).
- *
- * LRU-bounded because each room retains ~50 MB of ×4 pixels; unbounded, a full
- * playthrough held ~4 GB of decoded bitmaps that were never closed.
- */
-const aiRoomCache = new Map<string, Promise<AiRoom | null>>();
-const AI_ROOM_CACHE_MAX = 3; // current room + the two most recently visited
-async function evictAiRooms(keep: string): Promise<void> {
-  while (aiRoomCache.size > AI_ROOM_CACHE_MAX) {
-    // Map iterates in insertion order, so the first key that is not the room we are
-    // about to show is the least recently loaded.
-    const oldest = [...aiRoomCache.keys()].find((k) => k !== keep);
-    if (oldest === undefined) return;
-    const pending = aiRoomCache.get(oldest)!;
-    aiRoomCache.delete(oldest);
-    const room = await pending.catch(() => null);
-    // Never free the art the current frame is drawing from.
-    if (room !== null && room !== aiRoom) room.dispose();
-  }
-}
-interface RoomEnhanced {
-  art: EnhancedArt | null;
-  objects: EnhancedObject[];
-}
-const enhancedCache = new Map<string, RoomEnhanced>(); // jmeno -> art + objects (art null = no master)
-
-interface ObjManifestEntry {
-  item: number;
-  frames: string[];
-}
-
-/**
- * The dev server serves index.html (HTTP 200) for a missing asset, so `res.ok`
- * is not enough to know a file exists — verify the content-type is an image.
- */
-function isPngResponse(res: Response): boolean {
-  return res.ok && (res.headers.get('content-type') ?? '').startsWith('image/');
-}
-
-/**
- * Decode a PNG Response into straight RGBA using the browser's native decoder
- * (createImageBitmap + a 2D canvas) — no `node:zlib`, unlike the Node tools.
- */
-async function decodePngResponse(res: Response): Promise<{ w: number; h: number; rgba: Uint8Array }> {
-  const bmp = await createImageBitmap(await res.blob());
-  const w = bmp.width;
-  const h = bmp.height;
-  const off = document.createElement('canvas');
-  off.width = w;
-  off.height = h;
-  const g = off.getContext('2d')!;
-  g.clearRect(0, 0, w, h);
-  g.drawImage(bmp, 0, 0);
-  const data = g.getImageData(0, 0, w, h).data;
-  bmp.close();
-  return { w, h, rgba: new Uint8Array(data.buffer.slice(0)) };
-}
-
-/**
- * Load (and cache) the enhanced background masters + object sprites for a room,
- * staged under public/enhanced/<JMENO>/ (w.png, p.png, objects.json + obj/*.png).
- * A missing master or decode failure caches an empty result so the room silently
- * falls back to classic. Applies to `num` iff it is still current when resolved.
- */
-async function ensureEnhancedArt(num: number): Promise<void> {
-  const jmeno = ROOMS[num - 1]?.jmeno;
-  if (!jmeno) {
-    if (curNum === num) enhancedPending = false;
-    return;
-  }
-  if (enhancedCache.has(jmeno)) {
-    const c = enhancedCache.get(jmeno)!;
-    if (curNum === num) {
-      enhancedArt = c.art;
-      enhancedObjects = c.objects;
-      enhancedPending = false;
-    }
-    return;
-  }
-  try {
-    // A fetch that actually returns a PNG (dev server SPA-fallback serves the
-    // index HTML with 200 for missing files, so ok/status is not enough).
-    const isPng = isPngResponse;
-    const [w, p] = await Promise.all([
-      fetch(`/enhanced/${jmeno}/w.png`),
-      fetch(`/enhanced/${jmeno}/p.png`),
-    ]);
-    let art: EnhancedArt | null = null;
-    if (isPng(w) && isPng(p)) {
-      const [wall0, bg0] = await Promise.all([decodePngResponse(w), decodePngResponse(p)]);
-      if (wall0.w === bg0.w && wall0.h === bg0.h) {
-        // Additional animation frames (STEEL red-alert): w1.png/p1.png, w2.png/p2.png…
-        const walls = [wall0.rgba];
-        const bgs = [bg0.rgba];
-        for (let f = 1; ; f++) {
-          const [wf, pf] = await Promise.all([
-            fetch(`/enhanced/${jmeno}/w${f}.png`),
-            fetch(`/enhanced/${jmeno}/p${f}.png`),
-          ]);
-          if (!isPng(wf) || !isPng(pf)) break;
-          const [wd, pd] = await Promise.all([decodePngResponse(wf), decodePngResponse(pf)]);
-          if (wd.w !== wall0.w || wd.h !== wall0.h || pd.w !== wall0.w || pd.h !== wall0.h) break;
-          walls.push(wd.rgba);
-          bgs.push(pd.rgba);
-        }
-        art = { w: wall0.w, h: wall0.h, wall: walls, bg: bgs };
-      }
-    }
-    const objects = await loadEnhancedObjects(jmeno);
-    const result: RoomEnhanced = { art, objects };
-    enhancedCache.set(jmeno, result);
-    if (curNum === num) {
-      enhancedArt = art;
-      enhancedObjects = objects;
-      enhancedPending = false;
-    }
-  } catch {
-    enhancedCache.set(jmeno, { art: null, objects: [] });
-    if (curNum === num) {
-      enhancedArt = null;
-      enhancedObjects = [];
-      enhancedPending = false;
-    }
-  }
-}
-
-/** Decode a room's enhanced object sprites from its objects.json manifest. */
-async function loadEnhancedObjects(jmeno: string): Promise<EnhancedObject[]> {
-  const res = await fetch(`/enhanced/${jmeno}/objects.json`);
-  // The dev server serves index.html (200) for a missing manifest, so verify it
-  // is actually JSON before parsing.
-  if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return [];
-  const manifest = (await res.json()) as { objects?: ObjManifestEntry[] };
-  const entries = manifest.objects ?? [];
-  // One entry at a time was a per-object round trip: with the AI loads parallelised
-  // this waterfall became the thing the first frame waits on (2.2s at a 150ms RTT
-  // against 1.2s for the whole AI set). The sprites are independent, so fetch them
-  // all at once and let the browser schedule.
-  const loaded = await Promise.all(
-    entries.map(async (e): Promise<EnhancedObject | null> => {
-      if (typeof e.item !== 'number' || !Array.isArray(e.frames)) return null;
-      const frames = await Promise.all(
-        e.frames.map(async (f) =>
-          withLoadSlot(async () => {
-            const r = await fetch(`/enhanced/${jmeno}/obj/${f}`);
-            if (!isPngResponse(r)) return null;
-            const d = await decodePngResponse(r);
-            return { w: d.w, h: d.h, rgba: d.rgba };
-          }),
-        ),
-      );
-      const valid = frames.filter((f): f is { w: number; h: number; rgba: Uint8Array } => f !== null);
-      return valid.length > 0 ? { item: e.item, frames: valid } : null;
-    }),
-  );
-  return loaded.filter((o): o is EnhancedObject => o !== null);
-}
-
-/** Load the hi-res panel art once (see panelAi.ts); null ⇒ keep the faithful path. */
-async function ensureAiPanel(): Promise<void> {
-  aiPanel = await loadAiPanel('/');
-  if (aiPanel) panelSig = null;   // force a repaint at the new resolution
-}
-
-/**
- * ── The `ai` tier's world map: load it once, and hold the map until it lands ──
- *
- * The AI map art is 2.36 MB against 0.59 MB for the faithful BMPs, so on a slow link
- * there are seconds between the two being ready. The draw used to kick the load off and
- * paint whatever was ready, which put the faithful map up first and visibly swapped it
- * for the AI one a beat later — measured at 28.0s of enhanced map on screen (Slow 4G,
- * cold cache), on the first screen of the game. It is the same defect rooms had before
- * aiPending/roomArtPending(), and it gets the same three pieces: a live-state predicate,
- * a hold in the draw branch, and the loading overlay over the wait.
- */
-let aiMapTried = false; // one-shot: the load is started at most once per session
-let aiMapPending = false; // that load is in flight (independent of the tier on screen)
-/**
- * Is a map frame the thing currently on screen?
- *
- * Not "has a map ever been painted": the question it answers is whether withholding the
- * map leaves the player looking at a map (a tier switch — delay the spinner, it is a
- * fine thing to keep looking at) or at the room, story page, credits or blank stage they
- * are being taken away from (show the overlay at once, there is nothing to preserve).
- * Set by drawMap()'s paint and cleared in loop(), where every branch that takes #screen
- * over is already distinguished — see there. It also decides when the reveal starts.
- */
-let mapPresented = false;
-
-/**
- * Whether the map is still waiting for the art tier it will actually paint.
- *
- * The map's counterpart of roomArtPending(), and a PREDICATE over live state for the
- * same reason: press E for `enhanced` mid-load and the hold releases itself on the very
- * next frame — no generation counter, no waiter set, nothing to cancel — and pressing E
- * back re-applies it just as cheaply.
- */
-function mapArtPending(): boolean {
-  return graphics === 'ai' && aiMapPending;
-}
-
-/** Whether THIS frame must withhold the map because its final art is still loading. */
-function mapArtHolding(): boolean {
-  // The credits overlay replaces the map on the same screen, so while it is up there is
-  // no map to withhold and nothing to explain.
-  return screen === 'map' && mapOverlay !== 'credits' && mapArtPending();
-}
-
-/**
- * Start the `ai` tier's world-map load the first time the map is (about to be) on
- * screen.
- *
- * Still lazy — a player on classic/enhanced never fetches any of it — but no longer
- * kicked off from inside drawMap(): the draw is now the thing the hold suppresses, so
- * it cannot also be the thing that starts the load. Starting the load is ALL it does;
- * the overlay that covers the wait is derived in syncLoadingUi(), because this runs
- * once per session and the wait can be arrived at more than once.
- */
-function beginMapArt(): void {
-  if (aiMapTried || graphics !== 'ai' || !worldMap) return;
-  aiMapTried = true;
-  aiMapPending = true;
-  void ensureAiWorldMap();
-}
-
-/**
- * Load the hi-res world-map art once, on first use in the `ai` tier.
- *
- * Deliberately lazy, unlike the eager call this replaced: that one ran at boot in EVERY
- * tier, so a player on `classic` still downloaded 2.36 MB of *_ai art and retained
- * ~43 MB of decoded bitmaps plus two 2560×1920 canvases, concurrently with the intro's
- * own media. It self-cancels to null on any missing/undecodable asset, so the `ai` level
- * cleanly falls back to the faithful CPU composite.
- */
-async function ensureAiWorldMap(): Promise<void> {
-  try {
-    if (!worldMap) return;
-    aiWorldMap = await loadAiWorldMap('/data/', worldMap);
-  } finally {
-    // Unconditional, so the hold cannot outlive the load on ANY exit. Note this is
-    // NOT what saves the ordinary failure: loadAiWorldMap catches everything it does —
-    // fetch, decode, and the AiWorldMap construction — and resolves null, so a missing
-    // or undecodable asset returns here normally and the `ai` tier falls back to the
-    // faithful composite. What the finally covers is the guard above, and a future
-    // loadAiWorldMap that rejects instead. Either would otherwise leave aiMapPending
-    // set and withhold the map for the rest of the session.
-    aiMapPending = false;
-    mapSig = null; // force a repaint so the map switches to the AI art once ready
-    wake();
-  }
-}
-
-/** Load the hi-res credits art once (see creditsAi.ts). */
-async function ensureAiCredits(): Promise<void> {
-  aiCredits = await loadAiCredits('/');
-  // The pointer handlers live on #screen, which this path hides (display:none) while
-  // its own overlay is up — a hidden element gets no pointer events, so "click anywhere
-  // to dismiss" silently stopped working in the ai tier while the keyboard still did.
-  // Bind on the overlay itself; listeners survive detach/re-attach, so bind once here.
-  aiCredits?.el.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || mapOverlay !== 'credits') return;
-    e.preventDefault();
-    closeMapOverlay();
-  });
-}
-
-/**
- * Load (and cache) the AI-upscaled art for a room (public/enhanced-ai/<JMENO>/), for the
- * `ai` graphics level. A missing set caches null so the room falls back to the enhanced
- * render. Applies to `num` iff it is still the current room when the load resolves.
- */
-async function ensureAiRoom(num: number): Promise<void> {
-  const jmeno = ROOMS[num - 1]?.jmeno;
-  if (!jmeno) {
-    clearAiPending(num);
-    return;
-  }
-  let pending = aiRoomCache.get(jmeno);
-  if (pending === undefined) {
-    pending = loadAiRoom('/', jmeno);
-    // Registered BEFORE the first await so a concurrent caller joins this load rather
-    // than starting its own. Don't cache a rejection — loadAiRoom resolves null on
-    // failure, but a throw would otherwise poison the room for the session.
-    pending.catch(() => aiRoomCache.delete(jmeno));
-    aiRoomCache.set(jmeno, pending);
-  }
-  try {
-    const loaded = await pending;
-    if (curNum === num) { aiRoom = loaded; aiRoomNum = num; }
-  } finally {
-    // In a finally: a room whose AI art is missing or fails to decode must release
-    // the hold too (it falls back to the enhanced render), or it would never paint.
-    clearAiPending(num);
-  }
-  // AFTER the hold is released, and not awaited: evictAiRooms awaits an older room's
-  // (possibly still in-flight) load before disposing it, so with AI_ROOM_CACHE_MAX = 3
-  // awaiting it here made room D's first frame wait on room A's download finishing.
-  // Nothing visible depends on the eviction.
-  void evictAiRooms(jmeno).catch(() => { /* a room we could not dispose is not fatal */ });
-}
-
-/** Release the `ai` tier's art hold for `num`, and present the frame it was holding. */
-function clearAiPending(num: number): void {
-  if (aiPendingNum !== num) return;
-  aiPending = false;
-  aiPendingNum = 0;
-  forceRoomRedraw = true;
-  wake();
-}
-
-/**
- * Whether the current frame should render through the hi-res AI room compositor:
- * the ai level is on and the room's AI art loaded.
- *
- * The compositor now covers everything the faithful path draws from index
- * read-back except the ZX render: the spec=1 mirror (drawMirror), the spec=3/4
- * elevator double rope (drawRope), the gspec=5 bonus fish swap and the gspec=2
- * darkness fill + lit-item filter. gspec=3/4 (the KAJUTA1 screen shove) needs
- * nothing here at all — the shove is a CSS transform on the canvas, applied
- * outside the compositor — and gspec=9 is only a win condition.
- *
- * Still excluded: gspec=42, the ZX-Spectrum band render (its per-scanline bands
- * are an index effect, and the low-fi look is the point), any frame with an active
- * fishing hook, which the faithful path draws on top from the palette, any frame
- * with a CPU-only frame effect running (frameEffectsActive), any frame with a
- * sprite cheat active, and any frame whose subtitle must be baked in because no
- * subtitle font loaded. LODE's falling wreck used to be here too; AiRoom.syncWreck
- * now replays its destructive swaps into a mutable ×S background, so the room no
- * longer drops to native resolution mid-fall.
- */
-function aiRoomRenderActive(r: Room): boolean {
-  if (graphics !== 'ai' || aiRoom === null || aiRoomNum !== curNum) return false;
-  // The rest of the rule lives in roomAi.ts so there is ONE definition tests can import
-  // — the hand-copied duplicate in test/roomAi.test.ts had already drifted out of date.
-  return aiRoomGateAllows({
-    gspec: r.gspec,
-    hookStates: hooks.snapshot.map((h) => h.stav),
-    frameEffects: frameEffectsActive(),
-    spriteCheatsActive: spriteCheats.length > 0,
-    // Mirrors useVecSubs (drawRoom): in this tier enhancedArtActive() is always true, so
-    // the vector overlay is available iff a subtitle font loaded.
-    bakedSubsNeeded: (subs?.active ?? false) && !subFontReady,
-  });
-}
-
-// Enhanced fish sprites are shared across all rooms, so they load once.
+// Art loading for the enhanced and `ai` tiers lives in art.ts. Wired HERE, where that
+// code used to sit. It reads the game through these getters; the three setters are the
+// repaint invalidations it fires when an async load lands.
+//#region Art wiring | anchors: initArt | Hands `art.ts` its view of the game. The art loading itself is in that module.
+initArt({
+  get closeMapOverlay() {
+    return closeMapOverlay;
+  },
+  get enhancedArtActive() {
+    return enhancedArtActive;
+  },
+  get forceRoomRedraw() {
+    return forceRoomRedraw;
+  },
+  set forceRoomRedraw(v: boolean) {
+    forceRoomRedraw = v;
+  },
+  get graphics() {
+    return graphics;
+  },
+  get hooks() {
+    return hooks;
+  },
+  get mapOverlay() {
+    return mapOverlay;
+  },
+  get mapSig() {
+    return mapSig;
+  },
+  set mapSig(v: string | null) {
+    mapSig = v;
+  },
+  get panelSig() {
+    return panelSig;
+  },
+  set panelSig(v: string | null) {
+    panelSig = v;
+  },
+  get screen() {
+    return screen;
+  },
+  get subFontReady() {
+    return subFontReady;
+  },
+  get subs() {
+    return subs;
+  },
+  get wake() {
+    return wake;
+  },
+  get worldMap() {
+    return worldMap;
+  },
+});
 let fishSprites: FishSprites | null = null;
 async function loadFishSprites(): Promise<void> {
   try {
@@ -2100,6 +1161,7 @@ async function loadFishSprites(): Promise<void> {
   }
 }
 void loadFishSprites();
+//#region Engine, audio & mode state | anchors: audio, engine, activeScript, chatter, cutscene, showmode, hooks, KEYS | The mutable core: step engine, script, dialogue, the three playback modes, and the key tables.
 const talkIdx = { little: 0, big: 0 };
 const audio = new AudioEngine();
 applyVolumeSettings(); // restore persisted volume levels before any sound plays
@@ -2246,6 +1308,7 @@ function selectFish(which: 'little' | 'big'): void {
   setInfo();
 }
 
+//#region Room construction | anchors: buildRoom, setInfo, applySubFont, scriptTalk | Turns parsed FFR data into a live `Room` + `StepEngine`, and refreshes the info line. Room *loading*, audio, movement and drawing are elsewhere.
 const ffrUrl = (num: number): string => `/data/Graphic/${String(num).padStart(3, '0')}.ffr`;
 
 function setInfo(): void {
@@ -2316,13 +1379,7 @@ function buildRoom(carryPole = false): void {
   // The room-scoped cheats survive a RESTART but die on a room CHANGE — exactly
   // like roompole above, because TRoom.Init clears them in the very same block
   // (URoom.pas:1430-1433), while TRoom.Restart leaves them alone.
-  if (!carryPole) {
-    spriteCheats = [];
-    oldWater = null;
-    endSilentFilm(); // TRoom.Done also restores the volumes on the way out
-    interlacedFaze = INTERLACED_OFF;
-    roomCheats.reset();
-  }
+  if (!carryPole) resetRoomScopedCheats();
   // Re-apply whatever survived (a restart), onto the freshly built Room.
   applySpriteCheats();
   if (oldWater) {
@@ -2461,6 +1518,7 @@ function scriptTalk(name: string, prior: number): number {
 }
 
 /** Launch the briefcase story cutscene (InitKufrDemo), loading its assets once. */
+//#region Cutscene, showmode, replay | anchors: startCutscene, startShowmode, advanceShowmode, applyCapAction, ensureAiKufr, drawCutscene | The KUFRIK demo, the `.cap` demonstration player, record replay, and the cutscene compositor.
 async function startCutscene(): Promise<void> {
   if (cutscene || !font) return;
   // The room this launch belongs to. Every await below is a window in which the
@@ -2783,12 +1841,6 @@ function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number, dpr: n
  * PIXEL SOURCE, so the audio-dependent timeline, the KD-* narration, the captions and
  * the Escape skip are all untouched.
  */
-interface AiKufr {
-  base: ImageBitmap;
-  scale: number;
-  region: { x: number; y: number; w: number; h: number };
-  order: string[];
-}
 let aiKufr: AiKufr | null = null;
 let aiKufrTried = false;
 /** Decoded frames, bounded — all 284 at ×4 would be ~37 MB resident. */
@@ -2937,7 +1989,7 @@ function drawCutscene(): void {
         glCanvas.style.display = 'block';
         presented = true;
       } catch {
-        glFailed = true; // fall through to the CPU blit for this frame
+        markGlFailed(); // fall through to the CPU blit for this frame
       }
     }
   }
@@ -2956,6 +2008,7 @@ function drawCutscene(): void {
   }
 }
 
+//#region Room load & audio wiring | anchors: loadRoom, fetchSoundPkg, loadSoundPkg, loadRoomVoices, startRoomMusic, talk | Fetch FFR/FFS/FFT for a room, arm its voices, start its music. | Hot
 async function loadRoom(num: number): Promise<void> {
   endShowmode(); // a room change ends any KUFRIK demonstration
   forceRoomRedraw = true; // repaint the first frame of the new room
@@ -2989,18 +2042,9 @@ async function loadRoom(num: number): Promise<void> {
     armRoomVoices(bootLoad);
     pokus = 1; // fresh attempt on entering a room
     buildRoom();
-    // Enhanced background art for this room (async; draw() holds the previous
-    // frame until it lands, so the room never flashes classic first).
-    curNum = num;
-    enhancedArt = null;
-    enhancedObjects = [];
-    enhancedPending = enhancedArtActive();
-    aiRoom = null;
-    // Symmetric with enhancedPending: hold the frame until the AI art the `ai` tier
-    // will actually present has landed, so the room is never shown in enhanced art
-    // first and then visibly upgraded underneath the player.
-    aiPending = graphics === 'ai';
-    aiPendingNum = aiPending ? num : 0;
+    // Point the art layer at this room: clear the previous room's decoded art and arm
+    // the two "hold the frame until it lands" flags (see beginRoomArt).
+    beginRoomArt(num);
     // What the room is WAITING FOR must be the same thing roomArtPending() holds the
     // frame for — otherwise the two disagree. In `classic` nothing is awaited: the
     // enhanced art still loads (a later tier switch wants it cached) but the room does
@@ -3224,6 +2268,7 @@ function fishBusy(which: 'little' | 'big'): boolean {
 }
 
 /** Turn-first-then-move; horizontal turns animate (stav_otocka), moves slide. */
+//#region Movement, replay & restart | anchors: tryStep, beginHeldMove, dispatchHeldMove, wallShove, applyRecordStep, restore, advanceLoadmode, restartRoom | The `KeyRoom` held-key state machine and how a keypress becomes a game step — plus replaying a saved record (`loadmode`) and restarting a room.
 function tryStep(which: 'little' | 'big', dir: number): 'moving' | 'turning' | 'blocked' | 'busy' {
   wake(); // resume 60fps if the idle-loop throttle had us sleeping (also covers __ff.press)
   return engine ? engine.press(which, dir) : 'blocked';
@@ -3416,6 +2461,7 @@ function restartRoom(): void {
   setInfo();
 }
 
+//#region Save/load game | anchors: saveGame, loadGame, saveExists, canSave, onWinBookkeeping | In-room save slots and what happens on a win.
 const saveKey = (): string => `ff.save.${select.value}`;
 
 /**
@@ -3494,6 +2540,7 @@ function onWinBookkeeping(_countdown: number): void {
  * panel. Active fish = yellow, available = orange, busy/dead/unavailable = grey,
  * the held button = lit. `pressedDir` lights a pressed D-pad arrow.
  */
+//#region Control panel | anchors: panelState, optionsState, tickPanelScroll, togglePanelOptions, openHelp, drawPanel | The side panel: its buttons, the options scroll animation, the help overlay.
 function panelState(): PanelState {
   const bigDead = !room || !room.alive.big || room.busy.big !== 0;
   const littleDead = !room || !room.alive.little || room.busy.little !== 0;
@@ -3699,6 +2746,7 @@ function drawPanel(): void {
  * where n = 1 (cz) / 2 (en). The language is the shared subtitle language (subLang),
  * so the room-name plaques always match the subtitles/help.
  */
+//#region World map drawing | anchors: ensureDeskyData, openMapInfo, drawMap, aiPlaqueFor, drawMapOverlays | The branch map, its name plaques, and the record info panel (krokoměr).
 async function ensureDeskyData(): Promise<void> {
   const lang = subLang();
   if (deskyLang === lang && deskyData) return;
@@ -3790,7 +2838,7 @@ function drawMap(): void {
   if (sig + sigT === mapSig) return; // nothing visibly changed — skip the redraw entirely
   mapSig = sig + sigT;
   perfPaint++; // an actual map paint (past the cache check)
-  mapPresented = true; // a map frame is now the thing on screen (see syncLoadingUi)
+  setMapPresented(true); // a map frame is now the thing on screen (see syncLoadingUi)
   const panelOpen = mapInfoRoom !== null;
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
@@ -3946,6 +2994,7 @@ function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, skipPlaq
 }
 
 /** The menu/map music (SpustHudbu, UMain.pas:217): menu.wav, looped at sample 419772. */
+//#region Map navigation & story screens | anchors: showMap, returnFromRoom, showLegImage, playFirstRunIntro, openCredits, drawCredits | Entering/leaving the map, leg-completion pages, intro replay, the credits roll.
 function startMenuMusic(): void {
   // Swallow load/decode failures here: menu music is non-critical, and during boot
   // an unhandled rejection would otherwise trip the boot-fatal handler.
@@ -4317,6 +3366,7 @@ function drawCredits(): void {
 
 /** Enter a room from the map (or the dev dropdown); KillSnd first (Spust, UMain.pas:248).
  *  `replay` is the best-solution move record to play back animated (map "Replay"). */
+//#region Room entry & fish animation | anchors: enterRoom, panelAction, updateLipSync, fishFrameFor | The map → room transition, panel button actions, and which sprite frame each fish shows.
 function enterRoom(num: number, replay?: string): Promise<void> {
   wake();
   stopRoomClock(); // bank the outgoing room's time before the switch
@@ -4499,302 +3549,37 @@ function fishFrameFor(which: 'little' | 'big'): FishFrame {
   return { bodyFrame: TL_ZAKLAD[fazer]!, headFrame: headFor(which, false) };
 }
 
-
-/**
- * The classic art source (room palette → RGBA LUT) for the current room, rebuilt
- * only when the room changes so the compositor's hot path doesn't reallocate the
- * 256-entry table every frame.
- */
-let classicArt: ClassicArtSource | null = null;
-let classicArtRoom: Room | null = null;
-function classicArtFor(r: Room): ClassicArtSource {
-  if (classicArtRoom !== r || classicArt === null) {
-    classicArt = new ClassicArtSource(r.palette);
-    classicArtRoom = r;
-  }
-  return classicArt;
-}
-
-/**
- * A WebGL compositor built on demand from the stacked #screen-gl canvas, at most once
- * per context: `reset()` (context loss / re-enable) lets the next call rebuild it.
- * Yields null — meaning "use the CPU path" — when WebGL2 is unavailable or construction
- * fails, which is a normal outcome, not an error.
- *
- * There are two of these (the faithful compositor and the `ai` tier's) and they share
- * one canvas and one context: `getContext('webgl2')` returns the context the other one
- * already created. Only the class differs, so only the class is passed in.
- */
-function lazyCompositor<T>(what: string, build: (gl: WebGL2RenderingContext) => T) {
-  let comp: T | null = null;
-  let tried = false;
-  return {
-    get(): T | null {
-      if (tried) return comp;
-      tried = true;
-      if (!webgl2Available()) return null;
-      const gl = glCanvas.getContext('webgl2');
-      if (!gl) return null;
-      try {
-        comp = build(gl);
-      } catch (e) {
-        console.warn(`[ff] the ${what} WebGL compositor failed to build; staying on the CPU path`, e);
-        comp = null;
-      }
-      return comp;
-    },
-    /** Drop the built compositor so the next `get()` rebuilds it. */
-    reset(): void {
-      comp = null;
-      tried = false;
-    },
-    /** Allow a rebuild only if nothing is live — a cpu→webgl toggle must not leak one. */
-    allowRebuild(): void {
-      if (!comp) tried = false;
-    },
-  };
-}
-
-const roomGl = lazyCompositor('room', (gl) => new GlScreen(gl));
-const aiGl = lazyCompositor('ai tier', (gl) => new GlAiScreen(gl));
-const glCompositor = (): GlScreen | null => roomGl.get();
-const glAiCompositor = (): GlAiScreen | null => aiGl.get();
-
-// WebGL context loss (GPU reset, driver reclaim, tab backgrounding) does NOT
-// throw — it fires an event and makes subsequent GL calls silently no-op, which
-// would otherwise leave a blank canvas. Handle it as the real per-frame fallback
-// net: disable the GPU backend for now (→ the dispatch takes the CPU path and
-// hides #screen-gl automatically) and drop the dead compositor so it is rebuilt
-// on the next explicit enable. preventDefault() lets the browser restore the
-// context; on restore we allow a fresh GlScreen to be created.
-glCanvas.addEventListener('webglcontextlost', (e) => {
-  e.preventDefault();
-  glFailed = true;
-  glAiFailed = true;
-  roomGl.reset();
-  aiGl.reset();
-  console.warn('[ff] WebGL context lost; falling back to the CPU compositor. Press R to retry WebGL.');
-  setInfo();
+// The rendering plumbing — per-tier art sources, the WebGL compositors, the parity
+// probes — lives in glPlumbing.ts. Wired HERE, where that code used to sit; it reads
+// the game through these getters and writes nothing back.
+//#region Render plumbing wiring | anchors: initGlPlumbing | Hands `glPlumbing.ts` its view of the game. The compositors are in that module.
+initGlPlumbing({
+  get aiRoom() {
+    return aiRoom;
+  },
+  get count() {
+    return count;
+  },
+  get enhancedArt() {
+    return enhancedArt;
+  },
+  get enhancedObjects() {
+    return enhancedObjects;
+  },
+  get fishSprites() {
+    return fishSprites;
+  },
+  get room() {
+    return room;
+  },
+  get setInfo() {
+    return setInfo;
+  },
+  get subs() {
+    return subs;
+  },
 });
-glCanvas.addEventListener('webglcontextrestored', () => {
-  // Allow a rebuild, but stay on CPU until the user re-enables WebGL (R), so a
-  // flapping context can never thrash the render path.
-  roomGl.reset();
-  aiGl.reset();
-});
-
-/**
- * Clear the WebGL disabled-for-session state so both GPU backends can run again.
- * Rebuilds a compositor only if none is live (i.e. after a context loss); a normal
- * cpu→webgl toggle keeps the existing ones rather than leaking them.
- */
-function enableWebgl(): void {
-  glFailed = false;
-  glAiFailed = false;
-  roomGl.allowRebuild();
-  aiGl.allowRebuild();
-}
-
-/**
- * The enhanced art source for the current room + currently-loaded FFNG art,
- * rebuilt only when the room or its decoded art/objects/fish change (so the
- * per-frame hot path doesn't reallocate the palette LUT). Used for every room in
- * enhanced mode — the source itself falls back to classic per element where no
- * truecolor art exists.
- */
-let enhArt: EnhancedArtSource | null = null;
-let enhKey: [Room | null, EnhancedArt | null, EnhancedObject[], FishSprites | null] = [null, null, [], null];
-function enhancedArtFor(r: Room): EnhancedArtSource {
-  const fish = cheatFishSprites ?? fishSprites; // xundead/xmorph reshape these
-  if (
-    enhArt === null ||
-    enhKey[0] !== r ||
-    enhKey[1] !== enhancedArt ||
-    enhKey[2] !== enhancedObjects ||
-    enhKey[3] !== fish
-  ) {
-    enhArt = new EnhancedArtSource(r.palette, enhancedArt, enhancedObjects, fish);
-    enhKey = [r, enhancedArt, enhancedObjects, fish];
-  }
-  return enhArt;
-}
-
-
-/**
- * WebGL draw path: composite the room on the GPU via the shared renderInto
- * (GlScreen) — either art source (classic palette or enhanced FFNG truecolor) —
- * and present to #screen-gl. Returns false to request the CPU fallback if a GL
- * call throws (the backend is then disabled for the session) or, defensively, if
- * the compositor ever flags a frame `unsupported`. Never throws.
- */
-function drawGpu(
-  geom: RoomGeometry,
-  art: ArtSource,
-  opts: RenderOptions,
-  useVecSubs: boolean,
-): boolean {
-  const gl = glCompositor();
-  if (!gl || !room) return false;
-  try {
-    gl.begin(geom.nativeW, geom.nativeH, room.palette);
-    renderRoomInto(gl, room, art, opts);
-    if (gl.unsupported) return false; // defensive: an un-ported primitive → CPU this frame
-    if (!useVecSubs) subs?.draw(gl, opts.count ?? 0); // baked subtitles via GPU setIndex
-    presentToGlCanvas(gl, geom);
-    return true;
-  } catch (e) {
-    glFailed = true;
-    console.warn('[ff] WebGL renderer failed; falling back to the CPU compositor for this session', e);
-    return false;
-  }
-}
-
-/**
- * WebGL draw path for the `ai` tier: composite the room's ×S frame on the GPU via the
- * shared room walk (AiRoom.drawInto → GlAiScreen) and present it to #screen-gl.
- * Returns false to request the canvas-2D fallback — when the compositor could not be
- * built, when the GPU cannot hold this room's ×S buffer, when a primitive could not run,
- * or when a GL call throws (which disables this backend for the session). Never throws.
- */
-function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame): boolean {
-  const comp = glAiCompositor();
-  if (!comp || !aiRoom) return false;
-  try {
-    comp.track(aiRoom); // so evicting the room frees its ~50 MB of textures with it
-    // Not a formality: a ×4 room needs up to 3120px, WebGL2 only guarantees 2048, and an
-    // oversized allocation is reported as a GL error rather than thrown — so without
-    // this the frame would be "successfully" presented blank.
-    if (!comp.begin(geom.backingW, geom.backingH)) return false;
-    aiRoom.drawInto(comp, r, f);
-    if (comp.unsupported) return false;
-    presentToGlCanvas(comp, geom);
-    return true;
-  } catch (e) {
-    glAiFailed = true;
-    console.warn('[ff] the AI tier WebGL compositor failed; falling back to canvas-2D for this session', e);
-    return false;
-  }
-}
-
-/**
- * Size #screen-gl to the room's CSS box at device resolution and present into it.
- *
- * The room's box comes from roomGeometry — the GL canvas is an overlay stacked on
- * #screen, so it must match that box exactly rather than recompute it. Shared by both
- * GPU paths: the compositors differ entirely, the presentation does not.
- */
-function presentToGlCanvas(comp: { present(w: number, h: number): void }, geom: RoomGeometry): void {
-  const dpr = window.devicePixelRatio || 1;
-  const { cssW, cssH } = geom;
-  const bw = Math.round(cssW * dpr);
-  const bh = Math.round(cssH * dpr);
-  if (glCanvas.width !== bw || glCanvas.height !== bh) {
-    glCanvas.width = bw;
-    glCanvas.height = bh;
-  }
-  glCanvas.style.width = `${cssW}px`;
-  glCanvas.style.height = `${cssH}px`;
-  comp.present(bw, bh);
-}
-
-/**
- * Per-channel diff (ignoring alpha) between two same-size RGBA frames, plus WHERE they
- * disagree worst and what each side holds there.
- *
- * The aggregate alone says a parity probe failed but not where to look, and in a
- * 2400x2100 buffer "0.004% of the pixels are wrong" is a needle in a haystack — so a
- * failing room names its own suspect pixel. `w` (the frame width) turns the index into
- * coordinates; pass 0 when the caller has no use for them.
- *
- * Both are computed in ONE pass. A second sweep is another ~20 MB of pixel traffic per
- * room at this tier's frame sizes, times 72 rooms, on a machine already running the
- * whole probe suite in parallel — and the UI gate's value is that it stays fast enough
- * to run on every change.
- */
-function glChannelDiff(
-  cpu: Uint8Array,
-  gpu: Uint8Array,
-  w = 0,
-): {
-  max: number;
-  rmse: number;
-  overPct: number;
-  worstAt: [number, number];
-  worstCpu: number[];
-  worstGpu: number[];
-} {
-  let max = 0;
-  let sumsq = 0;
-  let over = 0;
-  let px = 0;
-  let at = 0;
-  const n = gpu.length;
-  for (let i = 0; i < n; i += 4) {
-    let pixMax = 0;
-    for (let c = 0; c < 3; c++) {
-      const d = Math.abs(gpu[i + c]! - cpu[i + c]!);
-      if (d > pixMax) pixMax = d;
-      sumsq += d * d;
-      if (d > 2) over++;
-      px++;
-    }
-    if (pixMax > max) { max = pixMax; at = i; }
-  }
-  const idx = at / 4;
-  return {
-    max,
-    rmse: Math.sqrt(sumsq / px),
-    overPct: (over / px) * 100,
-    worstAt: w > 0 ? [idx % w, Math.floor(idx / w)] : [idx, 0],
-    worstCpu: [cpu[at]!, cpu[at + 1]!, cpu[at + 2]!, cpu[at + 3]!],
-    worstGpu: [gpu[at]!, gpu[at + 1]!, gpu[at + 2]!, gpu[at + 3]!],
-  };
-}
-
-/**
- * Test-only GPU-vs-CPU parity probe: render the current room through both the
- * CPU (`renderRoomRgba`) and the GPU (`renderRoomInto` → GlScreen) with the given
- * art source and compare (max/rmse channel diff, % of channels differing > 2).
- * For the ZX room (gspec=42) the band width + colour cycle are `Math.random`-
- * driven per frame, so the comparison seeds `Math.random` to a constant and
- * snapshots/restores the room's zx state around the two renders — both passes see
- * identical inputs, giving a byte-exact check while the LIVE render stays random.
- */
-function glParityCompare(art: ArtSource): Record<string, unknown> | null {
-  if (!room) return null;
-  const comp = glCompositor();
-  if (!comp) return { webgl: false };
-  const opts = { count };
-  const isZx = room.gspec === 42;
-  const realRandom = Math.random;
-  // For the ZX room the band width + colour cycle are Math.random-driven and
-  // blitZX advances room.zx, so (a) seed Math.random to a constant and (b)
-  // snapshot room.zx — rewound between the CPU and GPU passes so both see
-  // identical input, and fully restored in `finally` so this probe leaves the
-  // live loading-band animation exactly where it found it (no side effects).
-  let zxSnap: { pruh: number; count: number; cur: number; colors: number[] | null } | null = null;
-  if (isZx) {
-    Math.random = () => 0.5;
-    const zx = room.zx;
-    zxSnap = { pruh: zx.pruh, count: zx.count, cur: zx.cur, colors: zx.colors };
-  }
-  try {
-    const cpu = renderRoomRgba(room, art, opts);
-    if (zxSnap) Object.assign(room.zx, zxSnap); // rewind zx so the GPU pass sees identical state
-    comp.begin(cpu.width, cpu.height, room.palette);
-    renderRoomInto(comp, room, art, opts);
-    if (comp.unsupported) return { webgl: true, unsupported: true };
-    const gpu = comp.readback();
-    if (gpu.w !== cpu.width || gpu.h !== cpu.height) return { webgl: true, dimMismatch: true };
-    return { webgl: true, w: gpu.w, h: gpu.h, ...glChannelDiff(cpu.rgba, gpu.rgba) };
-  } finally {
-    if (isZx) {
-      Math.random = realRandom;
-      if (zxSnap) Object.assign(room.zx, zxSnap); // restore live animation state
-    }
-  }
-}
-
+//#region The frame painter | anchors: draw, updateRoomSubOverlay | One room frame, all three tiers, CPU and GPU. Everything on screen during play is painted from here.
 function draw(): void {
   if (!room) return;
   mapSig = null; // this frame paints #screen with the room — invalidate the map cache
@@ -4978,6 +3763,7 @@ function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): 
   }
 }
 
+//#region The logic tick | anchors: step, tickBlink, hracNespi | One 80 ms game step: script, engine, dialogue, death handling, screensaver.
 function tickBlink(): void {
   for (const w of ['little', 'big'] as const) {
     if (blink[w] > 0) blink[w]--;
@@ -5188,6 +3974,7 @@ function step(): boolean {
   return false;
 }
 
+//#region Frame pacing & perf | anchors: roomLoading, roomLoadSeq, IDLE_LOOP_MS, updatePerfHud, roomAnimating, loopThrottleOk, wake | The idle throttle (60 fps ↔ 12.5 fps), the water/ZX wake rates, and the perf HUD. | Hot
 let lastTime = 0;
 let acc = 0;
 // Render-on-dirty bookkeeping: the last room frame's render signature, plus a
@@ -5491,6 +4278,7 @@ function wake(): void {
 
 /** The render loop: steps the game at a fixed timestep, then draws (capped, see
  *  MAX_PAINT_FPS) once per RAF. */
+//#region `loop()` | anchors: loop | The rAF callback: which screen paints, how many logic steps run, when to sleep.
 function loop(now: number): void {
   loopTicks++;
   // Skip this refresh entirely when it would exceed the paint cap. lastTime is left
@@ -5567,7 +4355,7 @@ function loop(now: number): void {
   // derived here, in one place, rather than cleared at each of those sites; drawMap()
   // sets it back when it paints. During the map's own art hold this leaves it alone,
   // which is the point: it still says whether there is a map under the wait.
-  if (helpOpen || screen !== 'map' || mapOverlay === 'credits') mapPresented = false;
+  if (helpOpen || screen !== 'map' || mapOverlay === 'credits') setMapPresented(false);
   if (helpOpen) {
     clearSubOverlay();
     drawHelp();
@@ -5678,6 +4466,7 @@ function loop(now: number): void {
   scheduleNext();
 }
 
+//#region Keyboard | anchors: keydown / keyup listeners | Every key binding, including cheats, dev keys and modal handling.
 window.addEventListener('keydown', (e) => {
   wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
   // The feedback form owns the keyboard while it is up. It is a modal <dialog>, so the
@@ -5904,6 +4693,7 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) clearHeldKey();
 });
 
+//#region Pointer | anchors: cellFromEvent, clickCell, dirToward, clickMapAt, panelCoords | Fish selection and click-to-swim target (the pathfinding is in `stepEngine.ts`), map and panel hit-testing.
 function cellFromEvent(e: MouseEvent): { cx: number; cy: number } {
   const rect = canvas.getBoundingClientRect();
   // Convert to NATIVE game pixels, not backing-store pixels. FSIZE below is a native
@@ -6208,6 +4998,7 @@ window.addEventListener('mouseup', () => {
   panelDragBus = null;
 });
 
+//#region Dev bar & window wiring | anchors: populateRooms, fitSelect, rendererSelect, graphicsSelect, idleDirtyToggle, winRoomBtn, resize / fullscreenchange / dpr watchers | The dev-only controls — room picker, fit mode, renderer, graphics tier, idle-render toggle, win-room — and the relayout triggers.
 function populateRooms(): void {
   const mapOpt = document.createElement('option');
   mapOpt.value = 'map';
@@ -6232,9 +5023,13 @@ select.value = 'map'; // the game opens on the world map, so start the picker th
 // Public-release layout: the visible fit-mode control (localStorage-persisted via
 // settings) + responsive stage scaling on resize / fullscreen.
 if (fitSelect) {
-  fitSelect.value = settings.fitMode;
-  fitSelect.addEventListener('change', () => {
-    const v = fitSelect.value;
+  // A local const, because TypeScript will not carry the null-narrowing of an
+  // IMPORTED binding into a closure (an exporting module may reassign it; these
+  // never do). Same one-line dance at the four dev-bar controls below.
+  const el = fitSelect;
+  el.value = settings.fitMode;
+  el.addEventListener('change', () => {
+    const v = el.value;
     settings.fitMode = isFitMode(v) ? v : 'medium';
     saveSettings(settings);
     forceRoomRedraw = true; // the fit scale changes the room canvas size — repaint
@@ -6245,26 +5040,30 @@ if (fitSelect) {
 // driven by the hidden R hotkey; syncDevControls() keeps their displayed value
 // current after a hotkey toggle.
 if (rendererSelect) {
-  rendererSelect.value = renderer;
-  rendererSelect.addEventListener('change', () => setRenderer(rendererSelect.value === 'cpu' ? 'cpu' : 'webgl'));
+  const el = rendererSelect;
+  el.value = renderer;
+  el.addEventListener('change', () => setRenderer(el.value === 'cpu' ? 'cpu' : 'webgl'));
 }
 // Dev-bar graphics-level combobox. Mirrors the E hotkey (setGraphics keeps the
 // select value in sync when E cycles), and is the primary point-and-click switch.
 if (graphicsSelect) {
-  graphicsSelect.value = graphics;
-  graphicsSelect.addEventListener('change', () => {
-    const v = graphicsSelect.value;
+  const el = graphicsSelect;
+  el.value = graphics;
+  el.addEventListener('change', () => {
+    const v = el.value;
     setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
   });
 }
 if (idleDirtyToggle) {
-  idleDirtyToggle.checked = renderOnDirty;
-  idleDirtyToggle.addEventListener('change', () => setRenderOnDirty(idleDirtyToggle.checked));
+  const el = idleDirtyToggle;
+  el.checked = renderOnDirty;
+  el.addEventListener('change', () => setRenderOnDirty(el.checked));
 }
 if (winRoomBtn) {
-  winRoomBtn.addEventListener('click', () => {
+  const el = winRoomBtn;
+  el.addEventListener('click', () => {
     devWinRoom();
-    winRoomBtn.blur(); // drop button focus so a Space/Enter dismiss doesn't re-click it
+    el.blur(); // drop button focus so a Space/Enter dismiss doesn't re-click it
   });
 }
 // Apply the persisted dev-pane state on boot (Ctrl+Alt+D toggles it thereafter).
@@ -6289,6 +5088,7 @@ if (typeof window.matchMedia === 'function') {
   watchDpr();
 }
 
+//#region Boot | anchors: await FontData.load, parseFfp, loadSoundPkg, loadRoom(7), initFeedback, requestAnimationFrame(loop) | The top-level-await boot sequence, in load order. What is critical vs. optional is documented inline.
 font = await FontData.load('/data/Intro');
 setLoadingMsg('Loading fonts…');
 // Enhanced subtitle font (FreeSans Bold, the FFNG subtitle face). Optional: if it
@@ -6447,1352 +5247,476 @@ window.addEventListener('pointerdown', unlockAudio, { once: true });
 window.addEventListener('keydown', unlockAudio, { once: true });
 
 // Debug hook for headless verification.
-(window as unknown as { __ff: unknown }).__ff = {
-  state: () => {
-    if (!room) return null;
-    const l = room.items[room.littleIdx];
-    const b = room.items[room.bigIdx];
-    return {
-      dead: room.anyFishDead,
-      alive: { ...room.alive },
-      won: room.won,
-      venku: room.venku,
-      active: engine?.active ?? 'little',
-      phase: engine?.phase ?? 'idle',
-      swimming: engine?.swim != null,
-      little: l ? { x: l.x, y: l.y, facingRight: room.facingRight.little } : null,
-      big: b ? { x: b.x, y: b.y, facingRight: room.facingRight.big } : null,
-      littleFrame: fishFrameFor('little'),
-    };
+// The debug/test interface (window.__ff). Its 215 entries live in debugHooks.ts;
+// what they need of the running game is handed over here, as getters, with setters
+// for the eleven values probes deliberately write. Assigned to window HERE, at the
+// end of boot, because tools/ui-lib.mjs waits on window.__ff as the signal that boot
+// has completed.
+//#region `window.__ff` host | anchors: debugHooks | The 144-member host the debug hooks read the game through: getters, plus eleven setters for the values probes deliberately write. The hooks themselves are in `debugHooks.ts`.
+(window as unknown as { __ff: unknown }).__ff = debugHooks({
+  get O_OPTIONS() {
+    return O_OPTIONS;
   },
-  press: (which: 'little' | 'big', dir: number) => {
-    if (!idle() || !engine) return;
-    engine.swim = null;
-    engine.active = which;
-    tryStep(which, dir);
+  get SUB_FONT_CANDIDATES() {
+    return SUB_FONT_CANDIDATES;
   },
-  click: (cx: number, cy: number) => clickCell(cx, cy),
-  talk: (which: 'little' | 'big') => talk(which),
-  count: () => count,
-  fsize: () => FSIZE,
-  /**
-   * The room's resolved geometry (see roomGeometry): native/css/backing sizes plus the
-   * AI upscale.
-   *
-   * `upscale` is the sound way to ask "is the AI compositor drawing this frame?".
-   * `#screen.width` is not: on the canvas-2D path #screen IS the ×S composite, but on
-   * the GPU path the composite lives in GlAiScreen's FBO and #screen stays at native
-   * size — so a probe reading the canvas only ever tests one backend, and since `webgl`
-   * is the default, the wrong one.
-   */
-  roomGeom: () => (room ? roomGeometry(room) : null),
-  phase: () => engine?.phase ?? 'idle',
-  moveFrames: () => engine?.moveFrames() ?? MOVE_FRAMES, // current ticks/cell (jizda speed-up)
-  jizda: () => engine?.jizda ?? 0,
-  record: () => engine?.srecord ?? '',
-  moves: () => lengthOfRecord(engine?.srecord ?? ''),
-  restart: () => restartRoom(),
-  smoothOn: () => {
-    smoothLog = [];
+  get activeScript() {
+    return activeScript;
   },
-  smoothLog: () => (smoothLog ? smoothLog.slice() : []),
-  save: () => saveGame(),
-  load: () => loadGame(),
-  hasSave: () => saveExists(),
-  /** CanSave (URoom.pas:26900): whether the current position may be saved at all. */
-  canSave: () => canSave(),
-  /** The panel's per-element colour state (for asserting the greyed save button). */
-  panelState: () => panelState(),
-  posHash: () => {
-    if (!room) return '';
-    // A stable snapshot of every item's position + fish facing/exit, for
-    // determinism checks (undo/load must reproduce it exactly).
-    const parts = room.items.map((it) => `${it.x},${it.y}`);
-    parts.push(`fL:${room.facingRight.little ? 1 : 0}`, `fB:${room.facingRight.big ? 1 : 0}`);
-    parts.push(`vL:${room.venku.little ? 1 : 0}`, `vB:${room.venku.big ? 1 : 0}`);
-    return parts.join('|');
+  get aiKufr() {
+    return aiKufr;
   },
-  mouths: () => ({ ...poslMluv }),
-  heads: () => ({ little: fishFrameFor('little').headFrame, big: fishFrameFor('big').headFrame }),
-  music: () => audio.currentMusic,
-  graphics: () => graphics,
-  setGraphics: (m: GraphicsLevel) => setGraphics(m),
-  // The movie URL that would be played for the active graphics level right now
-  // (reflects the `ai` upscale once its HEAD probe has resolved). Debug/test only.
-  logoMovieUrl: () => logoMovie(),
-  introMovieUrl: () => introMovie(),
-  renderer: () => renderer,
-  setRenderer: (m: 'cpu' | 'webgl') => {
-    renderer = m;
-    if (renderer === 'webgl') enableWebgl();
-    localStorage.setItem('ff.renderer', renderer);
+  get aiKufrFrames() {
+    return aiKufrFrames;
   },
-  subFont: () => ({ idx: subFontIdx, ...SUB_FONT_CANDIDATES[subFontIdx]! }),
-  subFontList: () => SUB_FONT_CANDIDATES.map((c) => c.name),
-  setSubFont: (i: number) => applySubFont(i),
-  cycleSubFont: (next = true) => previewSubFont(next),
-  // True when the last frame was actually presented by the WebGL backend.
-  //
-  // In a room this reports the backend that PAINTED, not the one the canvas stacking
-  // suggests. That distinction is the whole point: the `ai` tier used to paint on
-  // canvas-2D while `renderer` still read `webgl`, and a display-only check said the
-  // GPU was engaged. Off the room screen (map, cutscene) the visible canvas is still
-  // the honest signal.
-  glActive: () =>
-    renderer === 'webgl' &&
-    !glFailed &&
-    // While the room is loading or the help overlay is up, loop() hides #screen-gl and
-    // nothing paints the room at all, so `lastRoomBackend` is stale — the visible-canvas
-    // test is the honest one there, exactly as it is off the room screen.
-    (screen === 'room' && !roomLoading && !helpOpen
-      ? lastRoomBackend === 'webgl'
-      : glCanvas.style.display !== 'none'),
-  // Loop-throttle diagnostics (perf): whether the render loop may drop to the idle
-  // timer rate right now, and the room-side conditions that force the full-rate rAF
-  // spin when any is true (see loopThrottleOk). Used by the perf regression test.
-  throttleInfo: () => ({
-    throttleOk: loopThrottleOk(),
-    onTimer: idleTimer !== 0,
-    // Why an idle room may still be waking faster than the 12.5 Hz logic tick: the ai
-    // tier's water is sampled per paint on the GPU (see aiWaterAnimating).
-    waterAnim: aiWaterAnimating(),
-    loops: loopTicks,
-    roomPaints,
-    heldState,
-    phase: engine?.phase ?? 'idle',
-    enhancedPending,
-    aiPending,
-    roomArtPending: roomArtPending(),
-    ostav,
-    forceRoomRedraw,
-  }),
-  /** Dev/perf hook: mirror of the dev bar's idle-saver checkbox (P). */
-  setRenderOnDirty: (v: boolean) => setRenderOnDirty(v),
-  enhancedLoaded: () => enhancedArt !== null,
-  enhancedActive: () =>
-    enhancedArtActive() &&
-    enhancedArt !== null &&
-    room !== null &&
-    !classicOnlyBackground(room.gspec) &&
-    enhancedArt.w === (ffr?.width ?? 0) * FSIZE,
-  playingPrior: (prior: number) => audio.playing(prior),
-  voicePlaying: () => audio.playing(1) || audio.playing(2) || audio.playing(3),
-  panelHit: (x: number, y: number) => panelHitTest(x, y, ostav === O_OPTIONS),
-  panelAction: (region: number, panelX = 0) => panelAction(region, panelX),
-  hasPanel: () => panel !== null,
-  // Options sub-panel state (for UI probes): the scroll state + persisted settings.
-  panelOstav: () => ostav,
-  panelScroll: () => scroll,
-  toggleOptions: () => togglePanelOptions(),
-  optionsOpen: () => ostav === O_OPTIONS,
-  volumes: () => ({ ...settings.volume }),
-  /** music_volume as the room scripts see it (0..64), i.e. Volumes[slider index]. */
-  scriptMusicVolume: () => activeScript?.s.musicVolume ?? null,
-  subtitleMode: () => settings.subtitles,
-  titDef: () => settings.titDef,
-  // Help overlay (for UI probes): open/close + page state.
-  helpOpen: () => helpOpen,
-  // Feedback form (for UI probes): open/close, plus the payload and links exactly as
-  // the player sees them. Read-only — nothing here sends anything.
-  feedbackOpen: () => feedback?.isOpen() ?? false,
-  openFeedback: (kind?: 'bug' | 'idea') => feedback?.open(kind),
-  closeFeedback: () => feedback?.close(),
-  feedbackPreview: () => feedback?.preview() ?? '',
-  feedbackLinks: () => feedback?.links() ?? { issue: '', email: '' },
-  feedbackNote: () => feedback?.note() ?? '',
-  openHelp: () => openHelp(),
-  closeHelp: () => closeHelp(),
-  helpPage: () => helpScreens.page,
-  helpPageCount: () => helpScreens.pages(subLang()).length,
-  hasMap: () => worldMap !== null,
-  screen: () => screen,
-  // Debug: true while a room's assets are still loading (loadRoom). Until this
-  // clears, the PREVIOUS room is still the live one — `screen() === 'room'` alone
-  // does NOT mean the room you asked for is up, because enterRoom() flips the
-  // screen synchronously but loads asynchronously.
-  roomLoading: () => roomLoading,
-  // Debug: true while the room is still waiting for the art tier it will PRESENT —
-  // the counterpart of roomLoading() for the visual side (see roomArtPending).
-  roomArtPending: () => roomArtPending(),
-  // Debug: the same question for the world map — true while the `ai` tier's map art
-  // is in flight, and so while loop() is withholding the map draw (mapArtHolding).
-  mapArtPending: () => mapArtPending(),
-  // Debug: has the `ai` tier's world-map art finished loading? Distinct from
-  // mapArtPending(): a failed load also clears the hold, but leaves this false.
-  aiMapLoaded: () => aiWorldMap !== null,
-  // Debug: is a map frame the thing currently on screen? (What decides whether the
-  // map's overlay goes up at once or on the 200ms delay — see syncLoadingUi.)
-  mapPresented: () => mapPresented,
-  // Debug: is the post-boot room-loading overlay on screen right now?
-  loadingVisible: () => loadingEl?.hidden === false,
-  // Debug: the current room's AI art has finished loading / is actually painting
-  // this frame. Two different questions — the art can be loaded while the frame is
-  // withheld by the aiRoomRenderActive gate (hooks, ZX, frame effects…).
-  aiRoomLoaded: () => aiRoom !== null && aiRoomNum === curNum,
-  aiRoomActive: () => room !== null && aiRoomRenderActive(room),
-  // Debug: the room number that is actually built and running (curNum) — not the
-  // one currently being loaded.
-  roomNum: () => curNum,
-  // Debug: how many room loads have COMPLETED (see roomLoadSeq).
-  roomLoads: () => roomLoadSeq,
-  // Debug: the signature of the most recently PAINTED room frame
-  // (`count|roomArtPending|graphics|renderer|glFailed`, see the room-draw branch
-  // of loop()). Lets a test tell "a frame has been drawn in this graphics mode"
-  // apart from "the art happens to have animated", which a frame-hash comparison
-  // cannot distinguish in a room whose art animates every tick.
-  paintedRoomSig: () => lastRoomSig,
-  /** ZAVER finale cutscene active (zavermode) — for the completion-trigger UI test. */
-  zaverMode: () => activeScript?.s.zavermode ?? false,
-  // Leg-completion story page (obrazek): the shown leg number (1..8), or null when none.
-  legImage: () => (legImage ? legImageNum : null),
-  /** Debug: show a leg story page directly (probes cannot easily win a leg-final room). */
-  showLegImage: (leg: number) => { void showLegImage(leg); },
-  /** Debug: is the upscaled story page in use for the page on screen? */
-  legImageAiActive: () => legImageAi !== null,
-  /** Debug: how many cutscene frames are being served from the upscaled set. */
-  kufrAi: () => (aiKufr ? { frames: aiKufrFrames.size, order: aiKufr.order.length, scale: aiKufr.scale } : null),
-  showMap: () => showMap(),
-  enterRoom: (n: number) => enterRoom(n),
-  enterRoomAwait: (n: number) => enterRoom(n),
-  mapHit: (x: number, y: number) => worldMap?.hitTest(x, y, solved, cheated) ?? 0,
-  // World-map record info panel + best-solution replay (for UI probes).
-  mapInfoRoom: () => mapInfoRoom,
-  mapInfoHover: () => mapInfoHover,
-  mapInfoFaze: () => mapInfoFaze,
-  deskyLang: () => deskyLang, // language of the currently loaded room-name plaques
-  openMapInfo: (n: number) => openMapInfo(n),
-  closeMapInfo: () => closeMapInfo(),
-  /** Click at map (x,y): routes exactly like a real left-click (panel button / open panel / launch). */
-  clickMap: (x: number, y: number) => clickMapAt(x, y),
-  replayActive: () => inReplay(),
-  replayIndex: () => replaymode?.idx ?? -1,
-  bestRecord: (n: number) => bestRecord(n) ?? null,
-  bestRecords: () => Object.fromEntries(bestRecords),
-  markBest: (n: number, rec: string) => {
-    bestRecords.set(n, rec);
-    scores.set(n, lengthOfRecord(rec));
-    saveBestRecords();
-    saveScores();
+  get aiPending() {
+    return aiPending;
   },
-  // Intro movie + map-corner menu overlays (for UI probes).
-  introPlaying: () => intro.playing,
-  introSeen: () => settings.introSeen,
-  setIntroSeen: (v: boolean) => {
-    settings.introSeen = v;
-    saveSettings(settings);
+  get aiRoom() {
+    return aiRoom;
   },
-  skipIntro: () => intro.skip(),
-  replayIntro: () => replayIntro(),
-  mapCorner: (x: number, y: number) => worldMap?.cornerAction(x, y) ?? null,
-  mapHover: () => mapHoverCorner,
-  setMapHover: (a: MapAction | null) => {
-    mapHoverCorner = a;
+  get aiRoomNum() {
+    return aiRoomNum;
   },
-  clickMapCorner: (x: number, y: number) => dispatchMapCorner(worldMap?.cornerAction(x, y) ?? null),
-  mapOverlay: () => mapOverlay,
-  openMapOptions: () => openMapOptions(),
-  openCredits: () => openCredits(),
-  creditMode: () => creditMode,
-  // Debug/test only: jump the roll to a scroll offset by back-dating its start.
-  creditSeek: (posun: number) => { creditsStart = performance.now() - (posun / CREDIT_SPEED) * CREDIT_TICK_MS; },
-  creditLength: () => (credits ? credits.delka : 0),
-  closeMapOverlay: () => closeMapOverlay(),
-  solvedRooms: () => [...solved],
-  scores: () => Object.fromEntries(scores),
-  cheatedRooms: () => [...cheated],
-  markSolved: (n: number) => {
-    solved.add(n);
-    saveSolved();
+  get aiRoomRenderActive() {
+    return aiRoomRenderActive;
   },
-  cheat: () => cheatSolveRoom(),
-  lines: () => linesSpoken,
-  lastLine: () => lastLine,
-  subsActive: () => subs?.active ?? false,
-  /** True while a subtitle is still waving in or scrolling (perf probes/benchmarks). */
-  subsAnimating: () => subs?.vectorAnimating(count) ?? false,
-  /** Perf probe: cumulative count of vector-overlay re-renders (see subOverlayPaints). */
-  subPaints: () => subOverlayPaints,
-  /** Perf A/B: turn the overlay repaint gate off to reproduce the pre-fix cost. */
-  setSubsGate: (v: boolean) => {
-    subOverlayGate = v;
-    subOverlaySig = '';
-  },
-  /**
-   * Parity probe: repaint the vector overlay for an arbitrary logic tick, bypassing
-   * the repaint gate, and report the geometry the reference implementation needs to
-   * reproduce it (game-pixel screen size, the overlay backing size and its scale).
-   */
-  subsPaintAt: (at: number, frac = 0) => {
-    if (!subs?.active || !room) return null;
-    const { scale: cs } = roomGeometry(room);
-    const dpr = window.devicePixelRatio || 1;
-    syncSubOverlay();
-    subCtx.setTransform(1, 0, 0, 1, 0, 0);
-    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-    subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-    subs.drawVector(subCtx, at, subFontFamily, subFontWeight, frac);
-    subOverlayPainted = true;
-    subOverlaySig = ''; // painted behind the gate's back — force the next real repaint
-    return {
-      w: subCanvas.width,
-      h: subCanvas.height,
-      scale: cs * dpr,
-      screenW: subs.vectorScreen.w,
-      screenH: subs.vectorScreen.h,
-      family: subFontFamily,
-      weight: subFontWeight,
-      substeps: SUB_SUBSTEPS,
-      lines: subs.debugLines(),
-    };
-  },
-  /** Test hook: inject a subtitle directly (deterministic, no room dialogue needed). */
-  pushSubtitle: (text: string, code: string) => subs?.newSubtitle(text, code, count),
-  /** Test hooks for the win auto-return hold: read the countdown / clear subtitles. */
-  winCountdown: () => engine?.winCountdown ?? 0,
-  clearSubtitles: () => subs?.clear(),
-  audioHas: (name: string) => audio.has(name),  playSound: (name: string) => audio.play(name),
-  // Debug: the room's .ffs voice package now loads AFTER the room's art (it is the
-  // bulk of an entry's bytes and nothing visual needs it), so a probe that asserts on
-  // a room-specific SOUND must wait for this rather than for the room itself.
-  roomAudioReady: () => audio.roomLoaded,
-  /** How many sounds a named package currently answers for (probe: x01 in a leg-final). */
-  soundPkgSize: (id: string) => audio.entryCount(id),
-  script: () => (activeScript ? { pokus: activeScript.s.pokus, dialog: activeScript.s.isDialog() } : null),
-  itemState: (i: number) => {
-    const it = room?.items[i];
-    return it ? { x: it.x, y: it.y, afaze: it.afaze, dir: it.dir, spec: it.spec, kind: it.kind } : null;
-  },
-  gspec: () => room?.gspec ?? 0,
-  vytlacit: () => room?.vytlacit ?? 0,
-  /** LODE test hooks: start/read the destructive falling-wreck animation. */
-  dropShip: (phase = 0) => {
-    activeScript?.s.shodLod(phase);
-    forceRoomRedraw = true;
-    wake();
-  },
-  wreckState: () =>
-    activeScript
-      ? {
-          phase: activeScript.s.padalod,
-          x: activeScript.s.lodniX,
-          y: activeScript.s.lodniY,
-          swaps: room?.wreckSwaps.length ?? 0,
-          changed: room?.wreckSwaps.reduce((n, swap) => n + swap.pixels.length, 0) ?? 0,
-        }
-      : null,
-  /** The `ai` tier's ×S wreck replay: swaps applied, cache revision, background hash. */
-  aiWreckDigest: () => (aiRoom && aiRoomNum === curNum ? aiRoom.wreckDigest() : null),
-  /**
-   * The ENHANCED tier's replay of the same wreck history, as a native-px damage box.
-   * Renders the background first so the source actually replays it, then reports what it
-   * changed — the independent footprint `aiWreckDigest().damage` is compared against.
-   */
-  enhWreckDamage: () => {
-    if (!room) return null;
-    const art = enhancedArtFor(room);
-    renderRoomBackgroundRgba(room, art, { count: 0 });
-    return art.wreckDamageRect();
-  },
-  /** Stable fixed-count frame hash used by browser tests to prove a visible delta. */
-  roomFrameHash: (mode: GraphicsLevel = graphics) => {
-    if (!room) return null;
-    const art = mode === 'classic' ? classicArtFor(room) : enhancedArtFor(room);
-    const frame = renderRoomRgba(room, art, { count: 0 });
-    let hash = 2166136261;
-    for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
-    return hash >>> 0;
-  },
-  /**
-   * The same frame, but put through the cheat post-processing the real paint path
-   * applies (`applyFrameEffects`) — the ONLY way to observe the silent-film tint,
-   * the grain and the intertitle card as pixels. `roomFrameHash` above renders the
-   * room directly and structurally cannot see them.
-   *
-   * `grain` selects whether the (deliberately random) film grain is included; leave
-   * it off to get a hash that is stable between calls.
-   */
-  roomEffectFrameHash: (mode: GraphicsLevel = graphics, grain = false) => {
-    if (!room) return null;
-    const art = mode === 'classic' ? classicArtFor(room) : enhancedArtFor(room);
-    const frame = renderRoomRgba(room, art, { count: 0 });
-    // Snapshot the one-shot state applyFrameEffects consumes, so merely ASKING for
-    // the hash cannot swallow a megabomb flash the player is owed.
-    const flash = megabombFlash;
-    const force = forceRoomRedraw;
-    applyFrameEffects(frame, true, grain);
-    megabombFlash = flash;
-    forceRoomRedraw = force;
-    let hash = 2166136261;
-    for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
-    return hash >>> 0;
-  },
-  /**
-   * Same, but of the BACKGROUND layer only (wall + wobbled bg, no fish/items/effects).
-   * LODE's falling wreck is the only thing that mutates that layer mid-room, so this
-   * isolates its visible delta from ambient fish/item animation — and, being masked by
-   * the wall, it ignores swaps recorded where nothing can actually show.
-   */
-  roomBgFrameHash: (mode: GraphicsLevel = graphics) => {
-    if (!room) return null;
-    const art = mode === 'classic' ? classicArtFor(room) : enhancedArtFor(room);
-    const frame = renderRoomBackgroundRgba(room, art, { count: 0 });
-    let hash = 2166136261;
-    for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
-    return hash >>> 0;
-  },
-  /** Hacky (xfisher): spawn a fishing hook; read the hook count/states. */
-  spawnHook: () => {
-    if (room) hooks.add(room);
-  },
-  hookCount: () => hooks.count,
-  /** Type a cheat code as the player would (the leading X arms the machine). */
-  typeCheat: (code: string) => {
-    const entry = screen === 'map' ? mapCheats : roomCheats;
-    for (const ch of code) {
-      const r = entry.press(ch);
-      if (r.cheat) {
-        if (screen === 'map') applyMapCheat(r.cheat);
-        else applyRoomCheat(r.cheat);
-      }
-    }
-  },
-  ultraviolence: () => ultraviolence,
-  /** xsilent / xinterlaced state (silentfilm, cassilenttit, interlacedfaze). */
-  silentFilm: () => ({
-    on: silentFilm,
-    time: subs?.silentTime ?? 0,
-    lines: (subs?.silentLines ?? []).map((l) => l.s),
-  }),
-  interlacedFaze: () => interlacedFaze,
-  /** The Tetris minigame: null when closed, else its live state. */
-  tetris: () =>
-    tetris
-      ? {
-          score: tetris.score,
-          rychlost: tetris.rychlost,
-          gameover: tetris.gameover,
-          umisteni: tetris.umisteni,
-          hiscore: [...tetris.hiscore],
-          druh: tetris.pada.druh,
-          x: tetris.pada.x,
-          y: tetris.pada.y,
-          smer: tetris.pada.smer,
-          rychle: tetris.pada.rychle,
-          // The minigame's own clocks: `tick` counts 55ms ticks actually run and
-          // `blikani` is the game-over hiscore blink phase (0..17). A probe needs
-          // them to assert the blink runs on this clock rather than on the paint
-          // rate — without them it can only sleep and hope the machine kept up.
-          tick: tetrisTick,
-          blikani: tetris.blikani,
-          filled: tetris.pole.reduce(
-            (n, col) => n + col.reduce((m, c) => m + (c.volno ? 0 : 1), 0),
-            0,
-          ),
-        }
-      : null,
-  tetrisTick: () => (tetris ? tetris.tick() : undefined),
-  /** Hash of the minigame's 150x300 board as it is actually composed and coloured
-   *  — the only way a probe can tell the board is really being painted. */
-  tetrisBoardHash: () => {
-    if (!tetris || !tetrisArt) return null;
-    const rgba = tetrisRgba(renderTetris(tetris, tetrisArt), tetrisArt);
-    let hash = 2166136261;
-    for (const byte of rgba) hash = Math.imul(hash ^ byte, 16777619);
-    return { hash: hash >>> 0, w: tetrisArt.hole.w, h: tetrisArt.hole.h };
-  },
-  tetrisKey: (k: TetrisKey) => tetris?.key(k),
-  closeTetris: () => closeTetris(),
-  /** Which backend actually painted the last room frame ('cpu' | 'webgl'). */
-  roomBackend: () => lastRoomBackend,
-  /** cas_hry in days, plus the raw per-room banked milliseconds behind it. */
-  casHry: () => casHry(),
-  playTime: () => Object.fromEntries(playTime),
-  water: () => (room ? { wamp: room.wamp, wper: room.wper, wspd: room.wspd } : null),
-  /** The ENHANCED (truecolor) fish body sprite actually in use, for the sprite
-   *  cheats — a separate art path from the FFR frames below. */
-  enhancedFishSprite: (which: 'little' | 'big') => {
-    const set = (cheatFishSprites ?? fishSprites)?.[which === 'little' ? 'small' : 'big'].left;
-    const bm = set?.get('body_rest_00.png');
-    if (!bm) return null;
-    let hash = 2166136261;
-    for (const byte of bm.rgba) hash = Math.imul(hash ^ byte, 16777619);
-    return { w: bm.w, h: bm.h, hash: hash >>> 0 };
-  },
-  fishSpriteSize: (which: 'little' | 'big') => {
-    const bm = room?.bodies[which === 'little' ? 'small' : 'big'][1] ?? null;
-    if (!bm) return null;
-    let hash = 2166136261;
-    for (const byte of bm.pixels) hash = Math.imul(hash ^ byte, 16777619);
-    return { w: bm.w, h: bm.h, hash: hash >>> 0 };
-  },
-  hookStates: () => hooks.snapshot.map((h) => ({ stav: h.stav, cil: h.cil, x: h.x, y: h.y })),
-  /** Debug: teleport an item (used to test gspec=9 push-out rooms). */
-  moveItem: (i: number, x: number, y: number) => {
-    const it = room?.items[i];
-    if (it) {
-      it.x = x;
-      it.y = y;
-    }
-  },
-  chatterInfo: () => (chatter ? { interval: chatter.interval, last: chatter.last } : null),
-  // Test probe: render the current room's background-only on the GPU and compare
-  // it to the CPU background — the isolated first-failure signal for the FP32-sin
-  // wobble (full-room parity is in glRoomParity).
-  glBgParity: () => {
-    if (!room) return null;
-    const comp = glCompositor();
-    if (!comp) return { webgl: false };
-    comp.renderBackgroundOnly(room, room.palette, count);
-    const gpu = comp.readback();
-    const cpu = renderRoomBackgroundRgba(room, classicArtFor(room), { count });
-    if (gpu.w !== cpu.width || gpu.h !== cpu.height) return { webgl: true, dimMismatch: true };
-    return { webgl: true, w: gpu.w, h: gpu.h, ...glChannelDiff(cpu.rgba, gpu.rgba) };
-  },
-  // Test probe: render the WHOLE current room (background + items + fish) on the
-  // GPU via the shared compositor (renderRoomInto → GlScreen) and compare to the
-  // CPU frame, byte-for-byte. Classic art source, resting pose (count only).
-  glRoomParity: () => (room ? glParityCompare(classicArtFor(room)) : null),
-  /**
-   * Perf probe: MARGINAL milliseconds per ×S AI frame on each backend.
-   *
-   * Two things make the naive version of this measurement lie.
-   *
-   * First, the render loop caps paints at MAX_PAINT_FPS, so a frame-rate reading on a
-   * machine that holds the cap reports the cap, not the cost — which is exactly how a
-   * compositing regression hides. So this renders back-to-back frames instead.
-   *
-   * Second, both backends only QUEUE work: WebGL until something forces a sync, and
-   * canvas-2D until something forces rasterisation. Draining once at the end and
-   * dividing by N therefore folds a FIXED drain cost into the per-frame number, and the
-   * answer changes with N — measured 3.7 ms/frame at N=30 against 0.33 ms/frame at
-   * N=60 for identical work. So time N frames and 2N frames, both drained, and report
-   * the difference over N: the fixed cost appears in both and cancels.
-   *
-   * The CPU side deliberately alternates `count`, because the canvas-2D target caches
-   * the background composite per logic tick — repeating one tick would measure the
-   * cache rather than the compositor.
-   */
-  aiRenderBench: (frames = 30) => {
-    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
-    const comp = glAiCompositor();
-    const geom = roomGeometry(room);
-    const w = geom.nativeW * aiRoom.scale;
-    const h = geom.nativeH * aiRoom.scale;
-    const frame = (n: number): AiRoomFrame => ({
-      count: count + n,
-      slide: (n % 4) / 4,
-      fishAnim: {
-        little: { bodyFrame: TL_PLAV[1]!, headFrame: HL_MRK },
-        big: { bodyFrame: TL_NAHORU[1]!, headFrame: HL_TLACI },
-      },
-    });
-    const cv = document.createElement('canvas');
-    cv.width = w;
-    cv.height = h;
-    const c2 = cv.getContext('2d', { willReadFrequently: true });
-    if (!c2) return null;
-    // Its own target, reused across the runs: the background composite cache is part of
-    // the canvas-2D path's real cost profile so it must persist, but binding the room's
-    // live target to this scratch canvas would leave the room holding it (plus its
-    // full-size cache clone) long after the probe returned.
-    const cpuTarget = new Canvas2dAiTarget(c2);
-    const cpuRun = (n: number): number => {
-      const t = performance.now();
-      for (let i = 0; i < n; i++) {
-        c2.setTransform(1, 0, 0, 1, 0, 0);
-        c2.clearRect(0, 0, w, h);
-        aiRoom!.drawInto(cpuTarget, room!, frame(i));
-      }
-      c2.getImageData(0, 0, 1, 1); // drain the 2D command queue
-      return performance.now() - t;
-    };
-    const gpuRun = (n: number): number => {
-      const t = performance.now();
-      for (let i = 0; i < n; i++) {
-        comp!.begin(w, h);
-        aiRoom!.drawInto(comp!, room!, frame(i));
-      }
-      comp!.finish();
-      return performance.now() - t;
-    };
-    cpuRun(4); // warm caches on both sides before either clock starts
-    const cpuMs = (cpuRun(2 * frames) - cpuRun(frames)) / frames;
-    let gpuMs = null;
-    if (comp) {
-      comp.track(aiRoom);
-      gpuRun(4); // warm: the first call allocates the FBO and uploads the art
-      gpuMs = (gpuRun(2 * frames) - gpuRun(frames)) / frames;
-    }
-    return { w, h, frames, cpuMs, gpuMs };
-  },
-  /**
-   * Test probe: is the AI tier's PRESENT pass geometrically right?
-   *
-   * `aiGlParity` compares the offscreen ×S composite and stops there, so a wrong
-   * viewport, Y flip or filter footprint in `present()` leaves it byte-exact while the
-   * on-screen image is wrong — the one pass the player actually sees is the one nothing
-   * covered.
-   *
-   * It cannot be a pixel comparison: the GPU box-downsamples at the real ratio and the
-   * canvas-2D path leans on the browser's own minification filter, so the two legitimately
-   * differ (measured mean ~6/255). What IS filter-independent is ALIGNMENT. Present the
-   * frame, read it back, build the same frame through the canvas-2D path scaled to the
-   * same size, and score the mean absolute difference for the identity against a
-   * y-flipped, x-flipped and ±1px-shifted version of itself. If `present()` is right the
-   * identity must win every one of those; if it flips or shifts, it cannot. `spread` is
-   * the reference's own variance, so a blank frame (which would tie everywhere) is
-   * distinguishable from an aligned one.
-   */
-  aiPresentCheck: () => {
-    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
-    const comp = glAiCompositor();
-    if (!comp) return { webgl: false };
-    const geom = roomGeometry(room);
-    const w = geom.nativeW * aiRoom.scale;
-    const h = geom.nativeH * aiRoom.scale;
-    // Present at a real minification (the shipping case), small enough to score quickly.
-    const pw = Math.max(2, Math.round(geom.nativeW));
-    const ph = Math.max(2, Math.round(geom.nativeH));
-    const rest = { bodyFrame: TL_ZAKLAD[0]!, headFrame: 0 };
-    const f: AiRoomFrame = { count, slide: 0, fishAnim: { little: rest, big: rest } };
-    comp.track(aiRoom);
-    if (!comp.begin(w, h)) return { webgl: true, unsupported: true };
-    aiRoom.drawInto(comp, room, f);
-    const gpu = comp.presentReadback(pw, ph);
-
-    // Reference: the canvas-2D composite, scaled to the presented size by the browser.
-    const big = document.createElement('canvas');
-    big.width = w;
-    big.height = h;
-    const bg = big.getContext('2d', { willReadFrequently: true });
-    if (!bg) return { webgl: true, noCanvas: true };
-    bg.clearRect(0, 0, w, h);
-    aiRoom.drawInto(new Canvas2dAiTarget(bg), room, f);
-    const small = document.createElement('canvas');
-    small.width = pw;
-    small.height = ph;
-    const sg = small.getContext('2d', { willReadFrequently: true });
-    if (!sg) return { webgl: true, noCanvas: true };
-    sg.imageSmoothingEnabled = true;
-    sg.drawImage(big, 0, 0, pw, ph);
-    const ref = sg.getImageData(0, 0, pw, ph).data;
-
-    const score = (dx: number, dy: number, flipY: boolean, flipX: boolean): number => {
-      let sum = 0;
-      let n = 0;
-      for (let y = 0; y < ph; y++) {
-        const ry = flipY ? ph - 1 - y : y + dy;
-        if (ry < 0 || ry >= ph) continue;
-        for (let x = 0; x < pw; x++) {
-          const rx = flipX ? pw - 1 - x : x + dx;
-          if (rx < 0 || rx >= pw) continue;
-          const a = (y * pw + x) * 4;
-          const b = (ry * pw + rx) * 4;
-          sum += Math.abs(gpu[a]! - ref[b]!) + Math.abs(gpu[a + 1]! - ref[b + 1]!) + Math.abs(gpu[a + 2]! - ref[b + 2]!);
-          n += 3;
-        }
-      }
-      return n === 0 ? Number.POSITIVE_INFINITY : sum / n;
-    };
-    let mean = 0;
-    for (let i = 0; i < ref.length; i += 4) mean += ref[i]!;
-    mean /= ref.length / 4;
-    let spread = 0;
-    for (let i = 0; i < ref.length; i += 4) spread += Math.abs(ref[i]! - mean);
-    spread /= ref.length / 4;
-    return {
-      webgl: true,
-      w: pw,
-      h: ph,
-      spread,
-      identity: score(0, 0, false, false),
-      flipY: score(0, 0, true, false),
-      flipX: score(0, 0, false, true),
-      shiftX: score(1, 0, false, false),
-      shiftY: score(0, 1, false, false),
-    };
-  },
-  /**
-   * Test probe: the `ai` tier's CPU↔GPU parity. Renders the current room's ×S frame
-   * through BOTH AiTargets — canvas-2D into an offscreen canvas, and GlAiScreen into
-   * its FBO — from the identical room walk and frame state, and diffs them.
-   *
-   * Non-resting fish (an explicit swim body + head overlay) and a half-step slide are
-   * used deliberately: a resting pose exercises neither the head overlay nor the item
-   * slide offset, which is most of what a z-order or coordinate bug would move.
-   *
-   * Unlike the classic/enhanced probes this is NOT byte-exact, and the reason is
-   * structural rather than a tolerance chosen to make it pass: the classic oracle
-   * (RgbaScreen) is pure JS with defined rounding, whereas this oracle is the browser's
-   * own canvas-2D `drawImage`, which blends in PREMULTIPLIED space with rounding no
-   * specification pins down. Two roundings of the same blend differ by ±1 per channel
-   * on anti-aliased sprite edges. See tools/test-gl-room-ai.mjs for the gate.
-   */
-  /**
-   * Test probe: is the `ai` tier's water actually sampled at ×S — and is it the RIGHT
-   * curve?
-   *
-   * Renders the BACKGROUND LAYER ONLY on the GPU (no sprites, so nothing else can mask
-   * or explain a difference) and measures it three ways. Each answers a question the
-   * CPU↔GPU parity probe structurally cannot, because that probe now compares two
-   * backends that are deliberately allowed to differ here.
-   *
-   * 1. `oracleMax` — vs a JS reimplementation of BG_FS (the continuous curve from
-   *    `smoothWobbleShift`, linearly interpolated between source columns, then the wall
-   *    composited over it), built from this room's SOURCE art rather than from the other
-   *    AI backend. Precisely what it is independent OF is worth stating, because it is
-   *    not everything: it is independent of the GLSL and of both backends, so a rule
-   *    broken identically on both AI targets — the `dissolveKeeps` failure mode — shows
-   *    up here. It is NOT independent of the shared JS rule (`smoothWobbleShift`,
-   *    `activeRipples`, `wobblePhase`), which the shader is fed from; that half is
-   *    pinned instead by test/roomAi.test.ts against the faithful `waterShift`, and by
-   *    tools/mutate-room-walk.mjs.
-   * 2. `bandedMax` — vs the FAITHFUL banded expectation. This one must be LARGE: it is
-   *    the negative control that catches a silent regression to the quantized shader,
-   *    which check 1 alone would happily accept if the oracle regressed with it.
-   * 3. `exactRows` / `bandsVarying` — measured on the pixels, with no reference image at
-   *    all. A banded integer shift makes every output row an EXACT integer translation
-   *    of its source row, so the L1 residual at the best integer shift is 0 for 100 % of
-   *    rows, and the estimated shift is CONSTANT across all `scale` rows of a native
-   *    band. A fractional per-scaled-row shift breaks both. So `exactRows` must fall well
-   *    below 1 and `bandsVarying` must rise well above 0 — a screenshot cannot see either.
-   *
-   * Rows are scored only across the widest run of FULLY TRANSPARENT wall columns, where
-   * the composite is the background unaltered; a row whose run is too short is skipped.
-   */
-  /**
-   * Capture aid: the wall-over-wobbled-background layer at ×S, as a PNG data URL.
-   *
-   * Deterministic — the tick and sub-tick fraction are arguments, not whatever the live
-   * loop happens to be on — so the two backends can be captured at the SAME instant and
-   * put side by side. That is the whole point: since canvas-2D keeps the faithful 1998
-   * sampling and the GPU samples at ×S, `{ cpu: true }` and `{ cpu: false }` at one
-   * `count` are exactly the before/after pair for this change.
-   *
-   * Crops rather than returning the whole ×S frame by default: room 3's is 2400×2100,
-   * and the band seams are only legible at 1:1 anyway.
-   */
-  aiBgCapture: (opts: { x?: number; y?: number; w?: number; h?: number; at?: number; alpha?: number; cpu?: boolean } = {}) => {
-    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
-    const S = aiRoom.scale;
-    const geom = roomGeometry(room);
-    const W = geom.nativeW * S;
-    const H = geom.nativeH * S;
-    const x = Math.max(0, Math.min(W - 1, opts.x ?? 0));
-    const y = Math.max(0, Math.min(H - 1, opts.y ?? 0));
-    const w = Math.max(1, Math.min(W - x, opts.w ?? W));
-    const h = Math.max(1, Math.min(H - y, opts.h ?? H));
-    const at = opts.at ?? count;
-    const alpha = opts.alpha ?? 0;
-    const out = document.createElement('canvas');
-    out.width = w;
-    out.height = h;
-    const og = out.getContext('2d');
-    if (!og) return null;
-    og.imageSmoothingEnabled = false;
-    if (opts.cpu) {
-      const cv = document.createElement('canvas');
-      cv.width = W;
-      cv.height = H;
-      const c2 = cv.getContext('2d', { willReadFrequently: true });
-      if (!c2) return null;
-      c2.clearRect(0, 0, W, H);
-      aiRoom.drawBackgroundInto(new Canvas2dAiTarget(c2), room, at, alpha);
-      og.drawImage(cv, x, y, w, h, 0, 0, w, h);
-    } else {
-      const comp = glAiCompositor();
-      if (!comp) return null;
-      comp.track(aiRoom);
-      if (!comp.begin(W, H)) return null;
-      aiRoom.drawBackgroundInto(comp, room, at, alpha);
-      const px = comp.readback();
-      if (px.w !== W || px.h !== H) return null;
-      const img = og.createImageData(w, h);
-      for (let r = 0; r < h; r++) {
-        const src = ((y + r) * W + x) * 4;
-        img.data.set(px.rgba.subarray(src, src + w * 4), r * w * 4);
-      }
-      og.putImageData(img, 0, 0);
-    }
-    return out.toDataURL('image/png');
-  },
-  /**
-   * The live ripple tuning (src/render/aiTarget.ts). Returned by reference so a capture
-   * or tuning probe can sweep the look without a rebuild; the game never writes to it.
-   */
-  rippleTuning: () => RIPPLE,
-  /** Vector-subtitle size in the `ai` tier, as a fraction of the faithful size. */
-  subScale: (v?: number) => {
-    if (v !== undefined) {
-      aiSubScale = Math.max(0.2, Math.min(1, v));
-      subOverlaySig = ''; // the overlay caches on a signature; force the next repaint
-      forceRoomRedraw = true;
-      wake();
-    }
+  get aiSubScale() {
     return aiSubScale;
   },
-  /** Idle water wake period in ms (see waterAnimMs) — the perf/smoothness trade, live. */
-  waterAnimMs: (ms?: number) => {
-    if (ms !== undefined) {
-      waterAnimMs = Math.max(16, Math.min(80, ms));
-      forceRoomRedraw = true;
-      wake();
-    }
+  set aiSubScale(v: number) {
+    aiSubScale = v;
+  },
+  get aiWaterAnimating() {
+    return aiWaterAnimating;
+  },
+  get aiWorldMap() {
+    return aiWorldMap;
+  },
+  get alpha() {
+    return alpha;
+  },
+  get applySubFont() {
+    return applySubFont;
+  },
+  get audio() {
+    return audio;
+  },
+  get bestRecord() {
+    return bestRecord;
+  },
+  get bestRecords() {
+    return bestRecords;
+  },
+  get canSave() {
+    return canSave;
+  },
+  get casHry() {
+    return casHry;
+  },
+  get chatter() {
+    return chatter;
+  },
+  get cheated() {
+    return cheated;
+  },
+  get classicArtFor() {
+    return classicArtFor;
+  },
+  get clickCell() {
+    return clickCell;
+  },
+  get clickMapAt() {
+    return clickMapAt;
+  },
+  get closeHelp() {
+    return closeHelp;
+  },
+  get closeMapInfo() {
+    return closeMapInfo;
+  },
+  get closeMapOverlay() {
+    return closeMapOverlay;
+  },
+  get count() {
+    return count;
+  },
+  get creditMode() {
+    return creditMode;
+  },
+  get credits() {
+    return credits;
+  },
+  get creditsStart() {
+    return creditsStart;
+  },
+  set creditsStart(v: number) {
+    creditsStart = v;
+  },
+  get curNum() {
+    return curNum;
+  },
+  get cutscene() {
+    return cutscene;
+  },
+  get deskyLang() {
+    return deskyLang;
+  },
+  get dispatchMapCorner() {
+    return dispatchMapCorner;
+  },
+  get enableWebgl() {
+    return enableWebgl;
+  },
+  get engine() {
+    return engine;
+  },
+  get enhancedArt() {
+    return enhancedArt;
+  },
+  get enhancedArtActive() {
+    return enhancedArtActive;
+  },
+  get enhancedArtFor() {
+    return enhancedArtFor;
+  },
+  get enhancedPending() {
+    return enhancedPending;
+  },
+  get enterRoom() {
+    return enterRoom;
+  },
+  get feedback() {
+    return feedback;
+  },
+  get ffr() {
+    return ffr;
+  },
+  get fishFrameFor() {
+    return fishFrameFor;
+  },
+  get fishSprites() {
+    return fishSprites;
+  },
+  get forceBest() {
+    return forceBest;
+  },
+  get forceRoomRedraw() {
+    return forceRoomRedraw;
+  },
+  set forceRoomRedraw(v: boolean) {
+    forceRoomRedraw = v;
+  },
+  get glAiCompositor() {
+    return glAiCompositor;
+  },
+  get glChannelDiff() {
+    return glChannelDiff;
+  },
+  get glCompositor() {
+    return glCompositor;
+  },
+  get glFailed() {
+    return glFailed;
+  },
+  get glParityCompare() {
+    return glParityCompare;
+  },
+  get graphics() {
+    return graphics;
+  },
+  get heldState() {
+    return heldState;
+  },
+  get helpOpen() {
+    return helpOpen;
+  },
+  get helpScreens() {
+    return helpScreens;
+  },
+  get hooks() {
+    return hooks;
+  },
+  get idle() {
+    return idle;
+  },
+  get idleTimer() {
+    return idleTimer;
+  },
+  get inReplay() {
+    return inReplay;
+  },
+  get intro() {
+    return intro;
+  },
+  get introMovie() {
+    return introMovie;
+  },
+  get lastLine() {
+    return lastLine;
+  },
+  get lastRoomBackend() {
+    return lastRoomBackend;
+  },
+  get lastRoomSig() {
+    return lastRoomSig;
+  },
+  get legImage() {
+    return legImage;
+  },
+  get legImageAi() {
+    return legImageAi;
+  },
+  get legImageNum() {
+    return legImageNum;
+  },
+  get linesSpoken() {
+    return linesSpoken;
+  },
+  get loadGame() {
+    return loadGame;
+  },
+  get loadmode() {
+    return loadmode;
+  },
+  get logoMovie() {
+    return logoMovie;
+  },
+  get loopThrottleOk() {
+    return loopThrottleOk;
+  },
+  get loopTicks() {
+    return loopTicks;
+  },
+  get mapArtPending() {
+    return mapArtPending;
+  },
+  get mapHoverCorner() {
+    return mapHoverCorner;
+  },
+  set mapHoverCorner(v: MapAction | null) {
+    mapHoverCorner = v;
+  },
+  get mapInfoFaze() {
+    return mapInfoFaze;
+  },
+  get mapInfoHover() {
+    return mapInfoHover;
+  },
+  get mapInfoRoom() {
+    return mapInfoRoom;
+  },
+  get mapOverlay() {
+    return mapOverlay;
+  },
+  get mapPresented() {
+    return mapPresented;
+  },
+  get openCredits() {
+    return openCredits;
+  },
+  get openHelp() {
+    return openHelp;
+  },
+  get openMapInfo() {
+    return openMapInfo;
+  },
+  get openMapOptions() {
+    return openMapOptions;
+  },
+  get ostav() {
+    return ostav;
+  },
+  get panel() {
+    return panel;
+  },
+  get panelAction() {
+    return panelAction;
+  },
+  get panelState() {
+    return panelState;
+  },
+  get playTime() {
+    return playTime;
+  },
+  get poslMluv() {
+    return poslMluv;
+  },
+  get previewSubFont() {
+    return previewSubFont;
+  },
+  get renderer() {
+    return renderer;
+  },
+  set renderer(v: "cpu" | "webgl") {
+    renderer = v;
+  },
+  get replayIntro() {
+    return replayIntro;
+  },
+  get replaymode() {
+    return replaymode;
+  },
+  get restartRoom() {
+    return restartRoom;
+  },
+  get room() {
+    return room;
+  },
+  get roomArtPending() {
+    return roomArtPending;
+  },
+  get roomDepth() {
+    return roomDepth;
+  },
+  get roomGeometry() {
+    return roomGeometry;
+  },
+  get roomLoadSeq() {
+    return roomLoadSeq;
+  },
+  get roomLoading() {
+    return roomLoading;
+  },
+  get roomPaints() {
+    return roomPaints;
+  },
+  get saveExists() {
+    return saveExists;
+  },
+  get saveGame() {
+    return saveGame;
+  },
+  get saveSolved() {
+    return saveSolved;
+  },
+  get scores() {
+    return scores;
+  },
+  get screen() {
+    return screen;
+  },
+  get screenShoveX() {
+    return screenShoveX;
+  },
+  get scroll() {
+    return scroll;
+  },
+  get setGraphics() {
+    return setGraphics;
+  },
+  get setRenderOnDirty() {
+    return setRenderOnDirty;
+  },
+  get setSubtitleMode() {
+    return setSubtitleMode;
+  },
+  get settings() {
+    return settings;
+  },
+  get showLegImage() {
+    return showLegImage;
+  },
+  get showMap() {
+    return showMap;
+  },
+  get showmode() {
+    return showmode;
+  },
+  get showmodeHelptext() {
+    return showmodeHelptext;
+  },
+  get showmodeLoading() {
+    return showmodeLoading;
+  },
+  get showmodeTrace() {
+    return showmodeTrace;
+  },
+  get showmodeTraceOn() {
+    return showmodeTraceOn;
+  },
+  set showmodeTraceOn(v: boolean) {
+    showmodeTraceOn = v;
+  },
+  get skipCutscene() {
+    return skipCutscene;
+  },
+  get smoothLog() {
+    return smoothLog;
+  },
+  set smoothLog(v: { t: number; n: number; a: number; cf: number; x: number; y: number; ph: string; }[] | null) {
+    smoothLog = v;
+  },
+  get solved() {
+    return solved;
+  },
+  get startCutscene() {
+    return startCutscene;
+  },
+  get startShowmode() {
+    return startShowmode;
+  },
+  get subFontFamily() {
+    return subFontFamily;
+  },
+  get subFontIdx() {
+    return subFontIdx;
+  },
+  get subFontReady() {
+    return subFontReady;
+  },
+  get subFontWeight() {
+    return subFontWeight;
+  },
+  get subLang() {
+    return subLang;
+  },
+  get subOverlayGate() {
+    return subOverlayGate;
+  },
+  set subOverlayGate(v: boolean) {
+    subOverlayGate = v;
+  },
+  get subOverlayPainted() {
+    return subOverlayPainted;
+  },
+  set subOverlayPainted(v: boolean) {
+    subOverlayPainted = v;
+  },
+  get subOverlayPaints() {
+    return subOverlayPaints;
+  },
+  get subOverlaySig() {
+    return subOverlaySig;
+  },
+  set subOverlaySig(v: string) {
+    subOverlaySig = v;
+  },
+  get subs() {
+    return subs;
+  },
+  get syncSubOverlay() {
+    return syncSubOverlay;
+  },
+  get talk() {
+    return talk;
+  },
+  get togglePanelOptions() {
+    return togglePanelOptions;
+  },
+  get tryStep() {
+    return tryStep;
+  },
+  get wake() {
+    return wake;
+  },
+  get waterAnimMs() {
     return waterAnimMs;
   },
-  /**
-   * Live ripple state for the tuning lab (tools/ripple-lab.html): what is on screen now,
-   * and how long until the next train. `startTrainNow` shifts the birth schedule so one
-   * begins immediately, rather than making the tuner wait out `periodTicks`.
-   */
-  rippleState: () => {
-    if (!room) return null;
-    const w: AiWobble = {
-      wamp: room.wamp, wper: room.wper, wspd: room.wspd, count, time: count + alpha,
-    };
-    const clock = w.time + RIPPLE.offsetTicks;
-    const active = activeRipples(w, roomGeometry(room).nativeH);
-    return {
-      wamp: room.wamp,
-      wobbles: room.wamp !== 0,
-      active: active.length,
-      // Gaps are jittered, so "when is the next one" has to be asked of the schedule
-      // rather than derived from the period.
-      nextInTicks: +(nextRippleBirth(clock, RIPPLE) - clock).toFixed(1),
-      inTrain: active.length > 0,
-    };
+  set waterAnimMs(v: number) {
+    waterAnimMs = v;
   },
-  startTrainNow: () => {
-    if (!room) return;
-    const clock = count + alpha + RIPPLE.offsetTicks;
-    RIPPLE.offsetTicks += nextRippleBirth(clock, RIPPLE) - clock;
-    forceRoomRedraw = true;
+  get worldMap() {
+    return worldMap;
   },
-  aiWobbleCheck: (opts: { alpha?: number; minRun?: number } = {}) => {
-    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
-    const comp = glAiCompositor();
-    if (!comp) return { webgl: false };
-    const art = aiRoom.backgroundArt(room);
-    if (!art) return { webgl: true, noArt: true };
-    const S = aiRoom.scale;
-    const geom = roomGeometry(room);
-    const W = geom.nativeW * S;
-    const H = geom.nativeH * S;
-    const alpha = opts.alpha ?? 0;
-    const minRun = opts.minRun ?? 160;
-
-    comp.track(aiRoom);
-    if (!comp.begin(W, H)) return { webgl: true, unsupported: true };
-    aiRoom.drawBackgroundInto(comp, room, count, alpha);
-    const gpu = comp.readback();
-    if (gpu.w !== W || gpu.h !== H) return { webgl: true, dimMismatch: true };
-
-    const grab = (img: { width: number; height: number }): Uint8ClampedArray | null => {
-      const cv = document.createElement('canvas');
-      cv.width = W;
-      cv.height = H;
-      const g = cv.getContext('2d', { willReadFrequently: true });
-      if (!g) return null;
-      g.clearRect(0, 0, W, H);
-      g.drawImage(img as CanvasImageSource, 0, 0);
-      return g.getImageData(0, 0, W, H).data;
-    };
-    const bgPx = grab(art.bg);
-    const wallPx = grab(art.wall);
-    if (!bgPx || !wallPx) return { webgl: true, noCanvas: true };
-
-    const wobbles = room.wamp !== 0;
-    const w: AiWobble = {
-      wamp: room.wamp, wper: room.wper, wspd: room.wspd, count, time: count + alpha,
-    };
-    const phase = wobblePhase(w);
-    const ripples = activeRipples(w, geom.nativeH);
-    const banded = wobbles ? faithfulWobbleShifts(w, geom.nativeH) : null;
-
-    let oracleMax = 0;
-    let bandedMax = 0;
-    let rippleDelta = 0;
-    let sq = 0;
-    let n = 0;
-    const estimates = new Int32Array(H).fill(0x7fffffff);
-    let scored = 0;
-    let exact = 0;
-
-    for (let y = 0; y < H; y++) {
-      const sh = wobbles ? smoothWobbleShift(y, S, w, phase, ripples) : 0;
-      const f = Math.floor(sh);
-      const frac = sh - f;
-      // Same instant with the ripple term removed: how much the trains actually moved
-      // the picture. If the shader ignored uRip this collapses to the oracle's own floor.
-      const shNoRip = wobbles ? smoothWobbleShift(y, S, w, phase) : 0;
-      const fN = Math.floor(shNoRip);
-      const fracN = shNoRip - fN;
-      const kBand = banded ? banded[Math.min(geom.nativeH - 1, Math.floor(y / S))]! * S : 0;
-      const rowOff = y * W * 4;
-      // Longest fully-transparent wall run on this row (where composite === background).
-      let bestLen = 0, bestStart = -1, runStart = -1;
-      for (let x = 0; x <= W; x++) {
-        const clear = x < W && wallPx[rowOff + x * 4 + 3] === 0;
-        if (clear) { if (runStart < 0) runStart = x; }
-        else if (runStart >= 0) {
-          if (x - runStart > bestLen) { bestLen = x - runStart; bestStart = runStart; }
-          runStart = -1;
-        }
-      }
-      for (let x = 0; x < W; x++) {
-        const o = rowOff + x * 4;
-        const wa = wallPx[o + 3]! / 255;
-        // BG_FS, restated in FP64: bilerp the background, then wall over it.
-        const c0 = Math.min(Math.max(x + f, 0), W - 1);
-        const c1 = Math.min(Math.max(x + f + 1, 0), W - 1);
-        const cb = Math.min(Math.max(x + kBand, 0), W - 1);
-        for (let ch = 0; ch < 3; ch++) {
-          const a = bgPx[rowOff + c0 * 4 + ch]!;
-          const b = bgPx[rowOff + c1 * 4 + ch]!;
-          const bg = wobbles ? a + (b - a) * frac : a;
-          const want = wallPx[o + ch]! * wa + bg * (1 - wa);
-          const got = gpu.rgba[o + ch]!;
-          const d = Math.abs(want - got);
-          if (d > oracleMax) oracleMax = d;
-          sq += d * d;
-          n++;
-          const wantB = wallPx[o + ch]! * wa + bgPx[rowOff + cb * 4 + ch]! * (1 - wa);
-          const dB = Math.abs(wantB - got);
-          if (dB > bandedMax) bandedMax = dB;
-          const n0 = Math.min(Math.max(x + fN, 0), W - 1);
-          const n1 = Math.min(Math.max(x + fN + 1, 0), W - 1);
-          const na = bgPx[rowOff + n0 * 4 + ch]!;
-          const nb = bgPx[rowOff + n1 * 4 + ch]!;
-          const wantN = wallPx[o + ch]! * wa + (wobbles ? na + (nb - na) * fracN : na) * (1 - wa);
-          const dN = Math.abs(wantN - got);
-          if (dN > rippleDelta) rippleDelta = dN;
-        }
-      }
-      // Best INTEGER shift of this row against its own source row, and its residual.
-      if (bestLen >= minRun) {
-        const span = Math.min(bestLen, 800);
-        const lim = Math.ceil((room.wamp / 2) * S) + 2;
-        let bestD = 0, bestErr = Infinity;
-        for (let d = -lim; d <= lim; d++) {
-          let err = 0;
-          for (let x = bestStart; x < bestStart + span; x += 2) {
-            const src = Math.min(Math.max(x + d, 0), W - 1);
-            err += Math.abs(gpu.rgba[rowOff + x * 4 + 1]! - bgPx[rowOff + src * 4 + 1]!);
-            if (err >= bestErr) break;
-          }
-          if (err < bestErr) { bestErr = err; bestD = d; }
-        }
-        estimates[y] = bestD;
-        scored++;
-        if (bestErr === 0) exact++;
-      }
-    }
-
-    // Does the estimated shift vary WITHIN a native band? (Banded ⇒ never.)
-    let bands = 0, varying = 0;
-    for (let i = 0; i * S + S <= H; i++) {
-      let ok = true;
-      let vary = false;
-      const first = estimates[i * S]!;
-      for (let r = 0; r < S; r++) {
-        const e = estimates[i * S + r]!;
-        if (e === 0x7fffffff) { ok = false; break; }
-        if (e !== first) vary = true;
-      }
-      if (!ok) continue;
-      bands++;
-      if (vary) varying++;
-    }
-
-    return {
-      webgl: true,
-      w: W, h: H, scale: S, wobbles, alpha,
-      wamp: room.wamp, wper: room.wper, wspd: room.wspd,
-      ripples: ripples.length,
-      oracleMax,
-      oracleRmse: Math.sqrt(sq / Math.max(1, n)),
-      bandedMax,
-      rippleDelta,
-      scoredRows: scored,
-      exactRows: scored ? exact / scored : 1,
-      bands,
-      bandsVarying: bands ? varying / bands : 0,
-    };
-  },
-  aiGlParity: (opts: { stillWater?: boolean } = {}) => {
-    if (!room || !aiRoom || aiRoomNum !== curNum) return null;
-    const comp = glAiCompositor();
-    if (!comp) return { webgl: false };
-    const geom = roomGeometry(room);
-    const w = geom.nativeW * aiRoom.scale;
-    const h = geom.nativeH * aiRoom.scale;
-    const f: AiRoomFrame = {
-      count,
-      slide: 0.5,
-      fishAnim: {
-        little: { bodyFrame: TL_PLAV[1]!, headFrame: HL_MRK },
-        big: { bodyFrame: TL_NAHORU[1]!, headFrame: HL_TLACI },
-      },
-    };
-    // STILL WATER. The two backends deliberately sample the wobble differently now (the
-    // GPU per fragment at ×S, canvas-2D at 1998's quantization), so a wobbling room can
-    // no longer be byte-compared — in 70 of 72 rooms. Rather than widen the tolerance and
-    // lose the net for EVERYTHING ELSE, the comparison is made with the wave switched
-    // off: `wamp = 0` puts both backends on the identical `texelFetch(x)` path, and every
-    // other primitive — wall alpha compositing, items, fish, mirror, rope, wreck,
-    // dissolve, the classic-sprite fallback — is then held to exactly the gate it was
-    // held to before. Rooms 46 and 66 already have `wamp === 0`, so they run this probe
-    // untouched and act as the control that the override itself is not what produces the
-    // match. Restored in `finally`: a probe must not leave the room's water switched off.
-    const savedWamp = room.wamp;
-    if (opts.stillWater) room.wamp = 0;
-    try {
-      const cv = document.createElement('canvas');
-      cv.width = w;
-      cv.height = h;
-      const c2 = cv.getContext('2d', { willReadFrequently: true });
-      if (!c2) return { webgl: true, noCanvas: true };
-      c2.setTransform(1, 0, 0, 1, 0, 0);
-      c2.clearRect(0, 0, w, h);
-      aiRoom.drawInto(new Canvas2dAiTarget(c2), room, f); // scratch target: see aiRenderBench
-      const cpu = new Uint8Array(c2.getImageData(0, 0, w, h).data.buffer.slice(0));
-      comp.track(aiRoom);
-      comp.begin(w, h);
-      aiRoom.drawInto(comp, room, f);
-      const gpu = comp.readback();
-      if (gpu.w !== w || gpu.h !== h) return { webgl: true, dimMismatch: true };
-      return { webgl: true, w, h, stillWater: opts.stillWater === true, ...glChannelDiff(cpu, gpu.rgba, w) };
-    } finally {
-      room.wamp = savedWamp;
-    }
-  },
-  // Test probe: same, through the ENHANCED (FFNG truecolor) art source.
-  // `enh` reports whether the FFNG masters were actually engaged for this room.
-  glEnhParity: () => {
-    if (!room) return null;
-    const r = glParityCompare(enhancedArtFor(room));
-    if (r && typeof r === 'object' && 'webgl' in r && r.webgl) (r as Record<string, unknown>).enh = enhancedArt !== null;
-    return r;
-  },
-  // Live-state parity probe (classic art): compares the GPU vs CPU frame with
-  // NON-resting content — an explicit swim body + head overlay (exercises the
-  // FISH_FS head/body split), the current fishing hooks (setIndex line/glyph +
-  // caught-fish composite), a dead fish's disintegrating skeleton (DISINT_FS
-  // randpole dither, when a fish has been killed), and baked classic subtitles
-  // (setIndex text) drawn into BOTH targets. These paths are untouched by the
-  // resting-pose glRoomParity. Byte-exact expected (max=0). The test drives the
-  // scenario (spawnHook / killFish / pushSubtitle) before calling this.
-  glLiveParity: () => {
-    if (!room) return null;
-    const comp = glCompositor();
-    if (!comp) return { webgl: false };
-    const art = classicArtFor(room);
-    const opts = {
-      count,
-      slide: 0.5,
-      fishAnim: {
-        little: { bodyFrame: TL_PLAV[1]!, headFrame: HL_MRK },
-        big: { bodyFrame: TL_NAHORU[1]!, headFrame: HL_TLACI },
-      },
-      hooks: hooks.snapshot,
-    };
-    const cpu = renderRoomRgba(room, art, opts);
-    subs?.draw(cpu, count); // baked classic subtitles (setIndex on the CPU target)
-    comp.begin(cpu.width, cpu.height, room.palette);
-    renderRoomInto(comp, room, art, opts);
-    subs?.draw(comp, count); // baked classic subtitles (setIndex on the GPU target)
-    if (comp.unsupported) return { webgl: true, unsupported: true };
-    const gpu = comp.readback();
-    if (gpu.w !== cpu.width || gpu.h !== cpu.height) return { webgl: true, dimMismatch: true };
-    return { webgl: true, w: gpu.w, h: gpu.h, ...glChannelDiff(cpu.rgba, gpu.rgba) };
-  },
-  // Cutscene GPU parity probe: render the current briefcase-demo frame through the
-  // GPU indexed path (GlScreen.renderIndexed → offscreen FBO) and compare to a CPU
-  // IndexedScreen.toRgba of the same palette-indexed pixels. The FBO is sampled
-  // NEAREST from a palette LUT, so it is byte-exact (max=0); the LINEAR present
-  // upscale is cosmetic and NOT part of this comparison (readback reads the FBO,
-  // not the presented canvas). Requires an active cutscene.
-  glCutsceneParity: () => {
-    if (!cutscene) return null;
-    const comp = glCompositor();
-    if (!comp) return { webgl: false };
-    const w = cutscene.width;
-    const h = cutscene.height;
-    comp.renderIndexed(cutscene.pixels, w, h, cutscene.palette);
-    const gpu = comp.readback();
-    const frame = new IndexedScreen(w, h);
-    frame.px.set(cutscene.pixels);
-    const cpu = frame.toRgba(cutscene.palette);
-    if (gpu.w !== w || gpu.h !== h) return { webgl: true, dimMismatch: true };
-    return { webgl: true, w, h, ...glChannelDiff(cpu, gpu.rgba) };
-  },
-  // Present-filter probe (guards a LINEAR-filter leak the parity suite can't catch,
-  // since it reads the FBO not the canvas). Renders a 2px black→white step, then
-  // presents it upscaled to 16px three times and reads the CANVAS back each time:
-  // crisp (NEAREST, no intermediate greys) → smooth (LINEAR, intermediate greys) →
-  // crisp again (asserts the smooth present didn't leave the filter LINEAR).
-  glPresentFilterProbe: () => {
-    const comp = glCompositor();
-    if (!comp) return { webgl: false };
-    const pal = [
-      { r: 0, g: 0, b: 0 },
-      { r: 255, g: 255, b: 255 },
-    ];
-    const W = 16;
-    comp.renderIndexed(new Uint8Array([0, 1]), 2, 1, pal);
-    const intermediates = (smooth: boolean): number => {
-      const buf = comp.presentReadback(W, 1, smooth);
-      let n = 0;
-      for (let x = 0; x < W; x++) {
-        const r = buf[x * 4]!;
-        if (r > 20 && r < 235) n++; // a value between the two step colours ⇒ interpolation
-      }
-      return n;
-    };
-    const crisp1 = intermediates(false);
-    const smooth = intermediates(true);
-    const crisp2 = intermediates(false);
-    return { webgl: true, crisp1, smooth, crisp2 };
-  },
-  subFontReady: () => subFontReady,
-  // the current art source (classic/enhanced). Isolates the compositing+present
-  // cost from the rAF vsync cap, so it reveals real headroom (both backends sit
-  // at 60fps under vsync when there's slack). WebGL is timed with a gl.finish()
-  // per frame so real GPU execution — not just async command submission — counts.
-  benchRender: (mode: 'cpu' | 'webgl', frames = 120, warmup = 20) => {
-    if (!room) return null;
-    const art = enhancedArtActive() ? enhancedArtFor(room) : classicArtFor(room);
-    const { nativeW: sw, nativeH: sh, scale: benchCs } = roomGeometry(room);
-    const opts = { count };
-    const samples: number[] = [];
-    // The ZX room's blitZX advances room.zx every render; snapshot it so the
-    // benchmark (warmup + frames iterations) leaves the live animation untouched.
-    const zxSnap = room.gspec === 42 ? { ...room.zx } : null;
-    if (mode === 'webgl') {
-      const comp = glCompositor();
-      if (!comp) return { mode, webgl: false };
-      const dpr = window.devicePixelRatio || 1;
-      const bw = Math.round(sw * benchCs * dpr);
-      const bh = Math.round(sh * benchCs * dpr);
-      const one = (): void => {
-        comp.begin(sw, sh, room!.palette);
-        renderRoomInto(comp, room!, art, opts);
-        comp.present(bw, bh);
-        comp.finish(); // flush GPU so the timing includes execution, not just submission
-      };
-      for (let i = 0; i < warmup; i++) one();
-      for (let i = 0; i < frames; i++) {
-        const t0 = performance.now();
-        one();
-        samples.push(performance.now() - t0);
-      }
-    } else {
-      const one = (): void => {
-        const s = renderRoomRgba(room!, art, opts);
-        ctx.putImageData(new ImageData(new Uint8ClampedArray(s.rgba), sw, sh), 0, 0);
-      };
-      for (let i = 0; i < warmup; i++) one();
-      for (let i = 0; i < frames; i++) {
-        const t0 = performance.now();
-        one();
-        samples.push(performance.now() - t0);
-      }
-    }
-    samples.sort((a, b) => a - b);
-    if (zxSnap) Object.assign(room.zx, zxSnap); // restore ZX animation state
-    const sum = samples.reduce((a, b) => a + b, 0);
-    const median = samples[Math.floor(samples.length / 2)]!;
-    const p95 = samples[Math.floor(samples.length * 0.95)]!;
-    const mean = sum / samples.length;
-    return {
-      mode,
-      webgl: true,
-      w: sw,
-      h: sh,
-      frames,
-      min: samples[0]!,
-      median,
-      mean,
-      p95,
-      fps: 1000 / mean,
-    };
-  },
-  /**
-   * Perf probe for the enhanced subtitle overlay: times the exact work draw()
-   * does per frame for the vector subtitles (full-overlay clear + scaled
-   * drawVector), isolated from the room render and the rAF vsync cap. `at` pins
-   * the tick so the wave state can't drift mid-measurement; pass a rising count
-   * to model the animating case. Each iteration ends with a 1x1 readback so the
-   * 2D commands are actually rasterized inside the timed window instead of being
-   * batched away.
-   */
-  benchSubs: (frames = 120, warmup = 20, at = count, advance = false) => {
-    if (!subs?.active || !room) return null;
-    const { scale: cs } = roomGeometry(room);
-    syncSubOverlay();
-    const dpr = window.devicePixelRatio || 1;
-    let tick = at;
-    const run = (draw: boolean, flush: boolean): number[] => {
-      const one = (): void => {
-        subCtx.setTransform(1, 0, 0, 1, 0, 0);
-        subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-        if (draw) {
-          subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-          subs!.drawVector(subCtx, advance ? tick++ : at, subFontFamily, subFontWeight);
-        }
-        if (flush) {
-          subCtx.setTransform(1, 0, 0, 1, 0, 0);
-          subCtx.getImageData(0, 0, 1, 1); // force rasterization inside the timed window
-        }
-      };
-      for (let i = 0; i < warmup; i++) one();
-      const s: number[] = [];
-      for (let i = 0; i < frames; i++) {
-        const t0 = performance.now();
-        one();
-        s.push(performance.now() - t0);
-      }
-      return s.sort((a, b) => a - b);
-    };
-    const stat = (s: number[]): { min: number; median: number; mean: number; p95: number } => ({
-      min: s[0]!,
-      median: s[Math.floor(s.length / 2)]!,
-      mean: s.reduce((a, b) => a + b, 0) / s.length,
-      p95: s[Math.floor(s.length * 0.95)]!,
-    });
-    const full = stat(run(true, true));
-    const clearOnly = stat(run(false, true));
-    const noFlush = stat(run(true, false));
-    subOverlayPainted = true;
-    subOverlaySig = ''; // the probe painted behind the gate's back — force a repaint
-    return {
-      frames,
-      chars: subs.lineChars,
-      lines: subs.lineCount,
-      overlay: `${subCanvas.width}x${subCanvas.height}`,
-      ...full,
-      clearOnly,
-      noFlush,
-    };
-  },
-  chatCount: () => audio.entryCount('x03'),
-  deathBank: () => audio.entryCount('x02'),
-  roomDepth: () => roomDepth,
-  killFish: (which: 'little' | 'big') => {
-    room?.killFish(which);
-  },
-  /** Send a fish out of the room (stav_ven end): zije:=false, venku:=true. */
-  exitFish: (which: 'little' | 'big') => {
-    room?.exitFish(which);
-  },
-  setTrepat: (v: number) => {
-    if (activeScript) activeScript.s.trepat = v;
-  },
-  canvasTransform: () => canvas.style.transform,
-  // Force the ambient-chatter timer due, so the next tick fires a StdKecej line.
-  makeChatterDue: () => {
-    if (chatter) chatter.last = count - chatter.interval - 1;
-  },
-  startCutscene: () => void startCutscene(),
-  cutsceneDone: () => cutscene?.done ?? null,
-  cutsceneActive: () => cutscene !== null,
-  skipCutscene: () => skipCutscene(),
-  setLang: (l: SubtitleMode) => {
-    setSubtitleMode(l);
-  },
-  // Force a fish to swim out (demonstrates the stav_ven exit animation + win).
-  forceExit: (which: 'little' | 'big', dir: number = Dir.left) => {
-    if (!room || !engine || engine.phase !== 'idle' || room.won) return;
-    const idx = which === 'little' ? room.littleIdx : room.bigIdx;
-    engine.exiting = { which, dir };
-    engine.exitFrames = exitFramesFor(which, dir);
-    room.items[idx]!.dir = dir;
-    if (dir === Dir.left) room.facingRight[which] = false;
-    else if (dir === Dir.right) room.facingRight[which] = true;
-    engine.phase = 'exit';
-    engine.animFrame = 0;
-  },
-  // Dev-only "Win room" (dev-bar button / Shift+W hotkey): genuinely win via the real path.
-  winRoom: () => devWinRoom(),
-  // ZELVA telepathic possession (natvrdo): force the turtle to seize a fish and
-  // drive it to (tx,ty); read the flag and the fish's current cell.
-  natvrdo: () => activeScript?.s.natvrdo ?? 0,
-  screenShove: () => screenShoveX,
-  screenOffset: () => (activeScript ? { ...activeScript.s.screenOffset } : { x: 0, y: 0 }),
-  roompole: (i: number) => activeScript?.s.roompole[i] ?? 0,
-  // KAJUTA1 screen-shove testing: arm gspec, and push the big fish a step (returns the
-  // step result + resulting gspec/shove) so a probe can drive a wall-push deterministically.
-  setGspec: (n: number) => {
-    if (room) room.gspec = n;
-  },
-  bigPush: (dir: number) => {
-    const r = tryStep('big', dir);
-    return { result: r, gspec: room?.gspec ?? 0, shove: screenShoveX };
-  },
-  possess: (tvrdaryba: number, tx: number, ty: number) => {
-    if (activeScript) {
-      activeScript.s.tvrdaryba = tvrdaryba;
-      activeScript.s.tvrdex = tx;
-      activeScript.s.tvrdey = ty;
-      activeScript.s.natvrdo = 1;
-    }
-  },
-  fishCell: (which: 'little' | 'big') => {
-    if (!room) return null;
-    const it = room.items[which === 'little' ? room.littleIdx : room.bigIdx];
-    return it ? { x: it.x, y: it.y } : null;
-  },
-  // BUG-001 busy-input-gate testing: read/stage a fish's `busy` flag so a probe can
-  // verify that input is dropped (fish stays put, keeps facing the player) while it talks.
-  busy: (which: 'little' | 'big') => (room ? room.busy[which] : 0),
-  setBusy: (which: 'little' | 'big', val: number) => {
-    if (room) room.busy[which] = val;
-  },
-  // Debug: place a fish at a cell (used to stage the KUFRIK demo spot before forcing
-  // showmode, since the recording's waypoints assume the fish start there).
-  setFishCell: (which: 'little' | 'big', x: number, y: number) => {
-    if (!room) return;
-    const it = room.items[which === 'little' ? room.littleIdx : room.bigIdx];
-    if (it) {
-      it.x = x;
-      it.y = y;
-    }
-  },
-  // KUFRIK automatic demonstration (showmode / help.cap replay): force-start it and
-  // read its live state so a probe can verify the fish auto-move + tutorial subtitles.
-  forceShowmode: () => startShowmode(),
-  // Debug replay trace: toggle recording, read the rows, and clear.
-  showmodeTraceOn: (on: boolean) => {
-    showmodeTraceOn = on;
-    if (!on) showmodeTrace.length = 0;
-  },
-  showmodeTrace: () => showmodeTrace.slice(),
-  // Debug: true while a fast-forward load animation is replaying (loadmode).
-  loading: () => loadmode !== null,
-  soundLog: () => audio.soundLog.slice(),
-  clearSoundLog: () => {
-    audio.soundLog.length = 0;
-  },
-  // Debug: inspect pathfinding from a fish to a target cell.
-  probePath: (which: 'little' | 'big', x: number, y: number) => {
-    if (!room) return null;
-    const idx = which === 'little' ? room.littleIdx : room.bigIdx;
-    const it = room.items[idx];
-    return {
-      dir: room.findDir(which, x, y),
-      targetCell: room.cellOccupant(x, y),
-      width: room.width,
-      height: room.height,
-      fish: it ? { x: it.x, y: it.y } : null,
-    };
-  },
-  showmodeState: () => ({
-    active: showmode !== null,
-    loading: showmodeLoading,
-    idx: showmode?.idx ?? -1,
-    total: showmode?.actions.length ?? 0,
-    helptext: showmodeHelptext,
-    flag: activeScript?.s.showmode ?? false,
-    activeFish: engine?.active ?? 'little',
-  }),
-};
+});
