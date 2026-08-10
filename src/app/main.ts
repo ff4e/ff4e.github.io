@@ -4595,6 +4595,20 @@ function loop(now: number): void {
   // "hold previous frame" (screen==='room' while art loads) is untouched. The
   // cutscene is left out of the hide list because drawCutscene() manages the GL
   // canvas itself (it may present a smooth-upscaled frame there).
+  // Drive an armed room launch (daRealyRun) BEFORE anything downstream of `screen` reads
+  // it — the GL hide, the mapPresented derivation and the draw dispatch below — so the
+  // frame that hands the stage over is the frame that PAINTS the room.
+  //
+  // Running it after the draw instead (where it started) handed over a frame early for
+  // everything but the canvas: drawPanel() put the control panel back into the layout at
+  // the end of that frame while #screen still held the map, so the map visibly jumped
+  // 90px left with no room under it. Measured 1 frame / 12 ms in enhanced and 2 / 25 ms
+  // in ai, and the panel is a layout change, so a single frame of it reads as a flinch.
+  //
+  // The original's ordering is unaffected: the load still cannot start until a frame
+  // carrying the parchment has actually been painted, because drawMap() is what sets
+  // `painted` (UMain.pas:1489-1493 — the paint sets daRealyRun, Spust runs after it).
+  tickMapLaunch();
   if (helpOpen || screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
   // Exactly one branch below owns #screen for this frame, and every branch other than
   // the map's blits over whatever the map left there — help, the story page, the
@@ -4633,11 +4647,6 @@ function loop(now: number): void {
     // tier's final art, with syncLoadingUi() below covering the wait. The 2.36 MB of
     // AI map art against 0.59 MB of faithful BMPs measured 28.0s of enhanced map on
     // screen before it swapped (Slow 4G, cold cache) — the same defect rooms had.
-    //
-    // A room launch runs AFTER the draw for the same reason the draw runs at all here:
-    // the parchment has to be on a painted frame before Spust, and the room only takes
-    // the stage on a frame it can be drawn in (tickMapLaunch).
-    tickMapLaunch();
   } else if (cutscene) {
     drawCutscene(); // manages the GL canvas + subtitle overlay itself
     perfPaint++;

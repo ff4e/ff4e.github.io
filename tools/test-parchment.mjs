@@ -113,14 +113,25 @@ const COMPARE_RECT = async ([PX, PY, PW, PH]) => {
 };
 
 /**
- * Sample every frame: is #screen showing anything at all, and which screen is up?
+ * Sample every frame: is #screen showing anything at all, which screen is up, and does
+ * the control panel arrive with the room or before it?
  *
- * Every frame, because the defect this replaces was one frame wide at the start and then
- * HELD — enterRoom() blacked #screen and the room draw only landed when its assets did. A
- * before/after check would have passed straight through it.
+ * Every frame, because both defects here are a frame or two wide. The first was one frame
+ * at the start and then HELD — enterRoom() blacked #screen and the room draw only landed
+ * when its assets did. The second was purely transient: the handover used to be applied
+ * AFTER the frame's draw, so drawPanel() put the panel column back into the layout while
+ * #screen still held the map, and the map jumped ~90px left with no room under it for a
+ * frame (enhanced) or two (ai). A before/after check sails through both.
+ *
+ * `panelEarly` counts frames where the panel is in the layout but no room frame has been
+ * painted yet. "Painted" is read off the canvas rather than the state flags — the map
+ * draws at its own backing width, so the first frame at a DIFFERENT width is the first
+ * frame the room is really on screen. That width is taken from the first ENABLED frame
+ * that is still on the map, not from when this is installed: the sampler is installed
+ * from inside a room, whose canvas is a different size again.
  */
 const SAMPLER = () => {
-  window.__blk = { black: 0, frames: 0, screens: [], on: false };
+  window.__blk = { black: 0, frames: 0, screens: [], on: false, panelEarly: 0, mapW: 0, sawRoom: false };
   const step = () => {
     requestAnimationFrame(step);
     if (!window.__blk.on || !window.__ff) return;
@@ -131,6 +142,10 @@ const SAMPLER = () => {
     const list = window.__blk.screens;
     if (list[list.length - 1] !== s) list.push(s);
     window.__blk.frames++;
+    if (s === 'map' && !window.__blk.mapW) window.__blk.mapW = cv.width;
+    if (s === 'room' && window.__blk.mapW && cv.width !== window.__blk.mapW) window.__blk.sawRoom = true;
+    const panelUp = getComputedStyle(document.getElementById('panelcol')).display !== 'none';
+    if (panelUp && !window.__blk.sawRoom) window.__blk.panelEarly++;
     // A GRID of rows, strided within each — a full-width read every frame at x4 is the one
     // thing here that could perturb what it measures.
     for (let f = 1; f <= 7; f++) {
@@ -320,6 +335,14 @@ await withApp(
     expect(
       blk.screens.join('>') === 'map>room',
       `the stage went straight from the map to the room (${blk.screens.join('>')})`,
+    );
+    // The control panel is a LAYOUT change — it pushes the stage sideways — so a frame of
+    // it over a map that has not been replaced yet reads as a flinch, not as a transition.
+    // It must arrive on the frame the room does, which is what running the handover before
+    // the draw dispatch buys (see tickMapLaunch's call site in loop()).
+    expect(
+      blk.panelEarly === 0,
+      `the control panel appears WITH the room, not before it (${blk.panelEarly} of ${blk.frames} frames had the panel over the map)`,
     );
 
     console.log('3. an entry with NO map to keep still explains itself');
