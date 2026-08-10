@@ -497,6 +497,38 @@ await withApp(
       after.loops > loops0 + 5,
       `the game loop survived it (${after.loops - loops0} iterations after the throw)`,
     );
+
+    console.log('8. an overlay that commits mid-launch cannot strand the player');
+    // An armed launch waits for drawMap() to set `painted`, and drawMap() is the only
+    // thing that sets it — so a launch armed while the map stops being drawn would wait
+    // forever, with the input guards swallowing every way out. The window is one frame,
+    // but it is reachable: openCredits() and showLegImage() both commit AFTER an await.
+    //
+    // Warm the credits first so openCredits() commits synchronously, then arm the launch
+    // and commit it in the same tick — the exact interleaving, made deterministic.
+    await p.keyboard.press('Escape');
+    await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+    await p.evaluate(async () => {
+      await window.__ff.openCredits();
+    });
+    await p.waitForFunction(() => window.__ff.mapOverlay() === 'credits');
+    await p.evaluate(() => window.__ff.closeMapOverlay());
+    await p.waitForFunction(() => window.__ff.mapOverlay() === 'none' && window.__ff.mapPresented());
+    await p.evaluate((n) => {
+      window.__ff.enterRoom(n).catch(() => {});
+      window.__ff.openCredits(); // already loaded, so this commits before the next frame
+    }, ROOM);
+    await p
+      .waitForFunction(() => window.__ff.mapLaunching() === null, null, { timeout: budget(8000) })
+      .catch(() => {});
+    expect(
+      (await p.evaluate(() => window.__ff.mapLaunching())) === null,
+      'a launch whose map is taken away still resolves instead of hanging',
+    );
+    expect(
+      (await p.evaluate(() => window.__ff.screen())) === 'room',
+      'it falls back to the ordinary entry, which is what this route did before',
+    );
   },
   // Section 7 injects a throw into the room launch and asserts the game recovers from it.
   // The recovery path logs the exception (main.ts tickMapLaunch), which is the behaviour

@@ -49,6 +49,8 @@ export interface RoomLaunchHost {
   mapSig: string | null;
   forceRoomRedraw: boolean;
   readonly inShowmode: () => boolean;
+  /** Is the help viewer up? (It replaces the map's draw — see mapWillDraw.) */
+  readonly helpOpen: boolean;
   readonly roomArtPending: () => boolean;
   readonly roomLoading: boolean;
   screen: 'map' | 'room' | 'intro' | 'legimage';
@@ -233,6 +235,31 @@ export function beginMapLaunch(num: number, replay?: string): Promise<void> {
 }
 
 /**
+ * Will loop() draw the map again, given time? Mirrors its map branch — minus the one
+ * condition that resolves itself.
+ *
+ * An armed launch is waiting for drawMap() to set `painted`, and drawMap() is the ONLY
+ * thing that sets it. So a launch that is armed while the map has stopped being drawn
+ * waits forever — and because the input guards are inert for the whole launch window,
+ * the player cannot dismiss whatever took the map's place either. Reproduced: arm a
+ * launch, then let an already-loaded credits roll commit before the next frame, and the
+ * game sits at `mapLaunching() === 1` with Escape doing nothing.
+ *
+ * The window is small — one frame — but it is reachable, because the two screens that
+ * can take the map away are ASYNC: openCredits() and showLegImage() both commit after an
+ * await, so either can land between the arm and the paint.
+ *
+ * `mapArtHolding()` is deliberately NOT part of this, though loop() checks it too: it is
+ * the `ai` tier's map art still downloading, which ends on its own (and ends even if the
+ * download fails, see art.ts). A launch should WAIT for that, exactly as it waits for the
+ * room's own art — treating it as "the map is gone" cancelled the parchment on every
+ * entry made just after switching to `ai`, which test-ai-loading caught.
+ */
+function mapWillDraw(): boolean {
+  return !host.helpOpen && host.screen === 'map' && host.mapOverlay !== 'credits';
+}
+
+/**
  * Drive an armed launch, called from loop()'s map branch after the map has drawn.
  *
  * daRealyRun: the load starts only once a frame carrying the parchment has been
@@ -247,8 +274,18 @@ export function beginMapLaunch(num: number, replay?: string): Promise<void> {
 export function tickMapLaunch(): void {
   const l = mapLaunch;
   if (!l) return;
-  if (!l.painted) return;
   try {
+    if (!l.painted) {
+      if (mapWillDraw()) return;
+      // The map is gone before it ever carried the parchment, so the frame this launch is
+      // waiting for is never coming (see mapWillDraw). Enter the room the ordinary way
+      // instead of waiting: that is what this entry did before the launch route existed —
+      // a room entry raced by the credits used to win, because enterRoom() took the stage
+      // synchronously — and it is the only outcome that cannot strand the player.
+      mapLaunch = null;
+      l.settle(host.startRoom(l.room, l.replay, true));
+      return;
+    }
     if (!l.started) {
       l.started = true;
       const load = host.startRoom(l.room, l.replay, false);

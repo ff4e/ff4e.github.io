@@ -1163,6 +1163,9 @@ initRoomLaunch({
   get inShowmode() {
     return inShowmode;
   },
+  get helpOpen() {
+    return helpOpen;
+  },
   get mapArtHolding() {
     return mapArtHolding;
   },
