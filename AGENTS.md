@@ -80,10 +80,79 @@ table nobody opens is free; a large file everyone edits is the expensive thing.
    budget must rise, raise it in the same PR and justify it in the description. The test exists to force that
    sentence to be written, not to forbid growth.
 5. **Iterate with a filtered gate, not the full one.** `npm run test:ui -- <pattern>` is the loop; the full
-   suite is for before the PR. This is not only about wall-clock: a full UI run prints ~16 500 tokens of
-   output that an agent then carries in context for the rest of the task, and a filtered run prints ~190.
+   suite is for before the PR.
 6. **Delete what you replace.** A superseded file that stays behind is read by everyone who greps for it
    afterwards, and eventually followed by someone. This has happened here.
+
+### Tests: buy coverage, and know what it costs
+
+Test time is the other recurring bill, and the numbers are lopsided enough to settle most questions on their
+own:
+
+| | cost |
+| --- | --- |
+| one unit test | **~2.5 ms** (1 609 of them run in ~5 s) |
+| one UI probe | **~7.4 s** median — about **3 000×** a unit test |
+| the fixed part of any probe | 1.3–2.7 s, just to launch a browser and boot the app |
+| the full UI suite | 85 probes, ~1 390 s of serial work, ~5 min wall |
+
+So, in order:
+
+7. **Reach for a unit test first.** Use a probe only when the browser is genuinely the thing under test — a
+   real pointer, a real canvas, real timing. Most "does this state change" questions do not need one.
+8. **Prefer an assertion in an existing probe over a new file** when they share setup. A new probe pays the
+   1.3–2.7 s launch again however little it asserts.
+9. **Judge a probe by coverage per second, not by seconds.** The three ~100 s probes sweep all 72 rooms for
+   byte-exact GPU-vs-CPU parity — 1.6 s per room, and the strongest evidence in the repo. A 30 s probe that
+   checks one thing is the expensive one. A new probe should land near the median; if it is much heavier, say
+   in the PR what coverage buys that.
+10. **Slowing an EXISTING probe is a regression**, and belongs in the PR description. The suite roughly
+    doubled once already when the `ai` tier moved to the GPU, and nobody noticed until it was measured.
+
+`npm run test:ui` ends with a `cost:` line and flags probes over 8× that run's own median. It is a report,
+not a gate: see the comment on `reportCost` in `tools/run-ui-tests.mjs` for why gating on wall-clock here
+would only produce a flaky gate that people learn to bypass. Which probes get flagged also moves with load —
+at load average 11 the three 72-room sweeps topped the list; at load 20 `test-showmode` and `test-legimage`
+did. Read it as "look at these", never as a ranking.
+
+**A passing probe prints its verdict and nothing else**, so a green run is cheap to read and a failure is
+not buried. A FAIL still prints in full, including the `ok` lines before it — those are the context for the
+one that broke. A FLAKY pass prints in full too, and a `console errors:` line survives a passing probe.
+`--verbose` restores the old behaviour.
+
+The same was done to the other commands. What a green run prints, now:
+
+| command | before | after |
+| --- | --- | --- |
+| `npm run test:ui` | ~16 600 tokens | **~1 900** |
+| `npm run test` | ~3 200 | **~1 500** (half of it was ANSI escape codes — `NO_COLOR=1`) |
+| `npm run test:seeds` | **~292 000** | **~3** ("100 seeds passed") |
+
+**An honest note on what that buys.** Those are the sizes of the OUTPUT, not what an agent necessarily reads:
+the habit here is `npm run test:ui > /tmp/log 2>&1` followed by a grep for the summary, and measured across
+real sessions that lands 200–400 tokens in context, not 16 600. So the saving is smaller than the table looks.
+What it actually removes is the reliance on that habit — an undocumented trick a fresh session may not know —
+plus two things the habit never fixed: `test:seeds`, where even a grep cannot tell you which seed failed
+because the reports are interleaved, and the ANSI codes, which are pure noise however you invoke it.
+
+`test:seeds` was the extreme case: `--silent` mutes the tests' own `console.log` but **not** the reporter, so
+100 seeds printed 100 full reports. It now captures each run and prints it **only** for the seed that failed,
+prefixed `seed N FAILED` — which is also the seed to reproduce with.
+
+**If you are an agent: send test output to a file and read the summary.**
+
+```
+npm run test:ui > /tmp/ui.log 2>&1; echo "exit=$?"
+grep -E "passed in|^  FAIL |cost:" /tmp/ui.log
+```
+
+Everything above shrinks what a run prints; this decides what you *read*, and it is the bigger lever of the
+two. Open the log properly when something fails — that is what it is there for — but a green run needs three
+lines, not the whole thing. The same goes for `npm run test` and any long build.
+
+**A filtered run is not evidence the suite is green.** `-- <pattern>` is the iteration loop, but the full run
+executes probes in parallel and this suite's flakes are load-driven — a probe can pass alone and fail under
+that contention. That is what `PARTIAL RUN` is warning about. Run the whole thing before opening a PR.
 
 ### The rule these serve
 

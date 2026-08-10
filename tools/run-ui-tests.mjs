@@ -143,6 +143,9 @@ const EXCLUSIVE = new Set([
 const jobs = Math.max(1, Number(process.env.FF_UI_JOBS) || Math.min(8, Math.max(2, Math.round(cpus().length * 0.6))));
 
 // Deadlock backstop for a single probe (see runProbe). The slowest probe is ~150s.
+/** A probe over this multiple of the run's median is reported. Set so today's 72-room
+ *  sweeps (~15x) surface, while the ordinary long tail (p90 is ~5x) does not. */
+const COST_RATIO = 8;
 const PROBE_TIMEOUT_MS = Math.max(60000, Number(process.env.FF_UI_PROBE_TIMEOUT_MS) || 600000);
 
 // Longest-first scheduling needs to know how long each probe took last time.
@@ -211,11 +214,43 @@ function runProbe(file, env) {
   });
 }
 
+/**
+ * How much of a probe's own output to print.
+ *
+ * A passing probe's body is a list of assertions that held, and it is the bulk of what
+ * this suite prints: measured on a green run, 1 019 `ok` lines were 81% of the output
+ * (13 400 of 16 600 tokens). Nobody reads them, and an agent that runs the suite then
+ * carries all of it in context on every subsequent model call for the rest of the task.
+ *
+ * So a PASS prints its verdict line only. Everything that could carry information is
+ * kept in full:
+ *   - a FAIL prints its whole body — the assertions that held are the context for the
+ *     one that did not, and are exactly what you need to see;
+ *   - a FLAKY pass prints in full too, because the failed attempts are the interesting
+ *     part and a retried pass must never look like a clean one;
+ *   - a `console errors:` line means the page threw even though the probe passed, which
+ *     is a real signal and is surfaced rather than swallowed.
+ *
+ * `--verbose` (or FF_UI_VERBOSE=1) restores the old behaviour for when you genuinely
+ * want to read what a green probe checked.
+ */
+const VERBOSE = process.argv.includes('--verbose') || process.env.FF_UI_VERBOSE === '1';
+
+/** Lines worth keeping from an otherwise-quiet passing probe. */
+function signalLines(out) {
+  return out
+    .split('\n')
+    .filter((l) => /^\s*(console errors:|FAIL|WARN|SKIP)/.test(l))
+    .join('\n');
+}
+
 function report(r) {
   const why = r.note ? ` (${r.note})` : '';
   const verdict = r.ok ? (r.flaky ? `FLAKY (passed after ${r.flaky} retr${r.flaky === 1 ? 'y' : 'ies'})` : 'PASS') : 'FAIL';
   console.log(`\n=== ${r.t} — ${(r.ms / 1000).toFixed(1)}s — ${verdict}${why} ===`);
-  process.stdout.write(r.out.endsWith('\n') || r.out === '' ? r.out : r.out + '\n');
+  const full = VERBOSE || !r.ok || r.flaky;
+  const body = full ? r.out : signalLines(r.out);
+  if (body.trim()) process.stdout.write(body.endsWith('\n') ? body : body + '\n');
 }
 
 /**
@@ -381,8 +416,42 @@ for (const r of flaky)
   console.log(`  FLAKY: ${r.t} failed ${r.flaky}x then passed — see KNOWN_FLAKY in this file`);
 if (patterns.length)
   console.log(`  PARTIAL RUN: ${all.length} of ${every.length} probes (filtered). Not a full gate.`);
+/**
+ * Flag probes that are expensive RELATIVE TO THIS RUN, and say what the suite costs.
+ *
+ * Deliberately a report, not a gate, and deliberately a ratio rather than seconds.
+ * Wall-clock here is not a property of the code: the same suite has been measured at
+ * 277s and at 690s on one machine, purely by how loaded it was. A time-based gate would
+ * therefore fail for reasons no PR caused, and a gate that fires at random is one people
+ * learn to bypass. A ratio against the median of the SAME run is load-independent —
+ * contention slows every probe together, so it barely moves.
+ *
+ * Being flagged is not an accusation. The three ~100s probes sweep all 72 rooms for
+ * byte-exact GPU-vs-CPU parity, which is about 1.6s per room and the best coverage in
+ * the suite. The number to think about is coverage per second, not seconds. What this
+ * catches is the other shape: a probe near the top of the list that only asserts one
+ * thing, which usually wants to be a unit test (~2.5ms) or an assertion added to a probe
+ * that has already paid for its browser.
+ */
+function reportCost(results, filtered) {
+  if (results.length < 8) return; // too few to have a meaningful median
+  const ms = results.map((r) => r.ms).sort((a, b) => a - b);
+  const median = ms[Math.floor(ms.length / 2)];
+  const serial = ms.reduce((a, b) => a + b, 0);
+  const heavy = results.filter((r) => r.ms > median * COST_RATIO).sort((a, b) => b.ms - a.ms);
+  console.log(
+    `  cost: ${(serial / 1000).toFixed(0)}s serial across ${results.length} probes, median ${(median / 1000).toFixed(1)}s`,
+  );
+  if (!heavy.length) return;
+  console.log(`  heavy (over ${COST_RATIO}x this run's median — justify by coverage, not speed):`);
+  for (const r of heavy.slice(0, 6))
+    console.log(`    ${(r.ms / 1000).toFixed(1).padStart(6)}s  ${(r.ms / median).toFixed(1)}x  ${r.t}`);
+  if (filtered) console.log('    (filtered run: the median is over few probes, so treat this as noisy)');
+}
+
 console.log('  slowest:');
 for (const r of [...results].sort((a, b) => b.ms - a.ms).slice(0, 5))
   console.log(`    ${(r.ms / 1000).toFixed(1).padStart(6)}s  ${r.t}`);
+reportCost(results, patterns.length > 0);
 // exitCode rather than exit(), so buffered stdout is flushed before we go.
 process.exitCode = failed.length === 0 ? 0 : 1;
