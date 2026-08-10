@@ -204,6 +204,8 @@ export interface DebugHost {
   readonly mapInfoHover: InfoButton | null;
   readonly mapInfoRoom: number | null;
   readonly mapOverlay: "credits" | "options" | "none";
+  readonly mapLaunching: number | null;
+  readonly parchmentReady: boolean;
   readonly mapPresented: boolean;
   readonly O_OPTIONS: number;
   readonly openCredits: () => Promise<void>;
@@ -454,6 +456,12 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // Debug: is a map frame the thing currently on screen? (What decides whether the
     // map's overlay goes up at once or on the 200ms delay — see syncLoadingUi.)
     mapPresented: () => host.mapPresented,
+    // Debug: the room a map launch is running for (daRun/daRealyRun), else null — the
+    // window in which the map stays on screen with the parchment over it.
+    mapLaunching: () => host.mapLaunching,
+    // Debug: is the parchment art available at all? (Without it enterRoom falls back to
+    // the full-screen overlay — see canLaunchFromMap.)
+    parchmentReady: () => host.parchmentReady,
     // Debug: is the post-boot room-loading overlay on screen right now?
     loadingVisible: () => loadingEl?.hidden === false,
     // Debug: the current room's AI art has finished loading / is actually painting

@@ -19,6 +19,7 @@
  *   n0..n4.BMP  -> n0_ai.png..n4_ai.png   (room-ball sprites, 19x20 -> 76x80, RGBA)
  *   krokomer.BMP-> krokomer_ai.webp  (record-panel background frame + baked icons)
  *   ikonky.BMP  -> ikonky_ai.webp    (record-panel highlighted button icons)
+ *   loading.BMP -> loading_ai.webp   (room-entry parchment, 192x161 -> 768x644, opaque)
  *
  * The base layers + panel art are full-frame opaque, delivered as lossy WebP (~0.5 MB
  * vs ~10 MB PNG for a base layer) — visually lossless for this smooth painted art.
@@ -75,6 +76,8 @@ const X4PLUS = 'realesrgan-x4plus';
 
 // kind 'layer' = opaque full-frame art -> lossy WebP.
 // kind 'sprite' = tiny colour-keyed sprite -> baked-alpha RGBA PNG.
+// kind 'inset' = an opaque rectangle the game blits ONTO the map -> lossy WebP,
+//   upscaled IN PLACE on the map (see buildInset).
 const ASSETS = {
   'mapa-0': { src: 'mapa-0.BMP', out: 'mapa-0_ai.webp', kind: 'layer', model: X4PLUS },
   'mapa-1': { src: 'mapa-1.BMP', out: 'mapa-1_ai.webp', kind: 'layer', model: X4PLUS },
@@ -85,8 +88,15 @@ const ASSETS = {
   n4: { src: 'n4.BMP', out: 'n4_ai.png', kind: 'sprite' },
   krokomer: { src: 'krokomer.BMP', out: 'krokomer_ai.webp', kind: 'layer' },
   ikonky: { src: 'ikonky.BMP', out: 'ikonky_ai.webp', kind: 'layer' },
+  // The room-entry parchment (UMain.pas:1489). Blitted at (227,160) over the map with
+  // its RTable zeroed, i.e. over the DARK layer — which is baked into its own border
+  // (mean per-pixel border difference 0.97 vs mapa-0, 21.26 vs mapa-1). Hence 'inset':
+  // upscaling the 192x161 crop on its own would hand the model a different neighbourhood
+  // than mapa-0_ai got for the same pixels, and the border would no longer line up with
+  // the map it sits on.
+  loading: { src: 'loading.BMP', out: 'loading_ai.webp', kind: 'inset', model: X4PLUS, over: 'mapa-0.BMP', x: 227, y: 160 },
 };
-const DEFAULT_NAMES = ['mapa-0', 'mapa-1', 'n0', 'n1', 'n2', 'n3', 'n4', 'krokomer', 'ikonky'];
+const DEFAULT_NAMES = ['mapa-0', 'mapa-1', 'n0', 'n1', 'n2', 'n3', 'n4', 'krokomer', 'ikonky', 'loading'];
 
 /** Resolve the model for an asset: explicit AI_MODEL override > per-asset default > global default. */
 function modelFor(name) {
@@ -225,6 +235,51 @@ function buildSprite(name, bmp) {
   }
 }
 
+/**
+ * Build an INSET: an opaque rectangle the game blits onto the map at (x,y).
+ *
+ * Upscaled IN PLACE — composited onto its native background layer first, the whole
+ * 640x480 frame put through the SAME model the background layer uses, and the result
+ * cropped back out at (x*SCALE, y*SCALE). Upscaling the bare 192x161 crop instead
+ * would give the model a different neighbourhood for the border pixels than mapa-0_ai
+ * got for those same pixels, and the rectangle would show a seam against the map it
+ * is blitted onto (the parchment's border IS map background, baked in).
+ *
+ * Its own palette, not the background's: the two BMPs have different palettes, so the
+ * composite is done in RGB, after both have been palette-resolved.
+ */
+function buildInset(name, bmp) {
+  const { out: outName, over, x, y } = ASSETS[name];
+  const model = modelFor(name);
+  const dst = join(menuDir, outName);
+  const bg = parseBmp(new Uint8Array(readFileSync(join(menuDir, over))));
+  const work = mkdtempSync(join(tmpdir(), `mapai-${name}-`));
+  try {
+    const frame = indicesToRgb24(bg.pixels, bg.palette, bg.w, bg.h);
+    const inset = indicesToRgb24(bmp.pixels, bmp.palette, bmp.w, bmp.h);
+    for (let r = 0; r < bmp.h; r++) {
+      inset.copy(frame, ((y + r) * bg.w + x) * 3, r * bmp.w * 3, (r + 1) * bmp.w * 3);
+    }
+    const rawPath = join(work, 'in.rgb');
+    const inPng = join(work, 'in.png');
+    const aiPng = join(work, 'ai.png');
+    writeFileSync(rawPath, frame);
+    run(`Encoding ${name} on ${over} (${bg.w}x${bg.h}) -> PNG`, 'ffmpeg',
+      ['-y', '-v', 'error', '-f', 'rawvideo', '-pixel_format', 'rgb24',
+        '-video_size', `${bg.w}x${bg.h}`, '-i', rawPath, inPng]);
+    upscaleFile(inPng, aiPng, model);
+    const ow = bmp.w * SCALE;
+    const oh = bmp.h * SCALE;
+    const cropPng = join(work, 'crop.png');
+    run(`Cropping ${name} (${ow}x${oh} at ${x * SCALE},${y * SCALE})`, 'ffmpeg',
+      ['-y', '-v', 'error', '-i', aiPng, '-vf', `crop=${ow}:${oh}:${x * SCALE}:${y * SCALE}`, cropPng]);
+    run(`Encoding ${outName} (WebP q${WEBP_Q})`, 'cwebp', ['-quiet', '-q', WEBP_Q, cropPng, '-o', dst]);
+    console.log(`  wrote ${outName} (${ow}x${oh}, ${(statSync(dst).size / 1e3).toFixed(0)} KB)`);
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 function buildOne(name) {
   const { src: srcName, kind } = ASSETS[name];
   const src = join(menuDir, srcName);
@@ -234,6 +289,7 @@ function buildOne(name) {
   }
   const bmp = parseBmp(new Uint8Array(readFileSync(src)));
   if (kind === 'layer') buildLayer(name, bmp);
+  else if (kind === 'inset') buildInset(name, bmp);
   else buildSprite(name, bmp);
 }
 
@@ -245,7 +301,7 @@ for (const n of names) {
     process.exit(1);
   }
 }
-if (names.some((n) => ASSETS[n].kind === 'layer')) {
+if (names.some((n) => ASSETS[n].kind === 'layer' || ASSETS[n].kind === 'inset')) {
   const cwebp = spawnSync('cwebp', ['-version'], { encoding: 'utf8' });
   if (cwebp.status !== 0) {
     console.error('cwebp (libwebp) not found on PATH — required to encode the .webp base layers.');

@@ -72,14 +72,17 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff.lines() > 0);
   expect((await p.evaluate(() => window.__ff.lines())) > 0, 'room 1 speaks during normal play');
 
-  // Back to the map; Replay arms the best-solution playback. replaymode is armed in a
-  // .then() after loadRoom resolves, so wait for it (screen flips to room earlier).
+  // Back to the map; Replay arms the best-solution playback. Both now happen BEHIND the
+  // parchment: a launch off the map keeps the map on screen until the room can be drawn
+  // (main.ts beginMapLaunch), and replaymode is armed in a .then() after loadRoom resolves,
+  // which is inside that window — so `replayActive()` goes true a beat before the room
+  // takes the stage. Wait for both.
   await p.evaluate(() => window.__ff.showMap());
   await p.waitForTimeout(150);
   await click(ROOM1_NODE);
   await p.waitForTimeout(80);
   await click(REPLAY);
-  await p.waitForFunction(() => window.__ff.replayActive());
+  await p.waitForFunction(() => window.__ff.replayActive() && window.__ff.screen() === 'room');
   expect((await screen()) === 'room', 'Replay entered the room');
   expect(await p.evaluate(() => window.__ff.replayActive()), 'Replay armed best-solution playback');
 
