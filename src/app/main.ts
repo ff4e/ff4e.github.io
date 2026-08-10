@@ -265,6 +265,18 @@ import {
   tickTetris,
   ultraviolence,
 } from './cheats.js';
+import {
+  beginMapLaunch,
+  blitParchment,
+  blitParchmentAi,
+  canLaunchFromMap,
+  initRoomLaunch,
+  loadParchment,
+  mapLaunching,
+  markParchmentPainted,
+  parchmentReady,
+  tickMapLaunch,
+} from './roomLaunch.js';
 //#region Device gate, stage layout & constants | anchors: isUnsupportedDevice, computeStageLayout, roomGeometry, LOGIC_MS | Phones are refused first, before any art is fetched. Then how the stage is scaled to the viewport, and the 80 ms game tick.
 
 // Phones are refused here, before a single byte of game ART is fetched. (The engine
@@ -1131,6 +1143,64 @@ initArt({
   },
   get worldMap() {
     return worldMap;
+  },
+});
+
+// The room-entry parchment and the map launch it belongs to (roomLaunch.ts). Wired HERE,
+// where that code used to sit. It is the one module given a WRITABLE `screen`, because a
+// launch ending IS a screen transition — see its docblock for the rest of the seam.
+//#region Room launch wiring | anchors: initRoomLaunch | Hands `roomLaunch.ts` its view of the game. The parchment and the daRun state machine are in that module.
+initRoomLaunch({
+  get aiWorldMap() {
+    return aiWorldMap;
+  },
+  get forceRoomRedraw() {
+    return forceRoomRedraw;
+  },
+  set forceRoomRedraw(v: boolean) {
+    forceRoomRedraw = v;
+  },
+  get inShowmode() {
+    return inShowmode;
+  },
+  get helpOpen() {
+    return helpOpen;
+  },
+  get mapArtHolding() {
+    return mapArtHolding;
+  },
+  get mapOverlay() {
+    return mapOverlay;
+  },
+  get mapPresented() {
+    return mapPresented;
+  },
+  get mapSig() {
+    return mapSig;
+  },
+  set mapSig(v: string | null) {
+    mapSig = v;
+  },
+  get roomArtPending() {
+    return roomArtPending;
+  },
+  get roomLoading() {
+    return roomLoading;
+  },
+  get screen() {
+    return screen;
+  },
+  set screen(v: 'map' | 'room' | 'intro' | 'legimage') {
+    screen = v;
+  },
+  get setRoomPicker() {
+    return setRoomPicker;
+  },
+  get startRoom() {
+    return startRoom;
+  },
+  get wake() {
+    return wake;
   },
 });
 let fishSprites: FishSprites | null = null;
@@ -2191,8 +2261,27 @@ function armRoomVoices(settled: boolean): void {
   roomVoicesReady = new Promise<void>((resolve) => { markVoicesSettled = resolve; });
 }
 
+/**
+ * Is `num` the room the player is being taken to?
+ *
+ * Guards the two things a room load starts once its assets have landed — its voice
+ * package and its music — against being installed over a room the player has since
+ * left. `curNum` alone is not enough: they leave for the map (or a story page) and
+ * `curNum` still names the room they came from.
+ *
+ * The screen test is not literally `screen === 'room'` because a launch off the world
+ * map holds the map on screen for the whole load (see beginMapLaunch) — the same window
+ * in which this resolves. Delphi starts the room's music inside the blocking Spust,
+ * with the map still painted, so being on the map here means the entry is in progress,
+ * not abandoned.
+ */
+function enteringRoom(num: number): boolean {
+  if (curNum !== num) return false;
+  return screen === 'room' || mapLaunching() === num;
+}
+
 function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): void {
-  if (curNum !== num || screen !== 'room') return;
+  if (!enteringRoom(num)) return;
   loadBorderLines(num);
   let pending = voiceLoads.get(nnn);
   if (pending === undefined) {
@@ -2213,7 +2302,7 @@ function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): void {
 
 /** Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it. */
 function startRoomMusic(num: number): void {
-  if (curNum !== num || screen !== 'room') return;
+  if (!enteringRoom(num)) return;
   const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
   if (music) void audio.playMusic(music.name, `/data/Music/${music.name}.wav`, music.loopSample);
   else audio.stopMusic();
@@ -2831,7 +2920,7 @@ function drawMap(): void {
   const infoFazeKey = Math.min(mapInfoFaze, INFO_SETTLE_FAZE);
   const sig =
     `${useAi ? 'ai' : 'n'}|${pulse % 6}|${Math.min(depth, worldMap.maxDepth + 1)}|${mapHoverCorner ?? ''}|${solved.size}|${cheated.size}|${cheated.size ? 1 : 0}` +
-    `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}`;
+    `|${mapInfoRoom ?? ''}|${mapInfoHover ?? ''}|${infoFazeKey}|${mapHoverRoom ?? ''}|${mapLaunching() ?? ''}`;
   // The minigame is modal over the map too (UMain.pas:1764), and animates, so its
   // frame counter joins the cache key.
   const sigT = tetris ? `|ttr${tetrisTick}` : '';
@@ -2839,7 +2928,13 @@ function drawMap(): void {
   mapSig = sig + sigT;
   perfPaint++; // an actual map paint (past the cache check)
   setMapPresented(true); // a map frame is now the thing on screen (see syncLoadingUi)
+  // A room launch (daRun/daReplay) darkens the map exactly as an open record panel
+  // does — Delphi zeroes RTable for all three cases in the same statement
+  // (UMain.pas:1445) and skips the room balls with it — and draws the launching room's
+  // name plaque over that (KresliDesku, :1484).
+  const launching = mapLaunching() !== null;
   const panelOpen = mapInfoRoom !== null;
+  const unlit = panelOpen || launching;
   // While the record panel is open the base map renders fully unlit (Delphi zeroes
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
   // only the name plaque and panel stand out. Nodes (balls) are skipped too.
@@ -2852,8 +2947,8 @@ function drawMap(): void {
       depth,
       cheated,
       hoverCorner: mapHoverCorner,
-      drawNodes: !panelOpen,
-      litRegions: !panelOpen,
+      drawNodes: !unlit,
+      litRegions: !unlit,
     });
     // Record-panel *artwork* (krokoměr bg + hovered icon + disabled-Replay grey) is
     // drawn straight onto the hi-res ctx from the AI-upscaled bitmaps; the odometer
@@ -2864,7 +2959,7 @@ function drawMap(): void {
     }
     // Name plaque from the upscaled art, drawn straight on the hi-res ctx. Falls back
     // to the native overlay below whenever its art is missing or still loading.
-    const plaqueRoom = mapInfoRoom ?? mapHoverRoom;
+    const plaqueRoom = mapLaunching() ?? mapInfoRoom ?? mapHoverRoom;
     const plaque = plaqueRoom !== null ? aiPlaqueFor(plaqueRoom) : null;
     if (plaque) {
       ctx.imageSmoothingEnabled = false;
@@ -2882,10 +2977,20 @@ function drawMap(): void {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(mapOverlayCanvas, 0, 0, cw, ch);
     }
+    // Last, over the plaque: Delphi draws the plaque and then the parchment
+    // (UMain.pas:1484 then :1489), and the two rectangles overlap.
+    if (launching) {
+      blitParchmentAi(ctx);
+      markParchmentPainted(); // daRun -> daRealyRun: the load may now start
+    }
     return;
   }
-  const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !panelOpen, !panelOpen);
+  const rgba = worldMap.render(solved, pulse, depth, cheated, mapHoverCorner, !unlit, !unlit);
   drawMapOverlays(rgba);
+  if (launching) {
+    blitParchment(rgba);
+    markParchmentPainted(); // daRun -> daRealyRun: the load may now start
+  }
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
 }
 
@@ -2965,7 +3070,7 @@ async function loadAiPlaque(key: string): Promise<void> {
 function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, skipPlaque = false): boolean {
   if (!worldMap) return false;
   let drew = false;
-  const plaqueRoom = mapInfoRoom ?? mapHoverRoom;
+  const plaqueRoom = mapLaunching() ?? mapInfoRoom ?? mapHoverRoom;
   if (plaqueRoom !== null && deskyData && !skipPlaque) {
     const deska = deskyData.byRoom.get(plaqueRoom);
     if (deska) {
@@ -3364,14 +3469,43 @@ function drawCredits(): void {
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), credits.w, credits.h), 0, 0);
 }
 
-/** Enter a room from the map (or the dev dropdown); KillSnd first (Spust, UMain.pas:248).
- *  `replay` is the best-solution move record to play back animated (map "Replay"). */
-//#region Room entry & fish animation | anchors: enterRoom, panelAction, updateLipSync, fishFrameFor | The map → room transition, panel button actions, and which sprite frame each fish shows.
+/**
+ * Enter a room (Spust, UMain.pas:248).
+ *
+ * TWO routes, because the original has two. From the WORLD MAP a launch is `daRun`:
+ * the map stays on screen and repaints with the parchment over it, and the load runs
+ * behind that (see beginMapLaunch — this is the faithful one, and the one a player
+ * ever sees). Everywhere else — the dev room picker, the story-page chain, SCORE,
+ * ZAVER, an Escape restart — there is no map to keep, so the stage goes to the room
+ * immediately and the delayed loading overlay explains the wait, exactly as before.
+ *
+ * `replay` is the best-solution move record to play back animated (map "Replay").
+ */
+//#region Room entry & fish animation | anchors: enterRoom, beginMapLaunch, panelAction, updateLipSync, fishFrameFor | The map → room transition (incl. the launch parchment), panel button actions, and which sprite frame each fish shows.
+/** Keep the dev room picker in step with the room actually shown. */
+function setRoomPicker(num: number): void {
+  select.value = String(num);
+}
+
 function enterRoom(num: number, replay?: string): Promise<void> {
+  if (canLaunchFromMap()) return beginMapLaunch(num, replay);
+  return startRoom(num, replay, true);
+}
+
+/**
+ * The load itself: KillSnd, then the room's assets (Spust, UMain.pas:248-249).
+ *
+ * `takeStage` is what separates the two routes above — false leaves `screen` on the
+ * map for the launch flow, which flips it in loop() once the room can actually be
+ * painted.
+ */
+function startRoom(num: number, replay: string | undefined, takeStage: boolean): Promise<void> {
   wake();
   stopRoomClock(); // bank the outgoing room's time before the switch
-  screen = 'room';
-  beginRoomLoadingUi(num); // delayed; a cached entry lands before it ever shows
+  if (takeStage) {
+    screen = 'room';
+    beginRoomLoadingUi(num); // delayed; a cached entry lands before it ever shows
+  }
   startRoomClock(num); // TRoom.Start: casstartu := Date+Time
   mapHoverCorner = null; // drop any map corner hover on leaving the map
   mapHoverRoom = null;
@@ -4234,6 +4368,10 @@ function loopThrottleOk(): boolean {
     );
   }
   if (screen === 'map' && worldMap && mapOverlay === 'none') {
+    // A launch is a short-lived state that ends on a condition nothing repaints for
+    // (the room's assets landing), so keep the loop at full rate until it does —
+    // otherwise the handover waits up to a whole idle tick behind the parchment.
+    if (mapLaunching() !== null) return false;
     // Keep 60fps while the record-panel odometer is still rolling (so its wall-clock
     // faze advance is sampled smoothly); once settled it can idle-throttle again.
     if (mapInfoRoom !== null && mapInfoFaze < INFO_SETTLE_FAZE) return false;
@@ -4348,6 +4486,20 @@ function loop(now: number): void {
   // "hold previous frame" (screen==='room' while art loads) is untouched. The
   // cutscene is left out of the hide list because drawCutscene() manages the GL
   // canvas itself (it may present a smooth-upscaled frame there).
+  // Drive an armed room launch (daRealyRun) BEFORE anything downstream of `screen` reads
+  // it — the GL hide, the mapPresented derivation and the draw dispatch below — so the
+  // frame that hands the stage over is the frame that PAINTS the room.
+  //
+  // Running it after the draw instead (where it started) handed over a frame early for
+  // everything but the canvas: drawPanel() put the control panel back into the layout at
+  // the end of that frame while #screen still held the map, so the map visibly jumped
+  // 90px left with no room under it. Measured 1 frame / 12 ms in enhanced and 2 / 25 ms
+  // in ai, and the panel is a layout change, so a single frame of it reads as a flinch.
+  //
+  // The original's ordering is unaffected: the load still cannot start until a frame
+  // carrying the parchment has actually been painted, because drawMap() is what sets
+  // `painted` (UMain.pas:1489-1493 — the paint sets daRealyRun, Spust runs after it).
+  tickMapLaunch();
   if (helpOpen || screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
   // Exactly one branch below owns #screen for this frame, and every branch other than
   // the map's blits over whatever the map left there — help, the story page, the
@@ -4476,6 +4628,15 @@ window.addEventListener('keydown', (e) => {
   // swims the fish around behind the form — corrupting the very move record the report
   // is about. Escape is left alone: the dialog's own handler closes it.
   if (feedback?.isOpen()) return;
+  // A room launch off the map is BLOCKING in the original (Spust runs inside the timer
+  // handler, so no message is dispatched until the room is up). Swallow the keyboard
+  // for as long as the parchment is on the map — the map's own pointer handlers do the
+  // same. Anything else would let Escape, a cheat code or a tier switch act on a map
+  // that is already on its way out.
+  if (mapLaunching() !== null) {
+    e.preventDefault();
+    return;
+  }
   // While the intro movie plays, swallow input; any key skips the current movie
   // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603). Two exceptions:
   // a bare modifier keydown must NOT skip (otherwise arming Ctrl+Alt+D during the
@@ -4816,6 +4977,10 @@ canvas.addEventListener('mousedown', (e) => {
   // World map: a corner "button" (intro/credits/options) or a room node.
   if (screen === 'map') {
     if (!worldMap) return;
+    // A launch is BLOCKING in the original — Spust runs inside the timer handler, so
+    // no message is processed until the room is up. Nothing on the map is clickable
+    // while the parchment is on it.
+    if (mapLaunching() !== null) return;
     // A click anywhere during the credits roll dismisses it (UMain.pas:1595).
     if (mapOverlay === 'credits') {
       closeMapOverlay();
@@ -4898,7 +5063,7 @@ function mapCoords(e: MouseEvent): { mx: number; my: number } {
 // under the cursor and show a pointer over clickable spots (corners + room nodes).
 // The Exit corner is unwired on the web, so it neither lights nor points.
 canvas.addEventListener('mousemove', (e) => {
-  if (screen !== 'map' || !worldMap || mapOverlay !== 'none') {
+  if (screen !== 'map' || !worldMap || mapOverlay !== 'none' || mapLaunching() !== null) {
     if (mapHoverCorner) mapHoverCorner = null;
     return;
   }
@@ -5140,6 +5305,7 @@ try {
 } catch {
   /* map optional */
 }
+await loadParchment(); // the room-entry parchment; optional, never fatal (roomLaunch.ts)
 // World-map record info panel assets (krokoměr background, button icons, digit
 // glyphs) + the level name-plaque data for the current language (UMain.pas:341).
 try {
@@ -5508,6 +5674,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   get mapOverlay() {
     return mapOverlay;
+  },
+  // Derived, not a bare backing variable: the launch lives in one nullable object
+  // (see MapLaunch) and probes only ever want the room number out of it.
+  get mapLaunching() {
+    return mapLaunching();
+  },
+  get parchmentReady() {
+    return parchmentReady();
   },
   get mapPresented() {
     return mapPresented;

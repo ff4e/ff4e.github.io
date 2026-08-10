@@ -6,6 +6,7 @@
  * compositing at 4x from AI-upscaled art (tools/build-map-ai.mjs):
  *   - mapa-0_ai.webp / mapa-1_ai.webp — the two base layers (opaque, 2560x1920)
  *   - n0_ai.png .. n4_ai.png          — the room-ball sprites (RGBA, baked alpha)
+ *   - loading_ai.webp                 — the room-entry parchment (opaque, 768x644)
  * The branch/corner MASK stays index-exact: the native 640x480 mask is nearest-
  * neighbour-scaled x4 to select lit vs dark regions, so the reveal/lighting and the
  * corner buttons behave byte-for-byte like the faithful path. All game logic (which
@@ -27,7 +28,6 @@ export const AI_MAP_W = MAP_W * AI_MAP_SCALE;
 export const AI_MAP_H = MAP_H * AI_MAP_SCALE;
 
 const NODE_FILES = ['n0_ai.png', 'n1_ai.png', 'n2_ai.png', 'n3_ai.png', 'n4_ai.png'] as const;
-
 export interface AiMapState {
   solved: ReadonlySet<number>;
   pulse: number;
@@ -50,14 +50,15 @@ export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorl
       if (!res.ok) throw new Error(`${file}: ${res.status}`);
       return createImageBitmap(await res.blob());
     };
-    const [mapa0, mapa1, krokomer, ikonky, ...nodes] = await Promise.all([
+    const [mapa0, mapa1, krokomer, ikonky, loading, ...nodes] = await Promise.all([
       load('mapa-0_ai.webp'),
       load('mapa-1_ai.webp'),
       load('krokomer_ai.webp'),
       load('ikonky_ai.webp'),
+      load('loading_ai.webp'),
       ...NODE_FILES.map(load),
     ]);
-    return new AiWorldMap(wm, mapa0!, mapa1!, nodes, krokomer!, ikonky!);
+    return new AiWorldMap(wm, mapa0!, mapa1!, nodes, krokomer!, ikonky!, loading!);
   } catch (e) {
     // Returning null falls back to the faithful CPU map, which is right for a partial
     // download — but it would also hide a broken build, so say why (the other three AI
@@ -83,6 +84,8 @@ export class AiWorldMap {
     /** AI record-panel background (krokoměr) + highlighted button icons (ikonky). */
     readonly krokomer: ImageBitmap,
     readonly ikonky: ImageBitmap,
+    /** AI room-entry parchment (Menu/loading.BMP, blitted at 227,160 during a launch). */
+    readonly loading: ImageBitmap,
   ) {
     this.maskImage = this.maskNative.ctx.createImageData(MAP_W, MAP_H);
   }
