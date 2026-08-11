@@ -29,5 +29,14 @@ export default defineConfig({
   build: { copyPublicDir: false, target: 'es2022' },
   // The unit suite runs against a seeded Math.random so a failure always means a real
   // defect, never a 1-in-100 draw (see test/rng.ts). The game itself is untouched.
-  test: { setupFiles: ['./test/rng.setup.ts'] },
+  //
+  // `typescript` is externalised because test/region-cycle.test.ts imports the region
+  // analyser, which uses the TypeScript compiler API. Left inlined, Vite tries to read a
+  // source map that the published typescript.js does not ship and prints a four-line
+  // stack on every otherwise-green run — noise in the output the suite works to keep
+  // readable. Externalising also skips transforming an 8 MB file nobody is testing.
+  test: {
+    setupFiles: ['./test/rng.setup.ts'],
+    server: { deps: { external: ['typescript'] } },
+  },
 });
