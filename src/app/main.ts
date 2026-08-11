@@ -5329,16 +5329,13 @@ window.addEventListener('keydown', unlockAudio, { once: true });
 // for the eleven values probes deliberately write. Assigned to window HERE, at the
 // end of boot, because tools/ui-lib.mjs waits on window.__ff as the signal that boot
 // has completed.
-//#region `window.__ff` host | anchors: debugHooks | The 144-member host the debug hooks read the game through: getters, plus eleven setters for the values probes deliberately write. The hooks themselves are in `debugHooks.ts`.
+//#region `window.__ff` host | anchors: debugHooks | The 114-member host the debug hooks read the game through: getters, plus eight setters for the values probes deliberately write. State that has an owning module is imported there directly instead. The hooks themselves are in `debugHooks.ts`.
 (window as unknown as { __ff: unknown }).__ff = debugHooks({
   get O_OPTIONS() {
     return O_OPTIONS;
   },
   get SUB_FONT_CANDIDATES() {
     return SUB_FONT_CANDIDATES;
-  },
-  get activeScript() {
-    return activeScript;
   },
   get aiKufr() {
     return aiKufr;
@@ -5370,9 +5367,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   get aiWorldMap() {
     return aiWorldMap;
   },
-  get alpha() {
-    return alpha;
-  },
   get applySubFont() {
     return applySubFont;
   },
@@ -5390,9 +5384,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   get casHry() {
     return casHry;
-  },
-  get chatter() {
-    return chatter;
   },
   get cheated() {
     return cheated;
@@ -5415,38 +5406,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   get closeMapOverlay() {
     return closeMapOverlay;
   },
-  get count() {
-    return count;
-  },
-  get creditMode() {
-    return ui.creditMode;
-  },
-  get credits() {
-    return ui.credits;
-  },
-  get creditsStart() {
-    return ui.creditsStart;
-  },
-  set creditsStart(v: number) {
-    ui.creditsStart = v;
-  },
   get curNum() {
     return curNum;
-  },
-  get cutscene() {
-    return cutscene;
-  },
-  get deskyLang() {
-    return ui.deskyLang;
   },
   get dispatchMapCorner() {
     return dispatchMapCorner;
   },
   get enableWebgl() {
     return enableWebgl;
-  },
-  get engine() {
-    return engine;
   },
   get enhancedArt() {
     return enhancedArt;
@@ -5462,12 +5429,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   get enterRoom() {
     return enterRoom;
-  },
-  get feedback() {
-    return ui.feedback;
-  },
-  get ffr() {
-    return ffr;
   },
   get fishFrameFor() {
     return fishFrameFor;
@@ -5505,9 +5466,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   get heldState() {
     return heldState;
   },
-  get helpOpen() {
-    return ui.helpOpen;
-  },
   get helpScreens() {
     return helpScreens;
   },
@@ -5529,32 +5487,14 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   get introMovie() {
     return introMovie;
   },
-  get lastLine() {
-    return lastLine;
-  },
   get lastRoomBackend() {
     return lastRoomBackend;
   },
   get lastRoomSig() {
     return lastRoomSig;
   },
-  get legImage() {
-    return ui.legImage;
-  },
-  get legImageAi() {
-    return ui.legImageAi;
-  },
-  get legImageNum() {
-    return ui.legImageNum;
-  },
-  get linesSpoken() {
-    return linesSpoken;
-  },
   get loadGame() {
     return loadGame;
-  },
-  get loadmode() {
-    return loadmode;
   },
   get logoMovie() {
     return logoMovie;
@@ -5567,24 +5507,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   get mapArtPending() {
     return mapArtPending;
-  },
-  get mapHoverCorner() {
-    return ui.mapHoverCorner;
-  },
-  set mapHoverCorner(v: MapAction | null) {
-    ui.mapHoverCorner = v;
-  },
-  get mapInfoFaze() {
-    return ui.mapInfoFaze;
-  },
-  get mapInfoHover() {
-    return ui.mapInfoHover;
-  },
-  get mapInfoRoom() {
-    return ui.mapInfoRoom;
-  },
-  get mapOverlay() {
-    return ui.mapOverlay;
   },
   // Derived, not a bare backing variable: the launch lives in one nullable object
   // (see MapLaunch) and probes only ever want the room number out of it.
@@ -5609,12 +5531,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   get openMapOptions() {
     return openMapOptions;
   },
-  get ostav() {
-    return ui.ostav;
-  },
-  get panel() {
-    return ui.panel;
-  },
   get panelAction() {
     return panelAction;
   },
@@ -5623,9 +5539,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   get playTime() {
     return playTime;
-  },
-  get poslMluv() {
-    return poslMluv;
   },
   get previewSubFont() {
     return previewSubFont;
@@ -5639,20 +5552,11 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   get replayIntro() {
     return replayIntro;
   },
-  get replaymode() {
-    return replaymode;
-  },
   get restartRoom() {
     return restartRoom;
   },
-  get room() {
-    return room;
-  },
   get roomArtPending() {
     return roomArtPending;
-  },
-  get roomDepth() {
-    return roomDepth;
   },
   get roomGeometry() {
     return roomGeometry;
@@ -5678,15 +5582,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   get scores() {
     return scores;
   },
-  get screen() {
-    return ui.screen;
-  },
-  get screenShoveX() {
-    return screenShoveX;
-  },
-  get scroll() {
-    return ui.scroll;
-  },
   get setGraphics() {
     return setGraphics;
   },
@@ -5704,24 +5599,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   get showMap() {
     return showMap;
-  },
-  get showmode() {
-    return showmode;
-  },
-  get showmodeHelptext() {
-    return showmodeHelptext;
-  },
-  get showmodeLoading() {
-    return showmodeLoading;
-  },
-  get showmodeTrace() {
-    return showmodeTrace;
-  },
-  get showmodeTraceOn() {
-    return showmodeTraceOn;
-  },
-  set showmodeTraceOn(v: boolean) {
-    setShowmodeTraceOn(v);
   },
   get skipCutscene() {
     return skipCutscene;
@@ -5777,9 +5654,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   set subOverlaySig(v: string) {
     subOverlaySig = v;
   },
-  get subs() {
-    return subs;
-  },
   get syncSubOverlay() {
     return syncSubOverlay;
   },
@@ -5800,8 +5674,5 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   set waterAnimMs(v: number) {
     waterAnimMs = v;
-  },
-  get worldMap() {
-    return ui.worldMap;
   },
 });

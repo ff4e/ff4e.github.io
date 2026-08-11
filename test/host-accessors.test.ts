@@ -1,8 +1,8 @@
 /**
  * Every host accessor must expose the variable of the same name.
  *
- * `main.ts` hands each extracted module a `host` object of accessors — 204 of them,
- * the largest being the 144-member wall for `debugHooks.ts`. They are all of the form:
+ * `main.ts` hands each extracted module a `host` object of accessors — 170 of them,
+ * the largest being the 114-member wall for `debugHooks.ts`. They are all of the form:
  *
  *     get roomLoading() { return roomLoading; },
  *     set forceRoomRedraw(v: boolean) { forceRoomRedraw = v; },
