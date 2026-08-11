@@ -104,7 +104,13 @@ import {
 } from '../render/mapInfo.js';
 import { parseDesky, blitDeska, DESKA_X_OFFSET, DESKA_Y_OFFSET, type DeskyData } from '../data/desky.js';
 import { IntroPlayer } from './intro.js';
-import { advancePaintDeadline, shouldSkipPaint } from './paintClock.js';
+import {
+  framesIdle,
+  initFrameClock,
+  scheduleNextFrame,
+  startFrames,
+  wake,
+} from './frameClock.js';
 import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
 import { loadAiPanel, type AiPanel } from '../render/panelAi.js';
 import { loadAiCredits, type AiCredits } from '../render/creditsAi.js';
@@ -4108,7 +4114,7 @@ function step(): boolean {
   return false;
 }
 
-//#region Frame pacing & perf | anchors: roomLoading, roomLoadSeq, IDLE_LOOP_MS, updatePerfHud, roomAnimating, loopThrottleOk, wake | The idle throttle (60 fps ↔ 12.5 fps), the water/ZX wake rates, and the perf HUD. | Hot
+//#region Frame pacing & perf | anchors: roomLoading, roomLoadSeq, IDLE_LOOP_MS, updatePerfHud, roomAnimating, loopThrottleOk, idleDelayMs | The idle throttle (60 fps ↔ 12.5 fps), the water/ZX wake rates, and the perf HUD. | Hot
 let lastTime = 0;
 let acc = 0;
 // Render-on-dirty bookkeeping: the last room frame's render signature, plus a
@@ -4170,7 +4176,6 @@ const ZX_ANIM_MS = 33; // ~30fps
 // trade that has to be JUDGED on screen, and tools/ripple-lab.html sets it live so the
 // two ends can be compared without a rebuild. Nothing in the game writes to it.
 let waterAnimMs = 50; // 20fps
-let rafId = 0;
 
 /**
  * Does an IDLE frame still need repainting because the `ai` tier's water is animating
@@ -4244,23 +4249,18 @@ function aiWaterAnimating(): boolean {
  * so painting above 60 costs GPU/battery for no visible gain. The AI tier makes that
  * worse: it composites 4x-resolution rooms every paint.
  *
- * PHASE-LOCKED, not free-running. The obvious form — skip while `now - lastPaint <
- * PAINT_MIN_MS`, then set `lastPaint = now` — re-phases the gate to each painted frame,
- * so it only yields 60fps when the refresh rate is an exact multiple of 60. Everything
- * else aliases badly: 144Hz gave 48fps, 75Hz gave 37.5, 90Hz gave 45, 165Hz gave 55.
- * (A margin under 1000/60 hides this at 120Hz, which is why it went unnoticed.)
+ * PHASE-LOCKED, not free-running. The obvious form — skip while `now - lastPaint` is
+ * under the period, then set `lastPaint = now` — re-phases the gate to each painted
+ * frame, so it only yields 60fps when the refresh rate is an exact multiple of 60.
+ * Everything else aliases badly: 144Hz gave 48fps, 75Hz gave 37.5, 90Hz gave 45, 165Hz
+ * gave 55. (A margin under 1000/60 hides this at 120Hz, which is why it went unnoticed.)
  *
- * Instead we keep a `nextPaint` deadline advanced by exactly PAINT_MIN_MS, so the
- * accumulated remainder carries into the next interval and the long-run average is the
- * cap regardless of refresh rate. When we fall far behind (a stall, or a backgrounded
- * tab) the deadline snaps forward to `now` rather than bursting to catch up.
+ * The deadline itself lives in `frameClock.ts` along with the rAF handle and the idle
+ * timer; these are the two numbers that price it.
  */
 const MAX_PAINT_FPS = 60;
-const PAINT_MIN_MS = 1000 / MAX_PAINT_FPS;
 /** Rounding/jitter slack: a refresh landing a hair early still counts for this period. */
 const PAINT_EPSILON_MS = 1;
-let nextPaint = 0;
-let idleTimer: ReturnType<typeof setTimeout> | 0 = 0;
 // Perf HUD counters (dev mode): rAF ticks vs actual screen paints, sampled ~2×/sec.
 let perfRaf = 0;
 let perfPaint = 0;
@@ -4382,52 +4382,51 @@ function loopThrottleOk(): boolean {
   return false;
 }
 
-/** Schedule the next loop iteration: rAF (capped to MAX_PAINT_FPS) normally, a timer when idle. */
-function scheduleNext(): void {
-  if (loopThrottleOk()) {
-    // A ZX room keeps animating its bands, so it wakes at ~30fps; any other idle
-    // room/map wakes at the 12.5fps logic rate.
-    const delay = screen === 'room' && room?.gspec === 42
-      ? ZX_ANIM_MS
-      : aiWaterAnimating() ? waterAnimMs : IDLE_LOOP_MS;
-    idleTimer = setTimeout(() => {
-      idleTimer = 0;
-      loop(performance.now());
-    }, delay);
-  } else {
-    rafId = requestAnimationFrame(loop);
-  }
+/**
+ * How long the loop may sleep before the next frame, or `null` to stay at the full paint
+ * rate. This is the pacing POLICY — which screens may idle and how fast the things that
+ * still move on an idle screen need to move — and it stays here with the state it reads.
+ * The mechanism it feeds (the rAF handle, the idle timer, the paint deadline) is in
+ * `frameClock.ts`.
+ */
+function idleDelayMs(): number | null {
+  if (!loopThrottleOk()) return null;
+  // A ZX room keeps animating its bands, so it wakes at ~30fps; any other idle
+  // room/map wakes at the 12.5fps logic rate.
+  return screen === 'room' && room?.gspec === 42
+    ? ZX_ANIM_MS
+    : aiWaterAnimating() ? waterAnimMs : IDLE_LOOP_MS;
 }
 
-/**
- * Return to the full paint rate immediately. Called from input handlers so a
- * keypress/click never waits out a throttled timer (movement stays smooth from its
- * first frame). No-op if we're already on rAF.
- */
-function wake(): void {
-  if (idleTimer) {
-    clearTimeout(idleTimer);
-    idleTimer = 0;
-    lastTime = 0; // avoid a large dt from the idle gap
-    nextPaint = 0; // ...and don't let the cap swallow the first frame after idling
-    rafId = requestAnimationFrame(loop);
-  }
-}
+// Hand `frameClock.ts` its view of the game. Only the policy above and the loop itself
+// cross this boundary; the rAF handle, the idle timer and the paint deadline stay inside
+// the module, which is what stops eight unrelated regions from reaching into them.
+initFrameClock({
+  frame: (now) => loop(now),
+  idleDelayMs,
+  // A capped-away refresh is still a real display refresh, and the perf HUD's rAF number
+  // must show it — otherwise it just mirrors the paint rate and the cap is invisible.
+  onSkippedRefresh: () => {
+    perfRaf++;
+  },
+  // Drop the elapsed-time origin so the idle gap we just slept through does not arrive
+  // as one enormous dt.
+  onWake: () => {
+    lastTime = 0;
+  },
+  maxPaintFps: MAX_PAINT_FPS,
+  epsilonMs: PAINT_EPSILON_MS,
+});
 
 /** The render loop: steps the game at a fixed timestep, then draws (capped, see
  *  MAX_PAINT_FPS) once per RAF. */
 //#region `loop()` | anchors: loop | The rAF callback: which screen paints, how many logic steps run, when to sleep.
 function loop(now: number): void {
   loopTicks++;
-  // Skip this refresh entirely when it would exceed the paint cap. lastTime is left
-  // alone so the skipped interval still accumulates into `acc` — the simulation sees
-  // real elapsed time either way, so capping paint cannot change game speed.
-  if (shouldSkipPaint(now, nextPaint, PAINT_EPSILON_MS)) {
-    perfRaf++;            // still a real refresh — the HUD's rAF number must show it,
-    rafId = requestAnimationFrame(loop);   // otherwise it just mirrors the paint rate
-    return;
-  }
-  nextPaint = advancePaintDeadline(now, nextPaint, PAINT_MIN_MS);
+  // Refreshes dropped by the paint cap never reach here (frameClock.ts). `lastTime` is
+  // left alone across them, so a skipped interval still accumulates into `acc` — the
+  // simulation sees real elapsed time either way, so capping paint cannot change game
+  // speed.
   if (lastTime === 0) lastTime = now;
   const dt = now - lastTime;
   acc += dt;
@@ -4615,7 +4614,7 @@ function loop(now: number): void {
   // and hiding it here means the frame underneath has already been painted this tick.
   syncLoadingUi(now);
   updatePerfHud(now);
-  scheduleNext();
+  scheduleNextFrame();
 }
 
 //#region Keyboard | anchors: keydown / keyup listeners | Every key binding, including cheats, dev keys and modal handling.
@@ -5401,7 +5400,7 @@ feedback = initFeedback({
 // boot is not over from the player's side and the overlay stays up (see syncLoadingUi).
 if (loadingEl && !mapArtHolding()) loadingEl.hidden = true;
 maybeShowWebglNote();
-requestAnimationFrame(loop);
+startFrames();
 
 // Browsers gate audio behind a user gesture: on the first interaction, resume the
 // context and (re)start the menu music if we're on the map.
@@ -5606,8 +5605,8 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   get idle() {
     return idle;
   },
-  get idleTimer() {
-    return idleTimer;
+  get loopIdle() {
+    return framesIdle();
   },
   get inReplay() {
     return inReplay;

@@ -182,7 +182,12 @@ export interface DebugHost {
   readonly helpScreens: HelpScreens;
   readonly hooks: HookSystem;
   readonly idle: () => boolean;
-  readonly idleTimer: 0 | NodeJS.Timeout;
+  /**
+   * Whether the frame clock is sleeping on the idle timer rather than on rAF. Was the
+   * timer handle itself until the clock moved to `frameClock.ts`; the handle was never
+   * anything but a truthiness test here, and the boolean is what `onTimer` always meant.
+   */
+  readonly loopIdle: boolean;
   readonly inReplay: () => boolean;
   readonly intro: IntroPlayer;
   readonly introMovie: () => string;
@@ -385,7 +390,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // spin when any is true (see loopThrottleOk). Used by the perf regression test.
     throttleInfo: () => ({
       throttleOk: host.loopThrottleOk(),
-      onTimer: host.idleTimer !== 0,
+      onTimer: host.loopIdle,
       // Why an idle room may still be waking faster than the 12.5 Hz logic tick: the ai
       // tier's water is sampled per paint on the GPU (see aiWaterAnimating).
       waterAnim: host.aiWaterAnimating(),
