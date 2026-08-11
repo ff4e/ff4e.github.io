@@ -93,6 +93,7 @@ import {
   showmodeTraceOn,
   subs,
 } from './gameState.js';
+import { renderer, setRendererValue } from './renderSettings.js';
 import { ui } from './screenState.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
@@ -230,7 +231,6 @@ export interface DebugHost {
   readonly panelState: () => PanelState;
   readonly playTime: Map<number, number>;
   readonly previewSubFont: (next?: boolean) => void;
-  renderer: "cpu" | "webgl";
   readonly replayIntro: () => void;
   readonly restartRoom: () => void;
   readonly roomArtPending: () => boolean;
@@ -352,11 +352,11 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // (reflects the `ai` upscale once its HEAD probe has resolved). Debug/test only.
     logoMovieUrl: () => host.logoMovie(),
     introMovieUrl: () => host.introMovie(),
-    renderer: () => host.renderer,
+    renderer: () => renderer,
     setRenderer: (m: 'cpu' | 'webgl') => {
-      host.renderer = m;
-      if (host.renderer === 'webgl') host.enableWebgl();
-      localStorage.setItem('ff.renderer', host.renderer);
+      setRendererValue(m);
+      if (renderer === 'webgl') host.enableWebgl();
+      localStorage.setItem('ff.renderer', renderer);
     },
     subFont: () => ({ idx: host.subFontIdx, ...host.SUB_FONT_CANDIDATES[host.subFontIdx]! }),
     subFontList: () => host.SUB_FONT_CANDIDATES.map((c) => c.name),
@@ -370,7 +370,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // GPU was engaged. Off the room screen (map, cutscene) the visible canvas is still
     // the honest signal.
     glActive: () =>
-      host.renderer === 'webgl' &&
+      renderer === 'webgl' &&
       !host.glFailed &&
       // While the room is loading or the help overlay is up, loop() hides #screen-gl and
       // nothing paints the room at all, so `lastRoomBackend` is stale — the visible-canvas

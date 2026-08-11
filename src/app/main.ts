@@ -198,6 +198,19 @@ import {
 } from './dom.js';
 import { openSaveStore } from './persist.js';
 import {
+  GRAPHICS_LEVELS,
+  devEnabled,
+  enhancedArtActive,
+  graphics,
+  initRenderSettings,
+  renderOnDirty,
+  renderer,
+  setDevEnabled,
+  setGraphics,
+  setRenderOnDirty,
+  setRenderer,
+} from './renderSettings.js';
+import {
   DEFAULT_LINE_TICKS,
   EFFECT_VOL,
   EXIT_CELLS,
@@ -939,96 +952,14 @@ function applyVolumeSettings(): void {
 //    thence to classic. enhancedArtActive() (below) still treats ai like enhanced
 //    because enhanced IS that fallback, and supplies the shared truecolor-mode
 //    behaviour (vector subtitles, the anti-flash load hold).
-//#region Graphics tier, renderer, dev flags | anchors: setGraphics, setRenderer, setRenderOnDirty, setDevEnabled | Tier selection, CPU vs WebGL, render-on-dirty, the dev pane.
-let graphics: GraphicsLevel =
-  ((): GraphicsLevel => {
-    const v = localStorage.getItem('ff.graphics');
-    // Default: the AI-upscaled tier. Each element falls back to enhanced (and thence
-    // to classic) when it has no AI asset, so this is safe even for anything unbuilt.
-    return v === 'classic' || v === 'enhanced' || v === 'ai' ? v : 'ai';
-  })();
-
-/**
- * True when the active level may use the enhanced (truecolor) art source. The AI
- * level counts too: enhanced is its per-element fallback and supplies the shared
- * truecolor-mode behaviour, so the art must be loaded either way. This is exactly `graphics !==
- * 'classic'`, so classic (false) and enhanced (true) keep their prior behaviour
- * byte-for-byte; only the new `ai` level newly returns true.
- */
-const enhancedArtActive = (): boolean => graphics !== 'classic';
-// Render backend (P3): the CPU compositor (oracle, fallback) or the WebGL2 GPU
-// compositor. Orthogonal to `graphics` (the art source) — both art sources
-// composite on either backend, and every room (incl. gspec=42 ZX) is on the GPU.
-// Any GL failure falls back to the CPU compositor. Persisted; defaults to webgl.
-// The default is webgl unconditionally (not gated on a live webgl2Available()
-// probe): the probe spins up a throwaway GL context and, under context pressure,
-// can transiently fail on a fresh load and strand the picker on CPU. A genuine GL
-// failure at runtime still falls back to the CPU compositor via glFailed, and the
-// HUD shows the WEBGL→cpu fallback, so webgl stays the honest intended default.
-let renderer: 'cpu' | 'webgl' =
-  (localStorage.getItem('ff.renderer') as 'cpu' | 'webgl' | null) ?? 'webgl';
-// Render-on-dirty (perf): when true, an idle room is repainted only when its frame
-// actually changes (the wobble/animation advances on the 12.5fps logic tick), not
-// on every 60fps rAF — cutting idle in-room CPU ~5x. 60fps is kept while anything
-// is animating (fish sliding, ZX bands, etc.). Persisted; default on.
-let renderOnDirty = localStorage.getItem('ff.renderOnDirty') !== '0';
-// Developer pane: persisted, off by default. Enabled via Ctrl+Alt+D — it shows the
-// tuning chrome (dev bar) + perf HUD (both gated on body.dev in CSS) and arms the
-// one-key dev toggles (E/R/P/F/G). Players never see it.
-let devEnabled = localStorage.getItem('ff.devEnabled') === '1';
-
-/** Enable/disable the developer pane; persists and mirrors the body.dev CSS hook. */
-function setDevEnabled(v: boolean): void {
-  devEnabled = v;
-  localStorage.setItem('ff.devEnabled', v ? '1' : '0');
-  document.body.classList.toggle('dev', v);
-}
-
-/**
- * Switch the render backend (CPU compositor ⇄ WebGL). The CPU path is the parity
- * oracle + fallback; WebGL is re-enabled explicitly even after a prior GL failure
- * (the user is retrying). Persists, keeps the dev-bar select in sync, and forces a
- * room repaint so the switch shows immediately under render-on-dirty.
- */
-function setRenderer(r: 'cpu' | 'webgl'): void {
-  renderer = r;
-  if (renderer === 'webgl') enableWebgl();
-  localStorage.setItem('ff.renderer', renderer);
-  if (rendererSelect) rendererSelect.value = renderer;
-  setForceRoomRedraw(true);
-  wake();
-  setInfo();
-}
-
-/** Toggle/set the idle-FPS saver (render-on-dirty); persists + syncs the dev-bar checkbox. */
-function setRenderOnDirty(v: boolean): void {
-  renderOnDirty = v;
-  localStorage.setItem('ff.renderOnDirty', v ? '1' : '0');
-  if (idleDirtyToggle) idleDirtyToggle.checked = v;
-  setForceRoomRedraw(true); // repaint immediately when turning the saver off
-  wake();
-}
-
-// The graphics-level cycle order for the E hotkey (classic → enhanced → ai → …).
-const GRAPHICS_LEVELS: readonly GraphicsLevel[] = ['classic', 'enhanced', 'ai'];
-
-/**
- * Set the graphics-quality level (classic/enhanced/ai). Single entry point shared
- * by the E hotkey, the dev-bar combobox, and the ff.setGraphics hook: persists,
- * ensures the enhanced art for the current room is loaded whenever the new level
- * uses it (enhanced or ai), keeps the dev-bar select in sync, and forces a room
- * repaint so the switch shows immediately under render-on-dirty.
- */
-function setGraphics(level: GraphicsLevel): void {
-  graphics = level;
-  localStorage.setItem('ff.graphics', graphics);
-  retargetArtForTier();
-  if (graphicsSelect) graphicsSelect.value = graphics;
-  setForceRoomRedraw(true);
-  ui.mapSig = null; // repaint the map so switching to/from the AI level shows immediately
-  wake();
-  setInfo();
-}
+//#region Render settings wiring | anchors: initRenderSettings | Hands `renderSettings.ts` its one name and loads the four persisted choices. The tier/backend switches are in that module.
+// Called HERE, where the declarations used to sit: after the save store is open, which is
+// what makes reading the `ff.*` keys legal (persist.ts), and after the device gate.
+initRenderSettings({
+  get setInfo() {
+    return setInfo;
+  },
+});
 
 // Art loading for the enhanced and `ai` tiers lives in art.ts. Wired HERE, where that
 // code used to sit. It reads the game through these getters; `forceRoomRedraw` is the
@@ -5213,12 +5144,6 @@ window.addEventListener('keydown', unlockAudio, { once: true });
   },
   get previewSubFont() {
     return previewSubFont;
-  },
-  get renderer() {
-    return renderer;
-  },
-  set renderer(v: "cpu" | "webgl") {
-    renderer = v;
   },
   get replayIntro() {
     return replayIntro;
