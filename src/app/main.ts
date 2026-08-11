@@ -34,7 +34,6 @@ import {
   TetrisGame,
   parseShapes,
   type HiscoreStore,
-  type TetrisKey,
   type TetrisShapes,
 } from '../core/tetris.js';
 import { renderTetris, tetrisRgba, type TetrisArt } from '../render/tetrisRender.js';
@@ -111,6 +110,7 @@ import {
   startFrames,
   wake,
 } from './frameClock.js';
+import { initKeyboard } from './keyboard.js';
 import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
 import { loadAiPanel, type AiPanel } from '../render/panelAi.js';
 import { loadAiCredits, type AiCredits } from '../render/creditsAi.js';
@@ -1320,40 +1320,6 @@ const blink = { little: 0, big: 0 };
 // gspec=2 darkness flicker (KresliRybu, URoom.pas:25747): each tick a fish has a
 // ~6% chance to wink out (random(100)<6). Kept tick-stable like `blink`.
 const darkFlicker = { little: false, big: false };
-
-const KEYS: Record<string, { which: 'little' | 'big'; dir: number }> = {
-  KeyI: { which: 'little', dir: Dir.up },
-  KeyK: { which: 'little', dir: Dir.down },
-  KeyJ: { which: 'little', dir: Dir.left },
-  KeyL: { which: 'little', dir: Dir.right },
-  KeyW: { which: 'big', dir: Dir.up },
-  KeyS: { which: 'big', dir: Dir.down },
-  KeyA: { which: 'big', dir: Dir.left },
-  KeyD: { which: 'big', dir: Dir.right },
-};
-
-/** The minigame's key map (Ttr.pas:458: 37/100 left, 39/102 right, 12/40/98/101
- *  rotate, 32/45/96 slam). Down rotates; there is no soft drop. */
-const TETRIS_KEYS: Record<string, TetrisKey> = {
-  ArrowLeft: 'left',
-  Numpad4: 'left',
-  ArrowRight: 'right',
-  Numpad6: 'right',
-  ArrowDown: 'rotate',
-  Numpad2: 'rotate',
-  Numpad5: 'rotate',
-  Space: 'drop',
-  Insert: 'drop',
-  Numpad0: 'drop',
-};
-
-/** Arrow keys move the *active* fish (ZaznamenejPrikazKlavesou #37..#40, kdo:=sys). */
-const ARROWS: Record<string, number> = {
-  ArrowLeft: Dir.left,
-  ArrowUp: Dir.up,
-  ArrowRight: Dir.right,
-  ArrowDown: Dir.down,
-};
 
 /** stav_kuk trigger: the newly-active fish peeks at the player after a switch/select,
  *  unless we're replaying the demo (showmode) or fast-loading — the original suppresses
@@ -4617,240 +4583,150 @@ function loop(now: number): void {
   scheduleNextFrame();
 }
 
-//#region Keyboard | anchors: keydown / keyup listeners | Every key binding, including cheats, dev keys and modal handling.
-window.addEventListener('keydown', (e) => {
-  wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
-  // The feedback form owns the keyboard while it is up. It is a modal <dialog>, so the
-  // browser already keeps pointer and focus out of the game — but a keydown inside it
-  // still bubbles to window. The fish keys are letters (WASD/IJKL, Uovl.pas:744) and
-  // `X` arms the cheat buffer, so typing "the fish sank while I was pushing a crate"
-  // swims the fish around behind the form — corrupting the very move record the report
-  // is about. Escape is left alone: the dialog's own handler closes it.
-  if (feedback?.isOpen()) return;
-  // A room launch off the map is BLOCKING in the original (Spust runs inside the timer
-  // handler, so no message is dispatched until the room is up). Swallow the keyboard
-  // for as long as the parchment is on the map — the map's own pointer handlers do the
-  // same. Anything else would let Escape, a cheat code or a tier switch act on a map
-  // that is already on its way out.
-  if (mapLaunching() !== null) {
-    e.preventDefault();
-    return;
-  }
-  // While the intro movie plays, swallow input; any key skips the current movie
-  // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603). Two exceptions:
-  // a bare modifier keydown must NOT skip (otherwise arming Ctrl+Alt+D during the
-  // intro fires three skips — Ctrl, Alt, D — and blows through the whole sequence),
-  // and Ctrl+Alt+D itself toggles the dev pane in place so it can be armed before
-  // the game proper without abandoning the movies.
-  if (intro.playing) {
-    if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') return;
-    if (e.ctrlKey && e.altKey && e.code === 'KeyD') {
-      e.preventDefault();
-      setDevEnabled(!devEnabled);
-      return;
-    }
-    e.preventDefault();
-    intro.skip();
-    return;
-  }
-  // Any key dismisses the scrolling credits (UMain.pas FormKeyDown → DoneCredits).
-  if (mapOverlay === 'credits') {
-    e.preventDefault();
-    closeMapOverlay();
-    return;
-  }
-  // Any key dismisses the leg-completion story page (zrus_obrazek).
-  if (screen === 'legimage') {
-    e.preventDefault();
-    dismissLegImage();
-    return;
-  }
-  // While the help screens are open, arrows page through them and any other key
-  // closes the viewer (Help.pas:Image1Click / FormKeyDown).
-  if (helpOpen) {
-    e.preventDefault();
-    const count = helpScreens.pages(subLang()).length;
-    if (e.code === 'ArrowRight') helpScreens.next(count);
-    else if (e.code === 'ArrowLeft') helpScreens.prev(count);
-    else closeHelp();
-    return;
-  }
-  // While the briefcase demo plays, swallow input; Escape skips it (zrus_kufr).
-  // The render/graphics/font toggles are let through so you can switch the
-  // backend or art source live (the cutscene frame reads them every tick).
-  if (cutscene) {
-    if (e.code === 'Escape') {
-      e.preventDefault();
-      skipCutscene();
-      return;
-    }
-    if (e.code !== 'KeyR' && e.code !== 'KeyE' && e.code !== 'KeyF') return;
-  }
-  // While the Tetris minigame is open it owns the keyboard, as its modal window
-  // does (FormKeyDown, Ttr.pas:458). Escape closes it (modalresult := mrCancel).
-  // Note that Down ROTATES the piece here — the original has no soft drop; Space
-  // slams the piece down instead.
-  if (tetrisModal()) {
-    e.preventDefault();
-    if (e.code === 'Escape') {
-      closeTetris();
-      return;
-    }
-    const k = tetris ? TETRIS_KEYS[e.code] : undefined;
-    if (k && tetris) {
-      tetris.key(k);
-      forceRoomRedraw = true;
-    }
-    return;
-  }
-  // Typed cheat codes (ZaznamenejPrikazKlavesou, Uovl.pas:744; the map screen keeps
-  // its own buffer, UMain.pas:1750). `X` arms the machine; while a code is part-typed
-  // the letters are swallowed, and the first letter that cannot continue any code
-  // parks it and falls through to the normal handler below.
-  {
-    // The original feeds EVERY key through the buffer, so an arrow, Space or
-    // Backspace breaks the prefix and parks the machine before doing its normal
-    // job (Uovl.pas:748-769). Only letters can extend a code, so anything else is
-    // fed as a cancelling key and then handled normally below.
-    const entry = screen === 'map' ? mapCheats : roomCheats;
-    const letter = e.key.length === 1 && /[a-z]/i.test(e.key);
-    const r = letter ? entry.press(e.key) : entry.cancel();
-    if (r.cheat) {
-      if (screen === 'map') applyMapCheat(r.cheat);
-      else applyRoomCheat(r.cheat);
-      return;
-    }
-    if (r.swallowed) return;
-  }
-  // Ctrl+Alt+D: enable/disable the developer pane (persisted). This is the ONLY
-  // way in/out of dev mode; while enabled it shows the tuning chrome + perf HUD and
-  // arms the one-key dev toggles (E/R/P/F/G) below. Kept deliberately obscure so
-  // players never trip it — the game is played chrome-free.
-  if (e.ctrlKey && e.altKey && e.code === 'KeyD') {
-    e.preventDefault();
-    setDevEnabled(!devEnabled);
-    return;
-  }
-  // The single-key dev toggles are armed ONLY while the dev pane is enabled, and only
-  // for a BARE keypress. Without the modifier guard these collide with the browser's
-  // own shortcuts: Cmd/Ctrl+R (reload) toggled the renderer and persisted it, so the
-  // backend flipped CPU/WebGL on every reload — and reloading from the toolbar button,
-  // which fires no keydown, did not. Cmd+P (print) silently disabled the idle-FPS
-  // saver, Cmd+E changed the graphics tier, Cmd+F the subtitle font, Cmd+G the
-  // subtitle language. All of those are persisted, so a single accidental shortcut
-  // changed how the game rendered from then on.
-  //
-  // Ctrl+Alt+D above is deliberately checked BEFORE this and is unaffected: it is the
-  // one dev key that is meant to carry modifiers.
-  if (devEnabled && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    if (e.code === 'KeyG') {
-      // Cycle subtitles Czech -> English -> off (obltitcz/eng/no).
-      setSubtitleMode(settings.subtitles === 'cz' ? 'en' : settings.subtitles === 'en' ? 'off' : 'cz');
-      return;
-    }
-    if (e.code === 'KeyP') {
-      // Toggle the idle-FPS saver (render-on-dirty). Also the dev-bar checkbox.
-      setRenderOnDirty(!renderOnDirty);
-      return;
-    }
-    if (e.code === 'KeyE') {
-      // Cycle the graphics level classic → enhanced → ai → classic (also the
-      // dev-bar Graphics combobox). setGraphics persists + syncs the select.
-      const i = GRAPHICS_LEVELS.indexOf(graphics);
-      setGraphics(GRAPHICS_LEVELS[(i + 1) % GRAPHICS_LEVELS.length]!);
-      return;
-    }
-    if (e.code === 'KeyR') {
-      // Toggle the render backend CPU <-> WebGL (also on the dev-bar Renderer select).
-      setRenderer(renderer === 'webgl' ? 'cpu' : 'webgl');
-      return;
-    }
-    if (e.code === 'KeyF') {
-      // Cycle the vector-subtitle font (Shift+F for previous) and show a sample line.
-      previewSubFont(!e.shiftKey);
-      return;
-    }
-    if (e.code === 'KeyW' && e.shiftKey) {
-      // Genuinely win the current room (also the dev-bar "Win room" button). Uses the
-      // real win path, so an end-of-leg room reveals its story page. Spot-check aid.
-      // Shift-gated so it never collides with a typed cheat string (e.g. xwemaketherules).
-      devWinRoom();
-      return;
-    }
-  }
-  // Backspace restarts the room (TRoom.Restart) — the original's Restart action,
-  // which the tutorial fish teach ("1st-m-backspace"). It is NOT a single-move undo.
-  if (e.code === 'Backspace') {
-    e.preventDefault();
-    restartRoom();
-    return;
-  }
-  if (e.code === 'F2') {
-    e.preventDefault();
-    if (atRest()) saveGame();
-    return;
-  }
-  if (e.code === 'F3') {
-    e.preventDefault();
-    if (atRest()) loadGame();
-    return;
-  }
-
-  if (e.code === 'Escape') {
-    e.preventDefault();
-    if (screen === 'map') {
-      if (mapInfoRoom !== null) closeMapInfo(); // close the record panel first (daCancel)
-      else if (mapOverlay !== 'none') closeMapOverlay(); // close an open menu overlay
-      else if (room) enterRoom(Number(select.value));
-    } else showMap();
-    return;
-  }
-  if (screen === 'map') return; // no fish keys on the map
-  if (activeScript?.s.natvrdo === 1) return; // possessed by ZELVA: input is ignored
-  if (activeScript?.s.zavermode) return; // ZAVER finale cutscene: only restart/exit above work
-  if (inShowmode()) return; // KUFRIK demonstration: fish keys blocked (Backspace/Escape end it above)
-  if (inReplay()) return; // map "Replay" playback: player fish keys are blocked
-  if (loadmode) return; // fast-forward load in progress: ignore fish keys (Backspace above aborts it)
-  if (e.code === 'Space') {
-    e.preventDefault();
-    swapActive(); // akce_switch
-    return;
-  }
-  if (e.code === 'Digit1' || e.code === 'Digit2') {
-    e.preventDefault();
-    selectFish(e.code === 'Digit1' ? 'little' : 'big'); // akce_set
-    return;
-  }
-  const arrow = ARROWS[e.code];
-  if (arrow !== undefined) {
-    // Arrow keys move the active fish (kdo:=sys); the engine repeats it while held.
-    e.preventDefault();
-    beginHeldMove(e.code, true, engine?.active ?? 'little', arrow);
-    return;
-  }
-  const map = KEYS[e.code];
-  if (!map) return;
-  e.preventDefault();
-  beginHeldMove(e.code, false, map.which, map.dir); // kdo:=mala/velka
-});
-
-window.addEventListener('keyup', (e) => {
-  wake();
-  // FormKeyUp (Uovl.pas:1006): 1→3 (guarantee one dispatch for a tap), otherwise →0.
-  if (e.code !== heldKey) return;
-  if (heldState === 1) heldState = 3;
-  else clearHeldKey();
-});
-
-// Losing focus (alt-tab / clicking another window) or hiding the tab means the OS
-// stops auto-repeat and never delivers the keyup for a held movement key. Drop it
-// ourselves, exactly as a keyup would — otherwise heldState stays "held", the fish
-// keeps swimming, and (because loopThrottleOk requires heldState===0) the render
-// loop never drops to the idle timer and spins at the full display refresh (120fps
-// on a ProMotion panel) until the next room change/restart clears it.
-window.addEventListener('blur', () => clearHeldKey());
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) clearHeldKey();
+//#region Keyboard wiring | anchors: initKeyboard | Hands `keyboard.ts` its view of the game. Every binding is in that module.
+// The widest seam in the file, and deliberately so: a key table binds keys to the whole
+// command surface of the game, so its context cannot be argued below the size of that
+// surface. It shrinks when the commands themselves become modules, not before — see the
+// header of keyboard.ts.
+initKeyboard({
+  get GRAPHICS_LEVELS() {
+    return GRAPHICS_LEVELS;
+  },
+  get activeScript() {
+    return activeScript;
+  },
+  get atRest() {
+    return atRest;
+  },
+  get beginHeldMove() {
+    return beginHeldMove;
+  },
+  get clearHeldKey() {
+    return clearHeldKey;
+  },
+  get closeHelp() {
+    return closeHelp;
+  },
+  get closeMapInfo() {
+    return closeMapInfo;
+  },
+  get closeMapOverlay() {
+    return closeMapOverlay;
+  },
+  get cutscene() {
+    return cutscene;
+  },
+  get devEnabled() {
+    return devEnabled;
+  },
+  get dismissLegImage() {
+    return dismissLegImage;
+  },
+  get engine() {
+    return engine;
+  },
+  get enterRoom() {
+    return enterRoom;
+  },
+  get feedback() {
+    return feedback;
+  },
+  get graphics() {
+    return graphics;
+  },
+  get heldKey() {
+    return heldKey;
+  },
+  get helpOpen() {
+    return helpOpen;
+  },
+  get helpScreens() {
+    return helpScreens;
+  },
+  get inReplay() {
+    return inReplay;
+  },
+  get inShowmode() {
+    return inShowmode;
+  },
+  get intro() {
+    return intro;
+  },
+  get loadGame() {
+    return loadGame;
+  },
+  get loadmode() {
+    return loadmode;
+  },
+  get mapInfoRoom() {
+    return mapInfoRoom;
+  },
+  get mapOverlay() {
+    return mapOverlay;
+  },
+  get previewSubFont() {
+    return previewSubFont;
+  },
+  get renderOnDirty() {
+    return renderOnDirty;
+  },
+  get renderer() {
+    return renderer;
+  },
+  get restartRoom() {
+    return restartRoom;
+  },
+  get room() {
+    return room;
+  },
+  get saveGame() {
+    return saveGame;
+  },
+  get screen() {
+    return screen;
+  },
+  get selectFish() {
+    return selectFish;
+  },
+  get setDevEnabled() {
+    return setDevEnabled;
+  },
+  get setGraphics() {
+    return setGraphics;
+  },
+  get setRenderOnDirty() {
+    return setRenderOnDirty;
+  },
+  get setRenderer() {
+    return setRenderer;
+  },
+  get setSubtitleMode() {
+    return setSubtitleMode;
+  },
+  get settings() {
+    return settings;
+  },
+  get showMap() {
+    return showMap;
+  },
+  get skipCutscene() {
+    return skipCutscene;
+  },
+  get subLang() {
+    return subLang;
+  },
+  get swapActive() {
+    return swapActive;
+  },
+  get heldState() {
+    return heldState;
+  },
+  set heldState(v: number) {
+    heldState = v;
+  },
+  set forceRoomRedraw(v: boolean) {
+    forceRoomRedraw = v;
+  },
 });
 
 //#region Pointer | anchors: cellFromEvent, clickCell, dirToward, clickMapAt, panelCoords | Fish selection and click-to-swim target (the pathfinding is in `stepEngine.ts`), map and panel hit-testing.
