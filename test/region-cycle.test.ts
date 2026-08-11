@@ -32,17 +32,22 @@ import { analyse } from '../tools/region-graph.mjs';
 /**
  * Largest strongly-connected component of the region graph, in regions.
  *
- * 20 at the split — every one of these regions can reach every other, so none of them
- * can leave the file on its own.
+ * 20 at the split — every one of these regions could reach every other, so none of them
+ * could leave the file on its own.
+ *
+ * 17 once the frame clock moved to `src/app/frameClock.ts`. `wake()` alone was eight
+ * edges into frame pacing from regions with no interest in requestAnimationFrame, and
+ * removing it freed the whole frame layer: the painter, the pacing and `loop()` are all
+ * outside every cycle now.
  */
-const MAX_CYCLE = 20;
+const MAX_CYCLE = 17;
 
 /**
  * Edges inside that component. Tracked alongside the cycle because the cycle is a step
  * function: a PR can remove a dozen edges and leave the component the same size, and
  * without this number that PR looks like it achieved nothing.
  */
-const MAX_CORE_EDGES = 111;
+const MAX_CORE_EDGES = 82;
 
 describe('src/app/main.ts region graph', () => {
   const report = analyse();

@@ -36,8 +36,14 @@ import { readFileSync } from 'node:fs';
  * be noise, and noise is how a guard gets ignored.
  */
 const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
-  // 5 894 today. The split took it from 7 798; it is still the largest file here and the
+  // 5 910 today. The split took it from 7 798; it is still the largest file here and the
   // most-edited, so it is the one that matters most.
+  //
+  // Raised 5 900 -> 5 920 for the frame-clock move. The file grew by thirteen lines, all
+  // of them the comment on `onSkippedRefresh` explaining why `loopTicks` must count
+  // refreshes the paint cap drops: `test-aisubs` divides by that counter, and counting
+  // only post-cap frames would leave the probe passing while unable to fail. The pacing
+  // code itself leaves in a later commit and the budget comes back down with it.
   //
   // Raised 5 800 -> 5 900 for the room-launch parchment. The launch's own state machine,
   // its art and its blitting live in `src/app/roomLaunch.ts` (303 lines) exactly so they
@@ -46,7 +52,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // drawMap()'s unlit/plaque/parchment frame, loop()'s dispatch of the launch, the three
   // input guards, the enterRoom/startRoom split, and the new module's wiring block
   // (~48 lines of the ~171).
-  ['src/app/main.ts', 5900],
+  ['src/app/main.ts', 5920],
   // 1 625. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does.
   ['src/app/debugHooks.ts', 1700],
