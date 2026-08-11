@@ -19,6 +19,7 @@
     "test:ui": "node tools/run-ui-tests.mjs",
     "capture-digest": "node tools/capture-digest.mjs",
     "map:update": "node tools/gen-map.mjs",
+    "region-graph": "node tools/region-graph.mjs",
     "test:all": "npm run typecheck && npm run test && npm run test:ui",
     "test-move": "tsx tools/test-move.ts",
     "screenshot": "node tools/screenshot.mjs",

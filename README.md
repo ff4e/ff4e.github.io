@@ -388,8 +388,26 @@ rules; `AGENTS.md` has the things that cost people time to find out.
 - `tools/dev-server.mjs` — `npm run dev`: the dev server on a free port, printing what it serves.
 - `tools/link-node-modules.mjs` — share one `node_modules` between worktrees (opt-in, lockfile-checked).
 - `tools/gen-map.mjs` — regenerates the README's `main.ts` map from the `//#region` markers in that file.
+- `tools/region-graph.mjs` — measures which of those regions reference which, and reports the largest
+  cycle among them: the number that says whether `main.ts` could be split into files at all. `--edges`
+  lists every edge inside the cycle with the symbols carrying it. Guarded by `test/region-cycle.test.ts`.
 - `tools/capture-digest.mjs` — byte-exact behavioural fingerprint, comparable across git revisions.
   The safety net for the `main.ts` split; read its header for what it does and does not cover.
+
+### Why `main.ts` is mapped instead of split
+
+The map below is a workaround, and it is worth being precise about what for. Twenty of the file's 32
+regions form a **single strongly-connected component** in the region graph — every one of them can reach
+every other, so none can leave the file on its own. `node tools/region-graph.mjs` prints the component and
+the 111 edges inside it.
+
+That is what a map is standing in for. A reader has to trust a table and open a 60 k-token file to reach a
+200-line region; a directory of modules would describe itself. The knot is thin rather than deep — **66 of
+those 111 edges are carried by a single shared symbol**, and dropping the edges carried by two or fewer
+dissolves the component entirely — so it comes apart one small PR at a time, not in one rewrite.
+
+`test/region-cycle.test.ts` holds the current numbers as a ceiling that ratchets down, so a PR that
+untangles a seam records it and a PR that re-tangles one has to say so.
 
 ### Map of `src/app/main.ts`
 
