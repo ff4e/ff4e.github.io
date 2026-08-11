@@ -198,6 +198,20 @@ import {
 } from './dom.js';
 import { openSaveStore } from './persist.js';
 import {
+  DEFAULT_LINE_TICKS,
+  EFFECT_VOL,
+  EXIT_CELLS,
+  LOGIC_MS,
+  LOGIC_SEC,
+  MAX_STEPS_PER_FRAME,
+  contentScaleFor,
+  initStageGeometry,
+  roomGeometry,
+  scalingFilterFor,
+  setStage,
+  stage,
+} from './stageGeometry.js';
+import {
   acc,
   aiWaterAnimating,
   forceRoomRedraw,
@@ -394,7 +408,7 @@ import {
   parchmentReady,
   tickMapLaunch,
 } from './roomLaunch.js';
-//#region Device gate, stage layout & constants | anchors: isUnsupportedDevice, computeStageLayout, roomGeometry, LOGIC_MS | Phones are refused first, before any art is fetched. Then how the stage is scaled to the viewport, and the 80 ms game tick.
+//#region Device gate | anchors: isUnsupportedDevice, showUnsupportedNotice | Phones are refused here, before any art is fetched — and before every other side effect in the file. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`.
 
 // Phones are refused here, before a single byte of game ART is fetched. (The engine
 // bundle itself has already been downloaded — this statement is inside it — so the claim
@@ -411,114 +425,19 @@ if (typeof window !== 'undefined' && isUnsupportedDevice(window)) {
   await new Promise<never>(() => {});
 }
 
-// Display scaling (public-release Phase 1). The stage box + side panel are scaled
-// together to fill the viewport (`stage`, recomputed on resize/fullscreen); each
-// room/map/cutscene is drawn at contentScaleFor() and centered in the stage box.
-// Replaces the old fixed `SCALE = 2`. Input stays scale-agnostic (every pointer
-// handler maps via getBoundingClientRect ratios), so only display sizing changes.
-let stage: StageLayout = computeStageLayout(
-  typeof window !== 'undefined' ? window.innerWidth : 1600,
-  typeof window !== 'undefined' ? window.innerHeight : 1200,
-);
-
-/**
- * Pick the scaling filter for a canvas whose BACKING STORE is `backingW` wide while it
- * is displayed `cssW` wide.
- *
- * The stylesheet sets `image-rendering: pixelated` on every canvas, which is right for
- * native-resolution art (crisp 1998 pixels) but wrong for the ai tier: a ×4 backing
- * store shown smaller gets point-sampled on the way down, which throws most of the
- * upscaled detail away and aliases.
- *
- * Smooth-filter only when the store is genuinely UPSCALED (>= 1.5× the displayed size),
- * not merely minified: a native 155px panel shown at 145px is also "minifying", and
- * smoothing that would soften the faithful tiers, which must keep their exact pixels.
- * Returns the value for style.imageRendering ('' = inherit the stylesheet).
- */
-const UPSCALED_STORE_RATIO = 1.5;
-function scalingFilterFor(backingW: number, cssW: number): string {
-  return backingW >= cssW * UPSCALED_STORE_RATIO ? 'auto' : '';
-}
-
-/** Display px per native px for content of size w×h, per the current fit mode. */
-function contentScaleFor(w: number, h: number): number {
-  // Pass devicePixelRatio so 'native' can snap to whole PHYSICAL pixels (crisp at
-  // any browser zoom / display scaling); the other modes ignore it.
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  return fitScale(w, h, stage.scale, settings.fitMode, dpr);
-}
-
-/**
- * Everything about where and how big the current room is drawn — the single source of
- * truth for the room's geometry.
- *
- * It exists because "the room canvas's backing store is the native game resolution" was
- * true for classic and enhanced, so the two were used interchangeably in half a dozen
- * independently-derived places. The `ai` tier falsifies it (its backing store is ×scale)
- * and every one of those places became a chance to conflate them. That produced a real
- * bug — the subtitle overlay was sized from the backing store and came out up to 2.7×
- * wider than the room — and would have produced more.
- *
- * So the two are named separately here and derived once:
- *   native   the resolution the SIMULATION uses; all game coordinates are in these px
- *   css      the on-screen box; every layer stacked over the room must match this
- *   backing  the buffer the frame is COMPOSITED in, which is native×upscale in the ai
- *            tier — the #screen canvas on the canvas-2D path, GlAiScreen's offscreen
- *            FBO on the GPU one (where #screen is left at native size, since nothing
- *            paints into it)
- *
- * `scale` converts native → css, which is what any overlay drawing in game coordinates
- * needs; it is deliberately NOT derived from the backing store.
- */
-function roomGeometry(r: Room): RoomGeometry {
-  const { w: nativeW, h: nativeH } = roomScreenSize(r);
-  const scale = contentScaleFor(nativeW, nativeH);
-  // Only the AI compositor renders above native resolution, and only when it is the
-  // path that will actually draw this frame (aiRoomRenderActive covers the gate, the
-  // loaded art and the current room).
-  const upscale = aiRoomRenderActive(r) && aiRoom ? aiRoom.scale : 1;
-  return {
-    nativeW,
-    nativeH,
-    scale,
-    cssW: nativeW * scale,
-    cssH: nativeH * scale,
-    backingW: nativeW * upscale,
-    backingH: nativeH * upscale,
-    upscale,
-  };
-}
-
-// The original advances ALL game logic on a fixed WALL-CLOCK timestep, not the
-// display refresh and not per audio buffer. The shipped game loop is TRoom.Jedeme
-// (URoom.pas:23952, called from UMain.pas:266): a manual busy-wait that spins on
-// `Application.ProcessMessages` until ~80ms of system `Time` have elapsed
-// (`until curtime > lasttime + 0.08/86400`, i.e. 0.08s), then runs ONE logic step
-// (Timer1Timer). So logic runs at ~80ms/step (~12.5 fps). The audio-buffer gate
-// that would have locked it to the 139.32ms buffer (`else if Tick=0 then exit`,
-// URoom.pas:24061) is COMMENTED OUT; Timer1's Interval=90ms (URoom.dfm) is only a
-// secondary/fallback and the 80ms loop out-paces it. We reproduce this fixed
-// timestep so dialog `delay`s, idle timers, the `count` clock and animation `fazi`
-// counts all run at the authentic rate — otherwise (at the 60fps render rate)
-// every scripted pause is ~6.7x too short.
-const LOGIC_MS = 80; // ~12.5 game ticks/sec — TRoom.Jedeme's 0.08s wall-clock step
-const LOGIC_SEC = LOGIC_MS / 1000;
-// Jedeme runs exactly one step per loop iteration: under load the loop just takes
-// longer (the game slows), it never fast-forwards. So we step at most once per
-// rendered frame — no multi-step catch-up — matching that behaviour.
-const MAX_STEPS_PER_FRAME = 1;
-const DEFAULT_LINE_TICKS = 12; // readable fallback when a voice line has no audio
-
-// Sound-effect volume vs voices (RSound.pas:33-35): snd_volume=48, talk_volume=64,
-// max_volume=64. Effects (landings, death cries, bubbles, script Snd) play at 48/64
-// of voice level; the port previously played them at full voice volume, so loud
-// near-full-scale effects (e.g. the sp-smrt death scream) overlapping a landing
-// summed past 0 dB and hard-clipped — a harsh "beep". Voices/music keep their levels.
-const EFFECT_VOL = 48 / 64;
-
-
-// Animation lengths in game ticks (URoom.pas:425-433) — shared with the step-engine.
-const EXIT_CELLS = 5; // cells of travel to slide fully off-screen (render constant)
+//#region Stage geometry wiring | anchors: initStageGeometry | Hands `stageGeometry.ts` its one name and takes the first stage measurement. The scaling itself is in that module.
+// Immediately after the gate, which is where the stage used to be measured: the window
+// is only read once the device has been accepted, and never at import time.
+//
+// `settings` is a getter because it is declared much further down (it reads
+// localStorage, which must also come after the gate). The getter body does not run until
+// something asks for a scale, by which time it exists — the same lazy-host pattern
+// `initArt` and `initGlPlumbing` use.
+initStageGeometry({
+  get settings() {
+    return settings;
+  },
+});
 
 //#region Stage assembly & subtitle overlay state | anchors: buildStage, subFontIdx, subOverlaySig | Calls into `dom.ts` to nest the canvases, then the vector-subtitle bookkeeping.
 buildStage(); // the stage box + the GL/subtitle overlays (see dom.ts: not done at import time)
@@ -685,7 +604,7 @@ function maybeShowWebglNote(): void {
 function relayout(): void {
   const availW = stageRow?.clientWidth || window.innerWidth;
   const availH = stageRow?.clientHeight || window.innerHeight;
-  stage = computeStageLayout(availW, availH);
+  setStage(computeStageLayout(availW, availH));
   stageBox.style.width = `${Math.round(stage.stageW)}px`;
   stageBox.style.height = `${Math.round(stage.stageH)}px`;
   if (stageRow) stageRow.style.gap = `${Math.round(stage.gap)}px`;
