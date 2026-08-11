@@ -20,9 +20,17 @@
  * are both false during the capture sail straight through.
  *
  * So it is checked here instead. The rule is mechanical and total: for every accessor
- * whose body is a bare return or a bare assignment, the identifier must match the
- * accessor's own name. Accessors with a more involved body are skipped — none exist
- * today, and if one appears it deserves reading rather than a regex.
+ * whose body is a bare return or a bare assignment, the name must match the accessor's
+ * own name. Two forms count, because shared state that moved to an owning module is read
+ * through it:
+ *
+ *     get screen() { return screen; }        // a top-level variable
+ *     get mapSig() { return ui.mapSig; }     // a property of a state bag (screenState.ts)
+ *
+ * The second form matters more, not less: `ui` holds 37 same-shaped neighbours, so
+ * `get mapSig() { return ui.panelSig; }` is exactly the silent, same-typed mis-wiring
+ * this file exists to catch. Accessors with a more involved body are skipped — none
+ * exist today, and if one appears it deserves reading rather than a regex.
  *
  * The better fix is to GENERATE the accessor block from the same member list the host
  * interfaces are generated from, at which point identity is true by construction and
@@ -49,13 +57,28 @@ function scan(): { mismatches: Mismatch[]; checked: number } {
   let checked = 0;
   const lineOf = (n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
 
+  /**
+   * The name an accessor body is really reading or writing: a bare `screen`, or a single
+   * property off a state bag, `ui.screen`. Both are one hop to a named value, and both
+   * must agree with the accessor's own name. Anything else returns null and is skipped.
+   */
+  const backingName = (e: ts.Expression): string | null => {
+    if (ts.isIdentifier(e)) return e.text;
+    if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && ts.isIdentifier(e.name))
+      return e.name.text;
+    return null;
+  };
+
   const visit = (n: ts.Node): void => {
     if (ts.isGetAccessor(n) && ts.isIdentifier(n.name)) {
       const first = n.body?.statements[0];
-      if (first && ts.isReturnStatement(first) && first.expression && ts.isIdentifier(first.expression)) {
-        checked++;
-        if (first.expression.text !== n.name.text)
-          mismatches.push({ kind: 'get', member: n.name.text, backing: first.expression.text, line: lineOf(n) });
+      if (first && ts.isReturnStatement(first) && first.expression) {
+        const backing = backingName(first.expression);
+        if (backing !== null) {
+          checked++;
+          if (backing !== n.name.text)
+            mismatches.push({ kind: 'get', member: n.name.text, backing, line: lineOf(n) });
+        }
       }
     }
     if (ts.isSetAccessor(n) && ts.isIdentifier(n.name)) {
@@ -64,12 +87,14 @@ function scan(): { mismatches: Mismatch[]; checked: number } {
         first &&
         ts.isExpressionStatement(first) &&
         ts.isBinaryExpression(first.expression) &&
-        first.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-        ts.isIdentifier(first.expression.left)
+        first.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken
       ) {
-        checked++;
-        if (first.expression.left.text !== n.name.text)
-          mismatches.push({ kind: 'set', member: n.name.text, backing: first.expression.left.text, line: lineOf(n) });
+        const backing = backingName(first.expression.left);
+        if (backing !== null) {
+          checked++;
+          if (backing !== n.name.text)
+            mismatches.push({ kind: 'set', member: n.name.text, backing, line: lineOf(n) });
+        }
       }
     }
     ts.forEachChild(n, visit);
