@@ -6,8 +6,9 @@
  * both are answers to "what is the same for every screen": the stage box that everything
  * is scaled into, and the tick length everything is timed by. Nothing here reads game
  * state — `roomGeometry` takes the room as an argument rather than reading the global —
- * which is why this is the cheapest region in the file to move: it needs exactly ONE name
- * from `main.ts` (`settings`, for the player's fit mode).
+ * which is why this was the cheapest region in the file to move. It needed exactly one name
+ * from `main.ts` when it left (`settings`, for the player's fit mode) and needs none now
+ * that those live in `playerSettings.ts`.
  *
  * ── What deliberately did NOT come with it ───────────────────────────────────
  * The device gate. `main.ts` refuses to run on a phone before any other side effect, via
@@ -29,21 +30,9 @@ import {
   type StageLayout,
 } from './layout.js';
 import { roomScreenSize } from '../render/renderRoom.js';
+import { settings } from './playerSettings.js';
 import type { Room } from '../core/room.js';
 import type { Settings } from '../core/settings.js';
-
-/**
- * The one name this module needs from `main.ts`.
- *
- * `settings` is the player's persisted options, and only `fitMode` is read. It is not
- * imported directly because `loadSettings()` reads `localStorage`, which must not happen
- * before the device gate — so `main.ts` owns the call and hands the result over here.
- */
-export interface StageGeometryHost {
-  readonly settings: Settings;
-}
-
-let host!: StageGeometryHost;
 
 // Display scaling (public-release Phase 1). The stage box + side panel are scaled
 // together to fill the viewport (`stage`, recomputed on resize/fullscreen); each
@@ -85,7 +74,7 @@ export function contentScaleFor(w: number, h: number): number {
   // Pass devicePixelRatio so 'native' can snap to whole PHYSICAL pixels (crisp at
   // any browser zoom / display scaling); the other modes ignore it.
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  return fitScale(w, h, stage.scale, host.settings.fitMode, dpr);
+  return fitScale(w, h, stage.scale, settings.fitMode, dpr);
 }
 
 /**
@@ -160,9 +149,15 @@ export const EFFECT_VOL = 48 / 64;
 // Animation lengths in game ticks (URoom.pas:425-433) — shared with the step-engine.
 export const EXIT_CELLS = 5; // cells of travel to slide fully off-screen (render constant)
 
-/** Hand this module its view of the game and take the first stage measurement. */
-export function initStageGeometry(h: StageGeometryHost): void {
-  host = h;
+/**
+ * Take the first stage measurement.
+ *
+ * This took a one-member host until `settings` got its own module — now there is nothing
+ * left to hand over, only a measurement that must not happen at import time. That is the
+ * compounding this decomposition runs on: a region that leaves stops being something every
+ * other region has to be handed.
+ */
+export function initStageGeometry(): void {
   if (typeof window !== 'undefined') {
     stage = computeStageLayout(window.innerWidth, window.innerHeight);
   }

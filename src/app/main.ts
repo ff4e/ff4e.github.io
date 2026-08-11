@@ -198,6 +198,17 @@ import {
 } from './dom.js';
 import { openSaveStore } from './persist.js';
 import {
+  applyVolumeSettings,
+  initPlayerSettings,
+  musicLevel,
+  setSubtitleMode,
+  setVolume,
+  settings,
+  subLang,
+  subsOn,
+  syncScriptMusicVolume,
+} from './playerSettings.js';
+import {
   GRAPHICS_LEVELS,
   devEnabled,
   enhancedArtActive,
@@ -442,15 +453,9 @@ if (typeof window !== 'undefined' && isUnsupportedDevice(window)) {
 // Immediately after the gate, which is where the stage used to be measured: the window
 // is only read once the device has been accepted, and never at import time.
 //
-// `settings` is a getter because it is declared much further down (it reads
-// localStorage, which must also come after the gate). The getter body does not run until
-// something asks for a scale, by which time it exists — the same lazy-host pattern
-// `initArt` and `initGlPlumbing` use.
-initStageGeometry({
-  get settings() {
-    return settings;
-  },
-});
+// It takes no arguments: `settings` was its only dependency and now lives in
+// `playerSettings.ts`, which this module imports directly.
+initStageGeometry();
 
 //#region Stage assembly & subtitle overlay state | anchors: buildStage, subFontIdx, subOverlaySig | Calls into `dom.ts` to nest the canvases, then the vector-subtitle bookkeeping.
 buildStage(); // the stage box + the GL/subtitle overlays (see dom.ts: not done at import time)
@@ -877,67 +882,20 @@ initCheats({
     setForceRoomRedraw(v);
   },
 });
-//#region Settings | anchors: settings, subsOn, subLang, setSubtitleMode, setVolume, applyVolumeSettings | Subtitle language and the volume buses. The room itself (`ffr`, `room`, `subs`, `font`) moved to `gameState.ts`.
-// Player options (volume sliders + subtitle language), persisted across sessions
-// (settings.ts). Subtitles extend the port's cz/en with an off state (tit_no);
-// `titDef` remembers the last cz/en pick — the one language used for the titles,
-// room-name plaques and help (and the subtitles when on). subLang() resolves it.
-const settings = loadSettings();
-/**
- * True while dialogue text should be shown (titles <> tit_no).
- *
- * Silent-film mode overrides the "off" setting: `Talk` swaps `titles` to `tit_def`
- * for the duration (URoom.pas:630-635), because the cheat has muted every voice
- * and the intertitle cards are all the player has left.
- */
-function subsOn(): boolean {
-  return settings.subtitles !== 'off' || silentFilm;
-}
-/** The language to render dialogue text in (falls back to tit_def when off). */
-function subLang(): 'cz' | 'en' {
-  return settings.subtitles === 'off' ? settings.titDef : settings.subtitles;
-}
-/**
- * Set the subtitle language (obltitcz/eng/no, Uovl.pas:716-718). Choosing cz/en
- * also updates tit_def (the remembered language used when subtitles are off), so
- * the titles/plaques/help and the subtitles are always the one same language.
- */
-function setSubtitleMode(mode: SubtitleMode): void {
-  settings.subtitles = mode;
-  if (mode !== 'off') settings.titDef = mode;
-  saveSettings(settings);
-  void ensureDeskyData(); // language may have changed -> reload the room-name plaques
-  setInfo();
-}
-/** Set a volume slider index (tahlo_snd/talk/music) and apply it live. */
-function setVolume(bus: VolumeBus, index: number): void {
-  settings.volume[bus] = index;
-  audio.setBusGain(bus, busMultiplier(bus, index));
-  syncScriptMusicVolume();
-  saveSettings(settings);
-}
-
-/**
- * music_volume (RSound.pas:36) on the original's 0..64 scale — the level the
- * player's 0..12 slider index maps to through Volumes[]. Room scripts (VES's
- * quiet-music easter egg, URoom.pas:12190) compare against this, not the index.
- */
-function musicLevel(): number {
-  if (silentFilm) return 0; // xsilent sets music_volume := 0 (URoom.pas:24647)
-  return VOLUMES[Math.max(0, Math.min(VOLUMES.length - 1, settings.volume.music))]!;
-}
-
-/** Push the effective music_volume at the running room script. */
-function syncScriptMusicVolume(): void {
-  if (activeScript) activeScript.s.musicVolume = musicLevel();
-}
-
-/** Push all persisted volume levels into the audio buses (NastavZvuk, on boot). */
-function applyVolumeSettings(): void {
-  for (const bus of ['effect', 'voice', 'music'] as const) {
-    audio.setBusGain(bus, busMultiplier(bus, settings.volume[bus]));
-  }
-}
+//#region Player settings wiring | anchors: initPlayerSettings | Hands `playerSettings.ts` its three names and loads the persisted options. Subtitle language and the volume buses are in that module.
+// Called HERE, where `const settings = loadSettings()` used to sit: after the save store is
+// open (so the `ff.*` read is legal) and after the device gate.
+initPlayerSettings({
+  get audio() {
+    return audio;
+  },
+  get ensureDeskyData() {
+    return ensureDeskyData;
+  },
+  get setInfo() {
+    return setInfo;
+  },
+});
 
 // Graphics-quality level (the art source). Three tiers, persisted; defaults to
 // enhanced. Cycle with E (classic → enhanced → ai → classic) or the dev-bar combobox:
