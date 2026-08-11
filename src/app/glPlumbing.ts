@@ -33,18 +33,21 @@ import type { AiRoomFrame } from '../render/roomAi.js';
 import { SubtitleSystem } from '../render/subtitles.js';
 import { cheatFishSprites } from './cheats.js';
 import { glCanvas } from './dom.js';
+import { count, room, subs } from './gameState.js';
 import type { RoomGeometry } from './layout.js';
 
 /** What this module needs to see of the running game. All read-only. */
+/**
+ * Five members, down from eight. `count`, `room` and `subs` are imported from
+ * `gameState.ts` now — live bindings, so this module sees them change with no accessor
+ * and no wiring in main.ts to maintain.
+ */
 export interface GlPlumbingHost {
   readonly aiRoom: AiRoom | null;
-  readonly count: number;
   readonly enhancedArt: EnhancedArt | null;
   readonly enhancedObjects: EnhancedObject[];
   readonly fishSprites: FishSprites | null;
-  readonly room: Room | null;
   readonly setInfo: () => void;
-  readonly subs: SubtitleSystem | null;
 }
 
 let host!: GlPlumbingHost;
@@ -231,12 +234,12 @@ export function drawGpu(
   useVecSubs: boolean,
 ): boolean {
   const gl = glCompositor();
-  if (!gl || !host.room) return false;
+  if (!gl || !room) return false;
   try {
-    gl.begin(geom.nativeW, geom.nativeH, host.room.palette);
-    renderRoomInto(gl, host.room, art, opts);
+    gl.begin(geom.nativeW, geom.nativeH, room.palette);
+    renderRoomInto(gl, room, art, opts);
     if (gl.unsupported) return false; // defensive: an un-ported primitive → CPU this frame
-    if (!useVecSubs) host.subs?.draw(gl, opts.count ?? 0); // baked subtitles via GPU setIndex
+    if (!useVecSubs) subs?.draw(gl, opts.count ?? 0); // baked subtitles via GPU setIndex
     presentToGlCanvas(gl, geom);
     return true;
   } catch (e) {
@@ -358,11 +361,11 @@ export function glChannelDiff(
  * identical inputs, giving a byte-exact check while the LIVE render stays random.
  */
 export function glParityCompare(art: ArtSource): Record<string, unknown> | null {
-  if (!host.room) return null;
+  if (!room) return null;
   const comp = glCompositor();
   if (!comp) return { webgl: false };
-  const opts = { count: host.count };
-  const isZx = host.room.gspec === 42;
+  const opts = { count: count };
+  const isZx = room.gspec === 42;
   const realRandom = Math.random;
   // For the ZX room the band width + colour cycle are Math.random-driven and
   // blitZX advances room.zx, so (a) seed Math.random to a constant and (b)
@@ -372,14 +375,14 @@ export function glParityCompare(art: ArtSource): Record<string, unknown> | null 
   let zxSnap: { pruh: number; count: number; cur: number; colors: number[] | null } | null = null;
   if (isZx) {
     Math.random = () => 0.5;
-    const zx = host.room.zx;
+    const zx = room.zx;
     zxSnap = { pruh: zx.pruh, count: zx.count, cur: zx.cur, colors: zx.colors };
   }
   try {
-    const cpu = renderRoomRgba(host.room, art, opts);
-    if (zxSnap) Object.assign(host.room.zx, zxSnap); // rewind zx so the GPU pass sees identical state
-    comp.begin(cpu.width, cpu.height, host.room.palette);
-    renderRoomInto(comp, host.room, art, opts);
+    const cpu = renderRoomRgba(room, art, opts);
+    if (zxSnap) Object.assign(room.zx, zxSnap); // rewind zx so the GPU pass sees identical state
+    comp.begin(cpu.width, cpu.height, room.palette);
+    renderRoomInto(comp, room, art, opts);
     if (comp.unsupported) return { webgl: true, unsupported: true };
     const gpu = comp.readback();
     if (gpu.w !== cpu.width || gpu.h !== cpu.height) return { webgl: true, dimMismatch: true };
@@ -387,7 +390,7 @@ export function glParityCompare(art: ArtSource): Record<string, unknown> | null 
   } finally {
     if (isZx) {
       Math.random = realRandom;
-      if (zxSnap) Object.assign(host.room.zx, zxSnap); // restore live animation state
+      if (zxSnap) Object.assign(room.zx, zxSnap); // restore live animation state
     }
   }
 }
