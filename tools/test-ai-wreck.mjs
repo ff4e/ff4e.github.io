@@ -63,6 +63,25 @@ async function enterLode() {
   await waitRoom(p, 0);
   await p.waitForFunction(() => window.__ff.roomArtPending() === false);
   await p.waitForFunction(() => window.__ff.aiRoomLoaded());
+  // Acquire the ORACLE on purpose.
+  //
+  // Checks 2 and 3 below use the enhanced tier's independent replay of the same history
+  // as the oracle for the ×S one, and that needs the enhanced art loaded. The `ai` tier
+  // no longer loads it on room entry (it does not draw it — see art.ts
+  // ensureEnhancedFallback), so this probe asks for it, by taking the same route a
+  // player would: a tier switch and back.
+  //
+  // Better than the arrangement it replaces, where the art arrived by accident: an
+  // oracle you inherit can disappear without anyone noticing, and this one nearly did.
+  // The round trip is safe mid-probe — retargetArtForTier() re-arms nothing for a room
+  // whose AI art is already loaded — and it happens before the ship is dropped, so no
+  // recorded swap exists yet for either replay.
+  await p.evaluate(async () => {
+    window.__ff.setGraphics('enhanced');
+    window.__ff.setGraphics('ai');
+  });
+  await p.waitForFunction(() => window.__ff.enhancedLoaded());
+  await p.waitForFunction(() => window.__ff.aiRoomLoaded());
 }
 
 await enterLode();

@@ -96,10 +96,20 @@ export async function loadRoom(num: number): Promise<void> {
     // not hold for it, so audio must not either. Gating audio on the raw
     // ensureEnhancedArt promise left a classic room playable and SILENT for the ~1.7 MB
     // of truecolor art that tier never displays.
-    const enhanced = ensureEnhancedArt(num);
-    const art = enhancedArtActive()
-      ? Promise.all([enhanced, graphics === 'ai' ? ensureAiRoom(num) : Promise.resolve()])
-      : Promise.resolve();
+    //
+    // The `ai` tier does not load the enhanced art here AT ALL, which is the one thing
+    // this block does differently from every earlier version of it. That art is 0.3-2.1
+    // MB a room (51 MB over a playthrough) and the AI compositor does not draw it; it is
+    // only ever wanted in the fallback cases, which are discrete events that fetch it
+    // themselves (see ensureEnhancedFallback). Before this, an `ai` room entry both
+    // downloaded it and WAITED for it.
+    //
+    // `classic` keeps its eager background load unchanged. The same argument would
+    // apply to it, but that tier's behaviour is not what this change is about and its
+    // probes are the oracle for the rest of the change.
+    if (graphics === 'classic') void ensureEnhancedArt(num);
+    const art =
+      graphics === 'ai' ? ensureAiRoom(num) : graphics === 'enhanced' ? ensureEnhancedArt(num) : Promise.resolve();
     // Audio is the bulk of a room entry's bytes and none of it is needed to DRAW the
     // room: 4.30 MB of .ffs voices plus a 5.75 MB music track for PRVNI, against
     // ~2.14 MB of room-specific core+art bytes. On a capped link they simply crowd the

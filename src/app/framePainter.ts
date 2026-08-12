@@ -16,7 +16,7 @@ import type { HookSystem } from '../core/hooks.js';
 import { EXIT_CELLS, roomGeometry, scalingFilterFor } from './stageGeometry.js';
 import { FALL_FRAMES, MOVE_FRAMES } from '../core/stepEngine.js';
 import { FSIZE } from '../render/roomWalk.js';
-import { aiRoom, aiRoomRenderActive, roomArtPending } from './art.js';
+import { aiRoom, aiRoomRenderActive, ensureEnhancedFallback, roomArtPending } from './art.js';
 import { alpha, activeScript, count, engine, room, screenShoveX, subs } from './gameState.js';
 import { applyFrameEffects, frameEffectsActive } from './cheats.js';
 import { applySubScale, clearSubOverlay, subOverlaySignature, syncSubOverlay } from './introOverlay.js';
@@ -132,6 +132,14 @@ export function draw(): void {
   // Any GL error falls back to the CPU path for that frame (and disables WebGL for the
   // session).
   const aiActive = aiRoomRenderActive(room);
+  if (!aiActive) {
+    // In the `ai` tier this frame is about to be painted by the ENHANCED compositor
+    // (ZX, a cheat, a baked subtitle, or no AI art for this room) — which is the only
+    // thing that still wants the enhanced art, and the tier no longer fetches it on
+    // room entry. Ask for it here, where the fallback is actually taken. A no-op in
+    // every other tier, and idempotent, so calling it per frame costs one map lookup.
+    ensureEnhancedFallback();
+  }
   if (aiActive) {
     // roomGeometry already resolved the ×S backing store for this frame — deriving it a
     // second time here is how the two drifted apart before.
