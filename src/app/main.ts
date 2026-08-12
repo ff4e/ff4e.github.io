@@ -197,6 +197,28 @@ import {
   wrap,
 } from './dom.js';
 import { openSaveStore } from './persist.js';
+import {
+  SUB_FONT_CANDIDATES,
+  booted,
+  initStageState,
+  setBooted,
+  setSubFontFamily,
+  setSubFontIdx,
+  setSubFontReady,
+  setSubFontWeight,
+  setSubOverlayGate,
+  setSubOverlayPainted,
+  setSubOverlayPaints,
+  setSubOverlaySig,
+  subFontFamily,
+  subFontIdx,
+  subFontReady,
+  subFontWeight,
+  subOverlayGate,
+  subOverlayPainted,
+  subOverlayPaints,
+  subOverlaySig,
+} from './stageState.js';
 import { initDevBar } from './devBar.js';
 import {
   aiPlaqueFor,
@@ -487,50 +509,11 @@ if (typeof window !== 'undefined' && isUnsupportedDevice(window)) {
 // `playerSettings.ts`, which this module imports directly.
 initStageGeometry();
 
-//#region Stage assembly & subtitle overlay state | anchors: buildStage, subFontIdx, subOverlaySig | Calls into `dom.ts` to nest the canvases, then the vector-subtitle bookkeeping.
-buildStage(); // the stage box + the GL/subtitle overlays (see dom.ts: not done at import time)
-// Vector-subtitle font (enhanced mode). All candidates are bundled + OFL-licensed
-// so they render identically on every platform. Mulish Medium is the default — a
-// clean humanist face close to Avenir Next Medium. The previewer (F key) cycles
-// the alternates; the active family+weight are persisted. (Fonts + their OFL
-// licenses live in public/fonts/; FreeSans is the original public/enhanced face.)
-const SUB_FONT_CANDIDATES: ReadonlyArray<{ name: string; family: string; weight: string }> = [
-  { name: 'Mulish Medium', family: 'Mulish, sans-serif', weight: '500' },
-  { name: 'Manrope Medium', family: 'Manrope, sans-serif', weight: '500' },
-  { name: 'Jost Medium', family: 'Jost, sans-serif', weight: '500' },
-  { name: 'FreeSans Bold', family: 'FFSubtitle, sans-serif', weight: '700' },
-];
-let subFontIdx = ((): number => {
-  const saved = localStorage.getItem('ff.subfont');
-  const i = saved !== null ? SUB_FONT_CANDIDATES.findIndex((c) => c.name === saved) : -1;
-  return i >= 0 ? i : 0;
-})();
-let subFontFamily = SUB_FONT_CANDIDATES[subFontIdx]!.family;
-let subFontWeight = SUB_FONT_CANDIDATES[subFontIdx]!.weight;
-let subFontReady = false;
-// True while the overlay currently shows a subtitle, so idle frames skip the
-// (large) clear/redraw entirely and we wipe it exactly once when it clears.
-let subOverlayPainted = false;
-// Diagnostics: how many times the vector overlay has actually been re-rendered
-// (perf probes read the rate — every redraw between two logic ticks is waste).
-let subOverlayPaints = 0;
-// What the overlay currently SHOWS (SubtitleSystem.vectorSignature + the inputs
-// outside it: which system, the font, the backing size). The wave offset only
-// advances on a logic tick and stops entirely once a line has settled, so at 60fps
-// most frames would repaint the identical image — this skips them.
-let subOverlaySig = '';
-// Perf A/B switch (tools/bench-subtitles.mjs): false replays the pre-gate behaviour,
-// repainting the overlay on every frame that draws it.
-let subOverlayGate = true;
-let booted = false; // true once boot succeeds — before that, any error is fatal
+//#region Stage state wiring | anchors: initStageState | Assembles the stage and loads the persisted subtitle font. The state itself is in `stageState.ts`.
+initStageState();
 
-/** Update the loading overlay's status line. */
 //#region Loading UI wiring | anchors: initLoadingUi | Hands `loadingUi.ts` its one name and installs the boot-failure traps. The overlay, the fatal screen and relayout() are in that module.
-initLoadingUi({
-  get booted() {
-    return booted;
-  },
-});
+initLoadingUi();
 
 //#region Intro movies & subtitle overlay | anchors: IntroPlayer, probeAiMovies, syncSubOverlay, clearSubOverlay | Logo/intro `.mp4` playback and the vector-subtitle layer above the game canvas.
 const intro = new IntroPlayer({
@@ -665,11 +648,11 @@ function subOverlaySignature(who: string, sys: SubtitleSystem, scale: number): s
 
 /** Clear the subtitle overlay (used off the room screen). */
 function clearSubOverlay(): void {
-  subOverlaySig = ''; // whatever the overlay held is gone: never match a stale key
+  setSubOverlaySig(''); // whatever the overlay held is gone: never match a stale key
   if (!subOverlayPainted) return; // already clear — skip the (large) clearRect
   subCtx.setTransform(1, 0, 0, 1, 0, 0);
   subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-  subOverlayPainted = false;
+  setSubOverlayPainted(false);
 }
 
 //#region Screen & overlay state | anchors: ui, hideAiCredits | The mutable globals for panel/options/credits/map-info/help/leg-image moved to `screenState.ts` — import `ui` from there. Only the credits-overlay restore is left, because it is behaviour, not state.
@@ -1045,10 +1028,10 @@ function setInfo(): void {
 /** Apply a vector-subtitle font candidate by index (wraps) and persist it. */
 function applySubFont(i: number): void {
   const n = SUB_FONT_CANDIDATES.length;
-  subFontIdx = ((i % n) + n) % n;
+  setSubFontIdx(((i % n) + n) % n);
   const c = SUB_FONT_CANDIDATES[subFontIdx]!;
-  subFontFamily = c.family;
-  subFontWeight = c.weight;
+  setSubFontFamily(c.family);
+  setSubFontWeight(c.weight);
   localStorage.setItem('ff.subfont', c.name);
   setInfo();
 }
@@ -1552,9 +1535,9 @@ function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number, dpr: n
     subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
     applySubScale(subCtx, cutsceneSubs);
     cutsceneSubs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
-    subOverlayPaints++;
-    subOverlayPainted = true;
-    subOverlaySig = sig;
+    setSubOverlayPaints(subOverlayPaints + 1);
+    setSubOverlayPainted(true);
+    setSubOverlaySig(sig);
   }
   subCanvas.style.transform = '';
 }
@@ -3096,9 +3079,9 @@ function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): 
       subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
       applySubScale(subCtx, subs);
       subs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
-      subOverlayPaints++;
-      subOverlayPainted = true;
-      subOverlaySig = sig;
+      setSubOverlayPaints(subOverlayPaints + 1);
+      setSubOverlayPainted(true);
+      setSubOverlaySig(sig);
     }
     if (xform !== undefined) subCanvas.style.transform = xform; // shake/shove with the room
   } else if (subOverlayPainted) {
@@ -4132,7 +4115,7 @@ setLoadingMsg('Loading fonts…');
       }
     }),
   );
-  subFontReady = anyLoaded;
+  setSubFontReady(anyLoaded);
 }
 // Control-panel overlay graphic (TOvl / panel.ffp).
 setLoadingMsg('Loading graphics…');
@@ -4223,7 +4206,7 @@ if (settings.introSeen) {
 setInfo();
 // Boot complete — hide the loading overlay, stop treating errors as fatal, and
 // (if applicable) surface the software-renderer note.
-booted = true;
+setBooted(true);
 console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
 initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
 // The feedback form. Reads the live game state only when the player opens it — there is
@@ -4570,13 +4553,13 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     return subOverlayGate;
   },
   set subOverlayGate(v: boolean) {
-    subOverlayGate = v;
+    setSubOverlayGate(v);
   },
   get subOverlayPainted() {
     return subOverlayPainted;
   },
   set subOverlayPainted(v: boolean) {
-    subOverlayPainted = v;
+    setSubOverlayPainted(v);
   },
   get subOverlayPaints() {
     return subOverlayPaints;
@@ -4585,7 +4568,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     return subOverlaySig;
   },
   set subOverlaySig(v: string) {
-    subOverlaySig = v;
+    setSubOverlaySig(v);
   },
   get syncSubOverlay() {
     return syncSubOverlay;
