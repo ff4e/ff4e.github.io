@@ -47,7 +47,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // drawMap()'s unlit/plaque/parchment frame, loop()'s dispatch of the launch, the three
   // input guards, the enterRoom/startRoom split, and the new module's wiring block
   // (~48 lines of the ~171).
-  ['src/app/main.ts', 4480],
+  ['src/app/main.ts', 4310],
   // 1 625. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does.
   ['src/app/debugHooks.ts', 1700],
