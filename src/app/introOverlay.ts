@@ -16,12 +16,11 @@
  */
 import { IntroPlayer } from './intro.js';
 import type { SubtitleSystem } from '../render/subtitles.js';
-import { SUB_FONT_CANDIDATES, subFontFamily, subFontReady, subFontWeight, subOverlayGate, subOverlayPainted, subOverlayPaints, subOverlaySig, setSubOverlayPainted, setSubOverlayPaints, setSubOverlaySig } from './stageState.js';
-import { canvas, subCanvas, subCtx, wrap } from './dom.js';
-import { contentScaleFor, roomGeometry, scalingFilterFor, stage } from './stageGeometry.js';
-import { alpha, count, cutscene, cutsceneSubs, room, subs } from './gameState.js';
+import { setSubOverlayPainted, setSubOverlaySig, subFontFamily, subFontWeight, subOverlayPainted } from './stageState.js';
+import { canvas, subCanvas, subCtx } from './dom.js';
+import { contentScaleFor, roomGeometry } from './stageGeometry.js';
+import { alpha, count, room } from './gameState.js';
 import { graphics } from './renderSettings.js';
-import { ui } from './screenState.js';
 
 /** The intro/logo movie player. Constructed in initIntro(), never at import time. */
 export let intro!: IntroPlayer;

@@ -1,12 +1,14 @@
 /**
- * One room frame: all three art tiers, both backends. Everything the player sees during
- * play is painted from here — the room walk, the fish sprites at their interpolated
- * sub-tick position, the shake/shove transform, and the vector subtitle overlay.
+ * One room frame: all three art tiers, both backends. The room walk, the fish sprites at
+ * their interpolated sub-tick position, the shake/shove transform, and the vector
+ * subtitle overlay. Not the side panel, and not any screen other than the room —
+ * `panel.ts` and `mapDraw.ts` own those.
  *
  * It needs only two names from `main.ts` because it decides nothing: what tier, what
  * backend and what geometry all come from modules that already own those questions.
- * `fishFrameFor` (which sprite frame each fish shows) and `hooks` (the active script
- * hooks) are the two answers that still live next to the game loop.
+ * `fishFrameFor` (which sprite frame each fish shows) and `hooks` (the "xfisher"
+ * easter-egg fishing hooks, which the compositor paints) are the two answers that
+ * still live next to the game loop.
  */
 import type { AiRoomFrame } from '../render/roomAi.js';
 import { Dir } from '../core/dir.js';
@@ -39,7 +41,7 @@ import { ui } from './screenState.js';
 
 /**
  * The two names this module needs from `main.ts`: which sprite frame each fish is
- * showing, and the hook system whose snapshot the compositor paints.
+ * showing, and the fishing-hook system whose snapshot the compositor paints.
  */
 export interface FramePainterHost {
   readonly fishFrameFor: (which: 'little' | 'big') => FishFrame;

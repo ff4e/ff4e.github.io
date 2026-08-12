@@ -48,8 +48,6 @@ export let subOverlaySig = '';
 export let subOverlayGate = true;
 export let booted = false; // true once boot succeeds — before that, any error is fatal
 
-/** Update the loading overlay's status line. */
-
 export function setSubFontIdx(v: number): void {
   subFontIdx = v;
 }

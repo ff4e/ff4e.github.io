@@ -15,45 +15,12 @@
  * click water to BFS-swim there.
  */
 //#region Imports | The only part safe to skim.
-import { parseFfr, type FfrRoom, type FfrBitmap } from '../data/ffr.js';
-import { applyWinDesktopPalette } from '../data/winPalette.js';
-import { parseFft, type FftEntry } from '../data/fft.js';
-import { Room, ITEM_WATER, ITEM_WALL } from '../core/room.js';
+
+import { Room, ITEM_WATER } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
-import {
-  CheatEntry,
-  pretoc,
-  morphShrink,
-  morphStretch,
-  pretocRgba,
-  morphShrinkRgba,
-  morphStretchRgba,
-  type Cheat,
-} from '../core/cheats.js';
-import {
-  TetrisGame,
-  parseShapes,
-  type HiscoreStore,
-  type TetrisShapes,
-} from '../core/tetris.js';
-import { renderTetris, tetrisRgba, type TetrisArt } from '../render/tetrisRender.js';
-import {
-  zpracujInterlaced,
-  interlacedSounds,
-  sum,
-  zcernobilit,
-  INTERLACED_OFF,
-  INTERLACED_STOP,
-  INTERLACED_START,
-} from '../render/filmEffects.js';
 import { Dir } from '../core/dir.js';
 import {
   FSIZE,
-  renderRoomRgba,
-  renderRoomBackgroundRgba,
-  renderRoomInto,
-  roomScreenSize,
-  type RenderOptions,
   type FishFrame,
   TL_ZAKLAD,
   TL_PLAV,
@@ -66,179 +33,84 @@ import {
   HL_MRK,
   HL_MLUVI,
 } from '../render/renderRoom.js';
-import type { RgbaScreen } from '../render/rgbaScreen.js';
-import { ClassicArtSource } from '../render/classicArtSource.js';
-import type { ArtSource } from '../render/artSource.js';
-import { GlScreen, webgl2Available } from '../render/glScreen.js';
-import { GlAiScreen } from '../render/glRoomAi.js';
-import { FontData } from '../render/font.js';
-import { SubtitleSystem, SUB_SUBSTEPS } from '../render/subtitles.js';
-import { HelpScreens } from '../render/help.js';
-import { IndexedScreen } from '../render/framebuffer.js';
-import {
-  EnhancedArtSource,
-  classicOnlyBackground,
-  type EnhancedArt,
-  type EnhancedObject,
-  type EnhancedSprite,
-  type FishSprites,
-} from '../render/enhancedArtSource.js';
-import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
-import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
-import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
-import { loadAiRoom, aiRoomGateAllows, aiWaterVisible, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
-import type { AiRoomFrame } from '../render/roomAi.js';
-import { Canvas2dAiTarget, RIPPLE, activeRipples, faithfulWobbleShifts, nextRippleBirth, smoothWobbleShift, wobblePhase } from '../render/aiTarget.js';
-import type { AiWobble } from '../render/aiTarget.js';
-import { withLoadSlot } from '../render/loadSlot.js';
-import {
-  hitInfoButton,
-  drawInfoPanel,
-  drawInfoDigits,
-  drawInfoPanelArtAi,
-  INFO_SETTLE_FAZE,
-  INFO_FAZE_MS,
-  type InfoButton,
-  type InfoPanelAssets,
-} from '../render/mapInfo.js';
-import { parseDesky, blitDeska, DESKA_X_OFFSET, DESKA_Y_OFFSET, type DeskyData } from '../data/desky.js';
-import { IntroPlayer } from './intro.js';
-import {
-  framesIdle,
-  initFrameClock,
-  scheduleNextFrame,
-  startFrames,
-  wake,
-} from './frameClock.js';
-import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
-import { loadAiPanel, type AiPanel } from '../render/panelAi.js';
-import { loadAiCredits, type AiCredits } from '../render/creditsAi.js';
-import { initAnalytics } from '../platform/analytics.js';
-import { initFeedback, type FeedbackUi } from './feedback.js';
-import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
-import { parseFfp, type FfpPanel } from '../data/ffp.js';
-import {
-  composePanel,
-  composeOptions,
-  panelToRgba,
-  hitTest as panelHitTest,
-  sliderIndex,
-  PANEL_W,
-  PANEL_H,
-  SEDY,
-  ORANZOVY,
-  ZLUTY,
-  SVITICI,
-  type PanelState,
-  type OptionsState,
-} from '../render/hud.js';
+import { SubtitleSystem } from '../render/subtitles.js';
+import { type FishSprites } from '../render/enhancedArtSource.js';
+import { MAP_W, MAP_H } from '../render/worldMap.js';
+import { hitInfoButton } from '../render/mapInfo.js';
+import { framesIdle, wake } from './frameClock.js';
+import { depthOfRoom, branchOfRoom } from '../data/world.js';
+import { hitTest as panelHitTest, sliderIndex, PANEL_W, PANEL_H } from '../render/hud.js';
 import { TALKING_MEZ_SEC, MUSIC_PRIOR } from '../audio/audio.js';
-import {
-  loadSettings,
-  saveSettings,
-  busMultiplier,
-  VOLUMES,
-  type GraphicsLevel,
-  type SubtitleMode,
-  type VolumeBus,
-} from '../core/settings.js';
 import { musicForCHud } from '../audio/music.js';
 import { Script, type ScriptSnapshot } from '../core/script.js';
-import {
-  StepEngine,
-  MOVE_FRAMES,
-  FALL_FRAMES,
-  TURN_FRAMES,
-  exitFramesFor,
-  type Phase,
-} from '../core/stepEngine.js';
-import { newChatter, tickChatter, type ChatterState } from '../core/chatter.js';
-import { stdSmrt, newDeathState, type DeathState } from '../core/deathlines.js';
-import { maybeBubble } from '../core/ambient.js';
-import { movesOf, lengthOfRecord, stepsOf, type RecordStep } from '../core/record.js';
+import { StepEngine, TURN_FRAMES } from '../core/stepEngine.js';
+import { newChatter } from '../core/chatter.js';
+import { newDeathState } from '../core/deathlines.js';
+import { movesOf, lengthOfRecord } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
-import { KufrDemo, type AiKufr } from '../intro/kufrDemo.js';
-import { parseHelpCap, AKCE, KDO, type CapAction } from '../intro/helpCap.js';
-import { ROOMS, roomByNumber } from '../data/roomTable.js';
-import {
-  computeStageLayout,
-  contentScale as fitScale,
-  isFitMode,
-  type StageLayout,
-  type FitMode,
-  type RoomGeometry,
-} from './layout.js';
+import { ROOMS } from '../data/roomTable.js';
 import { isUnsupportedDevice, showUnsupportedNotice } from './deviceGate.js';
-import {
-  buildStage,
-  canvas,
-  ctx,
-  fatalEl,
-  feedbar,
-  fitSelect,
-  glCanvas,
-  graphicsSelect,
-  idleDirtyToggle,
-  info,
-  loadingEl,
-  loadingMsg,
-  panelCanvas,
-  panelCol,
-  panelCtx,
-  perfHud,
-  rendererSelect,
-  select,
-  stageBox,
-  stageRow,
-  subCanvas,
-  subCtx,
-  winRoomBtn,
-  wrap,
-} from './dom.js';
+import { canvas, info, panelCanvas, select } from './dom.js';
 import { ARROWS, KEYS, MLUVI_PRIOR, NOOP_SCRIPT, TETRIS_KEYS } from './keyTables.js';
 import { audio, initAudio } from './audioEngine.js';
 import { atRest, fishBusy, idle } from './roomGates.js';
-import {
-  armRoomVoices,
-  fetchSoundPkg,
-  initRoomLoad,
-  loadRoom,
-  loadSoundPkg,
-  roomVoicesReady,
-  roomVoicesSettled,
-  startRoomMusic,
-  talk,
-} from './roomLoad.js';
+import { initRoomLoad, loadRoom, roomVoicesSettled, talk } from './roomLoad.js';
 import { initRenderLoop, loop } from './renderLoop.js';
-import { openSaveStore } from './persist.js';
-import { draw, initFramePainter, updateRoomSubOverlay } from './framePainter.js';
 import {
-  aiMovieAvailable,
+  beginHeldMove,
+  clearHeldKey,
+  heldKeyState,
+  initMovement,
+  releaseHeldKey,
+  restartRoom,
+  restore,
+  tryStep,
+  wallShove,
+} from './movement.js';
+import {
+  aiKufr,
+  aiKufrFrames,
+  endShowmode,
+  inReplay,
+  inShowmode,
+  initCutscene,
+  skipCutscene,
+  startCutscene,
+  startShowmode,
+} from './cutscene.js';
+import {
+  closeMapOverlay,
+  dismissLegImage,
+  dispatchMapCorner,
+  initMapNav,
+  openCredits,
+  openMapOptions,
+  replayIntro,
+  returnFromRoom,
+  showLegImage,
+  showMap,
+} from './mapNav.js';
+import { initBoot, runBoot } from './boot.js';
+import { hracNespi, initLogicTick, step } from './logicTick.js';
+import { openSaveStore } from './persist.js';
+import { initFramePainter } from './framePainter.js';
+import {
   aiSubScale,
-  applySubScale,
-  clearSubOverlay,
   initIntro,
   intro,
   introMovie,
   logoMovie,
-  probeAiMovies,
   setAiSubScale,
-  subOverlaySignature,
   syncSubOverlay,
-  syncSubOverlaySized,
 } from './introOverlay.js';
 import {
   SUB_FONT_CANDIDATES,
-  booted,
   initStageState,
-  setBooted,
   setSubFontFamily,
   setSubFontIdx,
-  setSubFontReady,
   setSubFontWeight,
   setSubOverlayGate,
   setSubOverlayPainted,
-  setSubOverlayPaints,
   setSubOverlaySig,
   subFontFamily,
   subFontIdx,
@@ -250,35 +122,9 @@ import {
   subOverlaySig,
 } from './stageState.js';
 import { initDevBar } from './devBar.js';
-import {
-  aiPlaqueFor,
-  closeMapInfo,
-  drawMap,
-  drawMapOverlays,
-  ensureDeskyData,
-  initMapDraw,
-  openMapInfo,
-} from './mapDraw.js';
-import {
-  closeHelp,
-  drawHelp,
-  drawPanel,
-  initPanel,
-  openHelp,
-  optionsState,
-  panelState,
-  tickPanelScroll,
-  togglePanelOptions,
-} from './panel.js';
-import {
-  beginRoomLoadingUi,
-  initLoadingUi,
-  maybeShowWebglNote,
-  relayout,
-  setLoadingMsg,
-  showFatal,
-  syncLoadingUi,
-} from './loadingUi.js';
+import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
+import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
+import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
   applyVolumeSettings,
   initPlayerSettings,
@@ -306,213 +152,116 @@ import {
 import {
   DEFAULT_LINE_TICKS,
   EFFECT_VOL,
-  EXIT_CELLS,
   LOGIC_MS,
   LOGIC_SEC,
-  MAX_STEPS_PER_FRAME,
-  contentScaleFor,
   initStageGeometry,
   roomGeometry,
-  scalingFilterFor,
-  setStage,
-  stage,
 } from './stageGeometry.js';
 import {
-  acc,
   aiWaterAnimating,
   forceRoomRedraw,
   initFramePacing,
   lastRoomBackend,
   lastRoomSig,
-  lastTime,
-  lastWaterPaint,
   loopThrottleOk,
   loopTicks,
-  perfLast,
-  perfPaint,
-  perfRaf,
-  roomAnimating,
   roomLoadSeq,
   roomLoading,
   roomPaints,
-  setAcc,
   setForceRoomRedraw,
-  setLastRoomBackend,
-  setLastRoomSig,
-  setLastTime,
-  setLastWaterPaint,
-  setLoopTicks,
-  setPerfLast,
-  setPerfPaint,
-  setPerfRaf,
-  setRoomLoadSeq,
-  setRoomLoading,
-  setRoomPaints,
   setSmoothLog,
   setWaterAnimMs,
   smoothLog,
-  updatePerfHud,
   waterAnimMs,
-  waterOwesRepaint,
 } from './framePacing.js';
 import {
   activeScript,
-  alpha,
   blink,
-  chatter,
   count,
   cutscene,
-  cutsceneAssets,
   cutsceneSubs,
   darkFlicker,
-  deathState,
   engine,
   ffr,
   fftEntries,
   font,
-  lastLine,
   linesSpoken,
   loadmode,
   pokus,
   poslMluv,
   prevKostra,
-  replaymode,
   room,
-  roomDepth,
-  screenShoveX,
   setActiveScript,
-  setAlpha,
   setChatter,
   setCount,
-  setCutscene,
-  setCutsceneAssets,
-  setCutsceneSubs,
   setDeathState,
   setEngine,
-  setFfr,
-  setFftEntries,
-  setFont,
   setLastLine,
   setLinesSpoken,
   setLoadmode,
-  setPokus,
   setReplaymode,
   setRoom,
   setRoomDepth,
   setScreenShoveX,
-  setShowmode,
-  setShowmodeHelptext,
-  setShowmodeLoading,
-  setShowmodeRestarted,
-  setShowmodeSave,
-  setShowmodeTraceOn,
   setSubs,
   showmode,
-  showmodeHelptext,
-  showmodeLoading,
-  showmodeRestarted,
-  showmodeSave,
-  showmodeTrace,
-  showmodeTraceOn,
   subs,
   talkIdx,
 } from './gameState.js';
-import {
-  O_NORMAL,
-  O_OPTIONS,
-  O_SC_DOWN,
-  O_SC_UP,
-  PANEL_SCROLL_MS,
-  SCMAX,
-  SCMIN,
-  helpScreens,
-  ui,
-} from './screenState.js';
+import { O_OPTIONS, helpScreens, ui } from './screenState.js';
 import { debugHooks } from './debugHooks.js';
 import {
   classicArtFor,
-  drawAiGpu,
-  drawGpu,
   enableWebgl,
   enhancedArtFor,
   glAiCompositor,
-  glAiFailed,
   glChannelDiff,
   glCompositor,
   glFailed,
   glParityCompare,
   initGlPlumbing,
-  markGlFailed,
 } from './glPlumbing.js';
 import {
   aiCredits,
-  aiPanel,
   aiPending,
   aiRoom,
   aiRoomNum,
   aiRoomRenderActive,
   aiWorldMap,
-  beginMapArt,
-  beginRoomArt,
   curNum,
   decodePngResponse,
   enhancedArt,
   enhancedObjects,
   enhancedPending,
-  ensureAiCredits,
-  ensureAiPanel,
-  ensureAiRoom,
-  ensureEnhancedArt,
   initArt,
   isPngResponse,
   mapArtHolding,
   mapArtPending,
   mapPresented,
-  retargetArtForTier,
   roomArtPending,
-  setMapPresented,
 } from './art.js';
 import {
-  applyFrameEffects,
   applyMapCheat,
   applyRoomCheat,
   applySpriteCheats,
-  blitTetris,
-  cheatFishSprites,
-  cheatSolveRoom,
   closeTetris,
-  endSilentFilm,
   devWinRoom,
-  frameEffectsActive,
   initCheats,
-  interlacedFaze,
   mapCheats,
-  megabombFlash,
   oldWater,
   resetRoomScopedCheats,
   roomCheats,
-  setMegabombFlash,
   silentFilm,
-  spriteCheats,
   tetris,
-  tetrisArt,
   tetrisModal,
-  tetrisTick,
-  tickFrameEffects,
-  tickTetris,
   ultraviolence,
 } from './cheats.js';
 import {
   beginMapLaunch,
-  blitParchment,
-  blitParchmentAi,
   canLaunchFromMap,
   initRoomLaunch,
-  loadParchment,
   mapLaunching,
-  markParchmentPainted,
   parchmentReady,
-  tickMapLaunch,
 } from './roomLaunch.js';
 //#region Device gate | anchors: isUnsupportedDevice, showUnsupportedNotice | Phones are refused here, before any art is fetched — and before every other side effect in the file. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`.
 
@@ -1077,499 +826,24 @@ function scriptTalk(name: string, prior: number): number {
 }
 
 /** Launch the briefcase story cutscene (InitKufrDemo), loading its assets once. */
-//#region Cutscene, showmode, replay | anchors: startCutscene, startShowmode, advanceShowmode, applyCapAction, ensureAiKufr, drawCutscene | The KUFRIK demo, the `.cap` demonstration player, record replay, and the cutscene compositor.
-async function startCutscene(): Promise<void> {
-  if (cutscene || !font) return;
-  // The room this launch belongs to. Every await below is a window in which the
-  // player can leave (or restart into another room), and what lands afterwards must
-  // not be installed over whatever they went to — the same rule the room-change hold
-  // enforces for the script clock.
-  //
-  // Three conditions, because none alone is enough: `screen` misses a room→room change
-  // (it stays 'room'); `roomLoadSeq` only counts loads that COMPLETED, so it misses the
-  // window where the next room's assets are still in flight; and `roomLoading` alone
-  // misses a change that has already finished.
-  const seq = roomLoadSeq;
-  const stale = (): boolean =>
-    cutscene !== null || !font || ui.screen !== 'room' || roomLoading || roomLoadSeq !== seq;
-  // The demo is narration over pictures, and every caption's length comes from its
-  // voice sample (cutsceneCaption -> audio.duration). Starting it before the room's
-  // voice package has landed would run the whole story at the flat DEFAULT_LINE_TICKS
-  // fallback — silent, and several times too fast to read.
-  await roomVoicesReady;
-  if (stale()) return;
-  clearHeldKey(); // the briefcase cutscene takes over
-  if (!cutsceneAssets) {
-    const [bmp, pck, scr] = await Promise.all([
-      fetch('/data/Intro/kufr256.BMP').then((r) => r.arrayBuffer()),
-      fetch('/data/Intro/demo.pck').then((r) => r.arrayBuffer()),
-      fetch('/data/Intro/script.txt').then((r) => r.text()),
-    ]);
-    setCutsceneAssets({ bmp: new Uint8Array(bmp), pck: new Uint8Array(pck), script: scr });
-    // 5.3 MB of story assets (demo.pck alone is 4.9 MB), fetched once per session: the
-    // first launch is easily long enough to leave the room in. Without this the demo's
-    // looping 'kufrik' music started AFTER showMap()'s KillSnd (and the cutscene
-    // installed itself over the world map), because nothing in DoneKufrDemo ever stops
-    // that track — it only restores music_volume (URoom.pas:2914).
-    if (stale()) return;
-  }
-  // Either the branch above just published them or they were already there; an imported
-  // binding is never narrowed, so the invariant is re-stated rather than inferred.
-  const assets = cutsceneAssets;
-  if (!assets) return;
-  const demo = new KufrDemo(assets.bmp, assets.pck, assets.script);
-  setCutsceneSubs(new SubtitleSystem(font, demo.palette, Math.floor(demo.width / 15), demo.width, demo.height));
-  subs?.clear(); // ZrusTitulky (InitKufrDemo): clear the room's on-screen subtitle
-  // Music (InitKufrDemo, URoom.pas:2867): start the looping 'kufrik' track with the
-  // demo. The original loops at cycle 78660*2 *bytes*; playMusic wants the loop
-  // point in *samples* (bytes/2 for 16-bit audio), i.e. 78660. It persists after
-  // the demo — DoneKufrDemo never stops it — so it keeps playing in the room.
-  void audio.playMusic('kufrik', '/data/Music/kufrik.wav', 78660);
-  setCutscene(demo);
-}
-
-/**
- * Start the KUFRIK automatic demonstration (showmode, URoom.pas:19923). The room's
- * prog fires this once both fish reach the demo spot: help.cap (a recorded input
- * stream) is fetched and then replayed one action per tick, auto-driving the fish
- * and the tutorial subtitles. The big fish is turned to face left first
- * (natoceni[velka]:=smer_vlevo). s.showmode is set immediately so KUFRIK's normal
- * dialogue and the re-trigger both stop while help.cap loads asynchronously.
- */
-function startShowmode(): void {
-  if (showmode || showmodeLoading || !room) return;
-  clearHeldKey(); // the demo takes over — drop any held movement key
-  setShowmodeLoading(true);
-  setShowmodeHelptext(0);
-  setShowmodeRestarted(false);
-  setShowmodeSave(null);
-  if (activeScript) activeScript.s.showmode = true;
-  room.facingRight.big = false; // natoceni[velka] := smer_vlevo
-  if (engine) engine.swim = null;
-  void (async () => {
-    try {
-      const res = await fetch('/data/Intro/help.cap');
-      if (!res.ok) {
-        endShowmode();
-        return;
-      }
-      const buf = new Uint8Array(await res.arrayBuffer());
-      // The demo may have been cancelled (room change/restart) while fetching.
-      if (!showmodeLoading) return;
-      setShowmode({ actions: parseHelpCap(buf), idx: 0 });
-    } catch {
-      endShowmode();
-    } finally {
-      setShowmodeLoading(false);
-    }
-  })();
-}
-
-/** End the demonstration (EOF, or the recording's/player's restart/exit). */
-function endShowmode(): void {
-  setShowmode(null);
-  setShowmodeLoading(false);
-  setShowmodeRestarted(false);
-  setShowmodeSave(null);
-  setLoadmode(null);
-  setReplaymode(null); // a room change / exit also ends a best-solution replay
-  if (engine) engine.swim = null;
-  if (activeScript) activeScript.s.showmode = false;
-}
-
-/** True while the KUFRIK demo is playing or its recording is still loading. */
-function inShowmode(): boolean {
-  return showmode !== null || showmodeLoading;
-}
-
-/** True while a map "Replay" (best-solution playback) is running — blocks player input. */
-function inReplay(): boolean {
-  return replaymode !== null;
-}
-
-/**
- * Play back one move of the room's best solution per idle tick (daReplay, the
- * animated LoadSpeed:=1 replay, URoom.pas:1932). Each move drives the real swim
- * animation via tryStep; on the last move the normal win → winCountdown → showMap
- * path returns to the map. A death aborts back to the map.
- */
-function advanceReplay(): void {
-  if (!replaymode || !room || !engine) return;
-  if (room.anyFishDead) {
-    // The best solution shouldn't kill a fish, but abort safely to the map if it does.
-    setReplaymode(null);
-    showMap();
-    return;
-  }
-  if (replaymode.idx >= replaymode.moves.length) {
-    setReplaymode(null); // ran dry without a win (defensive) — hand control back
-    return;
-  }
-  const m = replaymode.moves[replaymode.idx++]!;
-  engine.active = m.which;
-  tryStep(m.which, m.dir);
-  hracNespi();
-}
-
-/**
- * Consume one recorded action per tick (DalsiPrikaz replay, URoom.pas:26971). At
- * end-of-file the demo ends and control returns to the player.
- */
-function advanceShowmode(): void {
-  if (!showmode || !room) return;
-  if (showmode.idx >= showmode.actions.length) {
-    endShowmode();
-    return;
-  }
-  const at = showmode.idx;
-  const a = showmode.actions[showmode.idx++]!;
-  applyCapAction(a);
-  hracNespi(); // DalsiPrikaz calls hrac_nespi after each replayed action (URoom.pas:26985)
-  // Debug trace (enabled via __ff.showmodeTraceOn): one row per consumed action, with
-  // the resulting fish cells / phase / alive, so a headless run can be replayed and
-  // diffed against the recording to pinpoint where the demo diverges.
-  if (showmodeTraceOn && room) {
-    const l = room.items[room.littleIdx];
-    const b = room.items[room.bigIdx];
-    showmodeTrace.push({
-      i: at,
-      kdo: a.kdo,
-      akce: a.akce,
-      x: a.x,
-      y: a.y,
-      ht: showmodeHelptext,
-      lx: l?.x ?? -1,
-      ly: l?.y ?? -1,
-      bx: b?.x ?? -1,
-      by: b?.y ?? -1,
-      aliveL: room.alive.little,
-      aliveB: room.alive.big,
-      act: engine?.active ?? 'little',
-      phase: engine?.phase ?? 'idle',
-    });
-    if (showmodeTrace.length > 4000) showmodeTrace.shift();
-  }
-}
-
-/**
- * Dispatch one recorded action (URoom.pas:24438-24501), consumed on an idle step.
- *
- * The recording encodes the demo's deliberate death-restart as a run of `akce_restart`
- * (kdo=0) entries — the engine's countdown auto-restart (countdown:=70 on both fish
- * dead, then akce_restart at 0; URoom.pas:24337/26911). We drive the restart straight
- * from the recording: on the first restart entry of a run we rebuild the room (fish
- * back to spawn, showmode preserved), which also re-syncs the fish to the recorded
- * positions and corrects any accumulated path drift. The rest of the run is a no-op.
- *
- * A system-issued directional move applies to the active fish (24440). `go` walks one
- * cell toward the recorded target (najdi_smer, re-issued each idle step by the
- * recording); `helptext` advances the tutorial subtitle. Recorded save/load/help/
- * natvrdo are ignored during replay.
- */
-function applyCapAction(a: CapAction): void {
-  if (!room || !engine) return;
-  // Recorded restart run: rebuild the room once (the demo's death-restart).
-  if (a.akce === AKCE.restart) {
-    if (!showmodeRestarted) {
-      setShowmodeRestarted(true);
-      buildRoom(true); // showmode + replay position are preserved across the rebuild
-    }
-    return;
-  }
-  setShowmodeRestarted(false); // a non-restart action ends the restart run
-  // Recorded save / load (akce_save=20, akce_load=10, URoom.pas:24480): the demo saves
-  // a checkpoint and reloads it after each death (help7). Only the system-issued copy
-  // acts; the stale kdo=0 duplicates fall through to the no-op return below.
-  if (a.kdo === KDO.sys && a.akce === AKCE.save) {
-    if (room.alive.little && room.alive.big) {
-      setShowmodeSave({ rec: engine.srecord, snapshot: activeScript?.s.snapshot() ?? null });
-    }
-    return;
-  }
-  if (a.kdo === KDO.sys && a.akce === AKCE.load) {
-    if (showmodeSave) restore(showmodeSave.rec, showmodeSave.snapshot, true, true); // preserve showmode, animated
-    return;
-  }
-  let kdo = a.kdo;
-  if (kdo === KDO.none) return;
-  if (kdo === KDO.sys && a.akce >= AKCE.up && a.akce <= AKCE.right) {
-    kdo = engine.active === 'little' ? KDO.little : KDO.big; // sys move -> active fish
-  }
-  const which: 'little' | 'big' | null =
-    kdo === KDO.little ? 'little' : kdo === KDO.big ? 'big' : null;
-  switch (a.akce) {
-    case AKCE.up:
-    case AKCE.down:
-    case AKCE.left:
-    case AKCE.right:
-      if (which) {
-        engine.active = which;
-        tryStep(which, a.akce); // Dir values equal akce 1-4
-      }
-      break;
-    case AKCE.set: // akce_set: select the fish
-      if (which) selectFish(which);
-      break;
-    case AKCE.switch: // akce_switch (no stav_kuk animation during showmode)
-      swapActive();
-      break;
-    case AKCE.go: // akce_go: step one cell toward the recorded target (najdi_smer)
-      if (which) {
-        engine.active = which;
-        const dir = room.findDir(which, a.x, a.y);
-        if (dir !== Dir.no) tryStep(which, dir);
-      }
-      break;
-    case AKCE.helptext:
-      showHelpText();
-      break;
-    case AKCE.exit:
-      endShowmode();
-      break;
-    default:
-      break; // load/save/help/natvrdo: ignored
-  }
-}
-
-/**
- * Tutorial subtitle (akce_helptext, URoom.pas:24495): show the next help line.
- * A fixed set of indices are spoken by the big fish (addv), the rest by the small
- * fish (addm). help1..help23 live in KUFRIK's caption bank.
- */
-function showHelpText(): void {
-  setShowmodeHelptext(showmodeHelptext + 1);
-  const n = showmodeHelptext;
-  const bigVoiced = n === 2 || n === 4 || n === 7 || n === 8 || n === 11 || n === 14 || n === 20 || n === 22;
-  if (!activeScript) return;
-  if (bigVoiced) activeScript.s.addv(0, 'help' + n);
-  else activeScript.s.addm(0, 'help' + n);
-}
-
-/**
- * Skip the briefcase demo (zrus_kufr, URoom.pas:2965): end it early and stop the
- * KD narration (KSnd(-1)). The 'kufrik' music keeps playing — only the demo ends.
- */
-function skipCutscene(): void {
-  if (!cutscene) return;
-  setCutscene(null);
-  setCutsceneSubs(null);
-  disposeAiKufr(); // release the upscaled frames (~37 MB at x4) on an early skip
-  audio.killVoices(); // KSnd(-1): drop the narration; music (playMusic) is untouched
-}
-
-/** A KD-* narration caption during the cutscene; returns its length in game ticks. */
-function cutsceneCaption(name: string): number {
-  const sound = `KD-${name}`;
-  const entry = fftEntries.find((e) => e.name === sound);
-  if (entry && cutsceneSubs && subsOn()) {
-    const t = subLang() === 'cz' ? entry.cz : entry.en;
-    if (t.text) cutsceneSubs.newSubtitle(t.text, t.color, count);
-  }
-  audio.play(sound, 1, -1, 'voice');
-  const dur = audio.duration(sound);
-  return dur > 0 ? Math.max(1, Math.round(dur / LOGIC_SEC)) : DEFAULT_LINE_TICKS;
-}
-
-/**
- * Paint the cutscene's KD-* captions on the vector overlay.
- *
- * Shared by the faithful and the AI cutscene paths: the captions are their own DOM
- * layer, so they are identical in both and must not be duplicated per path.
- */
-function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number, dpr: number): void {
-  if (!cutsceneSubs?.active) return;
-  syncSubOverlaySized(cssW, cssH);
-  // The cutscene paints on every rAF (it has no dirty check), so without this
-  // gate the captions were re-shaped ~60x a second to produce the same image.
-  const sig = subOverlaySignature('cut', cutsceneSubs, cs * dpr);
-  if (!subOverlayGate || sig !== subOverlaySig) {
-    subCtx.setTransform(1, 0, 0, 1, 0, 0);
-    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-    subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-    applySubScale(subCtx, cutsceneSubs);
-    cutsceneSubs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
-    setSubOverlayPaints(subOverlayPaints + 1);
-    setSubOverlayPainted(true);
-    setSubOverlaySig(sig);
-  }
-  subCanvas.style.transform = '';
-}
-
-/**
- * The AI-upscaled briefcase cutscene: the static suitcase/TV canvas plus one upscaled
- * image per DECODED animation frame (see tools/studio/stage-kufr.ts).
- *
- * The deltas in demo.pck cannot be upscaled — they are per-pixel palette writes — so the
- * frames are materialised offline. The script still drives playback: this only swaps the
- * PIXEL SOURCE, so the audio-dependent timeline, the KD-* narration, the captions and
- * the Escape skip are all untouched.
- */
-let aiKufr: AiKufr | null = null;
-let aiKufrTried = false;
-/** Decoded frames, bounded — all 284 at ×4 would be ~37 MB resident. */
-const aiKufrFrames = new Map<string, ImageBitmap>();
-const AI_KUFR_CACHE_MAX = 24;
-const aiKufrLoading = new Set<string>();
-let aiKufrRangeWarned = false;
-
-async function ensureAiKufr(): Promise<void> {
-  if (aiKufrTried) return;
-  aiKufrTried = true;
-  try {
-    const res = await fetch('/enhanced-ai/_kufr/ai.json');
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
-    const man = (await res.json()) as { scale: number; region: AiKufr['region']; order: string[] };
-    const bres = await fetch('/enhanced-ai/_kufr/base.webp');
-    if (!bres.ok || !(bres.headers.get('content-type') ?? '').startsWith('image/')) return;
-    aiKufr = {
-      base: await createImageBitmap(await bres.blob()),
-      scale: Number(man.scale) || AI_ROOM_SCALE,
-      region: man.region,
-      order: man.order ?? [],
-    };
-  } catch (e) {
-    console.warn('AI briefcase cutscene unavailable:', e);
-  }
-}
-
-/** Fetch a cutscene frame (and prefetch the next few, since playback is linear). */
-function loadAiKufrFrame(name: string): void {
-  if (!name || aiKufrFrames.has(name) || aiKufrLoading.has(name)) return;
-  aiKufrLoading.add(name);
-  void (async () => {
-    try {
-      const res = await fetch(`/enhanced-ai/_kufr/frames/${name}`);
-      if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
-      const bmp = await createImageBitmap(await res.blob());
-      aiKufrFrames.set(name, bmp);
-      while (aiKufrFrames.size > AI_KUFR_CACHE_MAX) {
-        const oldest = aiKufrFrames.keys().next().value as string | undefined;
-        if (oldest === undefined || oldest === name) break;
-        aiKufrFrames.get(oldest)?.close();
-        aiKufrFrames.delete(oldest);
-      }
-    } catch {
-      /* this frame stays on the faithful path */
-    } finally {
-      aiKufrLoading.delete(name);
-    }
-  })();
-}
-
-/** Release the cutscene's decoded art (~37 MB of frames at ×4). */
-function disposeAiKufr(): void {
-  aiKufrRangeWarned = false;
-  for (const b of aiKufrFrames.values()) b.close();
-  aiKufrFrames.clear();
-  aiKufr?.base.close();
-  aiKufr = null;
-  aiKufrTried = false;
-}
-
-function drawCutscene(): void {
-  if (!cutscene) return;
-  ui.mapSig = null; // cutscene paints #screen — invalidate the map cache
-  const w = cutscene.width;
-  const h = cutscene.height;
-  const cs = contentScaleFor(w, h); // scaled + centered in the stage like the room it plays over (KUFRIK)
-  const cssW = w * cs;
-  const cssH = h * cs;
-  const dpr = window.devicePixelRatio || 1;
-  // Enhanced: render the KD-* captions in the bundled Mulish font on the vector
-  // overlay (like room subtitles). Classic: keep the faithful baked bitmap font
-  // composited into the 256-colour frame.
-  const useVec = enhancedArtActive() && cutsceneSubs !== null && subFontReady;
-  // The hi-res path draws bitmaps, so it cannot composite BAKED captions into the
-  // indexed frame. When the vector overlay is unavailable (no subtitle font) it stands
-  // down entirely rather than drop the narration text — same rule as the room gate.
-  if (graphics === 'ai' && !aiKufrTried) void ensureAiKufr();
-  const aiFrameIdx = Math.max(0, cutscene.framesShown - 1);
-  const aiFrameName = aiKufr ? aiKufr.order[aiFrameIdx] ?? '' : '';
-  // Running past the end means the shipped sequence and the decoder disagree. The
-  // consequence is a silent mid-cutscene drop back to the faithful renderer, which is
-  // exactly how the framesDrawn/framesShown mix-up hid, so say it once.
-  if (aiKufr && !aiFrameName && !aiKufrRangeWarned) {
-    aiKufrRangeWarned = true;
-    console.warn(`AI cutscene: frame ${aiFrameIdx} is past the shipped sequence (${aiKufr.order.length}); falling back`);
-  }
-  if (aiKufr && aiFrameName) {
-    loadAiKufrFrame(aiFrameName);
-    for (let i = 1; i <= 4; i++) loadAiKufrFrame(aiKufr.order[cutscene.framesShown - 1 + i] ?? '');
-  }
-  const aiBmp = graphics === 'ai' && useVec && aiKufr ? aiKufrFrames.get(aiFrameName) ?? null : null;
-  if (aiBmp && aiKufr) {
-    const S = aiKufr.scale;
-    glCanvas.style.display = 'none';
-    if (canvas.width !== w * S || canvas.height !== h * S) { canvas.width = w * S; canvas.height = h * S; }
-    canvas.style.width = `${cssW}px`;
-    canvas.style.height = `${cssH}px`;
-    canvas.style.transform = '';
-    const wantSmooth = scalingFilterFor(w * S, cssW);
-    if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(aiKufr.base, 0, 0);
-    ctx.drawImage(aiBmp, aiKufr.region.x * S, aiKufr.region.y * S);
-    updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
-    setPerfPaint(perfPaint + 1);
-    return;
-  }
-  if (canvas.style.imageRendering) canvas.style.imageRendering = '';
-  const frame = new IndexedScreen(w, h);
-  frame.px.set(cutscene.pixels);
-  if (!useVec) cutsceneSubs?.draw(frame, count); // baked bitmap captions
-  // Enhanced upgrade: bilinear-upscale the 256-colour frame on the GPU so it isn't
-  // blocky on hi-DPI displays. Classic stays crisp (faithful) via the 2D path.
-  const smoothGpu = enhancedArtActive() && renderer === 'webgl' && !glFailed;
-  // #screen is the layout anchor of the wrap even when the GL canvas covers it, so
-  // it must carry the cutscene's CSS box (native backing, SCALE-sized on screen —
-  // the same box the KUFRIK room used, so entering/leaving the cutscene doesn't
-  // shift the layout). Its backing also backs the 2D fallback blit below.
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-  canvas.style.width = `${cssW}px`;
-  canvas.style.height = `${cssH}px`;
-  canvas.style.transform = '';
-  let presented = false;
-  if (smoothGpu) {
-    const comp = glCompositor();
-    if (comp) {
-      try {
-        comp.renderIndexed(frame.px, w, h, cutscene.palette);
-        // Back the GL canvas at the on-screen device resolution so the shader's
-        // LINEAR upscale (not CSS scaling) does the smoothing; present + show it.
-        const bw = Math.round(cssW * dpr);
-        const bh = Math.round(cssH * dpr);
-        if (glCanvas.width !== bw || glCanvas.height !== bh) {
-          glCanvas.width = bw;
-          glCanvas.height = bh;
-        }
-        glCanvas.style.width = `${cssW}px`;
-        glCanvas.style.height = `${cssH}px`;
-        glCanvas.style.transform = '';
-        comp.present(bw, bh, true);
-        glCanvas.style.display = 'block';
-        presented = true;
-      } catch {
-        markGlFailed(); // fall through to the CPU blit for this frame
-      }
-    }
-  }
-  if (!presented) {
-    glCanvas.style.display = 'none';
-    const rgba = frame.toRgba(cutscene.palette);
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
-  }
-  // Mulish captions on the vector overlay (enhanced). Same coordinate convention
-  // as room subtitles: the overlay spans the on-screen box and its context is
-  // scaled by SCALE*dpr so drawVector positions in native (720×555) game pixels.
-  if (useVec && cutsceneSubs!.active) {
-    updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
-  } else if (subOverlayPainted) {
-    clearSubOverlay();
-  }
-}
+//#region Cutscene wiring | anchors: initCutscene | Hands `cutscene.ts` the five names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo, the movies and the replay are in that module.
+initCutscene({
+  get buildRoom() {
+    return buildRoom;
+  },
+  get hracNespi() {
+    return hracNespi;
+  },
+  get selectFish() {
+    return selectFish;
+  },
+  get showMap() {
+    return showMap;
+  },
+  get swapActive() {
+    return swapActive;
+  },
+});
 
 //#region Room load wiring | anchors: initRoomLoad | Hands `roomLoad.ts` the three names it needs. Fetching a room, arming its voices and starting its music are in that module.
 initRoomLoad({
@@ -1584,198 +858,21 @@ initRoomLoad({
   },
 });
 
-//#region Movement, replay & restart | anchors: tryStep, beginHeldMove, dispatchHeldMove, wallShove, applyRecordStep, restore, advanceLoadmode, restartRoom | The `KeyRoom` held-key state machine and how a keypress becomes a game step — plus replaying a saved record (`loadmode`) and restarting a room.
-function tryStep(which: 'little' | 'big', dir: number): 'moving' | 'turning' | 'blocked' | 'busy' {
-  wake(); // resume 60fps if the idle-loop throttle had us sleeping (also covers __ff.press)
-  return engine ? engine.press(which, dir) : 'blocked';
-}
-
-// Engine-level held-key auto-repeat (KeyRoom, URoom.pas:26788/26941 + Uovl.pas:990/1006):
-// a held movement key is re-issued every rest tick, so holding a direction moves the fish
-// continuously with no OS typematic delay. Only ONE key is tracked at a time (a second
-// movement key while one is held is ignored, like FormKeyDown's `if KeyRoom in [1,2] then
-// exit`), and only movement keys repeat (action keys stay one-shot). `heldState` mirrors
-// KeyRoom: 0 idle, 1 pressed, 2 held (repeating), 3 released.
-let heldKey: string | null = null;
-let heldSys = false; // arrow keys are kdo:=sys → move whichever fish is active at dispatch
-let heldWhich: 'little' | 'big' = 'little';
-let heldDir: number = Dir.no;
-let heldState = 0; // KeyRoom: 0 idle, 1 pressed, 2 held, 3 released
-
-function clearHeldKey(): void {
-  heldKey = null;
-  heldState = 0;
-  heldDir = Dir.no;
-}
-
-/** FormKeyDown (Uovl.pas:990): record a held movement key. OS auto-repeat and any second
- *  key are absorbed while one is already held, so the engine (not the OS) drives repeat. */
-function beginHeldMove(code: string, sys: boolean, which: 'little' | 'big', dir: number): void {
-  if (heldState === 1 || heldState === 2) return; // a key is already held
-  if (engine) engine.swim = null; // a key press cancels any click-to-swim (most-recent input wins)
-  heldKey = code;
-  heldSys = sys;
-  heldWhich = which;
-  heldDir = dir;
-  heldState = 1;
-}
-
-/** DalsiPrikaz (URoom.pas:26941): dispatch the held key on a rest tick and advance its
- *  KeyRoom state (1→2 held, 3→0 released). The move is busy-gated exactly like a fresh
- *  press; the state still advances if the move is dropped, so it retries next tick. */
-function dispatchHeldMove(): void {
-  if (heldState === 0 || !engine || !room) return;
-  const which = heldSys ? engine.active : heldWhich;
-  const release = heldState === 3;
-  heldState = release ? 0 : 2;
-  if (release) heldKey = null;
-  if (fishBusy(which)) return; // dropped while the fish is talking (kdo:=0)
-  hracNespi();
-  engine.swim = null;
-  engine.active = which;
-  tryStep(which, heldDir);
-  setInfo();
-}
-
-/**
- * KAJUTA1 screen-shove (URoom.pas:24727-24761): a blocked big-fish left/right push
- * against a wall, while gspec is 3 or 4, slides the view and arms gspec:=4. Wired as
- * the engine's onBlockedMove hook so a rejected push still shoves the screen.
- */
-function wallShove(which: 'little' | 'big', dir: number): void {
-  if (
-    !room ||
-    which !== 'big' ||
-    (dir !== Dir.left && dir !== Dir.right) ||
-    (room.gspec !== 3 && room.gspec !== 4)
-  ) {
-    return;
-  }
-  const big = room.items[room.bigIdx]!;
-  const wall =
-    dir === Dir.left
-      ? room.cellOccupant(big.x - 1, big.y) === ITEM_WALL ||
-        room.cellOccupant(big.x - 1, big.y + 1) === ITEM_WALL
-      : room.cellOccupant(big.x + 4, big.y) === ITEM_WALL ||
-        room.cellOccupant(big.x + 4, big.y + 1) === ITEM_WALL;
-  if (wall) {
-    room.gspec = 4;
-    // screenShoveX is stored in NATIVE px (scaled by contentScale at apply time),
-    // so the shove tracks the current display scale. Was ±5*SCALE CSS / clamp ±40 CSS.
-    const delta = dir === Dir.left ? -5 : 5;
-    setScreenShoveX(Math.max(-20, Math.min(20, screenShoveX + delta)));
-  }
-}
-
-/**
- * Apply one recorded move to `room` instantly (no animation), via the shared engine.
- * Used to re-simulate for undo/load. Returns false if the move was blocked.
- */
-function applyMoveInstant(which: 'little' | 'big', dir: number): boolean {
-  return engine ? engine.applyMoveInstant(which, dir) : false;
-}
-
-/**
- * Apply one recorded step of a move-only re-simulation (load / undo). A move is
- * re-run through the physics; a push-out is re-applied from its record marker,
- * because prog() — which marks the item spec=9 — does not run on this path
- * (the 'q' case of the original's replay dispatch, URoom.pas:24184).
- */
-function applyRecordStep(st: RecordStep): void {
-  if (st.kind === 'pushOut') room?.removePushedOut(st.idx);
-  else applyMoveInstant(st.which, st.dir);
-}
-
-/**
- * Rebuild the room and replay a move record (load / undo). When `animated` (the
- * player F3 and the demo's reload), the replay is fast-forwarded over several ticks
- * at LoadSpeed moves/tick (TRoom.Load loadmode, URoom.pas:24102) so the fish visibly
- * rewind to spawn and race back to the saved position; otherwise it is applied
- * instantly (used by deterministic tests).
- */
-function restore(
-  rec: string,
-  snapshot: ScriptSnapshot | null = null,
-  preserveShowmode = false,
-  animated = false,
-): void {
-  if (!preserveShowmode) endShowmode(); // loading a saved game ends any KUFRIK demonstration
-  setLoadmode(null);
-  // Rebuild with carryPole, i.e. the RESTART flavour: TRoom.Load runs InitItems +
-  // InitProgramky (URoom.pas:1905-1948), never TRoom.Init, so loading a save must
-  // not clear the room-scoped cheats (or roompole) the way a room change does.
-  buildRoom(true); // fresh room (resets srecord); may leave pending fall dirs
-  if (!room || !engine) return;
-  room.clearAllDirs();
-  room.fallToRest(); // settle the initial gravity instantly
-  room.clearAllDirs();
-  engine.phase = 'idle';
-  engine.swim = null;
-  engine.exiting = null;
-  engine.animFrame = 0;
-  engine.srecord = ''; // rebuilt by the replayed moves
-  const steps = stepsOf(rec);
-  if (animated) {
-    // LoadSpeed := size div 150, clamped 5..50 (URoom.pas:1927). `size` is the save
-    // byte count; the record length is our proxy.
-    const speed = Math.max(5, Math.min(50, Math.floor(rec.length / 150)));
-    setLoadmode({ steps, idx: 0, speed, snapshot });
-    setInfo();
-    return;
-  }
-  for (const st of steps) {
-    if (room.anyFishDead || room.won) break;
-    applyRecordStep(st);
-  }
-  // Restore the script's "already said"/progress Vars so loading doesn't re-fire
-  // dialogue the fish have already spoken (the original re-derives these during a
-  // suppressed load replay; buildRoom reset them, so re-apply the saved snapshot).
-  if (snapshot && activeScript) activeScript.s.applySnapshot(snapshot);
-  setInfo();
-}
-
-/**
- * Advance a fast-forward load (loadmode): apply up to `speed` recorded moves this
- * tick; on completion re-apply the saved script snapshot and settle. Mirrors the
- * per-Timer1Timer `while kolo<LoadSpeed` replay in URoom.pas:24135.
- */
-function advanceLoadmode(): void {
-  if (!loadmode || !room || !engine) return;
-  let applied = 0;
-  while (applied < loadmode.speed && loadmode.idx < loadmode.steps.length) {
-    if (room.anyFishDead || room.won) {
-      loadmode.idx = loadmode.steps.length;
-      break;
-    }
-    applyRecordStep(loadmode.steps[loadmode.idx++]!);
-    applied++;
-  }
-  if (loadmode.idx >= loadmode.steps.length) {
-    // LoadDone (URoom.pas:1789): re-apply progress Vars, settle, resume play.
-    if (loadmode.snapshot && activeScript) activeScript.s.applySnapshot(loadmode.snapshot);
-    room.clearAllDirs();
-    room.fallToRest();
-    room.clearAllDirs();
-    engine.phase = 'idle';
-    setLoadmode(null);
-    setInfo();
-  }
-}
-
-/**
- * Restart the room (TRoom.Restart, URoom.pas:1577): the original's Restart action.
- * Discards the whole move record, resets every object to its start, and counts a
- * fresh attempt (pokus++). This is NOT a single-move undo — the 1998 Delphi game
- * had none; the tutorial's "1st-m-backspace" line teaches Backspace = start over.
- */
-function restartRoom(): void {
-  wake();
-  if (!room || ui.screen !== 'room' || cutscene) return;
-  endShowmode(); // a player restart aborts the KUFRIK demonstration (unlike a death-restart)
-  setPokus(pokus + 1);
-  buildRoom(true);
-  setInfo();
-}
+//#region Movement wiring | anchors: initMovement | Hands `movement.ts` the four names it needs. The held-key state machine, the record replay and the room restart are in that module.
+initMovement({
+  get buildRoom() {
+    return buildRoom;
+  },
+  get endShowmode() {
+    return endShowmode;
+  },
+  get hracNespi() {
+    return hracNespi;
+  },
+  get setInfo() {
+    return setInfo;
+  },
+});
 
 //#region Save/load game | anchors: saveGame, loadGame, saveExists, canSave, onWinBookkeeping | In-room save slots and what happens on a win.
 const saveKey = (): string => `ff.save.${select.value}`;
@@ -1885,374 +982,29 @@ initMapDraw({
   },
 });
 
-//#region Map navigation & story screens | anchors: showMap, returnFromRoom, showLegImage, playFirstRunIntro, openCredits, drawCredits | Entering/leaving the map, leg-completion pages, intro replay, the credits roll.
-function startMenuMusic(): void {
-  // Swallow load/decode failures here: menu music is non-critical, and during boot
-  // an unhandled rejection would otherwise trip the boot-fatal handler.
-  audio.playMusic('menu', '/data/Music/menu.wav', 419772).catch(() => {});
-}
+//#region Map navigation wiring | anchors: initMapNav | Hands `mapNav.ts` the five names it needs. Entering/leaving the map, the leg pages, the intro replay and the credits roll are in that module.
+initMapNav({
+  get enterRoom() {
+    return enterRoom;
+  },
+  get hideAiCredits() {
+    return hideAiCredits;
+  },
+  get setInfo() {
+    return setInfo;
+  },
+  get solved() {
+    return solved;
+  },
+  get stopRoomClock() {
+    return stopRoomClock;
+  },
+});
 
-/**
- * Show the world map, tearing down the room's audio faithfully (Jedeme end
- * KillSnd + zrus_dialogy + ZrusTitulky, UMain.pas): stop the room music and all
- * voices, clear the dialogue queue and subtitles, then start the menu music.
- */
-function showMap(): void {
-  stopRoomClock(); // bank this visit's play time before the room goes away
-  endSilentFilm(); // TRoom.Done (URoom.pas:1513): leaving the room un-mutes the game
-  ui.screen = 'map';
-  select.value = 'map'; // keep the dev-bar Room picker in sync with the screen
-  clearHeldKey(); // drop any held movement key when leaving the room
-  endShowmode(); // leaving the room ends any KUFRIK demonstration
-  if (engine) {
-    engine.swim = null;
-    engine.winCountdown = 0;
-  }
-  ui.mapRevealStart = performance.now(); // restart the reveal animation (Depth := -3)
-  audio.killAll(); // KillSnd: stop room music + every voice/effect
-  activeScript?.s.clearDialog(); // zrus_dialogy: drop the pending speech queue
-  subs?.clear(); // ZrusTitulky: clear any on-screen subtitle
-  poslMluv.little = -1;
-  poslMluv.big = -1;
-  startMenuMusic();
-  setInfo();
-}
-
-/** ZAVER ("At Home", room 71): the endgame finale cutscene, auto-launched on completion. */
-const ZAVER_ROOM = 71;
-/**
- * The story page ZAVER ends on: 009.$dv, the medals and the congratulation letter from
- * ŠÉF. It is the ninth page, and the only one no leg win can reach — legs 1..8 map to
- * 001..008, and branches 0 and 9 have no depth-15 room at all.
- */
-const ZAVER_LEG = 9;
-
-/**
- * chybi=0 (USoutez.pas:729): every registered room (1..70) is genuinely solved. Cheat-
- * solved rooms live in a separate `cheated` set and do NOT count — the original only
- * treats a room as finished when it holds a real best-solution record (savy[nej].dat<>0).
- */
-function allRegisteredSolved(): boolean {
-  return REGISTERED_ROOMS.every((r) => solved.has(r));
-}
-
-/**
- * Return to the world map after a room is won. Winning the last room of a leg (a
- * depth-15 room, one per branch 1..8) first shows that leg's story "case file" page
- * (zobraz_obrazek, UMain.pas:958/991/1030); every other room returns straight to the
- * map. Cheat-solves bypass this (they call showMap directly), matching the intent
- * that only a genuine finish reveals the page.
- *
- * The ZAVER finale auto-launches only when this win is of a *leg-final* room (depth 15)
- * AND it completes the game — pustitzaver := (hloubka=15) and (chybi=0), USoutez.pas:729
- * → av:=9 daRun, UMain.pas:948. So it always chains out of that final leg's story page;
- * winning an ordinary (non-leg-final) room when everything is already solved just returns
- * to the map. SCORE (room 72) is deliberately never auto-launched — it stays a hidden secret.
- */
-function returnFromRoom(): void {
-  const roomNum = Number(select.value);
-  // pustitzaver: hloubka=15 and chybi=0 — the finale fires only when a genuine win of a
-  // *registered leg-final* room (depth 15) leaves no registered room unsolved. A non-leg-
-  // final win (even with everything solved) must NOT launch it; nor can the ZAVER win
-  // itself (room 71, unregistered, depth −1) re-trigger the finale.
-  const finale =
-    REGISTERED_ROOMS.includes(roomNum) && depthOfRoom(roomNum) === 15 && allRegisteredSolved();
-  if (solved.has(roomNum) && depthOfRoom(roomNum) === 15) {
-    const leg = branchOfRoom(roomNum);
-    if (leg >= 1 && leg <= 8) {
-      // Show the leg page first; if the game is now finished, chain into ZAVER on dismiss.
-      void showLegImage(leg, finale ? { room: ZAVER_ROOM } : undefined);
-      return;
-    }
-  }
-  if (finale) {
-    void enterRoom(ZAVER_ROOM);
-    return;
-  }
-  // ZAVER has just ended: close the game on its story page (009.$dv), then the map.
-  //
-  // DELIBERATE DEVIATION from the original, which shows this page when the room is
-  // LAUNCHED — UMain.pas's daRealyRun runs `if Hloubka[av,am]=16 then zobraz_obrazek(av)`
-  // immediately after Spust(), alongside the score screen. The page is a congratulation
-  // on finishing the game, so it reads as an ending rather than a title card.
-  //
-  // It is unreachable in the port otherwise: computeHloubka only covers the nine
-  // REGISTERED branches, so room 71 has depth −1 and the original's Hloubka=16 branch
-  // can never fire. (The score screen that accompanies it upstream is not ported.)
-  if (roomNum === ZAVER_ROOM) {
-    void showLegImage(ZAVER_LEG); // no `pending` ⇒ dismisses to the map
-    return;
-  }
-  showMap();
-}
-
-/**
- * zobraz_obrazek (UMain.pas:831): show a leg's full-screen story page over a frozen
- * map, with the rybky11 theme. The page is a plain 640×480 8-bit BMP (Menu/00N.$dv);
- * a click or key dismisses it (zrus_obrazek) back to the map. Falls back to the map
- * if the image can't be loaded.
- */
-async function showLegImage(leg: number, pending?: { room: number; replay?: string }): Promise<void> {
-  let bmp: Bmp;
-  try {
-    const buf = await fetch(`/data/Menu/00${leg}.$dv`).then((r) => r.arrayBuffer());
-    bmp = parseBmp(new Uint8Array(buf));
-  } catch {
-    // Image unavailable: skip straight to the pending launch, or back to the map.
-    if (pending) void enterRoom(pending.room, pending.replay);
-    else showMap();
-    return;
-  }
-  ui.legImagePending = pending ?? null;
-  ui.legImage = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
-  ui.legImageNum = leg;
-  ui.legImageDrawn = false;
-  ui.screen = 'legimage';
-  // Swap in the upscaled page when it is available; the native one shows meanwhile.
-  ui.legImageAi?.close();
-  ui.legImageAi = null;
-  void ensureLegImageAi(leg);
-  clearHeldKey();
-  endShowmode();
-  if (engine) {
-    engine.swim = null;
-    engine.winCountdown = 0;
-  }
-  activeScript?.s.clearDialog(); // zrus_dialogy: drop any pending speech
-  subs?.clear(); // ZrusTitulky: clear any on-screen subtitle
-  audio.killAll(); // Killsnd
-  void audio.playMusic('rybky11', '/data/Music/rybky11.wav', 0); // Music('rybky11')
-  wake();
-}
-
-/**
- * zrus_obrazek (UMain.pas:847): dismiss the leg story page. If it was shown on re-entry
- * (Run/Replay of a solved room, daClickAndRun UMain.pas:966), continue into that room;
- * otherwise (the after-win case) return to the map.
- */
-function dismissLegImage(): void {
-  ui.legImage = null;
-  ui.legImageNum = -1;
-  ui.legImageAi?.close();   // a 2560x1920 page is ~20MB decoded; don't hold it after dismissal
-  ui.legImageAi = null;
-  const pending = ui.legImagePending;
-  ui.legImagePending = null;
-  if (pending) void enterRoom(pending.room, pending.replay);
-  else showMap();
-}
-
-/** Blit the current leg story page full-screen, sized like the map (fit-mode aware). */
-function drawLegImage(): void {
-  if (!ui.legImage) return;
-  const { w, h, rgba } = ui.legImage;
-  const cs = contentScaleFor(w, h);
-  // The CSS box always follows the NATIVE page size; only the BACKING STORE grows when
-  // the upscaled page is in use. Deriving the box from the backing store instead is the
-  // mistake that mis-sized the subtitle overlay (see roomGeometry).
-  const backW = ui.legImageAi ? ui.legImageAi.width : w;
-  const backH = ui.legImageAi ? ui.legImageAi.height : h;
-  if (canvas.width !== backW || canvas.height !== backH) {
-    canvas.width = backW;
-    canvas.height = backH;
-    ui.legImageDrawn = false; // the resize cleared the backing store
-  }
-  const cssW = `${w * cs}px`;
-  const cssH = `${h * cs}px`;
-  if (canvas.style.width !== cssW) canvas.style.width = cssW;
-  if (canvas.style.height !== cssH) canvas.style.height = cssH;
-  // The ×4 page is displayed smaller than it is, where the stylesheet's global
-  // pixelated rule would point-sample the detail away (same rule as the AI room).
-  const wantSmooth = ui.legImageAi ? scalingFilterFor(backW, w * cs) : '';
-  if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
-  if (ui.legImageDrawn) return; // static page — blit once, then let the loop idle
-  ui.legImageDrawn = true;
-  if (ui.legImageAi) {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.clearRect(0, 0, backW, backH);
-    ctx.drawImage(ui.legImageAi, 0, 0);
-  } else {
-    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
-  }
-  setPerfPaint(perfPaint + 1);
-}
-
-/**
- * Load the AI-upscaled story page for `leg`, when the `ai` tier is selected.
- *
- * Resolves to nothing on any failure, leaving the original page in place — the same
- * fallback contract as the rest of the tier. `legImageNum` is re-checked after the
- * await so a page dismissed (or replaced) mid-load cannot install itself late.
- */
-async function ensureLegImageAi(leg: number): Promise<void> {
-  if (graphics !== 'ai') return;
-  try {
-    const res = await fetch(`/enhanced-ai/_story/leg${leg}.webp`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
-    const bmp = await createImageBitmap(await res.blob());
-    if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
-    ui.legImageAi?.close();
-    ui.legImageAi = bmp;
-    ui.legImageDrawn = false; // repaint at the new resolution
-    wake();
-  } catch (e) {
-    console.warn(`AI story page unavailable for leg ${leg}:`, e);
-  }
-}
-
-/**
- * Play the intro movie sequence over the stage, then return to the map (the
- * original's daLogo/daIntro chain, UMain.pas:1064-1112). `gated` shows the
- * "click to start" splash first (first-run auto-play). The game audio is torn
- * down before playback (KillSnd/FinishSound) — the movie carries its own sound.
- * Each `resolver` is called at the moment its movie starts, so the source tracks
- * the graphics level chosen right then (e.g. AI-upscaled picked on the splash).
- */
-function playIntroMovies(resolvers: Array<() => string>, gated: boolean, onFinish: () => void): void {
-  if (intro.playing) return;
-  ui.screen = 'intro';
-  audio.killAll();
-  intro.start(resolvers, onFinish, gated);
-}
-
-/** The first-run intro (logo → intro), after which the flag flips so it won't auto-play again. */
-function playFirstRunIntro(): void {
-  playIntroMovies([logoMovie, introMovie], true, () => {
-    settings.introSeen = true;
-    saveSettings(settings);
-    showMap();
-  });
-}
-
-/** Replay just the intro movie from the map's top-left corner (daIntro plays FilmAvi only). */
-function replayIntro(): void {
-  playIntroMovies([introMovie], false, () => showMap());
-}
-
-/**
- * Handle a click on one of the map's corner "buttons" (UMain.pas daIntro/
- * daCredits/daOptions dispatch, 1064-1135). Exit is intentionally unwired — a
- * browser tab can't quit — so its corner is inert.
- */
-function dispatchMapCorner(action: MapAction | null): void {
-  switch (action) {
-    case 'intro':
-      replayIntro();
-      break;
-    case 'options':
-      openMapOptions();
-      break;
-    case 'credits':
-      void openCredits();
-      break;
-    case 'exit':
-    case null:
-      break; // Exit: no-op on the web; empty corner otherwise
-  }
-}
-
-/** Open the Options panel over the map (daOptions modal Ovl, UMain.pas:1120-1135). */
-function openMapOptions(): void {
-  ui.mapOverlay = 'options';
-  ui.ostav = O_OPTIONS; // open straight to the options face (no in-room scroll)
-  ui.scroll = SCMAX;
-}
-
-/** Close whichever menu overlay is open over the map, back to the plain map. */
-function closeMapOverlay(): void {
-  hideAiCredits();   // the credits overlay replaces the canvas — always restore it
-  ui.mapOverlay = 'none';
-  ui.ostav = O_NORMAL;
-  ui.panelDragBus = null;
-  ui.panelPressed = 0;
-  ui.creditMode = -1;
-}
-
-/**
- * Open the scrolling credits over the map (daCredits → InitCredits, UMain.pas:
- * 1114-1119,761). Lazily loads CredStat1 (static frame) + CredMov (scroll strip)
- * once; the roll then advances off wall-clock and auto-closes at the end.
- */
-async function openCredits(): Promise<void> {
-  if (ui.mapOverlay !== 'none') return;
-  if (!ui.credits) {
-    const bmp = async (f: string): Promise<Bmp> => {
-      const r = await fetch(`/data/Menu/${f}`);
-      if (!r.ok) throw new Error(`${f}: ${r.status}`);
-      return parseBmp(new Uint8Array(await r.arrayBuffer()));
-    };
-    try {
-      // CredMov_port is the shipped strip with the web-port card prepended
-      // (tools/build-credits-port.py). It is a drop-in in the same palette, and since
-      // the strip's height defines `delka`, the roll extends to cover it by itself.
-      // Falls back to the untouched original when the port variant isn't built.
-      const mov = await bmp('CredMov_port.BMP').catch(() => bmp('CredMov.BMP'));
-      ui.credits = new Credits(await bmp('CredStat1.BMP'), mov);
-    } catch {
-      return; // credits assets missing — leave the map as-is
-    }
-  }
-  ui.mapOverlay = 'credits';
-  ui.creditMode = 0;
-  ui.creditsStart = performance.now();
-}
-
-/** Render the scrolling credits full-screen on the main canvas (PaintBox1Paint, UMain.pas:1420). */
-function drawCredits(): void {
-  if (!ui.credits) return;
-  ui.mapSig = null; // credits paint #screen — invalidate the map cache
-  // Advance the scroll off wall-clock (CreditMode += CreditSpeed every 100ms);
-  // auto-close once it has settled and held (UMain.pas:867-869).
-  // The original advances in whole CREDIT_SPEED steps once per CREDIT_TICK_MS, which is
-  // a 4px jump at 10Hz. `creditMode` keeps that stepped value because it drives game
-  // logic (the auto-close) and is exposed for tests; `creditScroll` is the same ramp
-  // left CONTINUOUS, so the AI renderer — which positions a bitmap rather than indexing
-  // pixels — can roll smoothly. Same speed, same total duration, just not quantised.
-  const creditElapsed = (performance.now() - ui.creditsStart) / CREDIT_TICK_MS;
-  ui.creditMode = Math.floor(creditElapsed) * CREDIT_SPEED;
-  const creditScroll = creditElapsed * CREDIT_SPEED;
-  if (ui.creditMode > ui.credits.closeAt) {
-    closeMapOverlay();
-    return;
-  }
-  if (graphics === 'ai' && !ui.aiCreditsTried) { ui.aiCreditsTried = true; void ensureAiCredits(); }
-  const ai = graphics === 'ai' ? aiCredits : null;
-  // Display size follows the SAME fit rule as the map and the story pages
-  // (contentScaleFor on the NATIVE size). It used to be pinned at 640x480 CSS px, so
-  // the credits stayed a small window in the middle of a large viewport while every
-  // other screen filled it.
-  const cs = contentScaleFor(ui.credits.w, ui.credits.h);
-  const dispW = Math.round(ui.credits.w * cs);
-  const dispH = Math.round(ui.credits.h * cs);
-
-  if (ai) {
-    // GPU path: two stacked <img> layers replace the canvas, and the roll is a CSS
-    // transform the compositor animates. Per frame this is one style write — the
-    // canvas version cost ~2.4ms of JS for the same picture (see creditsAi.ts).
-    // #screen lives inside `wrap` (centred in the stage box); mount the overlay there
-    // so it inherits the same centring and letterboxing the canvas gets.
-    if (!ai.el.isConnected) wrap.appendChild(ai.el);
-    if (ui.creditsLayoutW !== dispW || ui.creditsLayoutH !== dispH) {
-      ui.creditsLayoutW = dispW;
-      ui.creditsLayoutH = dispH;
-      ai.layout(dispW, dispH);
-    }
-    canvas.style.display = 'none';
-    ai.show();
-    ai.setScroll(creditScroll);
-    return;
-  }
-
-  hideAiCredits();
-  if (canvas.width !== ui.credits.w || canvas.height !== ui.credits.h) {
-    canvas.width = ui.credits.w;
-    canvas.height = ui.credits.h;
-  }
-  const cssW = `${dispW}px`;
-  const cssH = `${dispH}px`;
-  if (canvas.style.width !== cssW) canvas.style.width = cssW;
-  if (canvas.style.height !== cssH) canvas.style.height = cssH;
-  const rgba = ui.credits.render(ui.creditMode);
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), ui.credits.w, ui.credits.h), 0, 0);
+//#region Room entry & fish animation | anchors: enterRoom, beginMapLaunch, panelAction, updateLipSync, fishFrameFor | The map → room transition (incl. the launch parchment), panel button actions, and which sprite frame each fish shows.
+/** Keep the dev room picker in step with the room actually shown. */
+function setRoomPicker(num: number): void {
+  select.value = String(num);
 }
 
 /**
@@ -2267,12 +1019,6 @@ function drawCredits(): void {
  *
  * `replay` is the best-solution move record to play back animated (map "Replay").
  */
-//#region Room entry & fish animation | anchors: enterRoom, beginMapLaunch, panelAction, updateLipSync, fishFrameFor | The map → room transition (incl. the launch parchment), panel button actions, and which sprite frame each fish shows.
-/** Keep the dev room picker in step with the room actually shown. */
-function setRoomPicker(num: number): void {
-  select.value = String(num);
-}
-
 function enterRoom(num: number, replay?: string): Promise<void> {
   if (canLaunchFromMap()) return beginMapLaunch(num, replay);
   return startRoom(num, replay, true);
@@ -2500,216 +1246,21 @@ initFramePainter({
   },
 });
 
-//#region The logic tick | anchors: step, tickBlink, hracNespi | One 80 ms game step: script, engine, dialogue, death handling, screensaver.
-function tickBlink(): void {
-  for (const w of ['little', 'big'] as const) {
-    if (blink[w] > 0) blink[w]--;
-    else if (Math.random() < 0.08) blink[w] = 1; // occasional ~1-tick (~140ms) blink
-    darkFlicker[w] = Math.random() < 0.06; // gspec=2 per-tick wink-out (random(100)<6)
-  }
-}
-
-/**
- * hrac_nespi (Uovl.pas:235): activity happened — the player moved, or the KUFRIK
- * demo replayed an action. Reset the fish idle timers AND the ambient-chatter idle
- * clock (casposlzmeny), so StdKecej only fires after ~60-120s of genuine inactivity.
- * This is why the original never chatters during the demo: every replayed action
- * resets the clock (DalsiPrikaz calls hrac_nespi, URoom.pas:26985).
- */
-function hracNespi(): void {
-  room?.hracNespi();
-  if (chatter) chatter.last = count; // casposlzmeny := now
-}
-
-/**
- * One game-logic step. Mirrors TRoom.Timer1Timer (URoom.pas:23986): it runs at
- * the fixed LOGIC_MS timestep, not per render frame. Returns true if it rebuilt
- * the room (death restart), so the catch-up loop discards leftover accumulation.
- */
-function step(): boolean {
-  if (ui.screen !== 'room') return false; // the map/intro screens have no game clock
-  setCount(count + 1);
-  // Briefcase cutscene takes over while it plays.
-  if (cutscene) {
-    cutsceneSubs?.tick(count);
-    cutscene.tick(cutsceneCaption, () => audio.playing(-1));
-    // Keep the idle-chatter timer synced to `now` while the demo plays, so the
-    // fish don't immediately "call" you the moment it ends (the demo isn't idle
-    // time). The room idle timers are already frozen here (the script block that
-    // increments them is skipped by the early return below).
-    if (chatter) chatter.last = count;
-    if (cutscene.done) {
-      setCutscene(null);
-      setCutsceneSubs(null);
-      disposeAiKufr(); // the cutscene plays once; don't hold its frames afterwards
-    }
-    return false;
-  }
-  tickBlink();
-  tickFrameEffects();
-  subs?.tick(count);
-  // Death cry when a fish is first crushed (sp-smrt1/2, URoom.pas:26767/26773).
-  if (room) {
-    for (const w of ['little', 'big'] as const) {
-      if (room.kostra[w] && !prevKostra[w]) {
-        audio.play(w === 'big' ? 'sp-smrt2' : 'sp-smrt1', EFFECT_VOL);
-        prevKostra[w] = true;
-      }
-    }
-  }
-  if (!room || !engine) return false;
-  // Fast-forward load animation (loadmode): replay the saved record at LoadSpeed
-  // moves/tick while it plays, skipping normal gameplay + the showmode replay (the
-  // original's DalsiPrikaz exits early during a load, URoom.pas:26930).
-  if (loadmode) {
-    advanceLoadmode();
-    return false;
-  }
-  // After a win, hold on the solved room while the cheer plays, then auto-return
-  // to the map (countdown:=30, URoom.pas:24341/24349). Enhancement over the original's
-  // fixed timer (which would cut a long line): when the countdown lapses, if the exit
-  // line is still being said — the fish's voice still sounding or its subtitle still
-  // on screen — hold at 1 until it finishes, so the map transition never truncates it.
-  if (engine.winCountdown > 0) {
-    const stillSpeaking =
-      audio.talking(MLUVI_PRIOR.little) ||
-      audio.talking(MLUVI_PRIOR.big) ||
-      (subsOn() && (subs?.active ?? false));
-    if (engine.winCountdown === 1 && stillSpeaking) return false; // hold — line still playing
-    engine.winCountdown--;
-    if (engine.winCountdown === 0) {
-      returnFromRoom();
-      return true;
-    }
-    // The hold does not freeze the room: the original decrements countdown and then
-    // still runs the gstav machine (`if countdown>0 then dec(countdown)` at
-    // URoom.pas:24349, followed by its `repeat`), so anything still in motion when the
-    // room was won finishes on screen. A gspec=9 push-out is the case that needs it —
-    // it wins the room AND enters stav_ma_padat on the same tick (URoom.pas:24904), so
-    // whatever the departed item held up would otherwise hang in the air until the map
-    // came back. `advance()` is inert while idle: its swim/possession branches are all
-    // gated on `!room.won`.
-    engine.advance();
-    return false;
-  }
-  // Zvuky_okoli (URoom.pas:23736): ambient bubbles — 5%/tick if none are sounding
-  // on the bubble channel (priority 1000). Skipped during a best-solution replay
-  // (loadtype=nej gates Zvuky_okoli, URoom.pas:24937) so the playback stays silent.
-  if (!inReplay()) {
-    const bubble = maybeBubble((n) => Math.floor(Math.random() * n), audio.playing(1000));
-    if (bubble) audio.play(bubble, EFFECT_VOL, 1000);
-  }
-  // Death: skeletons erode; if the active fish died, control passes to the
-  // survivor (URoom.pas:26998). Auto-restart only when *both* fish are out of play
-  // and it is not a win (URoom.pas:24337) — a lone survivor keeps playing until the
-  // player restarts, which is what lets the death commentary (StdSmrt) be heard.
-  if (room.anyFishDead) {
-    const eroded = room.tickRozpad();
-    const other = engine.active === 'little' ? 'big' : 'little';
-    if (!room.alive[engine.active] && room.alive[other]) engine.active = other;
-    if (!room.alive.little && !room.alive.big && !room.won && eroded && !showmode) {
-      setPokus(pokus + 1); // another attempt
-      buildRoom(true);
-      return true;
-    }
-    // A fully-eroded skeleton leaves the grid; anything it was holding up now
-    // falls (stav_ma_padat, URoom.pas:24421-24430). This runs during showmode too so
-    // the demo's deliberate deaths look right (e.g. the thrown bottle drops once the
-    // crushed fish disintegrates); the replay simply pauses while things fall (its
-    // branch is gated on phase==='idle') and resumes when the room settles.
-    if (room.clearErodedSkeletons() && engine.phase === 'idle') {
-      if (room.padani()) {
-        engine.phase = 'fall';
-        engine.animFrame = 0;
-      } else {
-        room.clearAllDirs();
-      }
-    }
-  }
-  // Run the room script (Programky) each unresolved tick. During the win hold,
-  // StepEngine still advances VyresLode so an in-flight wreck finishes falling.
-  if (activeScript) {
-    const wasWon = room.won;
-    engine.runScript(count, casHry()); // idle timers + scalar sync + prog + tickShodLod
-    if (!wasWon) {
-      // StdSmrt: death commentary (the survivor comments ~8 ticks after a partner dies).
-      // Gated on StdHlaskySmrti (URoom.pas:24942) — rooms like TRUP/VLADOVA disable it.
-      // Suppressed during the KUFRIK demonstration and during a best-solution replay
-      // (the original's silent loadmode replay speaks nothing): the recorded help
-      // subtitles are the demo's own narration of the deliberate death.
-      if (deathState && activeScript.s.stdHlaskySmrti && !showmode && !inReplay()) {
-        stdSmrt(activeScript.s, deathState, count, roomDepth, {
-          aliveLittle: room.alive.little,
-          aliveBig: room.alive.big,
-          venkuLittle: room.venku.little,
-          venkuBig: room.venku.big,
-        });
-      }
-      // StdKecej: ambient idle chatter, gated on no active dialogue + both fish alive.
-      // No showmode special-case: the demo keeps quiet on its own because every replayed
-      // action calls hracNespi (resets casposlzmeny), exactly like the original. A replay
-      // is silent (original loadmode replay runs no Programky/chatter).
-      if (chatter && room.alive.little && room.alive.big && !inReplay()) {
-        const depth15 = roomDepth === 15;
-        tickChatter(activeScript.s, chatter, count, 1000 / LOGIC_MS, activeScript.s.isDialog(), depth15);
-      }
-      activeScript.s.dialogy(count);
-    }
-  }
-  updateLipSync(); // cycle talking-mouth frames from live voice playback
-  // Hacky (URoom.pas:24950): the xfisher fishing hooks. A hook can catch+kill a fish
-  // (killByHook sets alive=false/kostra=false and drops what it held). If the active
-  // fish is hooked, control passes to the survivor; when both fish are out of play
-  // (and no hook is still dragging one up), the room restarts — mirroring the crush
-  // path but keyed on `alive` since a hooked fish leaves no skeleton to erode.
-  if (hooks.count > 0) {
-    hooks.tick(room, (n) => Math.floor(Math.random() * n));
-    const other = engine.active === 'little' ? 'big' : 'little';
-    if (!room.alive[engine.active] && room.alive[other]) engine.active = other;
-    if (
-      !room.alive.little &&
-      !room.alive.big &&
-      !room.won &&
-      !room.kostra.little &&
-      !room.kostra.big &&
-      !hooks.busy &&
-      engine.phase === 'idle'
-    ) {
-      setPokus(pokus + 1);
-      buildRoom(true);
-      return true;
-    }
-  }
-  // The shared step-engine drives the whole phase machine (gspec=9 cork setup, move/
-  // fall/turn/exit/cork animation with its exit cheer + triggerWin, and the pending
-  // auto-swim / ZELVA possession step) — the same path the headless harness runs.
-  engine.advance();
-  // Engine-level held-key repeat (DalsiPrikaz, URoom.pas:26941): re-issue the held
-  // movement key on a rest tick. Run AFTER advance() so a cell that just completed
-  // immediately starts the next one on the SAME tick — no stationary gap between cells
-  // (holding flows continuously) — while jizda still accumulates (advance saw phase=move
-  // this tick before completing). Gated to the same rest conditions the original
-  // dispatches under (stav_klid, not possessed/finale/demo/dead/won).
-  if (
-    engine.phase === 'idle' &&
-    !room.won &&
-    !room.anyFishDead &&
-    !showmode &&
-    !replaymode &&
-    activeScript?.s.natvrdo !== 1 &&
-    !activeScript?.s.zavermode
-  ) {
-    dispatchHeldMove();
-  }
-  // KUFRIK automatic demonstration: with no swim/possession pending, the recorded
-  // help.cap stream is consumed one action per idle step (DalsiPrikaz in stav_klid,
-  // URoom.pas:24438). It keeps advancing while both fish are DEAD (the demo's
-  // deliberate death countdown), so it checks phase directly rather than idle().
-  if (engine.phase === 'idle' && !room.won && showmode) advanceShowmode();
-  // Map "Replay": play back the best solution one move per idle tick (daReplay).
-  if (engine.phase === 'idle' && !room.won && replaymode) advanceReplay();
-  return false;
-}
+//#region Logic tick wiring | anchors: initLogicTick | Hands `logicTick.ts` the four names it needs. The 80 ms step itself — script, engine, dialogue, death, screensaver — is in that module.
+initLogicTick({
+  get buildRoom() {
+    return buildRoom;
+  },
+  get casHry() {
+    return casHry;
+  },
+  get hooks() {
+    return hooks;
+  },
+  get updateLipSync() {
+    return updateLipSync;
+  },
+});
 
 //#region Frame pacing wiring | anchors: initFramePacing | Hands `framePacing.ts` its view of the game. The idle throttle, the wake rates and the perf HUD are in that module.
 // Eight names, because the state those rates read has owning modules now. Before
@@ -2720,7 +1271,7 @@ initFramePacing(
       return enhancedArtActive;
     },
     get heldState() {
-      return heldState;
+      return heldKeyState();
     },
     get inShowmode() {
       return inShowmode;
@@ -2745,17 +1296,8 @@ initFramePacing(
 );
 /** The render loop: steps the game at a fixed timestep, then draws (capped, see
  *  MAX_PAINT_FPS) once per RAF. */
-//#region Render loop wiring | anchors: initRenderLoop | Hands `renderLoop.ts` the four names it needs: one logic step, and the three screen painters that still live here. The rAF callback is in that module.
+//#region Render loop wiring | anchors: initRenderLoop | Hands `renderLoop.ts` the one name it still needs: a logic step. Everything it paints it imports. The rAF callback is in that module.
 initRenderLoop({
-  get drawCredits() {
-    return drawCredits;
-  },
-  get drawCutscene() {
-    return drawCutscene;
-  },
-  get drawLegImage() {
-    return drawLegImage;
-  },
   get step() {
     return step;
   },
@@ -2980,10 +1522,7 @@ window.addEventListener('keydown', (e) => {
 
 window.addEventListener('keyup', (e) => {
   wake();
-  // FormKeyUp (Uovl.pas:1006): 1→3 (guarantee one dispatch for a tap), otherwise →0.
-  if (e.code !== heldKey) return;
-  if (heldState === 1) heldState = 3;
-  else clearHeldKey();
+  releaseHeldKey(e.code);
 });
 
 // Losing focus (alt-tab / clicking another window) or hiding the tab means the OS
@@ -3316,172 +1855,22 @@ initDevBar({
   },
 });
 
-//#region Boot | anchors: await FontData.load, parseFfp, loadSoundPkg, loadRoom(7), initFeedback, requestAnimationFrame(loop) | The top-level-await boot sequence, in load order. What is critical vs. optional is documented inline.
-setFont(await FontData.load('/data/Intro'));
-setLoadingMsg('Loading fonts…');
-// Enhanced subtitle font (FreeSans Bold, the FFNG subtitle face). Optional: if it
-// fails to load, enhanced mode silently falls back to the baked bitmap subtitles.
-// Enhanced subtitle fonts — all bundled + OFL/GPL so they render identically on
-// every platform. Mulish/Manrope/Jost are variable (weight axis 100-900);
-// FFSubtitle is the original FreeSans Bold. If loading fails, enhanced mode
-// silently falls back to the baked bitmap subtitles.
-{
-  const faces: ReadonlyArray<[string, string, string]> = [
-    ['FFSubtitle', '/enhanced/subtitle.ttf', '700'],
-    ['Mulish', '/fonts/Mulish.ttf', '100 900'],
-    ['Manrope', '/fonts/Manrope.ttf', '100 900'],
-    ['Jost', '/fonts/Jost.ttf', '100 900'],
-  ];
-  let anyLoaded = false;
-  await Promise.all(
-    faces.map(async ([family, url, weight]) => {
-      try {
-        const face = new FontFace(family, `url(${url})`, { weight });
-        await face.load();
-        document.fonts.add(face);
-        anyLoaded = true;
-      } catch {
-        /* this face is unavailable; others / bitmap fallback still work */
-      }
-    }),
-  );
-  setSubFontReady(anyLoaded);
-}
-// Control-panel overlay graphic (TOvl / panel.ffp).
-setLoadingMsg('Loading graphics…');
-try {
-  const pf = await fetch('/data/Menu/panel.ffp').then((r) => r.arrayBuffer());
-  ui.panel = parseFfp(new Uint8Array(pf));
-} catch {
-  /* panel optional */
-}
-// World map assets (mapa-0/mapa-1/maska + node sprites n0..n4).
-try {
-  const files = ['mapa-0.BMP', 'mapa-1.BMP', 'maska.BMP', 'n0.BMP', 'n1.BMP', 'n2.BMP', 'n3.BMP', 'n4.BMP'];
-  const bmps = await Promise.all(
-    files.map((f) => fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b)))),
-  );
-  ui.worldMap = new WorldMap(bmps[0]!, bmps[1]!, bmps[2]!, bmps.slice(3));
-  // The AI-upscaled map (Phase B) is NOT loaded here: it is fetched lazily the first
-  // time the map is about to be shown in the `ai` tier (beginMapArt), so other tiers
-  // pay nothing for it.
-} catch {
-  /* map optional */
-}
-await loadParchment(); // the room-entry parchment; optional, never fatal (roomLaunch.ts)
-// World-map record info panel assets (krokoměr background, button icons, digit
-// glyphs) + the level name-plaque data for the current language (UMain.pas:341).
-try {
-  const [krokomer, ikonky, cisla] = await Promise.all(
-    ['krokomer.BMP', 'ikonky.BMP', 'cisla.BMP'].map((f) =>
-      fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b))),
-    ),
-  );
-  ui.infoPanelAssets = { krokomer: krokomer!, ikonky: ikonky!, cisla: cisla! };
-} catch {
-  /* info panel optional */
-}
-await ensureDeskyData();
-
-setLoadingMsg('Loading sound…');
-// The persistent global packages, in the order the original loads them: x00 effects,
-// x03 ambient chatter (the "ob-*" idle lines, StdKecej / vyber_hlasku) and x02 death
-// commentary (the "smrt-*" lines, StdSmrt). Each is optional — a missing one costs
-// its lines, never the game. Kept sequential, as before: they are large, and the boot
-// path is what the UI probes' 5 s budget is measured against.
-for (const id of ['x00', 'x03', 'x02']) {
-  await loadSoundPkg(id, `/data/Title/${id}.fft`, `/data/Sound/${id}.ffs`);
-}
-setLoadingMsg('Loading the world…');
-await loadRoom(7);
-// Critical assets: without the control panel or the world map the game is
-// unplayable, so a missing/broken deploy of these is a fatal error (rather than
-// the silent graceful-degradation the optional audio packages get).
-if (!ui.panel || !ui.worldMap) {
-  showFatal('Some core game files are missing. Please try again, or check the installation.');
-  throw new Error('missing critical assets: ' + (!ui.panel ? 'panel ' : '') + (!ui.worldMap ? 'worldMap' : ''));
-}
-// The two lines the 1998 release referenced but shipped without (public/restored/,
-// built by tools/build-restored-sounds.ts) — `pyr-m-nudi` and `jes-v-potvora2`. A
-// package of its own rather than a patched 025/063, so the committed 1998 data stays
-// byte-for-byte what ALTAR released.
-//
-// Fetched AFTER boot and off the critical path: each awaited package above is another
-// serialized round trip before the game can start, and loading this one inline was
-// measured pushing UI probes past their 5 s boot budget. The cost of that choice is
-// real but small — if a player reaches room 25 or 63 before it lands, that one line
-// keeps the 1998 silence, so the failure mode is the status quo ante, not a break.
-void loadSoundPkg('restored', '/restored/restored.fft', '/restored/restored.ffs', true).then(
-  (ok) => {
-    if (!ok) console.warn('[audio] restored package unavailable — PYRAMIDA/JESKYNE keep the 1998 silence');
-  },
-);
-
-// Boot: on first run, auto-play the intro (logo → intro) before the map, then
-// flip the persisted flag so later runs go straight to the map (the original's
-// START→NO first-run gate, UMain.pas:677-682). The intro is always replayable
-// from the map's top-left corner.
-if (settings.introSeen) {
-  ui.screen = 'map'; // the game opens on the world map
-  ui.mapRevealStart = performance.now(); // animate the map in from the start
-  // Start the `ai` tier's map art HERE rather than leaving it to the loop's first
-  // frame, so the hide below already sees the wait: on this path the map's loading
-  // state is boot's loading state, and the overlay simply never comes down between
-  // them. Left to the loop it would hide for a frame and re-show.
-  beginMapArt();
-  startMenuMusic(); // menu music (silent until the first user gesture unlocks audio)
-} else {
-  playFirstRunIntro();
-}
-setInfo();
-// Boot complete — hide the loading overlay, stop treating errors as fatal, and
-// (if applicable) surface the software-renderer note.
-setBooted(true);
-console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
-initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
-// The feedback form. Reads the live game state only when the player opens it — there is
-// no collection before that, and nothing is ever sent without a click (see feedback.ts).
-ui.feedback = initFeedback({
-  build: { version: __APP_VERSION__, hash: __BUILD_HASH__, date: __BUILD_DATE__ },
-  webgl2: () => webgl2Available(),
-  game: () => {
-    const inRoom = ui.screen === 'room' && curNum > 0;
-    const desc = inRoom ? roomByNumber(curNum) : undefined;
-    return {
-      screen: ui.screen,
-      roomNum: inRoom ? curNum : null,
-      roomName: desc?.jmeno ?? null,
-      roomTitle: desc?.en ?? null,
-      graphics,
-      renderer,
-      subtitles: settings.subtitles,
-      moves: lengthOfRecord(engine?.srecord ?? ''),
-      record: engine?.srecord ?? '',
-    };
+//#region Boot | anchors: initBoot, runBoot | Hands `boot.ts` the one name it needs, then runs the boot sequence. The sequence itself — fonts, graphics, the save store, the sound packages, room 7, the first frame — is in that module.
+initBoot({
+  get setInfo() {
+    return setInfo;
   },
 });
-// ...unless the map is still waiting for the art it will be presented in, in which case
-// boot is not over from the player's side and the overlay stays up (see syncLoadingUi).
-if (loadingEl && !mapArtHolding()) loadingEl.hidden = true;
-maybeShowWebglNote();
-startFrames();
-
-// Browsers gate audio behind a user gesture: on the first interaction, resume the
-// context and (re)start the menu music if we're on the map.
-const unlockAudio = (): void => {
-  audio.resume();
-  if (ui.screen === 'map') startMenuMusic();
-};
-window.addEventListener('pointerdown', unlockAudio, { once: true });
-window.addEventListener('keydown', unlockAudio, { once: true });
+await runBoot();
 
 // Debug hook for headless verification.
 // The debug/test interface (window.__ff). Its 215 entries live in debugHooks.ts;
 // what they need of the running game is handed over here, as getters, with setters
-// for the eleven values probes deliberately write. Assigned to window HERE, at the
+// for the seven values probes deliberately write. Assigned to window HERE, at the
 // end of boot, because tools/ui-lib.mjs waits on window.__ff as the signal that boot
 // has completed.
-//#region `window.__ff` host | anchors: debugHooks | The 114-member host the debug hooks read the game through: getters, plus eight setters for the values probes deliberately write. State that has an owning module is imported there directly instead. The hooks themselves are in `debugHooks.ts`.
+
+//#region `window.__ff` host | anchors: debugHooks | The 112-member host the debug hooks read the game through: 105 getters, plus 7 setters for the values probes deliberately write. State that has an owning module is imported there directly instead. The hooks themselves are in `debugHooks.ts`.
 (window as unknown as { __ff: unknown }).__ff = debugHooks({
   get O_OPTIONS() {
     return O_OPTIONS;
@@ -3616,7 +2005,7 @@ window.addEventListener('keydown', unlockAudio, { once: true });
     return graphics;
   },
   get heldState() {
-    return heldState;
+    return heldKeyState();
   },
   get helpScreens() {
     return helpScreens;

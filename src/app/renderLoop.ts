@@ -1,9 +1,13 @@
 /**
  * The rAF callback: which screen paints, how many logic steps run, when to sleep.
  *
- * One frame's worth of decisions and nothing else — it owns no state and draws nothing
- * itself. Every branch here delegates; what the file actually holds is the ORDER, and
- * most of the comments are about why one thing has to happen before another.
+ * One frame's worth of decisions. It owns no state, and every branch delegates its
+ * painting — except the one case with nothing to delegate to, where it clears the stage
+ * to black because a room change is in flight and the previous room's frame is stale.
+ * What the file actually holds is the ORDER, which is why most of it is comment: why
+ * the map launch has to be driven before anything reads `screen`, why the simulation
+ * pauses under an art hold, why the AI tier is render-on-dirty on canvas-2D but not on
+ * the GPU.
  */
 import { aiRoomRenderActive, beginMapArt, mapArtHolding, roomArtPending, setMapPresented } from './art.js';
 import { frameEffectsActive, tetrisModal, tickTetris } from './cheats.js';
@@ -14,6 +18,8 @@ import { draw, updateRoomSubOverlay } from './framePainter.js';
 import { count, cutscene, room, setAlpha, subs } from './gameState.js';
 import { glAiFailed, glFailed } from './glPlumbing.js';
 import { clearSubOverlay } from './introOverlay.js';
+import { drawCutscene } from './cutscene.js';
+import { drawCredits, drawLegImage } from './mapNav.js';
 import { syncLoadingUi } from './loadingUi.js';
 import { drawMap } from './mapDraw.js';
 import { drawHelp, drawPanel, tickPanelScroll } from './panel.js';
@@ -25,13 +31,10 @@ import { subFontReady } from './stageState.js';
 import { INFO_FAZE_MS, INFO_SETTLE_FAZE } from '../render/mapInfo.js';
 
 /**
- * The four names this module needs from `main.ts`: one logic step, and the three
- * screens whose painters still live next to the game they are a view of.
+ * The one name this module needs from `main.ts`: a logic step. Everything it paints, it
+ * imports.
  */
 export interface RenderLoopHost {
-  readonly drawCredits: () => void;
-  readonly drawCutscene: () => void;
-  readonly drawLegImage: () => void;
   /** One 80 ms logic step. Returns true if the room was rebuilt under it. */
   readonly step: () => boolean;
 }
@@ -105,7 +108,7 @@ export function loop(now: number): void {
   // WebGL-only bug; the CPU path has no overlay so it never showed this). The
   // room-draw condition below mirrors the `else draw()` branch, so enhanced's
   // "hold previous frame" (screen==='room' while art loads) is untouched. The
-  // cutscene is left out of the hide list because host.drawCutscene() manages the GL
+  // cutscene is left out of the hide list because drawCutscene() manages the GL
   // canvas itself (it may present a smooth-upscaled frame there).
   // Drive an armed room launch (daRealyRun) BEFORE anything downstream of `screen` reads
   // it — the GL hide, the mapPresented derivation and the draw dispatch below — so the
@@ -137,7 +140,7 @@ export function loop(now: number): void {
     clearSubOverlay(); // the <video> overlay covers the stage; nothing to draw
   } else if (ui.screen === 'legimage') {
     clearSubOverlay();
-    host.drawLegImage(); // the leg-completion story page (counts its own one-shot blit)
+    drawLegImage(); // the leg-completion story page (counts its own one-shot blit)
   } else if (ui.screen === 'map') {
     clearSubOverlay();
     // Lazy, and here rather than inside drawMap(): every route onto the map runs
@@ -152,7 +155,7 @@ export function loop(now: number): void {
       ui.mapInfoFaze = Math.min(Math.floor((now - ui.mapInfoOpenAt) / INFO_FAZE_MS), INFO_SETTLE_FAZE);
     }
     if (ui.mapOverlay === 'credits') {
-      host.drawCredits();
+      drawCredits();
       setPerfPaint(perfPaint + 1);
     } else if (!mapArtHolding()) drawMap(); // counts its own paint (it skips when cached)
     // ...and when it IS holding, nothing is painted: the map is presented once, in the
@@ -160,7 +163,7 @@ export function loop(now: number): void {
     // AI map art against 0.59 MB of faithful BMPs measured 28.0s of enhanced map on
     // screen before it swapped (Slow 4G, cold cache) — the same defect rooms had.
   } else if (cutscene) {
-    host.drawCutscene(); // manages the GL canvas + subtitle overlay itself
+    drawCutscene(); // manages the GL canvas + subtitle overlay itself
     setPerfPaint(perfPaint + 1);
   } else if (roomLoading) {
     // A newly-entered room's assets are still loading (loadRoom is async). Don't
