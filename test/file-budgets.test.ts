@@ -47,7 +47,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // drawMap()'s unlit/plaque/parchment frame, loop()'s dispatch of the launch, the three
   // input guards, the enterRoom/startRoom split, and the new module's wiring block
   // (~48 lines of the ~171).
-  ['src/app/main.ts', 3665],
+  ['src/app/main.ts', 3210],
+  // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
+  // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
+  // needs. It is over the 520 tripwire on arrival rather than by growth: it left
+  // `main.ts` whole because splitting the demo from the movies would have split the
+  // queue that drives both. Worth revisiting if the AI frame cache grows.
+  ['src/app/cutscene.ts', 560],
   // 1 625. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does.
   ['src/app/debugHooks.ts', 1700],
