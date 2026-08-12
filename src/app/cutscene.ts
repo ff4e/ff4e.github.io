@@ -79,7 +79,7 @@ export async function startCutscene(): Promise<void> {
     setCutsceneAssets({ bmp: new Uint8Array(bmp), pck: new Uint8Array(pck), script: scr });
     // 5.3 MB of story assets (demo.pck alone is 4.9 MB), fetched once per session: the
     // first launch is easily long enough to leave the room in. Without this the demo's
-    // looping 'kufrik' music started AFTER host.showMap()'s KillSnd (and the cutscene
+    // looping 'kufrik' music started AFTER showMap()'s KillSnd (and the cutscene
     // installed itself over the world map), because nothing in DoneKufrDemo ever stops
     // that track — it only restores music_volume (URoom.pas:2914).
     if (stale()) return;

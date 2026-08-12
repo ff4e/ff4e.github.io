@@ -5,8 +5,9 @@
  * Pulling a region out of `main.ts` leaves its imports behind: the names are gone but
  * the `import` lines are not, and `npm run typecheck` says nothing because
  * `noUnusedLocals` is off (turning it on fails the repo on deliberately unused
- * parameters). After nine extractions `main.ts` was carrying 192 dead imports — 493
- * lines, about 1 600 tokens of noise at the top of the file that every reader pays for.
+ * parameters). After nine extractions `main.ts` was carrying 192 dead imports: 504
+ * lines deleted against 34 rewritten, a net 470, and about 1 600 tokens of noise at the
+ * top of the file that every reader pays for.
  *
  * This asks the compiler which ones they are (TS6133 / TS6192) and removes exactly
  * those, then repeats: dropping one import can orphan a type only it referenced. It

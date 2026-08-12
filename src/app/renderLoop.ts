@@ -109,7 +109,7 @@ export function loop(now: number): void {
   // WebGL-only bug; the CPU path has no overlay so it never showed this). The
   // room-draw condition below mirrors the `else draw()` branch, so enhanced's
   // "hold previous frame" (screen==='room' while art loads) is untouched. The
-  // cutscene is left out of the hide list because host.drawCutscene() manages the GL
+  // cutscene is left out of the hide list because drawCutscene() manages the GL
   // canvas itself (it may present a smooth-upscaled frame there).
   // Drive an armed room launch (daRealyRun) BEFORE anything downstream of `screen` reads
   // it — the GL hide, the mapPresented derivation and the draw dispatch below — so the
