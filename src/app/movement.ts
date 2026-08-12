@@ -38,6 +38,7 @@ export function initMovement(h: MovementHost): void {
   host = h;
 }
 
+/** Turn-first-then-move; horizontal turns animate (stav_otocka), moves slide. */
 export function tryStep(which: 'little' | 'big', dir: number): 'moving' | 'turning' | 'blocked' | 'busy' {
   wake(); // resume 60fps if the idle-loop throttle had us sleeping (also covers __ff.press)
   return engine ? engine.press(which, dir) : 'blocked';

@@ -1,9 +1,13 @@
 /**
  * The rAF callback: which screen paints, how many logic steps run, when to sleep.
  *
- * One frame's worth of decisions and nothing else — it owns no state and draws nothing
- * itself. Every branch here delegates; what the file actually holds is the ORDER, and
- * most of the comments are about why one thing has to happen before another.
+ * One frame's worth of decisions. It owns no state, and every branch delegates its
+ * painting — except the one case with nothing to delegate to, where it clears the stage
+ * to black because a room change is in flight and the previous room's frame is stale.
+ * What the file actually holds is the ORDER, which is why most of it is comment: why
+ * the map launch has to be driven before anything reads `screen`, why the simulation
+ * pauses under an art hold, why the AI tier is render-on-dirty on canvas-2D but not on
+ * the GPU.
  */
 import { aiRoomRenderActive, beginMapArt, mapArtHolding, roomArtPending, setMapPresented } from './art.js';
 import { frameEffectsActive, tetrisModal, tickTetris } from './cheats.js';

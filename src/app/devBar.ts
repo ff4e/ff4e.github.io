@@ -17,14 +17,13 @@
  * device gate. See AGENTS.md, "the module-evaluation trap".
  */
 import { ROOMS } from '../data/roomTable.js';
-import { FIT_MODES, isFitMode } from './layout.js';
+import { isFitMode } from './layout.js';
 import { devWinRoom } from './cheats.js';
 import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, winRoomBtn } from './dom.js';
 import { relayout } from './loadingUi.js';
 import { settings } from './playerSettings.js';
 import { saveSettings } from '../core/settings.js';
 import {
-  GRAPHICS_LEVELS,
   graphics,
   devEnabled,
   renderOnDirty,

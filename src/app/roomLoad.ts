@@ -298,4 +298,3 @@ export function talk(which: 'little' | 'big'): void {
   audio.play(entry.name, 1, MLUVI_PRIOR[which], 'voice'); // voice at the fish's mluvi priority (drives lip-sync)
 }
 
-/** Turn-first-then-move; horizontal turns animate (stav_otocka), moves slide. */
