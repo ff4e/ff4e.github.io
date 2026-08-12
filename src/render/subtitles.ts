@@ -52,6 +52,33 @@ const SUB_BASELINE_OFF = -6 * SUB_SCALE; // nudges the vector baseline to sit li
  */
 export const SUB_SUBSTEPS = 5;
 
+/**
+ * The vector overlay's geometry, for renderers other than `drawVector`.
+ *
+ * Exported so a DOM or GPU subtitle renderer places its text from the SAME numbers this
+ * one does, rather than a second copy of them that can drift. Everything here is in
+ * native game pixels (the `screenW` x `screenH` space `drawVector` draws in).
+ */
+export const VECTOR_GEOM = Object.freeze({
+  /** Row pitch (ROWTITLE), before SUB_SCALE. */
+  row: ROWTITLE,
+  /** Where the wave starts, below the line's resting row (UNDERTITLE), before SUB_SCALE. */
+  under: UNDERTITLE,
+  /** The vector path's uniform enlargement over the bitmap geometry. */
+  scale: SUB_SCALE,
+  /** Font size in native px. */
+  fontPx: SUB_FONT_PX,
+  /** Nudge that puts the vector baseline where the bitmap line sat. */
+  baselineOff: SUB_BASELINE_OFF,
+  /** Wave steps per logic tick: `p` advances by this much per tick (see drawVector). */
+  wavePerTick: 5,
+  /** Wave length in `p` units. */
+  waveLen: 50,
+  /** Side margin a line is fitted inside (BORDERTITLE), before SUB_SCALE. */
+  border: BORDERTITLE,
+});
+
+
 interface TitleLine {
   obsah: string;
   barva: string;
