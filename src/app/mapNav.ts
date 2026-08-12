@@ -2,9 +2,10 @@
  * Getting on and off the world map, and the pages that sit between rooms: the leg
  * completion story image, the first-run intro, the options overlay and the credits roll.
  *
- * Navigation only — deciding to go somewhere. Painting the map itself is `mapDraw.ts`,
- * and what happens once a room is entered is `roomLoad.ts`. The split is why a change to
- * how the map LOOKS never reads this file.
+ * It decides where the player goes, and it draws the pages that are not the map and not
+ * a room — the story image and the credits roll, which have nowhere else to live. What
+ * it does NOT draw is the map itself (`mapDraw.ts`) or a room (`framePainter.ts`), which
+ * is why a change to how the MAP looks never reads this file.
  */
 import { aiCredits, ensureAiCredits } from './art.js';
 import { audio } from './audioEngine.js';
@@ -418,16 +419,3 @@ export function drawCredits(): void {
   const rgba = ui.credits.render(ui.creditMode);
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), ui.credits.w, ui.credits.h), 0, 0);
 }
-
-/**
- * Enter a room (Spust, UMain.pas:248).
- *
- * TWO routes, because the original has two. From the WORLD MAP a launch is `daRun`:
- * the map stays on screen and repaints with the parchment over it, and the load runs
- * behind that (see beginMapLaunch — this is the faithful one, and the one a player
- * ever sees). Everywhere else — the dev room picker, the story-page chain, SCORE,
- * ZAVER, an Escape restart — there is no map to keep, so the stage goes to the room
- * immediately and the delayed loading overlay explains the wait, exactly as before.
- *
- * `replay` is the best-solution move record to play back animated (map "Replay").
- */

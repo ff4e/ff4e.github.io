@@ -1,9 +1,11 @@
 /**
- * The boot sequence, in load order: fonts, the panel and map graphics, the save store,
- * the global sound packages, room 7, then the first frame.
+ * The boot sequence, in load order: fonts, the panel and map graphics, the global sound
+ * packages, room 7, then the first frame. (The save store is opened earlier, in
+ * `main.ts`, because `migrateSaves()` has to precede every `ff.*` read.)
  *
- * What is critical and what is optional is documented inline — most of it is optional,
- * and the pattern is always the same: a failed fetch costs its feature, never the game.
+ * What is critical and what is optional is documented inline — nearly all of it is
+ * optional, and the pattern is the same each time: a failed fetch costs its feature,
+ * never the game.
  *
  * This is a function rather than module-scope top-level await on purpose. An imported
  * module is evaluated before any statement of its importer, so at module scope this

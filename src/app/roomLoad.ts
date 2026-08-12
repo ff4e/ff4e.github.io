@@ -297,4 +297,3 @@ export function talk(which: 'little' | 'big'): void {
   if (subsOn()) subs.newSubtitle(t.text, t.color, count);
   audio.play(entry.name, 1, MLUVI_PRIOR[which], 'voice'); // voice at the fish's mluvi priority (drives lip-sync)
 }
-

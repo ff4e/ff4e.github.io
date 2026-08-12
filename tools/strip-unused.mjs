@@ -9,18 +9,34 @@
  * lines deleted against 34 rewritten, a net 470, and about 1 600 tokens of noise at the
  * top of the file that every reader pays for.
  *
- * This asks the compiler which ones they are (TS6133 / TS6192) and removes exactly
- * those, then repeats: dropping one import can orphan a type only it referenced. It
- * never touches a side-effect import (`import './x.js'`) — those have no clause to be
- * unused, so they are invisible to both diagnostics.
+ * It asks the compiler which ones they are (TS6133 / TS6192) and deletes exactly those
+ * spans, then repeats — dropping one import can orphan a type only it referenced.
+ *
+ * Two things it deliberately does NOT do, both of which it got wrong on the first pass
+ * and both of which are silent:
+ *   - It never deletes a statement's LEADING TRIVIA. `getFullStart()` includes the
+ *     comments above a node, so deleting the first import by its full start took the
+ *     file docblock and two `//#region` markers with it, and nothing failed.
+ *   - It never reformats a surviving import. Only the dead specifiers are cut, so a
+ *     multi-line import stays multi-line and the diff is exactly the removal.
  *
  * Usage: node tools/strip-unused.mjs [path]   (default src/app/main.ts)
- * Rewrites the file in place; run `npm run typecheck` afterwards.
+ * Rewrites in place. Run `npm run typecheck` afterwards, and read the diff.
  */
 import ts from 'typescript';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 
 const path = process.argv[2] ?? 'src/app/main.ts';
+
+/** The statement's own span, plus the newline it sits on — but not the comments above it. */
+function statementSpan(node, sf, text) {
+  const start = node.getStart(sf); // getStart, NOT getFullStart: leading comments stay
+  let end = node.getEnd();
+  while (end < text.length && (text[end] === ' ' || text[end] === '\t')) end++;
+  if (text[end] === '\r') end++;
+  if (text[end] === '\n') end++;
+  return { start, end, text: '' };
+}
 
 for (let pass = 0; pass < 12; pass++) {
   const cfg = ts.getParsedCommandLineOfConfigFile('tsconfig.json', {}, {
@@ -38,18 +54,18 @@ for (let pass = 0; pass < 12; pass++) {
     break;
   }
 
-  // 6192 = every name in the declaration is unused (drop the statement).
-  // 6133 = one name is unused (drop that specifier). Keyed by position, because the
-  // same name can legitimately appear in more than one import.
+  const text = sf.getFullText();
+  // 6192 = every name in the declaration is unused, so the whole statement goes.
+  // 6133 = one name is unused. Keyed by position, because the same name can appear in
+  // more than one import.
   const wholeStatements = new Set();
-  const deadSpecifiers = new Set();
+  const deadPositions = new Set();
   for (const d of diags) {
     if (d.code === 6192) {
       const stmt = sf.statements.find((s) => s.getStart(sf) <= d.start && d.start < s.getEnd());
       if (stmt) wholeStatements.add(stmt);
     } else {
-      const m = /'([^']+)' is declared/.exec(ts.flattenDiagnosticMessageText(d.messageText, ' '));
-      if (m) deadSpecifiers.add(`${m[1]}@${d.start}`);
+      deadPositions.add(d.start);
     }
   }
 
@@ -57,36 +73,76 @@ for (let pass = 0; pass < 12; pass++) {
   for (const st of sf.statements) {
     if (!ts.isImportDeclaration(st)) continue;
     if (wholeStatements.has(st)) {
-      edits.push({ start: st.getFullStart(), end: st.getEnd(), text: '' });
+      edits.push(statementSpan(st, sf, text));
       continue;
     }
-    const bindings = st.importClause?.namedBindings;
+    const clause = st.importClause;
+    if (!clause) continue; // side-effect import: no bindings, nothing to be unused
+    const bindings = clause.namedBindings;
+
+    // A default or namespace import is the whole clause; if it is dead and there is
+    // nothing else in the declaration, the statement goes.
+    const defaultDead = clause.name && deadPositions.has(clause.name.getStart(sf));
+    const namedDead =
+      bindings && ts.isNamedImports(bindings)
+        ? bindings.elements.filter((el) => deadPositions.has(el.name.getStart(sf)))
+        : [];
+    const namespaceDead =
+      bindings && ts.isNamespaceImport(bindings) && deadPositions.has(bindings.name.getStart(sf));
+
+    const everythingDead =
+      (!clause.name || defaultDead) &&
+      (!bindings ||
+        namespaceDead ||
+        (ts.isNamedImports(bindings) && namedDead.length === bindings.elements.length));
+    if (everythingDead && (defaultDead || namespaceDead || namedDead.length > 0)) {
+      edits.push(statementSpan(st, sf, text));
+      continue;
+    }
+    // Partial. Delete each RUN of adjacent dead specifiers as one span, so the edits
+    // cannot overlap — cutting them one at a time corrupted the list whenever two dead
+    // names sat next to each other, and the result still parsed badly enough that only
+    // a syntax error gave it away.
     if (!bindings || !ts.isNamedImports(bindings)) continue;
-    const keep = bindings.elements.filter(
-      (el) => !deadSpecifiers.has(`${el.name.text}@${el.name.getStart(sf)}`),
-    );
-    if (keep.length === bindings.elements.length) continue;
-    if (keep.length === 0) {
-      edits.push({ start: st.getFullStart(), end: st.getEnd(), text: '' });
-      continue;
+    const dead = new Set(namedDead);
+    const els = bindings.elements;
+    for (let i = 0; i < els.length; ) {
+      if (!dead.has(els[i])) { i++; continue; }
+      let j = i;
+      while (j + 1 < els.length && dead.has(els[j + 1])) j++;
+      const after = els[j + 1];
+      if (after) {
+        // ...up to the next survivor, which takes the separators with it.
+        edits.push({ start: els[i].getStart(sf), end: after.getStart(sf), text: '' });
+      } else {
+        // Trailing run: cut back to the previous survivor, and swallow a dangling comma.
+        const before = els[i - 1];
+        const start = before ? before.getEnd() : els[i].getStart(sf);
+        let end = els[j].getEnd();
+        let k = end;
+        while (k < text.length && (text[k] === ' ' || text[k] === '\t')) k++;
+        if (text[k] === ',') end = k + 1;
+        edits.push({ start, end, text: '' });
+      }
+      i = j + 1;
     }
-    edits.push({
-      start: bindings.getStart(sf),
-      end: bindings.getEnd(),
-      text: `{ ${keep.map((k) => k.getText(sf)).join(', ')} }`,
-    });
   }
   if (edits.length === 0) {
-    // Anything left is not on a named import (an unused default or namespace import,
-    // say) and needs a human. Bail rather than spin.
-    console.log(`[strip-unused] ${path}: ${diags.length} left that are not named imports`);
+    console.log(`[strip-unused] ${path}: ${diags.length} diagnostic(s) left that it cannot place`);
     break;
   }
 
-  let out = sf.getFullText();
+  let out = text;
   for (const e of edits.sort((a, b) => b.start - a.start)) {
     out = out.slice(0, e.start) + e.text + out.slice(e.end);
   }
   writeFileSync(path, out);
-  console.log(`[strip-unused] ${path}: pass ${pass}, ${edits.length} import(s) rewritten`);
+  console.log(`[strip-unused] ${path}: pass ${pass}, ${edits.length} edit(s)`);
 }
+
+// Belt and braces: the leading trivia bug was silent, so say what survived.
+const after = readFileSync(path, 'utf8');
+console.log(
+  `[strip-unused] ${path}: ${after.split('\n').length} lines, ` +
+    `${(after.match(/^\/\/#region/gm) ?? []).length} region marker(s)`,
+);

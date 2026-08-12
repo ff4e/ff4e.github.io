@@ -1,9 +1,10 @@
 /**
  * The KUFRIK demo, the intro/ending cutscenes and the recorded-solution replay.
  *
- * All three are the same machine seen from different angles: a queue of capture actions
- * (`CapAction`) driven one per logic tick, painting a movie frame with its own subtitle
- * overlay. Showmode is that machine fed by the demo record; replay by a saved solution.
+ * Three different drivers over one presentation. What they share is the frame: a movie
+ * painted per logic tick with its own subtitle overlay, and one skip path. What differs
+ * is what feeds it — KUFRIK runs `KufrDemo`, showmode steps a `CapAction` queue parsed
+ * from help.cap, and replay walks a recorded move list.
  *
  * The AI-tier upscaled frames (`aiKufr`) are cached here too, because nothing else looks
  * at them and the cache has to be dropped when the cutscene ends.

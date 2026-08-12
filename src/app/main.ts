@@ -1,8 +1,38 @@
+//#region File docblock | The `URoom.pas` tick state machine this file reproduces, and the keyboard scheme.
+/**
+ * Browser host: loads a room's original FFR, renders it with the software-
+ * paletted compositor, drives the two fish, and reproduces the engine's animated
+ * tick (URoom.pas gstav/gfaze state machine):
+ *   - a horizontal press first TURNS the fish (stav_otocka, tl_otocka frames),
+ *     a second press swims it;
+ *   - a move slides while cycling the swim body frames (stav_vlevo, tl_plav /
+ *     tl_nahoru / tl_dolu), then objects settle by falling one cell per step
+ *     (stav_ma_padat -> padani -> stav_padani);
+ *   - a crushed fish is drawn as an eroding skeleton (KresliK / rozpad).
+ * Idle fish gently cycle tl_zaklad and blink (hl_mrk).
+ *
+ * Keyboard: small fish I/K/J/L, big fish W/S/A/D. Mouse: click a fish to select,
+ * click water to BFS-swim there.
+ */
+//#region Imports | The only part safe to skim.
 
 import { Room, ITEM_WATER } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
 import { Dir } from '../core/dir.js';
-import { FSIZE, type FishFrame, TL_ZAKLAD, TL_PLAV, TL_OTOCKA, TL_NAHORU, TL_DOLU, TL_MLUVI_NA, darkBodyFrame, HL_TLACI, HL_MRK, HL_MLUVI } from '../render/renderRoom.js';
+import {
+  FSIZE,
+  type FishFrame,
+  TL_ZAKLAD,
+  TL_PLAV,
+  TL_OTOCKA,
+  TL_NAHORU,
+  TL_DOLU,
+  TL_MLUVI_NA,
+  darkBodyFrame,
+  HL_TLACI,
+  HL_MRK,
+  HL_MLUVI,
+} from '../render/renderRoom.js';
 import { SubtitleSystem } from '../render/subtitles.js';
 import { type FishSprites } from '../render/enhancedArtSource.js';
 import { MAP_W, MAP_H } from '../render/worldMap.js';
@@ -26,15 +56,74 @@ import { audio, initAudio } from './audioEngine.js';
 import { atRest, fishBusy, idle } from './roomGates.js';
 import { initRoomLoad, loadRoom, roomVoicesSettled, talk } from './roomLoad.js';
 import { initRenderLoop, loop } from './renderLoop.js';
-import { beginHeldMove, clearHeldKey, heldKeyState, initMovement, releaseHeldKey, restartRoom, restore, tryStep, wallShove } from './movement.js';
-import { aiKufr, aiKufrFrames, drawCutscene, endShowmode, inReplay, inShowmode, initCutscene, skipCutscene, startCutscene, startShowmode } from './cutscene.js';
-import { closeMapOverlay, dismissLegImage, dispatchMapCorner, drawCredits, drawLegImage, initMapNav, openCredits, openMapOptions, replayIntro, returnFromRoom, showLegImage, showMap } from './mapNav.js';
+import {
+  beginHeldMove,
+  clearHeldKey,
+  heldKeyState,
+  initMovement,
+  releaseHeldKey,
+  restartRoom,
+  restore,
+  tryStep,
+  wallShove,
+} from './movement.js';
+import {
+  aiKufr,
+  aiKufrFrames,
+  drawCutscene,
+  endShowmode,
+  inReplay,
+  inShowmode,
+  initCutscene,
+  skipCutscene,
+  startCutscene,
+  startShowmode,
+} from './cutscene.js';
+import {
+  closeMapOverlay,
+  dismissLegImage,
+  dispatchMapCorner,
+  drawCredits,
+  drawLegImage,
+  initMapNav,
+  openCredits,
+  openMapOptions,
+  replayIntro,
+  returnFromRoom,
+  showLegImage,
+  showMap,
+} from './mapNav.js';
 import { initBoot, runBoot } from './boot.js';
 import { hracNespi, initLogicTick, step } from './logicTick.js';
 import { openSaveStore } from './persist.js';
 import { initFramePainter } from './framePainter.js';
-import { aiSubScale, initIntro, intro, introMovie, logoMovie, setAiSubScale, syncSubOverlay } from './introOverlay.js';
-import { SUB_FONT_CANDIDATES, initStageState, setSubFontFamily, setSubFontIdx, setSubFontWeight, setSubOverlayGate, setSubOverlayPainted, setSubOverlaySig, subFontFamily, subFontIdx, subFontReady, subFontWeight, subOverlayGate, subOverlayPainted, subOverlayPaints, subOverlaySig } from './stageState.js';
+import {
+  aiSubScale,
+  initIntro,
+  intro,
+  introMovie,
+  logoMovie,
+  setAiSubScale,
+  syncSubOverlay,
+} from './introOverlay.js';
+import {
+  SUB_FONT_CANDIDATES,
+  initStageState,
+  setSubFontFamily,
+  setSubFontIdx,
+  setSubFontWeight,
+  setSubOverlayGate,
+  setSubOverlayPainted,
+  setSubOverlaySig,
+  subFontFamily,
+  subFontIdx,
+  subFontReady,
+  subFontWeight,
+  subOverlayGate,
+  subOverlayPainted,
+  subOverlayPaints,
+  subOverlaySig,
+} from './stageState.js';
 import { initDevBar } from './devBar.js';
 import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
@@ -63,15 +152,120 @@ import {
   setRenderOnDirty,
   setRenderer,
 } from './renderSettings.js';
-import { DEFAULT_LINE_TICKS, EFFECT_VOL, LOGIC_MS, LOGIC_SEC, initStageGeometry, roomGeometry } from './stageGeometry.js';
-import { aiWaterAnimating, forceRoomRedraw, initFramePacing, lastRoomBackend, lastRoomSig, loopThrottleOk, loopTicks, roomLoadSeq, roomLoading, roomPaints, setForceRoomRedraw, setSmoothLog, setWaterAnimMs, smoothLog, waterAnimMs } from './framePacing.js';
-import { activeScript, blink, count, cutscene, cutsceneSubs, darkFlicker, engine, ffr, fftEntries, font, linesSpoken, loadmode, pokus, poslMluv, prevKostra, room, setActiveScript, setChatter, setCount, setDeathState, setEngine, setLastLine, setLinesSpoken, setLoadmode, setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, showmode, subs, talkIdx } from './gameState.js';
+import {
+  DEFAULT_LINE_TICKS,
+  EFFECT_VOL,
+  LOGIC_MS,
+  LOGIC_SEC,
+  initStageGeometry,
+  roomGeometry,
+} from './stageGeometry.js';
+import {
+  aiWaterAnimating,
+  forceRoomRedraw,
+  initFramePacing,
+  lastRoomBackend,
+  lastRoomSig,
+  loopThrottleOk,
+  loopTicks,
+  roomLoadSeq,
+  roomLoading,
+  roomPaints,
+  setForceRoomRedraw,
+  setSmoothLog,
+  setWaterAnimMs,
+  smoothLog,
+  waterAnimMs,
+} from './framePacing.js';
+import {
+  activeScript,
+  blink,
+  count,
+  cutscene,
+  cutsceneSubs,
+  darkFlicker,
+  engine,
+  ffr,
+  fftEntries,
+  font,
+  linesSpoken,
+  loadmode,
+  pokus,
+  poslMluv,
+  prevKostra,
+  room,
+  setActiveScript,
+  setChatter,
+  setCount,
+  setDeathState,
+  setEngine,
+  setLastLine,
+  setLinesSpoken,
+  setLoadmode,
+  setReplaymode,
+  setRoom,
+  setRoomDepth,
+  setScreenShoveX,
+  setSubs,
+  showmode,
+  subs,
+  talkIdx,
+} from './gameState.js';
 import { O_OPTIONS, helpScreens, ui } from './screenState.js';
 import { debugHooks } from './debugHooks.js';
-import { classicArtFor, enableWebgl, enhancedArtFor, glAiCompositor, glChannelDiff, glCompositor, glFailed, glParityCompare, initGlPlumbing } from './glPlumbing.js';
-import { aiCredits, aiPending, aiRoom, aiRoomNum, aiRoomRenderActive, aiWorldMap, curNum, decodePngResponse, enhancedArt, enhancedObjects, enhancedPending, initArt, isPngResponse, mapArtHolding, mapArtPending, mapPresented, roomArtPending } from './art.js';
-import { applyMapCheat, applyRoomCheat, applySpriteCheats, closeTetris, devWinRoom, initCheats, mapCheats, oldWater, resetRoomScopedCheats, roomCheats, silentFilm, tetris, tetrisModal, ultraviolence } from './cheats.js';
-import { beginMapLaunch, canLaunchFromMap, initRoomLaunch, mapLaunching, parchmentReady } from './roomLaunch.js';
+import {
+  classicArtFor,
+  enableWebgl,
+  enhancedArtFor,
+  glAiCompositor,
+  glChannelDiff,
+  glCompositor,
+  glFailed,
+  glParityCompare,
+  initGlPlumbing,
+} from './glPlumbing.js';
+import {
+  aiCredits,
+  aiPending,
+  aiRoom,
+  aiRoomNum,
+  aiRoomRenderActive,
+  aiWorldMap,
+  curNum,
+  decodePngResponse,
+  enhancedArt,
+  enhancedObjects,
+  enhancedPending,
+  initArt,
+  isPngResponse,
+  mapArtHolding,
+  mapArtPending,
+  mapPresented,
+  roomArtPending,
+} from './art.js';
+import {
+  applyMapCheat,
+  applyRoomCheat,
+  applySpriteCheats,
+  closeTetris,
+  devWinRoom,
+  initCheats,
+  mapCheats,
+  oldWater,
+  resetRoomScopedCheats,
+  roomCheats,
+  silentFilm,
+  tetris,
+  tetrisModal,
+  ultraviolence,
+} from './cheats.js';
+import {
+  beginMapLaunch,
+  canLaunchFromMap,
+  initRoomLaunch,
+  mapLaunching,
+  parchmentReady,
+} from './roomLaunch.js';
 //#region Device gate | anchors: isUnsupportedDevice, showUnsupportedNotice | Phones are refused here, before any art is fetched — and before every other side effect in the file. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`.
 
 // Phones are refused here, before a single byte of game ART is fetched. (The engine
@@ -1672,11 +1866,11 @@ await runBoot();
 // Debug hook for headless verification.
 // The debug/test interface (window.__ff). Its 215 entries live in debugHooks.ts;
 // what they need of the running game is handed over here, as getters, with setters
-// for the eleven values probes deliberately write. Assigned to window HERE, at the
+// for the seven values probes deliberately write. Assigned to window HERE, at the
 // end of boot, because tools/ui-lib.mjs waits on window.__ff as the signal that boot
 // has completed.
 
-//#region `window.__ff` host | anchors: debugHooks | The 114-member host the debug hooks read the game through: getters, plus eight setters for the values probes deliberately write. State that has an owning module is imported there directly instead. The hooks themselves are in `debugHooks.ts`.
+//#region `window.__ff` host | anchors: debugHooks | The 112-member host the debug hooks read the game through: 105 getters, plus 7 setters for the values probes deliberately write. State that has an owning module is imported there directly instead. The hooks themselves are in `debugHooks.ts`.
 (window as unknown as { __ff: unknown }).__ff = debugHooks({
   get O_OPTIONS() {
     return O_OPTIONS;
