@@ -47,7 +47,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // drawMap()'s unlit/plaque/parchment frame, loop()'s dispatch of the launch, the three
   // input guards, the enterRoom/startRoom split, and the new module's wiring block
   // (~48 lines of the ~171).
-  ['src/app/main.ts', 3210],
+  ['src/app/main.ts', 2740],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

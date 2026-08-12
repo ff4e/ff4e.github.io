@@ -1,318 +1,50 @@
-//#region File docblock | The `URoom.pas` tick state machine this file reproduces, and the keyboard scheme.
-/**
- * Browser host: loads a room's original FFR, renders it with the software-
- * paletted compositor, drives the two fish, and reproduces the engine's animated
- * tick (URoom.pas gstav/gfaze state machine):
- *   - a horizontal press first TURNS the fish (stav_otocka, tl_otocka frames),
- *     a second press swims it;
- *   - a move slides while cycling the swim body frames (stav_vlevo, tl_plav /
- *     tl_nahoru / tl_dolu), then objects settle by falling one cell per step
- *     (stav_ma_padat -> padani -> stav_padani);
- *   - a crushed fish is drawn as an eroding skeleton (KresliK / rozpad).
- * Idle fish gently cycle tl_zaklad and blink (hl_mrk).
- *
- * Keyboard: small fish I/K/J/L, big fish W/S/A/D. Mouse: click a fish to select,
- * click water to BFS-swim there.
- */
-//#region Imports | The only part safe to skim.
-import { parseFfr, type FfrRoom, type FfrBitmap } from '../data/ffr.js';
-import { applyWinDesktopPalette } from '../data/winPalette.js';
-import { parseFft, type FftEntry } from '../data/fft.js';
-import { Room, ITEM_WATER, ITEM_WALL } from '../core/room.js';
+
+import { Room, ITEM_WATER } from '../core/room.js';
 import { HookSystem } from '../core/hooks.js';
-import {
-  CheatEntry,
-  pretoc,
-  morphShrink,
-  morphStretch,
-  pretocRgba,
-  morphShrinkRgba,
-  morphStretchRgba,
-  type Cheat,
-} from '../core/cheats.js';
-import {
-  TetrisGame,
-  parseShapes,
-  type HiscoreStore,
-  type TetrisShapes,
-} from '../core/tetris.js';
-import { renderTetris, tetrisRgba, type TetrisArt } from '../render/tetrisRender.js';
-import {
-  zpracujInterlaced,
-  interlacedSounds,
-  sum,
-  zcernobilit,
-  INTERLACED_OFF,
-  INTERLACED_STOP,
-  INTERLACED_START,
-} from '../render/filmEffects.js';
 import { Dir } from '../core/dir.js';
-import {
-  FSIZE,
-  renderRoomRgba,
-  renderRoomBackgroundRgba,
-  renderRoomInto,
-  roomScreenSize,
-  type RenderOptions,
-  type FishFrame,
-  TL_ZAKLAD,
-  TL_PLAV,
-  TL_OTOCKA,
-  TL_NAHORU,
-  TL_DOLU,
-  TL_MLUVI_NA,
-  darkBodyFrame,
-  HL_TLACI,
-  HL_MRK,
-  HL_MLUVI,
-} from '../render/renderRoom.js';
-import type { RgbaScreen } from '../render/rgbaScreen.js';
-import { ClassicArtSource } from '../render/classicArtSource.js';
-import type { ArtSource } from '../render/artSource.js';
-import { GlScreen, webgl2Available } from '../render/glScreen.js';
-import { GlAiScreen } from '../render/glRoomAi.js';
+import { FSIZE, type FishFrame, TL_ZAKLAD, TL_PLAV, TL_OTOCKA, TL_NAHORU, TL_DOLU, TL_MLUVI_NA, darkBodyFrame, HL_TLACI, HL_MRK, HL_MLUVI } from '../render/renderRoom.js';
+import { webgl2Available } from '../render/glScreen.js';
 import { FontData } from '../render/font.js';
-import { SubtitleSystem, SUB_SUBSTEPS } from '../render/subtitles.js';
-import { HelpScreens } from '../render/help.js';
-import { IndexedScreen } from '../render/framebuffer.js';
-import {
-  EnhancedArtSource,
-  classicOnlyBackground,
-  type EnhancedArt,
-  type EnhancedObject,
-  type EnhancedSprite,
-  type FishSprites,
-} from '../render/enhancedArtSource.js';
+import { SubtitleSystem } from '../render/subtitles.js';
+import { type FishSprites } from '../render/enhancedArtSource.js';
 import { parseBmp, bmpToRgba, type Bmp } from '../data/bmp.js';
 import { WorldMap, MAP_W, MAP_H, MapAction } from '../render/worldMap.js';
-import { loadAiWorldMap, AiWorldMap, AI_MAP_W, AI_MAP_H, AI_MAP_SCALE } from '../render/worldMapAi.js';
-import { loadAiRoom, aiRoomGateAllows, aiWaterVisible, AiRoom, AI_ROOM_SCALE } from '../render/roomAi.js';
-import type { AiRoomFrame } from '../render/roomAi.js';
-import { Canvas2dAiTarget, RIPPLE, activeRipples, faithfulWobbleShifts, nextRippleBirth, smoothWobbleShift, wobblePhase } from '../render/aiTarget.js';
-import type { AiWobble } from '../render/aiTarget.js';
-import { withLoadSlot } from '../render/loadSlot.js';
-import {
-  hitInfoButton,
-  drawInfoPanel,
-  drawInfoDigits,
-  drawInfoPanelArtAi,
-  INFO_SETTLE_FAZE,
-  INFO_FAZE_MS,
-  type InfoButton,
-  type InfoPanelAssets,
-} from '../render/mapInfo.js';
-import { parseDesky, blitDeska, DESKA_X_OFFSET, DESKA_Y_OFFSET, type DeskyData } from '../data/desky.js';
-import { IntroPlayer } from './intro.js';
-import {
-  framesIdle,
-  initFrameClock,
-  scheduleNextFrame,
-  startFrames,
-  wake,
-} from './frameClock.js';
+import { hitInfoButton } from '../render/mapInfo.js';
+import { framesIdle, startFrames, wake } from './frameClock.js';
 import { Credits, CREDIT_SPEED, CREDIT_TICK_MS } from '../render/credits.js';
-import { loadAiPanel, type AiPanel } from '../render/panelAi.js';
-import { loadAiCredits, type AiCredits } from '../render/creditsAi.js';
 import { initAnalytics } from '../platform/analytics.js';
-import { initFeedback, type FeedbackUi } from './feedback.js';
+import { initFeedback } from './feedback.js';
 import { depthOfRoom, branchOfRoom, REGISTERED_ROOMS } from '../data/world.js';
-import { parseFfp, type FfpPanel } from '../data/ffp.js';
-import {
-  composePanel,
-  composeOptions,
-  panelToRgba,
-  hitTest as panelHitTest,
-  sliderIndex,
-  PANEL_W,
-  PANEL_H,
-  SEDY,
-  ORANZOVY,
-  ZLUTY,
-  SVITICI,
-  type PanelState,
-  type OptionsState,
-} from '../render/hud.js';
+import { parseFfp } from '../data/ffp.js';
+import { hitTest as panelHitTest, sliderIndex, PANEL_W, PANEL_H } from '../render/hud.js';
 import { TALKING_MEZ_SEC, MUSIC_PRIOR } from '../audio/audio.js';
-import {
-  loadSettings,
-  saveSettings,
-  busMultiplier,
-  VOLUMES,
-  type GraphicsLevel,
-  type SubtitleMode,
-  type VolumeBus,
-} from '../core/settings.js';
+import { saveSettings } from '../core/settings.js';
 import { musicForCHud } from '../audio/music.js';
 import { Script, type ScriptSnapshot } from '../core/script.js';
-import {
-  StepEngine,
-  MOVE_FRAMES,
-  FALL_FRAMES,
-  TURN_FRAMES,
-  exitFramesFor,
-  type Phase,
-} from '../core/stepEngine.js';
-import { newChatter, tickChatter, type ChatterState } from '../core/chatter.js';
-import { stdSmrt, newDeathState, type DeathState } from '../core/deathlines.js';
+import { StepEngine, TURN_FRAMES } from '../core/stepEngine.js';
+import { newChatter, tickChatter } from '../core/chatter.js';
+import { stdSmrt, newDeathState } from '../core/deathlines.js';
 import { maybeBubble } from '../core/ambient.js';
-import { movesOf, lengthOfRecord, stepsOf, type RecordStep } from '../core/record.js';
+import { movesOf, lengthOfRecord } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
-import { KufrDemo, type AiKufr } from '../intro/kufrDemo.js';
-import { parseHelpCap, AKCE, KDO, type CapAction } from '../intro/helpCap.js';
 import { ROOMS, roomByNumber } from '../data/roomTable.js';
-import {
-  computeStageLayout,
-  contentScale as fitScale,
-  isFitMode,
-  type StageLayout,
-  type FitMode,
-  type RoomGeometry,
-} from './layout.js';
 import { isUnsupportedDevice, showUnsupportedNotice } from './deviceGate.js';
-import {
-  buildStage,
-  canvas,
-  ctx,
-  fatalEl,
-  feedbar,
-  fitSelect,
-  glCanvas,
-  graphicsSelect,
-  idleDirtyToggle,
-  info,
-  loadingEl,
-  loadingMsg,
-  panelCanvas,
-  panelCol,
-  panelCtx,
-  perfHud,
-  rendererSelect,
-  select,
-  stageBox,
-  stageRow,
-  subCanvas,
-  subCtx,
-  winRoomBtn,
-  wrap,
-} from './dom.js';
+import { canvas, ctx, info, loadingEl, panelCanvas, select, wrap } from './dom.js';
 import { ARROWS, KEYS, MLUVI_PRIOR, NOOP_SCRIPT, TETRIS_KEYS } from './keyTables.js';
 import { audio, initAudio } from './audioEngine.js';
 import { atRest, fishBusy, idle } from './roomGates.js';
-import {
-  armRoomVoices,
-  fetchSoundPkg,
-  initRoomLoad,
-  loadRoom,
-  loadSoundPkg,
-  roomVoicesReady,
-  roomVoicesSettled,
-  startRoomMusic,
-  talk,
-} from './roomLoad.js';
+import { initRoomLoad, loadRoom, loadSoundPkg, roomVoicesSettled, talk } from './roomLoad.js';
 import { initRenderLoop, loop } from './renderLoop.js';
-import {
-  advanceLoadmode,
-  applyRecordStep,
-  beginHeldMove,
-  clearHeldKey,
-  dispatchHeldMove,
-  heldKeyState,
-  initMovement,
-  releaseHeldKey,
-  restartRoom,
-  restore,
-  tryStep,
-  wallShove,
-} from './movement.js';
-import {
-  advanceReplay,
-  advanceShowmode,
-  aiKufr,
-  aiKufrFrames,
-  cutsceneCaption,
-  disposeAiKufr,
-  drawCutscene,
-  endShowmode,
-  ensureAiKufr,
-  inReplay,
-  inShowmode,
-  initCutscene,
-  loadAiKufrFrame,
-  showHelpText,
-  skipCutscene,
-  startCutscene,
-  startShowmode,
-  updateCutsceneSubOverlay,
-} from './cutscene.js';
+import { advanceLoadmode, beginHeldMove, clearHeldKey, dispatchHeldMove, heldKeyState, initMovement, releaseHeldKey, restartRoom, restore, tryStep, wallShove } from './movement.js';
+import { advanceReplay, advanceShowmode, aiKufr, aiKufrFrames, cutsceneCaption, disposeAiKufr, drawCutscene, endShowmode, inReplay, inShowmode, initCutscene, skipCutscene, startCutscene, startShowmode } from './cutscene.js';
 import { openSaveStore } from './persist.js';
-import { draw, initFramePainter, updateRoomSubOverlay } from './framePainter.js';
-import {
-  aiMovieAvailable,
-  aiSubScale,
-  applySubScale,
-  clearSubOverlay,
-  initIntro,
-  intro,
-  introMovie,
-  logoMovie,
-  probeAiMovies,
-  setAiSubScale,
-  subOverlaySignature,
-  syncSubOverlay,
-  syncSubOverlaySized,
-} from './introOverlay.js';
-import {
-  SUB_FONT_CANDIDATES,
-  booted,
-  initStageState,
-  setBooted,
-  setSubFontFamily,
-  setSubFontIdx,
-  setSubFontReady,
-  setSubFontWeight,
-  setSubOverlayGate,
-  setSubOverlayPainted,
-  setSubOverlayPaints,
-  setSubOverlaySig,
-  subFontFamily,
-  subFontIdx,
-  subFontReady,
-  subFontWeight,
-  subOverlayGate,
-  subOverlayPainted,
-  subOverlayPaints,
-  subOverlaySig,
-} from './stageState.js';
+import { initFramePainter } from './framePainter.js';
+import { aiSubScale, initIntro, intro, introMovie, logoMovie, setAiSubScale, syncSubOverlay } from './introOverlay.js';
+import { SUB_FONT_CANDIDATES, initStageState, setBooted, setSubFontFamily, setSubFontIdx, setSubFontReady, setSubFontWeight, setSubOverlayGate, setSubOverlayPainted, setSubOverlaySig, subFontFamily, subFontIdx, subFontReady, subFontWeight, subOverlayGate, subOverlayPainted, subOverlayPaints, subOverlaySig } from './stageState.js';
 import { initDevBar } from './devBar.js';
-import {
-  aiPlaqueFor,
-  closeMapInfo,
-  drawMap,
-  drawMapOverlays,
-  ensureDeskyData,
-  initMapDraw,
-  openMapInfo,
-} from './mapDraw.js';
-import {
-  closeHelp,
-  drawHelp,
-  drawPanel,
-  initPanel,
-  openHelp,
-  optionsState,
-  panelState,
-  tickPanelScroll,
-  togglePanelOptions,
-} from './panel.js';
-import {
-  beginRoomLoadingUi,
-  initLoadingUi,
-  maybeShowWebglNote,
-  relayout,
-  setLoadingMsg,
-  showFatal,
-  syncLoadingUi,
-} from './loadingUi.js';
+import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
+import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
+import { beginRoomLoadingUi, initLoadingUi, maybeShowWebglNote, setLoadingMsg, showFatal } from './loadingUi.js';
 import {
   applyVolumeSettings,
   initPlayerSettings,
@@ -337,217 +69,15 @@ import {
   setRenderOnDirty,
   setRenderer,
 } from './renderSettings.js';
-import {
-  DEFAULT_LINE_TICKS,
-  EFFECT_VOL,
-  EXIT_CELLS,
-  LOGIC_MS,
-  LOGIC_SEC,
-  MAX_STEPS_PER_FRAME,
-  contentScaleFor,
-  initStageGeometry,
-  roomGeometry,
-  scalingFilterFor,
-  setStage,
-  stage,
-} from './stageGeometry.js';
-import {
-  acc,
-  aiWaterAnimating,
-  forceRoomRedraw,
-  initFramePacing,
-  lastRoomBackend,
-  lastRoomSig,
-  lastTime,
-  lastWaterPaint,
-  loopThrottleOk,
-  loopTicks,
-  perfLast,
-  perfPaint,
-  perfRaf,
-  roomAnimating,
-  roomLoadSeq,
-  roomLoading,
-  roomPaints,
-  setAcc,
-  setForceRoomRedraw,
-  setLastRoomBackend,
-  setLastRoomSig,
-  setLastTime,
-  setLastWaterPaint,
-  setLoopTicks,
-  setPerfLast,
-  setPerfPaint,
-  setPerfRaf,
-  setRoomLoadSeq,
-  setRoomLoading,
-  setRoomPaints,
-  setSmoothLog,
-  setWaterAnimMs,
-  smoothLog,
-  updatePerfHud,
-  waterAnimMs,
-  waterOwesRepaint,
-} from './framePacing.js';
-import {
-  activeScript,
-  alpha,
-  blink,
-  chatter,
-  count,
-  cutscene,
-  cutsceneAssets,
-  cutsceneSubs,
-  darkFlicker,
-  deathState,
-  engine,
-  ffr,
-  fftEntries,
-  font,
-  lastLine,
-  linesSpoken,
-  loadmode,
-  pokus,
-  poslMluv,
-  prevKostra,
-  replaymode,
-  room,
-  roomDepth,
-  screenShoveX,
-  setActiveScript,
-  setAlpha,
-  setChatter,
-  setCount,
-  setCutscene,
-  setCutsceneAssets,
-  setCutsceneSubs,
-  setDeathState,
-  setEngine,
-  setFfr,
-  setFftEntries,
-  setFont,
-  setLastLine,
-  setLinesSpoken,
-  setLoadmode,
-  setPokus,
-  setReplaymode,
-  setRoom,
-  setRoomDepth,
-  setScreenShoveX,
-  setShowmode,
-  setShowmodeHelptext,
-  setShowmodeLoading,
-  setShowmodeRestarted,
-  setShowmodeSave,
-  setShowmodeTraceOn,
-  setSubs,
-  showmode,
-  showmodeHelptext,
-  showmodeLoading,
-  showmodeRestarted,
-  showmodeSave,
-  showmodeTrace,
-  showmodeTraceOn,
-  subs,
-  talkIdx,
-} from './gameState.js';
-import {
-  O_NORMAL,
-  O_OPTIONS,
-  O_SC_DOWN,
-  O_SC_UP,
-  PANEL_SCROLL_MS,
-  SCMAX,
-  SCMIN,
-  helpScreens,
-  ui,
-} from './screenState.js';
+import { DEFAULT_LINE_TICKS, EFFECT_VOL, LOGIC_MS, LOGIC_SEC, contentScaleFor, initStageGeometry, roomGeometry, scalingFilterFor } from './stageGeometry.js';
+import { aiWaterAnimating, forceRoomRedraw, initFramePacing, lastRoomBackend, lastRoomSig, loopThrottleOk, loopTicks, perfPaint, roomLoadSeq, roomLoading, roomPaints, setForceRoomRedraw, setPerfPaint, setSmoothLog, setWaterAnimMs, smoothLog, waterAnimMs } from './framePacing.js';
+import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, ffr, fftEntries, font, linesSpoken, loadmode, pokus, poslMluv, prevKostra, replaymode, room, roomDepth, setActiveScript, setChatter, setCount, setCutscene, setCutsceneSubs, setDeathState, setEngine, setFont, setLastLine, setLinesSpoken, setLoadmode, setPokus, setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, showmode, subs, talkIdx } from './gameState.js';
+import { O_NORMAL, O_OPTIONS, SCMAX, helpScreens, ui } from './screenState.js';
 import { debugHooks } from './debugHooks.js';
-import {
-  classicArtFor,
-  drawAiGpu,
-  drawGpu,
-  enableWebgl,
-  enhancedArtFor,
-  glAiCompositor,
-  glAiFailed,
-  glChannelDiff,
-  glCompositor,
-  glFailed,
-  glParityCompare,
-  initGlPlumbing,
-  markGlFailed,
-} from './glPlumbing.js';
-import {
-  aiCredits,
-  aiPanel,
-  aiPending,
-  aiRoom,
-  aiRoomNum,
-  aiRoomRenderActive,
-  aiWorldMap,
-  beginMapArt,
-  beginRoomArt,
-  curNum,
-  decodePngResponse,
-  enhancedArt,
-  enhancedObjects,
-  enhancedPending,
-  ensureAiCredits,
-  ensureAiPanel,
-  ensureAiRoom,
-  ensureEnhancedArt,
-  initArt,
-  isPngResponse,
-  mapArtHolding,
-  mapArtPending,
-  mapPresented,
-  retargetArtForTier,
-  roomArtPending,
-  setMapPresented,
-} from './art.js';
-import {
-  applyFrameEffects,
-  applyMapCheat,
-  applyRoomCheat,
-  applySpriteCheats,
-  blitTetris,
-  cheatFishSprites,
-  cheatSolveRoom,
-  closeTetris,
-  endSilentFilm,
-  devWinRoom,
-  frameEffectsActive,
-  initCheats,
-  interlacedFaze,
-  mapCheats,
-  megabombFlash,
-  oldWater,
-  resetRoomScopedCheats,
-  roomCheats,
-  setMegabombFlash,
-  silentFilm,
-  spriteCheats,
-  tetris,
-  tetrisArt,
-  tetrisModal,
-  tetrisTick,
-  tickFrameEffects,
-  tickTetris,
-  ultraviolence,
-} from './cheats.js';
-import {
-  beginMapLaunch,
-  blitParchment,
-  blitParchmentAi,
-  canLaunchFromMap,
-  initRoomLaunch,
-  loadParchment,
-  mapLaunching,
-  markParchmentPainted,
-  parchmentReady,
-  tickMapLaunch,
-} from './roomLaunch.js';
+import { classicArtFor, enableWebgl, enhancedArtFor, glAiCompositor, glChannelDiff, glCompositor, glFailed, glParityCompare, initGlPlumbing } from './glPlumbing.js';
+import { aiCredits, aiPending, aiRoom, aiRoomNum, aiRoomRenderActive, aiWorldMap, beginMapArt, curNum, decodePngResponse, enhancedArt, enhancedObjects, enhancedPending, ensureAiCredits, initArt, isPngResponse, mapArtHolding, mapArtPending, mapPresented, roomArtPending } from './art.js';
+import { applyMapCheat, applyRoomCheat, applySpriteCheats, closeTetris, endSilentFilm, devWinRoom, initCheats, mapCheats, oldWater, resetRoomScopedCheats, roomCheats, silentFilm, tetris, tetrisModal, tickFrameEffects, ultraviolence } from './cheats.js';
+import { beginMapLaunch, canLaunchFromMap, initRoomLaunch, loadParchment, mapLaunching, parchmentReady } from './roomLaunch.js';
 //#region Device gate | anchors: isUnsupportedDevice, showUnsupportedNotice | Phones are refused here, before any art is fetched — and before every other side effect in the file. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`.
 
 // Phones are refused here, before a single byte of game ART is fetched. (The engine
