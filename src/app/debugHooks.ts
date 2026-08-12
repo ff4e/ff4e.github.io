@@ -1472,7 +1472,10 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
           subCtx.setTransform(1, 0, 0, 1, 0, 0);
           subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
           if (draw) {
-            subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+            // Band-shifted like the real painter: the overlay covers only the subtitle
+            // band, so drawing at origin 0 would put every glyph off the canvas and
+            // time an empty repaint.
+            subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, -subBandTop * cs * dpr);
             subs!.drawVector(subCtx, advance ? tick++ : at, host.subFontFamily, host.subFontWeight);
           }
           if (flush) {

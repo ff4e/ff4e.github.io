@@ -158,6 +158,10 @@ export function syncSubOverlay(): void {
   // DOWN the box. The band has to be measured after that, or the ai tier would reserve
   // room it no longer uses — and, far worse, the enhanced and classic tiers (which draw
   // at full size, several rows up the box) would have their top rows clipped.
+  // `vectorInkTop` is in the subtitle system's own height and this band is in the
+  // room's; they are the same number by construction — both are the wall bitmap
+  // (`room.bitmaps[room.wallItem.bmp]`), which buildRoom hands the SubtitleSystem and
+  // `roomScreenSize` reads back for the geometry.
   const band = subs === null ? 0 : bandTopFor(subs.vectorInkTop(), g.nativeH);
   syncSubOverlaySized(g.cssW, (g.nativeH - band) * g.scale, band * g.scale, band);
 }
@@ -191,12 +195,22 @@ export function subOverlaySignature(who: string, sys: SubtitleSystem, scale: num
   // `graphics` is in the key because the ai tier draws the overlay smaller
   // (`aiSubScale`); without it, switching tier could serve the previous tier's cached
   // overlay, which is exactly the class of bug this gate exists around.
-  return `${who}|${graphics}|${subFontFamily}|${subFontWeight}|${subCanvas.width}x${subCanvas.height}|${scale}|${sys.vectorSignature(count, alpha)}`;
+  // `subBandTop` is in the key even though it cannot currently move without the canvas
+  // height moving with it: it is what the drawing origin is shifted by, so a future
+  // change to how the band is derived must not be able to serve an image drawn at a
+  // different offset.
+  return `${who}|${graphics}|${subFontFamily}|${subFontWeight}|${subCanvas.width}x${subCanvas.height}@${subBandTop}|${scale}|${sys.vectorSignature(count, alpha)}`;
 }
 
 /** Clear the subtitle overlay (used off the room screen). */
 export function clearSubOverlay(): void {
   setSubOverlaySig(''); // whatever the overlay held is gone: never match a stale key
+  // Give up the room's band offset as well. The canvas keeps its size until the next
+  // owner sets one, but anchored back at the top it is guaranteed to stay inside the
+  // game box — a stale band could otherwise leave an (empty) layer hanging past the
+  // bottom of a smaller room or screen.
+  subBandTop = 0;
+  if (subCanvas.style.top !== '0px') subCanvas.style.top = '0px';
   if (!subOverlayPainted) return; // already clear — skip the (large) clearRect
   subCtx.setTransform(1, 0, 0, 1, 0, 0);
   subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);

@@ -454,7 +454,12 @@ export function drawCutscene(): void {
   // box here covers every path below — GPU, CPU and the AI briefcase — including the
   // ones that never draw a caption. Cheap to repeat: the canvas is only touched when
   // the size actually differs.
+  //
+  // The transform goes with it. KAJUTA1's screen shove translates the overlay along with
+  // the room (gspec 3/4), and a cutscene starting from that room used to inherit the
+  // shove — the caption path cleared it, but only if there was a caption to draw.
   syncSubOverlaySized(cssW, cssH);
+  if (subCanvas.style.transform) subCanvas.style.transform = '';
   // Enhanced: render the KD-* captions in the bundled Mulish font on the vector
   // overlay (like room subtitles). Classic: keep the faithful baked bitmap font
   // composited into the 256-colour frame.
