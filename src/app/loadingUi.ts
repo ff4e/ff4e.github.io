@@ -24,6 +24,7 @@ import { mapArtHolding, mapPresented, roomArtPending } from './art.js';
 import { fatalEl, loadingEl, loadingMsg, stageBox, stageRow } from './dom.js';
 import { setForceRoomRedraw, roomLoading } from './framePacing.js';
 import { wake } from './frameClock.js';
+import { booted } from './stageState.js';
 import { subLang } from './playerSettings.js';
 import { renderer } from './renderSettings.js';
 import { ui } from './screenState.js';
@@ -31,18 +32,6 @@ import { computeStageLayout } from './layout.js';
 import { setStage, stage } from './stageGeometry.js';
 import { ROOMS } from '../data/roomTable.js';
 import { webgl2Available } from '../render/glScreen.js';
-
-/**
- * The one name this module needs from `main.ts`.
- *
- * `booted` gates all three: before it the overlay belongs to boot and an error is fatal;
- * after it the overlay belongs to a room entry and a mid-game exception must not nuke play.
- */
-export interface LoadingUiHost {
-  readonly booted: boolean;
-}
-
-let host!: LoadingUiHost;
 
 export function setLoadingMsg(msg: string): void {
   if (loadingMsg) loadingMsg.textContent = msg;
@@ -68,7 +57,7 @@ let mapLoadingDueAt = 0;
 
 /** Arm the overlay for a room entry (the loop reveals it if the wait is real). */
 export function beginRoomLoadingUi(num: number): void {
-  if (!host.booted || !loadingEl) return;
+  if (!booted || !loadingEl) return;
   roomLoadingSince = performance.now();
   const desc = ROOMS[num - 1];
   setLoadingMsg(desc ? `Loading ${subLang() === 'cz' ? desc.cz : desc.en}…` : 'Loading…');
@@ -95,7 +84,7 @@ export function beginRoomLoadingUi(num: number): void {
  * the case a pushed map label would have got wrong.
  */
 export function syncLoadingUi(now: number): void {
-  if (!host.booted || !loadingEl) return;
+  if (!booted || !loadingEl) return;
   const roomWaiting = ui.screen === 'room' && (roomLoading || roomArtPending());
   const mapWaiting = mapArtHolding();
   if (!roomWaiting) roomLoadingSince = 0;
@@ -165,20 +154,24 @@ export function relayout(): void {
 // Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen <video> played
 // before the map on first run, and replayable from the map's top-left corner.
 
-/** Register the fatal-screen handlers. Call once, from `main.ts`, after the device gate. */
-export function initLoadingUi(h: LoadingUiHost): void {
-  host = h;
+/**
+ * Register the fatal-screen handlers. Call once, from `main.ts`, after the device gate.
+ *
+ * It took a one-member host until `booted` got an owner in `stageState.ts`; now there is
+ * nothing to hand over, only listeners that must not be armed at import time.
+ */
+export function initLoadingUi(): void {
   document.getElementById('fatal-reload')?.addEventListener('click', () => location.reload());
   // Any unhandled failure DURING boot means the game never became playable → fatal.
   // After boot we stop hijacking errors (a mid-game exception shouldn't nuke play).
   window.addEventListener('unhandledrejection', (ev) => {
-    if (!host.booted) {
+    if (!booted) {
       console.error('boot failed:', ev.reason);
       showFatal();
     }
   });
   window.addEventListener('error', (ev) => {
-    if (!host.booted) {
+    if (!booted) {
       console.error('boot failed:', ev.error ?? ev.message);
       showFatal();
     }

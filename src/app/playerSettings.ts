@@ -16,6 +16,7 @@
  */
 import { silentFilm } from './cheats.js';
 import { activeScript } from './gameState.js';
+import { audio } from './audioEngine.js';
 import {
   VOLUMES,
   busMultiplier,
@@ -26,7 +27,6 @@ import {
   type SubtitleMode,
   type VolumeBus,
 } from '../core/settings.js';
-import type { AudioEngine } from '../audio/audio.js';
 
 /**
  * The three names this module needs from `main.ts`.
@@ -36,7 +36,6 @@ import type { AudioEngine } from '../audio/audio.js';
  * subtitle mode.
  */
 export interface PlayerSettingsHost {
-  readonly audio: AudioEngine;
   readonly ensureDeskyData: () => Promise<void> | void;
   readonly setInfo: () => void;
 }
@@ -82,7 +81,7 @@ export function setSubtitleMode(mode: SubtitleMode): void {
 /** Set a volume slider index (tahlo_snd/talk/music) and apply it live. */
 export function setVolume(bus: VolumeBus, index: number): void {
   settings.volume[bus] = index;
-  host.audio.setBusGain(bus, busMultiplier(bus, index));
+  audio.setBusGain(bus, busMultiplier(bus, index));
   syncScriptMusicVolume();
   saveSettings(settings);
 }
@@ -105,7 +104,7 @@ export function syncScriptMusicVolume(): void {
 /** Push all persisted volume levels into the audio buses (NastavZvuk, on boot). */
 export function applyVolumeSettings(): void {
   for (const bus of ['effect', 'voice', 'music'] as const) {
-    host.audio.setBusGain(bus, busMultiplier(bus, settings.volume[bus]));
+    audio.setBusGain(bus, busMultiplier(bus, settings.volume[bus]));
   }
 }
 
