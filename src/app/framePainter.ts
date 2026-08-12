@@ -19,7 +19,7 @@ import { FSIZE } from '../render/roomWalk.js';
 import { aiRoom, aiRoomRenderActive, roomArtPending } from './art.js';
 import { alpha, activeScript, count, engine, room, screenShoveX, subs } from './gameState.js';
 import { applyFrameEffects, frameEffectsActive } from './cheats.js';
-import { applySubScale, clearSubOverlay, subOverlaySignature, syncSubOverlay } from './introOverlay.js';
+import { applySubScale, clearSubOverlay, subBandTop, subOverlaySignature, syncSubOverlay } from './introOverlay.js';
 import { canvas, ctx, glCanvas, subCanvas, subCtx } from './dom.js';
 import { classicArtFor, drawAiGpu, drawGpu, enhancedArtFor, glAiFailed, glFailed } from './glPlumbing.js';
 import { enhancedArtActive, renderer } from './renderSettings.js';
@@ -225,7 +225,10 @@ export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: st
     if (!subOverlayGate || sig !== subOverlaySig) {
       subCtx.setTransform(1, 0, 0, 1, 0, 0);
       subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+      // The canvas covers only the subtitle band (syncSubOverlay), so the drawing origin
+      // moves up the box by exactly the band's top. Everything below still draws in the
+      // subtitle system's own coordinates, which is what keeps the text where it was.
+      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, -subBandTop * cs * dpr);
       applySubScale(subCtx, subs);
       subs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
       setSubOverlayPaints(subOverlayPaints + 1);

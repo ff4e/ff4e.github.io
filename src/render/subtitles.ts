@@ -438,6 +438,39 @@ export class SubtitleSystem {
   }
 
   /**
+   * The topmost y `drawVector` can ink, in this system's own coordinates.
+   *
+   * The overlay canvas is sized from this: subtitles live in a band at the bottom of
+   * the room, and allocating the whole room box means the browser re-uploads a
+   * multi-megapixel texture for text that occupies a fraction of it. Measured in WebKit
+   * on a tall room: 2.09 Mpx overlay dropped an animating line to 23 fps against 61
+   * idle; the same line on a 0.56 Mpx band ran at 43.
+   *
+   * Deliberately independent of the animation phase, and of the font shrinking that
+   * `vectorLayout` may apply, so the band is stable for a given SET of lines: it only
+   * changes when a line is added or removed (which re-targets `cilys`), never while one
+   * waves or scrolls. A canvas resize wipes the overlay, so a band that twitched every
+   * tick would cost more than it saved.
+   *
+   * Conservative on every axis — the line's highest resting row, the full wave
+   * amplitude, and the largest font it could use.
+   */
+  vectorInkTop(): number {
+    let top = this.screenH;
+    for (const t of this.titles) {
+      // The topmost row this line can occupy: it interpolates between ys and cilys.
+      const ys = Math.min(t.ys, t.cilys) * SUB_SCALE;
+      // PisStringF lifts a glyph by up to the full amplitude above its own baseline.
+      const amp = UNDERTITLE * SUB_SCALE - ys;
+      const baseline = ys + this.screenH + SUB_BASELINE_OFF;
+      // Ink above the baseline: the ascender plus half the outline stroke. Bounded by
+      // the unshrunk font, since vectorLayout only ever makes it smaller.
+      top = Math.min(top, baseline - amp - SUB_FONT_PX * 1.25);
+    }
+    return top;
+  }
+
+  /**
    * A key that changes exactly when `drawVector`'s output would change, so the
    * caller can skip the overlay clear+repaint on every frame that would redraw the
    * identical image. The wave offset is a function of the logic tick (12.5/s), not

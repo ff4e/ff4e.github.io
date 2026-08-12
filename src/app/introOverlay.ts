@@ -19,7 +19,7 @@ import type { SubtitleSystem } from '../render/subtitles.js';
 import { setSubOverlayPainted, setSubOverlaySig, subFontFamily, subFontWeight, subOverlayPainted } from './stageState.js';
 import { canvas, subCanvas, subCtx } from './dom.js';
 import { contentScaleFor, roomGeometry } from './stageGeometry.js';
-import { alpha, count, room } from './gameState.js';
+import { alpha, count, room, subs } from './gameState.js';
 import { graphics } from './renderSettings.js';
 
 /** The intro/logo movie player. Constructed in initIntro(), never at import time. */
@@ -98,8 +98,21 @@ export function applySubScale(ctx: CanvasRenderingContext2D, sys: SubtitleSystem
   ctx.translate(-w / 2, -h);
 }
 
-/** Size the subtitle overlay to cover the game canvas at device resolution. */
-export function syncSubOverlaySized(cssW: number, cssH: number): void {
+/**
+ * How far down the game box the overlay canvas starts, in the coordinates `drawVector`
+ * draws in. Zero for a full-height overlay (the cutscene path); the room path sets it
+ * to the top of the subtitle band, and the painter translates by it (see subCssTop).
+ */
+export let subBandTop = 0;
+
+/**
+ * Size the subtitle overlay at device resolution.
+ *
+ * `cssTop` offsets it down the game box, so the room path can allocate only the band
+ * subtitles actually occupy instead of the whole room (see `syncSubOverlay`). The
+ * element is `position:absolute; top:0` (dom.ts), so the offset is applied there.
+ */
+export function syncSubOverlaySized(cssW: number, cssH: number, cssTop = 0, bandTop = 0): void {
   const dpr = window.devicePixelRatio || 1;
   const bw = Math.round(cssW * dpr);
   const bh = Math.round(cssH * dpr);
@@ -107,8 +120,11 @@ export function syncSubOverlaySized(cssW: number, cssH: number): void {
     subCanvas.width = bw;
     subCanvas.height = bh;
   }
+  subBandTop = bandTop;
   subCanvas.style.width = `${cssW}px`;
   subCanvas.style.height = `${cssH}px`;
+  const top = `${cssTop}px`;
+  if (subCanvas.style.top !== top) subCanvas.style.top = top;
 }
 
 /**
@@ -131,8 +147,39 @@ export function syncSubOverlay(): void {
     return;
   }
   const g = roomGeometry(room);
-  syncSubOverlaySized(g.cssW, g.cssH);
+  // Only the BAND the subtitles occupy, not the whole room. The browser re-uploads the
+  // overlay's whole backing store whenever it is touched — measured in WebKit on a tall
+  // room, a 2.09 Mpx overlay took an animating line from 61 fps to 23, and the same line
+  // on a 0.56 Mpx band ran at 43 — so the height of this canvas is a frame-rate
+  // decision, not just a memory one.
+  //
+  // `vectorInkTop` is in the subtitle system's own coordinates; `applySubScale` then
+  // shrinks the drawing about the bottom edge in the `ai` tier, which pulls the ink
+  // DOWN the box. The band has to be measured after that, or the ai tier would reserve
+  // room it no longer uses — and, far worse, the enhanced and classic tiers (which draw
+  // at full size, several rows up the box) would have their top rows clipped.
+  const band = subs === null ? 0 : bandTopFor(subs.vectorInkTop(), g.nativeH);
+  syncSubOverlaySized(g.cssW, (g.nativeH - band) * g.scale, band * g.scale, band);
 }
+
+/**
+ * Where the subtitle band starts, in native game rows.
+ *
+ * Snapped DOWN to a grid so the canvas is not reallocated for a one-pixel change (a
+ * resize wipes it, and the repaint that follows is the thing being economised), and
+ * clamped into the box so a pathological line can never produce a negative or
+ * zero-height canvas.
+ */
+function bandTopFor(inkTop: number, nativeH: number): number {
+  const s = graphics === 'ai' ? aiSubScale : 1;
+  // Where that ink lands once applySubScale has shrunk the drawing about the bottom.
+  const scaled = nativeH + (inkTop - nativeH) * s;
+  const snapped = Math.floor(scaled / BAND_GRID) * BAND_GRID;
+  return Math.min(Math.max(snapped, 0), nativeH - BAND_GRID);
+}
+
+/** Native rows the band is snapped to (see bandTopFor). */
+const BAND_GRID = 16;
 
 /**
  * Key for what the vector overlay currently shows. Beyond the subtitle system's own

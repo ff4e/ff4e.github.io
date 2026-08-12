@@ -447,6 +447,14 @@ export function drawCutscene(): void {
   const cssW = w * cs;
   const cssH = h * cs;
   const dpr = window.devicePixelRatio || 1;
+  // The overlay is the CUTSCENE's for as long as one is on screen, caption or not. The
+  // room path leaves it sized to the subtitle band and offset down the box (see
+  // syncSubOverlay), and a cutscene entered from a room would otherwise inherit that
+  // band: a layer sitting over the bottom fifth of its own frame. Reclaiming the whole
+  // box here covers every path below — GPU, CPU and the AI briefcase — including the
+  // ones that never draw a caption. Cheap to repeat: the canvas is only touched when
+  // the size actually differs.
+  syncSubOverlaySized(cssW, cssH);
   // Enhanced: render the KD-* captions in the bundled Mulish font on the vector
   // overlay (like room subtitles). Classic: keep the faithful baked bitmap font
   // composited into the 256-colour frame.

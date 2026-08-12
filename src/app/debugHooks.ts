@@ -120,6 +120,7 @@ import type { FishFrame } from '../render/renderRoom.js';
 import { AiRoom } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
 import { SUB_SUBSTEPS, SubtitleSystem } from '../render/subtitles.js';
+import { subBandTop } from './introOverlay.js';
 import { renderTetris, tetrisRgba } from '../render/tetrisRender.js';
 import { MapAction, WorldMap } from '../render/worldMap.js';
 import { AiWorldMap } from '../render/worldMapAi.js';
@@ -561,7 +562,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       host.syncSubOverlay();
       subCtx.setTransform(1, 0, 0, 1, 0, 0);
       subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
+      // Same origin shift the real painter uses: the canvas is only the subtitle band.
+      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, -subBandTop * cs * dpr);
       subs.drawVector(subCtx, at, host.subFontFamily, host.subFontWeight, frac);
       host.subOverlayPainted = true;
       host.subOverlaySig = ''; // painted behind the gate's back — force the next real repaint
@@ -569,6 +571,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         w: subCanvas.width,
         h: subCanvas.height,
         scale: cs * dpr,
+        bandTop: subBandTop,
         screenW: subs.vectorScreen.w,
         screenH: subs.vectorScreen.h,
         family: host.subFontFamily,

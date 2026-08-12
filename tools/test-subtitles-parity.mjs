@@ -57,7 +57,10 @@ async function installReference(p) {
       ref.width = st.w;
       ref.height = st.h;
       const r = ref.getContext('2d');
-      r.setTransform(st.scale, 0, 0, st.scale, 0, 0);
+      // The overlay canvas covers only the subtitle band, so its drawing origin is
+      // shifted up the game box by bandTop. The reference has to start from the same
+      // origin or every glyph would be reported off by the band.
+      r.setTransform(st.scale, 0, 0, st.scale, 0, -(st.bandTop ?? 0) * st.scale);
 
       // ── Reference: the straight-line port of PisStringF's wave, re-measuring and
       // re-creating everything for every glyph, every time.
