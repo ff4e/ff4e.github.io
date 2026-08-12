@@ -225,3 +225,12 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
   needs solving part of the tutorial, and the demo's save/load replays the move record (which only
   exists with real navigation). Verified piecewise, not end-to-end. A real `__ff.showmodeTrace()`
   capture from a live playthrough could seed a faithful end-to-end regression test.
+- Two observables have no oracle at all. Found by a mutation-testing pass during the `main.ts`
+  decomposition; both predate that work (their read/write sites were unchanged by it).
+  - `roomVoicesSettled` / `roomVoicesReady` (`src/app/roomLoad.ts`): no vitest test and no UI probe
+    reads them. The dialogue queue is gated on them, so a regression that let an opening
+    conversation be consumed while the .ffs was still downloading would be silent.
+  - `forceRoomRedraw` (`src/app/framePacing.ts`): removing it from the repaint condition in
+    `renderLoop.ts` fails NO probe, because `sig !== lastRoomSig` independently covers the cases the
+    probes exercise. It exists for the signature-INVISIBLE transitions (room entry, resize, fit
+    change, pointer), which is exactly what nothing tests.
