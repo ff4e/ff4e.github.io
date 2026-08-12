@@ -101,7 +101,7 @@ export function applySubScale(ctx: CanvasRenderingContext2D, sys: SubtitleSystem
 /**
  * How far down the game box the overlay canvas starts, in the coordinates `drawVector`
  * draws in. Zero for a full-height overlay (the cutscene path); the room path sets it
- * to the top of the subtitle band, and the painter translates by it (see subCssTop).
+ * to the top of the subtitle band, and `framePainter` shifts its drawing origin by it.
  */
 export let subBandTop = 0;
 
@@ -147,11 +147,15 @@ export function syncSubOverlay(): void {
     return;
   }
   const g = roomGeometry(room);
-  // Only the BAND the subtitles occupy, not the whole room. The browser re-uploads the
-  // overlay's whole backing store whenever it is touched — measured in WebKit on a tall
-  // room, a 2.09 Mpx overlay took an animating line from 61 fps to 23, and the same line
-  // on a 0.56 Mpx band ran at 43 — so the height of this canvas is a frame-rate
-  // decision, not just a memory one.
+  // Only the BAND the subtitles occupy, not the whole room.
+  //
+  // The JS cost of a repaint is flat in the canvas size (measured 0.20 ms in Chromium
+  // at 0.63, 3.32 and 5.02 Mpx alike), so the size is not about our own work — it is
+  // about what the browser does with the backing store afterwards, which is why a
+  // 2-megapixel overlay for text occupying a strip at the bottom showed up as a frame
+  // rate. Treat the height of this canvas as a rendering-cost decision, not a memory
+  // one. How large the win is depends on the browser and machine; it was reported on
+  // Safari, where the room's overlay was 1674x1184.
   //
   // `vectorInkTop` is in the subtitle system's own coordinates; `applySubScale` then
   // shrinks the drawing about the bottom edge in the `ai` tier, which pulls the ink

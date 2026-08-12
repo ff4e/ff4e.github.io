@@ -441,10 +441,11 @@ export class SubtitleSystem {
    * The topmost y `drawVector` can ink, in this system's own coordinates.
    *
    * The overlay canvas is sized from this: subtitles live in a band at the bottom of
-   * the room, and allocating the whole room box means the browser re-uploads a
-   * multi-megapixel texture for text that occupies a fraction of it. Measured in WebKit
-   * on a tall room: 2.09 Mpx overlay dropped an animating line to 23 fps against 61
-   * idle; the same line on a 0.56 Mpx band ran at 43.
+   * the room, and allocating the whole room box hands the browser a multi-megapixel
+   * texture to re-upload for text that occupies a fraction of it. The repaint's own JS
+   * cost does not grow with the canvas (0.20 ms in Chromium at 0.63 and 5.02 Mpx
+   * alike), so the size only costs on the browser's side of the boundary — reported on
+   * Safari, where the overlay was 1674x1184.
    *
    * Deliberately independent of the animation phase, and of the font shrinking that
    * `vectorLayout` may apply, so the band is stable for a given SET of lines: it only
