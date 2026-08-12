@@ -20,6 +20,7 @@ import { aiRoom, aiRoomRenderActive, roomArtPending } from './art.js';
 import { alpha, activeScript, count, engine, room, screenShoveX, subs } from './gameState.js';
 import { applyFrameEffects, frameEffectsActive } from './cheats.js';
 import { applySubScale, clearSubOverlay, subOverlaySignature, syncSubOverlay } from './introOverlay.js';
+import { clearDomSubtitles, domSubsEnabled, syncDomSubtitles } from './subtitleDom.js';
 import { canvas, ctx, glCanvas, subCanvas, subCtx } from './dom.js';
 import { classicArtFor, drawAiGpu, drawGpu, enhancedArtFor, glAiFailed, glFailed } from './glPlumbing.js';
 import { enhancedArtActive, renderer } from './renderSettings.js';
@@ -218,6 +219,18 @@ export function draw(): void {
  * so the shake it encodes cannot have changed either).
  */
 export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): void {
+  // Prototype renderer (__ff.setSubRenderer('dom')): the same lines as real text,
+  // animated by the compositor instead of redrawn per frame. Off by default.
+  if (domSubsEnabled()) {
+    if (useVecSubs && subs?.active && room) {
+      const g = roomGeometry(room);
+      clearSubOverlay(); // the canvas overlay is not the one showing them now
+      syncDomSubtitles(subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight);
+    } else {
+      clearDomSubtitles();
+    }
+    return;
+  }
   if (useVecSubs && subs?.active) {
     syncSubOverlay();
     const dpr = window.devicePixelRatio || 1;
