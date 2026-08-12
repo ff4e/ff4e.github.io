@@ -197,6 +197,10 @@ effectively the public API of the game for testing.
   `test/host-accessors.test.ts` enforces that every accessor exposes the identically-named variable —
   a getter wired to a same-typed neighbour (`aiPending` vs `enhancedPending`) typechecks cleanly and
   silently corrupts every probe that reads it.
+- **State that has an owning module does not go through the host at all.** `debugHooks.ts` imports
+  `room` from `gameState.ts` and reads `ui.screen` from `screenState.ts` directly, which is both
+  cheaper (no accessor to write, in either file) and safer (nothing in between to mis-wire). Reach for
+  the host only for values that genuinely live nowhere but `main.ts`.
 
 ## Ordering: the module-evaluation trap
 

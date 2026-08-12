@@ -15,15 +15,23 @@
  * The plan costed splitting these hooks into per-area files (room, render, screens,
  * perf...). Grouped that way the small groups do not pay: 53 of the screen hooks are
  * one-liners whose share of the context costs about what the hooks weigh. Kept
- * together they share ONE context of 144 names instead of several overlapping ones,
- * which is why this saves ~13 700 tokens where the grouped version saved ~8 100.
+ * together they share ONE context instead of several overlapping ones, which is why
+ * this saves ~13 700 tokens where the grouped version saved ~8 100.
  *
  * ── The seam ──────────────────────────────────────────────────────────────────
- * Every name this file needs from the running game arrives in `host`. Members are
- * getters, so they read live state at the moment a probe asks, and the eleven that
- * probes deliberately WRITE (the renderer, the perf switches, the overlay signature)
- * are settable. The interface was generated from the TypeScript checker rather than
- * hand-written, so it states main.ts's real types instead of a guess at them.
+ * Every name this file needs that ONLY main.ts has arrives in `host`: 114 members, down
+ * from 144. Members are getters, so they read live state at the moment a probe asks, and
+ * the eight that probes deliberately WRITE (the renderer, the perf switches, the overlay
+ * signature) are settable. The interface was generated from the TypeScript checker
+ * rather than hand-written, so it states main.ts's real types instead of a guess at them.
+ *
+ * The forty that left did not need a seam at all. They were game state, and it now has
+ * owning modules — `gameState.ts` for the live room, `screenState.ts` for the screens —
+ * so this file imports `room` and reads `ui.screen` the way any other module would. A
+ * getter per name per consumer is the tax for state that only main.ts can see, and these
+ * stopped paying it. That also removes a class of bug rather than guarding against it:
+ * with no accessor between the probe and the value, there is nothing left to wire to the
+ * wrong one.
  *
  * main.ts still performs the assignment to `window.__ff` itself, at the end of boot.
  * That matters: tools/ui-lib.mjs waits on `window.__ff` as the signal that boot has
@@ -61,6 +69,31 @@ import type { AiWobble } from '../render/aiTarget.js';
 import type { ArtSource } from '../render/artSource.js';
 import { ClassicArtSource } from '../render/classicArtSource.js';
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
+import {
+  activeScript,
+  alpha,
+  chatter,
+  count,
+  cutscene,
+  engine,
+  ffr,
+  lastLine,
+  linesSpoken,
+  loadmode,
+  poslMluv,
+  replaymode,
+  room,
+  roomDepth,
+  screenShoveX,
+  setShowmodeTraceOn,
+  showmode,
+  showmodeHelptext,
+  showmodeLoading,
+  showmodeTrace,
+  showmodeTraceOn,
+  subs,
+} from './gameState.js';
+import { ui } from './screenState.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
 import { sum } from '../render/filmEffects.js';
@@ -121,7 +154,6 @@ import type { RoomGeometry } from './layout.js';
  * rest are read-only views.
  */
 export interface DebugHost {
-  readonly activeScript: { def: RoomScript; s: Script; } | null;
   readonly aiKufr: AiKufr | null;
   readonly aiKufrFrames: Map<string, ImageBitmap>;
   readonly aiPending: boolean;
@@ -131,14 +163,12 @@ export interface DebugHost {
   aiSubScale: number;
   readonly aiWaterAnimating: () => boolean;
   readonly aiWorldMap: AiWorldMap | null;
-  readonly alpha: number;
   readonly applySubFont: (i: number) => void;
   readonly audio: AudioEngine;
   readonly bestRecord: (roomNum: number) => string | undefined;
   readonly bestRecords: Map<number, string>;
   readonly canSave: () => boolean;
   readonly casHry: () => number;
-  readonly chatter: ChatterState | null;
   readonly cheated: Set<number>;
   readonly classicArtFor: (r: Room) => ClassicArtSource;
   readonly clickCell: (cx: number, cy: number) => void;
@@ -146,23 +176,14 @@ export interface DebugHost {
   readonly closeHelp: () => void;
   readonly closeMapInfo: () => void;
   readonly closeMapOverlay: () => void;
-  readonly count: number;
-  readonly creditMode: number;
-  readonly credits: Credits | null;
-  creditsStart: number;
   readonly curNum: number;
-  readonly cutscene: KufrDemo | null;
-  readonly deskyLang: "cz" | "en" | null;
   readonly dispatchMapCorner: (action: MapAction | null) => void;
   readonly enableWebgl: () => void;
-  readonly engine: StepEngine | null;
   readonly enhancedArt: EnhancedArt | null;
   readonly enhancedArtActive: () => boolean;
   readonly enhancedArtFor: (r: Room) => EnhancedArtSource;
   readonly enhancedPending: boolean;
   readonly enterRoom: (num: number, replay?: string) => Promise<void>;
-  readonly feedback: FeedbackUi | null;
-  readonly ffr: FfrRoom | null;
   readonly fishFrameFor: (which: "little" | "big") => FishFrame;
   readonly fishSprites: FishSprites | null;
   readonly forceBest: (roomNum: number, rec: string, moves: number) => void;
@@ -178,32 +199,25 @@ export interface DebugHost {
   readonly glParityCompare: (art: ArtSource) => Record<string, unknown> | null;
   readonly graphics: GraphicsLevel;
   readonly heldState: number;
-  readonly helpOpen: boolean;
   readonly helpScreens: HelpScreens;
   readonly hooks: HookSystem;
   readonly idle: () => boolean;
-  readonly idleTimer: 0 | NodeJS.Timeout;
+  /**
+   * Whether the frame clock is sleeping on the idle timer rather than on rAF. Was the
+   * timer handle itself until the clock moved to `frameClock.ts`; the handle was never
+   * anything but a truthiness test here, and the boolean is what `onTimer` always meant.
+   */
+  readonly loopIdle: boolean;
   readonly inReplay: () => boolean;
   readonly intro: IntroPlayer;
   readonly introMovie: () => string;
-  readonly lastLine: { name: string; count: number; } | null;
   readonly lastRoomBackend: "cpu" | "webgl";
   readonly lastRoomSig: string;
-  readonly legImage: { w: number; h: number; rgba: Uint8ClampedArray; } | null;
-  readonly legImageAi: ImageBitmap | null;
-  readonly legImageNum: number;
-  readonly linesSpoken: number;
   readonly loadGame: () => void;
-  readonly loadmode: { steps: RecordStep[]; idx: number; speed: number; snapshot: ScriptSnapshot | null; } | null;
   readonly logoMovie: () => string;
   readonly loopThrottleOk: () => boolean;
   readonly loopTicks: number;
   readonly mapArtPending: () => boolean;
-  mapHoverCorner: MapAction | null;
-  readonly mapInfoFaze: number;
-  readonly mapInfoHover: InfoButton | null;
-  readonly mapInfoRoom: number | null;
-  readonly mapOverlay: "credits" | "options" | "none";
   readonly mapLaunching: number | null;
   readonly parchmentReady: boolean;
   readonly mapPresented: boolean;
@@ -212,20 +226,14 @@ export interface DebugHost {
   readonly openHelp: () => void;
   readonly openMapInfo: (roomNum: number) => void;
   readonly openMapOptions: () => void;
-  readonly ostav: number;
-  readonly panel: FfpPanel | null;
   readonly panelAction: (region: number, panelX?: number) => void;
   readonly panelState: () => PanelState;
   readonly playTime: Map<number, number>;
-  readonly poslMluv: { little: number; big: number; };
   readonly previewSubFont: (next?: boolean) => void;
   renderer: "cpu" | "webgl";
   readonly replayIntro: () => void;
-  readonly replaymode: { moves: { which: "little" | "big"; dir: number; }[]; idx: number; } | null;
   readonly restartRoom: () => void;
-  readonly room: Room | null;
   readonly roomArtPending: () => boolean;
-  readonly roomDepth: number;
   readonly roomGeometry: (r: Room) => RoomGeometry;
   readonly roomLoading: boolean;
   readonly roomLoadSeq: number;
@@ -234,20 +242,12 @@ export interface DebugHost {
   readonly saveGame: () => void;
   readonly saveSolved: () => void;
   readonly scores: Map<number, number>;
-  readonly screen: "map" | "room" | "intro" | "legimage";
-  readonly screenShoveX: number;
-  readonly scroll: number;
   readonly setGraphics: (level: GraphicsLevel) => void;
   readonly setRenderOnDirty: (v: boolean) => void;
   readonly setSubtitleMode: (mode: SubtitleMode) => void;
   readonly settings: Settings;
   readonly showLegImage: (leg: number, pending?: { room: number; replay?: string; }) => Promise<void>;
   readonly showMap: () => void;
-  readonly showmode: { actions: CapAction[]; idx: number; } | null;
-  readonly showmodeHelptext: number;
-  readonly showmodeLoading: boolean;
-  readonly showmodeTrace: Record<string, string | number | boolean>[];
-  showmodeTraceOn: boolean;
   readonly skipCutscene: () => void;
   smoothLog: { t: number; n: number; a: number; cf: number; x: number; y: number; ph: string; }[] | null;
   readonly solved: Set<number>;
@@ -263,14 +263,12 @@ export interface DebugHost {
   subOverlayPainted: boolean;
   readonly subOverlayPaints: number;
   subOverlaySig: string;
-  readonly subs: SubtitleSystem | null;
   readonly syncSubOverlay: () => void;
   readonly talk: (which: "little" | "big") => void;
   readonly togglePanelOptions: () => void;
   readonly tryStep: (which: "little" | "big", dir: number) => "moving" | "turning" | "blocked" | "busy";
   readonly wake: () => void;
   waterAnimMs: number;
-  readonly worldMap: WorldMap | null;
 }
 
 /**
@@ -282,31 +280,31 @@ export interface DebugHost {
 export function debugHooks(host: DebugHost): Record<string, unknown> {
   return {
     state: () => {
-      if (!host.room) return null;
-      const l = host.room.items[host.room.littleIdx];
-      const b = host.room.items[host.room.bigIdx];
+      if (!room) return null;
+      const l = room.items[room.littleIdx];
+      const b = room.items[room.bigIdx];
       return {
-        dead: host.room.anyFishDead,
-        alive: { ...host.room.alive },
-        won: host.room.won,
-        venku: host.room.venku,
-        active: host.engine?.active ?? 'little',
-        phase: host.engine?.phase ?? 'idle',
-        swimming: host.engine?.swim != null,
-        little: l ? { x: l.x, y: l.y, facingRight: host.room.facingRight.little } : null,
-        big: b ? { x: b.x, y: b.y, facingRight: host.room.facingRight.big } : null,
+        dead: room.anyFishDead,
+        alive: { ...room.alive },
+        won: room.won,
+        venku: room.venku,
+        active: engine?.active ?? 'little',
+        phase: engine?.phase ?? 'idle',
+        swimming: engine?.swim != null,
+        little: l ? { x: l.x, y: l.y, facingRight: room.facingRight.little } : null,
+        big: b ? { x: b.x, y: b.y, facingRight: room.facingRight.big } : null,
         littleFrame: host.fishFrameFor('little'),
       };
     },
     press: (which: 'little' | 'big', dir: number) => {
-      if (!host.idle() || !host.engine) return;
-      host.engine.swim = null;
-      host.engine.active = which;
+      if (!host.idle() || !engine) return;
+      engine.swim = null;
+      engine.active = which;
       host.tryStep(which, dir);
     },
     click: (cx: number, cy: number) => host.clickCell(cx, cy),
     talk: (which: 'little' | 'big') => host.talk(which),
-    count: () => host.count,
+    count: () => count,
     fsize: () => FSIZE,
     /**
      * The room's resolved geometry (see roomGeometry): native/css/backing sizes plus the
@@ -318,12 +316,12 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * size — so a probe reading the canvas only ever tests one backend, and since `webgl`
      * is the default, the wrong one.
      */
-    roomGeom: () => (host.room ? host.roomGeometry(host.room) : null),
-    phase: () => host.engine?.phase ?? 'idle',
-    moveFrames: () => host.engine?.moveFrames() ?? MOVE_FRAMES, // current ticks/cell (jizda speed-up)
-    jizda: () => host.engine?.jizda ?? 0,
-    record: () => host.engine?.srecord ?? '',
-    moves: () => lengthOfRecord(host.engine?.srecord ?? ''),
+    roomGeom: () => (room ? host.roomGeometry(room) : null),
+    phase: () => engine?.phase ?? 'idle',
+    moveFrames: () => engine?.moveFrames() ?? MOVE_FRAMES, // current ticks/cell (jizda speed-up)
+    jizda: () => engine?.jizda ?? 0,
+    record: () => engine?.srecord ?? '',
+    moves: () => lengthOfRecord(engine?.srecord ?? ''),
     restart: () => host.restartRoom(),
     smoothOn: () => {
       host.smoothLog = [];
@@ -337,15 +335,15 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     /** The panel's per-element colour state (for asserting the greyed save button). */
     panelState: () => host.panelState(),
     posHash: () => {
-      if (!host.room) return '';
+      if (!room) return '';
       // A stable snapshot of every item's position + fish facing/exit, for
       // determinism checks (undo/load must reproduce it exactly).
-      const parts = host.room.items.map((it) => `${it.x},${it.y}`);
-      parts.push(`fL:${host.room.facingRight.little ? 1 : 0}`, `fB:${host.room.facingRight.big ? 1 : 0}`);
-      parts.push(`vL:${host.room.venku.little ? 1 : 0}`, `vB:${host.room.venku.big ? 1 : 0}`);
+      const parts = room.items.map((it) => `${it.x},${it.y}`);
+      parts.push(`fL:${room.facingRight.little ? 1 : 0}`, `fB:${room.facingRight.big ? 1 : 0}`);
+      parts.push(`vL:${room.venku.little ? 1 : 0}`, `vB:${room.venku.big ? 1 : 0}`);
       return parts.join('|');
     },
-    mouths: () => ({ ...host.poslMluv }),
+    mouths: () => ({ ...poslMluv }),
     heads: () => ({ little: host.fishFrameFor('little').headFrame, big: host.fishFrameFor('big').headFrame }),
     music: () => host.audio.currentMusic,
     graphics: () => host.graphics,
@@ -377,7 +375,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       // While the room is loading or the help overlay is up, loop() hides #screen-gl and
       // nothing paints the room at all, so `lastRoomBackend` is stale — the visible-canvas
       // test is the honest one there, exactly as it is off the room screen.
-      (host.screen === 'room' && !host.roomLoading && !host.helpOpen
+      (ui.screen === 'room' && !host.roomLoading && !ui.helpOpen
         ? host.lastRoomBackend === 'webgl'
         : glCanvas.style.display !== 'none'),
     // Loop-throttle diagnostics (perf): whether the render loop may drop to the idle
@@ -385,18 +383,18 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // spin when any is true (see loopThrottleOk). Used by the perf regression test.
     throttleInfo: () => ({
       throttleOk: host.loopThrottleOk(),
-      onTimer: host.idleTimer !== 0,
+      onTimer: host.loopIdle,
       // Why an idle room may still be waking faster than the 12.5 Hz logic tick: the ai
       // tier's water is sampled per paint on the GPU (see aiWaterAnimating).
       waterAnim: host.aiWaterAnimating(),
       loops: host.loopTicks,
       roomPaints: host.roomPaints,
       heldState: host.heldState,
-      phase: host.engine?.phase ?? 'idle',
+      phase: engine?.phase ?? 'idle',
       enhancedPending: host.enhancedPending,
       aiPending: host.aiPending,
       roomArtPending: host.roomArtPending(),
-      ostav: host.ostav,
+      ostav: ui.ostav,
       forceRoomRedraw: host.forceRoomRedraw,
     }),
     /** Dev/perf hook: mirror of the dev bar's idle-saver checkbox (P). */
@@ -405,40 +403,40 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     enhancedActive: () =>
       host.enhancedArtActive() &&
       host.enhancedArt !== null &&
-      host.room !== null &&
-      !classicOnlyBackground(host.room.gspec) &&
-      host.enhancedArt.w === (host.ffr?.width ?? 0) * FSIZE,
+      room !== null &&
+      !classicOnlyBackground(room.gspec) &&
+      host.enhancedArt.w === (ffr?.width ?? 0) * FSIZE,
     playingPrior: (prior: number) => host.audio.playing(prior),
     voicePlaying: () => host.audio.playing(1) || host.audio.playing(2) || host.audio.playing(3),
-    panelHit: (x: number, y: number) => panelHitTest(x, y, host.ostav === host.O_OPTIONS),
+    panelHit: (x: number, y: number) => panelHitTest(x, y, ui.ostav === host.O_OPTIONS),
     panelAction: (region: number, panelX = 0) => host.panelAction(region, panelX),
-    hasPanel: () => host.panel !== null,
+    hasPanel: () => ui.panel !== null,
     // Options sub-panel state (for UI probes): the scroll state + persisted settings.
-    panelOstav: () => host.ostav,
-    panelScroll: () => host.scroll,
+    panelOstav: () => ui.ostav,
+    panelScroll: () => ui.scroll,
     toggleOptions: () => host.togglePanelOptions(),
-    optionsOpen: () => host.ostav === host.O_OPTIONS,
+    optionsOpen: () => ui.ostav === host.O_OPTIONS,
     volumes: () => ({ ...host.settings.volume }),
     /** music_volume as the room scripts see it (0..64), i.e. Volumes[slider index]. */
-    scriptMusicVolume: () => host.activeScript?.s.musicVolume ?? null,
+    scriptMusicVolume: () => activeScript?.s.musicVolume ?? null,
     subtitleMode: () => host.settings.subtitles,
     titDef: () => host.settings.titDef,
     // Help overlay (for UI probes): open/close + page state.
-    helpOpen: () => host.helpOpen,
+    helpOpen: () => ui.helpOpen,
     // Feedback form (for UI probes): open/close, plus the payload and links exactly as
     // the player sees them. Read-only — nothing here sends anything.
-    feedbackOpen: () => host.feedback?.isOpen() ?? false,
-    openFeedback: (kind?: 'bug' | 'idea') => host.feedback?.open(kind),
-    closeFeedback: () => host.feedback?.close(),
-    feedbackPreview: () => host.feedback?.preview() ?? '',
-    feedbackLinks: () => host.feedback?.links() ?? { issue: '', email: '' },
-    feedbackNote: () => host.feedback?.note() ?? '',
+    feedbackOpen: () => ui.feedback?.isOpen() ?? false,
+    openFeedback: (kind?: 'bug' | 'idea') => ui.feedback?.open(kind),
+    closeFeedback: () => ui.feedback?.close(),
+    feedbackPreview: () => ui.feedback?.preview() ?? '',
+    feedbackLinks: () => ui.feedback?.links() ?? { issue: '', email: '' },
+    feedbackNote: () => ui.feedback?.note() ?? '',
     openHelp: () => host.openHelp(),
     closeHelp: () => host.closeHelp(),
     helpPage: () => host.helpScreens.page,
     helpPageCount: () => host.helpScreens.pages(host.subLang()).length,
-    hasMap: () => host.worldMap !== null,
-    screen: () => host.screen,
+    hasMap: () => ui.worldMap !== null,
+    screen: () => ui.screen,
     // Debug: true while a room's assets are still loading (loadRoom). Until this
     // clears, the PREVIOUS room is still the live one — `screen() === 'room'` alone
     // does NOT mean the room you asked for is up, because enterRoom() flips the
@@ -468,7 +466,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // this frame. Two different questions — the art can be loaded while the frame is
     // withheld by the aiRoomRenderActive gate (hooks, ZX, frame effects…).
     aiRoomLoaded: () => host.aiRoom !== null && host.aiRoomNum === host.curNum,
-    aiRoomActive: () => host.room !== null && host.aiRoomRenderActive(host.room),
+    aiRoomActive: () => room !== null && host.aiRoomRenderActive(room),
     // Debug: the room number that is actually built and running (curNum) — not the
     // one currently being loaded.
     roomNum: () => host.curNum,
@@ -481,30 +479,30 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // cannot distinguish in a room whose art animates every tick.
     paintedRoomSig: () => host.lastRoomSig,
     /** ZAVER finale cutscene active (zavermode) — for the completion-trigger UI test. */
-    zaverMode: () => host.activeScript?.s.zavermode ?? false,
+    zaverMode: () => activeScript?.s.zavermode ?? false,
     // Leg-completion story page (obrazek): the shown leg number (1..8), or null when none.
-    legImage: () => (host.legImage ? host.legImageNum : null),
+    legImage: () => (ui.legImage ? ui.legImageNum : null),
     /** Debug: show a leg story page directly (probes cannot easily win a leg-final room). */
     showLegImage: (leg: number) => { void host.showLegImage(leg); },
     /** Debug: is the upscaled story page in use for the page on screen? */
-    legImageAiActive: () => host.legImageAi !== null,
+    legImageAiActive: () => ui.legImageAi !== null,
     /** Debug: how many cutscene frames are being served from the upscaled set. */
     kufrAi: () => (host.aiKufr ? { frames: host.aiKufrFrames.size, order: host.aiKufr.order.length, scale: host.aiKufr.scale } : null),
     showMap: () => host.showMap(),
     enterRoom: (n: number) => host.enterRoom(n),
     enterRoomAwait: (n: number) => host.enterRoom(n),
-    mapHit: (x: number, y: number) => host.worldMap?.hitTest(x, y, host.solved, host.cheated) ?? 0,
+    mapHit: (x: number, y: number) => ui.worldMap?.hitTest(x, y, host.solved, host.cheated) ?? 0,
     // World-map record info panel + best-solution replay (for UI probes).
-    mapInfoRoom: () => host.mapInfoRoom,
-    mapInfoHover: () => host.mapInfoHover,
-    mapInfoFaze: () => host.mapInfoFaze,
-    deskyLang: () => host.deskyLang, // language of the currently loaded room-name plaques
+    mapInfoRoom: () => ui.mapInfoRoom,
+    mapInfoHover: () => ui.mapInfoHover,
+    mapInfoFaze: () => ui.mapInfoFaze,
+    deskyLang: () => ui.deskyLang, // language of the currently loaded room-name plaques
     openMapInfo: (n: number) => host.openMapInfo(n),
     closeMapInfo: () => host.closeMapInfo(),
     /** Click at map (x,y): routes exactly like a real left-click (panel button / open panel / launch). */
     clickMap: (x: number, y: number) => host.clickMapAt(x, y),
     replayActive: () => host.inReplay(),
-    replayIndex: () => host.replaymode?.idx ?? -1,
+    replayIndex: () => replaymode?.idx ?? -1,
     bestRecord: (n: number) => host.bestRecord(n) ?? null,
     bestRecords: () => Object.fromEntries(host.bestRecords),
     markBest: (n: number, rec: string) => host.forceBest(n, rec, lengthOfRecord(rec)),
@@ -517,19 +515,19 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     },
     skipIntro: () => host.intro.skip(),
     replayIntro: () => host.replayIntro(),
-    mapCorner: (x: number, y: number) => host.worldMap?.cornerAction(x, y) ?? null,
-    mapHover: () => host.mapHoverCorner,
+    mapCorner: (x: number, y: number) => ui.worldMap?.cornerAction(x, y) ?? null,
+    mapHover: () => ui.mapHoverCorner,
     setMapHover: (a: MapAction | null) => {
-      host.mapHoverCorner = a;
+      ui.mapHoverCorner = a;
     },
-    clickMapCorner: (x: number, y: number) => host.dispatchMapCorner(host.worldMap?.cornerAction(x, y) ?? null),
-    mapOverlay: () => host.mapOverlay,
+    clickMapCorner: (x: number, y: number) => host.dispatchMapCorner(ui.worldMap?.cornerAction(x, y) ?? null),
+    mapOverlay: () => ui.mapOverlay,
     openMapOptions: () => host.openMapOptions(),
     openCredits: () => host.openCredits(),
-    creditMode: () => host.creditMode,
+    creditMode: () => ui.creditMode,
     // Debug/test only: jump the roll to a scroll offset by back-dating its start.
-    creditSeek: (posun: number) => { host.creditsStart = performance.now() - (posun / CREDIT_SPEED) * CREDIT_TICK_MS; },
-    creditLength: () => (host.credits ? host.credits.delka : 0),
+    creditSeek: (posun: number) => { ui.creditsStart = performance.now() - (posun / CREDIT_SPEED) * CREDIT_TICK_MS; },
+    creditLength: () => (ui.credits ? ui.credits.delka : 0),
     closeMapOverlay: () => host.closeMapOverlay(),
     solvedRooms: () => [...host.solved],
     scores: () => Object.fromEntries(host.scores),
@@ -539,11 +537,11 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       host.saveSolved();
     },
     cheat: () => cheatSolveRoom(),
-    lines: () => host.linesSpoken,
-    lastLine: () => host.lastLine,
-    subsActive: () => host.subs?.active ?? false,
+    lines: () => linesSpoken,
+    lastLine: () => lastLine,
+    subsActive: () => subs?.active ?? false,
     /** True while a subtitle is still waving in or scrolling (perf probes/benchmarks). */
-    subsAnimating: () => host.subs?.vectorAnimating(host.count) ?? false,
+    subsAnimating: () => subs?.vectorAnimating(count) ?? false,
     /** Perf probe: cumulative count of vector-overlay re-renders (see subOverlayPaints). */
     subPaints: () => host.subOverlayPaints,
     /** Perf A/B: turn the overlay repaint gate off to reproduce the pre-fix cost. */
@@ -557,33 +555,33 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * reproduce it (game-pixel screen size, the overlay backing size and its scale).
      */
     subsPaintAt: (at: number, frac = 0) => {
-      if (!host.subs?.active || !host.room) return null;
-      const { scale: cs } = host.roomGeometry(host.room);
+      if (!subs?.active || !room) return null;
+      const { scale: cs } = host.roomGeometry(room);
       const dpr = window.devicePixelRatio || 1;
       host.syncSubOverlay();
       subCtx.setTransform(1, 0, 0, 1, 0, 0);
       subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
       subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-      host.subs.drawVector(subCtx, at, host.subFontFamily, host.subFontWeight, frac);
+      subs.drawVector(subCtx, at, host.subFontFamily, host.subFontWeight, frac);
       host.subOverlayPainted = true;
       host.subOverlaySig = ''; // painted behind the gate's back — force the next real repaint
       return {
         w: subCanvas.width,
         h: subCanvas.height,
         scale: cs * dpr,
-        screenW: host.subs.vectorScreen.w,
-        screenH: host.subs.vectorScreen.h,
+        screenW: subs.vectorScreen.w,
+        screenH: subs.vectorScreen.h,
         family: host.subFontFamily,
         weight: host.subFontWeight,
         substeps: SUB_SUBSTEPS,
-        lines: host.subs.debugLines(),
+        lines: subs.debugLines(),
       };
     },
     /** Test hook: inject a subtitle directly (deterministic, no room dialogue needed). */
-    pushSubtitle: (text: string, code: string) => host.subs?.newSubtitle(text, code, host.count),
+    pushSubtitle: (text: string, code: string) => subs?.newSubtitle(text, code, count),
     /** Test hooks for the win auto-return hold: read the countdown / clear subtitles. */
-    winCountdown: () => host.engine?.winCountdown ?? 0,
-    clearSubtitles: () => host.subs?.clear(),
+    winCountdown: () => engine?.winCountdown ?? 0,
+    clearSubtitles: () => subs?.clear(),
     audioHas: (name: string) => host.audio.has(name),  playSound: (name: string) => host.audio.play(name),
     // Debug: the room's .ffs voice package now loads AFTER the room's art (it is the
     // bulk of an entry's bytes and nothing visual needs it), so a probe that asserts on
@@ -591,27 +589,27 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     roomAudioReady: () => host.audio.roomLoaded,
     /** How many sounds a named package currently answers for (probe: x01 in a leg-final). */
     soundPkgSize: (id: string) => host.audio.entryCount(id),
-    script: () => (host.activeScript ? { pokus: host.activeScript.s.pokus, dialog: host.activeScript.s.isDialog() } : null),
+    script: () => (activeScript ? { pokus: activeScript.s.pokus, dialog: activeScript.s.isDialog() } : null),
     itemState: (i: number) => {
-      const it = host.room?.items[i];
+      const it = room?.items[i];
       return it ? { x: it.x, y: it.y, afaze: it.afaze, dir: it.dir, spec: it.spec, kind: it.kind } : null;
     },
-    gspec: () => host.room?.gspec ?? 0,
-    vytlacit: () => host.room?.vytlacit ?? 0,
+    gspec: () => room?.gspec ?? 0,
+    vytlacit: () => room?.vytlacit ?? 0,
     /** LODE test hooks: start/read the destructive falling-wreck animation. */
     dropShip: (phase = 0) => {
-      host.activeScript?.s.shodLod(phase);
+      activeScript?.s.shodLod(phase);
       host.forceRoomRedraw = true;
       host.wake();
     },
     wreckState: () =>
-      host.activeScript
+      activeScript
         ? {
-            phase: host.activeScript.s.padalod,
-            x: host.activeScript.s.lodniX,
-            y: host.activeScript.s.lodniY,
-            swaps: host.room?.wreckSwaps.length ?? 0,
-            changed: host.room?.wreckSwaps.reduce((n, swap) => n + swap.pixels.length, 0) ?? 0,
+            phase: activeScript.s.padalod,
+            x: activeScript.s.lodniX,
+            y: activeScript.s.lodniY,
+            swaps: room?.wreckSwaps.length ?? 0,
+            changed: room?.wreckSwaps.reduce((n, swap) => n + swap.pixels.length, 0) ?? 0,
           }
         : null,
     /** The `ai` tier's ×S wreck replay: swaps applied, cache revision, background hash. */
@@ -622,16 +620,16 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * changed — the independent footprint `aiWreckDigest().damage` is compared against.
      */
     enhWreckDamage: () => {
-      if (!host.room) return null;
-      const art = host.enhancedArtFor(host.room);
-      renderRoomBackgroundRgba(host.room, art, { count: 0 });
+      if (!room) return null;
+      const art = host.enhancedArtFor(room);
+      renderRoomBackgroundRgba(room, art, { count: 0 });
       return art.wreckDamageRect();
     },
     /** Stable fixed-count frame hash used by browser tests to prove a visible delta. */
     roomFrameHash: (mode: GraphicsLevel = host.graphics) => {
-      if (!host.room) return null;
-      const art = mode === 'classic' ? host.classicArtFor(host.room) : host.enhancedArtFor(host.room);
-      const frame = renderRoomRgba(host.room, art, { count: 0 });
+      if (!room) return null;
+      const art = mode === 'classic' ? host.classicArtFor(room) : host.enhancedArtFor(room);
+      const frame = renderRoomRgba(room, art, { count: 0 });
       let hash = 2166136261;
       for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
       return hash >>> 0;
@@ -646,9 +644,9 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * it off to get a hash that is stable between calls.
      */
     roomEffectFrameHash: (mode: GraphicsLevel = host.graphics, grain = false) => {
-      if (!host.room) return null;
-      const art = mode === 'classic' ? host.classicArtFor(host.room) : host.enhancedArtFor(host.room);
-      const frame = renderRoomRgba(host.room, art, { count: 0 });
+      if (!room) return null;
+      const art = mode === 'classic' ? host.classicArtFor(room) : host.enhancedArtFor(room);
+      const frame = renderRoomRgba(room, art, { count: 0 });
       // Snapshot the one-shot state applyFrameEffects consumes, so merely ASKING for
       // the hash cannot swallow a megabomb flash the player is owed.
       const flash = megabombFlash;
@@ -667,25 +665,25 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * the wall, it ignores swaps recorded where nothing can actually show.
      */
     roomBgFrameHash: (mode: GraphicsLevel = host.graphics) => {
-      if (!host.room) return null;
-      const art = mode === 'classic' ? host.classicArtFor(host.room) : host.enhancedArtFor(host.room);
-      const frame = renderRoomBackgroundRgba(host.room, art, { count: 0 });
+      if (!room) return null;
+      const art = mode === 'classic' ? host.classicArtFor(room) : host.enhancedArtFor(room);
+      const frame = renderRoomBackgroundRgba(room, art, { count: 0 });
       let hash = 2166136261;
       for (const byte of frame.rgba) hash = Math.imul(hash ^ byte, 16777619);
       return hash >>> 0;
     },
     /** Hacky (xfisher): spawn a fishing hook; read the hook count/states. */
     spawnHook: () => {
-      if (host.room) host.hooks.add(host.room);
+      if (room) host.hooks.add(room);
     },
     hookCount: () => host.hooks.count,
     /** Type a cheat code as the player would (the leading X arms the machine). */
     typeCheat: (code: string) => {
-      const entry = host.screen === 'map' ? mapCheats : roomCheats;
+      const entry = ui.screen === 'map' ? mapCheats : roomCheats;
       for (const ch of code) {
         const r = entry.press(ch);
         if (r.cheat) {
-          if (host.screen === 'map') applyMapCheat(r.cheat);
+          if (ui.screen === 'map') applyMapCheat(r.cheat);
           else applyRoomCheat(r.cheat);
         }
       }
@@ -694,8 +692,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     /** xsilent / xinterlaced state (silentfilm, cassilenttit, interlacedfaze). */
     silentFilm: () => ({
       on: silentFilm,
-      time: host.subs?.silentTime ?? 0,
-      lines: (host.subs?.silentLines ?? []).map((l) => l.s),
+      time: subs?.silentTime ?? 0,
+      lines: (subs?.silentLines ?? []).map((l) => l.s),
     }),
     interlacedFaze: () => interlacedFaze,
     /** The Tetris minigame: null when closed, else its live state. */
@@ -741,7 +739,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     /** cas_hry in days, plus the raw per-room banked milliseconds behind it. */
     casHry: () => host.casHry(),
     playTime: () => Object.fromEntries(host.playTime),
-    water: () => (host.room ? { wamp: host.room.wamp, wper: host.room.wper, wspd: host.room.wspd } : null),
+    water: () => (room ? { wamp: room.wamp, wper: room.wper, wspd: room.wspd } : null),
     /** The ENHANCED (truecolor) fish body sprite actually in use, for the sprite
      *  cheats — a separate art path from the FFR frames below. */
     enhancedFishSprite: (which: 'little' | 'big') => {
@@ -753,7 +751,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       return { w: bm.w, h: bm.h, hash: hash >>> 0 };
     },
     fishSpriteSize: (which: 'little' | 'big') => {
-      const bm = host.room?.bodies[which === 'little' ? 'small' : 'big'][1] ?? null;
+      const bm = room?.bodies[which === 'little' ? 'small' : 'big'][1] ?? null;
       if (!bm) return null;
       let hash = 2166136261;
       for (const byte of bm.pixels) hash = Math.imul(hash ^ byte, 16777619);
@@ -762,30 +760,30 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     hookStates: () => host.hooks.snapshot.map((h) => ({ stav: h.stav, cil: h.cil, x: h.x, y: h.y })),
     /** Debug: teleport an item (used to test gspec=9 push-out rooms). */
     moveItem: (i: number, x: number, y: number) => {
-      const it = host.room?.items[i];
+      const it = room?.items[i];
       if (it) {
         it.x = x;
         it.y = y;
       }
     },
-    chatterInfo: () => (host.chatter ? { interval: host.chatter.interval, last: host.chatter.last } : null),
+    chatterInfo: () => (chatter ? { interval: chatter.interval, last: chatter.last } : null),
     // Test probe: render the current room's background-only on the GPU and compare
     // it to the CPU background — the isolated first-failure signal for the FP32-sin
     // wobble (full-room parity is in glRoomParity).
     glBgParity: () => {
-      if (!host.room) return null;
+      if (!room) return null;
       const comp = host.glCompositor();
       if (!comp) return { webgl: false };
-      comp.renderBackgroundOnly(host.room, host.room.palette, host.count);
+      comp.renderBackgroundOnly(room, room.palette, count);
       const gpu = comp.readback();
-      const cpu = renderRoomBackgroundRgba(host.room, host.classicArtFor(host.room), { count: host.count });
+      const cpu = renderRoomBackgroundRgba(room, host.classicArtFor(room), { count: count });
       if (gpu.w !== cpu.width || gpu.h !== cpu.height) return { webgl: true, dimMismatch: true };
       return { webgl: true, w: gpu.w, h: gpu.h, ...host.glChannelDiff(cpu.rgba, gpu.rgba) };
     },
     // Test probe: render the WHOLE current room (background + items + fish) on the
     // GPU via the shared compositor (renderRoomInto → GlScreen) and compare to the
     // CPU frame, byte-for-byte. Classic art source, resting pose (count only).
-    glRoomParity: () => (host.room ? host.glParityCompare(host.classicArtFor(host.room)) : null),
+    glRoomParity: () => (room ? host.glParityCompare(host.classicArtFor(room)) : null),
     /**
      * Perf probe: MARGINAL milliseconds per ×S AI frame on each backend.
      *
@@ -807,13 +805,13 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * cache rather than the compositor.
      */
     aiRenderBench: (frames = 30) => {
-      if (!host.room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
+      if (!room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
       const comp = host.glAiCompositor();
-      const geom = host.roomGeometry(host.room);
+      const geom = host.roomGeometry(room);
       const w = geom.nativeW * host.aiRoom.scale;
       const h = geom.nativeH * host.aiRoom.scale;
       const frame = (n: number): AiRoomFrame => ({
-        count: host.count + n,
+        count: count + n,
         slide: (n % 4) / 4,
         fishAnim: {
           little: { bodyFrame: TL_PLAV[1]!, headFrame: HL_MRK },
@@ -835,7 +833,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         for (let i = 0; i < n; i++) {
           c2.setTransform(1, 0, 0, 1, 0, 0);
           c2.clearRect(0, 0, w, h);
-          host.aiRoom!.drawInto(cpuTarget, host.room!, frame(i));
+          host.aiRoom!.drawInto(cpuTarget, room!, frame(i));
         }
         c2.getImageData(0, 0, 1, 1); // drain the 2D command queue
         return performance.now() - t;
@@ -844,7 +842,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         const t = performance.now();
         for (let i = 0; i < n; i++) {
           comp!.begin(w, h);
-          host.aiRoom!.drawInto(comp!, host.room!, frame(i));
+          host.aiRoom!.drawInto(comp!, room!, frame(i));
         }
         comp!.finish();
         return performance.now() - t;
@@ -878,20 +876,20 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * distinguishable from an aligned one.
      */
     aiPresentCheck: () => {
-      if (!host.room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
+      if (!room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
       const comp = host.glAiCompositor();
       if (!comp) return { webgl: false };
-      const geom = host.roomGeometry(host.room);
+      const geom = host.roomGeometry(room);
       const w = geom.nativeW * host.aiRoom.scale;
       const h = geom.nativeH * host.aiRoom.scale;
       // Present at a real minification (the shipping case), small enough to score quickly.
       const pw = Math.max(2, Math.round(geom.nativeW));
       const ph = Math.max(2, Math.round(geom.nativeH));
       const rest = { bodyFrame: TL_ZAKLAD[0]!, headFrame: 0 };
-      const f: AiRoomFrame = { count: host.count, slide: 0, fishAnim: { little: rest, big: rest } };
+      const f: AiRoomFrame = { count: count, slide: 0, fishAnim: { little: rest, big: rest } };
       comp.track(host.aiRoom);
       if (!comp.begin(w, h)) return { webgl: true, unsupported: true };
-      host.aiRoom.drawInto(comp, host.room, f);
+      host.aiRoom.drawInto(comp, room, f);
       const gpu = comp.presentReadback(pw, ph);
 
       // Reference: the canvas-2D composite, scaled to the presented size by the browser.
@@ -901,7 +899,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       const bg = big.getContext('2d', { willReadFrequently: true });
       if (!bg) return { webgl: true, noCanvas: true };
       bg.clearRect(0, 0, w, h);
-      host.aiRoom.drawInto(new Canvas2dAiTarget(bg), host.room, f);
+      host.aiRoom.drawInto(new Canvas2dAiTarget(bg), room, f);
       const small = document.createElement('canvas');
       small.width = pw;
       small.height = ph;
@@ -1007,16 +1005,16 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * and the band seams are only legible at 1:1 anyway.
      */
     aiBgCapture: (opts: { x?: number; y?: number; w?: number; h?: number; at?: number; alpha?: number; cpu?: boolean } = {}) => {
-      if (!host.room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
+      if (!room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
       const S = host.aiRoom.scale;
-      const geom = host.roomGeometry(host.room);
+      const geom = host.roomGeometry(room);
       const W = geom.nativeW * S;
       const H = geom.nativeH * S;
       const x = Math.max(0, Math.min(W - 1, opts.x ?? 0));
       const y = Math.max(0, Math.min(H - 1, opts.y ?? 0));
       const w = Math.max(1, Math.min(W - x, opts.w ?? W));
       const h = Math.max(1, Math.min(H - y, opts.h ?? H));
-      const at = opts.at ?? host.count;
+      const at = opts.at ?? count;
       const alpha = opts.alpha ?? 0;
       const out = document.createElement('canvas');
       out.width = w;
@@ -1031,14 +1029,14 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         const c2 = cv.getContext('2d', { willReadFrequently: true });
         if (!c2) return null;
         c2.clearRect(0, 0, W, H);
-        host.aiRoom.drawBackgroundInto(new Canvas2dAiTarget(c2), host.room, at, alpha);
+        host.aiRoom.drawBackgroundInto(new Canvas2dAiTarget(c2), room, at, alpha);
         og.drawImage(cv, x, y, w, h, 0, 0, w, h);
       } else {
         const comp = host.glAiCompositor();
         if (!comp) return null;
         comp.track(host.aiRoom);
         if (!comp.begin(W, H)) return null;
-        host.aiRoom.drawBackgroundInto(comp, host.room, at, alpha);
+        host.aiRoom.drawBackgroundInto(comp, room, at, alpha);
         const px = comp.readback();
         if (px.w !== W || px.h !== H) return null;
         const img = og.createImageData(w, h);
@@ -1080,15 +1078,15 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * begins immediately, rather than making the tuner wait out `periodTicks`.
      */
     rippleState: () => {
-      if (!host.room) return null;
+      if (!room) return null;
       const w: AiWobble = {
-        wamp: host.room.wamp, wper: host.room.wper, wspd: host.room.wspd, count: host.count, time: host.count + host.alpha,
+        wamp: room.wamp, wper: room.wper, wspd: room.wspd, count: count, time: count + alpha,
       };
       const clock = w.time + RIPPLE.offsetTicks;
-      const active = activeRipples(w, host.roomGeometry(host.room).nativeH);
+      const active = activeRipples(w, host.roomGeometry(room).nativeH);
       return {
-        wamp: host.room.wamp,
-        wobbles: host.room.wamp !== 0,
+        wamp: room.wamp,
+        wobbles: room.wamp !== 0,
         active: active.length,
         // Gaps are jittered, so "when is the next one" has to be asked of the schedule
         // rather than derived from the period.
@@ -1097,19 +1095,19 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       };
     },
     startTrainNow: () => {
-      if (!host.room) return;
-      const clock = host.count + host.alpha + RIPPLE.offsetTicks;
+      if (!room) return;
+      const clock = count + alpha + RIPPLE.offsetTicks;
       RIPPLE.offsetTicks += nextRippleBirth(clock, RIPPLE) - clock;
       host.forceRoomRedraw = true;
     },
     aiWobbleCheck: (opts: { alpha?: number; minRun?: number } = {}) => {
-      if (!host.room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
+      if (!room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
       const comp = host.glAiCompositor();
       if (!comp) return { webgl: false };
-      const art = host.aiRoom.backgroundArt(host.room);
+      const art = host.aiRoom.backgroundArt(room);
       if (!art) return { webgl: true, noArt: true };
       const S = host.aiRoom.scale;
-      const geom = host.roomGeometry(host.room);
+      const geom = host.roomGeometry(room);
       const W = geom.nativeW * S;
       const H = geom.nativeH * S;
       const alpha = opts.alpha ?? 0;
@@ -1117,7 +1115,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
 
       comp.track(host.aiRoom);
       if (!comp.begin(W, H)) return { webgl: true, unsupported: true };
-      host.aiRoom.drawBackgroundInto(comp, host.room, host.count, alpha);
+      host.aiRoom.drawBackgroundInto(comp, room, count, alpha);
       const gpu = comp.readback();
       if (gpu.w !== W || gpu.h !== H) return { webgl: true, dimMismatch: true };
 
@@ -1135,9 +1133,9 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       const wallPx = grab(art.wall);
       if (!bgPx || !wallPx) return { webgl: true, noCanvas: true };
 
-      const wobbles = host.room.wamp !== 0;
+      const wobbles = room.wamp !== 0;
       const w: AiWobble = {
-        wamp: host.room.wamp, wper: host.room.wper, wspd: host.room.wspd, count: host.count, time: host.count + alpha,
+        wamp: room.wamp, wper: room.wper, wspd: room.wspd, count: count, time: count + alpha,
       };
       const phase = wobblePhase(w);
       const ripples = activeRipples(w, geom.nativeH);
@@ -1205,7 +1203,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         // Best INTEGER shift of this row against its own source row, and its residual.
         if (bestLen >= minRun) {
           const span = Math.min(bestLen, 800);
-          const lim = Math.ceil((host.room.wamp / 2) * S) + 2;
+          const lim = Math.ceil((room.wamp / 2) * S) + 2;
           let bestD = 0, bestErr = Infinity;
           for (let d = -lim; d <= lim; d++) {
             let err = 0;
@@ -1241,7 +1239,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       return {
         webgl: true,
         w: W, h: H, scale: S, wobbles, alpha,
-        wamp: host.room.wamp, wper: host.room.wper, wspd: host.room.wspd,
+        wamp: room.wamp, wper: room.wper, wspd: room.wspd,
         ripples: ripples.length,
         oracleMax,
         oracleRmse: Math.sqrt(sq / Math.max(1, n)),
@@ -1254,14 +1252,14 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       };
     },
     aiGlParity: (opts: { stillWater?: boolean } = {}) => {
-      if (!host.room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
+      if (!room || !host.aiRoom || host.aiRoomNum !== host.curNum) return null;
       const comp = host.glAiCompositor();
       if (!comp) return { webgl: false };
-      const geom = host.roomGeometry(host.room);
+      const geom = host.roomGeometry(room);
       const w = geom.nativeW * host.aiRoom.scale;
       const h = geom.nativeH * host.aiRoom.scale;
       const f: AiRoomFrame = {
-        count: host.count,
+        count: count,
         slide: 0.5,
         fishAnim: {
           little: { bodyFrame: TL_PLAV[1]!, headFrame: HL_MRK },
@@ -1278,8 +1276,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       // held to before. Rooms 46 and 66 already have `wamp === 0`, so they run this probe
       // untouched and act as the control that the override itself is not what produces the
       // match. Restored in `finally`: a probe must not leave the room's water switched off.
-      const savedWamp = host.room.wamp;
-      if (opts.stillWater) host.room.wamp = 0;
+      const savedWamp = room.wamp;
+      if (opts.stillWater) room.wamp = 0;
       try {
         const cv = document.createElement('canvas');
         cv.width = w;
@@ -1288,23 +1286,23 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         if (!c2) return { webgl: true, noCanvas: true };
         c2.setTransform(1, 0, 0, 1, 0, 0);
         c2.clearRect(0, 0, w, h);
-        host.aiRoom.drawInto(new Canvas2dAiTarget(c2), host.room, f); // scratch target: see aiRenderBench
+        host.aiRoom.drawInto(new Canvas2dAiTarget(c2), room, f); // scratch target: see aiRenderBench
         const cpu = new Uint8Array(c2.getImageData(0, 0, w, h).data.buffer.slice(0));
         comp.track(host.aiRoom);
         comp.begin(w, h);
-        host.aiRoom.drawInto(comp, host.room, f);
+        host.aiRoom.drawInto(comp, room, f);
         const gpu = comp.readback();
         if (gpu.w !== w || gpu.h !== h) return { webgl: true, dimMismatch: true };
         return { webgl: true, w, h, stillWater: opts.stillWater === true, ...host.glChannelDiff(cpu, gpu.rgba, w) };
       } finally {
-        host.room.wamp = savedWamp;
+        room.wamp = savedWamp;
       }
     },
     // Test probe: same, through the ENHANCED (FFNG truecolor) art source.
     // `enh` reports whether the FFNG masters were actually engaged for this room.
     glEnhParity: () => {
-      if (!host.room) return null;
-      const r = host.glParityCompare(host.enhancedArtFor(host.room));
+      if (!room) return null;
+      const r = host.glParityCompare(host.enhancedArtFor(room));
       if (r && typeof r === 'object' && 'webgl' in r && r.webgl) (r as Record<string, unknown>).enh = host.enhancedArt !== null;
       return r;
     },
@@ -1317,12 +1315,12 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // resting-pose glRoomParity. Byte-exact expected (max=0). The test drives the
     // scenario (spawnHook / killFish / pushSubtitle) before calling this.
     glLiveParity: () => {
-      if (!host.room) return null;
+      if (!room) return null;
       const comp = host.glCompositor();
       if (!comp) return { webgl: false };
-      const art = host.classicArtFor(host.room);
+      const art = host.classicArtFor(room);
       const opts = {
-        count: host.count,
+        count: count,
         slide: 0.5,
         fishAnim: {
           little: { bodyFrame: TL_PLAV[1]!, headFrame: HL_MRK },
@@ -1330,11 +1328,11 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         },
         hooks: host.hooks.snapshot,
       };
-      const cpu = renderRoomRgba(host.room, art, opts);
-      host.subs?.draw(cpu, host.count); // baked classic subtitles (setIndex on the CPU target)
-      comp.begin(cpu.width, cpu.height, host.room.palette);
-      renderRoomInto(comp, host.room, art, opts);
-      host.subs?.draw(comp, host.count); // baked classic subtitles (setIndex on the GPU target)
+      const cpu = renderRoomRgba(room, art, opts);
+      subs?.draw(cpu, count); // baked classic subtitles (setIndex on the CPU target)
+      comp.begin(cpu.width, cpu.height, room.palette);
+      renderRoomInto(comp, room, art, opts);
+      subs?.draw(comp, count); // baked classic subtitles (setIndex on the GPU target)
       if (comp.unsupported) return { webgl: true, unsupported: true };
       const gpu = comp.readback();
       if (gpu.w !== cpu.width || gpu.h !== cpu.height) return { webgl: true, dimMismatch: true };
@@ -1347,16 +1345,16 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // upscale is cosmetic and NOT part of this comparison (readback reads the FBO,
     // not the presented canvas). Requires an active cutscene.
     glCutsceneParity: () => {
-      if (!host.cutscene) return null;
+      if (!cutscene) return null;
       const comp = host.glCompositor();
       if (!comp) return { webgl: false };
-      const w = host.cutscene.width;
-      const h = host.cutscene.height;
-      comp.renderIndexed(host.cutscene.pixels, w, h, host.cutscene.palette);
+      const w = cutscene.width;
+      const h = cutscene.height;
+      comp.renderIndexed(cutscene.pixels, w, h, cutscene.palette);
       const gpu = comp.readback();
       const frame = new IndexedScreen(w, h);
-      frame.px.set(host.cutscene.pixels);
-      const cpu = frame.toRgba(host.cutscene.palette);
+      frame.px.set(cutscene.pixels);
+      const cpu = frame.toRgba(cutscene.palette);
       if (gpu.w !== w || gpu.h !== h) return { webgl: true, dimMismatch: true };
       return { webgl: true, w, h, ...host.glChannelDiff(cpu, gpu.rgba) };
     },
@@ -1394,14 +1392,14 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // at 60fps under vsync when there's slack). WebGL is timed with a gl.finish()
     // per frame so real GPU execution — not just async command submission — counts.
     benchRender: (mode: 'cpu' | 'webgl', frames = 120, warmup = 20) => {
-      if (!host.room) return null;
-      const art = host.enhancedArtActive() ? host.enhancedArtFor(host.room) : host.classicArtFor(host.room);
-      const { nativeW: sw, nativeH: sh, scale: benchCs } = host.roomGeometry(host.room);
-      const opts = { count: host.count };
+      if (!room) return null;
+      const art = host.enhancedArtActive() ? host.enhancedArtFor(room) : host.classicArtFor(room);
+      const { nativeW: sw, nativeH: sh, scale: benchCs } = host.roomGeometry(room);
+      const opts = { count: count };
       const samples: number[] = [];
       // The ZX room's blitZX advances room.zx every render; snapshot it so the
       // benchmark (warmup + frames iterations) leaves the live animation untouched.
-      const zxSnap = host.room.gspec === 42 ? { ...host.room.zx } : null;
+      const zxSnap = room.gspec === 42 ? { ...room.zx } : null;
       if (mode === 'webgl') {
         const comp = host.glCompositor();
         if (!comp) return { mode, webgl: false };
@@ -1409,8 +1407,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         const bw = Math.round(sw * benchCs * dpr);
         const bh = Math.round(sh * benchCs * dpr);
         const one = (): void => {
-          comp.begin(sw, sh, host.room!.palette);
-          renderRoomInto(comp, host.room!, art, opts);
+          comp.begin(sw, sh, room!.palette);
+          renderRoomInto(comp, room!, art, opts);
           comp.present(bw, bh);
           comp.finish(); // flush GPU so the timing includes execution, not just submission
         };
@@ -1422,7 +1420,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         }
       } else {
         const one = (): void => {
-          const s = renderRoomRgba(host.room!, art, opts);
+          const s = renderRoomRgba(room!, art, opts);
           ctx.putImageData(new ImageData(new Uint8ClampedArray(s.rgba), sw, sh), 0, 0);
         };
         for (let i = 0; i < warmup; i++) one();
@@ -1433,7 +1431,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         }
       }
       samples.sort((a, b) => a - b);
-      if (zxSnap) Object.assign(host.room.zx, zxSnap); // restore ZX animation state
+      if (zxSnap) Object.assign(room.zx, zxSnap); // restore ZX animation state
       const sum = samples.reduce((a, b) => a + b, 0);
       const median = samples[Math.floor(samples.length / 2)]!;
       const p95 = samples[Math.floor(samples.length * 0.95)]!;
@@ -1460,9 +1458,9 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * 2D commands are actually rasterized inside the timed window instead of being
      * batched away.
      */
-    benchSubs: (frames = 120, warmup = 20, at = host.count, advance = false) => {
-      if (!host.subs?.active || !host.room) return null;
-      const { scale: cs } = host.roomGeometry(host.room);
+    benchSubs: (frames = 120, warmup = 20, at = count, advance = false) => {
+      if (!subs?.active || !room) return null;
+      const { scale: cs } = host.roomGeometry(room);
       host.syncSubOverlay();
       const dpr = window.devicePixelRatio || 1;
       let tick = at;
@@ -1472,7 +1470,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
           subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
           if (draw) {
             subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-            host.subs!.drawVector(subCtx, advance ? tick++ : at, host.subFontFamily, host.subFontWeight);
+            subs!.drawVector(subCtx, advance ? tick++ : at, host.subFontFamily, host.subFontWeight);
           }
           if (flush) {
             subCtx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1501,8 +1499,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       host.subOverlaySig = ''; // the probe painted behind the gate's back — force a repaint
       return {
         frames,
-        chars: host.subs.lineChars,
-        lines: host.subs.lineCount,
+        chars: subs.lineChars,
+        lines: subs.lineCount,
         overlay: `${subCanvas.width}x${subCanvas.height}`,
         ...full,
         clearOnly,
@@ -1511,82 +1509,82 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     },
     chatCount: () => host.audio.entryCount('x03'),
     deathBank: () => host.audio.entryCount('x02'),
-    roomDepth: () => host.roomDepth,
+    roomDepth: () => roomDepth,
     killFish: (which: 'little' | 'big') => {
-      host.room?.killFish(which);
+      room?.killFish(which);
     },
     /** Send a fish out of the room (stav_ven end): zije:=false, venku:=true. */
     exitFish: (which: 'little' | 'big') => {
-      host.room?.exitFish(which);
+      room?.exitFish(which);
     },
     setTrepat: (v: number) => {
-      if (host.activeScript) host.activeScript.s.trepat = v;
+      if (activeScript) activeScript.s.trepat = v;
     },
     canvasTransform: () => canvas.style.transform,
     // Force the ambient-chatter timer due, so the next tick fires a StdKecej line.
     makeChatterDue: () => {
-      if (host.chatter) host.chatter.last = host.count - host.chatter.interval - 1;
+      if (chatter) chatter.last = count - chatter.interval - 1;
     },
     startCutscene: () => void host.startCutscene(),
-    cutsceneDone: () => host.cutscene?.done ?? null,
-    cutsceneActive: () => host.cutscene !== null,
+    cutsceneDone: () => cutscene?.done ?? null,
+    cutsceneActive: () => cutscene !== null,
     skipCutscene: () => host.skipCutscene(),
     setLang: (l: SubtitleMode) => {
       host.setSubtitleMode(l);
     },
     // Force a fish to swim out (demonstrates the stav_ven exit animation + win).
     forceExit: (which: 'little' | 'big', dir: number = Dir.left) => {
-      if (!host.room || !host.engine || host.engine.phase !== 'idle' || host.room.won) return;
-      const idx = which === 'little' ? host.room.littleIdx : host.room.bigIdx;
-      host.engine.exiting = { which, dir };
-      host.engine.exitFrames = exitFramesFor(which, dir);
-      host.room.items[idx]!.dir = dir;
-      if (dir === Dir.left) host.room.facingRight[which] = false;
-      else if (dir === Dir.right) host.room.facingRight[which] = true;
-      host.engine.phase = 'exit';
-      host.engine.animFrame = 0;
+      if (!room || !engine || engine.phase !== 'idle' || room.won) return;
+      const idx = which === 'little' ? room.littleIdx : room.bigIdx;
+      engine.exiting = { which, dir };
+      engine.exitFrames = exitFramesFor(which, dir);
+      room.items[idx]!.dir = dir;
+      if (dir === Dir.left) room.facingRight[which] = false;
+      else if (dir === Dir.right) room.facingRight[which] = true;
+      engine.phase = 'exit';
+      engine.animFrame = 0;
     },
     // Dev-only "Win room" (dev-bar button / Shift+W hotkey): genuinely win via the real path.
     winRoom: () => devWinRoom(),
     // ZELVA telepathic possession (natvrdo): force the turtle to seize a fish and
     // drive it to (tx,ty); read the flag and the fish's current cell.
-    natvrdo: () => host.activeScript?.s.natvrdo ?? 0,
-    screenShove: () => host.screenShoveX,
-    screenOffset: () => (host.activeScript ? { ...host.activeScript.s.screenOffset } : { x: 0, y: 0 }),
-    roompole: (i: number) => host.activeScript?.s.roompole[i] ?? 0,
+    natvrdo: () => activeScript?.s.natvrdo ?? 0,
+    screenShove: () => screenShoveX,
+    screenOffset: () => (activeScript ? { ...activeScript.s.screenOffset } : { x: 0, y: 0 }),
+    roompole: (i: number) => activeScript?.s.roompole[i] ?? 0,
     // KAJUTA1 screen-shove testing: arm gspec, and push the big fish a step (returns the
     // step result + resulting gspec/shove) so a probe can drive a wall-push deterministically.
     setGspec: (n: number) => {
-      if (host.room) host.room.gspec = n;
+      if (room) room.gspec = n;
     },
     bigPush: (dir: number) => {
       const r = host.tryStep('big', dir);
-      return { result: r, gspec: host.room?.gspec ?? 0, shove: host.screenShoveX };
+      return { result: r, gspec: room?.gspec ?? 0, shove: screenShoveX };
     },
     possess: (tvrdaryba: number, tx: number, ty: number) => {
-      if (host.activeScript) {
-        host.activeScript.s.tvrdaryba = tvrdaryba;
-        host.activeScript.s.tvrdex = tx;
-        host.activeScript.s.tvrdey = ty;
-        host.activeScript.s.natvrdo = 1;
+      if (activeScript) {
+        activeScript.s.tvrdaryba = tvrdaryba;
+        activeScript.s.tvrdex = tx;
+        activeScript.s.tvrdey = ty;
+        activeScript.s.natvrdo = 1;
       }
     },
     fishCell: (which: 'little' | 'big') => {
-      if (!host.room) return null;
-      const it = host.room.items[which === 'little' ? host.room.littleIdx : host.room.bigIdx];
+      if (!room) return null;
+      const it = room.items[which === 'little' ? room.littleIdx : room.bigIdx];
       return it ? { x: it.x, y: it.y } : null;
     },
     // BUG-001 busy-input-gate testing: read/stage a fish's `busy` flag so a probe can
     // verify that input is dropped (fish stays put, keeps facing the player) while it talks.
-    busy: (which: 'little' | 'big') => (host.room ? host.room.busy[which] : 0),
+    busy: (which: 'little' | 'big') => (room ? room.busy[which] : 0),
     setBusy: (which: 'little' | 'big', val: number) => {
-      if (host.room) host.room.busy[which] = val;
+      if (room) room.busy[which] = val;
     },
     // Debug: place a fish at a cell (used to stage the KUFRIK demo spot before forcing
     // showmode, since the recording's waypoints assume the fish start there).
     setFishCell: (which: 'little' | 'big', x: number, y: number) => {
-      if (!host.room) return;
-      const it = host.room.items[which === 'little' ? host.room.littleIdx : host.room.bigIdx];
+      if (!room) return;
+      const it = room.items[which === 'little' ? room.littleIdx : room.bigIdx];
       if (it) {
         it.x = x;
         it.y = y;
@@ -1597,37 +1595,37 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     forceShowmode: () => host.startShowmode(),
     // Debug replay trace: toggle recording, read the rows, and clear.
     showmodeTraceOn: (on: boolean) => {
-      host.showmodeTraceOn = on;
-      if (!on) host.showmodeTrace.length = 0;
+      setShowmodeTraceOn(on);
+      if (!on) showmodeTrace.length = 0;
     },
-    showmodeTrace: () => host.showmodeTrace.slice(),
+    showmodeTrace: () => showmodeTrace.slice(),
     // Debug: true while a fast-forward load animation is replaying (loadmode).
-    loading: () => host.loadmode !== null,
+    loading: () => loadmode !== null,
     soundLog: () => host.audio.soundLog.slice(),
     clearSoundLog: () => {
       host.audio.soundLog.length = 0;
     },
     // Debug: inspect pathfinding from a fish to a target cell.
     probePath: (which: 'little' | 'big', x: number, y: number) => {
-      if (!host.room) return null;
-      const idx = which === 'little' ? host.room.littleIdx : host.room.bigIdx;
-      const it = host.room.items[idx];
+      if (!room) return null;
+      const idx = which === 'little' ? room.littleIdx : room.bigIdx;
+      const it = room.items[idx];
       return {
-        dir: host.room.findDir(which, x, y),
-        targetCell: host.room.cellOccupant(x, y),
-        width: host.room.width,
-        height: host.room.height,
+        dir: room.findDir(which, x, y),
+        targetCell: room.cellOccupant(x, y),
+        width: room.width,
+        height: room.height,
         fish: it ? { x: it.x, y: it.y } : null,
       };
     },
     showmodeState: () => ({
-      active: host.showmode !== null,
-      loading: host.showmodeLoading,
-      idx: host.showmode?.idx ?? -1,
-      total: host.showmode?.actions.length ?? 0,
-      helptext: host.showmodeHelptext,
-      flag: host.activeScript?.s.showmode ?? false,
-      activeFish: host.engine?.active ?? 'little',
+      active: showmode !== null,
+      loading: showmodeLoading,
+      idx: showmode?.idx ?? -1,
+      total: showmode?.actions.length ?? 0,
+      helptext: showmodeHelptext,
+      flag: activeScript?.s.showmode ?? false,
+      activeFish: engine?.active ?? 'little',
     }),
   };
 }

@@ -32,6 +32,7 @@ import { loadAiCredits } from '../render/creditsAi.js';
 import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
 import { withLoadSlot } from '../render/loadSlot.js';
+import { ui } from './screenState.js';
 import { loadAiPanel } from '../render/panelAi.js';
 import type { AiPanel } from '../render/panelAi.js';
 import { AiRoom, aiRoomGateAllows, loadAiRoom } from '../render/roomAi.js';
@@ -47,14 +48,9 @@ export interface ArtHost {
   forceRoomRedraw: boolean;
   readonly graphics: GraphicsLevel;
   readonly hooks: HookSystem;
-  readonly mapOverlay: "none" | "options" | "credits";
-  mapSig: string | null;
-  panelSig: string | null;
-  readonly screen: "map" | "room" | "intro" | "legimage";
   readonly subFontReady: boolean;
   readonly subs: SubtitleSystem | null;
   readonly wake: () => void;
-  readonly worldMap: WorldMap | null;
 }
 
 let host!: ArtHost;
@@ -314,7 +310,7 @@ async function loadEnhancedObjects(jmeno: string): Promise<EnhancedObject[]> {
 /** Load the hi-res panel art once (see panelAi.ts); null ⇒ keep the faithful path. */
 export async function ensureAiPanel(): Promise<void> {
   aiPanel = await loadAiPanel('/');
-  if (aiPanel) host.panelSig = null;   // force a repaint at the new resolution
+  if (aiPanel) ui.panelSig = null;   // force a repaint at the new resolution
 }
 
 /**
@@ -363,7 +359,7 @@ export function setMapPresented(v: boolean): void {
 export function mapArtHolding(): boolean {
   // The credits overlay replaces the map on the same screen, so while it is up there is
   // no map to withhold and nothing to explain.
-  return host.screen === 'map' && host.mapOverlay !== 'credits' && mapArtPending();
+  return ui.screen === 'map' && ui.mapOverlay !== 'credits' && mapArtPending();
 }
 
 /**
@@ -377,7 +373,7 @@ export function mapArtHolding(): boolean {
  * once per session and the wait can be arrived at more than once.
  */
 export function beginMapArt(): void {
-  if (aiMapTried || host.graphics !== 'ai' || !host.worldMap) return;
+  if (aiMapTried || host.graphics !== 'ai' || !ui.worldMap) return;
   aiMapTried = true;
   aiMapPending = true;
   void ensureAiWorldMap();
@@ -394,8 +390,8 @@ export function beginMapArt(): void {
  */
 async function ensureAiWorldMap(): Promise<void> {
   try {
-    if (!host.worldMap) return;
-    aiWorldMap = await loadAiWorldMap('/data/', host.worldMap);
+    if (!ui.worldMap) return;
+    aiWorldMap = await loadAiWorldMap('/data/', ui.worldMap);
   } finally {
     // Unconditional, so the hold cannot outlive the load on ANY exit. Note this is
     // NOT what saves the ordinary failure: loadAiWorldMap catches everything it does —
@@ -405,7 +401,7 @@ async function ensureAiWorldMap(): Promise<void> {
     // loadAiWorldMap that rejects instead. Either would otherwise leave aiMapPending
     // set and withhold the map for the rest of the session.
     aiMapPending = false;
-    host.mapSig = null; // force a repaint so the map switches to the AI art once ready
+    ui.mapSig = null; // force a repaint so the map switches to the AI art once ready
     host.wake();
   }
 }
@@ -418,7 +414,7 @@ export async function ensureAiCredits(): Promise<void> {
   // to dismiss" silently stopped working in the ai tier while the keyboard still did.
   // Bind on the overlay itself; listeners survive detach/re-attach, so bind once here.
   aiCredits?.el.addEventListener('mousedown', (e) => {
-    if (e.button !== 0 || host.mapOverlay !== 'credits') return;
+    if (e.button !== 0 || ui.mapOverlay !== 'credits') return;
     e.preventDefault();
     host.closeMapOverlay();
   });
