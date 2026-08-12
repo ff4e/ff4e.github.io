@@ -44,14 +44,14 @@ import { analyse } from '../tools/region-graph.mjs';
  * removing it freed the whole frame layer: the painter, the pacing and `loop()` are all
  * outside every cycle now.
  */
-const MAX_CYCLE = 7;
+const MAX_CYCLE = 6;
 
 /**
  * Edges inside that component. Tracked alongside the cycle because the cycle is a step
  * function: a PR can remove a dozen edges and leave the component the same size, and
  * without this number that PR looks like it achieved nothing.
  */
-const MAX_CORE_EDGES = 24;
+const MAX_CORE_EDGES = 17;
 
 describe('src/app/main.ts region graph', () => {
   const report = analyse();
