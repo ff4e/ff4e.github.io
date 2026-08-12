@@ -34,7 +34,6 @@ import {
   TetrisGame,
   parseShapes,
   type HiscoreStore,
-  type TetrisKey,
   type TetrisShapes,
 } from '../core/tetris.js';
 import { renderTetris, tetrisRgba, type TetrisArt } from '../render/tetrisRender.js';
@@ -133,7 +132,7 @@ import {
   type PanelState,
   type OptionsState,
 } from '../render/hud.js';
-import { AudioEngine, TALKING_MEZ_SEC, MUSIC_PRIOR } from '../audio/audio.js';
+import { TALKING_MEZ_SEC, MUSIC_PRIOR } from '../audio/audio.js';
 import {
   loadSettings,
   saveSettings,
@@ -144,7 +143,7 @@ import {
   type VolumeBus,
 } from '../core/settings.js';
 import { musicForCHud } from '../audio/music.js';
-import { Script, type RoomScript, type ScriptSnapshot } from '../core/script.js';
+import { Script, type ScriptSnapshot } from '../core/script.js';
 import {
   StepEngine,
   MOVE_FRAMES,
@@ -196,6 +195,8 @@ import {
   winRoomBtn,
   wrap,
 } from './dom.js';
+import { ARROWS, KEYS, MLUVI_PRIOR, NOOP_SCRIPT, TETRIS_KEYS } from './keyTables.js';
+import { audio, initAudio } from './audioEngine.js';
 import { openSaveStore } from './persist.js';
 import { draw, initFramePainter, updateRoomSubOverlay } from './framePainter.js';
 import {
@@ -644,13 +645,10 @@ initCheats({
     setForceRoomRedraw(v);
   },
 });
-//#region Player settings wiring | anchors: initPlayerSettings | Hands `playerSettings.ts` its three names and loads the persisted options. Subtitle language and the volume buses are in that module.
+//#region Player settings wiring | anchors: initPlayerSettings | Hands `playerSettings.ts` its two names and loads the persisted options. Subtitle language and the volume buses are in that module.
 // Called HERE, where `const settings = loadSettings()` used to sit: after the save store is
 // open (so the `ff.*` read is legal) and after the device gate.
 initPlayerSettings({
-  get audio() {
-    return audio;
-  },
   get ensureDeskyData() {
     return ensureDeskyData;
   },
@@ -805,12 +803,9 @@ async function loadFishSprites(): Promise<void> {
   }
 }
 void loadFishSprites();
-//#region Audio engine, hooks & key tables | anchors: audio, hooks, KEYS, MLUVI_PRIOR, NOOP_SCRIPT | What is left of the mutable core once the state moved to `gameState.ts`: the AudioEngine, the fishing-hook system, and the constant tables.
-const audio = new AudioEngine();
+//#region Audio & fish selection | anchors: initAudio, hooks, peekAtPlayer, swapActive, selectFish | Builds the AudioEngine (owned by `audioEngine.ts`), the fishing-hook easter egg, and switching which fish is active. The key/constant tables are in `keyTables.ts`.
+initAudio();
 applyVolumeSettings(); // restore persisted volume levels before any sound plays
-const MLUVI_PRIOR = { little: 1, big: 2 } as const;
-/** A no-op room script for rooms without ported Programky (the dialog scheduler still runs). */
-const NOOP_SCRIPT: RoomScript = { name: '', init: () => {}, prog: () => {} };
 /** Hacky (URoom.pas:23749): the "xfisher" easter-egg fishing hooks (kills a fish). */
 const hooks = new HookSystem({
   killByHook(which: 'little' | 'big') {
@@ -825,40 +820,6 @@ const hooks = new HookSystem({
     }
   },
 });
-
-const KEYS: Record<string, { which: 'little' | 'big'; dir: number }> = {
-  KeyI: { which: 'little', dir: Dir.up },
-  KeyK: { which: 'little', dir: Dir.down },
-  KeyJ: { which: 'little', dir: Dir.left },
-  KeyL: { which: 'little', dir: Dir.right },
-  KeyW: { which: 'big', dir: Dir.up },
-  KeyS: { which: 'big', dir: Dir.down },
-  KeyA: { which: 'big', dir: Dir.left },
-  KeyD: { which: 'big', dir: Dir.right },
-};
-
-/** The minigame's key map (Ttr.pas:458: 37/100 left, 39/102 right, 12/40/98/101
- *  rotate, 32/45/96 slam). Down rotates; there is no soft drop. */
-const TETRIS_KEYS: Record<string, TetrisKey> = {
-  ArrowLeft: 'left',
-  Numpad4: 'left',
-  ArrowRight: 'right',
-  Numpad6: 'right',
-  ArrowDown: 'rotate',
-  Numpad2: 'rotate',
-  Numpad5: 'rotate',
-  Space: 'drop',
-  Insert: 'drop',
-  Numpad0: 'drop',
-};
-
-/** Arrow keys move the *active* fish (ZaznamenejPrikazKlavesou #37..#40, kdo:=sys). */
-const ARROWS: Record<string, number> = {
-  ArrowLeft: Dir.left,
-  ArrowUp: Dir.up,
-  ArrowRight: Dir.right,
-  ArrowDown: Dir.down,
-};
 
 /** stav_kuk trigger: the newly-active fish peeks at the player after a switch/select,
  *  unless we're replaying the demo (showmode) or fast-loading — the original suppresses

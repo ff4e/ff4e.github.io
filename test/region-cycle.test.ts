@@ -51,7 +51,7 @@ const MAX_CYCLE = 10;
  * function: a PR can remove a dozen edges and leave the component the same size, and
  * without this number that PR looks like it achieved nothing.
  */
-const MAX_CORE_EDGES = 49;
+const MAX_CORE_EDGES = 47;
 
 describe('src/app/main.ts region graph', () => {
   const report = analyse();
