@@ -198,6 +198,35 @@ import {
 } from './dom.js';
 import { openSaveStore } from './persist.js';
 import {
+  aiPlaqueFor,
+  closeMapInfo,
+  drawMap,
+  drawMapOverlays,
+  ensureDeskyData,
+  initMapDraw,
+  openMapInfo,
+} from './mapDraw.js';
+import {
+  closeHelp,
+  drawHelp,
+  drawPanel,
+  initPanel,
+  openHelp,
+  optionsState,
+  panelState,
+  tickPanelScroll,
+  togglePanelOptions,
+} from './panel.js';
+import {
+  beginRoomLoadingUi,
+  initLoadingUi,
+  maybeShowWebglNote,
+  relayout,
+  setLoadingMsg,
+  showFatal,
+  syncLoadingUi,
+} from './loadingUi.js';
+import {
   applyVolumeSettings,
   initPlayerSettings,
   musicLevel,
@@ -495,143 +524,13 @@ let subOverlayGate = true;
 let booted = false; // true once boot succeeds — before that, any error is fatal
 
 /** Update the loading overlay's status line. */
-//#region Loading overlay & fatal errors | anchors: setLoadingMsg, beginRoomLoadingUi, syncLoadingUi, showFatal, relayout | The boot/room-load overlay, its 200 ms anti-flash delay, and the fatal-error screen. | Hot
-function setLoadingMsg(msg: string): void {
-  if (loadingMsg) loadingMsg.textContent = msg;
-}
-
-// ── Post-boot room-loading overlay ────────────────────────────────────────────
-// The same #loading markup boot uses, re-armed for room entry. Entering a cold room
-// over a slow link takes 17-27s (measured, Slow 4G) and the stage is deliberately
-// black for all of it, so the wait needs explaining. Armed on a DELAY: a cached or
-// local entry is ready in a few ms and must never flash a spinner.
-//
-// Driven by the RENDER LOOP off the same `roomLoading || roomArtPending()` predicate
-// the frame hold uses, rather than by notifications from every site that can change
-// those flags. That is what keeps it honest: the hide happens after the loop has
-// painted the frame the overlay was covering, and leaving the room screen (map,
-// story page, cutscene) takes it down with no separate teardown call — both of which
-// a push-based version had to hand-roll, and could get wrong by forgetting a site.
-const LOADING_DELAY_MS = 200;
-/** When the current room entry started, or 0 when no entry is in progress. */
-let roomLoadingSince = 0;
-/** When the map's overlay becomes visible, or 0 while the map is not waiting. */
-let mapLoadingDueAt = 0;
-
-/** Arm the overlay for a room entry (the loop reveals it if the wait is real). */
-function beginRoomLoadingUi(num: number): void {
-  if (!booted || !loadingEl) return;
-  roomLoadingSince = performance.now();
-  const desc = ROOMS[num - 1];
-  setLoadingMsg(desc ? `Loading ${subLang() === 'cz' ? desc.cz : desc.en}…` : 'Loading…');
-  // The boot splash's title and attribution would read as a restart mid-game; the
-  // spinner and the room name are the parts that belong to a room entry.
-  loadingEl.classList.add('inroom');
-}
-
-/**
- * Show or hide the overlay for the frame that has just been painted. Called from
- * loop() AFTER the draw branch, so hiding it can never expose an unpainted stage.
- *
- * Serves BOTH holds — the room's art tier and the `ai` tier's world map — off their
- * own live-state predicates. There is one overlay, so it gets one owner: two syncs
- * writing `hidden` would fight over it on any frame where both had an opinion.
- *
- * The map's whole overlay state is DERIVED here, where the room's is pushed from
- * beginRoomLoadingUi(). That is not an inconsistency but the same principle applied
- * to a one-shot: a room entry re-runs its begin() every time, while the map's art
- * loads at most once per session, so a pushed arm could not re-arm anything when the
- * player leaves the `ai` tier (or the map screen) mid-load and comes back. Derived,
- * every return to the wait re-arms — and re-labels — for free. Note the room's begin()
- * can overwrite the message while the map's load is still in flight, which is exactly
- * the case a pushed map label would have got wrong.
- */
-function syncLoadingUi(now: number): void {
-  if (!booted || !loadingEl) return;
-  const roomWaiting = ui.screen === 'room' && (roomLoading || roomArtPending());
-  const mapWaiting = mapArtHolding();
-  if (!roomWaiting) roomLoadingSince = 0;
-  if (!mapWaiting) mapLoadingDueAt = 0;
-  else if (mapLoadingDueAt === 0) {
-    // Delay the spinner only over a map that is ALREADY ON SCREEN — a switch into the
-    // tier, where the player is looking at a perfectly good map and an instant (local)
-    // load must not flash anything at them. When the map is not up yet the stage holds
-    // black, or the room/intro we just left, so waiting 200ms to say so would only
-    // present something the player is not being taken to.
-    mapLoadingDueAt = now + (mapPresented ? LOADING_DELAY_MS : 0);
-    setLoadingMsg('Loading the world map…');
-    // The boot splash's title and attribution belong to boot — so keep them in the one
-    // case where this IS boot still running: the overlay never came down between boot
-    // and the map's first frame. Every other arm is a spinner being (re)shown mid-game,
-    // where the splash would read as a restart, exactly as a room entry's does.
-    if (loadingEl.hidden) loadingEl.classList.add('inroom');
-  }
-  const show =
-    (roomWaiting && roomLoadingSince !== 0 && now - roomLoadingSince >= LOADING_DELAY_MS) ||
-    (mapWaiting && now >= mapLoadingDueAt);
-  if (loadingEl.hidden === show) loadingEl.hidden = !show;
-}
-
-/** Reveal the fatal-error screen (missing/broken assets or a boot exception). */
-function showFatal(msg?: string): void {
-  if (loadingEl) loadingEl.hidden = true;
-  if (fatalEl) {
-    const p = document.getElementById('fatal-msg');
-    if (p && msg) p.textContent = msg;
-    fatalEl.hidden = false;
-  }
-}
-document.getElementById('fatal-reload')?.addEventListener('click', () => location.reload());
-// Any unhandled failure DURING boot means the game never became playable → fatal.
-// After boot we stop hijacking errors (a mid-game exception shouldn't nuke play).
-window.addEventListener('unhandledrejection', (ev) => {
-  if (!booted) {
-    console.error('boot failed:', ev.reason);
-    showFatal();
-  }
-});
-window.addEventListener('error', (ev) => {
-  if (!booted) {
-    console.error('boot failed:', ev.error ?? ev.message);
-    showFatal();
-  }
+//#region Loading UI wiring | anchors: initLoadingUi | Hands `loadingUi.ts` its one name and installs the boot-failure traps. The overlay, the fatal screen and relayout() are in that module.
+initLoadingUi({
+  get booted() {
+    return booted;
+  },
 });
 
-/** Software-renderer note when WebGL2 is unavailable (CPU fallback is automatic). */
-function maybeShowWebglNote(): void {
-  const note = document.getElementById('webgl-note');
-  if (!note) return;
-  if (webgl2Available() || localStorage.getItem('ff.webglNoteDismissed') === '1') return;
-  note.hidden = false;
-  document.getElementById('webgl-note-x')?.addEventListener('click', () => {
-    note.hidden = true;
-    try {
-      localStorage.setItem('ff.webglNoteDismissed', '1');
-    } catch {
-      /* ignore */
-    }
-  });
-}
-
-
-/**
- * Recompute the stage scale from the available game area and size the stage box +
- * side panel. Called on boot, window resize, and fullscreen change. The room/map/
- * cutscene canvases are sized per-frame in their draw functions from `stage`.
- */
-function relayout(): void {
-  const availW = stageRow?.clientWidth || window.innerWidth;
-  const availH = stageRow?.clientHeight || window.innerHeight;
-  setStage(computeStageLayout(availW, availH));
-  stageBox.style.width = `${Math.round(stage.stageW)}px`;
-  stageBox.style.height = `${Math.round(stage.stageH)}px`;
-  if (stageRow) stageRow.style.gap = `${Math.round(stage.gap)}px`;
-  setForceRoomRedraw(true); // the room canvas CSS size is set in draw() — repaint to rescale
-  wake();
-}
-
-// Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen <video> played
-// before the map on first run, and replayable from the map's top-left corner.
 //#region Intro movies & subtitle overlay | anchors: IntroPlayer, probeAiMovies, syncSubOverlay, clearSubOverlay | Logo/intro `.mp4` playback and the vector-subtitle layer above the game canvas.
 const intro = new IntroPlayer({
   layer: document.getElementById('intro-layer') as HTMLElement,
@@ -2388,476 +2287,35 @@ function onWinBookkeeping(_countdown: number): void {
  * panel. Active fish = yellow, available = orange, busy/dead/unavailable = grey,
  * the held button = lit. `pressedDir` lights a pressed D-pad arrow.
  */
-//#region Control panel | anchors: panelState, optionsState, tickPanelScroll, togglePanelOptions, openHelp, drawPanel | The side panel: its buttons, the options scroll animation, the help overlay.
-function panelState(): PanelState {
-  const bigDead = !room || !room.alive.big || room.busy.big !== 0;
-  const littleDead = !room || !room.alive.little || room.busy.little !== 0;
-  const bothAlive = !!room && room.alive.big && room.alive.little;
-  const p = ui.panelPressed;
-  let pressedDir = 0;
-  if (p >= 1 && p <= 4) pressedDir = p; // little up/down/left/right
-  else if (p >= 6 && p <= 9) pressedDir = p - 1; // big -> 5..8
-  return {
-    velka: bigDead ? SEDY : engine?.active === 'big' ? ZLUTY : ORANZOVY,
-    mala: littleDead ? SEDY : engine?.active === 'little' ? ZLUTY : ORANZOVY,
-    space: p === 11 ? SVITICI : bothAlive ? ORANZOVY : SEDY,
-    save: p === 12 ? SVITICI : canSave() ? ORANZOVY : SEDY,
-    load: p === 13 ? SVITICI : saveExists() ? ORANZOVY : SEDY,
-    abort: p === 14 ? SVITICI : ORANZOVY,
-    restart: p === 15 ? SVITICI : ORANZOVY,
-    pressedDir,
-  };
-}
+//#region Panel wiring | anchors: initPanel | Hands `panel.ts` its three names. The side panel, the options sub-panel and the help overlay are in that module.
+initPanel({
+  get canSave() {
+    return canSave;
+  },
+  get closeMapOverlay() {
+    return closeMapOverlay;
+  },
+  get saveExists() {
+    return saveExists;
+  },
+});
 
-/** The live options-panel state for rendering (KresliOptions, Uovl.pas:461). */
-function optionsState(): OptionsState {
-  return {
-    volume: { ...settings.volume },
-    subtitles: settings.subtitles,
-    helpActive: ui.helpOpen,
-    scrollFrame: ui.ostav === O_SC_UP || ui.ostav === O_SC_DOWN ? ui.scroll : -1,
-  };
-}
+//#region Map drawing wiring | anchors: initMapDraw | Hands `mapDraw.ts` the four names it needs, all of them the persisted record the map is a view of. The drawing is in that module.
+initMapDraw({
+  get bestRecord() {
+    return bestRecord;
+  },
+  get cheated() {
+    return cheated;
+  },
+  get scores() {
+    return scores;
+  },
+  get solved() {
+    return solved;
+  },
+});
 
-/**
- * Advance the options scroll animation one frame (the original panel Timer,
- * Uovl.pas:499-512): o_sc_up runs scroll scmin->scmax then settles on o_options;
- * o_sc_down runs scmax->scmin then settles on o_normal.
- */
-function advancePanelScroll(): void {
-  if (ui.ostav === O_SC_UP) {
-    if (ui.scroll >= SCMAX) ui.ostav = O_OPTIONS;
-    else ui.scroll++;
-  } else if (ui.ostav === O_SC_DOWN) {
-    if (ui.scroll <= SCMIN) ui.ostav = O_NORMAL;
-    else ui.scroll--;
-  }
-}
-
-/** Drive the scroll animation off wall-clock time (independent of game logic). */
-function tickPanelScroll(dtMs: number): void {
-  if (ui.ostav !== O_SC_UP && ui.ostav !== O_SC_DOWN) {
-    ui.scrollAcc = 0;
-    return;
-  }
-  ui.scrollAcc += dtMs;
-  if (ui.scrollAcc < PANEL_SCROLL_MS) return;
-  // Advance at most ONE frame per rendered frame and DROP the rest of the backlog —
-  // the same rule the game logic uses (see the MAX_STEPS_PER_FRAME guard in loop()).
-  //
-  // This used to `while`-loop, which fast-forwarded the whole 10-frame animation
-  // inside a single long frame: opening the options right after entering a room, while
-  // the tier's art was still decoding, burned the entire roll-down in one tick and the
-  // panel appeared to snap open with no animation at all. (Closing it, and every later
-  // open, looked fine because nothing was loading by then.) A dropped backlog just
-  // makes the animation take marginally longer under load, which is invisible; a
-  // batched one skips it entirely.
-  ui.scrollAcc = 0;
-  advancePanelScroll();
-}
-
-/**
- * Toggle the options sub-panel (the corner button oblroh, or a right-click on the
- * panel; Uovl.pas:636-639,709-712): normal -> scroll up -> options -> scroll down.
- */
-function togglePanelOptions(): void {
-  if (ui.ostav === O_NORMAL) ui.ostav = O_SC_UP;
-  else if (ui.ostav === O_OPTIONS) ui.ostav = O_SC_DOWN;
-}
-
-/**
- * Open the help screens (akce_help / ToggleHelp, Uovl.pas:719,252): load the pages
- * for the current subtitle language (tit_def when subtitles are off, as the original
- * uses tit_def) and show the overlay from the first page.
- */
-function openHelp(): void {
-  // On the map the Options panel floats as a fixed, centred overlay (zIndex 50) that
-  // would otherwise cover the full-screen help pages — close it first so Help isn't
-  // hidden behind it (in-room the panel sits beside the play area, so no overlap).
-  if (ui.mapOverlay === 'options') closeMapOverlay();
-  ui.helpOpen = true;
-  helpScreens.page = 0;
-  void helpScreens.load(subLang());
-}
-
-/** Close the help overlay (any key, Help.pas:FormKeyDown). */
-function closeHelp(): void {
-  ui.helpOpen = false;
-}
-
-/** Draw the current help page full-screen on the main canvas (Help.pas:TabControl1Change). */
-function drawHelp(): void {
-  const pages = helpScreens.pages(subLang());
-  const pg = pages[helpScreens.page];
-  if (!pg) return; // still loading
-  ui.mapSig = null; // help paints #screen — invalidate the map cache
-  if (canvas.width !== pg.w || canvas.height !== pg.h) {
-    canvas.width = pg.w;
-    canvas.height = pg.h;
-    canvas.style.width = `${pg.w}px`;
-    canvas.style.height = `${pg.h}px`;
-  }
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(pg.rgba), pg.w, pg.h), 0, 0);
-}
-
-/** Composite and blit the control panel next to the play area (or as a map overlay). */
-function drawPanel(): void {
-  if (!ui.panel) return;
-  const asMapOverlay = ui.screen === 'map' && ui.mapOverlay === 'options';
-  const visible = ui.screen === 'room' || asMapOverlay;
-  // Hide the COLUMN, not just the canvas inside it. `display: none` takes an element
-  // out of the flex row entirely, and with it the row's gap; hiding only the canvas
-  // would leave a zero-width column still claiming that gap, so the map sat half a gap
-  // off-centre and then jumped right the moment Options floated the column out of the
-  // flow. (That is exactly what happened when the column was introduced — the canvas
-  // used to be the flex item itself, and hiding it removed the gap for free.)
-  panelCol.style.display = visible ? '' : 'none';
-  // The feedback strip belongs to the Options face and hangs under it (index.html).
-  // It is shown only while those options are actually on screen, so nothing modern is
-  // in view while the game is being played — and it is absolutely positioned, so it
-  // never changes the panel column's size and cannot move the game when it appears.
-  // Written through a guard like every other DOM touch in this function: drawPanel runs
-  // per frame, and an unconditional assignment here would be the one line in it that
-  // does style work on an idle room.
-  const wantBar = !(visible && ui.ostav === O_OPTIONS);
-  if (feedbar && feedbar.hidden !== wantBar) feedbar.hidden = wantBar;
-  // Float the panel over the map when opened from the Options corner; otherwise
-  // it sits statically beside the play area (its normal in-room position). The COLUMN
-  // is what floats, not the canvas, so the strip travels with the panel it belongs to.
-  if (asMapOverlay) {
-    panelCol.style.position = 'fixed';
-    panelCol.style.left = '50%';
-    panelCol.style.top = '50%';
-    panelCol.style.transform = 'translate(-50%, -50%)';
-    panelCol.style.zIndex = '50';
-  } else if (panelCol.style.position === 'fixed') {
-    panelCol.style.position = '';
-    panelCol.style.left = '';
-    panelCol.style.top = '';
-    panelCol.style.transform = '';
-    panelCol.style.zIndex = '';
-  }
-  if (!visible) return;
-  // Composing the panel (155×395) + palette→RGBA + putImageData is pure per-frame
-  // waste while nothing on it changes (idle in a room). Compute a signature from the
-  // state FIRST and bail before the (allocating) compose+blit when it's unchanged.
-  if (graphics === 'ai' && !ui.aiPanelTried) { ui.aiPanelTried = true; void ensureAiPanel(); }
-  // The AI panel composites at ×scale into a bigger backing store; the CSS size below
-  // is unchanged, so this is purely a resolution increase. Falls back the moment the
-  // art is missing or the tier is switched away.
-  const ai = graphics === 'ai' ? aiPanel : null;
-  const wantW = ai ? ai.width : PANEL_W;
-  const wantH = ai ? ai.height : PANEL_H;
-  if (panelCanvas.width !== wantW || panelCanvas.height !== wantH) {
-    panelCanvas.width = wantW;
-    panelCanvas.height = wantH;
-    ui.panelSig = null; // resize cleared the backing store — force a repaint
-  }
-  let sig: string;
-  let paint: () => void;
-  if (ui.ostav === O_NORMAL) {
-    const st = panelState();
-    sig = `n|${st.velka}|${st.mala}|${st.space}|${st.save}|${st.load}|${st.abort}|${st.restart}|${st.pressedDir}`;
-    paint = ai
-      ? () => ai.drawPanel(panelCtx, st)
-      : () => panelCtx.putImageData(new ImageData(new Uint8ClampedArray(panelToRgba(composePanel(ui.panel!.images, st), ui.panel!.palette)), PANEL_W, PANEL_H), 0, 0);
-  } else {
-    const st = optionsState();
-    sig = `o|${st.volume.effect}|${st.volume.voice}|${st.volume.music}|${st.subtitles}|${st.helpActive ? 1 : 0}|${st.scrollFrame}`;
-    paint = ai
-      ? () => ai.drawOptions(panelCtx, st)
-      : () => panelCtx.putImageData(new ImageData(new Uint8ClampedArray(panelToRgba(composeOptions(ui.panel!.images, ui.panel!.cudl, st), ui.panel!.palette)), PANEL_W, PANEL_H), 0, 0);
-  }
-  // The signature must include which renderer produced the pixels, or switching tiers
-  // with an otherwise-identical panel state would leave the old resolution on screen.
-  sig = `${ai ? 'a' : 'f'}|${sig}`;
-  if (sig !== ui.panelSig) {
-    ui.panelSig = sig;
-    paint();
-  }
-  // Fixed panel size at the stage scale — constant across all rooms (no longer
-  // tracks the room height, so it stops resizing room-to-room). Only touch the DOM
-  // when it actually changes (a resize), so idle frames do no style work.
-  const pw = `${Math.round(stage.panelW)}px`;
-  const ph = `${Math.round(stage.panelH)}px`;
-  if (panelCanvas.style.width !== pw) panelCanvas.style.width = pw;
-  if (panelCanvas.style.height !== ph) panelCanvas.style.height = ph;
-  // The ai panel composites at ×4 into a 620×1580 store shown at ~145px wide, so
-  // without this it is point-sampled and loses the detail it was upscaled for.
-  const pFilter = scalingFilterFor(panelCanvas.width, Math.round(stage.panelW));
-  if (panelCanvas.style.imageRendering !== pFilter) panelCanvas.style.imageRendering = pFilter;
-}
-
-/**
- * Ensure the level name-plaque data (Desky) is loaded for the current subtitle
- * language (typdesek<>tit_def reload, UMain.pas:1437): popdesk<n>.dat + desky<n>.dat
- * where n = 1 (cz) / 2 (en). The language is the shared subtitle language (subLang),
- * so the room-name plaques always match the subtitles/help.
- */
-//#region World map drawing | anchors: ensureDeskyData, openMapInfo, drawMap, aiPlaqueFor, drawMapOverlays | The branch map, its name plaques, and the record info panel (krokoměr).
-async function ensureDeskyData(): Promise<void> {
-  const lang = subLang();
-  if (ui.deskyLang === lang && ui.deskyData) return;
-  const n = lang === 'cz' ? '1' : '2';
-  try {
-    const [popdesk, atlas] = await Promise.all([
-      fetch(`/data/Menu/popdesk${n}.dat`).then((r) => r.arrayBuffer()),
-      fetch(`/data/Menu/desky${n}.dat`).then((r) => r.arrayBuffer()),
-    ]);
-    ui.deskyData = parseDesky(new Uint8Array(popdesk), new Uint8Array(atlas));
-    ui.deskyLang = lang;
-  } catch {
-    /* plaques optional */
-  }
-}
-
-/** Open the record info panel for a solved/cheated room (daInfo, UMain.pas:1008). */
-function openMapInfo(roomNum: number): void {
-  ui.mapInfoRoom = roomNum;
-  ui.mapInfoHover = null;
-  ui.mapInfoFaze = 0; // InfoFaze := 0 — restart the odometer roll
-  ui.mapInfoOpenAt = performance.now();
-  ui.mapSig = null; // force a repaint (the panel is new)
-  void ensureDeskyData(); // in case the language changed since boot
-  wake();
-}
-
-/** Close the record info panel (daCancel, UMain.pas:1018). */
-function closeMapInfo(): void {
-  if (ui.mapInfoRoom === null) return;
-  ui.mapInfoRoom = null;
-  ui.mapInfoHover = null;
-  ui.mapSig = null;
-  wake();
-}
-
-/** Render the world-map screen to the main canvas. */
-function drawMap(): void {
-  if (!ui.worldMap) return;
-  // Advance the reachable-node pulse ~every 140ms (kPul cadence, UMain.pas timer).
-  const pulse = Math.floor(performance.now() / 140);
-  // The reveal is wall-clock driven, so the `ai` tier's art hold would have traced it
-  // out behind the loading overlay and handed the player a map that never animated.
-  // Start it on the frame that actually reaches them — which is this one, since the
-  // hold withholds this call entirely. Gated on arrival: switching tier over a map that
-  // is already up must not re-trace a reveal the player has watched once already.
-  if (!mapPresented) ui.mapRevealStart = performance.now();
-  // The reveal (Depth, UMain.pas): from -3, +1 per ~60ms, tracing the map in from
-  // the start; once it passes the deepest room the whole enabled map is shown.
-  const depth = Math.floor((performance.now() - ui.mapRevealStart) / 60) - 3;
-  const cs = contentScaleFor(MAP_W, MAP_H);
-  // The `ai` graphics level draws the map from AI-upscaled art re-composited at 4x,
-  // so the backing store is 4x larger (still CSS-scaled to the same display box).
-  // Reaching here at all means the art for this tier is ready: loop() withholds the
-  // draw while mapArtHolding(), so the map is only ever presented in its final art.
-  const useAi = graphics === 'ai' && aiWorldMap !== null;
-  const cw = useAi ? AI_MAP_W : MAP_W;
-  const ch = useAi ? AI_MAP_H : MAP_H;
-  if (canvas.width !== cw || canvas.height !== ch) {
-    canvas.width = cw;
-    canvas.height = ch;
-    ui.mapSig = null; // backing store was cleared by the resize — force a repaint
-  }
-  const cssW = `${MAP_W * cs}px`;
-  const cssH = `${MAP_H * cs}px`;
-  if (canvas.style.width !== cssW) canvas.style.width = cssW;
-  if (canvas.style.height !== cssH) canvas.style.height = cssH;
-  // #screen is shared with the room, which sets its own filter — set ours explicitly
-  // rather than inheriting whatever the last room left behind (an AI room left 'auto',
-  // which blurred a FALLBACK map; a fresh boot straight to the map left 'pixelated',
-  // which aliased the AI one).
-  const mFilter = scalingFilterFor(cw, Math.round(MAP_W * cs));
-  if (canvas.style.imageRendering !== mFilter) canvas.style.imageRendering = mFilter;
-  // The 640×480 palette conversion + node compositing is the map's whole cost, and
-  // it only changes when its inputs do: the pulse frame (6-phase, ~140ms), the
-  // reveal depth (until it passes maxDepth, then frozen), the hover corner, and the
-  // solved/cheated sets (which only ever grow, so their size is a sufficient key).
-  // The record info panel adds its own inputs: the open room, hovered button, and
-  // the odometer roll frame (capped once settled so the sig stops churning), plus
-  // the hovered room node (its name plaque). The AI flag is in the key so toggling
-  // the graphics level repaints.
-  const infoFazeKey = Math.min(ui.mapInfoFaze, INFO_SETTLE_FAZE);
-  const sig =
-    `${useAi ? 'ai' : 'n'}|${pulse % 6}|${Math.min(depth, ui.worldMap.maxDepth + 1)}|${ui.mapHoverCorner ?? ''}|${solved.size}|${cheated.size}|${cheated.size ? 1 : 0}` +
-    `|${ui.mapInfoRoom ?? ''}|${ui.mapInfoHover ?? ''}|${infoFazeKey}|${ui.mapHoverRoom ?? ''}|${mapLaunching() ?? ''}`;
-  // The minigame is modal over the map too (UMain.pas:1764), and animates, so its
-  // frame counter joins the cache key.
-  const sigT = tetris ? `|ttr${tetrisTick}` : '';
-  if (sig + sigT === ui.mapSig) return; // nothing visibly changed — skip the redraw entirely
-  ui.mapSig = sig + sigT;
-  setPerfPaint(perfPaint + 1); // an actual map paint (past the cache check)
-  setMapPresented(true); // a map frame is now the thing on screen (see syncLoadingUi)
-  // A room launch (daRun/daReplay) darkens the map exactly as an open record panel
-  // does — Delphi zeroes RTable for all three cases in the same statement
-  // (UMain.pas:1445) and skips the room balls with it — and draws the launching room's
-  // name plaque over that (KresliDesku, :1484).
-  const launching = mapLaunching() !== null;
-  const panelOpen = ui.mapInfoRoom !== null;
-  const unlit = panelOpen || launching;
-  // While the record panel is open the base map renders fully unlit (Delphi zeroes
-  // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
-  // only the name plaque and panel stand out. Nodes (balls) are skipped too.
-  if (useAi) {
-    // Hi-res AI base + nodes, then the record panel / name plaque overlaid at native
-    // resolution and nearest-neighbour-scaled up (keeps digits + names crisp).
-    aiWorldMap!.draw(ctx, {
-      solved,
-      pulse,
-      depth,
-      cheated,
-      hoverCorner: ui.mapHoverCorner,
-      drawNodes: !unlit,
-      litRegions: !unlit,
-    });
-    // Record-panel *artwork* (krokoměr bg + hovered icon + disabled-Replay grey) is
-    // drawn straight onto the hi-res ctx from the AI-upscaled bitmaps; the odometer
-    // digits + name plaque still ride the crisp NN overlay below so text stays sharp.
-    if (panelOpen && ui.infoPanelAssets && ui.mapInfoRoom !== null) {
-      const replayEnabled = bestRecord(ui.mapInfoRoom) !== undefined;
-      drawInfoPanelArtAi(ctx, AI_MAP_SCALE, aiWorldMap!.krokomer, aiWorldMap!.ikonky, ui.mapInfoHover, replayEnabled);
-    }
-    // Name plaque from the upscaled art, drawn straight on the hi-res ctx. Falls back
-    // to the native overlay below whenever its art is missing or still loading.
-    const plaqueRoom = mapLaunching() ?? ui.mapInfoRoom ?? ui.mapHoverRoom;
-    const plaque = plaqueRoom !== null ? aiPlaqueFor(plaqueRoom) : null;
-    if (plaque) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(plaque.bmp, plaque.x * AI_MAP_SCALE, plaque.y * AI_MAP_SCALE);
-    }
-    const overlay = new Uint8ClampedArray(MAP_W * MAP_H * 4); // transparent; only drawn cells become opaque
-    if (drawMapOverlays(overlay, true, plaque !== null)) {
-      if (!ui.mapOverlayCanvas) {
-        ui.mapOverlayCanvas = document.createElement('canvas');
-        ui.mapOverlayCanvas.width = MAP_W;
-        ui.mapOverlayCanvas.height = MAP_H;
-        ui.mapOverlayCtx = ui.mapOverlayCanvas.getContext('2d');
-      }
-      ui.mapOverlayCtx!.putImageData(new ImageData(overlay, MAP_W, MAP_H), 0, 0);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(ui.mapOverlayCanvas, 0, 0, cw, ch);
-    }
-    // Last, over the plaque: Delphi draws the plaque and then the parchment
-    // (UMain.pas:1484 then :1489), and the two rectangles overlap.
-    if (launching) {
-      blitParchmentAi(ctx);
-      markParchmentPainted(); // daRun -> daRealyRun: the load may now start
-    }
-    return;
-  }
-  const rgba = ui.worldMap.render(solved, pulse, depth, cheated, ui.mapHoverCorner, !unlit, !unlit);
-  drawMapOverlays(rgba);
-  if (launching) {
-    blitParchment(rgba);
-    markParchmentPainted(); // daRun -> daRealyRun: the load may now start
-  }
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
-}
-
-/**
- * Composite the record panel + name plaque onto a map-sized RGBA buffer (the faithful
- * path passes the base map; the AI path passes a transparent buffer to overlay). The
- * name plaque (KresliDesku, UMain.pas:1484) is drawn for the open panel's room or the
- * hovered room node; the record panel (krokoměr) is drawn when a room panel is open.
- * `aiDigitsOnly` (the AI path) draws only the panel's odometer digits, not its bg/icon
- * artwork — that is drawn straight on the hi-res ctx from the AI bitmaps instead.
- * Returns whether anything was drawn.
- */
-/**
- * AI-upscaled world-map name plaques (_desky).
- *
- * KresliDesku blits the plaque OPAQUELY, and the rectangle carries a slice of the map
- * background baked in with the lettering. Drawn at native resolution over the ×4 AI map
- * that pastes a 640×480-resolution patch into an upscaled picture — a visibly pixelated
- * band around the name. So the plaque gets upscaled like everything else, with the SAME
- * model as the map (enforced by test/aiShippedArt.test.ts) so the patch matches.
- */
-let aiDeskyGeom: Record<string, { room: number; x: number; y: number; w: number; h: number }> | null = null;
-let aiDeskyTried = false;
-/** Decoded plaques, bounded: 140 of them at ×4 would be ~30 MB held for hovering. */
-const aiDeskyCache = new Map<string, ImageBitmap>();
-const AI_DESKY_CACHE_MAX = 12;
-
-async function ensureAiDeskyGeom(): Promise<void> {
-  if (aiDeskyTried) return;
-  aiDeskyTried = true;
-  try {
-    const res = await fetch('/enhanced-ai/_desky/plaques.json');
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
-    aiDeskyGeom = ((await res.json()) as { plaques: typeof aiDeskyGeom }).plaques ?? null;
-    ui.mapSig = null; // repaint now that plaques can be drawn hi-res
-  } catch (e) {
-    console.warn('AI name plaques unavailable:', e);
-  }
-}
-
-/** The upscaled plaque for `room` in the current subtitle language, if decoded. */
-function aiPlaqueFor(room: number): { bmp: ImageBitmap; x: number; y: number } | null {
-  if (graphics !== 'ai') return null;
-  if (!aiDeskyGeom) { void ensureAiDeskyGeom(); return null; }
-  const key = `${ui.deskyLang ?? subLang()}${String(room).padStart(2, '0')}.png`;
-  const g = aiDeskyGeom[key];
-  if (!g) return null;
-  const bmp = aiDeskyCache.get(key);
-  if (!bmp) { void loadAiPlaque(key); return null; }
-  return { bmp, x: g.x + DESKA_X_OFFSET, y: g.y + DESKA_Y_OFFSET };
-}
-
-const aiPlaqueLoading = new Set<string>();
-async function loadAiPlaque(key: string): Promise<void> {
-  if (aiPlaqueLoading.has(key)) return;
-  aiPlaqueLoading.add(key);
-  try {
-    const res = await fetch(`/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
-    const bmp = await createImageBitmap(await res.blob());
-    aiDeskyCache.set(key, bmp);
-    while (aiDeskyCache.size > AI_DESKY_CACHE_MAX) {
-      const oldest = aiDeskyCache.keys().next().value as string | undefined;
-      if (oldest === undefined || oldest === key) break;
-      aiDeskyCache.get(oldest)?.close();
-      aiDeskyCache.delete(oldest);
-    }
-    ui.mapSig = null; // the plaque can now be drawn hi-res
-    wake();
-  } catch {
-    /* leave the native plaque in place */
-  } finally {
-    aiPlaqueLoading.delete(key);
-  }
-}
-
-function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, skipPlaque = false): boolean {
-  if (!ui.worldMap) return false;
-  let drew = false;
-  const plaqueRoom = mapLaunching() ?? ui.mapInfoRoom ?? ui.mapHoverRoom;
-  if (plaqueRoom !== null && ui.deskyData && !skipPlaque) {
-    const deska = ui.deskyData.byRoom.get(plaqueRoom);
-    if (deska) {
-      blitDeska(rgba, MAP_W, MAP_H, deska, ui.deskyData.atlas, ui.worldMap.palette);
-      drew = true;
-    }
-  }
-  if (ui.mapInfoRoom !== null && ui.infoPanelAssets) {
-    const count = scores.get(ui.mapInfoRoom) ?? null; // best (nej) count; null = cheat-only
-    if (aiDigitsOnly) {
-      drawInfoDigits(rgba, MAP_W, MAP_H, ui.infoPanelAssets.cisla, count, ui.mapInfoFaze);
-    } else {
-      const replayEnabled = bestRecord(ui.mapInfoRoom) !== undefined;
-      drawInfoPanel(rgba, MAP_W, MAP_H, ui.infoPanelAssets, count, ui.mapInfoHover, ui.mapInfoFaze, replayEnabled);
-    }
-    drew = true;
-  }
-  // The Tetris minigame overlays the map when the cheat opens it. It goes through
-  // this shared overlay buffer so BOTH map paths get it — the AI path scales the
-  // buffer up like the plaque/digits rather than needing its own hi-res blit.
-  if (tetris && tetrisArt) {
-    blitTetris(rgba, MAP_W, MAP_H);
-    drew = true;
-  }
-  return drew;
-}
-
-/** The menu/map music (SpustHudbu, UMain.pas:217): menu.wav, looped at sample 419772. */
 //#region Map navigation & story screens | anchors: showMap, returnFromRoom, showLegImage, playFirstRunIntro, openCredits, drawCredits | Entering/leaving the map, leg-completion pages, intro replay, the credits roll.
 function startMenuMusic(): void {
   // Swallow load/decode failures here: menu music is non-critical, and during boot
