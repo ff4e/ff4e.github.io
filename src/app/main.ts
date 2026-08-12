@@ -70,7 +70,6 @@ import {
 import {
   aiKufr,
   aiKufrFrames,
-  drawCutscene,
   endShowmode,
   inReplay,
   inShowmode,
@@ -83,8 +82,6 @@ import {
   closeMapOverlay,
   dismissLegImage,
   dispatchMapCorner,
-  drawCredits,
-  drawLegImage,
   initMapNav,
   openCredits,
   openMapOptions,
@@ -1010,6 +1007,18 @@ function setRoomPicker(num: number): void {
   select.value = String(num);
 }
 
+/**
+ * Enter a room (Spust, UMain.pas:248).
+ *
+ * TWO routes, because the original has two. From the WORLD MAP a launch is `daRun`:
+ * the map stays on screen and repaints with the parchment over it, and the load runs
+ * behind that (see beginMapLaunch — this is the faithful one, and the one a player
+ * ever sees). Everywhere else — the dev room picker, the story-page chain, SCORE,
+ * ZAVER, an Escape restart — there is no map to keep, so the stage goes to the room
+ * immediately and the delayed loading overlay explains the wait, exactly as before.
+ *
+ * `replay` is the best-solution move record to play back animated (map "Replay").
+ */
 function enterRoom(num: number, replay?: string): Promise<void> {
   if (canLaunchFromMap()) return beginMapLaunch(num, replay);
   return startRoom(num, replay, true);
@@ -1287,17 +1296,8 @@ initFramePacing(
 );
 /** The render loop: steps the game at a fixed timestep, then draws (capped, see
  *  MAX_PAINT_FPS) once per RAF. */
-//#region Render loop wiring | anchors: initRenderLoop | Hands `renderLoop.ts` the four names it needs: one logic step, and the three screen painters that still live here. The rAF callback is in that module.
+//#region Render loop wiring | anchors: initRenderLoop | Hands `renderLoop.ts` the one name it still needs: a logic step. Everything it paints it imports. The rAF callback is in that module.
 initRenderLoop({
-  get drawCredits() {
-    return drawCredits;
-  },
-  get drawCutscene() {
-    return drawCutscene;
-  },
-  get drawLegImage() {
-    return drawLegImage;
-  },
   get step() {
     return step;
   },

@@ -495,33 +495,33 @@ between the sentinels below.
 | Lines | Region | Anchors — grep these | What lives here |
 | --- | --- | --- | --- |
 | 1–16 | File docblock | — | The `URoom.pas` tick state machine this file reproduces, and the keyboard scheme. |
-| 17–268 | Imports | — | The only part safe to skim. |
-| 269–285 | Device gate | `isUnsupportedDevice`, `showUnsupportedNotice` | Phones are refused here, before any art is fetched — and before every other side effect in the file. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`. |
-| 286–293 | Stage geometry wiring | `initStageGeometry` | Hands `stageGeometry.ts` its one name and takes the first stage measurement. The scaling itself is in that module. |
-| 294–296 | Stage state wiring | `initStageState` | Assembles the stage and loads the persisted subtitle font. The state itself is in `stageState.ts`. |
-| 297–299 | Loading UI wiring | `initLoadingUi` | Hands `loadingUi.ts` its one name and installs the boot-failure traps. The overlay, the fatal screen and relayout() are in that module. |
-| 300–302 | Intro wiring | `initIntro` | Builds the intro player and probes for the AI movie variants. The movies and the subtitle overlay are in `introOverlay.ts`. |
-| 303–308 | Screen & overlay state | `ui`, `hideAiCredits` | The mutable globals for panel/options/credits/map-info/help/leg-image moved to `screenState.ts` — import `ui` from there. Only the credits-overlay restore is left, because it is behaviour, not state. |
-| 309–412 | Save store + cheats wiring | `openSaveStore`, `initCheats` | Opens `persist.ts` and hands `cheats.ts` its view of the game, after the gate. |
-| 413–437 | Player settings wiring | `initPlayerSettings` | Hands `playerSettings.ts` its two names and loads the persisted options. Subtitle language and the volume buses are in that module. |
-| 438–454 | Render settings wiring | `initRenderSettings` | Hands `renderSettings.ts` its one name and loads the four persisted choices. The tier/backend switches are in that module. |
-| 455–488 | Art wiring | `initArt` | Hands `art.ts` its view of the game. The art loading itself is in that module. |
-| 489–570 | Room launch wiring | `initRoomLaunch` | Hands `roomLaunch.ts` its view of the game. The parchment and the daRun state machine are in that module. |
-| 571–617 | Audio & fish selection | `initAudio`, `hooks`, `peekAtPlayer`, `swapActive`, `selectFish` | Builds the AudioEngine (owned by `audioEngine.ts`), the fishing-hook easter egg, and switching which fish is active. The key/constant tables are in `keyTables.ts`. |
-| 618–831 | Room construction | `buildRoom`, `setInfo`, `applySubFont`, `scriptTalk` | Turns parsed FFR data into a live `Room` + `StepEngine`, and refreshes the info line. Room *loading*, audio, movement and drawing are elsewhere. |
-| 832–850 | Cutscene wiring | `initCutscene` | Hands `cutscene.ts` the five names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo, the movies and the replay are in that module. |
-| 851–863 | Room load wiring | `initRoomLoad` | Hands `roomLoad.ts` the three names it needs. Fetching a room, arming its voices and starting its music are in that module. |
-| 864–879 | Movement wiring | `initMovement` | Hands `movement.ts` the four names it needs. The held-key state machine, the record replay and the room restart are in that module. |
-| 880–958 | Save/load game | `saveGame`, `loadGame`, `saveExists`, `canSave`, `onWinBookkeeping` | In-room save slots and what happens on a win. |
-| 959–971 | Panel wiring | `initPanel` | Hands `panel.ts` its three names. The side panel, the options sub-panel and the help overlay are in that module. |
-| 972–987 | Map drawing wiring | `initMapDraw` | Hands `mapDraw.ts` the four names it needs, all of them the persisted record the map is a view of. The drawing is in that module. |
-| 988–1006 | Map navigation wiring | `initMapNav` | Hands `mapNav.ts` the five names it needs. Entering/leaving the map, the leg pages, the intro replay and the credits roll are in that module. |
-| 1007–1211 | Room entry & fish animation | `enterRoom`, `beginMapLaunch`, `panelAction`, `updateLipSync`, `fishFrameFor` | The map → room transition (incl. the launch parchment), panel button actions, and which sprite frame each fish shows. |
-| 1212–1229 | Render plumbing wiring | `initGlPlumbing` | Hands `glPlumbing.ts` its view of the game. The compositors are in that module. |
-| 1230–1239 | Frame painter wiring | `initFramePainter` | Hands `framePainter.ts` the two names it needs: which sprite frame each fish shows, and the hook system. The frame itself — all three tiers, both backends, the subtitle overlay — is in that module. |
-| 1240–1255 | Logic tick wiring | `initLogicTick` | Hands `logicTick.ts` the four names it needs. The 80 ms step itself — script, engine, dialogue, death, screensaver — is in that module. |
-| 1256–1289 | Frame pacing wiring | `initFramePacing` | Hands `framePacing.ts` its view of the game. The idle throttle, the wake rates and the perf HUD are in that module. |
-| 1290–1305 | Render loop wiring | `initRenderLoop` | Hands `renderLoop.ts` the four names it needs: one logic step, and the three screen painters that still live here. The rAF callback is in that module. |
+| 17–265 | Imports | — | The only part safe to skim. |
+| 266–282 | Device gate | `isUnsupportedDevice`, `showUnsupportedNotice` | Phones are refused here, before any art is fetched — and before every other side effect in the file. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`. |
+| 283–290 | Stage geometry wiring | `initStageGeometry` | Hands `stageGeometry.ts` its one name and takes the first stage measurement. The scaling itself is in that module. |
+| 291–293 | Stage state wiring | `initStageState` | Assembles the stage and loads the persisted subtitle font. The state itself is in `stageState.ts`. |
+| 294–296 | Loading UI wiring | `initLoadingUi` | Hands `loadingUi.ts` its one name and installs the boot-failure traps. The overlay, the fatal screen and relayout() are in that module. |
+| 297–299 | Intro wiring | `initIntro` | Builds the intro player and probes for the AI movie variants. The movies and the subtitle overlay are in `introOverlay.ts`. |
+| 300–305 | Screen & overlay state | `ui`, `hideAiCredits` | The mutable globals for panel/options/credits/map-info/help/leg-image moved to `screenState.ts` — import `ui` from there. Only the credits-overlay restore is left, because it is behaviour, not state. |
+| 306–409 | Save store + cheats wiring | `openSaveStore`, `initCheats` | Opens `persist.ts` and hands `cheats.ts` its view of the game, after the gate. |
+| 410–434 | Player settings wiring | `initPlayerSettings` | Hands `playerSettings.ts` its two names and loads the persisted options. Subtitle language and the volume buses are in that module. |
+| 435–451 | Render settings wiring | `initRenderSettings` | Hands `renderSettings.ts` its one name and loads the four persisted choices. The tier/backend switches are in that module. |
+| 452–485 | Art wiring | `initArt` | Hands `art.ts` its view of the game. The art loading itself is in that module. |
+| 486–567 | Room launch wiring | `initRoomLaunch` | Hands `roomLaunch.ts` its view of the game. The parchment and the daRun state machine are in that module. |
+| 568–614 | Audio & fish selection | `initAudio`, `hooks`, `peekAtPlayer`, `swapActive`, `selectFish` | Builds the AudioEngine (owned by `audioEngine.ts`), the fishing-hook easter egg, and switching which fish is active. The key/constant tables are in `keyTables.ts`. |
+| 615–828 | Room construction | `buildRoom`, `setInfo`, `applySubFont`, `scriptTalk` | Turns parsed FFR data into a live `Room` + `StepEngine`, and refreshes the info line. Room *loading*, audio, movement and drawing are elsewhere. |
+| 829–847 | Cutscene wiring | `initCutscene` | Hands `cutscene.ts` the five names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo, the movies and the replay are in that module. |
+| 848–860 | Room load wiring | `initRoomLoad` | Hands `roomLoad.ts` the three names it needs. Fetching a room, arming its voices and starting its music are in that module. |
+| 861–876 | Movement wiring | `initMovement` | Hands `movement.ts` the four names it needs. The held-key state machine, the record replay and the room restart are in that module. |
+| 877–955 | Save/load game | `saveGame`, `loadGame`, `saveExists`, `canSave`, `onWinBookkeeping` | In-room save slots and what happens on a win. |
+| 956–968 | Panel wiring | `initPanel` | Hands `panel.ts` its three names. The side panel, the options sub-panel and the help overlay are in that module. |
+| 969–984 | Map drawing wiring | `initMapDraw` | Hands `mapDraw.ts` the four names it needs, all of them the persisted record the map is a view of. The drawing is in that module. |
+| 985–1003 | Map navigation wiring | `initMapNav` | Hands `mapNav.ts` the five names it needs. Entering/leaving the map, the leg pages, the intro replay and the credits roll are in that module. |
+| 1004–1220 | Room entry & fish animation | `enterRoom`, `beginMapLaunch`, `panelAction`, `updateLipSync`, `fishFrameFor` | The map → room transition (incl. the launch parchment), panel button actions, and which sprite frame each fish shows. |
+| 1221–1238 | Render plumbing wiring | `initGlPlumbing` | Hands `glPlumbing.ts` its view of the game. The compositors are in that module. |
+| 1239–1248 | Frame painter wiring | `initFramePainter` | Hands `framePainter.ts` the two names it needs: which sprite frame each fish shows, and the hook system. The frame itself — all three tiers, both backends, the subtitle overlay — is in that module. |
+| 1249–1264 | Logic tick wiring | `initLogicTick` | Hands `logicTick.ts` the four names it needs. The 80 ms step itself — script, engine, dialogue, death, screensaver — is in that module. |
+| 1265–1298 | Frame pacing wiring | `initFramePacing` | Hands `framePacing.ts` its view of the game. The idle throttle, the wake rates and the perf HUD are in that module. |
+| 1299–1305 | Render loop wiring | `initRenderLoop` | Hands `renderLoop.ts` the one name it still needs: a logic step. Everything it paints it imports. The rAF callback is in that module. |
 | 1306–1538 | Keyboard | `keydown / keyup listeners` | Every key binding, including cheats, dev keys and modal handling. |
 | 1539–1847 | Pointer | `cellFromEvent`, `clickCell`, `dirToward`, `clickMapAt`, `panelCoords` | Fish selection and click-to-swim target (the pathfinding is in `stepEngine.ts`), map and panel hit-testing. |
 | 1848–1857 | Dev bar wiring | `initDevBar` | Hands `devBar.ts` its two names. The room picker, the dev selects and the relayout watchers are in that module. |
