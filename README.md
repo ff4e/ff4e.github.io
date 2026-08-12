@@ -413,7 +413,7 @@ rules; `AGENTS.md` has the things that cost people time to find out.
   only the writes go through a `setX`.
 - `src/app/persist.ts` — the localStorage save store (solved rooms, scores, records, play time).
 - `src/app/cheats.ts` — the typed cheat codes, the sprite/film effects, and the Tetris minigame.
-- `src/app/debugHooks.ts` — the `window.__ff` test interface all 85 UI probes read.
+- `src/app/debugHooks.ts` — the `window.__ff` test interface all 86 UI probes read.
 - `src/app/glPlumbing.ts` — the per-tier art sources, the WebGL compositors, and the parity probes.
 - `src/app/art.ts` — enhanced/`ai` art loading, the room art cache, and the anti-flash hold predicates.
 - `src/data/binReader.ts` — little-endian sequential reader modelling Pascal `blockread`.
@@ -492,6 +492,8 @@ its real work in an `initX()` that `main.ts` calls at the point the code used to
 `//#region` markers still divide `main.ts`, and `node tools/region-graph.mjs` still measures
 what depends on what. What is gone is the promise to keep a line-number table honest.
 
+Sizes are characters / 4, the same rough token meter the `src/render/` map below uses.
+
 | File | tok | What it owns |
 | --- | --- | --- |
 | **Composition and state** | | |
@@ -499,9 +501,9 @@ what depends on what. What is gone is the promise to keep a line-number table ho
 | `boot.ts` | 2.5 k | The boot sequence in load order — fonts, panel and map graphics, sound packages, room 7, first frame. |
 | `deviceGate.ts` | 1.4 k | Refusing to run on a phone. Runs before every side effect. |
 | `dom.ts` | 1.5 k | The element handles and their 2D contexts. |
-| `gameState.ts` | 2.6 k | The live room and how it is currently being played. Live bindings plus setters, because reads outnumber writes ~20:1. |
+| `gameState.ts` | 2.6 k | The live room and how it is currently being played. Live bindings plus setters, because of the 1 237 references only 74 are writes. |
 | `screenState.ts` | 1.9 k | Which screen is showing, and everything layered over it. A mutable bag — the reads are many and the shape is flat. |
-| `stageState.ts` | 1.1 k | The subtitle font in use and what the subtitle overlay currently holds. |
+| `stageState.ts` | 1.1 k | The subtitle font in use, what the subtitle overlay holds, and `booted`. |
 | `persist.ts` | 2.5 k | Everything kept in localStorage: solved, cheated, scores, saves, and the migration. |
 | **The frame** | | |
 | `frameClock.ts` | 1.6 k | When the next frame happens, and at what rate. |
@@ -515,7 +517,7 @@ what depends on what. What is gone is the promise to keep a line-number table ho
 | `roomGates.ts` | 0.5 k | May the room accept a command at all — `idle`, `atRest`, `fishBusy`. |
 | `roomLoad.ts` | 3.5 k | Fetching a room, arming its voices, starting its music — and the order that keeps audio behind art. |
 | `roomLaunch.ts` | 4.0 k | The room-entry parchment and the launch it belongs to. |
-| `keyTables.ts` | 0.5 k | Which key moves which fish, and the minigame's key map. |
+| `keyTables.ts` | 0.5 k | Which key moves which fish, the minigame's key map, and two constants the room scripts read. |
 | **Screens** | | |
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
@@ -528,7 +530,7 @@ what depends on what. What is gone is the promise to keep a line-number table ho
 | `art.ts` | 5.8 k | Fetching, decoding and caching the enhanced and `ai` tier art. |
 | `glPlumbing.ts` | 4.2 k | The per-tier art sources and the two WebGL compositors. |
 | `audioEngine.ts` | 0.3 k | Who owns the `AudioEngine`. |
-| `renderSettings.ts` | 2.0 k | What the game is drawn WITH: art tier, backend, idle-FPS saver. |
+| `renderSettings.ts` | 2.0 k | What the game is drawn WITH — the four persisted choices: art tier, backend, idle-FPS saver, developer pane. |
 | `playerSettings.ts` | 1.2 k | The player's options: subtitle language and the three volume buses. |
 | `layout.ts` | 2.2 k | Display layout and scaling. |
 | `stageGeometry.ts` | 2.2 k | How big the game is drawn, and the constants the simulation is timed by. |

@@ -1,7 +1,7 @@
 /**
  * `window.__ff` — the app's debug/test interface.
  *
- * 216 entries, and every one of the 85 UI probes in tools/ reads this object. It is
+ * 216 entries, and every one of the 86 UI probes in tools/ reads this object. It is
  * effectively the public API of the game for testing, which is why CONTRIBUTING.md
  * freezes its shape while main.ts is being split: it is the only external oracle a
  * refactor of that file has, and an oracle that moves with the code proves nothing.

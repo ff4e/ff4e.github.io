@@ -73,8 +73,9 @@ table nobody opens is free; a large file everyone edits is the expensive thing.
    file by file, drift-guarded by `test/readme-map.test.ts`. Open the file, not the directory. If a map
    sends you to the wrong place, fixing the map is part of your change.
 3. **A hot file needs internal structure.** Any file over ~600 lines that changes often should carry
-   `//#region` markers, so `tools/region-graph.mjs` can measure what depends on what. README maps are
-   per-file now; there is no line-range table to regenerate.
+   `//#region` markers with `anchors:` you can grep for. `tools/region-graph.mjs` measures the
+   dependencies BETWEEN those regions, but only for `src/app/main.ts` — it is pointed at that one file.
+   README maps are per-file now; there is no line-range table to regenerate.
 4. **Do not grow the hot files.** `test/file-budgets.test.ts` holds a line budget per hot file and fails when
    one is exceeded. The budgets only ever ratchet **down**: if your change genuinely belongs there and the
    budget must rise, raise it in the same PR and justify it in the description. The test exists to force that
@@ -103,7 +104,7 @@ own:
 | one unit test | **~2.5 ms** (1 609 of them run in ~5 s) |
 | one UI probe | **~7.4 s** median — about **3 000×** a unit test |
 | the fixed part of any probe | 1.3–2.7 s, just to launch a browser and boot the app |
-| the full UI suite | 85 probes, ~1 390 s of serial work, ~5 min wall |
+| the full UI suite | 86 probes, ~1 450 s of serial work, ~5 min wall |
 
 So, in order:
 
@@ -185,7 +186,7 @@ underneath it. So know what each net is actually watching:
   mutate `src/render/*` and `src/core/room.ts` only. **Neither can see `src/app/`.**
 - **`tools/test-gl-live.mjs`** is byte-exact, but compares GPU against CPU — two implementations that both
   live in `src/render/`. It proves the two agree, not that either is right.
-- **The 85 UI probes** are the only real coverage of `src/app/`, and every one of them asserts on
+- **The 86 UI probes** are the only real coverage of `src/app/`, and every one of them asserts on
   `window.__ff` — which is exactly the state a refactor of that area moves.
 - **`tools/capture-digest.mjs`** exists to fill that hole: it takes its oracle from the *previous revision*.
   Capture on the base commit, capture on the branch, `--compare`. Read its header for what it does and does
@@ -196,7 +197,7 @@ That is a better outcome than proceeding on hope.
 
 ## `window.__ff` is the test interface
 
-`src/app/debugHooks.ts` publishes 216 entries on `window.__ff`, and all 85 UI probes read it. It is
+`src/app/debugHooks.ts` publishes 216 entries on `window.__ff`, and all 86 UI probes read it. It is
 effectively the public API of the game for testing.
 
 - **Changing its shape changes the probes.** Ship a hook change as its own PR, never inside a PR that moves

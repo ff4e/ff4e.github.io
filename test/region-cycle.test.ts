@@ -28,7 +28,9 @@
  * a PR description rather than to discover months later.
  */
 import { describe, it, expect } from 'vitest';
-import { analyse } from '../tools/region-graph.mjs';
+import { analyse, readRegions } from '../tools/region-graph.mjs';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Largest strongly-connected component of the region graph, in regions.
@@ -86,10 +88,60 @@ describe('src/app/main.ts region graph', () => {
     expect(slack.join('\n'), 'these ceilings have gone slack; ratchet them down in this PR').toBe('');
   });
 
-  it('measures the regions the README map is generated from, not a private copy of them', () => {
+  it('measures the markers in the file, not a private copy of them', () => {
     // The predecessor of this tool carried its own hard-coded line ranges and started
-    // lying the first time an edit moved a line. Both now read the same markers.
+    // lying the first time an edit moved a line.
     expect(report.regions).toBeGreaterThan(0);
     expect(report.lines).toBeGreaterThan(1000);
+  });
+});
+
+/**
+ * The markers themselves.
+ *
+ * These two checks used to live in `test/gen-map.test.ts`, next to the generator that
+ * turned the markers into a README table. That generator is gone — `src/app/` is mapped
+ * by directory now — but the markers stayed, and without these they would be the only
+ * documentation in the repo that nothing verifies. An anchor is a promise that you can
+ * grep this name and land in this region; the promise is worth exactly as much as the
+ * check behind it.
+ */
+describe('src/app/main.ts region markers', () => {
+  const src = readFileSync(join(import.meta.dirname, '..', 'src', 'app', 'main.ts'), 'utf8');
+  const lines = src.split('\n');
+  const regions = readRegions(src);
+
+  it('main.ts still declares its regions', () => {
+    expect(regions.length).toBeGreaterThan(10);
+  });
+
+  it('every anchor occurs inside the region that names it', () => {
+    const problems: string[] = [];
+    for (const r of regions)
+      for (const anchor of r.anchors) {
+        // Anchors are written for a human (`loop()`, `await FontData.load`); match the
+        // leading identifier, which is the part you would actually grep for.
+        const name = anchor.replace(/\(.*/, '').replace(/[^\w$].*$/, '');
+        if (name.length < 3) continue;
+        const re = new RegExp(`\\b${name.replace(/\$/g, '\\$')}\\b`);
+        // slice(r.start), not slice(r.start - 1): the marker line itself CONTAINS the
+        // anchor name, so including it made every anchor match itself and the check
+        // could never fail. It was written that way, and passed vacuously, for as long
+        // as it existed.
+        if (!lines.slice(r.start, r.end).some((l) => re.test(l)))
+          problems.push(`\`${name}\` is not in ${r.start}-${r.end} ("${r.name}")`);
+      }
+    expect(
+      problems,
+      `a //#region marker names an anchor that is not in its region:\n  ${problems.join('\n  ')}\n` +
+        '  The code moved, or the anchor was renamed — update the marker in main.ts.',
+    ).toEqual([]);
+  });
+
+  it('every region has a name and a description', () => {
+    const thin = regions
+      .filter((r) => !r.name || !r.desc)
+      .map((r) => `line ${r.start}: "${r.name}"`);
+    expect(thin, `region markers missing a name or description:\n  ${thin.join('\n  ')}`).toEqual([]);
   });
 });
