@@ -14,8 +14,9 @@
  * every seam — more machinery than the single mapped file it would replace.
  *
  * At the split (PR #44) the number was **20 of 32 regions in one component**, and that is
- * the whole reason the file is navigated by a maintained line-range map instead of being
- * a directory of self-describing modules. So the map is not the fix; it is the symptom.
+ * the whole reason the file was navigated by a maintained line-range map instead of being
+ * a directory of self-describing modules. The map was not the fix; it was the symptom —
+ * and once the cycle came apart the map could go, which it has.
  *
  * ── How to use it ────────────────────────────────────────────────────────────
  * `node tools/region-graph.mjs --edges` prints the graph, the component and every edge

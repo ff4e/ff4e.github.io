@@ -69,12 +69,12 @@ table nobody opens is free; a large file everyone edits is the expensive thing.
 1. **New code starts in a new module.** `main.ts` reached 7 798 lines by accretion — every step was a
    reasonable "this is related, put it here". Default to a new file in the right directory and import it. Put
    code in an existing large file only when splitting it would genuinely duplicate state, and say so in the PR.
-2. **Do not read a big file to change a small part of it.** `README.md` maps `src/app/main.ts` and
-   `src/render/` with grep-able anchors, generated from `//#region` markers and drift-guarded by
-   `test/readme-map.test.ts`. Open the region, not the file. If a map sends you to the wrong place, fixing the
-   map is part of your change.
-3. **A hot file needs a map.** Any file over ~600 lines that changes often should carry `//#region` markers
-   and appear in the README map. `npm run map:update` regenerates it.
+2. **Do not read a big file to change a small part of it.** `README.md` maps `src/app/` and `src/render/`
+   file by file, drift-guarded by `test/readme-map.test.ts`. Open the file, not the directory. If a map
+   sends you to the wrong place, fixing the map is part of your change.
+3. **A hot file needs internal structure.** Any file over ~600 lines that changes often should carry
+   `//#region` markers, so `tools/region-graph.mjs` can measure what depends on what. README maps are
+   per-file now; there is no line-range table to regenerate.
 4. **Do not grow the hot files.** `test/file-budgets.test.ts` holds a line budget per hot file and fails when
    one is exceeded. The budgets only ever ratchet **down**: if your change genuinely belongs there and the
    budget must rise, raise it in the same PR and justify it in the description. The test exists to force that
@@ -227,9 +227,10 @@ load-bearing:
 
 ## Finding your way around
 
-- **`src/app/main.ts`** is ~5 720 lines. Do not read it front to back — the README has a map of its regions
-  with grep-able anchors. The map is **generated** from `//#region` markers in the file itself; edit a
-  marker and run `npm run map:update`.
+- **`src/app/`** is 37 files and the README maps them. `main.ts` is the composition root — the leftover
+  state, the boot-time wiring, and the keyboard and pointer routers — and at ~2 200 lines it is no longer
+  the place to start. Find the thing by name: `logicTick.ts` is one game step, `renderLoop.ts` is one
+  frame, `roomLoad.ts` gets a room on screen.
 - **`src/render/`** has its own map in the README. Start at `roomWalk.ts` (what is drawn, in what order) and
   `artSource.ts` (what colour) — nearly everything else implements one side of those two.
 - **`src/rooms/`** is 74 independent room scripts. Large in total, but a change touches one file.
