@@ -79,6 +79,15 @@ table nobody opens is free; a large file everyone edits is the expensive thing.
    one is exceeded. The budgets only ever ratchet **down**: if your change genuinely belongs there and the
    budget must rise, raise it in the same PR and justify it in the description. The test exists to force that
    sentence to be written, not to forbid growth.
+
+   The list is hand-curated, so it used to protect only the files somebody remembered to add. A tripwire in the
+   same file now closes that gap: **any file in `src/app/` over 520 lines must have a budget.** It is not a cap
+   — crossing the line does not fail because the file is too big, it fails because nothing was watching a file
+   that had become worth watching. It is scoped to `src/app/` because that is where churn concentrates
+   (`main.ts` alone is 84 of the project's 180 commits, against six for all of `src/rooms/`), and set just above
+   the largest unbudgeted file there today, so it stays quiet on the status quo. A blanket limit on every file
+   would be the wrong shape: `src/rooms/banka.ts` is 896 lines and has been touched twice, and budgeting it
+   would only teach people to ignore the guard.
 5. **Iterate with a filtered gate, not the full one.** `npm run test:ui -- <pattern>` is the loop; the full
    suite is for before the PR.
 6. **Delete what you replace.** A superseded file that stays behind is read by everyone who greps for it
