@@ -197,6 +197,7 @@ import {
   wrap,
 } from './dom.js';
 import { openSaveStore } from './persist.js';
+import { initDevBar } from './devBar.js';
 import {
   aiPlaqueFor,
   closeMapInfo,
@@ -4092,95 +4093,15 @@ window.addEventListener('mouseup', () => {
   ui.panelDragBus = null;
 });
 
-//#region Dev bar & window wiring | anchors: populateRooms, fitSelect, rendererSelect, graphicsSelect, idleDirtyToggle, winRoomBtn, resize / fullscreenchange / dpr watchers | The dev-only controls — room picker, fit mode, renderer, graphics tier, idle-render toggle, win-room — and the relayout triggers.
-function populateRooms(): void {
-  const mapOpt = document.createElement('option');
-  mapOpt.value = 'map';
-  mapOpt.textContent = '🗺  World map';
-  select.appendChild(mapOpt);
-  for (const r of ROOMS) {
-    const opt = document.createElement('option');
-    opt.value = String(r.num);
-    opt.textContent = `${String(r.num).padStart(2, '0')} — ${r.jmeno} (${r.en})`;
-    select.appendChild(opt);
-  }
-  select.addEventListener('change', () => {
-    wake();
-    if (select.value === 'map') showMap();
-    else enterRoom(Number(select.value));
-  });
-}
-
-populateRooms();
-select.value = 'map'; // the game opens on the world map, so start the picker there
-
-// Public-release layout: the visible fit-mode control (localStorage-persisted via
-// settings) + responsive stage scaling on resize / fullscreen.
-if (fitSelect) {
-  // A local const, because TypeScript will not carry the null-narrowing of an
-  // IMPORTED binding into a closure (an exporting module may reassign it; these
-  // never do). Same one-line dance at the four dev-bar controls below.
-  const el = fitSelect;
-  el.value = settings.fitMode;
-  el.addEventListener('change', () => {
-    const v = el.value;
-    settings.fitMode = isFitMode(v) ? v : 'medium';
-    saveSettings(settings);
-    setForceRoomRedraw(true); // the fit scale changes the room canvas size — repaint
-    wake();
-  });
-}
-// Dev-bar renderer (CPU/WebGL) + idle-FPS-saver toggles. These mirror the state
-// driven by the hidden R hotkey; syncDevControls() keeps their displayed value
-// current after a hotkey toggle.
-if (rendererSelect) {
-  const el = rendererSelect;
-  el.value = renderer;
-  el.addEventListener('change', () => setRenderer(el.value === 'cpu' ? 'cpu' : 'webgl'));
-}
-// Dev-bar graphics-level combobox. Mirrors the E hotkey (setGraphics keeps the
-// select value in sync when E cycles), and is the primary point-and-click switch.
-if (graphicsSelect) {
-  const el = graphicsSelect;
-  el.value = graphics;
-  el.addEventListener('change', () => {
-    const v = el.value;
-    setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
-  });
-}
-if (idleDirtyToggle) {
-  const el = idleDirtyToggle;
-  el.checked = renderOnDirty;
-  el.addEventListener('change', () => setRenderOnDirty(el.checked));
-}
-if (winRoomBtn) {
-  const el = winRoomBtn;
-  el.addEventListener('click', () => {
-    devWinRoom();
-    el.blur(); // drop button focus so a Space/Enter dismiss doesn't re-click it
-  });
-}
-// Apply the persisted dev-pane state on boot (Ctrl+Alt+D toggles it thereafter).
-document.body.classList.toggle('dev', devEnabled);
-relayout();
-window.addEventListener('resize', relayout);
-document.addEventListener('fullscreenchange', relayout);
-// devicePixelRatio can change without a resize event (moving the window to a
-// monitor of different density). Re-arm a matchMedia watch on each change so
-// 'native' re-snaps to whole physical pixels and stays crisp.
-if (typeof window.matchMedia === 'function') {
-  const watchDpr = (): void => {
-    window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`).addEventListener(
-      'change',
-      () => {
-        relayout();
-        watchDpr();
-      },
-      { once: true },
-    );
-  };
-  watchDpr();
-}
+//#region Dev bar wiring | anchors: initDevBar | Hands `devBar.ts` its two names. The room picker, the dev selects and the relayout watchers are in that module.
+initDevBar({
+  get enterRoom() {
+    return enterRoom;
+  },
+  get showMap() {
+    return showMap;
+  },
+});
 
 //#region Boot | anchors: await FontData.load, parseFfp, loadSoundPkg, loadRoom(7), initFeedback, requestAnimationFrame(loop) | The top-level-await boot sequence, in load order. What is critical vs. optional is documented inline.
 setFont(await FontData.load('/data/Intro'));
