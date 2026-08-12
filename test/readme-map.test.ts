@@ -1,10 +1,10 @@
 /**
  * The README maps must describe the code as it is now.
  *
- * `README.md` carries navigation maps — a line-range table for `src/app/main.ts`, a
- * file table for `src/render/` — and their whole value is that a reader can trust them
- * enough to open one region instead of a 60 000-token file. A map that has drifted is
- * worse than no map: it sends people confidently to the wrong place.
+ * `README.md` carries navigation maps — a file table for `src/app/` and one for
+ * `src/render/` — and their whole value is that a reader can trust them enough to open
+ * one file instead of reading a directory. A map that has drifted is worse than no map:
+ * it sends people confidently to the wrong place.
  *
  * CONTRIBUTING.md asks for them to be updated with any structural change, but an ask is
  * a promise, and promises drift. This turns that promise into a failing test. It costs
@@ -18,17 +18,13 @@
  *     the directory is listed. That catches the real drift for a directory, which is
  *     somebody adding a module and not mentioning it.
  *
- *   - Otherwise it is a FILE map: the first column is a `start–end` line range and the
- *     third column holds backticked anchor names. The checks are that the ranges tile
- *     the file exactly (no gap, no overlap, ending on the last line) and that every
- *     anchor really occurs inside the range that claims it.
- *
- * NOTE on the `main.ts` map specifically: its ranges are no longer hand-written. They
- * are GENERATED from `//#region` markers by tools/gen-map.mjs, and the freshness of the
- * generated block is checked in test/gen-map.test.ts. The tiling check below still runs
- * over it and is still worth having — it is an independent confirmation that the
- * generator's own arithmetic tiles the file — but it should never fail on its own now,
- * because ordinary edits no longer falsify a derived number.
+ *   - A path NOT ending in `/` would be a FILE map: a table of line ranges inside one
+ *     file. There are none left, and this test now REJECTS them. `src/app/main.ts` had
+ *     one, generated from its `//#region` markers, for as long as the app was a single
+ *     5 897-line file; it was deleted once the app became 37 files, because a line-range
+ *     table is a promise to keep numbers honest across every edit and a directory of
+ *     named files needs no such promise. If you find yourself adding one, split the file
+ *     instead — that is what the ranges were compensating for.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -104,13 +100,14 @@ describe('README maps', () => {
           ).toEqual({ missing: [], stale: [] });
         });
       } else {
-        // A FILE map's ranges are generated (see tools/gen-map.mjs) and their freshness
-        // is checked in test/gen-map.test.ts, which knows the command that fixes them.
-        // Re-checking them here only produced a second failure for the same cause, with
-        // a message that did not say what to run. The directory maps above are the only
-        // hand-written ones left, and they are what this file is for.
-        it('is generated — see test/gen-map.test.ts', () => {
-          expect(rows.length).toBeGreaterThan(0);
+        it('is a directory map — line-range maps are not kept any more', () => {
+          expect(
+            path,
+            `README has a line-range map of ${path}. Those were dropped when src/app/ ` +
+              'became a directory of named files: a range table has to be re-derived on ' +
+              'every edit that moves a line, and nothing re-derives it now. Map the ' +
+              'directory instead, or split the file so its parts have names.',
+          ).toMatch(/\/$/);
         });
       }
     });

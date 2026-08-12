@@ -16,7 +16,7 @@
  *   - tools/test-gl-live.mjs is byte-exact, but compares GPU against CPU — two
  *     implementations that both live in src/render/. It proves main.ts feeds both
  *     sides the same thing, not that the thing is right.
- *   - The 85 UI probes are the only real coverage of main.ts, and every one of them
+ *   - The 86 UI probes are the only real coverage of main.ts, and every one of them
  *     asserts on `__ff` — the very state a split moves.
  *
  * So this tool takes its oracle from OUTSIDE the change: the previous revision.
@@ -52,7 +52,7 @@
  * flags, hook count) and BACKGROUND pixels, byte-exact, across revisions. It does not
  * cover the pixels of animating items — for those the existing net still applies:
  * test/render-parity.test.ts (72 rooms, resting pose), tools/test-gl-live.mjs
- * (byte-exact live GPU-vs-CPU) and the 85 UI probes. Do not read a clean digest as
+ * (byte-exact live GPU-vs-CPU) and the 86 UI probes. Do not read a clean digest as
  * "the render path is unchanged"; read it as "the game state and the backgrounds are".
  *
  * `--self-check` captures twice in one process and fails if the two disagree. It is a

@@ -7,8 +7,8 @@
  *     node tools/region-graph.mjs --json     # machine-readable
  *
  * ── What it measures, and why that is the interesting number ─────────────────
- * The file is navigated by regions (the `//#region` markers `tools/gen-map.mjs` turns
- * into the README map). Treat each region as a candidate module and ask which regions
+ * The file is divided by regions (`//#region` markers). Treat each region as a
+ * candidate module and ask which regions
  * reference which — then the question "can this become N files?" has an answer that is
  * not a matter of taste:
  *
@@ -47,10 +47,49 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { readRegions } from './gen-map.mjs';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const REL = 'src/app/main.ts';
+
+/**
+ * Parse the `//#region` markers out of a file and turn them into ranges.
+ *
+ * This used to live in `tools/gen-map.mjs`, which generated a line-range table into
+ * README.md. That table is gone — the app is 37 files now, so the README carries a
+ * DIRECTORY map instead and nobody has to keep line numbers honest. The markers
+ * themselves stayed, because they are what this measurement is built on and they are
+ * useful to grep. This is the one parse of them in the repo.
+ */
+export function readRegions(text) {
+  const lines = text.split('\n');
+  const marks = [];
+  lines.forEach((l, i) => {
+    const m = l.match(/^\/\/#region\s+(.*)$/);
+    if (m) marks.push({ line: i + 1, spec: m[1].trim() });
+  });
+  return marks.map((mk, i) => {
+    const parts = mk.spec.split('|').map((s) => s.trim());
+    const name = parts.shift() ?? '';
+    let anchors = '';
+    let hot = false;
+    const prose = [];
+    for (const p of parts) {
+      if (/^anchors:/i.test(p)) anchors = p.replace(/^anchors:\s*/i, '');
+      else if (/^hot$/i.test(p)) hot = true;
+      else if (p) prose.push(p);
+    }
+    return {
+      name,
+      anchors: anchors ? anchors.split(',').map((a) => a.trim()).filter(Boolean) : [],
+      desc: prose.join(' — '),
+      hot,
+      start: mk.line,
+      // A region ends where the next one begins; the last runs to the end of the file.
+      end: i + 1 < marks.length ? marks[i + 1].line - 1 : lines.length,
+    };
+  });
+}
+
 /**
  * Measure the region graph. Exported so the guard in `test/region-cycle.test.ts` reads
  * the same numbers this command prints, rather than a second implementation of them.

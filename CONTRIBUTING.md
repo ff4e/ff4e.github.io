@@ -20,30 +20,22 @@ there is no separate private repo. Keep it clean and public-safe.
 
 ## Keeping the README maps honest
 
-`README.md` carries navigation maps — one for `src/app/main.ts`, one for `src/render/`. Their whole value
-is that a reader trusts them enough to open one region instead of a 60 000-token file, so a map that has
-drifted is worse than no map: it sends people confidently to the wrong place.
+`README.md` carries navigation maps — one for `src/app/`, one for `src/render/`. Their whole value is that
+a reader trusts them enough to open one file instead of reading a directory, so a map that has drifted is
+worse than no map: it sends people confidently to the wrong place.
 
-**The `main.ts` map is generated, not written.** Each region is declared by a marker at its head:
+Both are **directory maps**: one row per file, saying what that file owns. If you add, delete or rename a
+file in either directory, add or remove its row in the same PR.
 
-```ts
-//#region Room load & audio wiring | anchors: loadRoom, loadSoundPkg, talk | Fetch a room's FFR/FFS/FFT… | Hot
-```
+`test/readme-map.test.ts` checks both maps in both directions — nothing listed that is gone, nothing
+present that is unlisted — so a forgotten row fails `npm test` rather than rotting silently.
 
-The line ranges are *derived* from where the markers sit, so ordinary edits never falsify them — which is
-the point. Earlier this table was hand-maintained, and because the ranges had to tile the file exactly,
-every edit that changed the line count made it wrong. That put a documentation chore on the most-edited
-file in the repo.
-
-- Changed a region's **name, anchors or purpose**? Edit its marker in `main.ts`.
-- Moved a **boundary**, or added/removed a region? Move or add a marker.
-- Then run **`npm run map:update`** and commit the README change.
-- Do not hand-edit between the `<!-- MAP:main.ts BEGIN/END -->` sentinels; it is generated output.
-
-`test/gen-map.test.ts` fails if the table is stale (naming the command), if a marker's anchor no longer
-occurs inside its region, or if a region has no description. The `src/render/` map is still hand-written
-and `test/readme-map.test.ts` checks it both ways: nothing listed that is gone, nothing present that is
-unlisted.
+**There used to be a third kind: a line-range map of `src/app/main.ts`**, generated from `//#region`
+markers by `tools/gen-map.mjs`. It existed because the app was one 5 897-line file and there was no other
+way to open a part of it. The app is 37 files now, so the map is a directory listing and the generator is
+gone. The `//#region` markers stayed — `tools/region-graph.mjs` measures the dependencies between them,
+and they are useful to grep — but nothing derives line numbers from them any more. The test rejects a new
+line-range map: if a file is big enough to want one, split it instead.
 
 ## Assets & licensing## Assets & licensing
 
