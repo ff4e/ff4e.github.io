@@ -5,6 +5,29 @@ next steps. Keep resolved items (with the fix) rather than deleting, so the hist
 
 Severity: 🔴 breaks play · 🟠 visible/audible glitch · 🟡 minor/cosmetic · 🔵 investigation lead
 
+## Test interface: 🟡 `__ff.setRenderer` does less than the real `setRenderer`
+
+- **Symptom:** switching the render backend from a probe does not do everything switching it
+  from the game does. No known misbehaviour — filed because it is a silent difference between
+  the path the tests exercise and the path a player takes, which is the kind of gap that makes
+  a green suite mean less than it looks.
+- **What's known (noticed 2026-08-12 while extracting `src/app/renderSettings.ts`):**
+  - `setRenderer()` (now `renderSettings.ts`) assigns the backend, calls `enableWebgl()` when
+    switching to WebGL, persists `ff.renderer`, syncs the dev-bar select, forces a room repaint
+    and wakes the loop, then refreshes the info caption.
+  - `__ff.setRenderer` (`debugHooks.ts`) assigns, calls `enableWebgl()` and persists — and stops
+    there. No dev-bar sync, no forced repaint, no wake, no caption.
+  - So a probe that switches to WebGL and immediately samples a frame may be sampling one the
+    old backend painted, unless it waits for a repaint some other way. The probes that do this
+    all wait on their own conditions, which is why nothing fails today.
+- **Where to look:** `src/app/debugHooks.ts` (`setRenderer` hook), `src/app/renderSettings.ts`
+  (`setRenderer`, `setRendererValue`).
+- **Next steps:** most likely the hook should just call the real `setRenderer`. Deliberately NOT
+  done as part of the `main.ts` decomposition: the probes are the external oracle for that work,
+  and changing what a test hook does while using it to prove a refactor is exactly the trap this
+  repo has already written down. Worth its own small PR, with the suite re-run to see whether any
+  probe was quietly depending on the lighter path.
+
 ## Audio: 🟠 KUFRIK demo "beep" right after the steel pipe drops
 
 - **Symptom:** During the KUFRIK automatic demonstration, when the steel pipe (item 4, heavy)

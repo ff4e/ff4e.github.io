@@ -35,20 +35,23 @@ import { analyse } from '../tools/region-graph.mjs';
  * 20 at the split — every one of these regions could reach every other, so none of them
  * could leave the file on its own.
  *
- * 15 once the stage geometry and the tick constants moved to `src/app/stageGeometry.ts`,
+ * 11 once the player's options moved to `src/app/playerSettings.ts` — the biggest single
+ * drop, from one of the smallest regions, because everything reads the subtitle language.
+ * 14 with the render settings in `src/app/renderSettings.ts`, 15 with the stage
+ * geometry and the tick constants in `src/app/stageGeometry.ts`,
  * and 17 before that, when the frame clock moved to `src/app/frameClock.ts`. `wake()` alone was eight
  * edges into frame pacing from regions with no interest in requestAnimationFrame, and
  * removing it freed the whole frame layer: the painter, the pacing and `loop()` are all
  * outside every cycle now.
  */
-const MAX_CYCLE = 15;
+const MAX_CYCLE = 11;
 
 /**
  * Edges inside that component. Tracked alongside the cycle because the cycle is a step
  * function: a PR can remove a dozen edges and leave the component the same size, and
  * without this number that PR looks like it achieved nothing.
  */
-const MAX_CORE_EDGES = 71;
+const MAX_CORE_EDGES = 52;
 
 describe('src/app/main.ts region graph', () => {
   const report = analyse();
