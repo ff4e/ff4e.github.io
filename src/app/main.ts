@@ -14,9 +14,8 @@ import { TALKING_MEZ_SEC, MUSIC_PRIOR } from '../audio/audio.js';
 import { musicForCHud } from '../audio/music.js';
 import { Script, type ScriptSnapshot } from '../core/script.js';
 import { StepEngine, TURN_FRAMES } from '../core/stepEngine.js';
-import { newChatter, tickChatter } from '../core/chatter.js';
-import { stdSmrt, newDeathState } from '../core/deathlines.js';
-import { maybeBubble } from '../core/ambient.js';
+import { newChatter } from '../core/chatter.js';
+import { newDeathState } from '../core/deathlines.js';
 import { movesOf, lengthOfRecord } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
 import { ROOMS } from '../data/roomTable.js';
@@ -27,10 +26,11 @@ import { audio, initAudio } from './audioEngine.js';
 import { atRest, fishBusy, idle } from './roomGates.js';
 import { initRoomLoad, loadRoom, roomVoicesSettled, talk } from './roomLoad.js';
 import { initRenderLoop, loop } from './renderLoop.js';
-import { advanceLoadmode, beginHeldMove, clearHeldKey, dispatchHeldMove, heldKeyState, initMovement, releaseHeldKey, restartRoom, restore, tryStep, wallShove } from './movement.js';
-import { advanceReplay, advanceShowmode, aiKufr, aiKufrFrames, cutsceneCaption, disposeAiKufr, drawCutscene, endShowmode, inReplay, inShowmode, initCutscene, skipCutscene, startCutscene, startShowmode } from './cutscene.js';
+import { beginHeldMove, clearHeldKey, heldKeyState, initMovement, releaseHeldKey, restartRoom, restore, tryStep, wallShove } from './movement.js';
+import { aiKufr, aiKufrFrames, drawCutscene, endShowmode, inReplay, inShowmode, initCutscene, skipCutscene, startCutscene, startShowmode } from './cutscene.js';
 import { closeMapOverlay, dismissLegImage, dispatchMapCorner, drawCredits, drawLegImage, initMapNav, openCredits, openMapOptions, replayIntro, returnFromRoom, showLegImage, showMap } from './mapNav.js';
 import { initBoot, runBoot } from './boot.js';
+import { hracNespi, initLogicTick, step } from './logicTick.js';
 import { openSaveStore } from './persist.js';
 import { initFramePainter } from './framePainter.js';
 import { aiSubScale, initIntro, intro, introMovie, logoMovie, setAiSubScale, syncSubOverlay } from './introOverlay.js';
@@ -65,12 +65,12 @@ import {
 } from './renderSettings.js';
 import { DEFAULT_LINE_TICKS, EFFECT_VOL, LOGIC_MS, LOGIC_SEC, initStageGeometry, roomGeometry } from './stageGeometry.js';
 import { aiWaterAnimating, forceRoomRedraw, initFramePacing, lastRoomBackend, lastRoomSig, loopThrottleOk, loopTicks, roomLoadSeq, roomLoading, roomPaints, setForceRoomRedraw, setSmoothLog, setWaterAnimMs, smoothLog, waterAnimMs } from './framePacing.js';
-import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, ffr, fftEntries, font, linesSpoken, loadmode, pokus, poslMluv, prevKostra, replaymode, room, roomDepth, setActiveScript, setChatter, setCount, setCutscene, setCutsceneSubs, setDeathState, setEngine, setLastLine, setLinesSpoken, setLoadmode, setPokus, setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, showmode, subs, talkIdx } from './gameState.js';
+import { activeScript, blink, count, cutscene, cutsceneSubs, darkFlicker, engine, ffr, fftEntries, font, linesSpoken, loadmode, pokus, poslMluv, prevKostra, room, setActiveScript, setChatter, setCount, setDeathState, setEngine, setLastLine, setLinesSpoken, setLoadmode, setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, showmode, subs, talkIdx } from './gameState.js';
 import { O_OPTIONS, helpScreens, ui } from './screenState.js';
 import { debugHooks } from './debugHooks.js';
 import { classicArtFor, enableWebgl, enhancedArtFor, glAiCompositor, glChannelDiff, glCompositor, glFailed, glParityCompare, initGlPlumbing } from './glPlumbing.js';
 import { aiCredits, aiPending, aiRoom, aiRoomNum, aiRoomRenderActive, aiWorldMap, curNum, decodePngResponse, enhancedArt, enhancedObjects, enhancedPending, initArt, isPngResponse, mapArtHolding, mapArtPending, mapPresented, roomArtPending } from './art.js';
-import { applyMapCheat, applyRoomCheat, applySpriteCheats, closeTetris, devWinRoom, initCheats, mapCheats, oldWater, resetRoomScopedCheats, roomCheats, silentFilm, tetris, tetrisModal, tickFrameEffects, ultraviolence } from './cheats.js';
+import { applyMapCheat, applyRoomCheat, applySpriteCheats, closeTetris, devWinRoom, initCheats, mapCheats, oldWater, resetRoomScopedCheats, roomCheats, silentFilm, tetris, tetrisModal, ultraviolence } from './cheats.js';
 import { beginMapLaunch, canLaunchFromMap, initRoomLaunch, mapLaunching, parchmentReady } from './roomLaunch.js';
 //#region Device gate | anchors: isUnsupportedDevice, showUnsupportedNotice | Phones are refused here, before any art is fetched — and before every other side effect in the file. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`.
 
@@ -1043,216 +1043,21 @@ initFramePainter({
   },
 });
 
-//#region The logic tick | anchors: step, tickBlink, hracNespi | One 80 ms game step: script, engine, dialogue, death handling, screensaver.
-function tickBlink(): void {
-  for (const w of ['little', 'big'] as const) {
-    if (blink[w] > 0) blink[w]--;
-    else if (Math.random() < 0.08) blink[w] = 1; // occasional ~1-tick (~140ms) blink
-    darkFlicker[w] = Math.random() < 0.06; // gspec=2 per-tick wink-out (random(100)<6)
-  }
-}
-
-/**
- * hrac_nespi (Uovl.pas:235): activity happened — the player moved, or the KUFRIK
- * demo replayed an action. Reset the fish idle timers AND the ambient-chatter idle
- * clock (casposlzmeny), so StdKecej only fires after ~60-120s of genuine inactivity.
- * This is why the original never chatters during the demo: every replayed action
- * resets the clock (DalsiPrikaz calls hrac_nespi, URoom.pas:26985).
- */
-function hracNespi(): void {
-  room?.hracNespi();
-  if (chatter) chatter.last = count; // casposlzmeny := now
-}
-
-/**
- * One game-logic step. Mirrors TRoom.Timer1Timer (URoom.pas:23986): it runs at
- * the fixed LOGIC_MS timestep, not per render frame. Returns true if it rebuilt
- * the room (death restart), so the catch-up loop discards leftover accumulation.
- */
-function step(): boolean {
-  if (ui.screen !== 'room') return false; // the map/intro screens have no game clock
-  setCount(count + 1);
-  // Briefcase cutscene takes over while it plays.
-  if (cutscene) {
-    cutsceneSubs?.tick(count);
-    cutscene.tick(cutsceneCaption, () => audio.playing(-1));
-    // Keep the idle-chatter timer synced to `now` while the demo plays, so the
-    // fish don't immediately "call" you the moment it ends (the demo isn't idle
-    // time). The room idle timers are already frozen here (the script block that
-    // increments them is skipped by the early return below).
-    if (chatter) chatter.last = count;
-    if (cutscene.done) {
-      setCutscene(null);
-      setCutsceneSubs(null);
-      disposeAiKufr(); // the cutscene plays once; don't hold its frames afterwards
-    }
-    return false;
-  }
-  tickBlink();
-  tickFrameEffects();
-  subs?.tick(count);
-  // Death cry when a fish is first crushed (sp-smrt1/2, URoom.pas:26767/26773).
-  if (room) {
-    for (const w of ['little', 'big'] as const) {
-      if (room.kostra[w] && !prevKostra[w]) {
-        audio.play(w === 'big' ? 'sp-smrt2' : 'sp-smrt1', EFFECT_VOL);
-        prevKostra[w] = true;
-      }
-    }
-  }
-  if (!room || !engine) return false;
-  // Fast-forward load animation (loadmode): replay the saved record at LoadSpeed
-  // moves/tick while it plays, skipping normal gameplay + the showmode replay (the
-  // original's DalsiPrikaz exits early during a load, URoom.pas:26930).
-  if (loadmode) {
-    advanceLoadmode();
-    return false;
-  }
-  // After a win, hold on the solved room while the cheer plays, then auto-return
-  // to the map (countdown:=30, URoom.pas:24341/24349). Enhancement over the original's
-  // fixed timer (which would cut a long line): when the countdown lapses, if the exit
-  // line is still being said — the fish's voice still sounding or its subtitle still
-  // on screen — hold at 1 until it finishes, so the map transition never truncates it.
-  if (engine.winCountdown > 0) {
-    const stillSpeaking =
-      audio.talking(MLUVI_PRIOR.little) ||
-      audio.talking(MLUVI_PRIOR.big) ||
-      (subsOn() && (subs?.active ?? false));
-    if (engine.winCountdown === 1 && stillSpeaking) return false; // hold — line still playing
-    engine.winCountdown--;
-    if (engine.winCountdown === 0) {
-      returnFromRoom();
-      return true;
-    }
-    // The hold does not freeze the room: the original decrements countdown and then
-    // still runs the gstav machine (`if countdown>0 then dec(countdown)` at
-    // URoom.pas:24349, followed by its `repeat`), so anything still in motion when the
-    // room was won finishes on screen. A gspec=9 push-out is the case that needs it —
-    // it wins the room AND enters stav_ma_padat on the same tick (URoom.pas:24904), so
-    // whatever the departed item held up would otherwise hang in the air until the map
-    // came back. `advance()` is inert while idle: its swim/possession branches are all
-    // gated on `!room.won`.
-    engine.advance();
-    return false;
-  }
-  // Zvuky_okoli (URoom.pas:23736): ambient bubbles — 5%/tick if none are sounding
-  // on the bubble channel (priority 1000). Skipped during a best-solution replay
-  // (loadtype=nej gates Zvuky_okoli, URoom.pas:24937) so the playback stays silent.
-  if (!inReplay()) {
-    const bubble = maybeBubble((n) => Math.floor(Math.random() * n), audio.playing(1000));
-    if (bubble) audio.play(bubble, EFFECT_VOL, 1000);
-  }
-  // Death: skeletons erode; if the active fish died, control passes to the
-  // survivor (URoom.pas:26998). Auto-restart only when *both* fish are out of play
-  // and it is not a win (URoom.pas:24337) — a lone survivor keeps playing until the
-  // player restarts, which is what lets the death commentary (StdSmrt) be heard.
-  if (room.anyFishDead) {
-    const eroded = room.tickRozpad();
-    const other = engine.active === 'little' ? 'big' : 'little';
-    if (!room.alive[engine.active] && room.alive[other]) engine.active = other;
-    if (!room.alive.little && !room.alive.big && !room.won && eroded && !showmode) {
-      setPokus(pokus + 1); // another attempt
-      buildRoom(true);
-      return true;
-    }
-    // A fully-eroded skeleton leaves the grid; anything it was holding up now
-    // falls (stav_ma_padat, URoom.pas:24421-24430). This runs during showmode too so
-    // the demo's deliberate deaths look right (e.g. the thrown bottle drops once the
-    // crushed fish disintegrates); the replay simply pauses while things fall (its
-    // branch is gated on phase==='idle') and resumes when the room settles.
-    if (room.clearErodedSkeletons() && engine.phase === 'idle') {
-      if (room.padani()) {
-        engine.phase = 'fall';
-        engine.animFrame = 0;
-      } else {
-        room.clearAllDirs();
-      }
-    }
-  }
-  // Run the room script (Programky) each unresolved tick. During the win hold,
-  // StepEngine still advances VyresLode so an in-flight wreck finishes falling.
-  if (activeScript) {
-    const wasWon = room.won;
-    engine.runScript(count, casHry()); // idle timers + scalar sync + prog + tickShodLod
-    if (!wasWon) {
-      // StdSmrt: death commentary (the survivor comments ~8 ticks after a partner dies).
-      // Gated on StdHlaskySmrti (URoom.pas:24942) — rooms like TRUP/VLADOVA disable it.
-      // Suppressed during the KUFRIK demonstration and during a best-solution replay
-      // (the original's silent loadmode replay speaks nothing): the recorded help
-      // subtitles are the demo's own narration of the deliberate death.
-      if (deathState && activeScript.s.stdHlaskySmrti && !showmode && !inReplay()) {
-        stdSmrt(activeScript.s, deathState, count, roomDepth, {
-          aliveLittle: room.alive.little,
-          aliveBig: room.alive.big,
-          venkuLittle: room.venku.little,
-          venkuBig: room.venku.big,
-        });
-      }
-      // StdKecej: ambient idle chatter, gated on no active dialogue + both fish alive.
-      // No showmode special-case: the demo keeps quiet on its own because every replayed
-      // action calls hracNespi (resets casposlzmeny), exactly like the original. A replay
-      // is silent (original loadmode replay runs no Programky/chatter).
-      if (chatter && room.alive.little && room.alive.big && !inReplay()) {
-        const depth15 = roomDepth === 15;
-        tickChatter(activeScript.s, chatter, count, 1000 / LOGIC_MS, activeScript.s.isDialog(), depth15);
-      }
-      activeScript.s.dialogy(count);
-    }
-  }
-  updateLipSync(); // cycle talking-mouth frames from live voice playback
-  // Hacky (URoom.pas:24950): the xfisher fishing hooks. A hook can catch+kill a fish
-  // (killByHook sets alive=false/kostra=false and drops what it held). If the active
-  // fish is hooked, control passes to the survivor; when both fish are out of play
-  // (and no hook is still dragging one up), the room restarts — mirroring the crush
-  // path but keyed on `alive` since a hooked fish leaves no skeleton to erode.
-  if (hooks.count > 0) {
-    hooks.tick(room, (n) => Math.floor(Math.random() * n));
-    const other = engine.active === 'little' ? 'big' : 'little';
-    if (!room.alive[engine.active] && room.alive[other]) engine.active = other;
-    if (
-      !room.alive.little &&
-      !room.alive.big &&
-      !room.won &&
-      !room.kostra.little &&
-      !room.kostra.big &&
-      !hooks.busy &&
-      engine.phase === 'idle'
-    ) {
-      setPokus(pokus + 1);
-      buildRoom(true);
-      return true;
-    }
-  }
-  // The shared step-engine drives the whole phase machine (gspec=9 cork setup, move/
-  // fall/turn/exit/cork animation with its exit cheer + triggerWin, and the pending
-  // auto-swim / ZELVA possession step) — the same path the headless harness runs.
-  engine.advance();
-  // Engine-level held-key repeat (DalsiPrikaz, URoom.pas:26941): re-issue the held
-  // movement key on a rest tick. Run AFTER advance() so a cell that just completed
-  // immediately starts the next one on the SAME tick — no stationary gap between cells
-  // (holding flows continuously) — while jizda still accumulates (advance saw phase=move
-  // this tick before completing). Gated to the same rest conditions the original
-  // dispatches under (stav_klid, not possessed/finale/demo/dead/won).
-  if (
-    engine.phase === 'idle' &&
-    !room.won &&
-    !room.anyFishDead &&
-    !showmode &&
-    !replaymode &&
-    activeScript?.s.natvrdo !== 1 &&
-    !activeScript?.s.zavermode
-  ) {
-    dispatchHeldMove();
-  }
-  // KUFRIK automatic demonstration: with no swim/possession pending, the recorded
-  // help.cap stream is consumed one action per idle step (DalsiPrikaz in stav_klid,
-  // URoom.pas:24438). It keeps advancing while both fish are DEAD (the demo's
-  // deliberate death countdown), so it checks phase directly rather than idle().
-  if (engine.phase === 'idle' && !room.won && showmode) advanceShowmode();
-  // Map "Replay": play back the best solution one move per idle tick (daReplay).
-  if (engine.phase === 'idle' && !room.won && replaymode) advanceReplay();
-  return false;
-}
+//#region Logic tick wiring | anchors: initLogicTick | Hands `logicTick.ts` the four names it needs. The 80 ms step itself — script, engine, dialogue, death, screensaver — is in that module.
+initLogicTick({
+  get buildRoom() {
+    return buildRoom;
+  },
+  get casHry() {
+    return casHry;
+  },
+  get hooks() {
+    return hooks;
+  },
+  get updateLipSync() {
+    return updateLipSync;
+  },
+});
 
 //#region Frame pacing wiring | anchors: initFramePacing | Hands `framePacing.ts` its view of the game. The idle throttle, the wake rates and the perf HUD are in that module.
 // Eight names, because the state those rates read has owning modules now. Before
