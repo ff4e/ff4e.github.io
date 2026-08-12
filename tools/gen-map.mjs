@@ -98,29 +98,36 @@ export function render(regions, lineCount) {
   ].join('\n');
 }
 
-const text = readFileSync(SRC, 'utf8');
-const regions = readRegions(text);
-if (!regions.length) {
-  console.error('[gen-map] no //#region markers found in src/app/main.ts');
-  process.exit(1);
-}
-const block = render(regions, text.split('\n').length);
-const readme = readFileSync(README, 'utf8');
-const a = readme.indexOf(BEGIN);
-const b = readme.indexOf(END);
-if (a === -1 || b === -1) {
-  console.error(`[gen-map] README.md is missing the MAP sentinels:\n  ${BEGIN}\n  ${END}`);
-  process.exit(1);
-}
-const updated = readme.slice(0, a) + block + readme.slice(b + END.length);
-
-if (process.argv.includes('--check')) {
-  if (updated !== readme) {
-    console.error('[gen-map] the README map is out of date — run `npm run map:update`');
+function main() {
+  const text = readFileSync(SRC, 'utf8');
+  const regions = readRegions(text);
+  if (!regions.length) {
+    console.error('[gen-map] no //#region markers found in src/app/main.ts');
     process.exit(1);
   }
-  console.log(`[gen-map] up to date (${regions.length} regions)`);
-} else {
-  writeFileSync(README, updated);
-  console.log(`[gen-map] wrote ${regions.length} regions to README.md`);
+  const block = render(regions, text.split('\n').length);
+  const readme = readFileSync(README, 'utf8');
+  const a = readme.indexOf(BEGIN);
+  const b = readme.indexOf(END);
+  if (a === -1 || b === -1) {
+    console.error(`[gen-map] README.md is missing the MAP sentinels:\n  ${BEGIN}\n  ${END}`);
+    process.exit(1);
+  }
+  const updated = readme.slice(0, a) + block + readme.slice(b + END.length);
+
+  if (process.argv.includes('--check')) {
+    if (updated !== readme) {
+      console.error('[gen-map] the README map is out of date — run `npm run map:update`');
+      process.exit(1);
+    }
+    console.log(`[gen-map] up to date (${regions.length} regions)`);
+  } else {
+    writeFileSync(README, updated);
+    console.log(`[gen-map] wrote ${regions.length} regions to README.md`);
+  }
 }
+
+// `readRegions` is the one parse of the region markers in the repo, and other tools
+// import it (tools/region-graph.mjs). Rewriting the README as a side effect of that
+// import would make a read-only analysis command edit a tracked file.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
