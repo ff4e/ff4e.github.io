@@ -39,6 +39,8 @@ let lines = new Map<string, DomLine>();
 let lastFont = '';
 /** Distance from a line box's top to the text baseline, for the current font. */
 let baselineInset = 0;
+/** Height of a glyph's line box, for the current font — the gradient is placed in it. */
+let boxHeight = 0;
 
 /** Is the DOM renderer selected? Persisted so a reload keeps it while testing. */
 export function domSubsEnabled(): boolean {
@@ -77,7 +79,7 @@ export function clearDomSubtitles(): void {
  * measures exactly what CSS will not tell us directly. Measured once per font, because
  * it is a forced layout.
  */
-function measureBaseline(font: string): number {
+function measureBaseline(font: string): { inset: number; height: number } {
   const probe = document.createElement('div');
   probe.style.cssText = `position:absolute;visibility:hidden;white-space:pre;font:${font}`;
   probe.textContent = 'Mg';
@@ -85,9 +87,10 @@ function measureBaseline(font: string): number {
   marker.style.cssText = 'display:inline-block;width:0;height:0';
   probe.appendChild(marker);
   document.body.appendChild(probe);
-  const inset = marker.getBoundingClientRect().bottom - probe.getBoundingClientRect().top;
+  const box = probe.getBoundingClientRect();
+  const inset = marker.getBoundingClientRect().bottom - box.top;
   probe.remove();
-  return inset;
+  return { inset, height: box.height };
 }
 
 /** The damped-cosine wave, as keyframes the compositor can run on its own. */
@@ -136,7 +139,7 @@ export function syncDomSubtitles(
   const fontPx = VECTOR_GEOM.fontPx * scale;
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
   if (font !== lastFont) {
-    baselineInset = measureBaseline(font);
+    ({ inset: baselineInset, height: boxHeight } = measureBaseline(font));
     lastFont = font;
     // Glyph boxes are laid out for the old size; rebuild them.
     for (const l of lines.values()) l.el.remove();
@@ -147,23 +150,38 @@ export function syncDomSubtitles(
   for (const t of sys.debugLines()) {
     const key = `${t.startcount}|${t.barva}|${t.obsah}`;
     want.add(key);
+    // Where this line sits right now. Computed before the element exists, because it has
+    // to be part of the element's FIRST style: a `transition` plus a transform written
+    // after insertion animates from the untransformed position — the top of the game box
+    // — so a new line visibly fell from the ceiling before starting its wave.
+    const y = (t.ys * VECTOR_GEOM.scale + screenH + VECTOR_GEOM.baselineOff) * scale - baselineInset;
     let line = lines.get(key);
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
         `position:absolute;left:0;right:0;text-align:center;white-space:pre;font:${font};` +
-        `line-height:normal;transition:transform 80ms linear;will-change:transform`;
+        `line-height:normal;transform:translateY(${y.toFixed(2)}px);` +
+        `transition:transform 80ms linear;will-change:transform`;
       const [r, g, b] = t.rgb;
       const top = `rgb(${r},${g},${b})`;
       const bottom = `rgb(${Math.round(r * 0.42)},${Math.round(g * 0.42)},${Math.round(b * 0.42)})`;
       const spans: HTMLSpanElement[] = [];
-      // Eight offsets approximate the round outline drawFill strokes on.
-      const rr = fontPx * 0.075;
-      const ring = ([
-        [1, 0], [-1, 0], [0, 1], [0, -1], [0.7, 0.7], [-0.7, 0.7], [0.7, -0.7], [-0.7, -0.7],
-      ] as ReadonlyArray<readonly [number, number]>)
-        .map((d) => `${(d[0] * rr).toFixed(2)}px ${(d[1] * rr).toFixed(2)}px 0 rgb(5,5,12)`)
-        .join(',');
+      // The bevel gradient, placed exactly where the canvas puts it:
+      // createLinearGradient(0, gy - fs*0.72, 0, gy + fs*0.1) — a ramp across the
+      // glyph's cap height, anchored to ITS OWN baseline, not to the line box. Spreading
+      // it over the whole box (which is what a bare `linear-gradient` does) puts the
+      // light end above the glyph and lands it in the wrong part of the ramp, which is
+      // what made the text look washed out and flat.
+      const gTop = ((baselineInset - fontPx * 0.72) / boxHeight) * 100;
+      const gBottom = ((baselineInset + fontPx * 0.1) / boxHeight) * 100;
+      const bevel =
+        `linear-gradient(to bottom,${top} 0%,${top} ${gTop.toFixed(2)}%,` +
+        `${bottom} ${gBottom.toFixed(2)}%,${bottom} 100%)`;
+      // The outline is drawVector's strokeText: lineWidth = fs*0.16, centred on the
+      // path, so it reaches fs*0.08 outwards. -webkit-text-stroke is the same thing —
+      // but it paints OVER the fill in Chromium (which honours no paint-order on HTML
+      // text), so the stroke goes on its own layer BEHIND the fill instead.
+      const strokeW = fontPx * 0.16;
       // The line's own age, so a line already part-way through its wave starts there
       // rather than replaying it from the beginning.
       const ageMs = ((count - t.startcount) / TICKS_PER_SEC) * 1000;
@@ -173,17 +191,25 @@ export function syncDomSubtitles(
       const stepMs = 1000 / (VECTOR_GEOM.wavePerTick * TICKS_PER_SEC);
       const durMs = (VECTOR_GEOM.waveLen / VECTOR_GEOM.wavePerTick / TICKS_PER_SEC) * 1000;
       [...t.obsah].forEach((ch, i) => {
+        // Two layers per glyph so the outline sits behind the fill in every engine.
+        // The outer span is what the wave animates, so both move as one.
         const sp = document.createElement('span');
-        sp.textContent = ch;
-        // The bevel is a gradient clipped to the glyph, so it travels with it — exactly
-        // like drawVector's gradient, which is anchored to each glyph's own baseline.
         sp.style.cssText =
-          `display:inline-block;opacity:0;will-change:transform;` +
-          // The bevel is a gradient clipped to the glyph; the outline is a text-shadow
-          // ring rather than -webkit-text-stroke, because a stroke paints OVER the fill
-          // in Chromium (it honours no paint-order on HTML text) and swallows it.
-          `background-image:linear-gradient(${top},${bottom});-webkit-background-clip:text;` +
-          `background-clip:text;color:transparent;text-shadow:${ring}`;
+          `position:relative;display:inline-block;opacity:0;will-change:transform;` +
+          // Per-character advances, like the canvas path, which measures each glyph on
+          // its own: kerning and ligatures would shift the letters against it.
+          `font-kerning:none;font-variant-ligatures:none;-webkit-font-smoothing:antialiased`;
+        const strokeEl = document.createElement('span');
+        strokeEl.textContent = ch;
+        strokeEl.style.cssText =
+          `position:absolute;left:0;top:0;color:rgb(5,5,12);` +
+          `-webkit-text-stroke:${strokeW.toFixed(2)}px rgb(5,5,12)`;
+        const fillEl = document.createElement('span');
+        fillEl.textContent = ch;
+        fillEl.style.cssText =
+          `position:relative;background-image:${bevel};-webkit-background-clip:text;` +
+          `background-clip:text;color:transparent`;
+        sp.append(strokeEl, fillEl);
         el.appendChild(sp);
         spans.push(sp);
         if (ch === ' ') return; // a space inks nothing; drawVector skips it too
@@ -199,12 +225,11 @@ export function syncDomSubtitles(
         const shrunk = Math.max(8, (fontPx * maxCss) / natural);
         el.style.fontSize = `${shrunk.toFixed(2)}px`;
       }
-      line = { el, spans, y: NaN };
+      line = { el, spans, y };
       lines.set(key, line);
     }
     // The scroll: the only thing written per tick, and a transform, so the compositor
     // interpolates it (see the 80ms transition, one logic tick).
-    const y = (t.ys * VECTOR_GEOM.scale + screenH + VECTOR_GEOM.baselineOff) * scale - baselineInset;
     if (y !== line.y) {
       line.el.style.transform = `translateY(${y.toFixed(2)}px)`;
       line.y = y;
