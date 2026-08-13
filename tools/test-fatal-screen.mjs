@@ -72,7 +72,7 @@ try {
     if (!el || !first) return { present: false };
     const r = el.getBoundingClientRect();
     const url = getComputedStyle(first).backgroundImage;
-    const m = /url\("(data:image\/png;base64,[^"]+)"\)/.exec(url);
+    const m = /url\("(data:image\/(?:png|webp);base64,[^"]+)"\)/.exec(url);
     if (!m) return { present: true, w: r.width, h: r.height, inline: false };
     // Decode the data URI the CSS actually resolved to, and count the pixels it paints.
     // A blank or undecodable sprite is the failure mode worth catching, and it is
@@ -101,8 +101,12 @@ try {
   expect(bird.present, 'the failure screen has a creature');
   expect(bird.inline === true, 'its art is inlined in the page, not fetched');
   expect(bird.w > 0 && bird.h > 0, `it takes up space (${bird.w}x${bird.h})`);
-  expect(bird.decoded === true, 'the inlined PNG decodes');
-  expect(bird.nw === 45 && bird.nh === 30, `it is the 45x30 sprite (${bird.nw}x${bird.nh})`);
+  expect(bird.decoded === true, 'the inlined image decodes');
+  // The AI upscale, not the 45x30 original — and shown at HALF its size, which is what
+  // keeps it smooth. Both numbers are asserted because either alone would pass while
+  // the other was wrong: the right art blown up, or the right size drawn from a mosaic.
+  expect(bird.nw === 180 && bird.nh === 120, `it is the 180x120 AI upscale (${bird.nw}x${bird.nh})`);
+  expect(bird.w === 90 && bird.h === 60, `drawn at half that, so it is filtered, not blocky (${bird.w}x${bird.h})`);
   // Not just "an image" — an image with a parrot in it. A transparent or blank PNG
   // would satisfy every check above.
   const filled = bird.opaque / bird.total;
