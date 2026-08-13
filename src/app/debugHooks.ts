@@ -95,6 +95,7 @@ import {
 } from './gameState.js';
 import { renderer, setRendererValue } from './renderSettings.js';
 import { ui } from './screenState.js';
+import { tierNoteState } from './tierNote.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
 import { sum } from '../render/filmEffects.js';
@@ -400,6 +401,12 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     /** Dev/perf hook: mirror of the dev bar's idle-saver checkbox (P). */
     setRenderOnDirty: (v: boolean) => host.setRenderOnDirty(v),
     enhancedLoaded: () => host.enhancedArt !== null,
+    // The tier note: its STATE, and whether it is actually on screen. Both, because they
+    // answer different questions — the state says the game noticed a failed load, the
+    // visibility says the player was told. A probe asserting only the first would pass
+    // with the note permanently hidden.
+    tierNote: () => tierNoteState(),
+    tierNoteVisible: () => document.getElementById('tier-note')?.hidden === false,
     enhancedActive: () =>
       host.enhancedArtActive() &&
       host.enhancedArt !== null &&

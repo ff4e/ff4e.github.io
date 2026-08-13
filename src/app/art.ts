@@ -32,6 +32,8 @@ import { loadAiCredits } from '../render/creditsAi.js';
 import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
 import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
+import { isTransient } from '../render/assetFetch.js';
+import { setTierNote, syncTierNote } from './tierNote.js';
 // Re-exported so the one other consumer of the decode helpers (main.ts's leg-story art)
 // keeps its existing import. They live in enhancedLoad.ts now, with the loaders.
 export { decodePngResponse, isPngResponse } from './enhancedLoad.js';
@@ -138,6 +140,11 @@ export function retargetArtForTier(): void {
   } else {
     enhancedPending = false;
   }
+  // Switching away from `ai` makes the note untrue on the spot: the player is now
+  // getting exactly the tier they asked for.
+  syncTierNote(host.graphics);
+  // Selecting `ai` is the discrete event the one-shot UI assets retry on.
+  if (host.graphics === 'ai') retryAiUiAssets();
   if (host.graphics === 'ai' && curNum) {
     // Hold the frame we already have until the AI art lands, rather than repainting
     // the room in enhanced art and then popping to AI — the same rule room entry
@@ -258,12 +265,28 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
     }
     pending = loadEnhanced(jmeno);
     // Registered BEFORE the first await, so a caller arriving during the load joins
-    // this one. loadEnhanced never rejects, so there is no rejection to clear.
+    // this one rather than starting a second.
     enhancedLoads.set(jmeno, pending);
+    // A rejection must not be joined by the NEXT caller — that is the whole point of
+    // not remembering a failure. Attached here rather than in the await below because
+    // every joiner runs that, and only the originator should retract the entry.
+    pending.catch(() => enhancedLoads.delete(jmeno));
   }
-  const result = await pending;
-  enhancedLoads.delete(jmeno);
-  applyEnhanced(num, result);
+  try {
+    const result = await pending;
+    enhancedLoads.delete(jmeno);
+    applyEnhanced(num, result);
+  } catch (e) {
+    if (!isTransient(e)) throw e;
+    // Nothing was learned about this room, so nothing is remembered: enhancedCache is
+    // untouched and the next entry (or tier switch) tries again. What DOES have to
+    // happen is releasing the frame — a room that holds forever is worse than a room in
+    // 1998 bitmaps, and the player can still play.
+    console.warn(`[art] enhanced art for ${jmeno} did not load; retrying on the next entry`, e);
+    if (curNum === num) enhancedPending = false;
+    host.forceRoomRedraw = true;
+    host.wake();
+  }
 }
 
 /** Point the live art state at a loaded result, iff `num` is still the room on screen. */
@@ -275,11 +298,13 @@ function applyEnhanced(num: number, r: RoomEnhanced): void {
 }
 
 /**
- * Fetch one room's enhanced art and REMEMBER the outcome.
+ * Fetch one room's enhanced art and remember it — but only if an answer arrived.
  *
- * The fetching and decoding is `enhancedLoad.ts`; the only thing added here is the
- * cache, because caching is a judgement about what an empty result means and that
- * judgement belongs with the state, not with the transport.
+ * The fetching and decoding is `enhancedLoad.ts`. The only thing added here is the
+ * cache, and that is the interesting half: caching is a judgement about what an empty
+ * result MEANS, so it belongs with the state rather than with the transport. An empty
+ * result that the server confirmed is a fact about the room and is kept; a rejection is
+ * the absence of a fact and propagates untouched.
  */
 async function loadEnhanced(jmeno: string): Promise<RoomEnhanced> {
   const result = await loadEnhancedRoom(jmeno);
@@ -289,8 +314,13 @@ async function loadEnhanced(jmeno: string): Promise<RoomEnhanced> {
 
 /** Load the hi-res panel art once (see panelAi.ts); null ⇒ keep the faithful path. */
 export async function ensureAiPanel(): Promise<void> {
-  aiPanel = await loadAiPanel('/');
-  if (aiPanel) ui.panelSig = null;   // force a repaint at the new resolution
+  aiPanelPending = true;
+  try {
+    aiPanel = await loadAiPanel('/');
+    if (aiPanel) ui.panelSig = null;   // force a repaint at the new resolution
+  } finally {
+    aiPanelPending = false;
+  }
 }
 
 /**
@@ -306,6 +336,31 @@ export async function ensureAiPanel(): Promise<void> {
  */
 let aiMapTried = false; // one-shot: the load is started at most once per session
 let aiMapPending = false; // that load is in flight (independent of the tier on screen)
+// The same "in flight" flags for the panel and the credits, so retryAiUiAssets() can
+// tell an asset that FAILED from one that simply has not finished yet.
+let aiPanelPending = false;
+let aiCreditsPending = false;
+
+/**
+ * Give the three one-shot `ai` UI assets (world map, panel, credits) another go.
+ *
+ * Each is latched by a `…Tried` flag that is set BEFORE its load resolves, so a load
+ * that failed got no second attempt for the whole session — and the world map is the
+ * game's hub screen, so that was the same user-visible bug rooms had.
+ *
+ * The latch cannot be cleared where the load fails: `beginMapArt` runs from the map's
+ * draw branch, so clearing it there would be a request per frame on a flaky link. It
+ * hangs instead on a discrete, player-initiated event — selecting the `ai` tier — which
+ * bounds it at one retry per switch. An asset still in flight is left alone; an asset
+ * that legitimately resolved null is retried, because at this level "absent" and
+ * "failed" are not distinguished and one wasted request per deliberate tier switch is
+ * a price worth paying to make the hub screen recoverable.
+ */
+export function retryAiUiAssets(): void {
+  if (!aiWorldMap && !aiMapPending) aiMapTried = false;
+  if (!aiPanel && !aiPanelPending) ui.aiPanelTried = false;
+  if (!aiCredits && !aiCreditsPending) ui.aiCreditsTried = false;
+}
 /**
  * Is a map frame the thing currently on screen?
  *
@@ -388,6 +443,15 @@ async function ensureAiWorldMap(): Promise<void> {
 
 /** Load the hi-res credits art once (see creditsAi.ts). */
 export async function ensureAiCredits(): Promise<void> {
+  aiCreditsPending = true;
+  try {
+    await loadAiCreditsOnce();
+  } finally {
+    aiCreditsPending = false;
+  }
+}
+
+async function loadAiCreditsOnce(): Promise<void> {
   aiCredits = await loadAiCredits('/');
   // The pointer handlers live on #screen, which this path hides (display:none) while
   // its own overlay is up — a hidden element gets no pointer events, so "click anywhere
@@ -402,8 +466,14 @@ export async function ensureAiCredits(): Promise<void> {
 
 /**
  * Load (and cache) the AI-upscaled art for a room (public/enhanced-ai/<JMENO>/), for the
- * `ai` graphics level. A missing set caches null so the room falls back to the enhanced
- * render. Applies to `num` iff it is still the current room when the load resolves.
+ * `ai` graphics level. Applies to `num` iff it is still the current room when the load
+ * resolves.
+ *
+ * A room whose AI art is genuinely ABSENT caches null and falls back to the enhanced
+ * render — a stable fact, and the right thing to remember. A room whose load FAILED
+ * caches nothing, so the next entry (or tier switch) tries again. Before that
+ * distinction existed, one aborted request left the room drawing enhanced art with the
+ * setting still reading `ai`, for the whole session, with no way back but a reload.
  */
 export async function ensureAiRoom(num: number): Promise<void> {
   const jmeno = ROOMS[num - 1]?.jmeno;
@@ -415,14 +485,34 @@ export async function ensureAiRoom(num: number): Promise<void> {
   if (pending === undefined) {
     pending = loadAiRoom('/', jmeno);
     // Registered BEFORE the first await so a concurrent caller joins this load rather
-    // than starting its own. Don't cache a rejection — loadAiRoom resolves null on
-    // failure, but a throw would otherwise poison the room for the session.
-    pending.catch(() => aiRoomCache.delete(jmeno));
+    // than starting its own, and retracted if it rejects so the failure is not what the
+    // next caller joins. The identity check matters: by the time this runs, a later
+    // entry may already have started a REPLACEMENT load and stored it under the same
+    // key, and deleting that one would mean two live loads for one room.
+    pending.catch(() => { if (aiRoomCache.get(jmeno) === pending) aiRoomCache.delete(jmeno); });
     aiRoomCache.set(jmeno, pending);
   }
   try {
     const loaded = await pending;
-    if (curNum === num) { aiRoom = loaded; aiRoomNum = num; }
+    if (curNum === num) {
+      aiRoom = loaded;
+      aiRoomNum = num;
+      // Only a SUCCESS clears the note. `null` is not success and not failure — it is
+      // the room telling us, authoritatively, that it has no AI art (SCORE). That is
+      // permanent and there is nothing for the player to act on, so it says nothing.
+      if (loaded !== null) setTierNote('ok', host.graphics);
+    }
+  } catch (e) {
+    if (!isTransient(e)) throw e;
+    // Nothing learned, nothing remembered — and the player is told, because the room is
+    // now drawing one tier below the setting they chose and nothing else would say so.
+    console.warn(`[art] AI art for ${jmeno} did not load; retrying on the next entry`, e);
+    // Both arms are gated on `curNum === num`, and the note is why. It describes the
+    // room ON SCREEN, while these loads are per-room and outlive the room that started
+    // them: entering a room during the previous room's load had the older load's
+    // outcome overwrite the newer one's. Measured — a stale boot-room success landed
+    // just after this room's failure and silently cleared the note.
+    if (curNum === num) setTierNote('failed', host.graphics);
   } finally {
     // In a finally: a room whose AI art is missing or fails to decode must release
     // the hold too (it falls back to the enhanced render), or it would never paint.
