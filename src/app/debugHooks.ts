@@ -1140,6 +1140,16 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       const phase = wobblePhase(w);
       const ripples = activeRipples(w, geom.nativeH);
       const banded = wobbles ? faithfulWobbleShifts(w, geom.nativeH) : null;
+      // gspec=42: the shader replaces the wall's COLOUR with this frame's loading stripe
+      // for the native row (BG_FS `uZx`). Read back the very sequence the GPU was handed
+      // rather than deriving it — generating it advances the room's band state, so a
+      // second derivation would be a different frame's stripes.
+      const zxBands = room.gspec === 42 ? host.aiRoom.lastZxBands() : null;
+      const wallRgb = (o: number, ch: number, y: number): number => {
+        if (!zxBands) return wallPx[o + ch]!;
+        const c = room!.palette[zxBands[Math.min(zxBands.length - 1, Math.floor(y / S))]!];
+        return ch === 0 ? (c?.r ?? 0) : ch === 1 ? (c?.g ?? 0) : (c?.b ?? 0);
+      };
 
       let oracleMax = 0;
       let bandedMax = 0;
@@ -1182,20 +1192,20 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
             const a = bgPx[rowOff + c0 * 4 + ch]!;
             const b = bgPx[rowOff + c1 * 4 + ch]!;
             const bg = wobbles ? a + (b - a) * frac : a;
-            const want = wallPx[o + ch]! * wa + bg * (1 - wa);
+            const want = wallRgb(o, ch, y) * wa + bg * (1 - wa);
             const got = gpu.rgba[o + ch]!;
             const d = Math.abs(want - got);
             if (d > oracleMax) oracleMax = d;
             sq += d * d;
             n++;
-            const wantB = wallPx[o + ch]! * wa + bgPx[rowOff + cb * 4 + ch]! * (1 - wa);
+            const wantB = wallRgb(o, ch, y) * wa + bgPx[rowOff + cb * 4 + ch]! * (1 - wa);
             const dB = Math.abs(wantB - got);
             if (dB > bandedMax) bandedMax = dB;
             const n0 = Math.min(Math.max(x + fN, 0), W - 1);
             const n1 = Math.min(Math.max(x + fN + 1, 0), W - 1);
             const na = bgPx[rowOff + n0 * 4 + ch]!;
             const nb = bgPx[rowOff + n1 * 4 + ch]!;
-            const wantN = wallPx[o + ch]! * wa + (wobbles ? na + (nb - na) * fracN : na) * (1 - wa);
+            const wantN = wallRgb(o, ch, y) * wa + (wobbles ? na + (nb - na) * fracN : na) * (1 - wa);
             const dN = Math.abs(wantN - got);
             if (dN > rippleDelta) rippleDelta = dN;
           }

@@ -63,6 +63,23 @@ await withApp(
     expect(!(await p.evaluate(() => window.__ff.aiRoomLoaded())), 'no-AI-art: KOSTE has no AI art to present');
     expect(asked('/enhanced/KOSTE/') > 0, 'no-AI-art: KOSTE enhanced art WAS requested on demand');
     expect(await p.evaluate(() => window.__ff.enhancedLoaded()), 'no-AI-art: KOSTE falls back to loaded enhanced art');
+
+    // === 4: ZX, the last room that needed the other tier ===
+    // gspec=42 used to disqualify the AI compositor outright, so room 66 drew through
+    // the ENHANCED one on every frame — the one room whose enhanced art the `ai` tier
+    // genuinely could not do without. Its stripes now composite at ×S (zxBands.ts), so
+    // it must behave like any other room: AI art, and no enhanced request at all.
+    urls.length = 0;
+    await p.evaluate(() => window.__ff.enterRoomAwait(66));
+    await waitRoom(p, 0);
+    await waitFrames(p, 30);
+
+    expect(await p.evaluate(() => window.__ff.aiRoomActive()), 'ZX: composited by the ai tier, not handed back');
+    expect(
+      (await p.evaluate(() => window.__ff.roomGeom()?.upscale ?? 0)) > 1,
+      'ZX: drawn at ×S rather than native',
+    );
+    expect(asked('/enhanced/ZX/') === 0, `ZX: enhanced art was NOT requested (saw ${asked('/enhanced/ZX/')})`);
   },
   { graphics: 'ai', allowErrors: /404 \(Not Found\)/ },
 );
