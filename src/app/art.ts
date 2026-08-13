@@ -33,7 +33,7 @@ import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
 import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
 import { isTransient } from '../render/assetFetch.js';
-import { setTierNote, syncTierNote } from './tierNote.js';
+import { hideArtFailure, showArtFailure } from './artFailure.js';
 // Re-exported so the one other consumer of the decode helpers (main.ts's leg-story art)
 // keeps its existing import. They live in enhancedLoad.ts now, with the loaders.
 export { decodePngResponse, isPngResponse } from './enhancedLoad.js';
@@ -101,6 +101,10 @@ let aiPendingNum = 0; // room aiPending refers to (the tier can change under it)
  * and the same tier.
  */
 export function beginRoomArt(num: number): void {
+  // Any failure screen still up belongs to the room being LEFT, and its retry would
+  // reload art nobody is waiting for. Entering a room supersedes it; if this room's art
+  // fails too, its own loader raises a fresh one a moment later.
+  hideArtFailure();
   // Enhanced background art for this room (async; draw() holds the previous
   // frame until it lands, so the room never flashes classic first).
   curNum = num;
@@ -140,9 +144,10 @@ export function retargetArtForTier(): void {
   } else {
     enhancedPending = false;
   }
-  // Switching away from `ai` makes the note untrue on the spot: the player is now
-  // getting exactly the tier they asked for.
-  syncTierNote(host.graphics);
+  // A tier switch answers the question the screen was asking: whatever failed, the
+  // player is now asking for something else, and the load below will raise it again if
+  // the new tier fails too.
+  hideArtFailure();
   // Selecting `ai` is the discrete event the one-shot UI assets retry on.
   if (host.graphics === 'ai') retryAiUiAssets();
   if (host.graphics === 'ai' && curNum) {
@@ -279,13 +284,14 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
   } catch (e) {
     if (!isTransient(e)) throw e;
     // Nothing was learned about this room, so nothing is remembered: enhancedCache is
-    // untouched and the next entry (or tier switch) tries again. What DOES have to
-    // happen is releasing the frame — a room that holds forever is worse than a room in
-    // 1998 bitmaps, and the player can still play.
-    console.warn(`[art] enhanced art for ${jmeno} did not load; retrying on the next entry`, e);
-    if (curNum === num) enhancedPending = false;
-    host.forceRoomRedraw = true;
-    host.wake();
+    // untouched and a retry genuinely refetches.
+    //
+    // The hold is deliberately NOT released. Releasing it would paint the room in 1998
+    // bitmaps — a downgrade the player did not ask for and cannot see — so the game
+    // stops and offers the retry instead (see artFailure.ts). An outcome for a room
+    // that is no longer on screen is dropped: the player has already moved on.
+    console.warn(`[art] enhanced art for ${jmeno} did not load`, e);
+    if (curNum === num) raiseArtFailure('room', () => void ensureEnhancedArt(num));
   }
 }
 
@@ -295,6 +301,10 @@ function applyEnhanced(num: number, r: RoomEnhanced): void {
   enhancedArt = r.art;
   enhancedObjects = r.objects;
   enhancedPending = false;
+  // The art arrived, so whatever the screen was asking has been answered — including
+  // when the answer came from a retry the player did not press (a later room entry, a
+  // tier switch back). Leaving it up would strand a working game behind it.
+  hideArtFailure();
 }
 
 /**
@@ -424,20 +434,36 @@ export function beginMapArt(): void {
  * cleanly falls back to the faithful CPU composite.
  */
 async function ensureAiWorldMap(): Promise<void> {
+  // `held` rather than an early return out of the try: a `finally` runs even after a
+  // `return` in the catch, so the release below cannot be skipped that way — it has to
+  // be told not to. Getting that wrong would present the faithful map under an `ai`
+  // setting, which is the exact silent downgrade this change exists to stop.
+  let held = false;
   try {
     if (!ui.worldMap) return;
     aiWorldMap = await loadAiWorldMap('/data/', ui.worldMap);
+  } catch (e) {
+    if (!isTransient(e)) throw e;
+    // Nothing was learned, so the hold STAYS and the player is asked. The retry has to
+    // re-arm the one-shot latch too, or beginMapArt would refuse to start a second load.
+    console.warn('[art] AI world map did not load', e);
+    held = true;
+    raiseArtFailure('map', () => {
+      aiMapTried = false;
+      beginMapArt();
+    });
   } finally {
-    // Unconditional, so the hold cannot outlive the load on ANY exit. Note this is
-    // NOT what saves the ordinary failure: loadAiWorldMap catches everything it does —
-    // fetch, decode, and the AiWorldMap construction — and resolves null, so a missing
-    // or undecodable asset returns here normally and the `ai` tier falls back to the
-    // faithful composite. What the finally covers is the guard above, and a future
-    // loadAiWorldMap that rejects instead. Either would otherwise leave aiMapPending
-    // set and withhold the map for the rest of the session.
-    aiMapPending = false;
-    ui.mapSig = null; // force a repaint so the map switches to the AI art once ready
-    host.wake();
+    // Released on every exit EXCEPT a transient failure, which is what `held` marks.
+    // An ordinary absence still releases here and falls back to the faithful composite:
+    // loadAiWorldMap resolves null for anything the server actually answered, so a
+    // missing or undecodable asset returns normally and the map is simply the 1998 one.
+    // The guard above (no worldMap yet) releases too, or the map would be withheld for
+    // the rest of the session.
+    if (!held) {
+      aiMapPending = false;
+      ui.mapSig = null; // force a repaint so the map switches to the AI art once ready
+      host.wake();
+    }
   }
 }
 
@@ -497,32 +523,43 @@ export async function ensureAiRoom(num: number): Promise<void> {
     if (curNum === num) {
       aiRoom = loaded;
       aiRoomNum = num;
-      // Only a SUCCESS clears the note. `null` is not success and not failure — it is
-      // the room telling us, authoritatively, that it has no AI art (SCORE). That is
-      // permanent and there is nothing for the player to act on, so it says nothing.
-      if (loaded !== null) setTierNote('ok', host.graphics);
+      hideArtFailure(); // answered — see applyEnhanced
     }
+    // `null` is not a failure: it is the room saying, authoritatively, that it has no
+    // AI art. That is permanent, there is nothing to retry, and the fallback below it
+    // is correct — so the hold is released and the room paints one tier down, silently,
+    // exactly as it always has.
+    clearAiPending(num);
   } catch (e) {
     if (!isTransient(e)) throw e;
-    // Nothing learned, nothing remembered — and the player is told, because the room is
-    // now drawing one tier below the setting they chose and nothing else would say so.
-    console.warn(`[art] AI art for ${jmeno} did not load; retrying on the next entry`, e);
-    // Both arms are gated on `curNum === num`, and the note is why. It describes the
-    // room ON SCREEN, while these loads are per-room and outlive the room that started
-    // them: entering a room during the previous room's load had the older load's
-    // outcome overwrite the newer one's. Measured — a stale boot-room success landed
-    // just after this room's failure and silently cleared the note.
-    if (curNum === num) setTierNote('failed', host.graphics);
-  } finally {
-    // In a finally: a room whose AI art is missing or fails to decode must release
-    // the hold too (it falls back to the enhanced render), or it would never paint.
-    clearAiPending(num);
+    console.warn(`[art] AI art for ${jmeno} did not load`, e);
+    // The hold STAYS, and the player is asked. Both the guard and the hold matter:
+    // these loads outlive the room that started them, so a stale failure must not
+    // raise a screen over the room the player has since walked into. (The mirror of
+    // that was measured on the note this replaces — a stale SUCCESS cleared it.)
+    if (curNum === num) raiseArtFailure('room', () => void ensureAiRoom(num));
+    else clearAiPending(num);
   }
   // AFTER the hold is released, and not awaited: evictAiRooms awaits an older room's
   // (possibly still in-flight) load before disposing it, so with AI_ROOM_CACHE_MAX = 3
   // awaiting it here made room D's first frame wait on room A's download finishing.
   // Nothing visible depends on the eviction.
   void evictAiRooms(jmeno).catch(() => { /* a room we could not dispose is not fatal */ });
+}
+
+/**
+ * Put the failure screen up, and WAKE THE LOOP.
+ *
+ * The wake is not decoration. Every other exit from these loaders releases a hold and
+ * wakes on the way out; the failure path holds instead, so without this the loop can
+ * still be asleep — and `syncLoadingUi` only runs from the loop, so the loading spinner
+ * it is supposed to stand down would stay up ON TOP of this screen (same z-index, later
+ * in the DOM) and swallow the click on Try again. Found exactly that way.
+ */
+function raiseArtFailure(what: 'room' | 'map', again: () => void): void {
+  showArtFailure(what, again);
+  host.forceRoomRedraw = true;
+  host.wake();
 }
 
 /** Release the `ai` tier's art hold for `num`, and present the frame it was holding. */

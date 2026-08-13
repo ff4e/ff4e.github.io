@@ -146,7 +146,11 @@
          asset pipeline failed, so it must not depend on it: an <img src> into
          public/ would be blank in exactly the case the screen is for. Everything
          here is decoration, so if a data URI will not decode the box is simply
-         empty and the heading, message and Reload button are untouched.
+         empty and the heading, message and button are untouched.
+
+         A CLASS, not an id: both failure screens use it (boot failed, and the
+         room's art failed), and the class is what keeps the ~5 kB of base64 to one
+         copy in the stylesheet rather than one per screen.
 
          Two stacked elements whose OPACITY is animated in antiphase, rather than
          one element with the images in the keyframes. Two reasons, and the second
@@ -162,12 +166,12 @@
 
          `step-end` matters: opacity is interpolable, so without it the two frames
          cross-fade instead of cutting, and mid-fade BOTH are partly visible. */
-      #fatal-bird {
+      .creature {
         position: relative;
         width: 180px;
         height: 120px;
       }
-      #fatal-bird i {
+      .creature i {
         position: absolute;
         inset: 0;
         background-repeat: no-repeat;
@@ -176,12 +180,12 @@
       }
       /* The defaults are the resting pose, so `animation: none` (below, and any
          browser that ignores the animation) still shows the parrot — just still. */
-      #fatal-bird i:first-child {
+      .creature i:first-child {
         background-image: url(data:image/png;base64,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);
         opacity: 1;
         animation: fatal-squawk-0 2.4s step-end infinite;
       }
-      #fatal-bird i:last-child {
+      .creature i:last-child {
         background-image: url(data:image/png;base64,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);
         opacity: 0;
         animation: fatal-squawk-1 2.4s step-end infinite;
@@ -207,7 +211,7 @@
       /* A flapping bird is decoration; someone who asked for less motion still gets
          the parrot, just still. */
       @media (prefers-reduced-motion: reduce) {
-        #fatal-bird i { animation: none; }
+        .creature i { animation: none; }
       }
       /* A refused device must not show the game's chrome behind the notice — the dev
          bar is interactive and the stage would sit there as a dead black box. */
@@ -390,10 +394,23 @@
     <div id="fatal" class="overlay" hidden>
       <!-- Decorative, and marked so: a screen reader gets the heading and the
            message, which carry everything the parrot is there to soften. -->
-      <div id="fatal-bird" role="presentation" aria-hidden="true"><i></i><i></i></div>
+      <div id="fatal-bird" class="creature" role="presentation" aria-hidden="true"><i></i><i></i></div>
       <h1>Couldn't load the game</h1>
       <p id="fatal-msg">Some game files failed to load. Check your connection and try again.</p>
       <button id="fatal-reload" class="btn" type="button">Reload</button>
+    </div>
+    <!-- The selected art tier FAILED to load (no answer — a network error, a 5xx, an
+         aborted request), as opposed to a room that legitimately has no art at that
+         tier. The game deliberately does NOT quietly drop to the tier below and carry
+         on: that is a downgrade the player cannot see and did not ask for, and the
+         setting would go on claiming they were getting something they were not. So it
+         stops and offers the retry instead. Art that is genuinely ABSENT still falls
+         back silently, as it always has — nothing there can be retried. -->
+    <div id="art-fail" class="overlay" hidden>
+      <div class="creature" role="presentation" aria-hidden="true"><i></i><i></i></div>
+      <h1 id="art-fail-title">Couldn't load the graphics</h1>
+      <p id="art-fail-msg">The game could not download the artwork for this room. Check your connection and try again.</p>
+      <button id="art-fail-retry" class="btn" type="button">Try again</button>
     </div>
     <!-- Phone refusal. The game has no touch controls and phone-sized targets are
          unusable, so it does not boot on a touch-only, phone-sized screen. Tablets are
@@ -413,11 +430,6 @@
       <div id="webgl-note" class="note" hidden>
         <span>Running on the software renderer (WebGL unavailable) — the game may run slower, and in the AI-upscaled tier the water is drawn at the original resolution.</span>
         <button id="webgl-note-x" type="button">Dismiss</button>
-      </div>
-      <!-- The selected art tier failed to load and the room is drawn one tier down. -->
-      <div id="tier-note" class="note" hidden>
-        <span>The AI-upscaled art didn't load, so this is the enhanced art. It will try again when you re-enter the room, or when you switch the graphics setting away and back.</span>
-        <button id="tier-note-x" type="button">Dismiss</button>
       </div>
     </div>
     <div id="intro-layer" hidden>

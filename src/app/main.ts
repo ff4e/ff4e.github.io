@@ -125,7 +125,7 @@ import { initDevBar } from './devBar.js';
 import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
-import { initTierNote } from './tierNote.js';
+import { initArtFailure } from './artFailure.js';
 import {
   applyVolumeSettings,
   initPlayerSettings,
@@ -294,7 +294,7 @@ initStageState();
 
 //#region Loading UI wiring | anchors: initLoadingUi | Hands `loadingUi.ts` its one name and installs the boot-failure traps. The overlay, the fatal screen and relayout() are in that module.
 initLoadingUi();
-initTierNote();
+initArtFailure();
 
 //#region Intro wiring | anchors: initIntro | Builds the intro player and probes for the AI movie variants. The movies and the subtitle overlay are in `introOverlay.ts`.
 initIntro();

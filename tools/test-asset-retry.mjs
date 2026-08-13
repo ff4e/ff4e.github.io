@@ -63,8 +63,8 @@ await withApp(
     );
     // ...and because it was covered, the player was never told anything was wrong.
     expect(
-      (await p.evaluate(() => window.__ff.tierNote())) === 'ok',
-      'one blip: no tier note, because nothing ended up degraded',
+      (await p.evaluate(() => window.__ff.artFailShown())) === false,
+      'one blip: the player is never shown a failure screen, because nothing failed',
     );
 
     // === A room with no AI art is asked ONCE, not four times ===
@@ -83,9 +83,18 @@ await withApp(
       (await p.evaluate(() => window.__ff.aiRoomLoaded())) === false,
       `absent art: ${ABSENT_NAME} draws one tier down, as a room with no AI art always has`,
     );
+    // THE safety property of the whole design. Absent art is not a failure: the server
+    // answered, and the answer was "there is nothing here". Several rooms ship that way
+    // — SCORE has no enhanced art, CHODBA and WIN draw a classic background by design,
+    // 21 sprites are unstaged — so a failure screen here would appear permanently, in
+    // rooms that are working exactly as intended, with a retry that could never help.
     expect(
-      (await p.evaluate(() => window.__ff.tierNote())) === 'ok',
-      'absent art: still no note — permanent, and nothing the player can act on',
+      (await p.evaluate(() => window.__ff.artFailShown())) === false,
+      'absent art: NO failure screen — it falls back silently, as it always has',
+    );
+    expect(
+      (await p.evaluate(() => window.__ff.roomArtPending())) === false,
+      'absent art: the room is presented rather than held',
     );
 
     // The abort was provoked on purpose; assert it was seen rather than merely tolerated.

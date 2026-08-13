@@ -21,6 +21,7 @@
  * importer. See AGENTS.md, "the module-evaluation trap".
  */
 import { mapArtHolding, mapPresented, roomArtPending } from './art.js';
+import { artFailureShown } from './artFailure.js';
 import { fatalEl, loadingEl, loadingMsg, stageBox, stageRow } from './dom.js';
 import { setForceRoomRedraw, roomLoading } from './framePacing.js';
 import { wake } from './frameClock.js';
@@ -85,6 +86,15 @@ export function beginRoomLoadingUi(num: number): void {
  */
 export function syncLoadingUi(now: number): void {
   if (!booted || !loadingEl) return;
+  // The art-failure screen holds the art on purpose, so both predicates below are true
+  // while it is up — and the spinner would sit under it saying the opposite, for ever.
+  // The screen has taken over the waiting; there is nothing left to wait for.
+  if (artFailureShown()) {
+    if (!loadingEl.hidden) loadingEl.hidden = true;
+    roomLoadingSince = 0;
+    mapLoadingDueAt = 0;
+    return;
+  }
   const roomWaiting = ui.screen === 'room' && (roomLoading || roomArtPending());
   const mapWaiting = mapArtHolding();
   if (!roomWaiting) roomLoadingSince = 0;
