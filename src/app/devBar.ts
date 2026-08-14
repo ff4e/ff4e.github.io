@@ -23,7 +23,7 @@ import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, sub
 import { relayout } from './loadingUi.js';
 import { settings } from './playerSettings.js';
 import { saveSettings } from '../core/settings.js';
-import { domSubsEnabled, selectSubRenderer } from './subtitleDom.js';
+import { selectSubRenderer, subRendererPref } from './subtitleDom.js';
 import {
   graphics,
   devEnabled,
@@ -102,13 +102,17 @@ export function initDevBar(h: DevBarHost): void {
       setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
     });
   }
-  // Dev-bar subtitle-renderer combobox (PROTOTYPE). Mirrors `__ff.setSubRenderer`,
-  // which is the same call — selectSubRenderer keeps this select in sync when the
-  // console drives it, so the two can never disagree about what is on screen.
+  // Dev-bar subtitle-renderer combobox. Mirrors `__ff.setSubRenderer`, which is the
+  // same call — selectSubRenderer keeps this select in sync when the console drives
+  // it, so the two can never disagree about what is on screen. `auto` is the shipped
+  // behaviour (the ai tier paints DOM text); the other two force one renderer.
   if (subRendererSelect) {
     const el = subRendererSelect;
-    el.value = domSubsEnabled() ? 'dom' : 'canvas';
-    el.addEventListener('change', () => selectSubRenderer(el.value === 'dom' ? 'dom' : 'canvas'));
+    el.value = subRendererPref();
+    el.addEventListener('change', () => {
+      const v = el.value;
+      selectSubRenderer(v === 'dom' || v === 'canvas' ? v : 'auto');
+    });
   }
   if (idleDirtyToggle) {
     const el = idleDirtyToggle;

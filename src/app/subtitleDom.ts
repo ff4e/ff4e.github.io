@@ -23,10 +23,9 @@ import { wake } from './frameClock.js';
 import { aiSubScale } from './introOverlay.js';
 import { graphics } from './renderSettings.js';
 import { setSubOverlaySig } from './stageState.js';
+import { asSubRendererPref, resolveSubRenderer } from './subRendererChoice.js';
 import type { SubtitleSystem } from '../render/subtitles.js';
-
-/** Which renderer paints the vector subtitles. */
-export type SubRenderer = 'canvas' | 'dom';
+import type { SubRendererPref } from './subRendererChoice.js';
 
 /** Logic ticks per second (LOGIC_MS = 80). Wave timing is derived from this. */
 const TICKS_PER_SEC = 12.5;
@@ -48,23 +47,40 @@ let baselineInset = 0;
 /** Height of a glyph's line box, for the current font — the gradient is placed in it. */
 let boxHeight = 0;
 
-/** Is the DOM renderer selected? Persisted so a reload keeps it while testing. */
-export function domSubsEnabled(): boolean {
+/**
+ * Can this browser run the DOM renderer at all?
+ *
+ * `Element.animate` is the whole point (see resolveSubRenderer), so its absence is the
+ * one honest reason to refuse. Feature-detected rather than assumed, because the
+ * fallback has to be a decision taken up front, not an error thrown mid-frame.
+ */
+function domSubsSupported(): boolean {
+  return typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function';
+}
+
+/** The persisted preference. Absent — the normal case — means `auto`. */
+export function subRendererPref(): SubRendererPref {
   try {
-    return localStorage.getItem('ff.subRenderer') === 'dom';
+    return asSubRendererPref(localStorage.getItem('ff.subRenderer'));
   } catch {
-    return false;
+    return 'auto';
   }
 }
 
-/** Choose the renderer. Low-level: use `selectSubRenderer` unless you own the overlay. */
-export function setDomSubs(on: boolean): void {
+/** Is the DOM renderer the one painting right now? Asked once per frame. */
+export function domSubsEnabled(): boolean {
+  return resolveSubRenderer(subRendererPref(), graphics, domSubsSupported()) === 'dom';
+}
+
+/** Persist the preference. Low-level: use `selectSubRenderer` unless you own the overlay. */
+export function setSubRendererPref(pref: SubRendererPref): void {
   try {
-    localStorage.setItem('ff.subRenderer', on ? 'dom' : 'canvas');
+    if (pref === 'auto') localStorage.removeItem('ff.subRenderer');
+    else localStorage.setItem('ff.subRenderer', pref);
   } catch {
-    /* storage unavailable: the flag just will not persist */
+    /* storage unavailable: the choice just will not persist */
   }
-  if (!on) clearDomSubtitles();
+  if (!domSubsEnabled()) clearDomSubtitles();
 }
 
 /**
@@ -76,16 +92,24 @@ export function setDomSubs(on: boolean): void {
  * until something else happens to invalidate it; and an idle room is not repainting at
  * all, so without `wake()` nothing would redraw until the player moved.
  */
-export function selectSubRenderer(which: SubRenderer): SubRenderer {
-  setDomSubs(which === 'dom');
+export function selectSubRenderer(pref: SubRendererPref): SubRendererPref {
+  setSubRendererPref(pref);
   setSubOverlaySig(''); // the other renderer owns the overlay now
-  if (subRendererSelect) subRendererSelect.value = which;
+  if (subRendererSelect) subRendererSelect.value = pref;
   wake();
-  return which;
+  return pref;
 }
 
-/** Tear the overlay down (leaving the room, switching renderer, no lines left). */
+/**
+ * Tear the overlay down (leaving the room, switching renderer or tier, no lines left).
+ *
+ * The early return is what makes it safe to call unconditionally from the canvas branch
+ * of the frame path, which is how a TIER switch mid-line is caught: under `auto` the
+ * renderer can change with no setter being called at all, and the abandoned DOM text
+ * would otherwise sit on screen with the canvas overlay painting underneath it.
+ */
 export function clearDomSubtitles(): void {
+  if (!host && lines.size === 0) return;
   for (const l of lines.values()) l.el.remove();
   lines.clear();
   if (host) {

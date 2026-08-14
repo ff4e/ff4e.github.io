@@ -23,12 +23,23 @@
  * native game pixels in every tier, which sizes the text for 1998 bitmap art and reads
  * far too heavy over the AI upscale. That is a pure presentation transform — the engine's
  * line positions are shared with the faithful bitmap path and must not move — so it is
- * checked on the rendered INK rather than on any internal number.
+ * checked on the rendered INK rather than on any internal number. Since the `ai` tier
+ * paints DOM text by default, that size/anchor/centre trio is checked TWICE: once on the
+ * canvas overlay (forced) and once on the DOM text, which reaches it by a different
+ * mechanism and could drift from it.
  */
 import { withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
+  // The `ai` tier now paints its subtitles as DOM text by default, so everything below
+  // that measures the OVERLAY (repaint counts, overlay ink) has to ask for the canvas
+  // renderer explicitly or it would measure an overlay nobody is drawing on. That is not
+  // a dead configuration: it is the fallback when the browser cannot run a compositor
+  // animation, it is what `classic` and `enhanced` use, and the throttle contract it
+  // pins is shared by both renderers. The DOM path's own geometry is asserted at the
+  // bottom of this file, in the same terms.
+  await p.evaluate(() => window.__ff.setSubRenderer('canvas'));
 
   /** Overlay repaints AND loop rAF ticks per second while a line is waving in. */
   const measure = async (tier) => {
@@ -262,4 +273,69 @@ await withApp(async ({ p, expect }) => {
       `[ai] the subtitle is still centred (centre ${aiInk.cx.toFixed(3)} vs ${enhInk.cx.toFixed(3)} of the overlay)`,
     );
   }
+
+  // ── the same three properties, for the renderer the ai tier actually ships ──
+  //
+  // The DOM renderer reaches the ai tier's smaller subtitle a different way: one
+  // `scale()` on the container, about its bottom edge, so glyphs, row pitch and wave
+  // amplitude shrink together. That is easy to get subtly wrong (scaling the font alone
+  // leaves the row pitch and the wave at full size), and the canvas ink test above
+  // cannot see any of it, so it is measured here in the same terms.
+  //
+  // The oracle is the SAME renderer in the other tier: force `dom` in both, so the only
+  // difference between the two measurements is aiSubScale itself. Both are read in CSS
+  // pixels against the #subs box, which the probe has already asserted matches the room.
+  const domInk = async (tier) => {
+    await p.evaluate((t) => window.__ff.setGraphics(t), tier);
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier);
+    await p.waitForFunction(() => window.__ff.subsActive());
+    await p.waitForFunction(() => (document.getElementById('domsubs')?.children.length ?? 0) > 0);
+    await p.waitForTimeout(2200); // let the wave settle, so the box is the resting line
+    return p.evaluate(() => {
+      const frame = document.getElementById('subs').getBoundingClientRect();
+      let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+      for (const line of document.getElementById('domsubs').children) {
+        // The glyph spans, not the line div: the div is full-width by construction
+        // (left:0;right:0;text-align:center), so its box would measure the room.
+        for (const sp of line.querySelectorAll('span')) {
+          const r = sp.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          x0 = Math.min(x0, r.left); x1 = Math.max(x1, r.right);
+          y0 = Math.min(y0, r.top); y1 = Math.max(y1, r.bottom);
+        }
+      }
+      return { w: x1 - x0, h: y1 - y0, bottom: frame.bottom - y1, cx: (x0 + x1) / 2 - frame.left, frameW: frame.width, ink: x1 >= 0 };
+    });
+  };
+
+  await p.evaluate(() => window.__ff.setSubRenderer('dom'));
+  const enhDom = await domInk('enhanced');
+  const aiDom = await domInk('ai');
+  expect(enhDom.ink && aiDom.ink, 'a subtitle line is real DOM text in both tiers when the DOM renderer is asked for');
+  const domRatio = aiDom.w / enhDom.w;
+  expect(
+    Math.abs(domRatio - want) < 0.12,
+    `[ai/dom] the DOM subtitle is drawn at ~${want} of the faithful size (width ratio ${domRatio.toFixed(2)}, ` +
+      `${aiDom.w.toFixed(1)}px vs ${enhDom.w.toFixed(1)}px)`,
+  );
+  // The row pitch and the wave ride on the same transform, so a scale applied about the
+  // wrong origin shows up here as the line drifting off its bottom edge.
+  expect(
+    Math.abs(aiDom.bottom - enhDom.bottom) < enhDom.h,
+    `[ai/dom] the DOM subtitle sits on the same bottom edge (${aiDom.bottom.toFixed(1)}px vs ${enhDom.bottom.toFixed(1)}px from the bottom)`,
+  );
+  expect(
+    Math.abs(aiDom.cx / aiDom.frameW - enhDom.cx / enhDom.frameW) < 0.04,
+    `[ai/dom] the DOM subtitle is still centred (centre ${(aiDom.cx / aiDom.frameW).toFixed(3)} vs ${(enhDom.cx / enhDom.frameW).toFixed(3)} of the room)`,
+  );
+  // The two renderers must also agree with EACH OTHER about the ai tier's size, or the
+  // change is a silent presentation change rather than a change of painter. Compared as
+  // a ratio-of-ratios, so the canvas backing-store scale divides out.
+  expect(
+    Math.abs(domRatio - aiInk.w / enhInk.w) < 0.12,
+    `[ai] both renderers shrink the line by the same factor (dom ${domRatio.toFixed(2)}, canvas ${(aiInk.w / enhInk.w).toFixed(2)})`,
+  );
+
+  // Leave no persisted renderer choice behind for the probes that follow.
+  await p.evaluate(() => window.__ff.setSubRenderer('auto'));
 }, { gl: true });

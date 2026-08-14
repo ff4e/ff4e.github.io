@@ -478,8 +478,9 @@
         <option value="enhanced">Enhanced (FFNG)</option>
         <option value="ai">AI-upscaled</option>
       </select></label>
-      <label title="PROTOTYPE: how the vector subtitles are painted. canvas = the shipped path, every glyph redrawn per animation step; DOM = real text whose motion is a compositor transform (smoother while the main thread is busy). Mirrors __ff.setSubRenderer().">Subtitles <select id="subrenderer">
-        <option value="canvas">canvas (shipped)</option>
+      <label title="How the vector subtitles are painted. auto = the AI tier gets real DOM text whose motion is a compositor transform (smoother while the main thread is busy), classic and enhanced keep the canvas path. The other two force one renderer everywhere. Mirrors __ff.setSubRenderer().">Subtitles <select id="subrenderer">
+        <option value="auto">auto (AI → DOM)</option>
+        <option value="canvas">canvas</option>
         <option value="dom">DOM (compositor)</option>
       </select></label>
       <label title="Repaint an idle room only when it changes (~12.5fps) instead of 60fps"><input type="checkbox" id="idledirty" checked> Idle-FPS saver</label>

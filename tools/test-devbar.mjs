@@ -49,12 +49,13 @@ await withApp(async ({ p, expect }) => {
   // Restore the default so this test leaves no persisted side effect for others.
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
 
-  // The Subtitles picker (prototype: canvas vs DOM) and __ff.setSubRenderer are two
-  // doors onto one switch, so the risk worth pinning is that they DISAGREE — a picker
-  // showing 'canvas' while the DOM renderer is live is a lie told to whoever is judging
-  // the two side by side. Both directions, because only one of them is a listener.
+  // The Subtitles picker and __ff.setSubRenderer are two doors onto one switch, so the
+  // risk worth pinning is that they DISAGREE — a picker reading 'canvas' while the DOM
+  // renderer is live is a lie told to whoever is comparing the two side by side. Both
+  // directions, because only one of them is a listener. It shows the PREFERENCE, not the
+  // resolved renderer: 'auto' is the shipped default and resolves by art tier.
   const subVal = () => p.$eval('#subrenderer', (el) => el.value);
-  expect((await subVal()) === 'canvas', `Subtitles picker defaults to canvas (got "${await subVal()}")`);
+  expect((await subVal()) === 'auto', `Subtitles picker defaults to auto (got "${await subVal()}")`);
   await p.evaluate(() => {
     const sel = document.getElementById('subrenderer');
     sel.value = 'dom';
@@ -65,6 +66,10 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.setSubRenderer('canvas'));
   await p.waitForTimeout(50);
   expect((await subVal()) === 'canvas', `the Subtitles picker mirrors __ff.setSubRenderer (got "${await subVal()}")`);
+  // Restore the default so this test leaves no persisted side effect for others.
+  await p.evaluate(() => window.__ff.setSubRenderer('auto'));
+  await p.waitForTimeout(50);
+  expect((await subVal()) === 'auto', 'the picker returns to auto');
 
   // Modifier chords must NOT reach the single-key dev toggles. Cmd/Ctrl+R is the one
   // that hurt: it toggled the renderer and persisted it, so the backend flipped

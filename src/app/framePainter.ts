@@ -227,8 +227,8 @@ export function draw(): void {
  * so the shake it encodes cannot have changed either).
  */
 export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): void {
-  // Prototype renderer (__ff.setSubRenderer('dom')): the same lines as real text,
-  // animated by the compositor instead of redrawn per frame. Off by default.
+  // The `ai` tier's subtitles are real DOM text animated by the compositor; the other
+  // tiers keep the canvas overlay they were tuned against (see resolveSubRenderer).
   if (domSubsEnabled()) {
     if (useVecSubs && subs?.active && room) {
       const g = roomGeometry(room);
@@ -236,9 +236,16 @@ export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: st
       syncDomSubtitles(subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight);
     } else {
       clearDomSubtitles();
+      // The canvas overlay may still hold the previous renderer's paint — switching
+      // renderer (or tier) while nothing is on screen leaves nothing else to wipe it.
+      if (subOverlayPainted) clearSubOverlay();
     }
     return;
   }
+  // Unconditional, and cheap when there is nothing to do: under `auto` the renderer
+  // changes when the TIER changes, with no setter called, so this is the only place
+  // that notices the handover and takes the abandoned DOM text off the screen.
+  clearDomSubtitles();
   if (useVecSubs && subs?.active) {
     syncSubOverlay();
     const dpr = window.devicePixelRatio || 1;
