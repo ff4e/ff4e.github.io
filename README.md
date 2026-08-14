@@ -583,7 +583,8 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |
 | `help.ts` | 0.6 k | The control-help screens (`Help.pas`). |
-| `subtitles.ts` | 5.4 k | Colour mapping, glyph rendering, and the scrolling line. |
+| `subtitleGeom.ts` | 1.7 k | The geometry a vector subtitle line is built from — fit-to-room size, wave phase and curve, baseline and amplitude, stroke and bevel. Pure and import-free, so both renderers measure from it and it is unit-tested. |
+| `subtitles.ts` | 5.2 k | Colour mapping, glyph rendering, and the scrolling line. |
 | `font.ts` | 0.9 k | The bitmap font from the original `Chars.dat`/`Chartab.dat`/`Charcol.dat`. |
 | `tetrisRender.ts` | 1.3 k | The Tetris minigame's picture. |
 | `filmEffects.ts` | 1.1 k | Full-frame effects for the `xsilent` and `xinterlaced` cheats. |
