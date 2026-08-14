@@ -91,6 +91,7 @@ import {
   showmodeLoading,
   showmodeTrace,
   showmodeTraceOn,
+  cutsceneSubs,
   subs,
 } from './gameState.js';
 import { renderer, setRendererValue } from './renderSettings.js';
@@ -547,6 +548,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     lines: () => linesSpoken,
     lastLine: () => lastLine,
     subsActive: () => subs?.active ?? false,
+    /** The CUTSCENE's captions are a separate SubtitleSystem, so they need their own read. */
+    cutSubsActive: () => cutsceneSubs?.active ?? false,
     /** True while a subtitle is still waving in or scrolling (perf probes/benchmarks). */
     subsAnimating: () => subs?.vectorAnimating(count) ?? false,
     /** Perf probe: cumulative count of vector-overlay re-renders (see subOverlayPaints). */

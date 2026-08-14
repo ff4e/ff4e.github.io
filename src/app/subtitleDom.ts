@@ -39,15 +39,31 @@ interface DomLine {
   y: number;
 }
 
-let host: HTMLDivElement | null = null;
-let lines = new Map<string, DomLine>();
-let lastFont = '';
-/** The room's own transform (shake / shove), so this layer moves with it. */
-let lastXform = '';
-/** Distance from a line box's top to the text baseline, for the current font. */
-let baselineInset = 0;
-/** Height of a glyph's line box, for the current font — the gradient is placed in it. */
-let boxHeight = 0;
+/**
+ * Who a layer belongs to. The room and a cutscene each have their own subtitle system
+ * (`subs` and `cutsceneSubs`), their own on-screen box and their own content scale, so
+ * they get their own layer rather than sharing one — sharing would have them fighting
+ * over the font cache below, rebuilding every line on alternate frames.
+ */
+export type SubOwner = 'room' | 'cut';
+
+interface Layer {
+  host: HTMLDivElement | null;
+  lines: Map<string, DomLine>;
+  /** Font the measurements below were taken at; a change rebuilds the glyph boxes. */
+  lastFont: string;
+  /** The owner's own transform (the room's shake / shove), so the layer moves with it. */
+  lastXform: string;
+  /** Distance from a line box's top to the text baseline, for `lastFont`. */
+  baselineInset: number;
+  /** Height of a glyph's line box, for `lastFont` — the gradient is placed in it. */
+  boxHeight: number;
+}
+
+const newLayer = (): Layer => ({ host: null, lines: new Map(), lastFont: '', lastXform: '', baselineInset: 0, boxHeight: 0 });
+const layers: Record<SubOwner, Layer> = { room: newLayer(), cut: newLayer() };
+/** The element id each layer's host carries, so a probe can find it. */
+const HOST_ID: Record<SubOwner, string> = { room: 'domsubs', cut: 'domsubs-cut' };
 
 /**
  * Can this browser run the DOM renderer at all?
@@ -122,16 +138,22 @@ export function selectSubRenderer(pref: SubRendererPref): SubRendererPref {
  * renderer can change with no setter being called at all, and the abandoned DOM text
  * would otherwise sit on screen with the canvas overlay painting underneath it.
  */
-export function clearDomSubtitles(): void {
-  if (!host && lines.size === 0) return;
-  for (const l of lines.values()) l.el.remove();
-  lines.clear();
-  if (host) {
-    host.remove();
-    host = null;
+export function clearDomSubtitles(owner?: SubOwner): void {
+  if (owner === undefined) {
+    clearDomSubtitles('room');
+    clearDomSubtitles('cut');
+    return;
   }
-  lastFont = '';
-  lastXform = '';
+  const L = layers[owner];
+  if (!L.host && L.lines.size === 0) return;
+  for (const l of L.lines.values()) l.el.remove();
+  L.lines.clear();
+  if (L.host) {
+    L.host.remove();
+    L.host = null;
+  }
+  L.lastFont = '';
+  L.lastXform = '';
 }
 
 /**
@@ -192,6 +214,7 @@ function waveFrames(ampCss: number): Keyframe[] {
  * after it starts — it is running on the compositor.
  */
 export function syncDomSubtitles(
+  owner: SubOwner,
   sys: SubtitleSystem,
   count: number,
   cssW: number,
@@ -201,10 +224,13 @@ export function syncDomSubtitles(
   weight: string | number,
   xform?: string,
 ): void {
+  const L = layers[owner];
   const { w: screenW, h: screenH } = sys.vectorScreen;
+  let host = L.host;
   if (!host) {
     host = document.createElement('div');
-    host.id = 'domsubs';
+    L.host = host;
+    host.id = HOST_ID[owner];
     host.style.cssText =
       // The 1px transparent border matches #screen and #subs (dom.ts): they are all
       // absolutely positioned in the same wrapper, so without it this layer sits 1px
@@ -224,20 +250,20 @@ export function syncDomSubtitles(
   // the room's transform; this layer has to as well, or the room jitters under text
   // that stands still. Kept when the caller passes nothing, exactly as the canvas path
   // keeps the last one: no repaint means the shake cannot have changed either.
-  if (xform !== undefined) lastXform = xform;
+  if (xform !== undefined) L.lastXform = xform;
   const scaleT = tier === 1 ? '' : `scale(${tier})`;
   // Translate first, then scale: the shake moves the whole layer, and must not itself
   // be scaled down by the tier's transform.
-  host.style.transform = lastXform ? `${lastXform} ${scaleT}`.trim() : scaleT;
+  host.style.transform = L.lastXform ? `${L.lastXform} ${scaleT}`.trim() : scaleT;
 
   const fontPx = VECTOR_GEOM.fontPx * scale;
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
-  if (font !== lastFont) {
-    ({ inset: baselineInset, height: boxHeight } = measureBaseline(font));
-    lastFont = font;
+  if (font !== L.lastFont) {
+    ({ inset: L.baselineInset, height: L.boxHeight } = measureBaseline(font));
+    L.lastFont = font;
     // Glyph boxes are laid out for the old size; rebuild them.
-    for (const l of lines.values()) l.el.remove();
-    lines.clear();
+    for (const l of L.lines.values()) l.el.remove();
+    L.lines.clear();
   }
 
   const want = new Set<string>();
@@ -258,15 +284,15 @@ export function syncDomSubtitles(
     // measured pair can be scaled rather than re-measured (which would be a second
     // forced layout per line).
     const fs = fontPx * fit;
-    const inset = baselineInset * fit;
-    const boxH = boxHeight * fit;
+    const inset = L.baselineInset * fit;
+    const boxH = L.boxHeight * fit;
     const lineFont = fit === 1 ? font : `${weight} ${fs.toFixed(2)}px ${family}`;
     // Where this line sits right now. Computed before the element exists, because it has
     // to be part of the element's FIRST style: a `transition` plus a transform written
     // after insertion animates from the untransformed position — the top of the game box
     // — so a new line visibly fell from the ceiling before starting its wave.
     const y = (t.ys * VECTOR_GEOM.scale + screenH + VECTOR_GEOM.baselineOff) * scale - inset;
-    let line = lines.get(key);
+    let line = L.lines.get(key);
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
@@ -328,7 +354,7 @@ export function syncDomSubtitles(
       });
       host.appendChild(el);
       line = { el, spans, y };
-      lines.set(key, line);
+      L.lines.set(key, line);
     }
     // The scroll: the only thing written per tick, and a transform, so the compositor
     // interpolates it (see the 80ms transition, one logic tick).
@@ -337,9 +363,9 @@ export function syncDomSubtitles(
       line.y = y;
     }
   }
-  for (const [key, l] of lines) {
+  for (const [key, l] of L.lines) {
     if (want.has(key)) continue;
     l.el.remove();
-    lines.delete(key);
+    L.lines.delete(key);
   }
 }
