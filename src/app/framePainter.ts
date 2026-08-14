@@ -20,6 +20,7 @@ import { aiRoom, aiRoomRenderActive, ensureEnhancedFallback, roomArtPending } fr
 import { alpha, activeScript, count, engine, room, screenShoveX, subs } from './gameState.js';
 import { applyFrameEffects, frameEffectsActive } from './cheats.js';
 import { applySubScale, clearSubOverlay, subOverlaySignature, syncSubOverlay } from './introOverlay.js';
+import { clearDomSubtitles, domSubsEnabled, syncDomSubtitles } from './subtitleDom.js';
 import { canvas, ctx, glCanvas, subCanvas, subCtx } from './dom.js';
 import { classicArtFor, drawAiGpu, drawGpu, enhancedArtFor, glAiFailed, glFailed } from './glPlumbing.js';
 import { enhancedArtActive, renderer } from './renderSettings.js';
@@ -226,6 +227,25 @@ export function draw(): void {
  * so the shake it encodes cannot have changed either).
  */
 export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): void {
+  // The `ai` tier's subtitles are real DOM text animated by the compositor; the other
+  // tiers keep the canvas overlay they were tuned against (see resolveSubRenderer).
+  if (domSubsEnabled()) {
+    if (useVecSubs && subs?.active && room) {
+      const g = roomGeometry(room);
+      clearSubOverlay(); // the canvas overlay is not the one showing them now
+      syncDomSubtitles(subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight, xform);
+    } else {
+      clearDomSubtitles();
+      // The canvas overlay may still hold the previous renderer's paint — switching
+      // renderer (or tier) while nothing is on screen leaves nothing else to wipe it.
+      if (subOverlayPainted) clearSubOverlay();
+    }
+    return;
+  }
+  // Unconditional, and cheap when there is nothing to do: under `auto` the renderer
+  // changes when the TIER changes, with no setter called, so this is the only place
+  // that notices the handover and takes the abandoned DOM text off the screen.
+  clearDomSubtitles();
   if (useVecSubs && subs?.active) {
     syncSubOverlay();
     const dpr = window.devicePixelRatio || 1;

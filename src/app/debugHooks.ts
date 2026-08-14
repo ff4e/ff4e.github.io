@@ -121,6 +121,8 @@ import type { FishFrame } from '../render/renderRoom.js';
 import { AiRoom } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
 import { SUB_SUBSTEPS, SubtitleSystem } from '../render/subtitles.js';
+import { domSubsEnabled, selectSubRenderer, subRendererPref } from './subtitleDom.js';
+import type { SubRendererPref } from './subRendererChoice.js';
 import { renderTetris, tetrisRgba } from '../render/tetrisRender.js';
 import { MapAction, WorldMap } from '../render/worldMap.js';
 import { AiWorldMap } from '../render/worldMapAi.js';
@@ -582,6 +584,17 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         lines: subs.debugLines(),
       };
     },
+    /**
+     * Force how the vector subtitles are drawn — 'canvas', 'dom', or 'auto' to hand
+     * the choice back to the art tier (which is the shipped behaviour: `ai` paints
+     * DOM text). Persisted. The same call the dev bar's Subtitles select makes, so
+     * the two stay in step.
+     */
+    setSubRenderer: (pref: SubRendererPref) => selectSubRenderer(pref),
+    /** Which renderer is actually painting, once the tier and support have had their say. */
+    subRenderer: () => (domSubsEnabled() ? 'dom' : 'canvas'),
+    /** What was ASKED for, which is a different question — 'auto' unless overridden. */
+    subRendererPref: () => subRendererPref(),
     /** Test hook: inject a subtitle directly (deterministic, no room dialogue needed). */
     pushSubtitle: (text: string, code: string) => subs?.newSubtitle(text, code, count),
     /** Test hooks for the win auto-return hold: read the countdown / clear subtitles. */

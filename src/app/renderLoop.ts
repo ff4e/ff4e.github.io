@@ -18,6 +18,7 @@ import { draw, updateRoomSubOverlay } from './framePainter.js';
 import { count, cutscene, room, setAlpha, subs } from './gameState.js';
 import { glAiFailed, glFailed } from './glPlumbing.js';
 import { clearSubOverlay } from './introOverlay.js';
+import { clearDomSubtitles } from './subtitleDom.js';
 import { drawCutscene } from './cutscene.js';
 import { drawCredits, drawLegImage } from './mapNav.js';
 import { syncLoadingUi } from './loadingUi.js';
@@ -125,6 +126,14 @@ export function loop(now: number): void {
   // `painted` (UMain.pas:1489-1493 — the paint sets daRealyRun, Spust runs after it).
   tickMapLaunch();
   if (ui.helpOpen || ui.screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
+  // The room's subtitles may be a DOM layer of their own (subtitleDom.ts, the `ai`
+  // tier's renderer), and nothing below clears it: every other branch wipes the CANVAS
+  // overlay, which is a different element. So a line still on screen when the player
+  // opened the help page, went back to the map or walked into a cutscene stayed painted
+  // over it. Derived here in one place for the same reason mapPresented is, and it
+  // covers the cutscene too — that branch paints no room, and manages only the canvas
+  // overlay for its own captions.
+  if (ui.helpOpen || ui.screen !== 'room' || roomLoading || cutscene) clearDomSubtitles();
   // Exactly one branch below owns #screen for this frame, and every branch other than
   // the map's blits over whatever the map left there — help, the story page, the
   // credits roll, a cutscene, a room. So "is a map frame the thing on screen" is
