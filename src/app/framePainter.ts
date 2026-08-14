@@ -227,8 +227,9 @@ export function draw(): void {
  * so the shake it encodes cannot have changed either).
  */
 export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): void {
-  // The `ai` tier's subtitles are real DOM text animated by the compositor; the other
-  // tiers keep the canvas overlay they were tuned against (see resolveSubRenderer).
+  // The vector tiers' subtitles are real DOM text animated by the compositor (see
+  // resolveSubRenderer). `classic` reaches neither renderer: `useVecSubs` is false there
+  // and its subtitles are baked into the frame itself.
   if (domSubsEnabled()) {
     if (useVecSubs && subs?.active && room) {
       const g = roomGeometry(room);

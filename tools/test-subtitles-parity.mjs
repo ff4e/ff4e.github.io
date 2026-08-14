@@ -21,7 +21,7 @@
  */
 import { forTicks, observed, selectRoom, withApp } from './ui-lib.mjs';
 
-// Layout constants — must match src/render/subtitles.ts.
+// Layout constants — must match src/render/subtitleGeom.ts.
 // SUB_SCALE is the enhanced overlay's enlargement over the bitmap line it replaces; it
 // multiplies the WHOLE vertical geometry (glyph size, row pitch, baseline, wave), so the
 // reference below has to take it through every one of them or the comparison is not of

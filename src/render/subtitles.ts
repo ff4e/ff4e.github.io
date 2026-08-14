@@ -14,11 +14,8 @@ import {
   BASETITLE,
   BORDERTITLE,
   ROWTITLE,
-  SUB_BASELINE_OFF,
   SUB_FONT_PX,
-  SUB_SCALE,
   UNDERTITLE,
-  VECTOR_GEOM,
   bevelBottomRgb,
   bevelSpan,
   fitFontPx,
@@ -27,9 +24,6 @@ import {
   wavePhase,
   waveDy,
 } from './subtitleGeom.js';
-
-// Re-exported so existing importers keep one place to ask for the vector geometry.
-export { VECTOR_GEOM } from './subtitleGeom.js';
 
 // Subtitle layout constants (URoom.pas:140-161). The geometry ones live in
 // subtitleGeom.ts, which both renderers measure from; what stays here is timing.

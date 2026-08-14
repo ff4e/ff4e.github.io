@@ -135,10 +135,17 @@ export function loop(now: number): void {
   // The two layers stand down on different conditions, which is the whole reason they
   // are separate layers: the ROOM's goes when a room frame is not what is being painted
   // (a cutscene included — it is drawing its own captions, not the room's), while the
-  // CUTSCENE's goes when there is no cutscene left to caption. Help covers both: it
-  // paints over everything and clears the canvas overlay for the same reason.
+  // CUTSCENE's goes when there is no cutscene left to caption.
+  //
+  // Both also go when a room frame is not being painted at all, and for the cutscene
+  // that is NOT redundant with `!cutscene`: the map / intro / story-page branches below
+  // are tested BEFORE `else if (cutscene)`, so with a cutscene still live on another
+  // screen `drawCutscene()` never runs and nothing else would take its captions down.
+  // The canvas overlay never had that hole, because each of those branches clears it
+  // directly. A cutscene is only ever started from a room, so this cannot fire on the
+  // healthy path — it catches the ways out that do not go through skipCutscene().
   if (ui.helpOpen || ui.screen !== 'room' || roomLoading || cutscene) clearDomSubtitles('room');
-  if (ui.helpOpen || !cutscene) clearDomSubtitles('cut');
+  if (ui.helpOpen || ui.screen !== 'room' || !cutscene) clearDomSubtitles('cut');
   // Exactly one branch below owns #screen for this frame, and every branch other than
   // the map's blits over whatever the map left there — help, the story page, the
   // credits roll, a cutscene, a room. So "is a map frame the thing on screen" is

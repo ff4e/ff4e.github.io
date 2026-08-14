@@ -119,5 +119,23 @@ await withApp(async ({ p, expect }) => {
   expect(cv.canvas, 'the canvas renderer paints the captions on the overlay');
   expect(cv.dom === 0, 'no DOM captions when the canvas renderer is asked for');
   await p.evaluate(() => window.__ff.skipCutscene());
+
+  // Leaving the ROOM with a cutscene still live. The draw dispatch tests the map / intro
+  // / story-page branches BEFORE the cutscene one, so on that path drawCutscene() never
+  // runs and the captions have no owner to take them down. Every ordinary way out
+  // (Escape, clicking the stage) calls skipCutscene() first, so this is the narrow case
+  // the loop's own guard has to cover rather than the cutscene's draw path.
+  await p.evaluate(() => window.__ff.setSubRenderer('dom'));
+  await startDemo();
+  await p.waitForFunction(() => window.__ff.cutSubsActive());
+  await p.waitForFunction(() => (document.getElementById('domsubs-cut')?.children.length ?? 0) > 0);
+  await p.evaluate(() => window.__ff.showMap());
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
+  await p.waitForFunction(() => (document.getElementById('domsubs-cut')?.children.length ?? 0) === 0);
+  expect(
+    (await p.evaluate(() => document.getElementById('domsubs-cut')?.children.length ?? 0)) === 0,
+    'leaving the room with a cutscene live takes its captions off the map',
+  );
+  await p.evaluate(() => window.__ff.skipCutscene());
   await p.evaluate(() => window.__ff.setSubRenderer('auto')); // leave no persisted choice
 });

@@ -85,8 +85,11 @@ export const VECTOR_GEOM = Object.freeze({
  * @param screenW  the subtitle system's native screen width
  */
 export function fitFontPx(naturalW: number, screenW: number): number {
-  const maxW = screenW - VECTOR_GEOM.border * 2;
-  if (!(naturalW > maxW) || naturalW <= 0) return SUB_FONT_PX;
+  const maxW = screenW - BORDERTITLE * 2;
+  // `>` and not `>=`: a line that fits to the pixel must not be shrunk by a rounding
+  // hair. This also covers an unmeasurable line (0 or negative), which cannot exceed a
+  // positive budget and so keeps the full size rather than dividing by it.
+  if (!(naturalW > maxW)) return SUB_FONT_PX;
   return Math.max(8, (SUB_FONT_PX * maxW) / naturalW);
 }
 

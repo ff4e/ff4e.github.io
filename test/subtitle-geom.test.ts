@@ -53,8 +53,9 @@ describe('fitFontPx — shrink a long line to the room, never wrap it', () => {
     expect(fitFontPx(maxW * 1000, SCREEN_W)).toBe(8);
   });
 
-  // Guards against a divide-by-zero reaching the font size: a measurement of 0 means the
-  // caller could not measure, and the honest answer is the unshrunk size.
+  // A measurement of 0 means the caller could not measure. It cannot exceed a positive
+  // budget, so it keeps the full size rather than dividing by it — asserted because the
+  // alternative (a divide reaching the font size) would be silent and awful.
   it('treats an unmeasurable line as fitting', () => {
     expect(fitFontPx(0, SCREEN_W)).toBe(SUB_FONT_PX);
     expect(fitFontPx(-1, SCREEN_W)).toBe(SUB_FONT_PX);
@@ -129,14 +130,17 @@ describe('waveDy — the damped cosine a glyph rides in on', () => {
 describe('lineAnchor — where a line sits and how far its wave swings', () => {
   const screenH = 225;
 
-  it('takes ys through SUB_SCALE, so the row pitch grows with the glyphs', () => {
-    const a = lineAnchor(-26, screenH);
-    expect(a.baseline).toBeCloseTo(-26 * SUB_SCALE + screenH + VECTOR_GEOM.baselineOff, 10);
+  // Pinned to LITERALS, not rebuilt from the same constants the function uses: an
+  // expectation assembled from SUB_SCALE and baselineOff would follow any change to
+  // them and assert nothing. These are the numbers a player sees.
+  //   baseline = -26*1.2 + 225 + (-6*1.2) = 225 - 31.2 - 7.2 = 186.6
+  //   amp      = 15*1.2 - (-26*1.2)       = 18 + 31.2        = 49.2
+  it('places the first row 186.6px down a 225px screen', () => {
+    expect(lineAnchor(-26, screenH).baseline).toBeCloseTo(186.6, 10);
   });
 
-  it('measures the wave from UNDERTITLE, below the resting row', () => {
-    const a = lineAnchor(-26, screenH);
-    expect(a.amp).toBeCloseTo(UNDERTITLE * SUB_SCALE - -26 * SUB_SCALE, 10);
+  it('gives that row a 49.2px wave, measured from UNDERTITLE below it', () => {
+    expect(lineAnchor(-26, screenH).amp).toBeCloseTo(49.2, 10);
   });
 
   // A line resting AT the wave's origin has nowhere to travel; anything above it does.
@@ -175,17 +179,21 @@ describe('strokeWidth and bevelSpan — the glyph decoration', () => {
   });
 });
 
-describe('VECTOR_GEOM — the numbers a renderer places text from', () => {
-  it('agrees with the constants it is built from', () => {
-    expect(VECTOR_GEOM.fontPx).toBe(SUB_FONT_PX);
-    expect(VECTOR_GEOM.scale).toBe(SUB_SCALE);
-    expect(VECTOR_GEOM.border).toBe(BORDERTITLE);
-    expect(VECTOR_GEOM.under).toBe(UNDERTITLE);
-    expect(VECTOR_GEOM.waveLen).toBe(WAVE_LEN);
-    expect(VECTOR_GEOM.wavePerTick).toBe(WAVE_PER_TICK);
+describe('the constants both renderers place text from', () => {
+  // Absolute, because everything else in this file is relative to them. Without this the
+  // whole suite would follow a change to SUB_SCALE and still pass, which is how a
+  // subtitle silently ends up the wrong size.
+  it('are the values the geometry is tuned to', () => {
+    expect(SUB_SCALE).toBe(1.2);
+    expect(SUB_FONT_PX).toBeCloseTo(27.6, 10);
+    expect(VECTOR_GEOM.baselineOff).toBeCloseTo(-7.2, 10);
+    expect(BORDERTITLE).toBe(20);
+    expect(UNDERTITLE).toBe(15);
+    expect(WAVE_LEN).toBe(50);
+    expect(WAVE_PER_TICK).toBe(5);
   });
 
-  it('is frozen, so a renderer cannot reach in and retune the other one', () => {
+  it('are frozen, so one renderer cannot reach in and retune the other', () => {
     expect(Object.isFrozen(VECTOR_GEOM)).toBe(true);
   });
 });

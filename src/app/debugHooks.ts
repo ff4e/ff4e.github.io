@@ -588,10 +588,10 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       };
     },
     /**
-     * Force how the vector subtitles are drawn — 'canvas', 'dom', or 'auto' to hand
-     * the choice back to the art tier (which is the shipped behaviour: `ai` paints
-     * DOM text). Persisted. The same call the dev bar's Subtitles select makes, so
-     * the two stay in step.
+     * Force how the vector subtitles are drawn — 'canvas', 'dom', or 'auto', which is
+     * the shipped behaviour and now means DOM in every tier that draws vector text.
+     * Persisted. The same call the dev bar's Subtitles select makes, so the two stay
+     * in step.
      */
     setSubRenderer: (pref: SubRendererPref) => selectSubRenderer(pref),
     /** Which renderer is actually painting, once the tier and support have had their say. */

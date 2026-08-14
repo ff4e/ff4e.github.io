@@ -1,5 +1,9 @@
 /**
- * PROTOTYPE: the room's subtitles as DOM text, animated by the compositor.
+ * Subtitles as DOM text, animated by the compositor.
+ *
+ * The renderer for the `enhanced` and `ai` tiers, and for cutscene captions. `classic`
+ * is the one path this does not touch: it bakes its subtitles into the pixel frame with
+ * the game's own bitmap font, and never reaches either vector renderer.
  *
  * The canvas overlay redraws every glyph — shape, outline stroke, gradient fill — on
  * every animation step, and hands the browser a changed backing store to re-upload each
@@ -13,9 +17,11 @@
  * animate at whatever rate the main thread manages, because that is where it would be
  * driven from.
  *
- * Behind `__ff.setSubRenderer('dom')` and off by default. It is NOT a replacement yet:
- * the browser shapes and rasterises this text, so it is not pixel-identical to
- * `drawVector`, and `test-subtitles-parity` still pins the canvas path.
+ * NOT pixel-identical to `drawVector`: the browser shapes and rasterises this text. What
+ * is pinned instead is the geometry — `subtitleGeom.ts` holds the rules both renderers
+ * measure from, in unit tests, and `test-subtitles` compares this renderer's line
+ * against the canvas one in the same tier (0.992 of its width, the remainder being the
+ * browser's own shaping). `__ff.setSubRenderer('canvas')` still forces the old path.
  */
 import {
   VECTOR_GEOM,
@@ -45,6 +51,16 @@ interface DomLine {
   spans: HTMLSpanElement[];
   /** Last vertical position written, to skip no-op style writes. */
   y: number;
+  /**
+   * Fit-to-room factor for this line, kept because measuring it is a forced layout.
+   *
+   * `y` has to be recomputed every tick (the line scrolls) and depends on this, so
+   * without it stored the measurement ran once per line PER FRAME — a synchronous
+   * layout in the path whose whole purpose is keeping work off the main thread, and one
+   * that gets more expensive under exactly the load this renderer exists to survive.
+   * It only depends on (font, text), both of which are already in the line's cache key.
+   */
+  fit: number;
 }
 
 /**
@@ -288,9 +304,10 @@ export function syncDomSubtitles(
     // a font the line was no longer drawn in.
     // Measured at the display scale, but fitted in NATIVE units, because that is where
     // the rule is defined and where drawVector applies it — dividing out `scale` keeps a
-    // fit-to-room decision from depending on the window size.
-    const natural = measureTextWidth(font, t.obsah);
-    const fit = fitFontPx(natural / scale, screenW) / VECTOR_GEOM.fontPx;
+    // fit-to-room decision from depending on the window size. Measured ONLY for a line
+    // being built: it is a forced layout, and it cannot change while the line exists.
+    let line = L.lines.get(key);
+    const fit = line ? line.fit : fitFontPx(measureTextWidth(font, t.obsah) / scale, screenW) / VECTOR_GEOM.fontPx;
     // A scalable font's baseline inset and line-box height scale with its size, so the
     // measured pair can be scaled rather than re-measured (which would be a second
     // forced layout per line).
@@ -303,7 +320,6 @@ export function syncDomSubtitles(
     // after insertion animates from the untransformed position — the top of the game box
     // — so a new line visibly fell from the ceiling before starting its wave.
     const y = lineAnchor(t.ys, screenH).baseline * scale - inset;
-    let line = L.lines.get(key);
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
@@ -369,7 +385,7 @@ export function syncDomSubtitles(
         sp.animate(frames, { duration: durMs, delay: (i + 1) * stepMs - ageMs, fill: 'forwards', easing: 'linear' });
       });
       host.appendChild(el);
-      line = { el, spans, y };
+      line = { el, spans, y, fit };
       L.lines.set(key, line);
     }
     // The scroll: the only thing written per tick, and a transform, so the compositor
