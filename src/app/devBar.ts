@@ -19,10 +19,11 @@
 import { ROOMS } from '../data/roomTable.js';
 import { isFitMode } from './layout.js';
 import { devWinRoom } from './cheats.js';
-import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, winRoomBtn } from './dom.js';
+import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, subRendererSelect, winRoomBtn } from './dom.js';
 import { relayout } from './loadingUi.js';
 import { settings } from './playerSettings.js';
 import { saveSettings } from '../core/settings.js';
+import { domSubsEnabled, selectSubRenderer } from './subtitleDom.js';
 import {
   graphics,
   devEnabled,
@@ -101,12 +102,19 @@ export function initDevBar(h: DevBarHost): void {
       setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
     });
   }
+  // Dev-bar subtitle-renderer combobox (PROTOTYPE). Mirrors `__ff.setSubRenderer`,
+  // which is the same call — selectSubRenderer keeps this select in sync when the
+  // console drives it, so the two can never disagree about what is on screen.
+  if (subRendererSelect) {
+    const el = subRendererSelect;
+    el.value = domSubsEnabled() ? 'dom' : 'canvas';
+    el.addEventListener('change', () => selectSubRenderer(el.value === 'dom' ? 'dom' : 'canvas'));
+  }
   if (idleDirtyToggle) {
     const el = idleDirtyToggle;
     el.checked = renderOnDirty;
     el.addEventListener('change', () => setRenderOnDirty(el.checked));
-  }
-  if (winRoomBtn) {
+  }  if (winRoomBtn) {
     const el = winRoomBtn;
     el.addEventListener('click', () => {
       devWinRoom();

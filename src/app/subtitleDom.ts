@@ -18,9 +18,15 @@
  * `drawVector`, and `test-subtitles-parity` still pins the canvas path.
  */
 import { VECTOR_GEOM } from '../render/subtitles.js';
+import { subRendererSelect } from './dom.js';
+import { wake } from './frameClock.js';
 import { aiSubScale } from './introOverlay.js';
 import { graphics } from './renderSettings.js';
+import { setSubOverlaySig } from './stageState.js';
 import type { SubtitleSystem } from '../render/subtitles.js';
+
+/** Which renderer paints the vector subtitles. */
+export type SubRenderer = 'canvas' | 'dom';
 
 /** Logic ticks per second (LOGIC_MS = 80). Wave timing is derived from this. */
 const TICKS_PER_SEC = 12.5;
@@ -51,7 +57,7 @@ export function domSubsEnabled(): boolean {
   }
 }
 
-/** Choose the renderer. `__ff.setSubRenderer`. */
+/** Choose the renderer. Low-level: use `selectSubRenderer` unless you own the overlay. */
 export function setDomSubs(on: boolean): void {
   try {
     localStorage.setItem('ff.subRenderer', on ? 'dom' : 'canvas');
@@ -59,6 +65,23 @@ export function setDomSubs(on: boolean): void {
     /* storage unavailable: the flag just will not persist */
   }
   if (!on) clearDomSubtitles();
+}
+
+/**
+ * Switch renderer and make the change visible now — the whole switch, in one place.
+ *
+ * Two callers ask for this (`__ff.setSubRenderer` and the dev bar's Subtitles select),
+ * and each of the three steps matters: the canvas overlay caches on a signature, so
+ * without clearing it the handover can leave the previous renderer's paint on screen
+ * until something else happens to invalidate it; and an idle room is not repainting at
+ * all, so without `wake()` nothing would redraw until the player moved.
+ */
+export function selectSubRenderer(which: SubRenderer): SubRenderer {
+  setDomSubs(which === 'dom');
+  setSubOverlaySig(''); // the other renderer owns the overlay now
+  if (subRendererSelect) subRendererSelect.value = which;
+  wake();
+  return which;
 }
 
 /** Tear the overlay down (leaving the room, switching renderer, no lines left). */

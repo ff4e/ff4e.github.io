@@ -53,6 +53,7 @@ export const select = document.getElementById('room') as HTMLSelectElement;
 export const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null;
 export const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
 export const graphicsSelect = document.getElementById('graphics') as HTMLSelectElement | null;
+export const subRendererSelect = document.getElementById('subrenderer') as HTMLSelectElement | null;
 export const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;
 export const winRoomBtn = document.getElementById('winroom') as HTMLButtonElement | null;
 export const perfHud = document.getElementById('perfhud') as HTMLElement | null;

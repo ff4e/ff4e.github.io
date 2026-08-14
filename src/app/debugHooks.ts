@@ -121,7 +121,8 @@ import type { FishFrame } from '../render/renderRoom.js';
 import { AiRoom } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
 import { SUB_SUBSTEPS, SubtitleSystem } from '../render/subtitles.js';
-import { domSubsEnabled, setDomSubs } from './subtitleDom.js';
+import { domSubsEnabled, selectSubRenderer } from './subtitleDom.js';
+import type { SubRenderer } from './subtitleDom.js';
 import { renderTetris, tetrisRgba } from '../render/tetrisRender.js';
 import { MapAction, WorldMap } from '../render/worldMap.js';
 import { AiWorldMap } from '../render/worldMapAi.js';
@@ -586,14 +587,10 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     /**
      * Prototype: choose how the vector subtitles are drawn — 'canvas' (the shipped
      * path) or 'dom' (real text animated by the compositor, see subtitleDom.ts).
-     * Persisted, so a reload keeps whichever is being judged.
+     * Persisted, so a reload keeps whichever is being judged. The same call the dev
+     * bar's Subtitles select makes, so the two stay in step.
      */
-    setSubRenderer: (which: 'canvas' | 'dom') => {
-      setDomSubs(which === 'dom');
-      host.subOverlaySig = ''; // the other renderer owns the overlay now
-      host.wake();
-      return which;
-    },
+    setSubRenderer: (which: SubRenderer) => selectSubRenderer(which),
     subRenderer: () => (domSubsEnabled() ? 'dom' : 'canvas'),
     /** Test hook: inject a subtitle directly (deterministic, no room dialogue needed). */
     pushSubtitle: (text: string, code: string) => subs?.newSubtitle(text, code, count),

@@ -1,9 +1,10 @@
 /**
- * UI test: the developer bar's Room, Renderer and Graphics pickers stay in sync with reality.
+ * UI test: the developer bar's Room, Renderer, Graphics and Subtitles pickers stay in sync with reality.
  *  - The game opens on the world map, so the Room picker starts on "map" (not a room).
  *  - Entering a room selects that room; pressing Escape back to the map re-selects "map".
  *  - The Renderer picker defaults to WebGL and reflects the live backend.
  *  - The Graphics picker defaults to enhanced, follows the E hotkey cycle, and drives setGraphics on change.
+ *  - The Subtitles picker and __ff.setSubRenderer drive each other, so they cannot disagree.
  */
 import { withApp } from './ui-lib.mjs';
 
@@ -47,6 +48,23 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.graphics())) === 'ai', 'Graphics picker change sets the level to ai');
   // Restore the default so this test leaves no persisted side effect for others.
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
+
+  // The Subtitles picker (prototype: canvas vs DOM) and __ff.setSubRenderer are two
+  // doors onto one switch, so the risk worth pinning is that they DISAGREE — a picker
+  // showing 'canvas' while the DOM renderer is live is a lie told to whoever is judging
+  // the two side by side. Both directions, because only one of them is a listener.
+  const subVal = () => p.$eval('#subrenderer', (el) => el.value);
+  expect((await subVal()) === 'canvas', `Subtitles picker defaults to canvas (got "${await subVal()}")`);
+  await p.evaluate(() => {
+    const sel = document.getElementById('subrenderer');
+    sel.value = 'dom';
+    sel.dispatchEvent(new Event('change'));
+  });
+  await p.waitForTimeout(50);
+  expect((await p.evaluate(() => window.__ff.subRenderer())) === 'dom', 'Subtitles picker change selects the DOM renderer');
+  await p.evaluate(() => window.__ff.setSubRenderer('canvas'));
+  await p.waitForTimeout(50);
+  expect((await subVal()) === 'canvas', `the Subtitles picker mirrors __ff.setSubRenderer (got "${await subVal()}")`);
 
   // Modifier chords must NOT reach the single-key dev toggles. Cmd/Ctrl+R is the one
   // that hurt: it toggled the renderer and persisted it, so the backend flipped
