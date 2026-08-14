@@ -529,7 +529,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
 | `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
-| `tierNote.ts` | 0.7 k | The "you are not seeing the tier you chose" note: shown for a FAILED load, never for art that is simply absent. |
+| `artFailure.ts` | 0.9 k | The "artwork would not load — try again" screen. Raised for a FAILED load only; art that is genuinely absent still falls back silently. |
 | `glPlumbing.ts` | 4.2 k | The per-tier art sources and the two WebGL compositors. |
 | `audioEngine.ts` | 0.3 k | Who owns the `AudioEngine`. |
 | `renderSettings.ts` | 2.0 k | What the game is drawn WITH — the four persisted choices: art tier, backend, idle-FPS saver, developer pane. |

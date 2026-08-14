@@ -14,7 +14,8 @@
  *
  *   - the target families — `CompositeTarget` is paletted and native, `AiTarget` RGBA at
  *     ×S. Unifying them needs stubs whose semantics mean nothing on the other side.
- *   - the background paint — different art containers, and the `ai` tier has no gspec=42.
+ *   - the background paint — different art containers, and gspec=2/42 reach it by
+ *     different routes (the `ai` tier composites its own ZX stripes; see zxBands.ts).
  *   - the spec=1 mirror, the ONE effect reading the composited plane back
  *     (framebuffer.ts:145,154); the `ai` tier masks off its own sprite instead. The walk
  *     supplies the anchor, each sink reflects its own way.

@@ -67,10 +67,15 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // frame is still holding for it. Budgeted on arrival rather than after growth: it
   // crossed the 520 tripwire taking on the absent/failed distinction, and two pieces
   // were split off in the same series rather than landing here — the fetching and
-  // decoding (`enhancedLoad.ts`) and the player-facing note (`tierNote.ts`). What is
+  // decoding (`enhancedLoad.ts`) and the player-facing screen (`artFailure.ts`). What is
   // left is the state, which is the part that genuinely cannot be split: the caches, the
   // in-flight maps and the two hold predicates are one another's invariants.
-  ['src/app/art.ts', 620],
+  // 620 -> 660 for the three recovery paths a review found missing: a non-transient
+  // failure must be filed as an absence rather than rethrown past the release (it hung
+  // the room for ever), the `classic` tier's warm-cache prefetch must not raise a modal
+  // over a game that needs none of that art, and the map screen must not appear over a
+  // room the player has since walked into. Each is a guard plus the comment saying why.
+  ['src/app/art.ts', 660],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak

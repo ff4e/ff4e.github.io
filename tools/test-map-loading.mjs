@@ -249,17 +249,17 @@ await withApp(
       `each presentation is in the tier that was chosen for it (${JSON.stringify(after)})`,
     );
 
-    // === 5. A missing or undecodable AI map must fall back to the faithful composite
-    //        rather than hold forever: the fallback is the `ai` tier's whole safety net
-    //        for an unbuilt or half-deployed asset set, and a hold that only released on
-    //        success would withhold the map for the entire session.
+    // === 5. An ABSENT AI map falls back to the faithful composite rather than holding
+    //        forever. That fallback is the `ai` tier's safety net for an unbuilt or
+    //        half-deployed asset set, and a hold that only released on success would
+    //        withhold the map for the whole session.
     //
-    //        Served as a 200 of garbage rather than a 404, so the failure lands in
-    //        createImageBitmap: it is the harsher case (loadAiWorldMap's own `res.ok`
-    //        check does not catch it), and it does not make the browser log a network
-    //        error, which withApp counts as a probe failure. ===
+    //        404, i.e. the server ANSWERING "not there". That distinction is the whole
+    //        rule now: an answer is a fact about the deploy, which the player cannot
+    //        act on and a retry cannot fix, so it degrades quietly. §5b is the other
+    //        half. ===
     await p.unroute(GATED).catch(() => {});
-    await p.route(GATED, (route) => route.fulfill({ status: 200, contentType: 'image/webp', body: 'not an image' }));
+    await p.route(GATED, (route) => route.fulfill({ status: 404, body: '' }));
     await p.reload({ waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => window.__ff !== undefined);
     await p.waitForFunction(() => window.__ff.screen() === 'map' && !window.__ff.mapArtPending());
@@ -269,13 +269,45 @@ await withApp(
       widths: [...window.__map.widths],
       loaded: window.__ff.aiMapLoaded(),
       presented: window.__ff.mapPresented(),
+      failScreen: window.__ff.artFailShown(),
     }));
     expect(!failed.loaded, 'the AI map really did fail to load');
-    expect(failed.presented, 'a failed AI map still gets the player a map — the hold released');
+    expect(failed.presented, 'an absent AI map still gets the player a map — the hold released');
+    expect(!failed.failScreen, 'and no failure screen, because a retry could not help');
     expect(
       failed.widths.length === 1 && failed.widths[0] === 640,
       `it falls back to the faithful composite, once (${JSON.stringify(failed.widths)})`,
     );
+    await p.unroute(GATED).catch(() => {});
+
+    // === 5b. A map load that FAILED is the opposite case: the art exists, the player
+    //         asked for it, and quietly presenting the 1998 map under an `ai` setting is
+    //         a downgrade they cannot see and did not choose. So the map is HELD and the
+    //         player is asked.
+    //
+    //         Served as a 200 of garbage, so the failure lands in createImageBitmap —
+    //         which `decodeAsset` classifies as transient on purpose (a truncated
+    //         download and a corrupt file are indistinguishable there, and guessing
+    //         transient costs one refetch while guessing absent costs the tier). ===
+    await p.route(GATED, (route) => route.fulfill({ status: 200, contentType: 'image/webp', body: 'not an image' }));
+    await p.reload({ waitUntil: 'domcontentloaded' });
+    await p.waitForFunction(() => window.__ff !== undefined);
+    await p.waitForFunction(() => window.__ff.artFailShown());
+    await waitFrames(p, 4);
+    const mapHeld = await p.evaluate(() => ({
+      title: document.getElementById('art-fail-title')?.textContent ?? '',
+      pending: window.__ff.mapArtPending(),
+      spinner: window.__ff.loadingVisible(),
+    }));
+    expect(mapHeld.title.toLowerCase().includes('map'), `the message names the map (“${mapHeld.title}”)`);
+    expect(mapHeld.pending, 'the map is held rather than presented in the wrong tier');
+    expect(!mapHeld.spinner, 'the loading spinner stands down — the screen has taken over the wait');
+
+    // Serving the real art again and pressing the button gets the player their map.
+    await p.unroute(GATED).catch(() => {});
+    await p.click('#art-fail-retry');
+    await p.waitForFunction(() => window.__ff.aiMapLoaded() && !window.__ff.artFailShown());
+    expect(true, '“Try again” recovers the AI map');
     await p.unroute(GATED).catch(() => {});
 
     // === 6. Tier parity: `classic` and `enhanced` fetch no AI map and never hold, so
@@ -311,5 +343,6 @@ await withApp(
   // Pinned so the FIRST boot fetches no AI map art, leaving it cold for the gated
   // reloads (see the header note on the memory cache). The sampler's init script
   // overrides this to `ai` for every navigation after that one.
-  { graphics: 'enhanced' },
+  // The 404s in §5 are served on purpose; §5b's garbage 200 logs a decode failure.
+  { graphics: 'enhanced', allowErrors: /Failed to load resource|404/ },
 );

@@ -21,6 +21,7 @@
  * the map falls back to the faithful CPU composite. classic/enhanced never touch it.
  */
 import { MAP_W, MAP_H, type MapAction, type WorldMap } from './worldMap.js';
+import { assetBlob, decodeAsset, fetchAsset, isTransient } from './assetFetch.js';
 
 /** Upscale factor of the committed AI art (must match tools/build-map-ai.mjs AI_SCALE). */
 export const AI_MAP_SCALE = 4;
@@ -41,14 +42,20 @@ export interface AiMapState {
 /**
  * Try to load the AI world-map art from `${base}Menu/`. Resolves to an AiWorldMap
  * when every asset decoded, or null when any is missing/undecodable (⇒ the caller
- * falls back to the faithful CPU composite). Never throws.
+ * falls back to the faithful CPU composite). THROWS TransientAssetError when a
+ * request got no answer at all — see the catch below.
  */
 export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorldMap | null> {
   try {
     const load = async (file: string): Promise<ImageBitmap> => {
-      const res = await fetch(`${base}Menu/${file}`);
+      const url = `${base}Menu/${file}`;
+      const res = await fetchAsset(url);
+      // A status that is an ANSWER ("not there") stays a plain Error and is caught
+      // below as an absence. Only a request that got no answer is transient, and
+      // fetchAsset has already thrown for that.
       if (!res.ok) throw new Error(`${file}: ${res.status}`);
-      return createImageBitmap(await res.blob());
+      const blob = await assetBlob(url, res);
+      return decodeAsset(url, () => createImageBitmap(blob));
     };
     const [mapa0, mapa1, krokomer, ikonky, loading, ...nodes] = await Promise.all([
       load('mapa-0_ai.webp'),
@@ -60,9 +67,13 @@ export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorl
     ]);
     return new AiWorldMap(wm, mapa0!, mapa1!, nodes, krokomer!, ikonky!, loading!);
   } catch (e) {
-    // Returning null falls back to the faithful CPU map, which is right for a partial
-    // download — but it would also hide a broken build, so say why (the other three AI
-    // loaders warn identically).
+    // Rethrown, not swallowed: a load that got no answer has taught us nothing, and the
+    // caller now asks the player rather than quietly presenting the 1998 map under an
+    // `ai` setting. This used to resolve null for both cases together.
+    if (isTransient(e)) throw e;
+    // A genuine absence: the deploy is missing the AI map art. Nothing at runtime can
+    // fix that, so fall back to the faithful CPU map — but say why, since the only
+    // other symptom is the map quietly being the wrong one.
     console.warn('AI world map unavailable:', e);
     return null;
   }

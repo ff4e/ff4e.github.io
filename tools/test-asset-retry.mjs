@@ -63,8 +63,8 @@ await withApp(
     );
     // ...and because it was covered, the player was never told anything was wrong.
     expect(
-      (await p.evaluate(() => window.__ff.tierNote())) === 'ok',
-      'one blip: no tier note, because nothing ended up degraded',
+      (await p.evaluate(() => window.__ff.artFailShown())) === false,
+      'one blip: the player is never shown a failure screen, because nothing failed',
     );
 
     // === A room with no AI art is asked ONCE, not four times ===
@@ -83,10 +83,48 @@ await withApp(
       (await p.evaluate(() => window.__ff.aiRoomLoaded())) === false,
       `absent art: ${ABSENT_NAME} draws one tier down, as a room with no AI art always has`,
     );
+    // THE safety property of the whole design. Absent art is not a failure: the server
+    // answered, and the answer was "there is nothing here". Several rooms ship that way
+    // — SCORE has no enhanced art, CHODBA and WIN draw a classic background by design,
+    // 21 sprites are unstaged — so a failure screen here would appear permanently, in
+    // rooms that are working exactly as intended, with a retry that could never help.
     expect(
-      (await p.evaluate(() => window.__ff.tierNote())) === 'ok',
-      'absent art: still no note — permanent, and nothing the player can act on',
+      (await p.evaluate(() => window.__ff.artFailShown())) === false,
+      'absent art: NO failure screen — it falls back silently, as it always has',
     );
+    expect(
+      (await p.evaluate(() => window.__ff.roomArtPending())) === false,
+      'absent art: the room is presented rather than held',
+    );
+
+    // === The `classic` tier must never see this screen ===
+    // It prefetches the enhanced art to warm the cache for a later tier switch and holds
+    // nothing for it, so a failure there is not a failure the player is experiencing:
+    // the room renders from bundled FFR data and is completely playable. A modal whose
+    // only control is "Try again" would, offline, lock them out of a working game.
+    await p.evaluate(() => window.__ff.setGraphics('classic'));
+    // Every request killed, not just the first: the point is that a SUSTAINED failure
+    // of art this tier does not paint is still invisible to the player.
+    await p.route('**/enhanced/ZDVIZ1/**', (r) => r.abort('connectionfailed'));
+    await selectRoom(p, 20, 1);
+    // Long enough for the retry budget to be SPENT (2 retries, ~250ms + ~1000ms) and the
+    // failure to actually land. Asserting sooner passes while the load is merely still
+    // in flight — which is how this check first passed against a deliberately broken
+    // build, and is worth more than the seconds it costs.
+    await p.waitForTimeout(3000);
+    expect(
+      (await p.evaluate(() => window.__ff.artFailShown())) === false,
+      'classic tier: a failed enhanced prefetch shows NO screen — that art is never drawn',
+    );
+    expect(
+      (await p.evaluate(() => window.__ff.roomArtPending())) === false,
+      'classic tier: and the room is not held',
+    );
+    expect(
+      (await p.evaluate(() => window.__ff.count())) > 0,
+      'classic tier: the room is running normally',
+    );
+    await p.unroute('**/enhanced/ZDVIZ1/**').catch(() => {});
 
     // The abort was provoked on purpose; assert it was seen rather than merely tolerated.
     expect(
