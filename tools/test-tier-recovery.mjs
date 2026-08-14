@@ -20,23 +20,41 @@
  * size, so it reads as a tier change when the room changed. That misreading is what sent
  * the first investigation of this bug down the wrong path.
  *
- * One request is aborted, once, and everything after it is served normally — so anything
- * still broken afterwards is the app remembering, not the network.
+ * Requests are aborted only until the retry budget is spent, and everything after that is
+ * served normally — so anything still broken afterwards is the app remembering, not the
+ * network. (The single-blip case, which the retry now hides entirely, is
+ * `test-asset-retry.mjs`.)
  */
 import { reloadApp, selectRoom, waitFrames, withApp } from './ui-lib.mjs';
 
 const SCHODY = 5; // the room the blip hits
 const OTHER = 6; // a different room, to prove the network is healthy again
 
-/** Abort the FIRST request for `glob`, then serve every later one normally. */
-async function blipOnce(p, glob) {
-  let armed = true;
+/**
+ * Fail every request for `glob` until the retry budget is spent, then serve normally.
+ *
+ * This used to abort exactly ONE request, and that stopped being a repro when
+ * `fetchAsset` gained its retry: a single blip is now covered before anything is
+ * degraded, so there was nothing left for this probe to recover FROM. That case did not
+ * disappear, it moved — `test-asset-retry.mjs` owns it, and asserts the player never
+ * sees it.
+ *
+ * What is left here is the case retry cannot fix: an outage that outlasts the budget.
+ * The art really does fail, the room really is drawn one tier down, and the question is
+ * whether the app can ever get back — which is what this file has always been about.
+ * ATTEMPTS is deliberately budget + 1 so the load fails even if the budget grows by one;
+ * everything after is served normally, so anything still broken is the app remembering.
+ */
+const ATTEMPTS = 4; // the initial request + 2 retries, + 1 of headroom
+
+async function outage(p, glob) {
+  let left = ATTEMPTS;
   // ONE room's asset, by name. A wildcard (`**/enhanced-ai/**`) hits whatever the boot
   // room asks for first instead, and the probe then silently tests nothing — which is
   // exactly how this repro was first got wrong.
   await p.route(glob, async (r) => {
-    if (armed) {
-      armed = false;
+    if (left > 0) {
+      left--;
       await r.abort('connectionfailed');
     } else {
       await r.continue().catch(() => {});
@@ -53,7 +71,7 @@ async function settled(p) {
 await withApp(
   async ({ p, expect, allowed }) => {
     // === AI tier ===============================================================
-    await blipOnce(p, `**/enhanced-ai/SCHODY/ai.json`);
+    await outage(p, `**/enhanced-ai/SCHODY/ai.json`);
     await p.evaluate(() => window.__ff.setGraphics('ai'));
     await selectRoom(p, SCHODY, 1);
     await settled(p);
@@ -111,7 +129,7 @@ await withApp(
     // this the blip route below would never be hit and the probe would assert nothing.
     await p.unrouteAll({ behavior: 'ignoreErrors' });
     await reloadApp(p);
-    await blipOnce(p, '**/enhanced/SCHODY/obj/snek_10.png');
+    await outage(p, '**/enhanced/SCHODY/obj/snek_10.png');
     await p.evaluate(() => window.__ff.setGraphics('enhanced'));
     await selectRoom(p, SCHODY, 1);
     await settled(p);

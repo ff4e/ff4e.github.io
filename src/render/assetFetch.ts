@@ -43,23 +43,105 @@ function retryableStatus(status: number): boolean {
 }
 
 /**
- * `fetch`, with the transport-level failures labelled.
+ * ── Retry ─────────────────────────────────────────────────────────────────────
+ *
+ * The trap that decides this design: **a 404 here is usually correct.** No `ai.json`
+ * means the room has no AI art and falls back a tier BY DESIGN; the same goes for
+ * `objects.json` and for the 21 sprites that are legitimately absent from their
+ * manifests. A retry that could not tell those from a failure would make every
+ * fallback room pay three requests plus backoff on EVERY entry, for ever — slower than
+ * doing nothing, and worse.
+ *
+ * So the retry lives here, inside the one function that already draws that line, rather
+ * than at 47 call sites. It can only ever re-issue a request that `fetchAsset` itself
+ * classified as transient; an answer — any answer, including 404 — is returned to the
+ * caller untouched and unretried. That is a property of where the code sits, not a rule
+ * someone has to remember.
+ *
+ * ── The budget ────────────────────────────────────────────────────────────────
+ * Two retries, ~250 ms then ~1000 ms, jittered by ±25%. Worst case a dead link costs
+ * **1.25 s of waiting** on top of the failed requests themselves, and then the caller
+ * carries on exactly as it does today — falls back a tier, and (since #66) does not
+ * remember the failure, so the next room entry tries again anyway.
+ *
+ * The ceiling matters more than the count. Boot fetches ~48 MB and a cold room entry is
+ * 17-27 s on Slow 4G, so a policy that turned one dead link into a 30-second stall would
+ * be its own bug. Three attempts is the point where a genuine blip is almost always
+ * covered and a genuinely broken deploy has not yet become a hang.
+ */
+const RETRY_DELAYS_MS = [250, 1000] as const;
+const JITTER = 0.25;
+
+/**
+ * How long to wait before attempt `n + 1` (0-based), or null when the budget is spent.
+ *
+ * Jittered so a burst of assets failing together — which is what a dropped connection
+ * looks like — does not retry in lockstep and re-create the burst. Pure, and exported,
+ * so the schedule can be tested without waiting for it.
+ */
+export function retryDelayMs(attempt: number, rand: () => number = Math.random): number | null {
+  const base = RETRY_DELAYS_MS[attempt];
+  if (base === undefined) return null;
+  return Math.round(base * (1 + (rand() * 2 - 1) * JITTER));
+}
+
+/**
+ * The two things a caller (in practice, a test) may want to control about the waiting.
+ *
+ * Injected rather than reached for globally, because the alternative is a test-only
+ * backdoor in shipping code. The unit suite uses `delayMs: () => null` to test the
+ * CLASSIFICATION at full speed, and a counting `sleep` to test the SCHEDULE without
+ * spending it — a retry test that actually waits 1.25 s costs 500x what a unit test in
+ * this repo is supposed to.
+ */
+export interface RetryPolicy {
+  /** Wait before attempt `n + 1`, or null to stop. Defaults to `retryDelayMs`. */
+  delayMs?: (attempt: number) => number | null;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * `fetch`, with the transport-level failures labelled — and retried.
  *
  * Deliberately does NOT judge the response body: whether a 200 that is not a PNG counts
  * as absent is the caller's business (and for the dev server's SPA fallback, it does).
  * This only separates "no answer" from "an answer".
+ *
+ * The happy path is one `fetch` inside one `try`, and the loop exits on the first
+ * attempt — measured at no detectable difference on a full room entry, which is the case
+ * that matters, since every request succeeding is overwhelmingly the common one.
+ *
+ * A body that arrives TRUNCATED is not retried here: it is reported transient by
+ * `assetBlob` / `assetJson`, after this function has already returned its response. That
+ * is a real gap and a deliberate one — retrying it means re-issuing the whole request
+ * from the caller, and the caller already recovers on the next room entry because a
+ * transient failure is not remembered.
  */
-export async function fetchAsset(url: string, init?: RequestInit): Promise<Response> {
-  let res: Response;
-  try {
-    res = await fetch(url, init);
-  } catch (e) {
-    // fetch rejects only for a transport failure: DNS, connection reset, offline, an
-    // aborted request. Exactly the case that must never be remembered.
-    throw new TransientAssetError(url, 'network error', e);
+export async function fetchAsset(url: string, init?: RequestInit, retry?: RetryPolicy): Promise<Response> {
+  const nextDelay = retry?.delayMs ?? retryDelayMs;
+  const sleep = retry?.sleep ?? realSleep;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const res = await fetch(url, init);
+      if (retryableStatus(res.status)) throw new TransientAssetError(url, `HTTP ${res.status}`);
+      return res;
+    } catch (e) {
+      // Only OUR classification is retried. A caller-thrown error, or anything the
+      // labelling below decided was an answer, leaves immediately.
+      const err = e instanceof TransientAssetError ? e : new TransientAssetError(url, 'network error', e);
+      // An abort the CALLER asked for is not a failure to recover from — it is the app
+      // saying it no longer wants this. Retrying it would fight the page that navigated
+      // away, and would keep a load alive after the room that wanted it is gone.
+      const delay = init?.signal?.aborted === true ? null : nextDelay(attempt);
+      if (delay === null) throw err;
+      // The wait happens while HOLDING the caller's load slot, where it has one. That is
+      // deliberate: acquiring a second slot from inside one can deadlock the pool, and
+      // holding it also stops a failing room from spending its whole budget re-queuing.
+      await sleep(delay);
+    }
   }
-  if (retryableStatus(res.status)) throw new TransientAssetError(url, `HTTP ${res.status}`);
-  return res;
 }
 
 /**
