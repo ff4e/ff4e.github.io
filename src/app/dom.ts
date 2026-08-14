@@ -34,9 +34,6 @@ glCanvas.id = 'screen-gl';
 // pixel-art frame. Wrap #screen so the overlay can be absolutely positioned on
 // top; a transparent 1px border matches #screen's border box for pixel-exact
 // alignment.
-export const subCanvas = document.createElement('canvas');
-subCanvas.id = 'subs';
-export const subCtx = subCanvas.getContext('2d')!;
 // The fixed stage box (sized by relayout): rooms/map/cutscene are centered inside
 // it and letterboxed, so the side panel stays put while the room canvas resizes.
 export const stageBox = document.createElement('div');
@@ -53,7 +50,6 @@ export const select = document.getElementById('room') as HTMLSelectElement;
 export const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null;
 export const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
 export const graphicsSelect = document.getElementById('graphics') as HTMLSelectElement | null;
-export const subRendererSelect = document.getElementById('subrenderer') as HTMLSelectElement | null;
 export const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;
 export const winRoomBtn = document.getElementById('winroom') as HTMLButtonElement | null;
 export const perfHud = document.getElementById('perfhud') as HTMLElement | null;
@@ -96,12 +92,4 @@ export function buildStage(): void {
   glCanvas.style.display = 'none';
   glCanvas.style.pointerEvents = 'none';
   wrap.appendChild(glCanvas);
-  subCanvas.style.position = 'absolute';
-  subCanvas.style.left = '0';
-  subCanvas.style.top = '0';
-  subCanvas.style.border = '1px solid transparent';
-  subCanvas.style.background = 'transparent';
-  subCanvas.style.imageRendering = 'auto';
-  subCanvas.style.pointerEvents = 'none';
-  wrap.appendChild(subCanvas);
 }

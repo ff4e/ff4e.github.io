@@ -17,11 +17,11 @@
  * animate at whatever rate the main thread manages, because that is where it would be
  * driven from.
  *
- * NOT pixel-identical to `drawVector`: the browser shapes and rasterises this text. What
- * is pinned instead is the geometry — `subtitleGeom.ts` holds the rules both renderers
- * measure from, in unit tests, and `test-subtitles` compares this renderer's line
- * against the canvas one in the same tier (0.992 of its width, the remainder being the
- * browser's own shaping). `__ff.setSubRenderer('canvas')` still forces the old path.
+ * NOT pixel-identical to the original's own glyph rendering: the browser shapes and
+ * rasterises this text. What is pinned instead is the geometry — `subtitleGeom.ts` holds
+ * the rules (fit-to-room size, wave phase and curve, baseline, stroke, bevel) in unit
+ * tests, and test-aisubs measures the rendered text for size, bottom anchoring and
+ * centring. The bitmap path is still byte-exact, and is what `classic` draws.
  */
 import {
   VECTOR_GEOM,
@@ -32,14 +32,10 @@ import {
   strokeWidth,
   waveDy,
 } from '../render/subtitleGeom.js';
-import { subRendererSelect } from './dom.js';
-import { wake } from './frameClock.js';
+import { wrap } from './dom.js';
 import { aiSubScale } from './introOverlay.js';
 import { graphics } from './renderSettings.js';
-import { setSubOverlaySig } from './stageState.js';
-import { asSubRendererPref, resolveSubRenderer } from './subRendererChoice.js';
 import type { SubtitleSystem } from '../render/subtitles.js';
-import type { SubRendererPref } from './subRendererChoice.js';
 
 /** Logic ticks per second (LOGIC_MS = 80). Wave timing is derived from this. */
 const TICKS_PER_SEC = 12.5;
@@ -88,71 +84,6 @@ const newLayer = (): Layer => ({ host: null, lines: new Map(), lastFont: '', las
 const layers: Record<SubOwner, Layer> = { room: newLayer(), cut: newLayer() };
 /** The element id each layer's host carries, so a probe can find it. */
 const HOST_ID: Record<SubOwner, string> = { room: 'domsubs', cut: 'domsubs-cut' };
-
-/**
- * Can this browser run the DOM renderer at all?
- *
- * `Element.animate` is the whole point (see resolveSubRenderer), so its absence is the
- * one honest reason to refuse. Feature-detected rather than assumed, because the
- * fallback has to be a decision taken up front, not an error thrown mid-frame.
- */
-function domSubsSupported(): boolean {
-  return typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function';
-}
-
-/**
- * The persisted preference. Absent — the normal case — means `auto`.
- *
- * Cached, because `domSubsEnabled()` asks for it once per frame and this whole change
- * exists to take work off the main thread; a synchronous `localStorage` read is a poor
- * thing to add to the path that paints the animation. Only the STORAGE read is cached —
- * the art tier is read live in `domSubsEnabled`, so switching tier still takes effect on
- * the next frame, which is what makes `auto` work at all.
- */
-let prefCache: SubRendererPref | null = null;
-export function subRendererPref(): SubRendererPref {
-  if (prefCache !== null) return prefCache;
-  try {
-    prefCache = asSubRendererPref(localStorage.getItem('ff.subRenderer'));
-  } catch {
-    prefCache = 'auto';
-  }
-  return prefCache;
-}
-
-/** Is the DOM renderer the one painting right now? Asked once per frame. */
-export function domSubsEnabled(): boolean {
-  return resolveSubRenderer(subRendererPref(), domSubsSupported()) === 'dom';
-}
-
-/** Persist the preference. Low-level: use `selectSubRenderer` unless you own the overlay. */
-export function setSubRendererPref(pref: SubRendererPref): void {
-  prefCache = pref;
-  try {
-    if (pref === 'auto') localStorage.removeItem('ff.subRenderer');
-    else localStorage.setItem('ff.subRenderer', pref);
-  } catch {
-    /* storage unavailable: the choice just will not persist */
-  }
-  if (!domSubsEnabled()) clearDomSubtitles();
-}
-
-/**
- * Switch renderer and make the change visible now — the whole switch, in one place.
- *
- * Two callers ask for this (`__ff.setSubRenderer` and the dev bar's Subtitles select),
- * and each of the three steps matters: the canvas overlay caches on a signature, so
- * without clearing it the handover can leave the previous renderer's paint on screen
- * until something else happens to invalidate it; and an idle room is not repainting at
- * all, so without `wake()` nothing would redraw until the player moved.
- */
-export function selectSubRenderer(pref: SubRendererPref): SubRendererPref {
-  setSubRendererPref(pref);
-  setSubOverlaySig(''); // the other renderer owns the overlay now
-  if (subRendererSelect) subRendererSelect.value = pref;
-  wake();
-  return pref;
-}
 
 /**
  * Tear the overlay down (leaving the room, switching renderer or tier, no lines left).
@@ -204,8 +135,8 @@ function measureBaseline(font: string): { inset: number; height: number } {
 /**
  * Width of a line at a given font, measured the way the canvas path measures it.
  *
- * Kerning and ligatures are off because `drawVector` advances glyph by glyph, so a
- * kerned measurement here would disagree with what actually gets drawn there.
+ * Kerning and ligatures are off because the glyphs are laid out one at a time (as
+ * PisStringF advances them), so a kerned measurement would disagree with the result.
  */
 function measureTextWidth(font: string, text: string): number {
   const probe = document.createElement('span');
@@ -261,12 +192,12 @@ export function syncDomSubtitles(
       // absolutely positioned in the same wrapper, so without it this layer sits 1px
       // up and to the left of the canvas the text is supposed to line up with.
       'position:absolute;left:0;top:0;border:1px solid transparent;pointer-events:none;overflow:hidden';
-    document.getElementById('subs')?.parentElement?.appendChild(host);
+    wrap.appendChild(host);
   }
   host.style.width = `${cssW}px`;
   host.style.height = `${cssH}px`;
   // The `ai` tier draws its subtitles smaller, shrunk about the bottom edge of the game
-  // box (applySubScale). One transform on the container is the same operation, and it
+  // box. One transform on the container is the whole operation, and it
   // scales the row pitch and the wave amplitude with the glyphs, exactly as that does.
   const tier = graphics === 'ai' ? aiSubScale : 1;
   host.style.transformOrigin = '50% 100%';
@@ -303,7 +234,7 @@ export function syncDomSubtitles(
     // afterwards (by writing fontSize onto a finished element) left all three sized for
     // a font the line was no longer drawn in.
     // Measured at the display scale, but fitted in NATIVE units, because that is where
-    // the rule is defined and where drawVector applies it — dividing out `scale` keeps a
+    // the rule is defined (subtitleGeom) — dividing out `scale` keeps a
     // fit-to-room decision from depending on the window size. Measured ONLY for a line
     // being built: it is a forced layout, and it cannot change while the line exists.
     let line = L.lines.get(key);
@@ -343,7 +274,7 @@ export function syncDomSubtitles(
       const bevel =
         `linear-gradient(to bottom,${top} 0%,${top} ${gTop.toFixed(2)}%,` +
         `${bottom} ${gBottom.toFixed(2)}%,${bottom} 100%)`;
-      // The outline is drawVector's strokeText: lineWidth = fs*0.16, centred on the
+      // The outline is strokeText's: lineWidth = fs*0.16, centred on the
       // path, so it reaches fs*0.08 outwards. -webkit-text-stroke is the same thing —
       // but it paints OVER the fill in Chromium (which honours no paint-order on HTML
       // text), so the stroke goes on its own layer BEHIND the fill instead.
@@ -377,7 +308,7 @@ export function syncDomSubtitles(
         sp.append(strokeEl, fillEl);
         el.appendChild(sp);
         spans.push(sp);
-        if (ch === ' ') return; // a space inks nothing; drawVector skips it too
+        if (ch === ' ') return; // a space inks nothing; PisStringF skips it too
         // Glyph i is due when its phase reaches zero, which `wavePhase` puts at (i+1)
         // steps -- PisStringF counts characters from 1. This used to start at `i`, one
         // step (16ms) early per glyph, which is exactly the kind of drift that having

@@ -62,14 +62,6 @@ interface TitleLine {
  * changes between frames, so this is measured once per (text, font) instead of
  * on every one of the ~120 overlay repaints a second.
  */
-interface VectorLine {
-  chars: string[];
-  xs: number[];
-  fs: number;
-  font: string;
-  total: number;
-}
-
 /** Quantise a 0..1 sub-tick fraction to the overlay's animation step grid. */
 function subStep(alpha: number): number {
   if (!(alpha > 0)) return 0; // also catches NaN
@@ -97,8 +89,6 @@ export class SubtitleSystem {
   private readonly fontcol = new Map<string, number[]>();
   /** Digit colour codes -> two ramps of 6 shades (fontcol2). */
   private readonly fontcol2 = new Map<string, [number[], number[]]>();
-  /** Measured vector layouts, keyed by weight|family|text (see VectorLine). */
-  private readonly vecCache = new Map<string, VectorLine>();
 
   constructor(
     private readonly font: FontData,
@@ -297,7 +287,7 @@ export class SubtitleSystem {
   }
 
   /**
-   * The state `drawVector` renders, for the parity probe: enough for an independent
+   * The state a vector renderer needs: enough for an independent
    * reference implementation of PisStringF's wave to reproduce the overlay exactly.
    */
   debugLines(): {
@@ -316,142 +306,6 @@ export class SubtitleSystem {
       startcount: t.startcount,
       rgb: this.vectorColor(t.barva),
     }));
-  }
-
-  /**
-   * Enhanced-graphics subtitle renderer: draw the same lines (layout, scroll and
-   * per-character wave from KresliTitulky/PisStringF) as crisp vector text with a
-   * dark outline and a top->bottom bevel gradient in the speaker's colour, onto a
-   * high-resolution 2D overlay. The caller sets the context transform so that one
-   * unit == one native game pixel (i.e. drawing happens in screenW x screenH
-   * space); crispness comes from the overlay's larger backing store.
-   *
-   * Per frame this only issues the two text draws per glyph. The text shaping
-   * (`measureText` for the fit and for every glyph advance) is memoised per line
-   * in `vectorLayout`, and the bevel gradient is shared by every glyph sitting at
-   * the same wave offset — which, once the wave-in has finished, is all of them.
-   */
-  drawVector(
-    ctx: CanvasRenderingContext2D,
-    count: number,
-    fontFamily: string,
-    weight: string | number = 700,
-    alpha = 0,
-  ): void {
-    const frac = subStep(alpha);
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'alphabetic';
-    ctx.lineJoin = 'round';
-    ctx.miterLimit = 2;
-    ctx.strokeStyle = 'rgb(5,5,12)';
-    for (const t of this.titles) {
-      const [r, g, b] = this.vectorColor(t.barva);
-      const line = this.vectorLayout(ctx, t.obsah, fontFamily, weight);
-      ctx.font = line.font;
-      ctx.lineWidth = strokeWidth(line.fs);
-      const top = `rgb(${r},${g},${b})`;
-      const [br, bg, bb] = bevelBottomRgb(r, g, b);
-      const bottom = `rgb(${br},${bg},${bb})`;
-      // y here mirrors PisStringF: the line's on-screen top is ys (+screenH the
-      // caller already folds into the transform origin at 0). y0 is the wave's
-      // rest line; (y0 - y) == UNDERTITLE - ys drives the wave amplitude. Both are
-      // taken through SUB_SCALE so the row pitch and the wave grow with the glyphs
-      // (see SUB_SCALE); the tick logic behind renderYs stays at the original's
-      // geometry, because the bitmap path draws from the same numbers.
-      const { baseline, amp } = lineAnchor(this.renderYs(t, frac), this.screenH);
-      const cas = count - t.startcount + frac;
-      const x0 = (this.screenW - line.total) / 2;
-      // The gradient is anchored to the glyph's own baseline, so glyphs that share
-      // a wave offset share one gradient object (all of them on a settled line).
-      const grads = new Map<number, CanvasGradient>();
-      for (let i = 0; i < line.chars.length; i++) {
-        const ch = line.chars[i]!;
-        const p = wavePhase(cas, i);
-        if (p < 0 || ch === ' ') continue;
-        const gy = baseline + waveDy(p, amp);
-        let grad = grads.get(gy);
-        if (grad === undefined) {
-          const bevel = bevelSpan(line.fs);
-          grad = ctx.createLinearGradient(0, gy + bevel.top, 0, gy + bevel.bottom);
-          grad.addColorStop(0, top);
-          grad.addColorStop(1, bottom);
-          grads.set(gy, grad);
-        }
-        const x = x0 + line.xs[i]!;
-        ctx.strokeText(ch, x, gy);
-        ctx.fillStyle = grad;
-        ctx.fillText(ch, x, gy);
-      }
-    }
-  }
-
-  /**
-   * Measure (once) the invariant layout of a vector subtitle line: fit the line to
-   * the room width by shrinking the font if needed — matching the classic word-wrap
-   * intent, which used bitmap metrics — then record each glyph's x offset.
-   *
-   * The cache is keyed by weight|family|text, so the F-key font cycling and the
-   * per-line text both invalidate it; all subtitle faces are loaded before the
-   * overlay is ever used (subFontReady), so measurements can't be taken against a
-   * fallback face and then go stale.
-   */
-  private vectorLayout(
-    ctx: CanvasRenderingContext2D,
-    obsah: string,
-    fontFamily: string,
-    weight: string | number,
-  ): VectorLine {
-    const key = `${weight}|${fontFamily}|${obsah}`;
-    const hit = this.vecCache.get(key);
-    if (hit) return hit;
-    let fs = SUB_FONT_PX;
-    let font = `${weight} ${fs}px ${fontFamily}`;
-    ctx.font = font;
-    let total = ctx.measureText(obsah).width;
-    const fitted = fitFontPx(total, this.screenW);
-    if (fitted !== fs) {
-      fs = fitted;
-      font = `${weight} ${fs}px ${fontFamily}`;
-      ctx.font = font;
-      total = ctx.measureText(obsah).width;
-    }
-    const chars = [...obsah];
-    const xs: number[] = [];
-    let x = 0;
-    for (const ch of chars) {
-      xs.push(x);
-      x += ctx.measureText(ch).width;
-    }
-    const line: VectorLine = { chars, xs, fs, font, total };
-    if (this.vecCache.size >= 128) this.vecCache.clear(); // bounded; a room is nowhere near this
-    this.vecCache.set(key, line);
-    return line;
-  }
-
-  /**
-   * A key that changes exactly when `drawVector`'s output would change, so the
-   * caller can skip the overlay clear+repaint on every frame that would redraw the
-   * identical image. The wave offset is a function of the logic tick (12.5/s), not
-   * of the frame, so at 60fps most repaints are pure waste; and once the last glyph
-   * has passed p >= 50 the wave is over, so a settled, fully scrolled line stops
-   * changing altogether and needs no repaints at all.
-   */
-  vectorSignature(count: number, alpha = 0): string {
-    const frac = subStep(alpha);
-    let s = '';
-    for (let i = 0; i < this.titles.length; i++) {
-      const t = this.titles[i]!;
-      const cas = count - t.startcount + frac;
-      // p of the LAST glyph: >= 50 means every glyph has settled at dy = 0. UTF-16
-      // length over-counts astral characters, which only ever delays `settled` — it
-      // can never claim a still-waving line is static.
-      const settled = cas * 5 - t.obsah.length >= 50;
-      // Length-prefix the text: it is arbitrary game text and may itself contain the
-      // delimiters, which would otherwise let two different screen states encode to
-      // the same key — and a colliding key means a stale image is left on screen.
-      s += `${i}:${t.barva}${t.obsah.length}:${t.obsah}|${this.renderYs(t, frac)}|${settled ? 'x' : cas};`;
-    }
-    return s;
   }
 
   /**

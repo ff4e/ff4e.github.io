@@ -526,8 +526,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 2.2 k | The logo and intro movies, and the vector-subtitle layer above the canvas. |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the fatal screen and the resize handler. |
-| `subRendererChoice.ts` | 0.6 k | Which renderer paints the vector subtitles: DOM text by default, plus the fallback when the browser cannot animate. Pure, so the decision is unit-tested. |
-| `subtitleDom.ts` | 3.7 k | Subtitles as DOM text, animated by the compositor — the renderer for `enhanced`, `ai` and cutscene captions, one layer each for the room and a cutscene. Forced either way by the dev bar's Subtitles picker or `__ff.setSubRenderer()`. |
+| `subtitleDom.ts` | 3.2 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
 | `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |

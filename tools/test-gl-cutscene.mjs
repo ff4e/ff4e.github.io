@@ -4,7 +4,7 @@
  *   - GAP 2 parity: the cutscene's offscreen FBO (GlScreen.renderIndexed, NEAREST
  *     index → palette LUT) is byte-exact vs a CPU IndexedScreen.toRgba. The LINEAR
  *     present upscale is cosmetic and not part of this comparison.
- *   - GAP 4 layout: #screen, #screen-gl and #subs share one CSS box; #screen-gl is
+ *   - GAP 4 layout: #screen and #screen-gl share one CSS box; #screen-gl is
  *     shown only for the enhanced+webgl (GPU-present) path and hidden for the 2D
  *     fallback (cpu renderer or classic art).
  *   - GAP 3 toggles: R/E/F work live during the cutscene; Escape still skips.
@@ -54,14 +54,14 @@ else console.log(`  OK   cutscene FBO byte-exact (${first.w}x${first.h})`);
 const rects = () => p.evaluate(() => {
   const q = (id) => { const r = document.getElementById(id).getBoundingClientRect(); return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }; };
   const disp = (id) => getComputedStyle(document.getElementById(id)).display;
-  return { screen: q('screen'), gl: q('screen-gl'), subs: q('subs'), glDisp: disp('screen-gl') };
+  return { screen: q('screen'), gl: q('screen-gl'), glDisp: disp('screen-gl') };
 });
 const same = (a, b2) => a.x === b2.x && a.y === b2.y && a.w === b2.w && a.h === b2.h;
 
 let r = await rects();
 if (r.glDisp !== 'block') fail(`enhanced+webgl cutscene: #screen-gl display=${r.glDisp} (expected block)`);
-else if (!same(r.screen, r.gl) || !same(r.screen, r.subs)) fail(`canvases don't share a box: ${JSON.stringify(r)}`);
-else console.log(`  OK   #screen/#screen-gl/#subs share one box, GL shown (${r.gl.w}x${r.gl.h})`);
+else if (!same(r.screen, r.gl)) fail(`canvases don't share a box: ${JSON.stringify(r)}`);
+else console.log(`  OK   #screen/#screen-gl share one box, GL shown (${r.gl.w}x${r.gl.h})`);
 
 // --- GAP 3: live toggles ----------------------------------------------------
 // R -> cpu: the cutscene must switch to the 2D fallback (GL canvas hidden).
@@ -73,7 +73,6 @@ else if (!(await p.evaluate(() => window.__ff.cutsceneActive()))) fail('cutscene
 else {
   r = await rects();
   if (r.glDisp !== 'none') fail(`cpu cutscene: #screen-gl display=${r.glDisp} (expected none)`);
-  else if (!same(r.screen, r.subs)) fail('cpu cutscene: #screen/#subs box drift');
   else console.log('  OK   R -> cpu: 2D fallback, #screen-gl hidden, still playing');
 }
 await p.keyboard.press('r'); // back to webgl

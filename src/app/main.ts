@@ -101,7 +101,6 @@ import {
   introMovie,
   logoMovie,
   setAiSubScale,
-  syncSubOverlay,
 } from './introOverlay.js';
 import {
   SUB_FONT_CANDIDATES,
@@ -109,17 +108,10 @@ import {
   setSubFontFamily,
   setSubFontIdx,
   setSubFontWeight,
-  setSubOverlayGate,
-  setSubOverlayPainted,
-  setSubOverlaySig,
   subFontFamily,
   subFontIdx,
   subFontReady,
   subFontWeight,
-  subOverlayGate,
-  subOverlayPainted,
-  subOverlayPaints,
-  subOverlaySig,
 } from './stageState.js';
 import { initDevBar } from './devBar.js';
 import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
@@ -2169,30 +2161,6 @@ await runBoot();
   },
   get subLang() {
     return subLang;
-  },
-  get subOverlayGate() {
-    return subOverlayGate;
-  },
-  set subOverlayGate(v: boolean) {
-    setSubOverlayGate(v);
-  },
-  get subOverlayPainted() {
-    return subOverlayPainted;
-  },
-  set subOverlayPainted(v: boolean) {
-    setSubOverlayPainted(v);
-  },
-  get subOverlayPaints() {
-    return subOverlayPaints;
-  },
-  get subOverlaySig() {
-    return subOverlaySig;
-  },
-  set subOverlaySig(v: string) {
-    setSubOverlaySig(v);
-  },
-  get syncSubOverlay() {
-    return syncSubOverlay;
   },
   get talk() {
     return talk;

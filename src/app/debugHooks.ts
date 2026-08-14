@@ -122,8 +122,6 @@ import type { FishFrame } from '../render/renderRoom.js';
 import { AiRoom } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
 import { SUB_SUBSTEPS, SubtitleSystem } from '../render/subtitles.js';
-import { domSubsEnabled, selectSubRenderer, subRendererPref } from './subtitleDom.js';
-import type { SubRendererPref } from './subRendererChoice.js';
 import { renderTetris, tetrisRgba } from '../render/tetrisRender.js';
 import { MapAction, WorldMap } from '../render/worldMap.js';
 import { AiWorldMap } from '../render/worldMapAi.js';
@@ -146,7 +144,7 @@ import {
   tetrisTick,
   ultraviolence,
 } from './cheats.js';
-import { canvas, ctx, glCanvas, loadingEl, subCanvas, subCtx } from './dom.js';
+import { canvas, ctx, glCanvas, loadingEl } from './dom.js';
 import type { FeedbackUi } from './feedback.js';
 import { IntroPlayer } from './intro.js';
 import type { RoomGeometry } from './layout.js';
@@ -263,11 +261,6 @@ export interface DebugHost {
   readonly subFontReady: boolean;
   readonly subFontWeight: string;
   readonly subLang: () => "cz" | "en";
-  subOverlayGate: boolean;
-  subOverlayPainted: boolean;
-  readonly subOverlayPaints: number;
-  subOverlaySig: string;
-  readonly syncSubOverlay: () => void;
   readonly talk: (which: "little" | "big") => void;
   readonly togglePanelOptions: () => void;
   readonly tryStep: (which: "little" | "big", dir: number) => "moving" | "turning" | "blocked" | "busy";
@@ -552,52 +545,6 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     cutSubsActive: () => cutsceneSubs?.active ?? false,
     /** True while a subtitle is still waving in or scrolling (perf probes/benchmarks). */
     subsAnimating: () => subs?.vectorAnimating(count) ?? false,
-    /** Perf probe: cumulative count of vector-overlay re-renders (see subOverlayPaints). */
-    subPaints: () => host.subOverlayPaints,
-    /** Perf A/B: turn the overlay repaint gate off to reproduce the pre-fix cost. */
-    setSubsGate: (v: boolean) => {
-      host.subOverlayGate = v;
-      host.subOverlaySig = '';
-    },
-    /**
-     * Parity probe: repaint the vector overlay for an arbitrary logic tick, bypassing
-     * the repaint gate, and report the geometry the reference implementation needs to
-     * reproduce it (game-pixel screen size, the overlay backing size and its scale).
-     */
-    subsPaintAt: (at: number, frac = 0) => {
-      if (!subs?.active || !room) return null;
-      const { scale: cs } = host.roomGeometry(room);
-      const dpr = window.devicePixelRatio || 1;
-      host.syncSubOverlay();
-      subCtx.setTransform(1, 0, 0, 1, 0, 0);
-      subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-      subs.drawVector(subCtx, at, host.subFontFamily, host.subFontWeight, frac);
-      host.subOverlayPainted = true;
-      host.subOverlaySig = ''; // painted behind the gate's back — force the next real repaint
-      return {
-        w: subCanvas.width,
-        h: subCanvas.height,
-        scale: cs * dpr,
-        screenW: subs.vectorScreen.w,
-        screenH: subs.vectorScreen.h,
-        family: host.subFontFamily,
-        weight: host.subFontWeight,
-        substeps: SUB_SUBSTEPS,
-        lines: subs.debugLines(),
-      };
-    },
-    /**
-     * Force how the vector subtitles are drawn — 'canvas', 'dom', or 'auto', which is
-     * the shipped behaviour and now means DOM in every tier that draws vector text.
-     * Persisted. The same call the dev bar's Subtitles select makes, so the two stay
-     * in step.
-     */
-    setSubRenderer: (pref: SubRendererPref) => selectSubRenderer(pref),
-    /** Which renderer is actually painting, once the tier and support have had their say. */
-    subRenderer: () => (domSubsEnabled() ? 'dom' : 'canvas'),
-    /** What was ASKED for, which is a different question — 'auto' unless overridden. */
-    subRendererPref: () => subRendererPref(),
     /** Test hook: inject a subtitle directly (deterministic, no room dialogue needed). */
     pushSubtitle: (text: string, code: string) => subs?.newSubtitle(text, code, count),
     /** Test hooks for the win auto-return hold: read the countdown / clear subtitles. */
@@ -1078,7 +1025,6 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     subScale: (v?: number) => {
       if (v !== undefined) {
         host.aiSubScale = Math.max(0.2, Math.min(1, v));
-        host.subOverlaySig = ''; // the overlay caches on a signature; force the next repaint
         host.forceRoomRedraw = true;
         host.wake();
       }
@@ -1478,64 +1424,6 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         mean,
         p95,
         fps: 1000 / mean,
-      };
-    },
-    /**
-     * Perf probe for the enhanced subtitle overlay: times the exact work draw()
-     * does per frame for the vector subtitles (full-overlay clear + scaled
-     * drawVector), isolated from the room render and the rAF vsync cap. `at` pins
-     * the tick so the wave state can't drift mid-measurement; pass a rising count
-     * to model the animating case. Each iteration ends with a 1x1 readback so the
-     * 2D commands are actually rasterized inside the timed window instead of being
-     * batched away.
-     */
-    benchSubs: (frames = 120, warmup = 20, at = count, advance = false) => {
-      if (!subs?.active || !room) return null;
-      const { scale: cs } = host.roomGeometry(room);
-      host.syncSubOverlay();
-      const dpr = window.devicePixelRatio || 1;
-      let tick = at;
-      const run = (draw: boolean, flush: boolean): number[] => {
-        const one = (): void => {
-          subCtx.setTransform(1, 0, 0, 1, 0, 0);
-          subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-          if (draw) {
-            subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-            subs!.drawVector(subCtx, advance ? tick++ : at, host.subFontFamily, host.subFontWeight);
-          }
-          if (flush) {
-            subCtx.setTransform(1, 0, 0, 1, 0, 0);
-            subCtx.getImageData(0, 0, 1, 1); // force rasterization inside the timed window
-          }
-        };
-        for (let i = 0; i < warmup; i++) one();
-        const s: number[] = [];
-        for (let i = 0; i < frames; i++) {
-          const t0 = performance.now();
-          one();
-          s.push(performance.now() - t0);
-        }
-        return s.sort((a, b) => a - b);
-      };
-      const stat = (s: number[]): { min: number; median: number; mean: number; p95: number } => ({
-        min: s[0]!,
-        median: s[Math.floor(s.length / 2)]!,
-        mean: s.reduce((a, b) => a + b, 0) / s.length,
-        p95: s[Math.floor(s.length * 0.95)]!,
-      });
-      const full = stat(run(true, true));
-      const clearOnly = stat(run(false, true));
-      const noFlush = stat(run(true, false));
-      host.subOverlayPainted = true;
-      host.subOverlaySig = ''; // the probe painted behind the gate's back — force a repaint
-      return {
-        frames,
-        chars: subs.lineChars,
-        lines: subs.lineCount,
-        overlay: `${subCanvas.width}x${subCanvas.height}`,
-        ...full,
-        clearOnly,
-        noFlush,
       };
     },
     chatCount: () => host.audio.entryCount('x03'),

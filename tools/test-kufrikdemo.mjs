@@ -63,23 +63,14 @@ await withApp(async ({ p, expect }) => {
    */
   const captionsShow = () =>
     p.evaluate(async () => {
-      const inked = () => {
-        const c = document.getElementById('subs');
-        if (!c || !c.width) return false;
-        const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-        for (let i = 3; i < d.length; i += 4) if (d[i] !== 0) return true;
-        return false;
-      };
-      const out = { dom: 0, canvas: false, room: 0, sawSomething: false };
+      const out = { dom: 0, room: 0, sawSomething: false };
       for (let i = 0; i < 300; i++) {
         const dom = document.getElementById('domsubs-cut')?.children.length ?? 0;
-        const canvas = inked();
         // The room's layer is a different element and must never carry the captions;
         // kept as a max across the whole window so one bad frame is still caught.
         out.room = Math.max(out.room, document.getElementById('domsubs')?.children.length ?? 0);
-        if (dom > 0 || canvas) {
+        if (dom > 0) {
           out.dom = dom;
-          out.canvas = canvas;
           out.sawSomething = true;
           return out;
         }
@@ -88,15 +79,14 @@ await withApp(async ({ p, expect }) => {
       return out;
     });
 
-  // The DOM renderer: captions are real text, and the canvas overlay is left alone.
-  await p.evaluate(() => window.__ff.setSubRenderer('dom'));
+  // The captions are real DOM text, and the room's own layer stays empty underneath —
+  // they are separate layers precisely because they stand down on different conditions.
   await startDemo();
   await p.waitForFunction(() => window.__ff.cutSubsActive());
-  const dom = await captionsShow();
-  expect(dom.sawSomething, 'the cutscene captions reach the screen');
-  expect(dom.dom > 0, `the cutscene captions are real DOM text (${dom.dom} lines)`);
-  expect(!dom.canvas, 'the canvas overlay stays empty while DOM captions are up');
-  expect(dom.room === 0, "the room's subtitle layer stays empty during a cutscene");
+  const shown = await captionsShow();
+  expect(shown.sawSomething, 'the cutscene captions reach the screen');
+  expect(shown.dom > 0, `the cutscene captions are real DOM text (${shown.dom} lines)`);
+  expect(shown.room === 0, "the room's subtitle layer stays empty during a cutscene");
 
   // Skipping takes them down. Without this the captions outlive the cutscene that owns
   // them, and sit over the room the player lands back in. (The wait IS the assertion:
@@ -109,23 +99,11 @@ await withApp(async ({ p, expect }) => {
     'skipping the demo takes the DOM captions down',
   );
 
-  // The canvas renderer still draws them — the path the no-Web-Animations fallback and
-  // anyone forcing 'canvas' goes through.
-  await p.evaluate(() => window.__ff.setSubRenderer('canvas'));
-  await startDemo();
-  await p.waitForFunction(() => window.__ff.cutSubsActive());
-  const cv = await captionsShow();
-  expect(cv.sawSomething, 'the cutscene captions reach the screen with the canvas renderer');
-  expect(cv.canvas, 'the canvas renderer paints the captions on the overlay');
-  expect(cv.dom === 0, 'no DOM captions when the canvas renderer is asked for');
-  await p.evaluate(() => window.__ff.skipCutscene());
-
   // Leaving the ROOM with a cutscene still live. The draw dispatch tests the map / intro
   // / story-page branches BEFORE the cutscene one, so on that path drawCutscene() never
   // runs and the captions have no owner to take them down. Every ordinary way out
   // (Escape, clicking the stage) calls skipCutscene() first, so this is the narrow case
   // the loop's own guard has to cover rather than the cutscene's draw path.
-  await p.evaluate(() => window.__ff.setSubRenderer('dom'));
   await startDemo();
   await p.waitForFunction(() => window.__ff.cutSubsActive());
   await p.waitForFunction(() => (document.getElementById('domsubs-cut')?.children.length ?? 0) > 0);
@@ -137,5 +115,4 @@ await withApp(async ({ p, expect }) => {
     'leaving the room with a cutscene live takes its captions off the map',
   );
   await p.evaluate(() => window.__ff.skipCutscene());
-  await p.evaluate(() => window.__ff.setSubRenderer('auto')); // leave no persisted choice
 });

@@ -32,14 +32,6 @@ import { withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
-  // The `ai` tier now paints its subtitles as DOM text by default, so everything below
-  // that measures the OVERLAY (repaint counts, overlay ink) has to ask for the canvas
-  // renderer explicitly or it would measure an overlay nobody is drawing on. That is not
-  // a dead configuration: it is the fallback when the browser cannot run a compositor
-  // animation, it is what `classic` and `enhanced` use, and the throttle contract it
-  // pins is shared by both renderers. The DOM path's own geometry is asserted at the
-  // bottom of this file, in the same terms.
-  await p.evaluate(() => window.__ff.setSubRenderer('canvas'));
 
   /** Overlay repaints AND loop rAF ticks per second while a line is waving in. */
   const measure = async (tier) => {
@@ -73,7 +65,7 @@ await withApp(async ({ p, expect }) => {
       (ms) =>
         new Promise((done) => {
           const t0 = performance.now();
-          const start = { n: window.__ff.subPaints(), c: window.__ff.count(), l: window.__ff.throttleInfo().loops };
+          const start = { c: window.__ff.count(), l: window.__ff.throttleInfo().loops };
           let everThrottleOk = false;
           let everOnTimer = false;
           const finish = () => {
@@ -81,7 +73,6 @@ await withApp(async ({ p, expect }) => {
             everThrottleOk = everThrottleOk || info.throttleOk;
             everOnTimer = everOnTimer || info.onTimer;
             done({
-              paints: window.__ff.subPaints() - start.n,
               ticks: window.__ff.count() - start.c,
               loops: window.__ff.throttleInfo().loops - start.l,
               ms: performance.now() - t0,
@@ -107,22 +98,22 @@ await withApp(async ({ p, expect }) => {
   };
 
   /**
-   * The overlay must occupy exactly the room's on-screen box.
+   * The subtitle layer must occupy exactly the room's on-screen box.
    *
-   * It is a separate DOM layer, so its size comes from its own calculation rather than
-   * from the room canvas — and that calculation used to run off `canvas.width`, which is
-   * NATIVE in enhanced but xSCALE in ai. The ai overlay came out 595px against a 435px
-   * room (and 1607px against 595px in `fill`): invisible, because the text is positioned
-   * in native coordinates from a shared origin, but a backing store up to 2.7x wider than
-   * needed, cleared and composited on every subtitle frame.
+   * It sizes itself rather than inheriting the room canvas, and that calculation used to
+   * run off `canvas.width` — NATIVE in enhanced but xSCALE in ai, which produced a layer
+   * 595px wide against a 435px room. Invisible, because the text is positioned in native
+   * coordinates from a shared origin, but wrong, and it moves the text if the origin ever
+   * stops being shared.
    */
   const overlayBox = async (tier) => {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier);
     await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier);
+    await p.waitForFunction(() => (document.getElementById('domsubs')?.children.length ?? 0) > 0);
     return p.evaluate(() => {
       const c = document.querySelector('#screen');
-      const s = document.querySelector('#subs');
-      return { room: c.style.width, sub: s ? s.style.width : null, subBacking: s ? s.width : 0, backing: c.width };
+      const s = document.getElementById('domsubs');
+      return { room: c.style.width, sub: s ? s.style.width : null, backing: c.width };
     });
   };
 
@@ -131,7 +122,7 @@ await withApp(async ({ p, expect }) => {
 
   for (const tier of ['enhanced', 'ai']) {
     const b = await overlayBox(tier);
-    expect(b.sub === b.room, `[${tier}] the subtitle overlay matches the room box (room ${b.room}, subs ${b.sub}, room backing ${b.backing})`);
+    expect(b.sub === b.room, `[${tier}] the subtitle layer matches the room box (room ${b.room}, layer ${b.sub}, room backing ${b.backing})`);
   }
 
   expect(enh.active, 'the enhanced line is still on screen for the whole sample');
@@ -159,20 +150,6 @@ await withApp(async ({ p, expect }) => {
       `[${tier}] the loop is never allowed to idle-throttle while the line waves in`,
     );
     expect(m.everOnTimer === false, `[${tier}] the loop never leaves rAF for the idle timer while the line waves in`);
-    // 2. Overlay repaints against LOOP ITERATIONS. Both counters are incremented by the
-    //    same loop in the same window (`loopTicks` at main.ts:5308, `subOverlayPaints` at
-    //    :4784), so the machine's speed divides out exactly — this is a ratio of the
-    //    loop against itself, not against a clock. It catches the failure the throttle
-    //    booleans cannot: capping the OVERLAY repaint while leaving the loop on rAF
-    //    would keep `throttleOk` false and still leave the line juddering.
-    //    Measured while a line waves in: 0.50 in `enhanced` (the loop runs at the
-    //    display's 120Hz and MAX_PAINT_FPS lets half of those through), 0.67-0.87 in
-    //    `ai`, and ~1.0 on a 60Hz display. An overlay capped to the water rate reads
-    //    ~0.25, so 0.4 sits below every healthy figure and above the fault.
-    expect(
-      m.paints >= m.loops * 0.4,
-      `[${tier}] the overlay repaints on the frames the loop draws (${m.paints} repaints / ${m.loops} loop iterations)`,
-    );
   }
   // The window has to contain real game time, or the ratios above are vacuous.
   expect(enh.ticks >= 5 && ai.ticks >= 5, `the sample window covers real game time (enhanced ${enh.ticks} ticks, ai ${ai.ticks} ticks)`);
@@ -217,74 +194,16 @@ await withApp(async ({ p, expect }) => {
 
   // ── the ai tier draws the SAME line smaller, anchored to the same bottom edge ──
   //
-  // Measured on the overlay's own ink, not on the scale constant: that way a transform
-  // applied about the wrong origin (text drifting up the screen, or off-centre) fails
-  // here, which a check on the number could not see. The line is frozen at a fixed tick
-  // via the deterministic subtitle probe so both tiers are compared at the identical
-  // wave phase — sampling live would compare different moments of the wave-in.
-  const inkBox = async (tier) => {
-    await p.evaluate((t) => window.__ff.setGraphics(t), tier);
-    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier);
-    await p.waitForFunction(() => window.__ff.subsActive());
-    await p.waitForTimeout(400);
-    return p.evaluate(() => {
-      const c = document.getElementById('subs');
-      const g = c.getContext('2d', { willReadFrequently: true });
-      const d = g.getImageData(0, 0, c.width, c.height).data;
-      let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
-      for (let y = 0; y < c.height; y++) {
-        for (let x = 0; x < c.width; x++) {
-          if (d[(y * c.width + x) * 4 + 3] > 40) {
-            if (x < x0) x0 = x;
-            if (x > x1) x1 = x;
-            if (y < y0) y0 = y;
-            if (y > y1) y1 = y;
-          }
-        }
-      }
-      return { w: x1 - x0, h: y1 - y0, bottom: c.height - y1, cx: (x0 + x1) / 2 / c.width, ink: x1 >= 0 };
-    });
-  };
-
-  await p.evaluate(() => window.__ff.talk('little'));
-  await p.waitForFunction(() => window.__ff.subsActive());
-  await p.waitForTimeout(2200); // let the wave finish so the ink is the settled line
-  const enhInk = await inkBox('enhanced');
-  const aiInk = await inkBox('ai');
-  const want = await p.evaluate(() => window.__ff.subScale());
-  if (!enhInk.ink || !aiInk.ink) {
-    expect(false, 'a subtitle line is inked on the overlay in both tiers');
-  } else {
-    const wRatio = aiInk.w / enhInk.w;
-    // Generous band: glyph hinting and the stroke width do not scale perfectly linearly.
-    expect(
-      Math.abs(wRatio - want) < 0.12,
-      `[ai] the subtitle is drawn at ~${want} of the faithful size (width ratio ${wRatio.toFixed(2)}, ` +
-        `${aiInk.w}px vs ${enhInk.w}px)`,
-    );
-    // Anchored: same bottom edge, still centred. A transform about the wrong origin
-    // scales the text correctly and puts it in the wrong place.
-    expect(
-      Math.abs(aiInk.bottom - enhInk.bottom) < enhInk.h,
-      `[ai] the subtitle still sits on the same bottom edge (${aiInk.bottom}px vs ${enhInk.bottom}px from the bottom)`,
-    );
-    expect(
-      Math.abs(aiInk.cx - enhInk.cx) < 0.04,
-      `[ai] the subtitle is still centred (centre ${aiInk.cx.toFixed(3)} vs ${enhInk.cx.toFixed(3)} of the overlay)`,
-    );
-  }
-
-  // ── the same three properties, for the renderer the ai tier actually ships ──
+  // The `ai` tier's smaller subtitle is one `scale()` on the container, about its bottom
+  // edge, so glyphs, row pitch and wave amplitude shrink together. That is easy to get
+  // subtly wrong (scaling the font alone leaves the row pitch and the wave at full size),
+  // so it is measured on the rendered text rather than on the scale constant: a transform
+  // about the wrong origin scales correctly and puts the line in the wrong place, which a
+  // check on the number could not see.
   //
-  // The DOM renderer reaches the ai tier's smaller subtitle a different way: one
-  // `scale()` on the container, about its bottom edge, so glyphs, row pitch and wave
-  // amplitude shrink together. That is easy to get subtly wrong (scaling the font alone
-  // leaves the row pitch and the wave at full size), and the canvas ink test above
-  // cannot see any of it, so it is measured here in the same terms.
-  //
-  // The oracle is the SAME renderer in the other tier: force `dom` in both, so the only
-  // difference between the two measurements is aiSubScale itself. Both are read in CSS
-  // pixels against the #subs box, which the probe has already asserted matches the room.
+  // The oracle is the same renderer in the OTHER tier, so the only difference between the
+  // two measurements is aiSubScale itself. Both are read in CSS pixels against the room's
+  // own box.
   const domInk = async (tier) => {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier);
     await p.waitForFunction((t) => (window.__ff.paintedRoomSig() || '').includes(`|${t}|`), tier);
@@ -292,7 +211,7 @@ await withApp(async ({ p, expect }) => {
     await p.waitForFunction(() => (document.getElementById('domsubs')?.children.length ?? 0) > 0);
     await p.waitForTimeout(2200); // let the wave settle, so the box is the resting line
     return p.evaluate(() => {
-      const frame = document.getElementById('subs').getBoundingClientRect();
+      const frame = document.getElementById('screen').getBoundingClientRect();
       let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
       for (const line of document.getElementById('domsubs').children) {
         // The glyph spans, not the line div: the div is full-width by construction
@@ -308,7 +227,7 @@ await withApp(async ({ p, expect }) => {
     });
   };
 
-  await p.evaluate(() => window.__ff.setSubRenderer('dom'));
+  const want = await p.evaluate(() => window.__ff.subScale());
   const enhDom = await domInk('enhanced');
   const aiDom = await domInk('ai');
   expect(enhDom.ink && aiDom.ink, 'a subtitle line is real DOM text in both tiers when the DOM renderer is asked for');
@@ -338,10 +257,8 @@ await withApp(async ({ p, expect }) => {
   // cannot see an error common to every DOM line. That one is caught in test-subtitles,
   // by measuring the DOM path against the canvas path in the same tier.
   expect(
-    Math.abs(domRatio - aiInk.w / enhInk.w) < 0.12,
-    `[ai] both renderers shrink the line by the same factor (dom ${domRatio.toFixed(2)}, canvas ${(aiInk.w / enhInk.w).toFixed(2)})`,
+    Math.abs(domRatio - want) < 0.12,
+    `[ai] the shrink matches the tier's own scale constant (measured ${domRatio.toFixed(2)}, subScale ${want})`,
   );
 
-  // Leave no persisted renderer choice behind for the probes that follow.
-  await p.evaluate(() => window.__ff.setSubRenderer('auto'));
 }, { gl: true });

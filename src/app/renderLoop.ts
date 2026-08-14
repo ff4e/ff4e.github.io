@@ -17,7 +17,6 @@ import { acc, forceRoomRedraw, lastRoomBackend, lastRoomSig, lastTime, loopTicks
 import { draw, updateRoomSubOverlay } from './framePainter.js';
 import { count, cutscene, room, setAlpha, subs } from './gameState.js';
 import { glAiFailed, glFailed } from './glPlumbing.js';
-import { clearSubOverlay } from './introOverlay.js';
 import { clearDomSubtitles } from './subtitleDom.js';
 import { drawCutscene } from './cutscene.js';
 import { drawCredits, drawLegImage } from './mapNav.js';
@@ -154,16 +153,12 @@ export function loop(now: number): void {
   // which is the point: it still says whether there is a map under the wait.
   if (ui.helpOpen || ui.screen !== 'map' || ui.mapOverlay === 'credits') setMapPresented(false);
   if (ui.helpOpen) {
-    clearSubOverlay();
     drawHelp();
     setPerfPaint(perfPaint + 1);
   } else if (ui.screen === 'intro') {
-    clearSubOverlay(); // the <video> overlay covers the stage; nothing to draw
   } else if (ui.screen === 'legimage') {
-    clearSubOverlay();
     drawLegImage(); // the leg-completion story page (counts its own one-shot blit)
   } else if (ui.screen === 'map') {
-    clearSubOverlay();
     // Lazy, and here rather than inside drawMap(): every route onto the map runs
     // through this branch — boot, the intro ending, leaving a room, a tier switch — so
     // the load starts exactly once without a begin() call bolted onto each of them.
@@ -195,7 +190,6 @@ export function loop(now: number): void {
     // (cached) load this is imperceptible.
     ctx.fillStyle = '#000';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    clearSubOverlay();
     setPerfPaint(perfPaint + 1);
   } else {
     // signature captures everything that changes on a logic tick (count → wobble/
@@ -252,7 +246,7 @@ export function loop(now: number): void {
       // Checking `graphics === 'enhanced'` excluded the `ai` tier, whose subtitles
       // then only advanced when the room itself repainted — measured at 22 overlay
       // repaints/sec against enhanced's 40.7, which reads as juddering text.
-      updateRoomSubOverlay(true, roomGeometry(room!).scale);
+      updateRoomSubOverlay(true);
     }
   }
   drawPanel();

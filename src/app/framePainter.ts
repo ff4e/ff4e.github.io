@@ -19,24 +19,16 @@ import { FSIZE } from '../render/roomWalk.js';
 import { aiRoom, aiRoomRenderActive, ensureEnhancedFallback, roomArtPending } from './art.js';
 import { alpha, activeScript, count, engine, room, screenShoveX, subs } from './gameState.js';
 import { applyFrameEffects, frameEffectsActive } from './cheats.js';
-import { applySubScale, clearSubOverlay, subOverlaySignature, syncSubOverlay } from './introOverlay.js';
-import { clearDomSubtitles, domSubsEnabled, syncDomSubtitles } from './subtitleDom.js';
-import { canvas, ctx, glCanvas, subCanvas, subCtx } from './dom.js';
+import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
+import { canvas, ctx, glCanvas,  } from './dom.js';
 import { classicArtFor, drawAiGpu, drawGpu, enhancedArtFor, glAiFailed, glFailed } from './glPlumbing.js';
 import { enhancedArtActive, renderer } from './renderSettings.js';
 import { renderRoomRgba, type FishFrame } from '../render/renderRoom.js';
 import { setLastRoomBackend, smoothLog } from './framePacing.js';
 import {
-  setSubOverlayPainted,
-  setSubOverlayPaints,
-  setSubOverlaySig,
   subFontFamily,
   subFontReady,
   subFontWeight,
-  subOverlayGate,
-  subOverlayPainted,
-  subOverlayPaints,
-  subOverlaySig,
 } from './stageState.js';
 import { ui } from './screenState.js';
 
@@ -215,54 +207,25 @@ export function draw(): void {
   // Enhanced subtitle overlay (drawn in native game coords via a scaled context).
   // Only touch the (large) overlay while a subtitle is actually on screen; once it
   // clears we wipe it a single time, so idle frames do no overlay work at all.
-  updateRoomSubOverlay(useVecSubs, cs, xform);
+  updateRoomSubOverlay(useVecSubs, xform);
 }
 
 /**
- * Repaint the room's vector subtitle overlay if — and only if — its image would
- * differ from what is already on it (see subOverlaySignature). Split out of draw()
- * because the overlay is an independent layer: while a line waves in, the loop keeps
- * this running at the sub-tick animation rate WITHOUT repainting the room behind it.
- * `xform` is left alone when the caller has no fresh one (the room did not repaint,
- * so the shake it encodes cannot have changed either).
+ * Reconcile the room's DOM subtitle layer with what the subtitle system is showing.
+ *
+ * Split out of draw() because the layer is independent of the room: while a line waves
+ * in, the wave itself is running on the compositor and this only writes the line's own
+ * scroll transform, once per tick. `xform` is the room's shake/shove, which the layer
+ * has to ride; it is left alone when the caller has no fresh one, since a frame that did
+ * not repaint the room cannot have changed it either.
  */
-export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: string): void {
-  // The vector tiers' subtitles are real DOM text animated by the compositor (see
-  // resolveSubRenderer). `classic` reaches neither renderer: `useVecSubs` is false there
-  // and its subtitles are baked into the frame itself.
-  if (domSubsEnabled()) {
-    if (useVecSubs && subs?.active && room) {
-      const g = roomGeometry(room);
-      clearSubOverlay(); // the canvas overlay is not the one showing them now
-      syncDomSubtitles('room', subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight, xform);
-    } else {
-      clearDomSubtitles('room');
-      // The canvas overlay may still hold the previous renderer's paint — switching
-      // renderer (or tier) while nothing is on screen leaves nothing else to wipe it.
-      if (subOverlayPainted) clearSubOverlay();
-    }
-    return;
-  }
-  // Unconditional, and cheap when there is nothing to do: under `auto` the renderer
-  // changes when the TIER changes, with no setter called, so this is the only place
-  // that notices the handover and takes the abandoned DOM text off the screen.
-  clearDomSubtitles('room');
-  if (useVecSubs && subs?.active) {
-    syncSubOverlay();
-    const dpr = window.devicePixelRatio || 1;
-    const sig = subOverlaySignature('room', subs, cs * dpr);
-    if (!subOverlayGate || sig !== subOverlaySig) {
-      subCtx.setTransform(1, 0, 0, 1, 0, 0);
-      subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-      subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-      applySubScale(subCtx, subs);
-      subs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
-      setSubOverlayPaints(subOverlayPaints + 1);
-      setSubOverlayPainted(true);
-      setSubOverlaySig(sig);
-    }
-    if (xform !== undefined) subCanvas.style.transform = xform; // shake/shove with the room
-  } else if (subOverlayPainted) {
-    clearSubOverlay();
+export function updateRoomSubOverlay(useVecSubs: boolean, xform?: string): void {
+  if (useVecSubs && subs?.active && room) {
+    const g = roomGeometry(room);
+    syncDomSubtitles('room', subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight, xform);
+  } else {
+    // Not showing vector subtitles at all: either nothing is being said, or the font
+    // never loaded and they are baked into the frame instead.
+    clearDomSubtitles('room');
   }
 }

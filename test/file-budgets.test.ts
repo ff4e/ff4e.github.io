@@ -54,16 +54,15 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `main.ts` whole because splitting the demo from the movies would have split the
   // queue that drives both. Worth revisiting if the AI frame cache grows.
   //
-  // Raised 560 -> 566 when the captions moved to the DOM renderer: the caption block now
-  // carries both painters (which one draws follows the same choice the room's subtitles
-  // follow) while the canvas overlay is still the fallback. This is a peak, not a trend
-  // — deleting the overlay removes `updateCutsceneSubOverlay`'s canvas branch and the
-  // signature/gate bookkeeping with it, and this budget should ratchet back below 540
-  // in that change rather than stay here.
-  ['src/app/cutscene.ts', 566],
-  // 1 625. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
-  // fine — but it is worth noticing when it does.
-  ['src/app/debugHooks.ts', 1700],
+  // Went 560 -> 566 while the captions carried both painters, then 566 -> 540 when the
+  // canvas overlay was deleted and `updateCutsceneSubOverlay` lost its canvas branch and
+  // the signature/gate bookkeeping with it. That was the ratchet the 566 entry promised.
+  ['src/app/cutscene.ts', 540],
+  // 1 560. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
+  // fine — but it is worth noticing when it does. Came DOWN from 1 700 when the canvas
+  // subtitle overlay went and took `subPaints`, `setSubsGate`, `subsPaintAt`, `benchSubs`
+  // and the renderer-preference hooks with it.
+  ['src/app/debugHooks.ts', 1620],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
