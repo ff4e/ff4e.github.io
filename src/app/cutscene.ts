@@ -15,6 +15,7 @@ import { perfPaint, roomLoadSeq, roomLoading, setPerfPaint } from './framePacing
 import { activeScript, alpha, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneAssets, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
 import { glCompositor, glFailed, markGlFailed } from './glPlumbing.js';
 import { applySubScale, clearSubOverlay, subOverlaySignature, syncSubOverlaySized } from './introOverlay.js';
+import { clearDomSubtitles, domSubsEnabled, syncDomSubtitles } from './subtitleDom.js';
 import { clearHeldKey, restore, tryStep } from './movement.js';
 import { subLang, subsOn } from './playerSettings.js';
 import { enhancedArtActive, graphics, renderer } from './renderSettings.js';
@@ -343,13 +344,25 @@ export function cutsceneCaption(name: string): number {
 }
 
 /**
- * Paint the cutscene's KD-* captions on the vector overlay.
+ * Paint the cutscene's KD-* captions.
  *
- * Shared by the faithful and the AI cutscene paths: the captions are their own DOM
- * layer, so they are identical in both and must not be duplicated per path.
+ * Shared by the faithful and the AI cutscene paths: the captions are their own layer,
+ * so they are identical in both and must not be duplicated per path.
+ *
+ * Which renderer draws them follows the same choice the room's subtitles follow
+ * (`resolveSubRenderer`) rather than a second policy — a KD-* line waving in over the
+ * briefcase movie wants the compositor for the same reason room dialogue does. The
+ * cutscene's own box and content scale are handed over, not the room's: a cutscene is
+ * 720x555 whatever room it was started from.
  */
 export function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number, dpr: number): void {
   if (!cutsceneSubs?.active) return;
+  if (domSubsEnabled()) {
+    if (subOverlayPainted) clearSubOverlay(); // the canvas is not the one showing them now
+    syncDomSubtitles('cut', cutsceneSubs, count, cssW, cssH, cs, subFontFamily, subFontWeight);
+    return;
+  }
+  clearDomSubtitles('cut');
   syncSubOverlaySized(cssW, cssH);
   // The cutscene paints on every rAF (it has no dirty check), so without this
   // gate the captions were re-shaped ~60x a second to produce the same image.
@@ -538,7 +551,9 @@ export function drawCutscene(): void {
   // scaled by SCALE*dpr so drawVector positions in native (720×555) game pixels.
   if (useVec && cutsceneSubs!.active) {
     updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
-  } else if (subOverlayPainted) {
-    clearSubOverlay();
+  } else {
+    // Baked captions, or none at all: whichever layer was showing them stands down.
+    clearDomSubtitles('cut');
+    if (subOverlayPainted) clearSubOverlay();
   }
 }
