@@ -31,6 +31,8 @@
 type Retry = () => void;
 
 let retry: Retry | null = null;
+/** What the screen currently up is ABOUT, or null when nothing is up. */
+let subject: 'room' | 'map' | null = null;
 let el: HTMLElement | null = null;
 let titleEl: HTMLElement | null = null;
 let msgEl: HTMLElement | null = null;
@@ -63,6 +65,7 @@ export function artFailureShown(): boolean {
  */
 export function showArtFailure(what: 'room' | 'map', again: Retry): void {
   retry = again;
+  subject = what;
   if (titleEl) titleEl.textContent = what === 'map' ? "Couldn't load the world map" : "Couldn't load the graphics";
   if (msgEl) {
     msgEl.textContent =
@@ -73,8 +76,21 @@ export function showArtFailure(what: 'room' | 'map', again: Retry): void {
   if (el) el.hidden = false;
 }
 
-/** Take it down (the retry is running, or the tier changed under it). */
-export function hideArtFailure(): void {
+/**
+ * Take it down.
+ *
+ * `what` scopes it: a successful ROOM load answers a room's screen and says nothing
+ * about the map's, and vice versa. Without that scope, boot's room-7 art landing a
+ * moment after the world map failed pulled the map's screen out from under the player —
+ * observed as a Try again button that resolved and then went invisible mid-click.
+ *
+ * Called with no argument it clears whatever is up, which is right for the events that
+ * invalidate both: pressing the button, entering a room (a new destination supersedes
+ * everything), and switching tier.
+ */
+export function hideArtFailure(what?: 'room' | 'map'): void {
+  if (what !== undefined && subject !== what) return;
   retry = null;
+  subject = null;
   if (el) el.hidden = true;
 }
