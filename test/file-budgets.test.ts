@@ -66,9 +66,17 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   ['src/render/glScreen.ts', 1150],
   ['src/render/roomAi.ts', 1120],
   ['src/core/room.ts', 1060],
-  ['src/render/glRoomAi.ts', 800],
+  // 800 -> 830 for the gspec=42 ZX stripes: BG_FS gains `uZx` + a band texture, and the
+  // two entry points share one `bgPass`. The stripes are the LAST gspec the `ai` tier
+  // handed back to the faithful compositor, so this buys the tier its independence — see
+  // the PR. The sequence itself is not here: it is `src/render/zxBands.ts`, generated
+  // once and shared with the faithful renderer, which is what keeps this to a uniform.
+  ['src/render/glRoomAi.ts', 830],
   ['src/core/script.ts', 780],
-  ['src/render/aiTarget.ts', 720],
+  // 720 -> 780 for `backgroundZx`, the canvas-2D half of the same change: the stripes
+  // masked by the wall's alpha, plus the `paint`/`paintBg` split that lets it reuse the
+  // wobbled-background half rather than copy it.
+  ['src/render/aiTarget.ts', 780],
   ['src/audio/audio.ts', 680],
 ];
 

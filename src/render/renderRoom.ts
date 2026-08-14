@@ -24,6 +24,7 @@ import { RgbaScreen } from './rgbaScreen.js';
 import { ClassicArtSource } from './classicArtSource.js';
 import { walkRoom, FSIZE, TL_ZAKLAD, type RoomWalkSink, type FishFrame } from './roomWalk.js';
 import type { ArtSource } from './artSource.js';
+import { advanceZxBands } from './zxBands.js';
 
 export { FSIZE, TL_ZAKLAD, type FishFrame };
 const DXRYBY = { little: 45, big: 60 } as const;
@@ -302,26 +303,9 @@ export function classicBackground(
   } else if (room.gspec === 42) {
     // The ZX-Spectrum "emulator" wall render — advance the loading-stripe band
     // height per frame, then blit the wall with opaque pixels replaced by bands.
-    const zx = room.zx;
-    if (!zx.colors) {
-      // ZX1..ZX4 = the wall bitmap's four corner pixels (TRoom.Start, URoom.pas:1417-1423).
-      const w = wall.w;
-      const h = wall.h;
-      zx.colors = [wall.pixels[0]!, wall.pixels[(h - 1) * w]!, wall.pixels[w - 1]!, wall.pixels[h * w - 1]!];
-    }
-    const phase = count % 500;
-    if (phase === 1) {
-      zx.pruh = 38.5;
-      zx.cur = 0;
-    } else if (phase === 52) {
-      zx.pruh = 3.4;
-      zx.cur = 2;
-    } else if (phase >= 2 && phase <= 51) {
-      zx.pruh = (zx.pruh * (0.97 + 0.06 * Math.random()) * 3 + 38.5) / 4;
-    } else {
-      zx.pruh = (zx.pruh * (0.95 + 0.1 * Math.random()) * 3 + 3.4) / 4;
-    }
-    screen.blitZX(0, 0, wall, bg, room.wallItem.mask, count, room.wamp, room.wper, room.wspd, zx.colors, zx);
+    // The advance lives in zxBands.ts so the ×S renderer runs the same sequence.
+    const colors = advanceZxBands(room, wall, count);
+    screen.blitZX(0, 0, wall, bg, room.wallItem.mask, count, room.wamp, room.wper, room.wspd, colors, room.zx);
   } else {
     screen.blit2(0, 0, wall, bg, room.wallItem.mask, count, room.wamp, room.wper, room.wspd);
   }

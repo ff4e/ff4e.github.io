@@ -348,9 +348,14 @@ const aiGateAllows = (over: Partial<typeof GATE_OK> = {}): boolean =>
   aiRoomGateAllows({ ...GATE_OK, ...over });
 
 describe('aiRoomRenderActive gate rule (main.ts:954)', () => {
-  it('allows every gspec the compositor covers (0/2/3/4/5/9) and excludes only 42', () => {
+  it('allows every gspec the compositor covers, now including 42', () => {
     for (const g of [0, 2, 3, 4, 5, 9]) expect(aiGateAllows({ gspec: g })).toBe(true);
-    expect(aiGateAllows({ gspec: 42 })).toBe(false);
+    // 42 (ZX) WAS the last gspec exclusion: its loading stripes are a per-scanline index
+    // effect, which static ×S bitmaps could not express, so the room was handed back to
+    // the faithful compositor and drew at native resolution. AiTarget.backgroundZx and
+    // BG_FS's `uZx` now paint the stripes at ×S on both backends, so — as with LODE's
+    // wreck before it — the CONDITION IS GONE rather than merely satisfied.
+    expect(aiGateAllows({ gspec: 42 })).toBe(true);
   });
 
   it('excludes any frame with an active fishing hook regardless of gspec', () => {
@@ -395,7 +400,7 @@ describe('aiRoomRenderActive gate rule (main.ts:954)', () => {
     // Guards against an early `return true` or a dropped clause: each exclusion is
     // checked in isolation above, so here we assert none of them is skippable.
     const exclusions: Partial<typeof GATE_OK>[] = [
-      { gspec: 42 }, { hookStates: [1] }, { frameEffects: true },
+      { hookStates: [1] }, { frameEffects: true },
       { spriteCheatsActive: true }, { bakedSubsNeeded: true },
     ];
     for (const e of exclusions) expect(aiGateAllows(e)).toBe(false);

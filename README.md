@@ -553,6 +553,7 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | File | tok | What it is |
 | --- | --- | --- |
 | **The two seams everything else hangs off** | | |
+| `zxBands.ts` | 0.9 k | The gspec=42 ZX loading stripes: the band height per frame and the colour per native row. Shared by the faithful and `ai` renderers, because generating the sequence ADVANCES it. |
 | `roomWalk.ts` | 2.0 k | ONE traversal deciding what is drawn, in what order, at what coordinates — a port of `TRoom.Priprav`. Replayed by both the faithful and the `ai` renderers, so a rule fixed here is fixed for both. |
 | `artSource.ts` | 1.2 k | The pluggable seam deciding *what colour / which pixels*. The only thing that differs between the classic and enhanced looks. |
 | **CPU compositing** | | |

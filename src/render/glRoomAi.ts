@@ -98,7 +98,8 @@ precision highp float;
 precision highp int;
 uniform sampler2D uBg;
 uniform sampler2D uWall;
-uniform int uScale, uBgW, uWobble, uRipN;
+uniform sampler2D uBands;
+uniform int uScale, uBgW, uWobble, uRipN, uZx;
 uniform float uAmp, uPer, uPhase;
 uniform vec4 uRip[${RIPPLE_GPU_SLOTS}];
 uniform float uRipPh[${RIPPLE_GPU_SLOTS}];
@@ -124,7 +125,13 @@ void main() {
     bg = texelFetch(uBg, ivec2(x, y), 0).rgb;
   }
   vec4 w = texelFetch(uWall, ivec2(x, y), 0);
-  outColor = vec4(w.rgb * w.a + bg * (1.0 - w.a), 1.0);
+  // gspec=42: the wall keeps its SHAPE and loses its picture — every opaque pixel takes
+  // the loading-stripe colour for its NATIVE row (y / uScale, matching the canvas-2D
+  // path's rect per native row). The blend below is then unchanged, which is the point:
+  // the ZX render differs from every other room in what colour the wall is, and in
+  // nothing else.
+  vec3 wrgb = (uZx == 1) ? texelFetch(uBands, ivec2(y / uScale, 0), 0).rgb : w.rgb;
+  outColor = vec4(wrgb * w.a + bg * (1.0 - w.a), 1.0);
 }`;
 
 /** Straight-RGBA sprite; `uMirror` flips within [uX, uX+uW-1] (KresliRev geometry). */
@@ -265,6 +272,9 @@ export class GlAiScreen implements AiTarget {
   private readonly fsVao: WebGLVertexArrayObject;
   private readonly rectVao: WebGLVertexArrayObject;
   private readonly randTex: WebGLTexture;
+  /** The gspec=42 loading-stripe colours, one texel per NATIVE row. Rebuilt every frame. */
+  private readonly bandTex: WebGLTexture;
+  private bandBuf = new Uint8Array(0);
   /** Scratch for the per-frame `uRip` upload — allocated once, not per frame. */
   private readonly ripBuf = new Float32Array(RIPPLE_GPU_SLOTS * 4);
   private readonly ripPhBuf = new Float32Array(RIPPLE_GPU_SLOTS);
@@ -316,7 +326,7 @@ export class GlAiScreen implements AiTarget {
     this.mirrorProg = linkProgram(gl, QUAD_VS, MIRROR_FS, 'aPos', 'ai');
     this.presentProg = linkProgram(gl, QUAD_VS, PRESENT_FS, 'aPos', 'ai');
     this.fillUni = uniformLocations(gl, this.fillProg, ['uColor', 'uRect']);
-    this.bgUni = uniformLocations(gl, this.bgProg, ['uBg', 'uWall', 'uScale', 'uBgW', 'uWobble', 'uAmp', 'uPer', 'uPhase', 'uRipN', 'uRip[0]', 'uRipPh[0]']);
+    this.bgUni = uniformLocations(gl, this.bgProg, ['uBg', 'uWall', 'uBands', 'uScale', 'uBgW', 'uWobble', 'uZx', 'uAmp', 'uPer', 'uPhase', 'uRipN', 'uRip[0]', 'uRipPh[0]']);
     this.spriteUni = uniformLocations(gl, this.spriteProg, ['uSprite', 'uX', 'uY', 'uW', 'uMirror', 'uRect']);
     this.disintUni = uniformLocations(gl, this.disintProg, ['uSprite', 'uRand', 'uX', 'uY', 'uScale', 'uNativeW', 'uRozpad', 'uRect']);
     this.mirrorUni = uniformLocations(gl, this.mirrorProg, ['uSrc', 'uMask', 'uRx0', 'uRx1', 'uRy0', 'uRy1', 'uDx0', 'uDx1', 'uK', 'uMX', 'uMY', 'uMW', 'uMH']);
@@ -329,6 +339,15 @@ export class GlAiScreen implements AiTarget {
     gl.bindTexture(gl.TEXTURE_2D, this.randTex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8UI, 256, 1, 0, gl.RED_INTEGER, gl.UNSIGNED_BYTE, RANDPOLE);
+    nearestClamp(gl);
+
+    this.bandTex = gl.createTexture()!;
+    gl.bindTexture(gl.TEXTURE_2D, this.bandTex);
+    // Given a 1x1 texel here and not left empty. `uBands` is bound on EVERY background
+    // pass, ZX or not, so an incomplete texture would be attached to the sampler in all
+    // 72 rooms — and sampling one is undefined behaviour, not a guaranteed black. It
+    // read as a whole-frame corruption on the wobbling rooms, nowhere near ZX.
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array(3));
     nearestClamp(gl);
   }
 
@@ -554,8 +573,49 @@ export class GlAiScreen implements AiTarget {
     gl.disable(gl.BLEND);
   }
 
+  /**
+   * The gspec=42 ZX composite. The same single fullscreen pass as `background` — the
+   * wall's SHAPE is unchanged and only its colour comes from somewhere else — so it goes
+   * through the same program rather than a second one, with `uZx` selecting the source.
+   *
+   * `bands` is one palette index per NATIVE row, uploaded as an Nx1 RGB texture the
+   * shader samples at `y / uScale`. Uploaded rather than recomputed in GLSL on purpose:
+   * generating the sequence ADVANCES the room's band state, so a shader that derived it
+   * would be deriving it from state the CPU had already moved — and the two would drift
+   * apart at exactly the rate the stripes animate.
+   */
+  backgroundZx(
+    bg: AiImage,
+    wall: AiImage,
+    bands: Uint8Array,
+    palette: ReadonlyArray<{ r: number; g: number; b: number }>,
+    wobble: AiWobble | null,
+    scale: number,
+  ): void {
+    const gl = this.gl;
+    const n = bands.length;
+    if (this.bandBuf.length !== n * 3) this.bandBuf = new Uint8Array(n * 3);
+    for (let i = 0; i < n; i++) {
+      const c = palette[bands[i]!] ?? { r: 0, g: 0, b: 0 };
+      this.bandBuf[i * 3] = c.r;
+      this.bandBuf[i * 3 + 1] = c.g;
+      this.bandBuf[i * 3 + 2] = c.b;
+    }
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.bandTex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB8, n, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, this.bandBuf);
+    gl.activeTexture(gl.TEXTURE0); // leave the active unit where every other pass expects it
+    this.bgPass(bg, wall, wobble, scale, true);
+  }
+
   /** `sig` is ignored: the composite is one fullscreen pass, so caching it would cost more than it saves. */
   background(_sig: string, bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number): void {
+    this.bgPass(bg, wall, wobble, scale, false);
+  }
+
+  /** The wall-over-wobbled-background pass both entry points share. */
+  private bgPass(bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number, zx: boolean): void {
     const gl = this.gl;
     const u = this.bgUni;
     gl.disable(gl.BLEND);
@@ -566,6 +626,11 @@ export class GlAiScreen implements AiTarget {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.texture(wall));
     gl.uniform1i(u.uWall!, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.bandTex);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(u.uBands!, 2);
+    gl.uniform1i(u.uZx!, zx ? 1 : 0);
     gl.uniform1i(u.uScale!, scale);
     gl.uniform1i(u.uBgW!, bg.width);
     gl.uniform1i(u.uWobble!, wobble ? 1 : 0);

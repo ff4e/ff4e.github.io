@@ -393,6 +393,28 @@ export interface AiTarget {
    */
   background(sig: string, bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number): void;
 
+  /**
+   * The gspec=42 ZX composite: the same wobbled background, but the wall painted as flat
+   * loading stripes instead of as art (see zxBands.ts).
+   *
+   * Separate from `background` rather than a flag on it because the wall stops being a
+   * picture here — only its SILHOUETTE survives, and the colour comes from the palette.
+   * `bands` is one palette index per NATIVE row, already sequenced; a target paints each
+   * entry `scale` device rows tall and must not re-derive the sequence, because
+   * generating it advances the room's band state.
+   *
+   * Not cached on `sig` by the callers: the stripes move every frame, so there is
+   * nothing to reuse.
+   */
+  backgroundZx(
+    bg: AiImage,
+    wall: AiImage,
+    bands: Uint8Array,
+    palette: ReadonlyArray<{ r: number; g: number; b: number }>,
+    wobble: AiWobble | null,
+    scale: number,
+  ): void;
+
   /** KresliK's dithered dissolve of `src` at (x,y) — see the RANDPOLE rule below. */
   disintegrate(src: AiImage, x: number, y: number, scale: number, rozpad: number): void;
 
@@ -444,6 +466,8 @@ export class Canvas2dAiTarget implements AiTarget {
   /** Cached background+wall composite, and the signature it was built for. */
   private bgCanvas: HTMLCanvasElement | null = null;
   private bgSig = '';
+  /** Scratch canvas the ZX stripes are masked on (see backgroundZx). */
+  private zxCanvas: HTMLCanvasElement | null = null;
   /** Scratch canvas reused by the skeleton dissolve (see disintegrate). */
   private dissolveCanvas: HTMLCanvasElement | null = null;
 
@@ -538,12 +562,80 @@ export class Canvas2dAiTarget implements AiTarget {
   }
 
   /**
+   * The ZX composite: wobbled background, then the wall's silhouette filled with flat
+   * horizontal loading stripes.
+   *
+   * The wall image is used as a MASK, not as art. `source-in` against the stripes keeps
+   * exactly the pixels the wall is opaque at — which at ×S is the AI wall's own alpha,
+   * so the silhouette is as hi-res as the rest of the tier while the stripes stay
+   * quantised to native rows. That split is the point: the low-fi thing about ZX is the
+   * band structure, not the outline of the room.
+   *
+   * Uncached, unlike `background`: the stripes advance every frame, so there is nothing
+   * a signature could reuse.
+   */
+  backgroundZx(
+    bg: AiImage,
+    wall: AiImage,
+    bands: Uint8Array,
+    palette: ReadonlyArray<{ r: number; g: number; b: number }>,
+    wobble: AiWobble | null,
+    scale: number,
+  ): void {
+    const ctx = this.ctx;
+    const W = ctx.canvas.width;
+    const H = ctx.canvas.height;
+    const shifts = wobble ? faithfulWobbleShifts(wobble, Math.max(1, Math.round(bg.height / scale))) : null;
+    this.paintBg(ctx, bg, shifts, scale);
+    if (typeof document === 'undefined') return; // no DOM ⇒ no scratch canvas; background only
+    let cv = this.zxCanvas;
+    if (!cv || cv.width !== W || cv.height !== H) {
+      cv = document.createElement('canvas');
+      cv.width = W;
+      cv.height = H;
+      this.zxCanvas = cv;
+    }
+    const zctx = cv.getContext('2d');
+    if (!zctx) return;
+    zctx.setTransform(1, 0, 0, 1, 0, 0);
+    zctx.globalCompositeOperation = 'source-over';
+    zctx.clearRect(0, 0, W, H);
+    // Stripes first, then keep only what the wall covers. Consecutive native rows
+    // sharing a colour are one rect — at pruh 38.5 that is most of them.
+    let start = 0;
+    const flush = (endRow: number): void => {
+      const c = palette[bands[start]!] ?? { r: 0, g: 0, b: 0 };
+      zctx.fillStyle = `rgb(${c.r},${c.g},${c.b})`;
+      zctx.fillRect(0, start * scale, W, (endRow - start) * scale);
+    };
+    for (let i = 1; i < bands.length; i++) {
+      if (bands[i] !== bands[start]) {
+        flush(i);
+        start = i;
+      }
+    }
+    flush(bands.length);
+    // destination-in, NOT source-in: keep the STRIPES where the wall is opaque. The
+    // other way round replaces the stripes with the wall art clipped to them, which
+    // composites to an ordinary AI room and looks plausible enough to ship by mistake.
+    zctx.globalCompositeOperation = 'destination-in';
+    zctx.drawImage(wall, 0, 0);
+    ctx.drawImage(cv, 0, 0);
+  }
+
+  /**
    * Wall over the water-wobbled background. Only the background wobbles (a per-row
    * horizontal shift, Kresli2), so it is drawn as horizontal bands — consecutive
    * native rows sharing a shift are one draw — then the wall (its matted alpha carries
    * the doorway hole) is drawn flat on top.
    */
   private paint(ctx: CanvasRenderingContext2D, bg: AiImage, wall: AiImage, shifts: Int16Array | null, scale: number): void {
+    this.paintBg(ctx, bg, shifts, scale);
+    ctx.drawImage(wall, 0, 0);
+  }
+
+  /** The wobbled background alone — the half `backgroundZx` shares, which paints its own wall. */
+  private paintBg(ctx: CanvasRenderingContext2D, bg: AiImage, shifts: Int16Array | null, scale: number): void {
     if (shifts === null) {
       ctx.drawImage(bg, 0, 0);
     } else {
@@ -565,7 +657,6 @@ export class Canvas2dAiTarget implements AiTarget {
       }
       flush(H);
     }
-    ctx.drawImage(wall, 0, 0);
   }
 
   /**

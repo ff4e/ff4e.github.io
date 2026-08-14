@@ -57,6 +57,7 @@ import { wreckDamage, type WreckDamage } from './artSource.js';
 import { forEachWreckPixel, wreckFrame } from '../core/room.js';
 import type { Room, Item, WreckSwap } from '../core/room.js';
 import { FFR_EXTRA, type FfrBitmap } from '../data/ffr.js';
+import { advanceZxBands, bandRows } from './zxBands.js';
 
 /** Upscale factor of the committed AI room art (must match tools/build-room-ai.mjs AI_SCALE). */
 export const AI_ROOM_SCALE = 4;
@@ -121,7 +122,6 @@ export interface AiRoomGateInput {
 }
 
 export function aiRoomGateAllows(g: AiRoomGateInput): boolean {
-  if (g.gspec === 42) return false;
   if (g.hookStates.some((s) => s !== 0)) return false;
   if (g.frameEffects) return false;
   if (g.spriteCheatsActive) return false;
@@ -652,7 +652,7 @@ export class AiRoom {
    * every coordinate multiplied by `scale` on the way out.
    */
   drawInto(t: AiTarget, room: Room, f: AiRoomFrame): void {
-    walkRoom(this.sink(t, f.alpha ?? 0), room, f.count, f.slide, f.fishAnim);
+    walkRoom(this.sink(t, f.alpha ?? 0, f), room, f.count, f.slide, f.fishAnim);
   }
 
   /**
@@ -665,7 +665,7 @@ export class AiRoom {
    * oracle too, which is how an oracle becomes a copy of the implementation.
    */
   drawBackgroundInto(t: AiTarget, room: Room, count: number, alpha = 0): void {
-    this.paintBackground(t, room, count, alpha);
+    this.paintBackground(t, room, count, alpha, null);
   }
 
   /**
@@ -673,11 +673,11 @@ export class AiRoom {
    * scale enters. The walk emits native coordinates (an item's cell origin plus its
    * slide offset); everything below multiplies them out to backing-store pixels.
    */
-  private sink(t: AiTarget, alpha: number): RoomWalkSink {
+  private sink(t: AiTarget, alpha: number, frame: object | null): RoomWalkSink {
     const S = this.scale;
     const px = (cell: number, shift: number): number => (cell * FSIZE + shift) * S;
     return {
-      background: (room, count) => this.paintBackground(t, room, count, alpha),
+      background: (room, count) => this.paintBackground(t, room, count, alpha, frame),
       item: (room, it, index, sx, sy) => this.drawItem(t, it, index, px(it.x, sx), px(it.y, sy), room),
       fish: (room, which, it, sx, sy, frame) =>
         this.drawFish(t, room, which, px(it.x, sx), px(it.y, sy), frame, it),
@@ -696,7 +696,7 @@ export class AiRoom {
    * glowing dog eyes) and the fish silhouettes are drawn on top, so those are the
    * parts worth having at S×.
    */
-  private paintBackground(t: AiTarget, room: Room, count: number, alpha: number): void {
+  private paintBackground(t: AiTarget, room: Room, count: number, alpha: number, frame: object | null): void {
     if (room.gspec === 2) {
       const d = room.palette[darkestIndex(room.palette)] ?? { r: 0, g: 0, b: 0 };
       t.fill(d.r, d.g, d.b);
@@ -710,6 +710,19 @@ export class AiRoom {
     const bg: AiImage = (bgIdx === 0 && this.wreckBg) ? this.wreckBg : this.bg[bgIdx]!;
     const wall = this.wall[Math.min(faze, this.wall.length - 1)]!;
     const wobble = this.wobbleFor(room, count, alpha);
+    if (room.gspec === 42) {
+      // The ZX loading stripes. The band sequence is generated in NATIVE rows and from
+      // the room's own state, by the same code the faithful renderer runs — see
+      // zxBands.ts for why there is exactly one copy of it.
+      //
+      // The wall bitmap is still needed, and only to sample its four corner colours on
+      // the first frame; everything painted comes from the ×S art and the palette.
+      const classicWall = room.bitmaps[room.wallItem.bmp + faze];
+      if (classicWall) {
+        t.backgroundZx(bg, wall, this.zxBandsFor(room, frame, classicWall, count), room.palette, wobble, this.scale);
+        return;
+      }
+    }
     // The composite depends only on the wall's animation phase and — when the room
     // wobbles — the logic tick; the fish interpolate BETWEEN ticks, so a target that
     // can cache the composite skips it on most frames. Note the key carries `count`, NOT
@@ -722,6 +735,48 @@ export class AiRoom {
     // wobble, so `count` would mask this most of the time — which is luck, not
     // correctness.)
     t.background(`${faze}|${wobble === null ? 0 : count}|${aiImageRevision(bg)}`, bg, wall, wobble, this.scale);
+  }
+
+  /**
+   * The ZX band sequence for THIS frame — generated once, however many times the frame
+   * is drawn.
+   *
+   * Generating it advances `room.zx`, so it is a side effect of drawing, and that is a
+   * problem the faithful renderer never had: this tier draws the same frame twice in
+   * three different places. `framePainter` tries the GPU and falls back to canvas-2D;
+   * `aiGlParity` and `aiPresentCheck` render both backends to compare them byte-exact.
+   * Advancing per DRAW would have made those comparisons impossible by construction —
+   * the second render's stripes would legitimately differ from the first's.
+   *
+   * So the cache is keyed on the AiRoomFrame's IDENTITY, not on `count`. Identity is
+   * exactly the right grain: `framePainter` builds a new frame object per paint, so the
+   * stripes still animate at the paint rate (which is what `framePacing` keeps ZX out of
+   * the idle throttle for — URoom.pas advances them per paint, not per logic tick),
+   * while the two-backend comparisons pass ONE object twice and get one answer.
+   *
+   * `null` (drawBackgroundInto, the background-only probe entry) always regenerates:
+   * with no frame to belong to there is nothing to be consistent with.
+   */
+  /**
+   * The band sequence the last background pass actually used, for the parity oracle.
+   *
+   * `aiWobbleCheck` reimplements BG_FS in JS and compares it against the GPU byte for
+   * byte. For ZX the wall's colour no longer comes from the wall texture, so the oracle
+   * has to read the same stripes the shader was handed — deriving them again would
+   * advance the room's band state and compare two different frames.
+   */
+  lastZxBands(): Uint8Array | null {
+    return this.zxBands;
+  }
+
+  private zxBandsFor(room: Room, frame: object | null, wall: FfrBitmap, count: number): Uint8Array {
+    if (frame !== null && this.zxFrame === frame && this.zxBands) return this.zxBands;
+    const colors = advanceZxBands(room, wall, count);
+    const rows = Math.max(1, Math.round((this.bg[0]?.height ?? this.scale) / this.scale));
+    const bands = bandRows(rows, colors, room.zx);
+    this.zxFrame = frame;
+    this.zxBands = bands;
+    return bands;
   }
 
   /**
@@ -785,6 +840,10 @@ export class AiRoom {
     // 25 MB texture (12.3 ms vs 0.68 ms, see the measurement note in aiTarget.ts).
     markAiImageChanged(canvas, { x, y, w: img.width, h: img.height, data: img.data });
   }
+
+  /** The frame the cached ZX band sequence was generated for, and the sequence. */
+  private zxFrame: object | null = null;
+  private zxBands: Uint8Array | null = null;
 
   /** The mutable ×S background copy, created on the first swap. */
   private makeWreckBg(base: ImageBitmap): HTMLCanvasElement | null {
