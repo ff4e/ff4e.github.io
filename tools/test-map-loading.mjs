@@ -290,10 +290,28 @@ await withApp(
     //         download and a corrupt file are indistinguishable there, and guessing
     //         transient costs one refetch while guessing absent costs the tier). ===
     await p.route(GATED, (route) => route.fulfill({ status: 200, contentType: 'image/webp', body: 'not an image' }));
+    // Boot's own room (7, UTES) is SLOWED so its art lands AFTER the map has failed.
+    // That ordering is the bug this pins: a successful ROOM load used to dismiss the
+    // MAP's screen — the Try again button resolved and then went invisible mid-click,
+    // because `hideArtFailure` did not know which of the two the screen was about.
+    // Left to chance the order flips with machine load, and the assertion becomes a
+    // coin toss that mostly passes.
+    await p.route('**/enhanced-ai/UTES/**', async (route) => {
+      await new Promise((r) => setTimeout(r, 1500));
+      await route.continue().catch(() => {});
+    });
     await p.reload({ waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => window.__ff !== undefined);
     await p.waitForFunction(() => window.__ff.artFailShown());
     await waitFrames(p, 4);
+    // Now let the slowed room art land underneath it.
+    await p.waitForFunction(() => window.__ff.aiRoomLoaded());
+    await waitFrames(p, 4);
+    expect(
+      (await p.evaluate(() => window.__ff.artFailShown())) === true,
+      "a room's art landing does not dismiss the MAP's failure screen",
+    );
+    await p.unroute('**/enhanced-ai/UTES/**').catch(() => {});
     const mapHeld = await p.evaluate(() => ({
       title: document.getElementById('art-fail-title')?.textContent ?? '',
       pending: window.__ff.mapArtPending(),

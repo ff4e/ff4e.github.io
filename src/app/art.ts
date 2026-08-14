@@ -337,8 +337,9 @@ function applyEnhanced(num: number, r: RoomEnhanced): void {
   enhancedPending = false;
   // The art arrived, so whatever the screen was asking has been answered — including
   // when the answer came from a retry the player did not press (a later room entry, a
-  // tier switch back). Leaving it up would strand a working game behind it.
-  hideArtFailure();
+  // tier switch back). Leaving it up would strand a working game behind it. Scoped to
+  // 'room': this says nothing about a map failure the player is still looking at.
+  hideArtFailure('room');
 }
 
 /**
@@ -569,7 +570,7 @@ export async function ensureAiRoom(num: number): Promise<void> {
     if (curNum === num) {
       aiRoom = loaded;
       aiRoomNum = num;
-      hideArtFailure(); // answered — see applyEnhanced
+      hideArtFailure('room'); // answered — see applyEnhanced
     }
     // `null` is not a failure: it is the room saying, authoritatively, that it has no
     // AI art. That is permanent, there is nothing to retry, and the fallback below it
