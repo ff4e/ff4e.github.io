@@ -31,7 +31,10 @@ import { ROOMS } from '../data/roomTable.js';
 import { loadAiCredits } from '../render/creditsAi.js';
 import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
-import { withLoadSlot } from '../render/loadSlot.js';
+import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
+// Re-exported so the one other consumer of the decode helpers (main.ts's leg-story art)
+// keeps its existing import. They live in enhancedLoad.ts now, with the loaders.
+export { decodePngResponse, isPngResponse } from './enhancedLoad.js';
 import { ui } from './screenState.js';
 import { loadAiPanel } from '../render/panelAi.js';
 import type { AiPanel } from '../render/panelAi.js';
@@ -101,7 +104,10 @@ export function beginRoomArt(num: number): void {
   curNum = num;
   enhancedArt = null;
   enhancedObjects = [];
-  enhancedPending = host.enhancedArtActive();
+  // Only the `enhanced` tier holds for this. The `ai` tier does not load the enhanced
+  // art on entry at all any more (see ensureEnhancedFallback), so arming the flag here
+  // would hold the room for art no one asked for and nothing is fetching.
+  enhancedPending = host.graphics === 'enhanced';
   aiRoom = null;
   // Symmetric with enhancedPending: hold the frame until the AI art the `ai` tier
   // will actually present has landed, so the room is never shown in enhanced art
@@ -117,7 +123,21 @@ export function beginRoomArt(num: number): void {
  * are only correct set together, against the same room number and the same tier.
  */
 export function retargetArtForTier(): void {
-  if (host.enhancedArtActive() && curNum) void ensureEnhancedArt(curNum);
+  // Switching INTO the `enhanced` tier is now the moment that art is fetched, not a
+  // cache hit: no other tier loads it on room entry any more. So the hold has to be
+  // armed here, or the switch would show classic for the length of the download and
+  // then pop. Armed from the CACHE rather than from `enhancedArt`, because a room whose
+  // masters are legitimately absent caches a null and must not hold forever.
+  //
+  // The `ai` tier deliberately does not arm or fetch here: it paints enhanced art only
+  // in the fallback cases, and ensureEnhancedFallback() owns those.
+  if (host.graphics === 'enhanced' && curNum) {
+    const jmeno = ROOMS[curNum - 1]?.jmeno;
+    enhancedPending = jmeno !== undefined && !enhancedCache.has(jmeno);
+    void ensureEnhancedArt(curNum);
+  } else {
+    enhancedPending = false;
+  }
   if (host.graphics === 'ai' && curNum) {
     // Hold the frame we already have until the AI art lands, rather than repainting
     // the room in enhanced art and then popping to AI — the same rule room entry
@@ -140,10 +160,42 @@ export function retargetArtForTier(): void {
  * classic and enhancedArtActive() is false on the very next frame, so the hold releases
  * itself — no generation counter, no waiter set, nothing to cancel. It also leaves
  * loadRoom()'s meaning (and so waitRoom()/roomLoading()) exactly as it was.
+ *
+ * One hold per tier, and only for the tier that paints. This used to read
+ * `enhancedArtActive() && enhancedPending`, which is true in the `ai` tier as well — so
+ * an `ai` room entry waited for the enhanced art too, and stayed on the previous frame
+ * after the art it actually paints had already arrived. The two tiers are independent
+ * at render time (framePainter picks ONE compositor per frame); this makes them
+ * independent at load time.
  */
 export function roomArtPending(): boolean {
-  if (host.enhancedArtActive() && enhancedPending) return true;
-  return host.graphics === 'ai' && aiPending && aiPendingNum === curNum;
+  if (host.graphics === 'ai') return aiPending && aiPendingNum === curNum;
+  return host.enhancedArtActive() && enhancedPending;
+}
+
+/**
+ * Load the current room's enhanced art because the `ai` tier is about to paint through
+ * the enhanced compositor after all.
+ *
+ * The `ai` tier does not fetch this on room entry — that was 0.3-2.1 MB per room, on
+ * every entry, for art the AI compositor does not use. But the tier is not quite
+ * self-sufficient: framePainter falls back to the enhanced compositor for a whole frame
+ * whenever aiRoomRenderActive() says no, which is the gspec=42 ZX render, any frame with
+ * a cheat's hooks / sprites / film effects running, a subtitle that must be baked in,
+ * and any room whose AI art is missing or failed to load.
+ *
+ * Each of those is a DISCRETE event rather than a steady state, so paying the fetch at
+ * the moment it happens is the right shape — the same argument the map/panel/credits AI
+ * assets already make. The cost is that those frames draw 1998 bitmaps until it lands;
+ * that is the trade, and it is one room's sprites, not a room's background.
+ *
+ * Safe to call every frame: ensureEnhancedArt joins an in-flight load and returns
+ * immediately on a cached one, so this cannot become a request per frame on a flaky
+ * link (the trap beginMapArt documents).
+ */
+export function ensureEnhancedFallback(): void {
+  if (host.graphics !== 'ai' || !curNum) return;
+  void ensureEnhancedArt(curNum);
 }
 /**
  * jmeno -> loaded AI room (null = no AI art / failed). Keyed on the PROMISE so a second
@@ -169,49 +221,27 @@ async function evictAiRooms(keep: string): Promise<void> {
     if (room !== null && room !== aiRoom) room.dispose();
   }
 }
-interface RoomEnhanced {
-  art: EnhancedArt | null;
-  objects: EnhancedObject[];
-}
 const enhancedCache = new Map<string, RoomEnhanced>(); // jmeno -> art + objects (art null = no master)
-
-interface ObjManifestEntry {
-  item: number;
-  frames: string[];
-}
-
 /**
- * The dev server serves index.html (HTTP 200) for a missing asset, so `res.ok`
- * is not enough to know a file exists — verify the content-type is an image.
+ * jmeno -> the load in flight for it, so concurrent callers join one load.
+ *
+ * The AI cache has always been keyed on the promise for this reason; the enhanced one
+ * was not, and wrote its entry only after the await — so every caller that arrived
+ * during a load started another complete one. Harmless while the only caller was room
+ * entry, and not harmless now that ensureEnhancedFallback() can call from a frame.
  */
-export function isPngResponse(res: Response): boolean {
-  return res.ok && (res.headers.get('content-type') ?? '').startsWith('image/');
-}
-
-/**
- * Decode a PNG Response into straight RGBA using the browser's native decoder
- * (createImageBitmap + a 2D canvas) — no `node:zlib`, unlike the Node tools.
- */
-export async function decodePngResponse(res: Response): Promise<{ w: number; h: number; rgba: Uint8Array }> {
-  const bmp = await createImageBitmap(await res.blob());
-  const w = bmp.width;
-  const h = bmp.height;
-  const off = document.createElement('canvas');
-  off.width = w;
-  off.height = h;
-  const g = off.getContext('2d')!;
-  g.clearRect(0, 0, w, h);
-  g.drawImage(bmp, 0, 0);
-  const data = g.getImageData(0, 0, w, h).data;
-  bmp.close();
-  return { w, h, rgba: new Uint8Array(data.buffer.slice(0)) };
-}
+const enhancedLoads = new Map<string, Promise<RoomEnhanced>>();
 
 /**
  * Load (and cache) the enhanced background masters + object sprites for a room,
  * staged under public/enhanced/<JMENO>/ (w.png, p.png, objects.json + obj/*.png).
  * A missing master or decode failure caches an empty result so the room silently
  * falls back to classic. Applies to `num` iff it is still current when resolved.
+ *
+ * Idempotent and safe to call repeatedly, including once per frame: a second call while
+ * a load is in flight JOINS it (enhancedLoads) instead of starting a duplicate. That was
+ * already worth having — cycling tiers with E fired one full load per press — but it is
+ * now load-bearing, because ensureEnhancedFallback() calls this from the draw path.
  */
 export async function ensureEnhancedArt(num: number): Promise<void> {
   const jmeno = ROOMS[num - 1]?.jmeno;
@@ -219,92 +249,42 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
     if (curNum === num) enhancedPending = false;
     return;
   }
-  if (enhancedCache.has(jmeno)) {
-    const c = enhancedCache.get(jmeno)!;
-    if (curNum === num) {
-      enhancedArt = c.art;
-      enhancedObjects = c.objects;
-      enhancedPending = false;
+  let pending = enhancedLoads.get(jmeno);
+  if (pending === undefined) {
+    const cached = enhancedCache.get(jmeno);
+    if (cached !== undefined) {
+      applyEnhanced(num, cached);
+      return;
     }
-    return;
+    pending = loadEnhanced(jmeno);
+    // Registered BEFORE the first await, so a caller arriving during the load joins
+    // this one. loadEnhanced never rejects, so there is no rejection to clear.
+    enhancedLoads.set(jmeno, pending);
   }
-  try {
-    // A fetch that actually returns a PNG (dev server SPA-fallback serves the
-    // index HTML with 200 for missing files, so ok/status is not enough).
-    const isPng = isPngResponse;
-    const [w, p] = await Promise.all([
-      fetch(`/enhanced/${jmeno}/w.png`),
-      fetch(`/enhanced/${jmeno}/p.png`),
-    ]);
-    let art: EnhancedArt | null = null;
-    if (isPng(w) && isPng(p)) {
-      const [wall0, bg0] = await Promise.all([decodePngResponse(w), decodePngResponse(p)]);
-      if (wall0.w === bg0.w && wall0.h === bg0.h) {
-        // Additional animation frames (STEEL red-alert): w1.png/p1.png, w2.png/p2.png…
-        const walls = [wall0.rgba];
-        const bgs = [bg0.rgba];
-        for (let f = 1; ; f++) {
-          const [wf, pf] = await Promise.all([
-            fetch(`/enhanced/${jmeno}/w${f}.png`),
-            fetch(`/enhanced/${jmeno}/p${f}.png`),
-          ]);
-          if (!isPng(wf) || !isPng(pf)) break;
-          const [wd, pd] = await Promise.all([decodePngResponse(wf), decodePngResponse(pf)]);
-          if (wd.w !== wall0.w || wd.h !== wall0.h || pd.w !== wall0.w || pd.h !== wall0.h) break;
-          walls.push(wd.rgba);
-          bgs.push(pd.rgba);
-        }
-        art = { w: wall0.w, h: wall0.h, wall: walls, bg: bgs };
-      }
-    }
-    const objects = await loadEnhancedObjects(jmeno);
-    const result: RoomEnhanced = { art, objects };
-    enhancedCache.set(jmeno, result);
-    if (curNum === num) {
-      enhancedArt = art;
-      enhancedObjects = objects;
-      enhancedPending = false;
-    }
-  } catch {
-    enhancedCache.set(jmeno, { art: null, objects: [] });
-    if (curNum === num) {
-      enhancedArt = null;
-      enhancedObjects = [];
-      enhancedPending = false;
-    }
-  }
+  const result = await pending;
+  enhancedLoads.delete(jmeno);
+  applyEnhanced(num, result);
 }
 
-/** Decode a room's enhanced object sprites from its objects.json manifest. */
-async function loadEnhancedObjects(jmeno: string): Promise<EnhancedObject[]> {
-  const res = await fetch(`/enhanced/${jmeno}/objects.json`);
-  // The dev server serves index.html (200) for a missing manifest, so verify it
-  // is actually JSON before parsing.
-  if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return [];
-  const manifest = (await res.json()) as { objects?: ObjManifestEntry[] };
-  const entries = manifest.objects ?? [];
-  // One entry at a time was a per-object round trip: with the AI loads parallelised
-  // this waterfall became the thing the first frame waits on (2.2s at a 150ms RTT
-  // against 1.2s for the whole AI set). The sprites are independent, so fetch them
-  // all at once and let the browser schedule.
-  const loaded = await Promise.all(
-    entries.map(async (e): Promise<EnhancedObject | null> => {
-      if (typeof e.item !== 'number' || !Array.isArray(e.frames)) return null;
-      const frames = await Promise.all(
-        e.frames.map(async (f) =>
-          withLoadSlot(async () => {
-            const r = await fetch(`/enhanced/${jmeno}/obj/${f}`);
-            if (!isPngResponse(r)) return null;
-            const d = await decodePngResponse(r);
-            return { w: d.w, h: d.h, rgba: d.rgba };
-          }),
-        ),
-      );
-      const valid = frames.filter((f): f is { w: number; h: number; rgba: Uint8Array } => f !== null);
-      return valid.length > 0 ? { item: e.item, frames: valid } : null;
-    }),
-  );
-  return loaded.filter((o): o is EnhancedObject => o !== null);
+/** Point the live art state at a loaded result, iff `num` is still the room on screen. */
+function applyEnhanced(num: number, r: RoomEnhanced): void {
+  if (curNum !== num) return;
+  enhancedArt = r.art;
+  enhancedObjects = r.objects;
+  enhancedPending = false;
+}
+
+/**
+ * Fetch one room's enhanced art and REMEMBER the outcome.
+ *
+ * The fetching and decoding is `enhancedLoad.ts`; the only thing added here is the
+ * cache, because caching is a judgement about what an empty result means and that
+ * judgement belongs with the state, not with the transport.
+ */
+async function loadEnhanced(jmeno: string): Promise<RoomEnhanced> {
+  const result = await loadEnhancedRoom(jmeno);
+  enhancedCache.set(jmeno, result);
+  return result;
 }
 
 /** Load the hi-res panel art once (see panelAi.ts); null ⇒ keep the faithful path. */
