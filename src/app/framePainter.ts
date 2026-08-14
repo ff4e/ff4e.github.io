@@ -233,9 +233,9 @@ export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: st
     if (useVecSubs && subs?.active && room) {
       const g = roomGeometry(room);
       clearSubOverlay(); // the canvas overlay is not the one showing them now
-      syncDomSubtitles(subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight, xform);
+      syncDomSubtitles('room', subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight, xform);
     } else {
-      clearDomSubtitles();
+      clearDomSubtitles('room');
       // The canvas overlay may still hold the previous renderer's paint — switching
       // renderer (or tier) while nothing is on screen leaves nothing else to wipe it.
       if (subOverlayPainted) clearSubOverlay();
@@ -245,7 +245,7 @@ export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: st
   // Unconditional, and cheap when there is nothing to do: under `auto` the renderer
   // changes when the TIER changes, with no setter called, so this is the only place
   // that notices the handover and takes the abandoned DOM text off the screen.
-  clearDomSubtitles();
+  clearDomSubtitles('room');
   if (useVecSubs && subs?.active) {
     syncSubOverlay();
     const dpr = window.devicePixelRatio || 1;
