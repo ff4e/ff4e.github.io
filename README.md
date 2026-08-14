@@ -526,8 +526,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 2.2 k | The logo and intro movies, and the vector-subtitle layer above the canvas. |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the fatal screen and the resize handler. |
-| `subRendererChoice.ts` | 0.6 k | Which renderer paints the vector subtitles: `ai` → DOM text, other tiers → canvas, plus the fallback when the browser cannot animate. Pure, so the decision is unit-tested. |
-| `subtitleDom.ts` | 3.4 k | The room's subtitles as DOM text, animated by the compositor — the `ai` tier's renderer. Forced either way by the dev bar's Subtitles picker or `__ff.setSubRenderer()`. |
+| `subRendererChoice.ts` | 0.6 k | Which renderer paints the vector subtitles: DOM text by default, plus the fallback when the browser cannot animate. Pure, so the decision is unit-tested. |
+| `subtitleDom.ts` | 3.7 k | Subtitles as DOM text, animated by the compositor — the renderer for `enhanced`, `ai` and cutscene captions, one layer each for the room and a cutscene. Forced either way by the dev bar's Subtitles picker or `__ff.setSubRenderer()`. |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
 | `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
@@ -583,7 +583,8 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |
 | `help.ts` | 0.6 k | The control-help screens (`Help.pas`). |
-| `subtitles.ts` | 5.4 k | Colour mapping, glyph rendering, and the scrolling line. |
+| `subtitleGeom.ts` | 1.7 k | The geometry a vector subtitle line is built from — fit-to-room size, wave phase and curve, baseline and amplitude, stroke and bevel. Pure and import-free, so both renderers measure from it and it is unit-tested. |
+| `subtitles.ts` | 5.2 k | Colour mapping, glyph rendering, and the scrolling line. |
 | `font.ts` | 0.9 k | The bitmap font from the original `Chars.dat`/`Chartab.dat`/`Charcol.dat`. |
 | `tetrisRender.ts` | 1.3 k | The Tetris minigame's picture. |
 | `filmEffects.ts` | 1.1 k | Full-frame effects for the `xsilent` and `xinterlaced` cheats. |

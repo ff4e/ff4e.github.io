@@ -1,5 +1,9 @@
 /**
- * PROTOTYPE: the room's subtitles as DOM text, animated by the compositor.
+ * Subtitles as DOM text, animated by the compositor.
+ *
+ * The renderer for the `enhanced` and `ai` tiers, and for cutscene captions. `classic`
+ * is the one path this does not touch: it bakes its subtitles into the pixel frame with
+ * the game's own bitmap font, and never reaches either vector renderer.
  *
  * The canvas overlay redraws every glyph — shape, outline stroke, gradient fill — on
  * every animation step, and hands the browser a changed backing store to re-upload each
@@ -13,11 +17,21 @@
  * animate at whatever rate the main thread manages, because that is where it would be
  * driven from.
  *
- * Behind `__ff.setSubRenderer('dom')` and off by default. It is NOT a replacement yet:
- * the browser shapes and rasterises this text, so it is not pixel-identical to
- * `drawVector`, and `test-subtitles-parity` still pins the canvas path.
+ * NOT pixel-identical to `drawVector`: the browser shapes and rasterises this text. What
+ * is pinned instead is the geometry — `subtitleGeom.ts` holds the rules both renderers
+ * measure from, in unit tests, and `test-subtitles` compares this renderer's line
+ * against the canvas one in the same tier (0.992 of its width, the remainder being the
+ * browser's own shaping). `__ff.setSubRenderer('canvas')` still forces the old path.
  */
-import { VECTOR_GEOM } from '../render/subtitles.js';
+import {
+  VECTOR_GEOM,
+  bevelBottomRgb,
+  bevelSpan,
+  fitFontPx,
+  lineAnchor,
+  strokeWidth,
+  waveDy,
+} from '../render/subtitleGeom.js';
 import { subRendererSelect } from './dom.js';
 import { wake } from './frameClock.js';
 import { aiSubScale } from './introOverlay.js';
@@ -37,6 +51,16 @@ interface DomLine {
   spans: HTMLSpanElement[];
   /** Last vertical position written, to skip no-op style writes. */
   y: number;
+  /**
+   * Fit-to-room factor for this line, kept because measuring it is a forced layout.
+   *
+   * `y` has to be recomputed every tick (the line scrolls) and depends on this, so
+   * without it stored the measurement ran once per line PER FRAME — a synchronous
+   * layout in the path whose whole purpose is keeping work off the main thread, and one
+   * that gets more expensive under exactly the load this renderer exists to survive.
+   * It only depends on (font, text), both of which are already in the line's cache key.
+   */
+  fit: number;
 }
 
 /**
@@ -199,9 +223,10 @@ function measureTextWidth(font: string, text: string): number {
 function waveFrames(ampCss: number): Keyframe[] {
   const out: Keyframe[] = [];
   for (let k = 0; k <= WAVE_KEYFRAMES; k++) {
+    // The same curve the canvas path rides, sampled instead of evaluated per frame —
+    // which is the whole trick: sampled once into keyframes, the compositor runs it.
     const p = (k / WAVE_KEYFRAMES) * VECTOR_GEOM.waveLen;
-    const dy = ampCss * ((VECTOR_GEOM.waveLen - p) / VECTOR_GEOM.waveLen) * Math.cos((3.5 * Math.PI * p) / VECTOR_GEOM.waveLen);
-    out.push({ offset: k / WAVE_KEYFRAMES, opacity: 1, transform: `translateY(${dy.toFixed(2)}px)` });
+    out.push({ offset: k / WAVE_KEYFRAMES, opacity: 1, transform: `translateY(${waveDy(p, ampCss).toFixed(2)}px)` });
   }
   return out;
 }
@@ -277,9 +302,12 @@ export function syncDomSubtitles(
     // the baseline offset in `y`, the stroke width, and the bevel stops. Shrinking
     // afterwards (by writing fontSize onto a finished element) left all three sized for
     // a font the line was no longer drawn in.
-    const maxCss = (screenW - VECTOR_GEOM.border * 2) * scale;
-    const natural = measureTextWidth(font, t.obsah);
-    const fit = natural > maxCss && natural > 0 ? maxCss / natural : 1;
+    // Measured at the display scale, but fitted in NATIVE units, because that is where
+    // the rule is defined and where drawVector applies it — dividing out `scale` keeps a
+    // fit-to-room decision from depending on the window size. Measured ONLY for a line
+    // being built: it is a forced layout, and it cannot change while the line exists.
+    let line = L.lines.get(key);
+    const fit = line ? line.fit : fitFontPx(measureTextWidth(font, t.obsah) / scale, screenW) / VECTOR_GEOM.fontPx;
     // A scalable font's baseline inset and line-box height scale with its size, so the
     // measured pair can be scaled rather than re-measured (which would be a second
     // forced layout per line).
@@ -291,8 +319,7 @@ export function syncDomSubtitles(
     // to be part of the element's FIRST style: a `transition` plus a transform written
     // after insertion animates from the untransformed position — the top of the game box
     // — so a new line visibly fell from the ceiling before starting its wave.
-    const y = (t.ys * VECTOR_GEOM.scale + screenH + VECTOR_GEOM.baselineOff) * scale - inset;
-    let line = L.lines.get(key);
+    const y = lineAnchor(t.ys, screenH).baseline * scale - inset;
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
@@ -301,7 +328,8 @@ export function syncDomSubtitles(
         `transition:transform 80ms linear;will-change:transform`;
       const [r, g, b] = t.rgb;
       const top = `rgb(${r},${g},${b})`;
-      const bottom = `rgb(${Math.round(r * 0.42)},${Math.round(g * 0.42)},${Math.round(b * 0.42)})`;
+      const [dr, dg, db] = bevelBottomRgb(r, g, b);
+      const bottom = `rgb(${dr},${dg},${db})`;
       const spans: HTMLSpanElement[] = [];
       // The bevel gradient, placed exactly where the canvas puts it:
       // createLinearGradient(0, gy - fs*0.72, 0, gy + fs*0.1) — a ramp across the
@@ -309,8 +337,9 @@ export function syncDomSubtitles(
       // it over the whole box (which is what a bare `linear-gradient` does) puts the
       // light end above the glyph and lands it in the wrong part of the ramp, which is
       // what made the text look washed out and flat.
-      const gTop = ((inset - fs * 0.72) / boxH) * 100;
-      const gBottom = ((inset + fs * 0.1) / boxH) * 100;
+      const ramp = bevelSpan(fs);
+      const gTop = ((inset + ramp.top) / boxH) * 100;
+      const gBottom = ((inset + ramp.bottom) / boxH) * 100;
       const bevel =
         `linear-gradient(to bottom,${top} 0%,${top} ${gTop.toFixed(2)}%,` +
         `${bottom} ${gBottom.toFixed(2)}%,${bottom} 100%)`;
@@ -318,12 +347,11 @@ export function syncDomSubtitles(
       // path, so it reaches fs*0.08 outwards. -webkit-text-stroke is the same thing —
       // but it paints OVER the fill in Chromium (which honours no paint-order on HTML
       // text), so the stroke goes on its own layer BEHIND the fill instead.
-      const strokeW = fs * 0.16;
+      const strokeW = strokeWidth(fs);
       // The line's own age, so a line already part-way through its wave starts there
       // rather than replaying it from the beginning.
       const ageMs = ((count - t.startcount) / TICKS_PER_SEC) * 1000;
-      const ysNative = t.ys * VECTOR_GEOM.scale;
-      const ampCss = (VECTOR_GEOM.under * VECTOR_GEOM.scale - ysNative) * scale;
+      const ampCss = lineAnchor(t.ys, screenH).amp * scale;
       const frames = waveFrames(ampCss);
       const stepMs = 1000 / (VECTOR_GEOM.wavePerTick * TICKS_PER_SEC);
       const durMs = (VECTOR_GEOM.waveLen / VECTOR_GEOM.wavePerTick / TICKS_PER_SEC) * 1000;
@@ -350,10 +378,14 @@ export function syncDomSubtitles(
         el.appendChild(sp);
         spans.push(sp);
         if (ch === ' ') return; // a space inks nothing; drawVector skips it too
-        sp.animate(frames, { duration: durMs, delay: i * stepMs - ageMs, fill: 'forwards', easing: 'linear' });
+        // Glyph i is due when its phase reaches zero, which `wavePhase` puts at (i+1)
+        // steps -- PisStringF counts characters from 1. This used to start at `i`, one
+        // step (16ms) early per glyph, which is exactly the kind of drift that having
+        // two copies of the rule produces and sharing one removes.
+        sp.animate(frames, { duration: durMs, delay: (i + 1) * stepMs - ageMs, fill: 'forwards', easing: 'linear' });
       });
       host.appendChild(el);
-      line = { el, spans, y };
+      line = { el, spans, y, fit };
       L.lines.set(key, line);
     }
     // The scroll: the only thing written per tick, and a transform, so the compositor

@@ -10,37 +10,30 @@
 import type { FfrPaletteEntry } from '../data/ffr.js';
 import type { FontData } from './font.js';
 import type { PixelTarget } from './framebuffer.js';
+import {
+  BASETITLE,
+  BORDERTITLE,
+  ROWTITLE,
+  SUB_FONT_PX,
+  UNDERTITLE,
+  bevelBottomRgb,
+  bevelSpan,
+  fitFontPx,
+  lineAnchor,
+  strokeWidth,
+  wavePhase,
+  waveDy,
+} from './subtitleGeom.js';
 
-// Subtitle layout constants (URoom.pas:140-161).
-const ROWTITLE = 26;
-const BASETITLE = 0;
-const UNDERTITLE = 15;
+// Subtitle layout constants (URoom.pas:140-161). The geometry ones live in
+// subtitleGeom.ts, which both renderers measure from; what stays here is timing.
 const SPEEDTITLE = 2;
 const TIMEPERCHARTITLE = 2;
 const MINTIMETITLE = 40;
 const MINYTITLE = BASETITLE - ROWTITLE * 5;
-const BORDERTITLE = 20;
 /** siltitborder (URoom.pas:26125): the intertitle card's frame inset. */
 const SILTITBORDER = 15;
 
-// Enhanced (vector) subtitle rendering.
-/**
- * How much larger the vector overlay draws than the bitmap line it replaces.
- *
- * Applied to the WHOLE vertical geometry of the vector path — glyph size, row pitch,
- * baseline nudge and wave amplitude — never to a subset. Scaling the font alone would
- * collide: Czech text with diacritics measures 25.0-26.9px tall at SUB_FONT_PX across
- * the four subtitle faces, against a ROWTITLE pitch of 26, so it already fills the row;
- * at 1.2 it measures 30.0-32.3px and stacked lines would overlap by 4-6px.
- *
- * The bitmap path (`draw`, the classic tier) is deliberately untouched: it renders the
- * game's own font at the original's exact geometry (ROWTITLE/UNDERTITLE, URoom.pas:140-161)
- * and must stay byte-exact. So this scales at render time in `drawVector` only, and does
- * NOT change ROWTITLE, which the shared tick logic uses to place both.
- */
-const SUB_SCALE = 1.2;
-const SUB_FONT_PX = 23 * SUB_SCALE; // native-pixel font size for the FreeSans-Bold overlay
-const SUB_BASELINE_OFF = -6 * SUB_SCALE; // nudges the vector baseline to sit like the bitmap line
 /**
  * Sub-tick animation steps for the enhanced overlay. The wave-in and the line scroll
  * are functions of the 12.5/s logic tick, which on its own looks stepped; the port
@@ -51,32 +44,6 @@ const SUB_BASELINE_OFF = -6 * SUB_SCALE; // nudges the vector baseline to sit li
  * Every whole tick still renders exactly the state it rendered before.
  */
 export const SUB_SUBSTEPS = 5;
-
-/**
- * The vector overlay's geometry, for renderers other than `drawVector`.
- *
- * Exported so a DOM or GPU subtitle renderer places its text from the SAME numbers this
- * one does, rather than a second copy of them that can drift. Everything here is in
- * native game pixels (the `screenW` x `screenH` space `drawVector` draws in).
- */
-export const VECTOR_GEOM = Object.freeze({
-  /** Row pitch (ROWTITLE), before SUB_SCALE. */
-  row: ROWTITLE,
-  /** Where the wave starts, below the line's resting row (UNDERTITLE), before SUB_SCALE. */
-  under: UNDERTITLE,
-  /** The vector path's uniform enlargement over the bitmap geometry. */
-  scale: SUB_SCALE,
-  /** Font size in native px. */
-  fontPx: SUB_FONT_PX,
-  /** Nudge that puts the vector baseline where the bitmap line sat. */
-  baselineOff: SUB_BASELINE_OFF,
-  /** Wave steps per logic tick: `p` advances by this much per tick (see drawVector). */
-  wavePerTick: 5,
-  /** Wave length in `p` units. */
-  waveLen: 50,
-  /** Side margin a line is fitted inside (BORDERTITLE), before SUB_SCALE. */
-  border: BORDERTITLE,
-});
 
 interface TitleLine {
   obsah: string;
@@ -381,18 +348,17 @@ export class SubtitleSystem {
       const [r, g, b] = this.vectorColor(t.barva);
       const line = this.vectorLayout(ctx, t.obsah, fontFamily, weight);
       ctx.font = line.font;
-      ctx.lineWidth = line.fs * 0.16;
+      ctx.lineWidth = strokeWidth(line.fs);
       const top = `rgb(${r},${g},${b})`;
-      const bottom = `rgb(${Math.round(r * 0.42)},${Math.round(g * 0.42)},${Math.round(b * 0.42)})`;
+      const [br, bg, bb] = bevelBottomRgb(r, g, b);
+      const bottom = `rgb(${br},${bg},${bb})`;
       // y here mirrors PisStringF: the line's on-screen top is ys (+screenH the
       // caller already folds into the transform origin at 0). y0 is the wave's
       // rest line; (y0 - y) == UNDERTITLE - ys drives the wave amplitude. Both are
       // taken through SUB_SCALE so the row pitch and the wave grow with the glyphs
       // (see SUB_SCALE); the tick logic behind renderYs stays at the original's
       // geometry, because the bitmap path draws from the same numbers.
-      const ys = this.renderYs(t, frac) * SUB_SCALE;
-      const baseline = ys + this.screenH + SUB_BASELINE_OFF;
-      const amp = UNDERTITLE * SUB_SCALE - ys;
+      const { baseline, amp } = lineAnchor(this.renderYs(t, frac), this.screenH);
       const cas = count - t.startcount + frac;
       const x0 = (this.screenW - line.total) / 2;
       // The gradient is anchored to the glyph's own baseline, so glyphs that share
@@ -400,14 +366,13 @@ export class SubtitleSystem {
       const grads = new Map<number, CanvasGradient>();
       for (let i = 0; i < line.chars.length; i++) {
         const ch = line.chars[i]!;
-        const p = cas * 5 - (i + 1);
+        const p = wavePhase(cas, i);
         if (p < 0 || ch === ' ') continue;
-        let dy = 0;
-        if (p < 50) dy = ((amp * (50 - p)) / 50) * Math.cos((3.5 * Math.PI * p) / 50);
-        const gy = baseline + dy;
+        const gy = baseline + waveDy(p, amp);
         let grad = grads.get(gy);
         if (grad === undefined) {
-          grad = ctx.createLinearGradient(0, gy - line.fs * 0.72, 0, gy + line.fs * 0.1);
+          const bevel = bevelSpan(line.fs);
+          grad = ctx.createLinearGradient(0, gy + bevel.top, 0, gy + bevel.bottom);
           grad.addColorStop(0, top);
           grad.addColorStop(1, bottom);
           grads.set(gy, grad);
@@ -439,13 +404,13 @@ export class SubtitleSystem {
     const key = `${weight}|${fontFamily}|${obsah}`;
     const hit = this.vecCache.get(key);
     if (hit) return hit;
-    const maxW = this.screenW - BORDERTITLE * 2;
     let fs = SUB_FONT_PX;
     let font = `${weight} ${fs}px ${fontFamily}`;
     ctx.font = font;
     let total = ctx.measureText(obsah).width;
-    if (total > maxW) {
-      fs = Math.max(8, (fs * maxW) / total);
+    const fitted = fitFontPx(total, this.screenW);
+    if (fitted !== fs) {
+      fs = fitted;
       font = `${weight} ${fs}px ${fontFamily}`;
       ctx.font = font;
       total = ctx.measureText(obsah).width;

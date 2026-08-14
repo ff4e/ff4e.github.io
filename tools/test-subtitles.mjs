@@ -1,12 +1,12 @@
 /**
  * UI test: each art tier's subtitles are painted by the renderer that tier chose.
- *  - `ai` paints real DOM text (#domsubs) and leaves the overlay canvas empty.
- *  - `enhanced` paints the crisp overlay canvas (#subs).
- *  - `classic` bakes them into the pixel frame, so the overlay stays empty.
+ *  - `enhanced` and `ai` paint real DOM text (#domsubs), leaving the overlay canvas empty.
+ *  - `classic` bakes them into the pixel frame, so NEITHER layer shows anything.
  * Also guards the idle-skip optimisation (the overlay stays empty when no subtitle is
- * showing) and the handover when the TIER changes with a line already on screen — under
- * the default `auto` preference that swaps renderer with no setter called, so whichever
- * renderer is standing down has to take its own text off the screen.
+ * showing) and the handover when the RENDERER changes with a line already on screen —
+ * whichever one is standing down has to take its own output off the screen, or both are
+ * visible at once. It also pins the DOM line against the canvas line in the same tier,
+ * which is the only comparison that can catch an error common to every DOM line.
  * Asserts painted-vs-empty, never pixel-exact positions or wave timing, so it is not flaky.
  */
 import { selectRoom, tickSleep, withApp } from './ui-lib.mjs';

@@ -478,8 +478,8 @@
         <option value="enhanced">Enhanced (FFNG)</option>
         <option value="ai">AI-upscaled</option>
       </select></label>
-      <label title="How the vector subtitles are painted. auto = the AI tier gets real DOM text whose motion is a compositor transform (smoother while the main thread is busy), classic and enhanced keep the canvas path. The other two force one renderer everywhere. Mirrors __ff.setSubRenderer().">Subtitles <select id="subrenderer">
-        <option value="auto">auto (AI → DOM)</option>
+      <label title="How the vector subtitles are painted. auto = real DOM text whose motion is a compositor transform, which is smoother while the main thread is busy. (Classic is unaffected either way: it bakes its subtitles into the frame.) The other two force one renderer. Mirrors __ff.setSubRenderer().">Subtitles <select id="subrenderer">
+        <option value="auto">auto (DOM)</option>
         <option value="canvas">canvas</option>
         <option value="dom">DOM (compositor)</option>
       </select></label>
