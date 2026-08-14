@@ -363,7 +363,6 @@ export function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number,
     return;
   }
   clearDomSubtitles('cut');
-  syncSubOverlaySized(cssW, cssH);
   // The cutscene paints on every rAF (it has no dirty check), so without this
   // gate the captions were re-shaped ~60x a second to produce the same image.
   const sig = subOverlaySignature('cut', cutsceneSubs, cs * dpr);
@@ -549,6 +548,11 @@ export function drawCutscene(): void {
   // Mulish captions on the vector overlay (enhanced). Same coordinate convention
   // as room subtitles: the overlay spans the on-screen box and its context is
   // scaled by SCALE*dpr so drawVector positions in native (720×555) game pixels.
+  // The caption box is the CUTSCENE's for as long as the cutscene is up, whether or not
+  // a line happens to be on screen and whichever renderer draws it. #subs is still a live
+  // element that other code reads as that box, and it would otherwise sit at the size the
+  // room left it at until the first KD-* line arrived.
+  syncSubOverlaySized(cssW, cssH);
   if (useVec && cutsceneSubs!.active) {
     updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
   } else {

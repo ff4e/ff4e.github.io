@@ -98,7 +98,7 @@ export function subRendererPref(): SubRendererPref {
 
 /** Is the DOM renderer the one painting right now? Asked once per frame. */
 export function domSubsEnabled(): boolean {
-  return resolveSubRenderer(subRendererPref(), graphics, domSubsSupported()) === 'dom';
+  return resolveSubRenderer(subRendererPref(), domSubsSupported()) === 'dom';
 }
 
 /** Persist the preference. Low-level: use `selectSubRenderer` unless you own the overlay. */
