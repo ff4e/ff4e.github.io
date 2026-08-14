@@ -67,7 +67,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // frame is still holding for it. Budgeted on arrival rather than after growth: it
   // crossed the 520 tripwire taking on the absent/failed distinction, and two pieces
   // were split off in the same series rather than landing here — the fetching and
-  // decoding (`enhancedLoad.ts`) and the player-facing note (`tierNote.ts`). What is
+  // decoding (`enhancedLoad.ts`) and the player-facing screen (`artFailure.ts`). What is
   // left is the state, which is the part that genuinely cannot be split: the caches, the
   // in-flight maps and the two hold predicates are one another's invariants.
   ['src/app/art.ts', 620],

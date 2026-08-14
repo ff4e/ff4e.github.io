@@ -33,7 +33,7 @@ import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
 import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
 import { isTransient } from '../render/assetFetch.js';
-import { hideArtFailure, showArtFailure } from './artFailure.js';
+import { artFailureShown, hideArtFailure, showArtFailure } from './artFailure.js';
 // Re-exported so the one other consumer of the decode helpers (main.ts's leg-story art)
 // keeps its existing import. They live in enhancedLoad.ts now, with the loaders.
 export { decodePngResponse, isPngResponse } from './enhancedLoad.js';
@@ -192,21 +192,30 @@ export function roomArtPending(): boolean {
  * The `ai` tier does not fetch this on room entry — that was 0.3-2.1 MB per room, on
  * every entry, for art the AI compositor does not use. But the tier is not quite
  * self-sufficient: framePainter falls back to the enhanced compositor for a whole frame
- * whenever aiRoomRenderActive() says no, which is the gspec=42 ZX render, any frame with
- * a cheat's hooks / sprites / film effects running, a subtitle that must be baked in,
- * and any room whose AI art is missing or failed to load.
+ * whenever aiRoomRenderActive() says no — a cheat's hooks / sprites / film effects
+ * running, or a subtitle that must be baked in because no subtitle font loaded. (The
+ * gspec=42 ZX render used to be on that list and is not any more; it composites at ×S.)
  *
  * Each of those is a DISCRETE event rather than a steady state, so paying the fetch at
  * the moment it happens is the right shape — the same argument the map/panel/credits AI
  * assets already make. The cost is that those frames draw 1998 bitmaps until it lands;
  * that is the trade, and it is one room's sprites, not a room's background.
  *
- * Safe to call every frame: ensureEnhancedArt joins an in-flight load and returns
- * immediately on a cached one, so this cannot become a request per frame on a flaky
- * link (the trap beginMapArt documents).
+ * ── Why the failure-screen guard ──────────────────────────────────────────────
+ * This is called from the DRAW PATH, once per frame, and it used to be safe on the
+ * strength of "a cached result returns immediately" — which stopped being true when
+ * failures deliberately stopped being cached. A failed load retracts its own
+ * `enhancedLoads` entry, so without this guard the next frame starts a fresh one, for
+ * ever: precisely the request-per-frame trap `beginMapArt` documents, arrived at by a
+ * change three commits away from here.
+ *
+ * The screen being up IS the guard, and it is the honest one: the player has been asked,
+ * and the button they were given is the retry. Anything automatic underneath it would be
+ * a second retry loop competing with theirs.
  */
 export function ensureEnhancedFallback(): void {
   if (host.graphics !== 'ai' || !curNum) return;
+  if (artFailureShown()) return;
   void ensureEnhancedArt(curNum);
 }
 /**
