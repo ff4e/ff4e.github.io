@@ -13,8 +13,8 @@
  *
  * ── The case this must not break ──────────────────────────────────────────────
  * A 404 here is usually correct: no `ai.json` means the room has no AI art and falls
- * back BY DESIGN. So the second half enters a room whose AI art is legitimately absent
- * and asserts it is asked for ONCE — the trap being a retry policy that cannot tell
+ * back BY DESIGN. So the second half serves a 404 for a room's manifest and asserts it is
+ * asked for ONCE — the trap being a retry policy that cannot tell
  * "missing" from "failed" and makes every fallback room pay three requests plus backoff
  * on every entry, for ever.
  *
@@ -24,7 +24,14 @@
 import { selectRoom, waitFrames, withApp } from './ui-lib.mjs';
 
 const SCHODY = 5; // has AI art; the room the blip hits
-const SCORE = 72; // the one room of the 72 with no AI art at all — the 404 that is correct
+// The room whose AI art is made ABSENT, by answering 404 for its manifest.
+//
+// This used to be SCORE, which shipped with no AI art at all — until it was staged
+// (tools/stage-score.ts) and all 72 rooms had it. Serving the 404 ourselves is the
+// better test regardless: it says exactly what is being asserted instead of depending on
+// a room happening to lack art, and it cannot rot the next time the tier gains coverage.
+const ABSENT = 6; // KOSTE
+const ABSENT_NAME = 'KOSTE';
 
 await withApp(
   async ({ p, expect, allowed }) => {
@@ -61,16 +68,20 @@ await withApp(
     );
 
     // === A room with no AI art is asked ONCE, not four times ===
+    // 404 is an ANSWER — "there is nothing here" — and answers are never retried. This is
+    // the case a naive retry policy would make every fallback room pay for, on every
+    // entry, for ever.
+    await p.route(`**/enhanced-ai/${ABSENT_NAME}/ai.json`, (r) => r.fulfill({ status: 404, body: '' }));
     urls.length = 0;
-    await selectRoom(p, SCORE, 1);
+    await selectRoom(p, ABSENT, 1);
     await p.waitForFunction(() => !window.__ff.roomArtPending()).catch(() => {});
     await waitFrames(p, 30);
 
-    const n = asked('/enhanced-ai/SCORE/ai.json');
+    const n = asked(`/enhanced-ai/${ABSENT_NAME}/ai.json`);
     expect(n === 1, `absent art is requested once, not retried (saw ${n})`);
     expect(
       (await p.evaluate(() => window.__ff.aiRoomLoaded())) === false,
-      'absent art: SCORE still has none, as it always has',
+      `absent art: ${ABSENT_NAME} draws one tier down, as a room with no AI art always has`,
     );
     expect(
       (await p.evaluate(() => window.__ff.tierNote())) === 'ok',
