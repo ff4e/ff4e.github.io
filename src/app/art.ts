@@ -284,14 +284,32 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
     // A rejection must not be joined by the NEXT caller — that is the whole point of
     // not remembering a failure. Attached here rather than in the await below because
     // every joiner runs that, and only the originator should retract the entry.
-    pending.catch(() => enhancedLoads.delete(jmeno));
+    // The identity check matters for the same reason `aiRoomCache`'s does: by the time
+    // this runs, a retry may already have installed a REPLACEMENT load under the same
+    // key, and deleting that one would leave two live loads for one room.
+    pending.catch(() => { if (enhancedLoads.get(jmeno) === pending) enhancedLoads.delete(jmeno); });
   }
   try {
     const result = await pending;
     enhancedLoads.delete(jmeno);
     applyEnhanced(num, result);
   } catch (e) {
-    if (!isTransient(e)) throw e;
+    if (!isTransient(e)) {
+      // NOT transient: the server answered, and the answer was unusable — a manifest
+      // with a JSON content-type and a malformed body reaches here as a bare
+      // SyntaxError (assetJson rethrows it unwrapped, on purpose). That is a broken
+      // build, so it is an ABSENCE: remember it and let the room render classic, which
+      // is exactly what loadAiRoom does one tier up.
+      //
+      // Rethrowing instead — as this did — escaped past both the cache write and the
+      // release below, so `enhancedPending` stayed true for ever. `simPaused` then
+      // stopped the game clock, the spinner sat there, and no screen was offered: a
+      // permanently frozen room, recoverable only by reloading the page.
+      console.error(`[art] enhanced art for ${jmeno} is unusable`, e);
+      enhancedCache.set(jmeno, { art: null, objects: [] });
+      applyEnhanced(num, { art: null, objects: [] });
+      return;
+    }
     // Nothing was learned about this room, so nothing is remembered: enhancedCache is
     // untouched and a retry genuinely refetches.
     //
@@ -300,7 +318,14 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
     // stops and offers the retry instead (see artFailure.ts). An outcome for a room
     // that is no longer on screen is dropped: the player has already moved on.
     console.warn(`[art] enhanced art for ${jmeno} did not load`, e);
-    if (curNum === num) raiseArtFailure('room', () => void ensureEnhancedArt(num));
+    // ...and an outcome for a tier that does not PAINT this art is dropped too. The
+    // `classic` tier prefetches the enhanced art purely to warm the cache for a later
+    // switch (roomLoad.ts) and holds nothing for it, so raising a modal there would
+    // obstruct a game that is rendering perfectly from the bundled FFR data — with a
+    // Try again button as its only control, which offline never succeeds.
+    if (curNum === num && host.graphics !== 'classic') {
+      raiseArtFailure('room', () => void ensureEnhancedArt(num));
+    }
   }
 }
 
@@ -456,11 +481,23 @@ async function ensureAiWorldMap(): Promise<void> {
     // Nothing was learned, so the hold STAYS and the player is asked. The retry has to
     // re-arm the one-shot latch too, or beginMapArt would refuse to start a second load.
     console.warn('[art] AI world map did not load', e);
-    held = true;
-    raiseArtFailure('map', () => {
+    // Only while the player is actually looking at the map. This load starts on the map
+    // but OUTLIVES it — Escape launches a room straight out of the 2.36 MB fetch — and a
+    // late failure would otherwise raise "couldn't load the world map" over a room the
+    // player is standing in, whose own art loaded fine, offering a retry for something
+    // they are not looking at. Off the map there is nothing to withhold, so the hold is
+    // released instead and the map is simply the faithful one next time they open it.
+    if (ui.screen === 'map') {
+      held = true;
+      raiseArtFailure('map', () => {
+        aiMapTried = false;
+        beginMapArt();
+      });
+    } else {
+      // Re-armed so returning to the map tries again rather than showing the 1998 map
+      // for the rest of the session on the strength of one blip.
       aiMapTried = false;
-      beginMapArt();
-    });
+    }
   } finally {
     // Released on every exit EXCEPT a transient failure, which is what `held` marks.
     // An ordinary absence still releases here and falls back to the faithful composite:
