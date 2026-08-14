@@ -63,8 +63,19 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // precisely the gap the tripwire exists to close. Low churn today (1 of the last 200
   // commits), so this is a ceiling rather than a concern.
   ['src/app/cheats.ts', 700],
+  // 564. Which room's art is loaded, what has been REMEMBERED about it, and whether the
+  // frame is still holding for it. Budgeted on arrival rather than after growth: it
+  // crossed the 520 tripwire taking on the absent/failed distinction, and two pieces
+  // were split off in the same series rather than landing here — the fetching and
+  // decoding (`enhancedLoad.ts`) and the player-facing note (`tierNote.ts`). What is
+  // left is the state, which is the part that genuinely cannot be split: the caches, the
+  // in-flight maps and the two hold predicates are one another's invariants.
+  ['src/app/art.ts', 620],
   ['src/render/glScreen.ts', 1150],
-  ['src/render/roomAi.ts', 1120],
+  // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
+  // outcomes where there were two, plus closeDecoded so a rejected load does not leak
+  // the bitmaps it had already decoded — which matters now that such a load is retried.
+  ['src/render/roomAi.ts', 1200],
   ['src/core/room.ts', 1060],
   // 800 -> 830 for the gspec=42 ZX stripes: BG_FS gains `uZx` + a band texture, and the
   // two entry points share one `bgPass`. The stripes are the LAST gspec the `ai` tier

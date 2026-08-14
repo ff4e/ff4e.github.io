@@ -124,9 +124,18 @@ export async function withApp(fn, opts = {}) {
   // being provoked is usually the assertion: test-parchment injects a throw into the room
   // launch and asserts the game recovers, and the recovery path logs. A flag would have
   // hidden a genuine second error thrown alongside it.
-  const allowed = (t) => opts.allowErrors instanceof RegExp && opts.allowErrors.test(t);
-  p.on('console', (m) => m.type() === 'error' && !allowed(m.text()) && errs.push(m.text()));
-  p.on('pageerror', (e) => !allowed(e.message) && errs.push('PE:' + e.message));
+  // Rather than DROPPING matching errors, divert them to `allowed` and hand that to the
+  // probe, which then has to ASSERT it saw them. That makes the exemption stronger than
+  // the default, not weaker: an allowed error that never arrives is now a failure —
+  // which catches the case where the provocation silently stopped working and the probe
+  // was passing on an unbroken game. Errors outside the allowlist still fail as usual.
+  const allowed = [];
+  const keep = (t) => {
+    if (opts.allowErrors instanceof RegExp && opts.allowErrors.test(t)) allowed.push(t);
+    else errs.push(t);
+  };
+  p.on('console', (m) => m.type() === 'error' && keep(m.text()));
+  p.on('pageerror', (e) => keep('PE:' + e.message));
   // By default, boot as a returning player (skip the first-run intro): the intro
   // is a full-screen overlay that swallows input, so tests that drive keys/mouse
   // must not sit behind it. The intro test opts into first-run via { firstRun: true }.
@@ -192,7 +201,7 @@ export async function withApp(fn, opts = {}) {
     // way it is reported with the console/page errors collected above rather than
     // escaping as an unhandled rejection with no context.
     await gotoApp(p);
-    await fn({ p, expect });
+    await fn({ p, expect, allowed });
   } catch (e) {
     ok = false;
     console.log('  FAIL threw: ' + (e?.message ?? e) + failureSite(e));

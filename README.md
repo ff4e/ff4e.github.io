@@ -528,7 +528,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `loadingUi.ts` | 2.3 k | The loading overlay, the fatal screen and the resize handler. |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
-| `enhancedLoad.ts` | 1.4 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
+| `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
+| `tierNote.ts` | 0.7 k | The "you are not seeing the tier you chose" note: shown for a FAILED load, never for art that is simply absent. |
 | `glPlumbing.ts` | 4.2 k | The per-tier art sources and the two WebGL compositors. |
 | `audioEngine.ts` | 0.3 k | Who owns the `AudioEngine`. |
 | `renderSettings.ts` | 2.0 k | What the game is drawn WITH — the four persisted choices: art tier, backend, idle-FPS saver, developer pane. |
@@ -553,6 +554,8 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | File | tok | What it is |
 | --- | --- | --- |
 | **The two seams everything else hangs off** | | |
+| `assetFetch.ts` | 1.4 k | What "this asset did not load" MEANS: absent (an answer, cache it) vs failed (no answer, never cache it). Every caching decision in the art path consults it. |
+| `enhancedObjects.ts` | 1.1 k | One room's enhanced object sprites, whole-object-or-nothing — the frame list is indexed by animation phase, so a gap is the wrong picture, not a missing one. |
 | `zxBands.ts` | 0.9 k | The gspec=42 ZX loading stripes: the band height per frame and the colour per native row. Shared by the faithful and `ai` renderers, because generating the sequence ADVANCES it. |
 | `roomWalk.ts` | 2.0 k | ONE traversal deciding what is drawn, in what order, at what coordinates — a port of `TRoom.Priprav`. Replayed by both the faithful and the `ai` renderers, so a rule fixed here is fixed for both. |
 | `artSource.ts` | 1.2 k | The pluggable seam deciding *what colour / which pixels*. The only thing that differs between the classic and enhanced looks. |
