@@ -233,7 +233,7 @@ export function updateRoomSubOverlay(useVecSubs: boolean, cs: number, xform?: st
     if (useVecSubs && subs?.active && room) {
       const g = roomGeometry(room);
       clearSubOverlay(); // the canvas overlay is not the one showing them now
-      syncDomSubtitles(subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight);
+      syncDomSubtitles(subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight, xform);
     } else {
       clearDomSubtitles();
       // The canvas overlay may still hold the previous renderer's paint — switching

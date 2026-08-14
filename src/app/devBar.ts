@@ -118,7 +118,8 @@ export function initDevBar(h: DevBarHost): void {
     const el = idleDirtyToggle;
     el.checked = renderOnDirty;
     el.addEventListener('change', () => setRenderOnDirty(el.checked));
-  }  if (winRoomBtn) {
+  }
+  if (winRoomBtn) {
     const el = winRoomBtn;
     el.addEventListener('click', () => {
       devWinRoom();

@@ -78,7 +78,6 @@ export const VECTOR_GEOM = Object.freeze({
   border: BORDERTITLE,
 });
 
-
 interface TitleLine {
   obsah: string;
   barva: string;

@@ -319,18 +319,24 @@ await withApp(async ({ p, expect }) => {
       `${aiDom.w.toFixed(1)}px vs ${enhDom.w.toFixed(1)}px)`,
   );
   // The row pitch and the wave ride on the same transform, so a scale applied about the
-  // wrong origin shows up here as the line drifting off its bottom edge.
+  // wrong origin shows up here as the line drifting off its bottom edge. The target is
+  // NOT equality: scaling about the container's bottom edge pulls the line's gap to that
+  // edge in by the same factor. Equality with a whole-line-height tolerance, which is
+  // what stood here first, would also have admitted a transform-origin of 50% 90%.
   expect(
-    Math.abs(aiDom.bottom - enhDom.bottom) < enhDom.h,
-    `[ai/dom] the DOM subtitle sits on the same bottom edge (${aiDom.bottom.toFixed(1)}px vs ${enhDom.bottom.toFixed(1)}px from the bottom)`,
+    Math.abs(aiDom.bottom - want * enhDom.bottom) < 0.35 * enhDom.h,
+    `[ai/dom] the DOM subtitle is anchored to the container's bottom edge ` +
+      `(${aiDom.bottom.toFixed(1)}px from the bottom, want ~${(want * enhDom.bottom).toFixed(1)}px)`,
   );
   expect(
     Math.abs(aiDom.cx / aiDom.frameW - enhDom.cx / enhDom.frameW) < 0.04,
     `[ai/dom] the DOM subtitle is still centred (centre ${(aiDom.cx / aiDom.frameW).toFixed(3)} vs ${(enhDom.cx / enhDom.frameW).toFixed(3)} of the room)`,
   );
-  // The two renderers must also agree with EACH OTHER about the ai tier's size, or the
-  // change is a silent presentation change rather than a change of painter. Compared as
-  // a ratio-of-ratios, so the canvas backing-store scale divides out.
+  // Both renderers must shrink the line by the SAME factor, or the tier switch becomes a
+  // silent presentation change rather than a change of painter. Compared as a
+  // ratio-of-ratios, so the canvas backing-store scale divides out — which also means it
+  // cannot see an error common to every DOM line. That one is caught in test-subtitles,
+  // by measuring the DOM path against the canvas path in the same tier.
   expect(
     Math.abs(domRatio - aiInk.w / enhInk.w) < 0.12,
     `[ai] both renderers shrink the line by the same factor (dom ${domRatio.toFixed(2)}, canvas ${(aiInk.w / enhInk.w).toFixed(2)})`,

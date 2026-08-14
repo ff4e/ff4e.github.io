@@ -42,6 +42,8 @@ interface DomLine {
 let host: HTMLDivElement | null = null;
 let lines = new Map<string, DomLine>();
 let lastFont = '';
+/** The room's own transform (shake / shove), so this layer moves with it. */
+let lastXform = '';
 /** Distance from a line box's top to the text baseline, for the current font. */
 let baselineInset = 0;
 /** Height of a glyph's line box, for the current font — the gradient is placed in it. */
@@ -58,13 +60,24 @@ function domSubsSupported(): boolean {
   return typeof Element !== 'undefined' && typeof Element.prototype.animate === 'function';
 }
 
-/** The persisted preference. Absent — the normal case — means `auto`. */
+/**
+ * The persisted preference. Absent — the normal case — means `auto`.
+ *
+ * Cached, because `domSubsEnabled()` asks for it once per frame and this whole change
+ * exists to take work off the main thread; a synchronous `localStorage` read is a poor
+ * thing to add to the path that paints the animation. Only the STORAGE read is cached —
+ * the art tier is read live in `domSubsEnabled`, so switching tier still takes effect on
+ * the next frame, which is what makes `auto` work at all.
+ */
+let prefCache: SubRendererPref | null = null;
 export function subRendererPref(): SubRendererPref {
+  if (prefCache !== null) return prefCache;
   try {
-    return asSubRendererPref(localStorage.getItem('ff.subRenderer'));
+    prefCache = asSubRendererPref(localStorage.getItem('ff.subRenderer'));
   } catch {
-    return 'auto';
+    prefCache = 'auto';
   }
+  return prefCache;
 }
 
 /** Is the DOM renderer the one painting right now? Asked once per frame. */
@@ -74,6 +87,7 @@ export function domSubsEnabled(): boolean {
 
 /** Persist the preference. Low-level: use `selectSubRenderer` unless you own the overlay. */
 export function setSubRendererPref(pref: SubRendererPref): void {
+  prefCache = pref;
   try {
     if (pref === 'auto') localStorage.removeItem('ff.subRenderer');
     else localStorage.setItem('ff.subRenderer', pref);
@@ -117,6 +131,7 @@ export function clearDomSubtitles(): void {
     host = null;
   }
   lastFont = '';
+  lastXform = '';
 }
 
 /**
@@ -138,6 +153,24 @@ function measureBaseline(font: string): { inset: number; height: number } {
   const inset = marker.getBoundingClientRect().bottom - box.top;
   probe.remove();
   return { inset, height: box.height };
+}
+
+/**
+ * Width of a line at a given font, measured the way the canvas path measures it.
+ *
+ * Kerning and ligatures are off because `drawVector` advances glyph by glyph, so a
+ * kerned measurement here would disagree with what actually gets drawn there.
+ */
+function measureTextWidth(font: string, text: string): number {
+  const probe = document.createElement('span');
+  probe.style.cssText =
+    `position:absolute;visibility:hidden;white-space:pre;font:${font};` +
+    `font-kerning:none;font-variant-ligatures:none`;
+  probe.textContent = text;
+  document.body.appendChild(probe);
+  const w = probe.getBoundingClientRect().width;
+  probe.remove();
+  return w;
 }
 
 /** The damped-cosine wave, as keyframes the compositor can run on its own. */
@@ -166,12 +199,17 @@ export function syncDomSubtitles(
   scale: number,
   family: string,
   weight: string | number,
+  xform?: string,
 ): void {
   const { w: screenW, h: screenH } = sys.vectorScreen;
   if (!host) {
     host = document.createElement('div');
     host.id = 'domsubs';
-    host.style.cssText = 'position:absolute;left:0;top:0;pointer-events:none;overflow:hidden';
+    host.style.cssText =
+      // The 1px transparent border matches #screen and #subs (dom.ts): they are all
+      // absolutely positioned in the same wrapper, so without it this layer sits 1px
+      // up and to the left of the canvas the text is supposed to line up with.
+      'position:absolute;left:0;top:0;border:1px solid transparent;pointer-events:none;overflow:hidden';
     document.getElementById('subs')?.parentElement?.appendChild(host);
   }
   host.style.width = `${cssW}px`;
@@ -181,7 +219,16 @@ export function syncDomSubtitles(
   // scales the row pitch and the wave amplitude with the glyphs, exactly as that does.
   const tier = graphics === 'ai' ? aiSubScale : 1;
   host.style.transformOrigin = '50% 100%';
-  host.style.transform = tier === 1 ? '' : `scale(${tier})`;
+  // The room shakes (trepat, ±10 native px — fired by the very chatter scripts that put
+  // a subtitle up) and shoves (screenShoveX). The canvas overlay rides that by taking
+  // the room's transform; this layer has to as well, or the room jitters under text
+  // that stands still. Kept when the caller passes nothing, exactly as the canvas path
+  // keeps the last one: no repaint means the shake cannot have changed either.
+  if (xform !== undefined) lastXform = xform;
+  const scaleT = tier === 1 ? '' : `scale(${tier})`;
+  // Translate first, then scale: the shake moves the whole layer, and must not itself
+  // be scaled down by the tier's transform.
+  host.style.transform = lastXform ? `${lastXform} ${scaleT}`.trim() : scaleT;
 
   const fontPx = VECTOR_GEOM.fontPx * scale;
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
@@ -197,16 +244,33 @@ export function syncDomSubtitles(
   for (const t of sys.debugLines()) {
     const key = `${t.startcount}|${t.barva}|${t.obsah}`;
     want.add(key);
+    // Fit the line inside the room the way vectorLayout does: it shrinks the font
+    // rather than wrapping, and a line that overflowed here was clipped by the host's
+    // bounds, losing its last word. Measured on the TEXT and BEFORE the element is
+    // built, because everything below is derived from the size the line ends up at —
+    // the baseline offset in `y`, the stroke width, and the bevel stops. Shrinking
+    // afterwards (by writing fontSize onto a finished element) left all three sized for
+    // a font the line was no longer drawn in.
+    const maxCss = (screenW - VECTOR_GEOM.border * 2) * scale;
+    const natural = measureTextWidth(font, t.obsah);
+    const fit = natural > maxCss && natural > 0 ? maxCss / natural : 1;
+    // A scalable font's baseline inset and line-box height scale with its size, so the
+    // measured pair can be scaled rather than re-measured (which would be a second
+    // forced layout per line).
+    const fs = fontPx * fit;
+    const inset = baselineInset * fit;
+    const boxH = boxHeight * fit;
+    const lineFont = fit === 1 ? font : `${weight} ${fs.toFixed(2)}px ${family}`;
     // Where this line sits right now. Computed before the element exists, because it has
     // to be part of the element's FIRST style: a `transition` plus a transform written
     // after insertion animates from the untransformed position — the top of the game box
     // — so a new line visibly fell from the ceiling before starting its wave.
-    const y = (t.ys * VECTOR_GEOM.scale + screenH + VECTOR_GEOM.baselineOff) * scale - baselineInset;
+    const y = (t.ys * VECTOR_GEOM.scale + screenH + VECTOR_GEOM.baselineOff) * scale - inset;
     let line = lines.get(key);
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
-        `position:absolute;left:0;right:0;text-align:center;white-space:pre;font:${font};` +
+        `position:absolute;left:0;right:0;text-align:center;white-space:pre;font:${lineFont};` +
         `line-height:normal;transform:translateY(${y.toFixed(2)}px);` +
         `transition:transform 80ms linear;will-change:transform`;
       const [r, g, b] = t.rgb;
@@ -219,8 +283,8 @@ export function syncDomSubtitles(
       // it over the whole box (which is what a bare `linear-gradient` does) puts the
       // light end above the glyph and lands it in the wrong part of the ramp, which is
       // what made the text look washed out and flat.
-      const gTop = ((baselineInset - fontPx * 0.72) / boxHeight) * 100;
-      const gBottom = ((baselineInset + fontPx * 0.1) / boxHeight) * 100;
+      const gTop = ((inset - fs * 0.72) / boxH) * 100;
+      const gBottom = ((inset + fs * 0.1) / boxH) * 100;
       const bevel =
         `linear-gradient(to bottom,${top} 0%,${top} ${gTop.toFixed(2)}%,` +
         `${bottom} ${gBottom.toFixed(2)}%,${bottom} 100%)`;
@@ -228,7 +292,7 @@ export function syncDomSubtitles(
       // path, so it reaches fs*0.08 outwards. -webkit-text-stroke is the same thing —
       // but it paints OVER the fill in Chromium (which honours no paint-order on HTML
       // text), so the stroke goes on its own layer BEHIND the fill instead.
-      const strokeW = fontPx * 0.16;
+      const strokeW = fs * 0.16;
       // The line's own age, so a line already part-way through its wave starts there
       // rather than replaying it from the beginning.
       const ageMs = ((count - t.startcount) / TICKS_PER_SEC) * 1000;
@@ -263,15 +327,6 @@ export function syncDomSubtitles(
         sp.animate(frames, { duration: durMs, delay: i * stepMs - ageMs, fill: 'forwards', easing: 'linear' });
       });
       host.appendChild(el);
-      // Fit the line inside the room like vectorLayout does: it shrinks the font rather
-      // than wrapping or overflowing, and a line that overflowed here was clipped by the
-      // host's own bounds — losing the last word of a long line.
-      const maxCss = (screenW - VECTOR_GEOM.border * 2) * scale;
-      const natural = el.scrollWidth;
-      if (natural > maxCss) {
-        const shrunk = Math.max(8, (fontPx * maxCss) / natural);
-        el.style.fontSize = `${shrunk.toFixed(2)}px`;
-      }
       line = { el, spans, y };
       lines.set(key, line);
     }
