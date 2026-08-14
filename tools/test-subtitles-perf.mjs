@@ -54,6 +54,11 @@ async function sample(p, ms) {
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
+  // This probe's subject is the CANVAS overlay's repaint gate, and the vector tiers now
+  // paint DOM text by default, so the renderer has to be asked for explicitly or there
+  // would be no overlay repaints to count. Still a live path: it is the fallback when
+  // the browser cannot run a compositor animation.
+  await p.evaluate(() => window.__ff.setSubRenderer('canvas'));
   await p.waitForFunction(() => window.__ff.subFontReady());
   // Turn the idle saver off so the room really does repaint on every rAF: that is
   // the situation the gate has to survive (it is also what happens with the saver
@@ -113,4 +118,5 @@ await withApp(async ({ p, expect }) => {
     `settled: a static line is repainted zero times (${settled.paints} repaints over ${settled.frames} frames)`,
   );
   expect(await p.evaluate(() => window.__ff.subsActive()), 'settled: the line is still on screen');
+  await p.evaluate(() => window.__ff.setSubRenderer('auto')); // leave no persisted choice
 }, { cpu: true });

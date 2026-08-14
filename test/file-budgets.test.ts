@@ -53,7 +53,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
   // `main.ts` whole because splitting the demo from the movies would have split the
   // queue that drives both. Worth revisiting if the AI frame cache grows.
-  ['src/app/cutscene.ts', 560],
+  //
+  // Raised 560 -> 566 when the captions moved to the DOM renderer: the caption block now
+  // carries both painters (which one draws follows the same choice the room's subtitles
+  // follow) while the canvas overlay is still the fallback. This is a peak, not a trend
+  // — deleting the overlay removes `updateCutsceneSubOverlay`'s canvas branch and the
+  // signature/gate bookkeeping with it, and this budget should ratchet back below 540
+  // in that change rather than stay here.
+  ['src/app/cutscene.ts', 566],
   // 1 625. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does.
   ['src/app/debugHooks.ts', 1700],

@@ -38,32 +38,35 @@ await withApp(async ({ p, expect }) => {
     .catch(() => {});
   await tickSleep(p, 3);
 
-  // Idle (no subtitle): the overlay does nothing / stays clear.
+  // Idle (no subtitle): nothing is drawn anywhere.
   expect((await overlayPixels(p)) === 0, 'enhanced idle: overlay is empty');
+  expect((await domLines(p)) === 0, 'enhanced idle: no DOM text');
 
-  // A subtitle appears on the overlay (not baked into the frame).
+  // enhanced: real DOM text, and the canvas overlay left alone.
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
   await tickSleep(p, 5); // let the wave-in run (it advances on the game tick)
   expect(await p.evaluate(() => window.__ff.subsActive()), 'enhanced: subtitle active');
-  expect((await overlayPixels(p)) > 0, 'enhanced: subtitle painted on the #subs overlay');
+  expect((await domLines(p)) > 0, 'enhanced: subtitle painted as real DOM text');
+  expect((await overlayPixels(p)) === 0, 'enhanced: the overlay canvas stays empty');
 
-  // Classic: the overlay is cleared and stays empty; subtitles bake into the frame.
+  // Classic is the third renderer and the one this change never touches: it bakes its
+  // subtitles into the pixel frame, so neither layer shows anything.
   await p.evaluate(() => window.__ff.setGraphics('classic'));
   await tickSleep(p, 3);
-  expect((await overlayPixels(p)) === 0, 'classic: overlay cleared on switch');
+  expect((await domLines(p)) === 0, 'classic: the DOM layer is cleared on switch');
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
   await tickSleep(p, 5);
   expect(await p.evaluate(() => window.__ff.subsActive()), 'classic: subtitle active');
   expect((await overlayPixels(p)) === 0, 'classic: overlay stays empty (subs baked into frame)');
+  expect((await domLines(p)) === 0, 'classic: no DOM text either (subs baked into frame)');
 
-  // The ai tier is the one this renderer shipped for: real DOM text, and the overlay
-  // canvas left alone. Note the tier is switched with a line ALREADY on screen (the
-  // classic one above is still up), which is the handover `auto` makes possible.
+  // ai: same renderer as enhanced. Switched with a line ALREADY on screen, because the
+  // tier change still resizes and rescales the layer even though it no longer swaps it.
   await p.evaluate(() => window.__ff.setGraphics('ai'));
   await tickSleep(p, 3);
   expect(
     (await p.evaluate(() => window.__ff.subRenderer())) === 'dom',
-    'ai: the tier selects the DOM renderer by default (no override set)',
+    'ai: the DOM renderer is the default (no override set)',
   );
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
   await tickSleep(p, 5);
@@ -71,24 +74,17 @@ await withApp(async ({ p, expect }) => {
   expect((await domLines(p)) > 0, 'ai: subtitle painted as real DOM text');
   expect((await overlayPixels(p)) === 0, 'ai: the overlay canvas stays empty');
 
-  // Leaving the tier hands back cleanly. This is the defect the handover would cause:
-  // nothing calls a renderer setter here, so without the frame path noticing the swap
-  // the abandoned DOM text would sit on top of the canvas overlay painting underneath.
-  await p.evaluate(() => window.__ff.setGraphics('enhanced'));
-  await tickSleep(p, 5);
-  expect((await domLines(p)) === 0, 'leaving ai mid-line takes the DOM text down');
-  expect((await overlayPixels(p)) > 0, 'leaving ai mid-line hands the line back to the overlay');
-
-  // An explicit override outranks the tier, both ways — this is what probes and anyone
-  // A/B-ing the two renderers by eye depend on.
-  await p.evaluate(() => window.__ff.setSubRenderer('dom'));
-  await tickSleep(p, 5);
-  expect((await domLines(p)) > 0, "enhanced + 'dom' override: DOM text wins over the tier");
-  await p.evaluate(() => window.__ff.setGraphics('ai'));
+  // The handover, which is now driven by the PREFERENCE rather than by the tier. Both
+  // directions, mid-line: whichever renderer stands down has to take its own output off
+  // the screen, or the two are visible at once.
   await p.evaluate(() => window.__ff.setSubRenderer('canvas'));
   await tickSleep(p, 5);
-  expect((await domLines(p)) === 0, "ai + 'canvas' override: no DOM text");
-  expect((await overlayPixels(p)) > 0, "ai + 'canvas' override: the overlay paints instead");
+  expect((await domLines(p)) === 0, "switching to 'canvas' mid-line takes the DOM text down");
+  expect((await overlayPixels(p)) > 0, "switching to 'canvas' mid-line hands the line to the overlay");
+  await p.evaluate(() => window.__ff.setSubRenderer('dom'));
+  await tickSleep(p, 5);
+  expect((await domLines(p)) > 0, "switching back to 'dom' mid-line puts the text back");
+  expect((await overlayPixels(p)) === 0, "switching back to 'dom' mid-line clears the overlay");
 
   // ── the DOM line must be the size the canvas draws it ──
   //
