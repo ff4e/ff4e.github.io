@@ -3,7 +3,7 @@
  *
  * Pure by design, and separate for the reason the repo's economy rules give: this is the
  * arithmetic that decides where a subtitle actually appears, and here it costs ~2.5 ms
- * unit tests to pin instead of a ~7.4 s browser probe. Measuring text needs a DOM (the
+ * unit tests to pin instead of a ~10 s browser probe. Measuring text needs a DOM (the
  * renderer uses a hidden span), so nothing in this file may touch one — a caller passes a
  * measurement in, which is also what makes the rules testable in `node`.
  *

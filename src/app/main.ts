@@ -1858,13 +1858,13 @@ initBoot({
 await runBoot();
 
 // Debug hook for headless verification.
-// The debug/test interface (window.__ff). Its 215 entries live in debugHooks.ts;
+// The debug/test interface (window.__ff). The entries themselves live in debugHooks.ts;
 // what they need of the running game is handed over here, as getters, with setters
-// for the seven values probes deliberately write. Assigned to window HERE, at the
+// for the few values probes deliberately write. Assigned to window HERE, at the
 // end of boot, because tools/ui-lib.mjs waits on window.__ff as the signal that boot
 // has completed.
 
-//#region `window.__ff` host | anchors: debugHooks | The 112-member host the debug hooks read the game through: 105 getters, plus 7 setters for the values probes deliberately write. State that has an owning module is imported there directly instead. The hooks themselves are in `debugHooks.ts`.
+//#region `window.__ff` host | anchors: debugHooks | The host the debug hooks read the game through: every member is a getter, and a few also have a setter, for the values probes deliberately write. State that has an owning module is imported there directly instead. The hooks themselves are in `debugHooks.ts`.
 (window as unknown as { __ff: unknown }).__ff = debugHooks({
   get O_OPTIONS() {
     return O_OPTIONS;
@@ -2152,9 +2152,6 @@ await runBoot();
   },
   get subFontIdx() {
     return subFontIdx;
-  },
-  get subFontReady() {
-    return subFontReady;
   },
   get subFontWeight() {
     return subFontWeight;

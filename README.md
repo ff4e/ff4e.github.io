@@ -315,8 +315,9 @@ pick, the host's lip-sync and blink — so the one swap covers all of them.
 
 `tools/run-ui-tests.mjs` builds the app (`vite build`, ~2s), serves the result on a port it
 picks for that run, and runs the probes **concurrently**. It used to run them one at a time,
-each in its own cold Chromium, which took ~15 minutes; it now takes ~3, with the same probes and
-the same assertions.
+each in its own cold Chromium, which took ~15 minutes; the pool is what turns roughly half an
+hour of probe time into **~5–6 minutes** of wall clock, with the same probes and the same
+assertions.
 
 - **A fresh server on a per-run port.** The runner always serves the build it just made and
   never adopts a server that happens to be listening (reusing a stale dev server on 5173 once
@@ -376,7 +377,7 @@ the same assertions.
   the `setBusy` primitive, the **`StdSmrt` death commentary** (Depth-gated survivor lines, the +8-tick fire
   window), and a corpus test that parses all 72 real rooms and checks their load settle (auto-skips when the
   game data isn't present; point `$FFNG_DATA` at the extracted `MAINDIR` to run it).
-- **`npm run test:ui`** (`tools/test-*.mjs`, 68 probes): the HUD (render + hit-test + button dispatch), the
+- **`npm run test:ui`** (`tools/test-*.mjs`, ~90 probes): the HUD (render + hit-test + button dispatch), the
   world map (compositing + node hit-test + branch unlock + navigation), the map/room **audio lifecycle**
   (menu music, `KillSnd` + dialogue-clear on leaving), per-room music, the fixed-timestep clock + dialogue
   pacing, lip-sync heads, save/restart determinism, the faithful **input map** (arrow keys move the active
@@ -452,7 +453,7 @@ rules; `AGENTS.md` has the things that cost people time to find out.
   only the writes go through a `setX`.
 - `src/app/persist.ts` — the localStorage save store (solved rooms, scores, records, play time).
 - `src/app/cheats.ts` — the typed cheat codes, the sprite/film effects, and the Tetris minigame.
-- `src/app/debugHooks.ts` — the `window.__ff` test interface all 86 UI probes read.
+- `src/app/debugHooks.ts` — the `window.__ff` test interface every UI probe reads.
 - `src/app/glPlumbing.ts` — the per-tier art sources, the WebGL compositors, and the parity probes.
 - `src/app/art.ts` — enhanced/`ai` art loading, the room art cache, and the anti-flash hold predicates.
 - `src/data/binReader.ts` — little-endian sequential reader modelling Pascal `blockread`.
@@ -578,7 +579,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `stageGeometry.ts` | 2.2 k | How big the game is drawn, and the constants the simulation is timed by. |
 | `cheats.ts` | 6.2 k | The typed codes, the effects they switch on, and the Tetris minigame. |
 | **Development** | | |
-| `debugHooks.ts` | 18.6 k | `window.__ff`, the debug/test interface the 86 UI probes drive the game through. |
+| `debugHooks.ts` | 18.6 k | `window.__ff`, the debug/test interface the UI probes drive the game through. |
 | `devBar.ts` | 1.4 k | The developer bar, and the relayout watchers. |
 | `feedback.ts` | 2.9 k | The player feedback affordance and form. |
 

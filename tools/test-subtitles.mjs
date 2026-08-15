@@ -2,6 +2,7 @@
  * UI test: each art tier's subtitles are painted the way that tier paints them.
  *  - `enhanced` and `ai` paint real DOM text (#domsubs).
  *  - `classic` bakes them into the pixel frame, so nothing appears in the DOM at all.
+ *  - ANY tier bakes them when no subtitle font loaded — the one fallback left.
  * Also guards the idle-skip (no DOM text when no subtitle is showing), and a tier switch
  * with a line already up: the renderer does not change, but the room's box and the tier's
  * own scale do, so the layer has to follow both rather than be left as it was. Finally,
@@ -89,6 +90,62 @@ await withApp(async ({ p, expect }) => {
   const backInAi = await layerBox();
   expect((await domLines(p)) > 0, 'and survives switching back');
   expect(/scale\(/.test(backInAi?.transform ?? ''), `[ai] the shrink comes back with the tier (transform "${backInAi?.transform}")`);
+
+  // ── the font-failure fallback ──
+  //
+  // `useVecSubs` is `enhancedArtActive() && subs !== null && subFontReady` (framePainter),
+  // so a browser that loads none of the bundled faces bakes its subtitles in EVERY tier,
+  // with the game's own bitmap font. That is the only fallback the vector path has left:
+  // the Web Animations one was deleted with the canvas renderer, on the grounds that no
+  // engine able to parse the ES2022 bundle lacks the API. This one is real, and until now
+  // nothing reached it — `setSubFontReady` had no hook, so no probe could ask for it.
+  //
+  // Asserted in both directions on the SAME line, which is what stops it passing for the
+  // wrong reason: with the font marked missing the line must still be live but absent
+  // from the DOM (not simply dropped), and turning the font back on must bring it back
+  // (so the gate is what moved it, not a subtitle system left broken by the flag).
+  //
+  // The `ai` pass is NOT the `enhanced` pass again. `useVecSubs` is the same boolean in
+  // both, so on its own the second iteration would re-assert the first one's proposition
+  // and buy nothing. What is ai-only is the knock-on: a baked line cannot be composited
+  // by the hi-res AI compositor, so `bakedSubsNeeded` pulls that whole path out of the
+  // frame for as long as the line is up (art.ts -> aiRoomGateAllows, roomAi.ts). That
+  // wiring is invisible to `roomAi`'s unit tests, which cover the RULE and not what is
+  // fed into it, and it costs no extra game ticks to check here.
+  for (const tier of ['enhanced', 'ai']) {
+    await p.evaluate((t) => window.__ff.setGraphics(t), tier);
+    await p.evaluate(() => window.__ff.clearSubtitles());
+    await tickSleep(p, 2);
+    // The ai tier has to be actually compositing before "it stops" can mean anything.
+    // Waited for rather than assumed: the tier switch has to fetch the room's AI art.
+    if (tier === 'ai') {
+      await p.waitForFunction(() => window.__ff.aiRoomActive()).catch(() => {});
+      expect(await p.evaluate(() => window.__ff.aiRoomActive()), '[ai] the tier is compositing before the font fails');
+    }
+    await p.evaluate(() => window.__ff.subFontReady(false));
+    await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
+    await tickSleep(p, 5);
+    expect(
+      await p.evaluate(() => window.__ff.subsActive()),
+      `[${tier}] with no subtitle font the line is still being said`,
+    );
+    expect((await domLines(p)) === 0, `[${tier}] with no subtitle font nothing is drawn as DOM text (baked instead)`);
+    if (tier === 'ai') {
+      expect(
+        (await p.evaluate(() => window.__ff.aiRoomActive())) === false,
+        '[ai] a baked line takes the hi-res compositor out of the frame (bakedSubsNeeded)',
+      );
+    }
+
+    await p.evaluate(() => window.__ff.subFontReady(true));
+    await tickSleep(p, 5);
+    expect((await domLines(p)) > 0, `[${tier}] the same line comes back as DOM text once a font is available`);
+    if (tier === 'ai') {
+      expect(await p.evaluate(() => window.__ff.aiRoomActive()), '[ai] and the compositor comes back with it');
+    }
+  }
+  await p.evaluate(() => window.__ff.clearSubtitles());
+  await tickSleep(p, 2);
 
   // Leaving the ROOM with a line still up must take the DOM text down. No draw branch
   // clears it on its own — a branch paints #screen, and the layer is a sibling element —

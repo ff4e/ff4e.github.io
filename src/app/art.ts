@@ -647,8 +647,8 @@ export function aiRoomRenderActive(r: Room): boolean {
     hookStates: host.hooks.snapshot.map((h) => h.stav),
     frameEffects: frameEffectsActive(),
     spriteCheatsActive: spriteCheats.length > 0,
-    // Mirrors useVecSubs (drawRoom): in this tier enhancedArtActive() is always true, so
-    // the vector overlay is available iff a subtitle font loaded.
+    // Mirrors useVecSubs (framePainter's `draw`): in this tier enhancedArtActive() is
+    // always true, so vector subtitles are available iff a subtitle font loaded.
     bakedSubsNeeded: (host.subs?.active ?? false) && !host.subFontReady,
   });
 }
