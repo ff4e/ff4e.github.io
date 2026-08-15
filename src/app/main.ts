@@ -2153,9 +2153,6 @@ await runBoot();
   get subFontIdx() {
     return subFontIdx;
   },
-  get subFontReady() {
-    return subFontReady;
-  },
   get subFontWeight() {
     return subFontWeight;
   },

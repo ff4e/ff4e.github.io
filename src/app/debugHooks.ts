@@ -96,6 +96,7 @@ import {
 } from './gameState.js';
 import { renderer, setRendererValue } from './renderSettings.js';
 import { ui } from './screenState.js';
+import { setSubFontReady, subFontReady } from './stageState.js';
 import { artFailureShown } from './artFailure.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
@@ -257,7 +258,6 @@ export interface DebugHost {
   readonly SUB_FONT_CANDIDATES: readonly { name: string; family: string; weight: string; }[];
   readonly subFontFamily: string;
   readonly subFontIdx: number;
-  readonly subFontReady: boolean;
   readonly subFontWeight: string;
   readonly subLang: () => "cz" | "en";
   readonly talk: (which: "little" | "big") => void;
@@ -1362,7 +1362,24 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       const crisp2 = intermediates(false);
       return { webgl: true, crisp1, smooth, crisp2 };
     },
-    subFontReady: () => host.subFontReady,
+    /**
+     * Did a bundled subtitle face load? Settable, which is the only way to reach the
+     * fallback every tier takes when none did: the subtitles are BAKED into the pixel
+     * frame with the game's own bitmap font instead of drawn as DOM text (see
+     * `useVecSubs` in framePainter). `boot.ts` is the only other writer, and it writes
+     * once, so a probe can hold it false for as long as it needs to.
+     *
+     * The room is not repainting while it is idle, so this forces the frame that shows
+     * the change — same reason `subScale` does.
+     */
+    subFontReady: (v?: boolean) => {
+      if (v !== undefined) {
+        setSubFontReady(v);
+        host.forceRoomRedraw = true;
+        host.wake();
+      }
+      return subFontReady;
+    },
     // the current art source (classic/enhanced). Isolates the compositing+present
     // cost from the rAF vsync cap, so it reveals real headroom (both backends sit
     // at 60fps under vsync when there's slack). WebGL is timed with a gl.finish()
