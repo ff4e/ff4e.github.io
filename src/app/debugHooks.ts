@@ -19,10 +19,11 @@
  * this saves ~13 700 tokens where the grouped version saved ~8 100.
  *
  * ── The seam ──────────────────────────────────────────────────────────────────
- * Every name this file needs that ONLY main.ts has arrives in `host`: 99 members, down
- * from 144. Members are getters, so they read live state at the moment a probe asks, and
- * the four that probes deliberately WRITE (`aiSubScale`, `forceRoomRedraw`, `smoothLog`,
- * `waterAnimMs`) are settable. The interface was generated from the TypeScript checker
+ * Every name this file needs that ONLY main.ts has arrives in `host` — a hundred or so
+ * members, down from 144. They are getters, so they read live state at the moment a probe
+ * asks, and the ones probes deliberately WRITE (`aiSubScale`, `forceRoomRedraw`,
+ * `smoothLog`, `waterAnimMs`) are settable. Named rather than counted: a list goes stale
+ * loudly, a number goes stale silently. The interface was generated from the TypeScript checker
  * rather than hand-written, so it states main.ts's real types instead of a guess at them.
  *
  * The forty that left did not need a seam at all. They were game state, and it now has
@@ -152,7 +153,7 @@ import type { RoomGeometry } from './layout.js';
 /**
  * What the debug hooks see of the running game.
  *
- * Generated from main.ts's own declarations; keep it that way. Four members are
+ * Generated from main.ts's own declarations; keep it that way. A few members are
  * writable because probes set them (`aiSubScale`, `forceRoomRedraw`, `smoothLog`,
  * `waterAnimMs`); the rest are read-only views.
  */
