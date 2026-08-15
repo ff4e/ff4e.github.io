@@ -350,7 +350,7 @@ export function cutsceneCaption(name: string): number {
  * and content scale are handed over, not the room's — a cutscene is 720x555 whatever room
  * it was started from.
  */
-export function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number): void {
+export function updateCutsceneCaptions(cssW: number, cssH: number, cs: number): void {
   if (!cutsceneSubs?.active) return;
   syncDomSubtitles('cut', cutsceneSubs, count, cssW, cssH, cs, subFontFamily, subFontWeight);
 }
@@ -469,7 +469,7 @@ export function drawCutscene(): void {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(aiKufr.base, 0, 0);
     ctx.drawImage(aiBmp, aiKufr.region.x * S, aiKufr.region.y * S);
-    updateCutsceneSubOverlay(cssW, cssH, cs);
+    updateCutsceneCaptions(cssW, cssH, cs);
     setPerfPaint(perfPaint + 1);
     return;
   }
@@ -524,7 +524,7 @@ export function drawCutscene(): void {
   // Mulish captions, in the same coordinate convention as the room's subtitles: the
   // layer spans the on-screen box and is placed from native (720x555) game pixels.
   if (useVec && cutsceneSubs!.active) {
-    updateCutsceneSubOverlay(cssW, cssH, cs);
+    updateCutsceneCaptions(cssW, cssH, cs);
   } else {
     // Baked captions, or none at all: the layer stands down.
     clearDomSubtitles('cut');

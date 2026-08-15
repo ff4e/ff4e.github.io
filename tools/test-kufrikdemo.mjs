@@ -63,15 +63,24 @@ await withApp(async ({ p, expect }) => {
    */
   const captionsShow = () =>
     p.evaluate(async () => {
-      const out = { dom: 0, room: 0, sawSomething: false };
+      const out = { dom: 0, room: 0, sawSomething: false, box: null, screenBox: null };
       for (let i = 0; i < 300; i++) {
-        const dom = document.getElementById('domsubs-cut')?.children.length ?? 0;
+        const el = document.getElementById('domsubs-cut');
+        const dom = el?.children.length ?? 0;
         // The room's layer is a different element and must never carry the captions;
         // kept as a max across the whole window so one bad frame is still caught.
         out.room = Math.max(out.room, document.getElementById('domsubs')?.children.length ?? 0);
         if (dom > 0) {
           out.dom = dom;
           out.sawSomething = true;
+          // Read the boxes in the same frame as the captions, for the same reason the
+          // caption count is read here: the cutscene is only up for as long as it is up.
+          // The LAID-OUT box, not getBoundingClientRect: probes default to the `ai`
+          // tier, whose subtitles carry a deliberate scale(aiSubScale) about the bottom
+          // edge, and a client rect would report that shrink and read as drift.
+          const s = document.getElementById('screen');
+          out.box = { w: el.style.width, h: el.style.height };
+          out.screenBox = { w: s.style.width, h: s.style.height };
           return out;
         }
         await new Promise((r) => setTimeout(r, 50));
@@ -87,6 +96,20 @@ await withApp(async ({ p, expect }) => {
   expect(shown.sawSomething, 'the cutscene captions reach the screen');
   expect(shown.dom > 0, `the cutscene captions are real DOM text (${shown.dom} lines)`);
   expect(shown.room === 0, "the room's subtitle layer stays empty during a cutscene");
+  // The caption layer has to be laid out on the cutscene's own box. `test-gl-cutscene`
+  // used to carry this as part of its #screen/#screen-gl/#subs invariant; when the
+  // canvas overlay went, that arm went with it and nothing checked the caption layer's
+  // box any more. It belongs here anyway — this is the probe that already waits for a
+  // caption to exist, so the element is guaranteed to be there to measure.
+  //
+  // It is the CUTSCENE's box, not the room's: a cutscene is 720x555 whichever room it
+  // was started from, and #screen carries that box while the cutscene is up. A layer
+  // left at the room's geometry would place every line from the wrong origin — which is
+  // the bug `updateCutsceneCaptions` handing over its own cssW/cssH exists to avoid.
+  expect(
+    shown.box !== null && shown.box.w === shown.screenBox.w && shown.box.h === shown.screenBox.h,
+    `the caption layer is laid out on the cutscene's box (layer ${shown.box?.w}x${shown.box?.h}, screen ${shown.screenBox?.w}x${shown.screenBox?.h})`,
+  );
 
   // Skipping takes them down. Without this the captions outlive the cutscene that owns
   // them, and sit over the room the player lands back in. (The wait IS the assertion:

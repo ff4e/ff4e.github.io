@@ -206,7 +206,7 @@ export function draw(): void {
   }
   }
   // The DOM subtitle layer, which rides the shake/shove transform this frame computed.
-  updateRoomSubOverlay(useVecSubs, xform);
+  updateRoomSubtitles(useVecSubs, xform);
 }
 
 /**
@@ -218,7 +218,7 @@ export function draw(): void {
  * has to ride; it is left alone when the caller has no fresh one, since a frame that did
  * not repaint the room cannot have changed it either.
  */
-export function updateRoomSubOverlay(useVecSubs: boolean, xform?: string): void {
+export function updateRoomSubtitles(useVecSubs: boolean, xform?: string): void {
   if (useVecSubs && subs?.active && room) {
     const g = roomGeometry(room);
     syncDomSubtitles('room', subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight, xform);

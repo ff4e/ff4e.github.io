@@ -55,7 +55,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // queue that drives both. Worth revisiting if the AI frame cache grows.
   //
   // Went 560 -> 566 while the captions carried both painters, then 566 -> 540 when the
-  // canvas overlay was deleted and `updateCutsceneSubOverlay` lost its canvas branch and
+  // canvas overlay was deleted and `updateCutsceneCaptions` lost its canvas branch and
   // the signature/gate bookkeeping with it. That was the ratchet the 566 entry promised.
   ['src/app/cutscene.ts', 540],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is

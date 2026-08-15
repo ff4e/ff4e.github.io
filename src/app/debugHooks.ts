@@ -152,7 +152,7 @@ import type { RoomGeometry } from './layout.js';
  * What the debug hooks see of the running game.
  *
  * Generated from main.ts's own declarations; keep it that way. Four members are
- * writable because probes set them (`subScale`, `forceRoomRedraw`, `smoothLog`,
+ * writable because probes set them (`aiSubScale`, `forceRoomRedraw`, `smoothLog`,
  * `waterAnimMs`); the rest are read-only views.
  */
 export interface DebugHost {

@@ -227,8 +227,8 @@ export function syncDomSubtitles(
   for (const t of sys.debugLines()) {
     const key = `${t.startcount}|${t.barva}|${t.obsah}`;
     want.add(key);
-    // Fit the line inside the room the way vectorLayout does: it shrinks the font
-    // rather than wrapping, and a line that overflowed here was clipped by the host's
+    // Fit the line inside the room the way `fitFontPx` defines it: shrink the font
+    // rather than wrap, and a line that overflowed here was clipped by the host's
     // bounds, losing its last word. Measured on the TEXT and BEFORE the element is
     // built, because everything below is derived from the size the line ends up at —
     // the baseline offset in `y`, the stroke width, and the bevel stops. Shrinking

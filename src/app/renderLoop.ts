@@ -14,7 +14,7 @@ import { frameEffectsActive, tetrisModal, tickTetris } from './cheats.js';
 import { canvas, ctx, glCanvas } from './dom.js';
 import { scheduleNextFrame } from './frameClock.js';
 import { acc, forceRoomRedraw, lastRoomBackend, lastRoomSig, lastTime, loopTicks, perfPaint, roomAnimating, roomLoading, roomPaints, setAcc, setForceRoomRedraw, setLastRoomSig, setLastTime, setLastWaterPaint, setLoopTicks, setPerfPaint, setRoomPaints, updatePerfHud, waterOwesRepaint } from './framePacing.js';
-import { draw, updateRoomSubOverlay } from './framePainter.js';
+import { draw, updateRoomSubtitles } from './framePainter.js';
 import { count, cutscene, room, setAlpha, subs } from './gameState.js';
 import { glAiFailed, glFailed } from './glPlumbing.js';
 import { clearDomSubtitles } from './subtitleDom.js';
@@ -248,7 +248,7 @@ export function loop(now: number): void {
       // advanced when the room itself repainted — measured, back when this layer was a
       // canvas, at 22 repaints/sec against enhanced's 40.7, which reads as juddering
       // text.
-      updateRoomSubOverlay(true);
+      updateRoomSubtitles(true);
     }
   }
   drawPanel();
