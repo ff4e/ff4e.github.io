@@ -12,10 +12,18 @@
 # testing the backend they exist to test. So the probes stay a local pre-PR gate, and
 # adding a macOS job later is a real option rather than an impossibility.
 #
-# The unit suite, by contrast, is nearly free. A few of its tests need the ORIGINAL
-# extracted game data ($FFNG_DATA, ~/.cache/ffng-orig) which is genuinely not in the
-# repo; those skip themselves cleanly (see test/solutions.test.ts). Measured without
-# it: 1529 of 1597 pass in ~3 seconds.
+# The unit suite, by contrast, is nearly free — and it now includes the solvability net:
+# all 62 recorded reference solutions are replayed here on every push. That used to skip,
+# because the replays were keyed on a PRIVATE extraction of the game at ~/.cache/ffng-orig
+# which no runner has, so 62 assertions vanished silently and this job still went green.
+# There was never a reason for it: the room data is GPL-released (CONTRIBUTING.md) and all
+# 72 Graphic/*.ffr are committed under public/data/, which is also why the note above says
+# the probes could in principle run here. test/gameData.ts now resolves to that data, and
+# missing data fails instead of skipping.
+#
+# A few tests still default to ~/.cache/ffng-orig and do skip here (rooms.test.ts,
+# gral-pushout.test.ts, and $FF_DATA_DIR in render-parity/enhanced-mapping) — 146 assertions
+# that could be unskipped the same way, separately from the solvability work.
 #
 # `vite build` runs too. `tsc --noEmit` does not link or resolve assets, so a bundling
 # break (a bad import path, an esbuild-only failure) passes typecheck and fails only
