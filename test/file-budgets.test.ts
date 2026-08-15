@@ -58,7 +58,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // canvas overlay was deleted and `updateCutsceneSubOverlay` lost its canvas branch and
   // the signature/gate bookkeeping with it. That was the ratchet the 566 entry promised.
   ['src/app/cutscene.ts', 540],
-  // 1 560. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
+  // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does. Came DOWN from 1 700 when the canvas
   // subtitle overlay went and took `subPaints`, `setSubsGate`, `subsPaintAt`, `benchSubs`
   // and the renderer-preference hooks with it.

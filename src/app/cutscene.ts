@@ -12,7 +12,7 @@
 import { audio } from './audioEngine.js';
 import { canvas, ctx, glCanvas } from './dom.js';
 import { perfPaint, roomLoadSeq, roomLoading, setPerfPaint } from './framePacing.js';
-import { activeScript, alpha, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneAssets, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
+import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneAssets, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
 import { glCompositor, glFailed, markGlFailed } from './glPlumbing.js';
 import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
 import { clearHeldKey, restore, tryStep } from './movement.js';

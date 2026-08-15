@@ -10,40 +10,16 @@
 import type { FfrPaletteEntry } from '../data/ffr.js';
 import type { FontData } from './font.js';
 import type { PixelTarget } from './framebuffer.js';
-import {
-  BASETITLE,
-  BORDERTITLE,
-  ROWTITLE,
-  SUB_FONT_PX,
-  UNDERTITLE,
-  bevelBottomRgb,
-  bevelSpan,
-  fitFontPx,
-  lineAnchor,
-  strokeWidth,
-  wavePhase,
-  waveDy,
-} from './subtitleGeom.js';
+import { BASETITLE, BORDERTITLE, ROWTITLE, UNDERTITLE } from './subtitleGeom.js';
 
 // Subtitle layout constants (URoom.pas:140-161). The geometry ones live in
-// subtitleGeom.ts, which both renderers measure from; what stays here is timing.
+// subtitleGeom.ts, which the renderer measures from; what stays here is timing.
 const SPEEDTITLE = 2;
 const TIMEPERCHARTITLE = 2;
 const MINTIMETITLE = 40;
 const MINYTITLE = BASETITLE - ROWTITLE * 5;
 /** siltitborder (URoom.pas:26125): the intertitle card's frame inset. */
 const SILTITBORDER = 15;
-
-/**
- * Sub-tick animation steps for the enhanced overlay. The wave-in and the line scroll
- * are functions of the 12.5/s logic tick, which on its own looks stepped; the port
- * already interpolates fish motion between ticks, and this does the same for the
- * vector subtitles (enhanced only — the classic bitmap path stays at the faithful
- * tick rate). 5 steps per 80ms tick = 62.5 animation updates/s, smooth to the eye
- * while keeping the repaint cost bounded no matter how fast the display refreshes.
- * Every whole tick still renders exactly the state it rendered before.
- */
-export const SUB_SUBSTEPS = 5;
 
 interface TitleLine {
   obsah: string;
@@ -53,19 +29,6 @@ interface TitleLine {
   cilys: number;
   startcount: number;
   killcount: number;
-}
-
-/**
- * Everything about a vector subtitle line that is invariant for its whole life:
- * the fitted font size, the font string, the width the centring uses and each
- * glyph's x offset from the line's left edge. Only the per-glyph wave offset
- * changes between frames, so this is measured once per (text, font) instead of
- * on every one of the ~120 overlay repaints a second.
- */
-/** Quantise a 0..1 sub-tick fraction to the overlay's animation step grid. */
-function subStep(alpha: number): number {
-  if (!(alpha > 0)) return 0; // also catches NaN
-  return Math.min(Math.floor(alpha * SUB_SUBSTEPS), SUB_SUBSTEPS - 1) / SUB_SUBSTEPS;
 }
 
 /** najdi_barvu (URoom.pas:1087): nearest palette index by weighted RGB distance. */
@@ -269,26 +232,17 @@ export class SubtitleSystem {
     return this.titles.length > 0;
   }
 
-  /** Total characters currently on screen (perf probes). */
-  get lineChars(): number {
-    let n = 0;
-    for (const t of this.titles) n += t.obsah.length;
-    return n;
-  }
-
-  /** Number of subtitle lines currently on screen (perf probes). */
-  get lineCount(): number {
-    return this.titles.length;
-  }
-
-  /** The native game-pixel box the vector layout centres in (parity probe). */
+  /** The native game-pixel box the vector layout centres in (subtitleDom reads it). */
   get vectorScreen(): { w: number; h: number } {
     return { w: this.screenW, h: this.screenH };
   }
 
   /**
-   * The state a vector renderer needs: enough for an independent
-   * reference implementation of PisStringF's wave to reproduce the overlay exactly.
+   * The lines a vector renderer draws, in engine terms: the text, the speaker colour
+   * already resolved to RGB, and the row positions PosunTitulky maintains.
+   *
+   * Named for what it once was — a read-only view for probes — but it is now the
+   * production input to `subtitleDom`, which is the only caller.
    */
   debugLines(): {
     obsah: string;
@@ -309,10 +263,10 @@ export class SubtitleSystem {
   }
 
   /**
-   * True while anything on the overlay is still moving — a wave still running or a
-   * line still scrolling toward its target row. The render loop uses this to hold
-   * off the idle throttle for exactly as long as the subtitles need it (typically
-   * ~1.5s per line), and to know that repainting the overlay is worthwhile at all.
+   * True while anything in the vector subtitle layer is still moving — a wave still
+   * running or a line still scrolling toward its target row. The render loop uses this
+   * to hold off the idle throttle for exactly as long as the subtitles need it
+   * (typically ~1.5s per line).
    */
   vectorAnimating(count: number): boolean {
     for (const t of this.titles) {
@@ -320,17 +274,6 @@ export class SubtitleSystem {
       if ((count - t.startcount) * 5 - t.obsah.length < 50) return true; // wave still running
     }
     return false;
-  }
-
-  /**
-   * The line's y at a fraction `frac` into the current tick. PosunTitulky moves it
-   * SPEEDTITLE px per tick toward cilys, so the in-between position is exact rather
-   * than a guess — no need to keep a previous value, and no added latency.
-   */
-  private renderYs(t: TitleLine, frac: number): number {
-    if (frac === 0 || t.ys <= t.cilys) return t.ys;
-    const next = Math.max(t.cilys, t.ys - SPEEDTITLE);
-    return t.ys + (next - t.ys) * frac;
   }
 
   /** Speaker colour (true RGB) for a subtitle colour code: letters -> coltab,

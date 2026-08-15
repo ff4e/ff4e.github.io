@@ -125,11 +125,11 @@ export function loop(now: number): void {
   // `painted` (UMain.pas:1489-1493 — the paint sets daRealyRun, Spust runs after it).
   tickMapLaunch();
   if (ui.helpOpen || ui.screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
-  // The room's subtitles may be a DOM layer of their own (subtitleDom.ts), and nothing
-  // below clears it: every other branch wipes the CANVAS overlay, which is a different
-  // element. So a line still on screen when the player opened the help page, went back
-  // to the map or walked into a cutscene stayed painted over it. Derived here in one
-  // place for the same reason mapPresented is.
+  // The room's and the cutscene's subtitles are DOM layers of their own (subtitleDom.ts),
+  // and no draw branch below clears them: a branch paints #screen, and a sibling element
+  // is not something painting over #screen can touch. So a line still on screen when the
+  // player opened the help page, went back to the map or walked into a cutscene stayed
+  // sitting over it. Derived here in one place for the same reason mapPresented is.
   //
   // The two layers stand down on different conditions, which is the whole reason they
   // are separate layers: the ROOM's goes when a room frame is not what is being painted
@@ -140,9 +140,8 @@ export function loop(now: number): void {
   // that is NOT redundant with `!cutscene`: the map / intro / story-page branches below
   // are tested BEFORE `else if (cutscene)`, so with a cutscene still live on another
   // screen `drawCutscene()` never runs and nothing else would take its captions down.
-  // The canvas overlay never had that hole, because each of those branches clears it
-  // directly. A cutscene is only ever started from a room, so this cannot fire on the
-  // healthy path — it catches the ways out that do not go through skipCutscene().
+  // A cutscene is only ever started from a room, so this cannot fire on the healthy
+  // path — it catches the ways out that do not go through skipCutscene().
   if (ui.helpOpen || ui.screen !== 'room' || roomLoading || cutscene) clearDomSubtitles('room');
   if (ui.helpOpen || ui.screen !== 'room' || !cutscene) clearDomSubtitles('cut');
   // Exactly one branch below owns #screen for this frame, and every branch other than
@@ -156,6 +155,8 @@ export function loop(now: number): void {
     drawHelp();
     setPerfPaint(perfPaint + 1);
   } else if (ui.screen === 'intro') {
+    // Deliberately empty: the <video> element covers the stage, so there is nothing to
+    // paint. The branch still has to exist, or the intro would fall through to the room.
   } else if (ui.screen === 'legimage') {
     drawLegImage(); // the leg-completion story page (counts its own one-shot blit)
   } else if (ui.screen === 'map') {
@@ -238,14 +239,15 @@ export function loop(now: number): void {
       setForceRoomRedraw(frameEffectsActive());
     } else if (enhancedArtActive() && subFontReady && subs?.active) {
       // The room is unchanged, but a subtitle may still be waving in or scrolling.
-      // The overlay is its own layer, so animate it on its own — at the sub-tick
-      // rate — without paying for a room repaint underneath.
+      // The text is its own layer, so reconcile it on its own — without paying for a
+      // room repaint underneath.
       //
-      // Gated on enhancedArtActive(), i.e. exactly the tiers that USE the vector
-      // overlay (see useVecSubs in drawRoom), not on the literal 'enhanced' tier.
-      // Checking `graphics === 'enhanced'` excluded the `ai` tier, whose subtitles
-      // then only advanced when the room itself repainted — measured at 22 overlay
-      // repaints/sec against enhanced's 40.7, which reads as juddering text.
+      // Gated on enhancedArtActive(), i.e. exactly the tiers that draw vector subtitles
+      // (see useVecSubs in draw), not on the literal 'enhanced' tier. Checking
+      // `graphics === 'enhanced'` excluded the `ai` tier, whose subtitles then only
+      // advanced when the room itself repainted — measured, back when this layer was a
+      // canvas, at 22 repaints/sec against enhanced's 40.7, which reads as juddering
+      // text.
       updateRoomSubOverlay(true);
     }
   }

@@ -118,11 +118,9 @@ const KNOWN_FLAKY = new Map([
 const EXCLUSIVE = new Set([
   'test-timing.mjs', // asserts the game clock keeps up with wall clock, frame budget permitting
   'test-idlefps.mjs', // asserts the render loop drops to the idle timer
-  // Counts vector-subtitle overlay repaints against logic ticks and rendered
-  // frames — a ratio, but both sides are sampled over wall-clock windows.
-  'test-subtitles-perf.mjs',
   'test-mapinfo.mjs', // world-map animation pacing, measured over rAF frames
-  // Subtitle overlay repaints and loop rAF ticks, both per second of real time.
+  // Samples the loop's throttle decision across a wave-in, and counts room repaints
+  // against a wall-clock window to check the water cap.
   'test-aisubs.mjs',
   // Samples loopThrottleOk() over wall-clock windows to catch a line while it is
   // still animating; a loaded machine can settle the line before it samples.

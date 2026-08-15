@@ -1,5 +1,5 @@
 /**
- * The geometry a vector subtitle line is built from — shared by both renderers.
+ * The geometry a vector subtitle line is built from.
  *
  * Pure by design, and separate for the reason the repo's economy rules give: this is the
  * arithmetic that decides where a subtitle actually appears, and here it costs ~2.5 ms
@@ -15,8 +15,8 @@
  */
 
 // Subtitle layout constants (URoom.pas:140-161). They live here rather than in
-// subtitles.ts so that this module has no imports at all: it is the leaf both renderers
-// and the tick logic measure from, and a cycle through the renderer would make the
+// subtitles.ts so that this module has no imports at all: it is the leaf the renderer
+// and the tick logic both measure from, and a cycle through the renderer would make the
 // module-evaluation order matter (see AGENTS.md, "the module-evaluation trap").
 export const ROWTITLE = 26;
 export const BASETITLE = 0;
@@ -75,13 +75,13 @@ export const VECTOR_GEOM = Object.freeze({
 /**
  * Font size for a line, after fitting it to the room.
  *
- * `vectorLayout` shrinks the font rather than wrapping or overflowing — the wrap already
+ * The renderer shrinks the font rather than wrapping or overflowing — the wrap already
  * happened in `newSubtitle`, and what reaches here is a line that still measures too wide
  * (a single long word, or a face wider than the bitmap metrics the wrap used).
  *
- * The 8px floor comes from the original vector path and is kept: without it a
- * pathological line collapses
- * to an unreadable size, and shrinking past 8px would not make it fit anyway.
+ * The 8px floor comes from the original vector path and is kept: without it a pathological
+ * line collapses to an unreadable size, and shrinking past 8px would not make it fit
+ * anyway.
  *
  * @param naturalW width of the text at `SUB_FONT_PX`, measured by the caller
  * @param screenW  the subtitle system's native screen width

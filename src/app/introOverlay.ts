@@ -1,12 +1,14 @@
 /**
- * The logo and intro movies, and the vector-subtitle layer that sits above the game canvas.
+ * The logo and intro movies, plus `aiSubScale`.
  *
- * They share a file because they share a surface: both draw over the stage rather than into
- * it, and both have to be told the display scale rather than reading it from a canvas.
+ * The subtitle half of this file was the canvas overlay, and it is gone. What is left of
+ * it is one number: how much smaller the `ai` tier draws its subtitles. `subtitleDom.ts`
+ * is its only reader, and `__ff.subScale()` its only writer, so the honest place for it
+ * is probably there — left here for now because moving an exported `let` that main.ts
+ * also wires a setter for is a change of its own.
  *
- * Needs NOTHING from `main.ts` — the last of its dependencies went when the subtitle font
- * and overlay signature moved to `stageState.ts`. It is the second module to come out with
- * no host object at all.
+ * Needs NOTHING from `main.ts`. It is the second module to come out with no host object
+ * at all.
  *
  * ── Ordering ─────────────────────────────────────────────────────────────────
  * `new IntroPlayer(...)` touches the DOM and `probeAiMovies()` issues HEAD requests, so both
@@ -15,10 +17,6 @@
  * the rule forbids. See AGENTS.md, "the module-evaluation trap".
  */
 import { IntroPlayer } from './intro.js';
-import type { SubtitleSystem } from '../render/subtitles.js';
-import { canvas } from './dom.js';
-import { contentScaleFor, roomGeometry } from './stageGeometry.js';
-import { alpha, count, room } from './gameState.js';
 import { graphics } from './renderSettings.js';
 
 /** The intro/logo movie player. Constructed in initIntro(), never at import time. */

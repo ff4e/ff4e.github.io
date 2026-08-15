@@ -3,12 +3,13 @@
  *
  * The renderer for the `enhanced` and `ai` tiers, and for cutscene captions. `classic`
  * is the one path this does not touch: it bakes its subtitles into the pixel frame with
- * the game's own bitmap font, and never reaches either vector renderer.
+ * the game's own bitmap font, and never reaches a vector renderer at all.
  *
- * The canvas overlay redraws every glyph — shape, outline stroke, gradient fill — on
- * every animation step, and hands the browser a changed backing store to re-upload each
- * time. This renders each glyph ONCE as real text and then animates only its
- * `transform`, which a browser composites on the GPU without re-rasterising anything.
+ * This replaced a canvas overlay that redrew every glyph — shape, outline stroke,
+ * gradient fill — on every animation step, handing the browser a changed backing store
+ * to re-upload each time. Here each glyph is rendered ONCE as real text and only its
+ * `transform` is animated, which a browser composites on the GPU without re-rasterising
+ * anything.
  *
  * The point of doing it this way rather than in WebGL: a `transform` animation started
  * through the Web Animations API runs on the COMPOSITOR thread. It keeps its own time
@@ -86,12 +87,12 @@ const layers: Record<SubOwner, Layer> = { room: newLayer(), cut: newLayer() };
 const HOST_ID: Record<SubOwner, string> = { room: 'domsubs', cut: 'domsubs-cut' };
 
 /**
- * Tear the overlay down (leaving the room, switching renderer or tier, no lines left).
+ * Tear a subtitle layer down (leaving the room, switching tier, no lines left).
  *
- * The early return is what makes it safe to call unconditionally from the canvas branch
- * of the frame path, which is how a TIER switch mid-line is caught: under `auto` the
- * renderer can change with no setter being called at all, and the abandoned DOM text
- * would otherwise sit on screen with the canvas overlay painting underneath it.
+ * The early return is what makes it safe to call unconditionally from the frame path and
+ * from the render loop's guards, which is how an abandoned line is caught: the layer has
+ * to be taken off the screen by whoever notices the room is no longer being painted,
+ * because nothing that paints #screen can clear a sibling element.
  */
 export function clearDomSubtitles(owner?: SubOwner): void {
   if (owner === undefined) {
@@ -133,7 +134,7 @@ function measureBaseline(font: string): { inset: number; height: number } {
 }
 
 /**
- * Width of a line at a given font, measured the way the canvas path measures it.
+ * Width of a line at a given font, measured glyph by glyph.
  *
  * Kerning and ligatures are off because the glyphs are laid out one at a time (as
  * PisStringF advances them), so a kerned measurement would disagree with the result.
@@ -154,8 +155,9 @@ function measureTextWidth(font: string, text: string): number {
 function waveFrames(ampCss: number): Keyframe[] {
   const out: Keyframe[] = [];
   for (let k = 0; k <= WAVE_KEYFRAMES; k++) {
-    // The same curve the canvas path rides, sampled instead of evaluated per frame —
-    // which is the whole trick: sampled once into keyframes, the compositor runs it.
+    // PisStringF's own damped cosine (subtitleGeom.waveDy), sampled instead of
+    // evaluated per frame — which is the whole trick: sampled once into keyframes, the
+    // compositor runs it.
     const p = (k / WAVE_KEYFRAMES) * VECTOR_GEOM.waveLen;
     out.push({ offset: k / WAVE_KEYFRAMES, opacity: 1, transform: `translateY(${waveDy(p, ampCss).toFixed(2)}px)` });
   }
@@ -188,8 +190,8 @@ export function syncDomSubtitles(
     L.host = host;
     host.id = HOST_ID[owner];
     host.style.cssText =
-      // The 1px transparent border matches #screen and #subs (dom.ts): they are all
-      // absolutely positioned in the same wrapper, so without it this layer sits 1px
+      // The 1px transparent border matches #screen (dom.ts): they are absolutely
+      // positioned in the same wrapper, so without it this layer sits 1px
       // up and to the left of the canvas the text is supposed to line up with.
       'position:absolute;left:0;top:0;border:1px solid transparent;pointer-events:none;overflow:hidden';
     wrap.appendChild(host);
@@ -202,10 +204,9 @@ export function syncDomSubtitles(
   const tier = graphics === 'ai' ? aiSubScale : 1;
   host.style.transformOrigin = '50% 100%';
   // The room shakes (trepat, ±10 native px — fired by the very chatter scripts that put
-  // a subtitle up) and shoves (screenShoveX). The canvas overlay rides that by taking
-  // the room's transform; this layer has to as well, or the room jitters under text
-  // that stands still. Kept when the caller passes nothing, exactly as the canvas path
-  // keeps the last one: no repaint means the shake cannot have changed either.
+  // a subtitle up) and shoves (screenShoveX). This layer has to ride the room's
+  // transform, or the room jitters under text that stands still. The last one is kept
+  // when the caller passes nothing: no repaint means the shake cannot have changed.
   if (xform !== undefined) L.lastXform = xform;
   const scaleT = tier === 1 ? '' : `scale(${tier})`;
   // Translate first, then scale: the shake moves the whole layer, and must not itself
@@ -262,7 +263,7 @@ export function syncDomSubtitles(
       const [dr, dg, db] = bevelBottomRgb(r, g, b);
       const bottom = `rgb(${dr},${dg},${db})`;
       const spans: HTMLSpanElement[] = [];
-      // The bevel gradient, placed exactly where the canvas puts it:
+      // The bevel gradient, placed where the original vector path put it:
       // createLinearGradient(0, gy - fs*0.72, 0, gy + fs*0.1) — a ramp across the
       // glyph's cap height, anchored to ITS OWN baseline, not to the line box. Spreading
       // it over the whole box (which is what a bare `linear-gradient` does) puts the
@@ -292,8 +293,8 @@ export function syncDomSubtitles(
         const sp = document.createElement('span');
         sp.style.cssText =
           `position:relative;display:inline-block;opacity:0;will-change:transform;` +
-          // Per-character advances, like the canvas path, which measures each glyph on
-          // its own: kerning and ligatures would shift the letters against it.
+          // Per-character advances, as PisStringF lays them out one glyph at a time:
+          // kerning and ligatures would shift the letters against that.
           `font-kerning:none;font-variant-ligatures:none;-webkit-font-smoothing:antialiased`;
         const strokeEl = document.createElement('span');
         strokeEl.textContent = ch;

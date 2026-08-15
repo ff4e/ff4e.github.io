@@ -19,10 +19,10 @@
  * this saves ~13 700 tokens where the grouped version saved ~8 100.
  *
  * ── The seam ──────────────────────────────────────────────────────────────────
- * Every name this file needs that ONLY main.ts has arrives in `host`: 114 members, down
+ * Every name this file needs that ONLY main.ts has arrives in `host`: 100 members, down
  * from 144. Members are getters, so they read live state at the moment a probe asks, and
- * the eight that probes deliberately WRITE (the renderer, the perf switches, the overlay
- * signature) are settable. The interface was generated from the TypeScript checker
+ * the four that probes deliberately WRITE (`aiSubScale`, `forceRoomRedraw`, `smoothLog`,
+ * `waterAnimMs`) are settable. The interface was generated from the TypeScript checker
  * rather than hand-written, so it states main.ts's real types instead of a guess at them.
  *
  * The forty that left did not need a seam at all. They were game state, and it now has
@@ -121,7 +121,6 @@ import {
 import type { FishFrame } from '../render/renderRoom.js';
 import { AiRoom } from '../render/roomAi.js';
 import type { AiRoomFrame } from '../render/roomAi.js';
-import { SUB_SUBSTEPS, SubtitleSystem } from '../render/subtitles.js';
 import { renderTetris, tetrisRgba } from '../render/tetrisRender.js';
 import { MapAction, WorldMap } from '../render/worldMap.js';
 import { AiWorldMap } from '../render/worldMapAi.js';
@@ -152,9 +151,9 @@ import type { RoomGeometry } from './layout.js';
 /**
  * What the debug hooks see of the running game.
  *
- * Generated from main.ts's own declarations; keep it that way. Eleven members are
- * writable because probes set them (setRenderer, setSubsGate, subScale, ...); the
- * rest are read-only views.
+ * Generated from main.ts's own declarations; keep it that way. Four members are
+ * writable because probes set them (`subScale`, `forceRoomRedraw`, `smoothLog`,
+ * `waterAnimMs`); the rest are read-only views.
  */
 export interface DebugHost {
   readonly aiKufr: AiKufr | null;

@@ -1,39 +1,41 @@
 /**
  * UI test: subtitles animate at the full frame rate in the `ai` tier, not just `enhanced`.
  *
- * The vector subtitle overlay waves each glyph in over ~1.5s, which happens BETWEEN
- * logic ticks. The loop therefore has to stay at the display refresh rate while a line
- * is settling, instead of idle-throttling to the 12.5fps logic rate.
+ * A subtitle waves each glyph in over ~1.5s, which happens BETWEEN logic ticks. The loop
+ * therefore has to stay at the display refresh rate while a line is settling, instead of
+ * idle-throttling to the 12.5fps logic rate.
  *
  * That rule was written as `graphics === 'enhanced'` in two places (the idle-throttle
- * decision and the overlay-only repaint branch), which silently excluded the `ai` tier
- * even though it uses exactly the same vector overlay. The result was subtitles that
- * animated at 12.5fps in `ai` and 60+fps in `enhanced` — measured at 19.2 against 39.9
- * overlay repaints/sec — with nothing logged and every unit test green.
+ * decision and the subtitle-only branch of the loop), which silently excluded the `ai`
+ * tier even though it draws vector subtitles too. The result was subtitles that animated
+ * at 12.5fps in `ai` and 60+fps in `enhanced` — with nothing logged and every unit test
+ * green.
  *
- * This asserts, per tier, that the overlay repaints SEVERAL TIMES PER LOGIC TICK while a
- * line waves in, and that the loop is never allowed to idle-throttle for the duration.
- * Both are measured in game ticks, not seconds, so a busy machine cannot move them: a
- * per-second bound was tried and failed on correct builds, reading anywhere from 14/s to
- * 60/s depending only on how loaded the machine was. A cross-tier ratio is not the answer
- * either — `ai` costs about twice the CPU of `enhanced` and legitimately falls behind it
- * under contention. See the note beside the assertions.
+ * What it asserts is the throttle DECISION, per tier, for the whole of a wave: the loop
+ * is never allowed to idle-throttle and never leaves rAF for the idle timer while a line
+ * is moving. No rate and no clock: a per-second bound was tried and failed on correct
+ * builds, reading anywhere from 14/s to 60/s depending only on how loaded the machine
+ * was, and a tick-relative bound fails too — the healthy and broken ranges OVERLAP. See
+ * the note beside the assertions.
  *
- * It also pins the `ai` tier's SMALLER subtitle (`aiSubScale`): the overlay draws in
+ * (The overlay-repaint ratio that used to sit here went with the canvas renderer: there
+ * is no repaint counter to read any more, because the wave now runs on the compositor.
+ * The contract it was really pinning — the loop may not idle-throttle mid-wave — is what
+ * is left, and it is the half that caught the original bug.)
+ *
+ * It also pins the `ai` tier's SMALLER subtitle (`aiSubScale`): subtitles are laid out in
  * native game pixels in every tier, which sizes the text for 1998 bitmap art and reads
  * far too heavy over the AI upscale. That is a pure presentation transform — the engine's
  * line positions are shared with the faithful bitmap path and must not move — so it is
- * checked on the rendered INK rather than on any internal number. Since the `ai` tier
- * paints DOM text by default, that size/anchor/centre trio is checked TWICE: once on the
- * canvas overlay (forced) and once on the DOM text, which reaches it by a different
- * mechanism and could drift from it.
+ * checked on the RENDERED TEXT rather than on any internal number, against the same
+ * renderer in the other tier so that only `aiSubScale` differs between the two.
  */
 import { withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
 
-  /** Overlay repaints AND loop rAF ticks per second while a line is waving in. */
+  /** Sample the loop's throttle decision across a whole wave-in, per tier. */
   const measure = async (tier) => {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier);
     await p.evaluate(() => window.__ff.enterRoomAwait(1));
@@ -45,13 +47,8 @@ await withApp(async ({ p, expect }) => {
     await p.waitForFunction(() => window.__ff.phase() === 'idle');
     await p.evaluate(() => window.__ff.talk('little'));
     await p.waitForFunction(() => window.__ff.subsActive());
-    // Sample ACROSS the wave, not at its start. Two things are watched:
+    // Sample ACROSS the wave, not at its start. What is watched:
     //
-    //  - overlay repaints against LOGIC TICKS in the same window. That is the unit this
-    //    probe really cares about — "the line animates BETWEEN ticks" — and because both
-    //    counts come from the same window, the machine's speed cancels out of the ratio.
-    //    A repaints-per-second figure cannot do this: measured on a correct build it
-    //    ranges from 14/s to 60/s depending only on how busy the machine is.
     //  - `loopThrottleOk()`, the throttle DECISION itself, and `onTimer`, whether the
     //    loop actually left requestAnimationFrame for the idle timer. Sampled at every
     //    frame of the window, because the bug does not have to be present at t=0: a wave
@@ -65,7 +62,7 @@ await withApp(async ({ p, expect }) => {
       (ms) =>
         new Promise((done) => {
           const t0 = performance.now();
-          const start = { c: window.__ff.count(), l: window.__ff.throttleInfo().loops };
+          const start = { c: window.__ff.count() };
           let everThrottleOk = false;
           let everOnTimer = false;
           const finish = () => {
@@ -74,7 +71,6 @@ await withApp(async ({ p, expect }) => {
             everOnTimer = everOnTimer || info.onTimer;
             done({
               ticks: window.__ff.count() - start.c,
-              loops: window.__ff.throttleInfo().loops - start.l,
               ms: performance.now() - t0,
               active: window.__ff.subsActive(),
               everThrottleOk,
@@ -151,7 +147,8 @@ await withApp(async ({ p, expect }) => {
     );
     expect(m.everOnTimer === false, `[${tier}] the loop never leaves rAF for the idle timer while the line waves in`);
   }
-  // The window has to contain real game time, or the ratios above are vacuous.
+  // The window has to contain real game time, or a "never happened" assertion passes
+  // simply because almost nothing happened in it.
   expect(enh.ticks >= 5 && ai.ticks >= 5, `the sample window covers real game time (enhanced ${enh.ticks} ticks, ai ${ai.ticks} ticks)`);
   // A cross-tier ratio (ai.fps / enh.fps > 0.7) used to stand here. It is gone because it
   // measured the wrong thing: two per-second rates, sampled in different windows, divided.
@@ -161,16 +158,16 @@ await withApp(async ({ p, expect }) => {
   // honestly failing to match a tier that costs half as much (it composites a xS FBO),
   // which is not a defect and is not something this suite should require.
   //
-  // The repaints-per-tick bound above keeps what the ratio was actually reaching for —
-  // "the ai overlay animates faster than the tick" — without asking the two tiers to cost
-  // the same, and without a wall clock anywhere in it.
+  // What replaced it is the throttle DECISION above: it asks the loop to keep its promise
+  // in both tiers without asking the two tiers to cost the same, and has no wall clock in
+  // it anywhere.
 
   // ── the MECHANISM behind the smoothness, asserted directly ──
   //
   // What protects the subtitle is `waterOwesRepaint` capping the ×S room repaint at
-  // `waterAnimMs` while the loop runs at the full paint rate for the overlay's sake —
-  // and that contract is not wall-clock at all, so it can be asserted exactly. Without
-  // the cap this counted ~60 repaints/s; the cap is what brought the cross-tier
+  // `waterAnimMs` while the loop still runs at the full paint rate for the subtitle's
+  // sake — and that contract is not wall-clock at all, so it can be asserted exactly.
+  // Without the cap this counted ~60 repaints/s; the cap is what brought the cross-tier
   // smoothness back from 0.60 to ~0.95 when it was introduced.
   await p.evaluate(() => window.__ff.setGraphics('ai'));
   await p.evaluate(() => window.__ff.talk('little'));
@@ -230,7 +227,7 @@ await withApp(async ({ p, expect }) => {
   const want = await p.evaluate(() => window.__ff.subScale());
   const enhDom = await domInk('enhanced');
   const aiDom = await domInk('ai');
-  expect(enhDom.ink && aiDom.ink, 'a subtitle line is real DOM text in both tiers when the DOM renderer is asked for');
+  expect(enhDom.ink && aiDom.ink, 'a subtitle line is real DOM text in both tiers');
   const domRatio = aiDom.w / enhDom.w;
   expect(
     Math.abs(domRatio - want) < 0.12,
@@ -251,14 +248,10 @@ await withApp(async ({ p, expect }) => {
     Math.abs(aiDom.cx / aiDom.frameW - enhDom.cx / enhDom.frameW) < 0.04,
     `[ai/dom] the DOM subtitle is still centred (centre ${(aiDom.cx / aiDom.frameW).toFixed(3)} vs ${(enhDom.cx / enhDom.frameW).toFixed(3)} of the room)`,
   );
-  // Both renderers must shrink the line by the SAME factor, or the tier switch becomes a
-  // silent presentation change rather than a change of painter. Compared as a
-  // ratio-of-ratios, so the canvas backing-store scale divides out — which also means it
-  // cannot see an error common to every DOM line. That one is caught in test-subtitles,
-  // by measuring the DOM path against the canvas path in the same tier.
-  expect(
-    Math.abs(domRatio - want) < 0.12,
-    `[ai] the shrink matches the tier's own scale constant (measured ${domRatio.toFixed(2)}, subScale ${want})`,
-  );
-
+  // NOTE for anyone adding to this block: the width ratio is already asserted against
+  // `want` at the top of it. A second `Math.abs(domRatio - want)` check is not a second
+  // oracle — it is the same one, printing a second green line. An error common to EVERY
+  // line (all of them drawn the same fraction too small) cancels out of a ratio and is
+  // not visible here at all; the renderer that used to catch it is gone, and nothing has
+  // replaced it.
 }, { gl: true });

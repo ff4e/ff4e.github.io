@@ -1,7 +1,7 @@
 /**
  * One room frame: all three art tiers, both backends. The room walk, the fish sprites at
- * their interpolated sub-tick position, the shake/shove transform, and the vector
- * subtitle overlay. Not the side panel, and not any screen other than the room —
+ * their interpolated sub-tick position, the shake/shove transform, and the DOM subtitle
+ * layer that rides it. Not the side panel, and not any screen other than the room —
  * `panel.ts` and `mapDraw.ts` own those.
  *
  * It needs only two names from `main.ts` because it decides nothing: what tier, what
@@ -20,7 +20,7 @@ import { aiRoom, aiRoomRenderActive, ensureEnhancedFallback, roomArtPending } fr
 import { alpha, activeScript, count, engine, room, screenShoveX, subs } from './gameState.js';
 import { applyFrameEffects, frameEffectsActive } from './cheats.js';
 import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
-import { canvas, ctx, glCanvas,  } from './dom.js';
+import { canvas, ctx, glCanvas } from './dom.js';
 import { classicArtFor, drawAiGpu, drawGpu, enhancedArtFor, glAiFailed, glFailed } from './glPlumbing.js';
 import { enhancedArtActive, renderer } from './renderSettings.js';
 import { renderRoomRgba, type FishFrame } from '../render/renderRoom.js';
@@ -93,9 +93,9 @@ export function draw(): void {
       if (smoothLog.length > 4000) smoothLog.shift();
     }
   }
-  // Subtitles: in enhanced mode with the vector font ready, render them on the
-  // high-res overlay (crisp, above the pixel frame) instead of baking them into
-  // the frame. Otherwise (classic, or font not yet loaded) bake them in.
+  // Subtitles: in the enhanced and ai tiers, with the vector font ready, render them as
+  // real DOM text above the pixel frame instead of baking them into it. Otherwise
+  // (classic, or the font failed to load) bake them in.
   const useVecSubs = enhancedArtActive() && subs !== null && subFontReady;
   // Native/fallback path (the AI room compositor above bypasses it entirely):
   // one compositor, one pass. The art source is the ONLY switch between the
@@ -178,9 +178,10 @@ export function draw(): void {
   const gpuOk = wantGpu && drawGpu(geom, art, opts, useVecSubs);
   setLastRoomBackend(gpuOk ? 'webgl' : 'cpu'); // the backend that ACTUALLY painted this frame (for the HUD)
   // #screen (the 2D canvas) is the flow anchor for the wrap that also holds the
-  // absolutely-positioned #screen-gl + #subs overlays and sits left of #panel, so
-  // it must ALWAYS carry the room's CSS box — even in WebGL mode where we don't
-  // draw into it. Otherwise it stays at the default 300×150, the wrap collapses,
+  // absolutely-positioned #screen-gl canvas and the #domsubs subtitle layer, and sits
+  // left of #panel, so it must ALWAYS carry the room's CSS box — even in WebGL mode
+  // where we don't draw into it. Otherwise it stays at the default 300×150, the wrap
+  // collapses,
   // the GL canvas overflows over the panel and #info crosses the frame.
   // (backingW/H is the native size here: only the AI branch above upscales.)
   if (canvas.width !== geom.backingW || canvas.height !== geom.backingH) {
@@ -204,9 +205,7 @@ export function draw(): void {
     canvas.style.transform = xform;
   }
   }
-  // Enhanced subtitle overlay (drawn in native game coords via a scaled context).
-  // Only touch the (large) overlay while a subtitle is actually on screen; once it
-  // clears we wipe it a single time, so idle frames do no overlay work at all.
+  // The DOM subtitle layer, which rides the shake/shove transform this frame computed.
   updateRoomSubOverlay(useVecSubs, xform);
 }
 

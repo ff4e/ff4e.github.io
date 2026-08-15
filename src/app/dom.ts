@@ -29,11 +29,6 @@ export const ctx = canvas.getContext('2d')!;
 // the GlScreen can bind its context lazily on first use.
 export const glCanvas = document.createElement('canvas');
 glCanvas.id = 'screen-gl';
-// Enhanced-graphics subtitle overlay: a smooth (non-pixelated) high-DPI canvas
-// laid exactly over the game canvas, so vector subtitles stay crisp above the
-// pixel-art frame. Wrap #screen so the overlay can be absolutely positioned on
-// top; a transparent 1px border matches #screen's border box for pixel-exact
-// alignment.
 // The fixed stage box (sized by relayout): rooms/map/cutscene are centered inside
 // it and letterboxed, so the side panel stays put while the room canvas resizes.
 export const stageBox = document.createElement('div');

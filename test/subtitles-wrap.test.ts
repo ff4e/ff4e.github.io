@@ -55,3 +55,24 @@ describe('subtitle word-wrap fits the room width', () => {
     expect(lines(sub)[0]!.obsah).toBe('short line');
   });
 });
+
+/**
+ * `vectorAnimating` is what holds the render loop off the idle throttle while a line is
+ * still moving (framePacing.ts) — so the interesting edge is the FALSE case: a line that
+ * has settled and parked is still on screen, and the loop must be allowed to throttle
+ * again. Nothing else asserts that; the probes only ever catch the true case, because
+ * they sample while a line waves in.
+ *
+ * This test used to live in `subtitles-vector.test.ts`, which was deleted whole with the
+ * canvas renderer. `vectorAnimating` was not part of that renderer and survived it.
+ */
+describe('vectorAnimating drives the idle throttle', () => {
+  it('reports whether anything is still moving', () => {
+    const sub = new SubtitleSystem(fakeFont, palette, 40, 600, 100);
+    sub.newSubtitle('Careful', 'M', 0);
+    expect(sub.vectorAnimating(0)).toBe(true); // wave just started
+    for (let c = 1; c <= 30; c++) sub.tick(c);
+    expect(sub.vectorAnimating(30)).toBe(false); // settled and parked
+    expect(sub.active).toBe(true); // …but still on screen
+  });
+});

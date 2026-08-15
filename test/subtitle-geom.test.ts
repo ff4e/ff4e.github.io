@@ -1,12 +1,12 @@
 /**
- * The shared vector-subtitle geometry (src/render/subtitleGeom.ts).
+ * The vector-subtitle geometry (src/render/subtitleGeom.ts).
  *
- * Both renderers measure from this module — `drawVector` onto a canvas, `subtitleDom`
- * into real text — so these are the rules that decide where a subtitle actually appears,
- * in either. They used to exist twice, once per renderer, which is how the two drifted:
- * the DOM path had no 8px floor on the fit and started its wave one step early. Pinned
- * here at ~2.5 ms a test rather than in a ~7.4 s probe, which is the reason the module is
- * pure and import-free.
+ * `subtitleDom` measures from this module to place real text, so these are the rules that
+ * decide where a subtitle actually appears. They used to exist twice, once per renderer,
+ * which is how the two drifted: the DOM path had no 8px floor on the fit and started its
+ * wave one step early. The canvas renderer is gone, but the rules stay pinned here at
+ * ~2.5 ms a test rather than in a ~7.4 s probe — which is the reason the module is pure
+ * and import-free.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -35,7 +35,7 @@ describe('fitFontPx — shrink a long line to the room, never wrap it', () => {
     expect(fitFontPx(1, SCREEN_W)).toBe(SUB_FONT_PX);
   });
 
-  // Exactly at the limit is not "too wide" — the canvas path's condition is `>`, and a
+  // Exactly at the limit is not "too wide" — the condition is `>`, and a
   // line that fits to the pixel must not be shrunk by a rounding hair.
   it('does not shrink a line that fits exactly', () => {
     expect(fitFontPx(maxW, SCREEN_W)).toBe(SUB_FONT_PX);
@@ -47,7 +47,7 @@ describe('fitFontPx — shrink a long line to the room, never wrap it', () => {
     expect(fitFontPx(maxW * 1.25, SCREEN_W)).toBeCloseTo(SUB_FONT_PX / 1.25, 10);
   });
 
-  // The floor is drawVector's. Without it a pathological line collapses to something
+  // The floor comes from the original vector path. Without it a pathological line collapses to something
   // unreadable, and shrinking past 8px would not make it fit anyway.
   it('never goes below the 8px floor', () => {
     expect(fitFontPx(maxW * 1000, SCREEN_W)).toBe(8);
@@ -154,7 +154,7 @@ describe('lineAnchor — where a line sits and how far its wave swings', () => {
 });
 
 describe('strokeWidth and bevelSpan — the glyph decoration', () => {
-  it('the outline is 16% of the font size (drawVector strokeText)', () => {
+  it('the outline is 16% of the font size (the original strokeText width)', () => {
     expect(strokeWidth(30)).toBeCloseTo(4.8, 10);
   });
 
@@ -179,7 +179,7 @@ describe('strokeWidth and bevelSpan — the glyph decoration', () => {
   });
 });
 
-describe('the constants both renderers place text from', () => {
+describe('the constants the renderer and the tick logic both place text from', () => {
   // Absolute, because everything else in this file is relative to them. Without this the
   // whole suite would follow a change to SUB_SCALE and still pass, which is how a
   // subtitle silently ends up the wrong size.
