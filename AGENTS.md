@@ -58,8 +58,8 @@ calls the task takes. Measured on this repo before the `main.ts` split: a sessio
 
 That is the lens for the rules below. They are not tidiness for its own sake.
 
-**What the code already looks like** (447 files under `src/`, `tools/`, `test/`): median **132 lines**, 90th
-percentile **386**, and only 15 files over 700. The codebase is already small-module. The cost was never
+**What the code already looks like** (~450 files under `src/`, `tools/`, `test/`): median **~130 lines**, 90th
+percentile **~390**, and only about 15 files over 700. The codebase is already small-module. The cost was never
 spread evenly — it was concentrated in one file, which also happened to be the most-changed file in the repo
 (32 of the last 60 commits touched `main.ts`). **Size only costs when it meets churn.** A large generated
 table nobody opens is free; a large file everyone edits is the expensive thing.
@@ -85,9 +85,9 @@ table nobody opens is free; a large file everyone edits is the expensive thing.
    same file now closes that gap: **any file in `src/app/` over 520 lines must have a budget.** It is not a cap
    — crossing the line does not fail because the file is too big, it fails because nothing was watching a file
    that had become worth watching. It is scoped to `src/app/` because that is where churn concentrates
-   (`main.ts` alone is 103 of the project's 231 commits, against six for all of `src/rooms/`), and set just above
+   (`main.ts` alone is touched by roughly half the project's commits, against six for all of `src/rooms/`), and set just above
    the largest unbudgeted file there today, so it stays quiet on the status quo. A blanket limit on every file
-   would be the wrong shape: `src/rooms/banka.ts` is 896 lines and has been touched twice, and budgeting it
+   would be the wrong shape: `src/rooms/banka.ts` is ~900 lines and has been touched twice, and budgeting it
    would only teach people to ignore the guard.
 5. **Iterate with a filtered gate, not the full one.** `npm run test:ui -- <pattern>` is the loop; the full
    suite is for before the PR.
@@ -101,16 +101,17 @@ own:
 
 | | cost |
 | --- | --- |
-| one unit test | **~2.5 ms** (1 670 of them run in ~5 s) |
-| one UI probe | **~9.5 s** median — about **3 800×** a unit test |
+| one unit test | **milliseconds** — the whole unit suite runs in ~5 s |
+| one UI probe | **~10 s** median — three to four orders of magnitude more |
 | the fixed part of any probe | 1.3–2.7 s, just to launch a browser and boot the app |
-| the full UI suite | 89 UI probes, ~1 540–1 900 s of probe-seconds, ~5–6 min wall |
+| the full UI suite | **~90 probes, 5–6 minutes** of wall clock |
 
-The probe figures are the `cost:` line `npm run test:ui` prints, across four full runs on one
-10-core machine. Read "probe-seconds" literally: they are per-probe WALL times measured inside
-the parallel pool, so they include the contention of up to eight probes sharing the machine —
-the real serial cost would be lower. They move with load, which is why they are a range and not
-a figure; the same runs put the median between 9.3 s and 9.9 s.
+Deliberately magnitudes, not counts. The decision these drive — write a unit test unless the
+browser is genuinely the thing under test — does not change between 3 000x and 3 800x, and an
+exact figure here has to be re-measured on every commit or it lies. `npm run test:ui` prints a
+`cost:` line if you want today's numbers. The same goes for the rest of this file: measurements
+that justify a past decision are quoted exactly and stay true because they are about a moment,
+while anything that counts what exists right now is given as an order of magnitude on purpose.
 
 So, in order:
 
@@ -192,7 +193,7 @@ underneath it. So know what each net is actually watching:
   mutate `src/render/*` and `src/core/room.ts` only. **Neither can see `src/app/`.**
 - **`tools/test-gl-live.mjs`** is byte-exact, but compares GPU against CPU — two implementations that both
   live in `src/render/`. It proves the two agree, not that either is right.
-- **The 89 UI probes** are the only real coverage of `src/app/`, and every one of them asserts on
+- **The UI probes** are the only real coverage of `src/app/`, and every one of them asserts on
   `window.__ff` — which is exactly the state a refactor of that area moves.
 - **`tools/capture-digest.mjs`** exists to fill that hole: it takes its oracle from the *previous revision*.
   Capture on the base commit, capture on the branch, `--compare`. Read its header for what it does and does
@@ -203,7 +204,7 @@ That is a better outcome than proceeding on hope.
 
 ## `window.__ff` is the test interface
 
-`src/app/debugHooks.ts` publishes 217 entries on `window.__ff`, and all 89 UI probes read it. It is
+`src/app/debugHooks.ts` publishes a couple of hundred entries on `window.__ff`, and every UI probe reads it. It is
 effectively the public API of the game for testing.
 
 - **Changing its shape changes the probes.** Ship a hook change as its own PR, never inside a PR that moves
