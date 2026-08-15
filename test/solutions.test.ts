@@ -7,23 +7,25 @@
  * the end `won === true && anyFishDead === false && blocked === 0` — a blocked move
  * means the port's physics diverged from the reference, so we hard-fail on it.
  *
- * The FFR game data is not in the repo (copyright), so the REPLAYS below skip when it
- * isn't present. Point $FFNG_DATA at the extracted MAINDIR to run them, exactly like
- * test/rooms.test.ts.
+ * These replays used to be gated behind `describe.skipIf(!hasData)`, keyed on a PRIVATE
+ * extraction of the original game at ~/.cache/ffng-orig — so CI, which has no such cache,
+ * silently skipped all 62 solvability assertions on every push and still reported green.
+ * The `console.warn` that said so is invisible in a passing run.
  *
- * That skip used to be silent, which made a run with ZERO solvability coverage look
- * exactly like a green one — a `console.warn` nobody reads in a passing run. Two things
- * fix that now:
- *   - the coverage half moved to `solutionsCoverage.test.ts`, needs no game data, and so
- *     runs everywhere INCLUDING CI (that is what catches a room losing its solution);
- *   - `npm run test:solutions` sets $FFNG_REQUIRE_SOLUTIONS, which turns the skip into a
- *     hard failure. It is part of `npm run test:all`, so the pre-PR gate can no longer
- *     pass while quietly checking nothing. CI does NOT set it: CI cannot have the data,
- *     and pretending otherwise would just be a permanently red job (see README).
+ * The premise behind that gate was wrong. The room data is NOT withheld from this repo:
+ * ALTAR GPL-released the Fish Fillets data in 2002, all 72 `Graphic/*.ffr` are tracked
+ * under `public/data/` because the site ships them, and they are byte-identical to a
+ * private extraction (verified across all 72). So there is nothing to skip for: the
+ * replays now run everywhere off the repo's own data, in under a second. See
+ * `test/gameData.ts` for how the directory is resolved, and $FFNG_DATA to override it.
+ *
+ * Missing data is therefore a FAILURE, not a skip — `the solvability net is armed` below
+ * asserts the data resolved AND that every room it is about to replay is readable, so this
+ * file can never again contribute zero coverage while the run reports success. The
+ * inventory half (which rooms should be here at all) is `solutionsCoverage.test.ts`.
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { parseFfr } from '../src/data/ffr.js';
 import { Room } from '../src/core/room.js';
@@ -31,31 +33,34 @@ import { ROOMS } from '../src/data/roomTable.js';
 import { replaySolution } from './solutionsHarness.js';
 import { SOLUTION_ROOMS, KNOWN_DIVERGENT } from './solutionsMapping.js';
 import { recordedMoves } from './solutionsSource.js';
+import { gameDataDir } from './gameData.js';
 
-const DATA = process.env.FFNG_DATA ?? join(homedir(), '.cache/ffng-orig/extracted/MAINDIR');
-const GRAPHIC = join(DATA, 'Graphic');
-const hasData = existsSync(GRAPHIC);
-const dataRequired = process.env.FFNG_REQUIRE_SOLUTIONS === '1';
+const GRAPHIC = join(gameDataDir(), 'Graphic');
 
 const ffrPath = (num: number): string => join(GRAPHIC, `${String(num).padStart(3, '0')}.ffr`);
 const loadRoom = (num: number): Room => new Room(parseFfr(new Uint8Array(readFileSync(ffrPath(num)))));
 
 const slugs = Object.keys(SOLUTION_ROOMS).sort();
+const clean = slugs.filter((s) => !KNOWN_DIVERGENT.has(s));
 
-// Always runs. Without $FFNG_REQUIRE_SOLUTIONS it is a no-op; with it, a missing data
-// directory fails the run instead of skipping 62 assertions behind a warning.
-describe('the solvability replay is actually running', () => {
-  it.skipIf(!dataRequired)('has the original game data it needs', () => {
-    expect(
-      hasData,
-      `$FFNG_REQUIRE_SOLUTIONS is set but the game data is missing at ${GRAPHIC}. ` +
-        `Every room-solvability assertion would have skipped silently. ` +
-        `Point $FFNG_DATA at the extracted MAINDIR, or run \`npm test\` instead of \`npm run test:solutions\`.`,
-    ).toBe(true);
+/**
+ * The guard against this file quietly checking nothing. It is not enough to know the data
+ * directory exists: a `.skip`, a renamed file, or a resolution bug upstream would each
+ * leave the run green with zero replays. So assert the exact set of rooms that is about to
+ * be replayed is real and readable — if this passes, the 62 tests below have their input.
+ */
+describe('the solvability net is armed', () => {
+  it('has readable room data for all 62 rooms it is about to replay', () => {
+    expect(existsSync(GRAPHIC), `no room data at ${GRAPHIC} — set $FFNG_DATA, or check public/data is intact`).toBe(
+      true,
+    );
+    const unreadable = clean.filter((s) => !existsSync(ffrPath(SOLUTION_ROOMS[s]!)));
+    expect(unreadable, `no .ffr for these rooms under ${GRAPHIC}`).toEqual([]);
+    expect(clean.length, 'rooms about to be replayed').toBe(62);
   });
 });
 
-describe.skipIf(!hasData)('every mapped room is solvable by its reference solution', () => {
+describe('every mapped room is solvable by its reference solution', () => {
   for (const slug of slugs) {
     const num = SOLUTION_ROOMS[slug]!;
     const jmeno = ROOMS[num - 1]!.jmeno;

@@ -10,9 +10,11 @@
  * is source. So these assertions run EVERYWHERE, including CI, and they are what makes
  * "a room silently lost its solution" a failure rather than a skip.
  *
- * The numbers are pinned exactly, on purpose. They only ever move UP (a room gaining a
- * solution, a divergence being fixed), and the PR that moves them has to say why in the
- * same change — same reasoning as the line budgets in `file-budgets.test.ts`.
+ * The numbers are pinned exactly, on purpose, so that a room quietly losing its solution
+ * is a failure rather than a smaller number nobody looks at. They are not frozen: coverage
+ * numbers move UP as rooms gain solutions, and `KNOWN_DIVERGENT` moves DOWN as port bugs
+ * are fixed. Either way the PR that moves them has to say so in the same change — same
+ * reasoning as the line budgets in `file-budgets.test.ts`.
  */
 import { describe, it, expect } from 'vitest';
 import { ROOMS } from '../src/data/roomTable.js';
@@ -35,8 +37,7 @@ describe('solution coverage', () => {
   it('the recorded corpus is exactly the pinned inventory', () => {
     expect(slugs.length, 'recorded solutions').toBe(65);
     expect(mappedSlugs.length, 'solutions pinned to a room').toBe(64);
-    expect(KNOWN_DIVERGENT.size, 'known port divergences').toBe(2);
-    expect([...KNOWN_DIVERGENT].sort()).toEqual(['corridor', 'windoze']);
+    expect([...KNOWN_DIVERGENT].sort(), 'known port divergences').toEqual(['corridor', 'windoze']);
   });
 
   it('every mapped slug has a recording, and every unmapped recording is a deliberate one', () => {
@@ -80,6 +81,18 @@ describe('solution coverage', () => {
     );
 
     expect(cleanSlugs.length, 'rooms with a clean recorded solution').toBe(62);
-    expect(uncovered.length, 'rooms with no recorded solution at all').toBe(ROOMS.length - mapped.size);
+    // Pinned by name, not just by count: the 8 are four rooms awaiting a hand-recorded
+    // solution (SPUNT, ZELVA, BARELY, POHON), two gspec=9 push-out rooms the FFNG corpus
+    // ships nothing for (LODE, GRAL), and two non-playable screens (ZAVER, SCORE).
+    expect(uncovered, 'rooms with no recorded solution at all').toEqual([
+      '#19 LODE',
+      '#29 SPUNT',
+      '#37 ZELVA',
+      '#44 BARELY',
+      '#58 POHON',
+      '#64 GRAL',
+      '#71 ZAVER',
+      '#72 SCORE',
+    ]);
   });
 });
