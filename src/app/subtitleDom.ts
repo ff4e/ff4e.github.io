@@ -78,6 +78,16 @@ interface Layer {
   lines: Map<string, DomLine>;
   /** Font the measurements below were taken at; a change rebuilds the glyph boxes. */
   lastFont: string;
+  /**
+   * Fit budget the rows' `fit` was decided against; a change rebuilds them too.
+   *
+   * Watched separately from the font because the two can now move independently: the
+   * font follows the STAGE and the budget follows the ROOM, so changing the fit mode
+   * with a line up rescales the room without touching the font string. Left unwatched,
+   * a row fitted to a wide room stayed too wide for a narrow one and was clipped by the
+   * host's bounds — the exact failure `fitFontPx` exists to prevent.
+   */
+  lastFitW: number;
   /** The owner's own transform (the room's shake / shove), so the layer moves with it. */
   lastXform: string;
   /** Distance from a line box's top to the text baseline, for `lastFont`. */
@@ -86,7 +96,7 @@ interface Layer {
   boxHeight: number;
 }
 
-const newLayer = (): Layer => ({ host: null, lines: new Map(), lastFont: '', lastXform: '', baselineInset: 0, boxHeight: 0 });
+const newLayer = (): Layer => ({ host: null, lines: new Map(), lastFont: '', lastFitW: 0, lastXform: '', baselineInset: 0, boxHeight: 0 });
 const layers: Record<SubOwner, Layer> = { room: newLayer(), cut: newLayer() };
 /** The element id each layer's host carries, so a probe can find it. */
 const HOST_ID: Record<SubOwner, string> = { room: 'domsubs', cut: 'domsubs-cut' };
@@ -114,6 +124,7 @@ export function clearDomSubtitles(owner?: SubOwner): void {
     L.host = null;
   }
   L.lastFont = '';
+  L.lastFitW = 0;
   L.lastXform = '';
 }
 
@@ -235,9 +246,15 @@ export function syncDomSubtitles(
 
   const fontPx = VECTOR_GEOM.fontPx * textScale;
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
-  if (font !== L.lastFont) {
-    ({ inset: L.baselineInset, height: L.boxHeight } = measureBaseline(font));
+  // The width a row is fitted inside. Not the same thing as the font any more, so it is
+  // watched on its own — see `Layer.lastFitW`.
+  const fitW = fitScreenW(screenW, boxScale, textScale);
+  if (font !== L.lastFont || fitW !== L.lastFitW) {
+    // The baseline pair depends only on the font, so a budget change does not pay for a
+    // second forced layout.
+    if (font !== L.lastFont) ({ inset: L.baselineInset, height: L.boxHeight } = measureBaseline(font));
     L.lastFont = font;
+    L.lastFitW = fitW;
     // Glyph boxes are laid out for the old size; rebuild them.
     for (const l of L.lines.values()) l.el.remove();
     L.lines.clear();
@@ -283,7 +300,6 @@ export function syncDomSubtitles(
     if (list) list.push(natural);
     else blockNatural.set(t.block, [natural]);
   }
-  const fitW = fitScreenW(screenW, boxScale, textScale);
   for (const [block, naturals] of blockNatural) {
     const f = fitBlockFontPx(naturals, fitW) / VECTOR_GEOM.fontPx;
     const cur = blockFit.get(block);

@@ -58,10 +58,15 @@ export const introMovie = (): string =>
 /**
  * Vector-subtitle size in the `ai` tier, as a fraction of the faithful size.
  *
- * The subtitle overlay draws in NATIVE game pixels in every tier, so the text has always
- * been the same size relative to the room. That reads as correct against classic and
- * enhanced art, and too heavy against the AI upscale: next to art carrying four times the
- * detail, a line sized for a 1998 bitmap font is the coarsest thing on screen.
+ * The subtitle layer draws in NATIVE game pixels, so the text was sized for a 1998 bitmap
+ * font in every tier. That reads as correct against classic and enhanced art, and too
+ * heavy against the AI upscale: next to art carrying four times the detail, that line is
+ * the coarsest thing on screen.
+ *
+ * (It used to be put as "the same size relative to the room", which was true while the
+ * text was scaled by the room's zoom-to-fit. It is not any more — a room subtitle is
+ * sized from the STAGE now, see framePainter's updateRoomSubtitles — so the text is a
+ * constant size on screen instead, which is what the original demonstrated.)
  *
  * Applied as a pure PRESENTATION transform by the subtitle layer's own container scale —
  * the engine's line positions (`ys`/`cilys`, advanced by PosunTitulky at the logic tick)

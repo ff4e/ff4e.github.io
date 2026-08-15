@@ -551,7 +551,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `paintClock.ts` | 0.4 k | The paint-rate cap, kept pure so it can be tested against synthetic refresh trains. |
 | `framePacing.ts` | 5.7 k | Whether the next frame must be painted at all, and the perf HUD's counters. |
 | `renderLoop.ts` | 3.7 k | The rAF callback: which screen paints, how many logic steps run, when to sleep. |
-| `framePainter.ts` | 3.3 k | One room frame, all three art tiers, both backends. |
+| `framePainter.ts` | 3.5 k | One room frame, all three art tiers, both backends. |
 | `logicTick.ts` | 3.0 k | One 80 ms game step: script, engine, dialogue, death, screensaver. |
 | **Playing a room** | | |
 | `movement.ts` | 2.6 k | The held-key state machine, and replaying a saved record back into a room. |
@@ -567,7 +567,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the fatal screen and the resize handler. |
-| `subtitleDom.ts` | 4.0 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. |
+| `subtitleDom.ts` | 4.9 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
 | `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
@@ -623,8 +623,8 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |
 | `help.ts` | 0.6 k | The control-help screens (`Help.pas`). |
-| `subtitleGeom.ts` | 1.8 k | The geometry a vector subtitle line is built from — fit-to-room size, wave phase and curve, baseline and amplitude, stroke and bevel. Pure and import-free, so the renderer and the tick logic both measure from it and it is unit-tested. |
-| `subtitles.ts` | 3.1 k | Colour mapping, glyph rendering, and the scrolling line. |
+| `subtitleGeom.ts` | 2.5 k | The geometry a vector subtitle line is built from — fit-to-room size (one per message, not per row), wave phase and curve, baseline and amplitude, stroke and bevel, and the split that lets the text be scaled from the stage while the room is scaled to fit. Pure and import-free, so the renderer and the tick logic both measure from it and it is unit-tested. |
+| `subtitles.ts` | 3.4 k | Colour mapping, glyph rendering, and the scrolling line. |
 | `font.ts` | 0.9 k | The bitmap font from the original `Chars.dat`/`Chartab.dat`/`Charcol.dat`. |
 | `tetrisRender.ts` | 1.3 k | The Tetris minigame's picture. |
 | `filmEffects.ts` | 1.1 k | Full-frame effects for the `xsilent` and `xinterlaced` cheats. |
