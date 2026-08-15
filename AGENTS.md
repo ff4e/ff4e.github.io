@@ -101,10 +101,10 @@ own:
 
 | | cost |
 | --- | --- |
-| one unit test | **~2.5 ms** (1 609 of them run in ~5 s) |
+| one unit test | **~2.5 ms** (1 670 of them run in ~5 s) |
 | one UI probe | **~7.4 s** median — about **3 000×** a unit test |
 | the fixed part of any probe | 1.3–2.7 s, just to launch a browser and boot the app |
-| the full UI suite | 86 probes, ~1 450 s of serial work, ~5 min wall |
+| the full UI suite | 89 UI probes, ~1 550-1 900 s of serial work, ~5-6 min wall |
 
 So, in order:
 
@@ -186,7 +186,7 @@ underneath it. So know what each net is actually watching:
   mutate `src/render/*` and `src/core/room.ts` only. **Neither can see `src/app/`.**
 - **`tools/test-gl-live.mjs`** is byte-exact, but compares GPU against CPU — two implementations that both
   live in `src/render/`. It proves the two agree, not that either is right.
-- **The 86 UI probes** are the only real coverage of `src/app/`, and every one of them asserts on
+- **The 89 UI probes** are the only real coverage of `src/app/`, and every one of them asserts on
   `window.__ff` — which is exactly the state a refactor of that area moves.
 - **`tools/capture-digest.mjs`** exists to fill that hole: it takes its oracle from the *previous revision*.
   Capture on the base commit, capture on the branch, `--compare`. Read its header for what it does and does
@@ -197,7 +197,7 @@ That is a better outcome than proceeding on hope.
 
 ## `window.__ff` is the test interface
 
-`src/app/debugHooks.ts` publishes 216 entries on `window.__ff`, and all 86 UI probes read it. It is
+`src/app/debugHooks.ts` publishes 217 entries on `window.__ff`, and all 89 UI probes read it. It is
 effectively the public API of the game for testing.
 
 - **Changing its shape changes the probes.** Ship a hook change as its own PR, never inside a PR that moves
