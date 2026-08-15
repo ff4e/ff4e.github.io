@@ -29,6 +29,19 @@ interface TitleLine {
   cilys: number;
   startcount: number;
   killcount: number;
+  /**
+   * Which `newSubtitle` call produced this line — port bookkeeping, not the original's.
+   *
+   * The original had no use for it: it drew every line with the same bitmap font at the
+   * same size, so "these lines are one sentence" was never a question the renderer had
+   * to ask. A vector renderer does have to ask it, because it fits a too-wide line by
+   * shrinking it (`fitFontPx`), and shrinking the lines of one sentence independently
+   * makes them different sizes. `startcount` + `barva` nearly identifies a message, but
+   * not quite — two calls can land on the same tick with the same speaker (a scripted
+   * line while `talk()` fires, or the `pushSubtitle` debug hook) — so the identity is
+   * recorded rather than inferred.
+   */
+  block: number;
 }
 
 /** najdi_barvu (URoom.pas:1087): nearest palette index by weighted RGB distance. */
@@ -48,6 +61,8 @@ function nearestColor(pal: readonly FfrPaletteEntry[], r: number, g: number, b: 
 
 export class SubtitleSystem {
   private readonly titles: TitleLine[] = [];
+  /** Message counter behind `TitleLine.block`; monotonic, never reset by `clear()`. */
+  private blockSeq = 0;
   /** Letter colour codes -> 6 palette-index shades (fontcol). */
   private readonly fontcol = new Map<string, number[]>();
   /** Digit colour codes -> two ramps of 6 shades (fontcol2). */
@@ -99,6 +114,9 @@ export class SubtitleSystem {
     const maxW = this.screenW - BORDERTITLE * 2;
     let obsah = text;
     let prvni = true; // the outer call; the original recurses with prvni=false
+    // Every line this call emits is one sentence, however many rows it wraps to. Only
+    // the port needs to know that; see `TitleLine.block`.
+    const block = ++this.blockSeq;
     for (;;) {
       let s = obsah;
       let i = s.length;
@@ -110,7 +128,7 @@ export class SubtitleSystem {
         s = s.slice(0, i - 1); // delete(s, i, ..) -> s[1..i-1]
       }
       if (this.silentFilm) this.addSilentLine(s, color, prvni);
-      else this.addLine(s, color, count);
+      else this.addLine(s, color, count, block);
       prvni = false;
       if (s.length >= obsah.length) return; // whole string fit on this line
       obsah = obsah.slice(i); // delete(obsah, 1, i) -> obsah[i+1..], dropping the break space
@@ -118,7 +136,7 @@ export class SubtitleSystem {
   }
 
   /** NovyRadekTitulku (URoom.pas:520): add a title line, pushing existing ones up. */
-  private addLine(s: string, c: string, count: number): void {
+  private addLine(s: string, c: string, count: number, block: number): void {
     let lasty: number;
     if (this.titles.length === 0) {
       lasty = -1000;
@@ -139,6 +157,7 @@ export class SubtitleSystem {
       cilys: BASETITLE - ROWTITLE,
       startcount: count,
       killcount,
+      block,
     });
   }
 
@@ -250,6 +269,7 @@ export class SubtitleSystem {
     ys: number;
     cilys: number;
     startcount: number;
+    block: number;
     rgb: [number, number, number];
   }[] {
     return this.titles.map((t) => ({
@@ -258,6 +278,7 @@ export class SubtitleSystem {
       ys: t.ys,
       cilys: t.cilys,
       startcount: t.startcount,
+      block: t.block,
       rgb: this.vectorColor(t.barva),
     }));
   }

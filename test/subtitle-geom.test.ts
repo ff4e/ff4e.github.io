@@ -19,6 +19,7 @@ import {
   WAVE_PER_TICK,
   bevelBottomRgb,
   bevelSpan,
+  fitBlockFontPx,
   fitFontPx,
   lineAnchor,
   strokeWidth,
@@ -67,6 +68,45 @@ describe('fitFontPx — shrink a long line to the room, never wrap it', () => {
     const tight = fitFontPx(500, narrow);
     expect(tight).toBeLessThan(wide);
     expect(tight).toBeCloseTo((SUB_FONT_PX * (narrow - BORDERTITLE * 2)) / 500, 10);
+  });
+});
+
+describe('fitBlockFontPx — one size for a whole message, not one per row', () => {
+  // The reported case (KUFRIK, ai tier): "Nyní začínáme znovu - můžeme však nahrát
+  // uloženou pozici" / "klávesou F3.". The wrap is faithful (it uses the ORIGINAL
+  // BITMAP font's metrics, NovyTitulek URoom.pas:592) but the vector face draws 20%
+  // larger, so the first row still overflows and the short remainder does not. Fitted
+  // per row that is two visibly different sizes in one spoken sentence.
+  const longRow = maxW * 1.18;
+  const shortRow = maxW * 0.2;
+
+  it('gives every row of a message the size of its widest row', () => {
+    const block = fitBlockFontPx([longRow, shortRow], SCREEN_W);
+    expect(block).toBeCloseTo(fitFontPx(longRow, SCREEN_W), 10);
+    expect(block).toBeLessThan(fitFontPx(shortRow, SCREEN_W)); // …which the short row alone would not have got
+  });
+
+  it('leaves a message whose rows all fit at the full size', () => {
+    expect(fitBlockFontPx([shortRow, shortRow], SCREEN_W)).toBe(SUB_FONT_PX);
+  });
+
+  it('is the plain fit for a message that did not wrap', () => {
+    expect(fitBlockFontPx([longRow], SCREEN_W)).toBeCloseTo(fitFontPx(longRow, SCREEN_W), 10);
+    expect(fitBlockFontPx([shortRow], SCREEN_W)).toBe(SUB_FONT_PX);
+  });
+
+  // Order must not matter: the rows arrive in reading order, and the widest one is as
+  // likely to be the last as the first.
+  it('does not depend on the order the rows are measured in', () => {
+    expect(fitBlockFontPx([shortRow, longRow], SCREEN_W)).toBeCloseTo(
+      fitBlockFontPx([longRow, shortRow], SCREEN_W),
+      10,
+    );
+  });
+
+  it('keeps the 8px floor, and treats no rows at all as fitting', () => {
+    expect(fitBlockFontPx([maxW * 1000, shortRow], SCREEN_W)).toBe(8);
+    expect(fitBlockFontPx([], SCREEN_W)).toBe(SUB_FONT_PX);
   });
 });
 

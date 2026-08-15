@@ -96,6 +96,30 @@ export function fitFontPx(naturalW: number, screenW: number): number {
 }
 
 /**
+ * One font size for a whole message, from the natural widths of its lines.
+ *
+ * A wrapped sentence is several `TitleLine`s, and `fitFontPx` applied to each of them
+ * independently gives them DIFFERENT sizes: the long line overflows and shrinks, the
+ * short remainder does not. That is visible — reported from KUFRIK, where
+ * "…nahrát uloženou pozici" rendered noticeably smaller than "klávesou F3." on the row
+ * below it.
+ *
+ * The overflow itself is not a defect to fix here. `newSubtitle` wraps against the
+ * ORIGINAL BITMAP font's metrics (NovyTitulek, URoom.pas:592) and must keep doing so —
+ * the wrap points are part of the port's fidelity. The vector face is a different font
+ * drawn at SUB_SCALE (+20%), so a faithfully wrapped line can still measure too wide for
+ * it, and `fitFontPx` is the compensation. What was wrong was the GRANULARITY of that
+ * compensation: it belongs to the message, not to the row.
+ *
+ * The smallest of the per-line fits, because it is the only one that fits every line.
+ */
+export function fitBlockFontPx(naturalWs: readonly number[], screenW: number): number {
+  let px = SUB_FONT_PX;
+  for (const w of naturalWs) px = Math.min(px, fitFontPx(w, screenW));
+  return px;
+}
+
+/**
  * How far through its wave glyph `index` is, at time `cas` (ticks since the line began).
  *
  * `index` is 0-based here; PisStringF's `p = cas*5 - index` counts from 1, so the +1 is

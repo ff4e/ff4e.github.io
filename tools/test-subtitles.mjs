@@ -3,7 +3,8 @@
  *  - `enhanced` and `ai` paint real DOM text (#domsubs).
  *  - `classic` bakes them into the pixel frame, so nothing appears in the DOM at all.
  *  - ANY tier bakes them when no subtitle font loaded — the one fallback left.
- * Also guards the idle-skip (no DOM text when no subtitle is showing), and a tier switch
+ * Also guards the idle-skip (no DOM text when no subtitle is showing), a wrapped sentence
+ * being drawn at ONE size rather than one per row, and a tier switch
  * with a line already up: the renderer does not change, but the room's box and the tier's
  * own scale do, so the layer has to follow both rather than be left as it was. Finally,
  * leaving the room has to take an abandoned line off the screen.
@@ -59,6 +60,38 @@ await withApp(async ({ p, expect }) => {
   await tickSleep(p, 5);
   expect(await p.evaluate(() => window.__ff.subsActive()), 'ai: subtitle active');
   expect((await domLines(p)) > 0, 'ai: subtitle painted as real DOM text');
+
+  // ── one sentence, one font size ──
+  //
+  // A wrapped line is several rows, and the fit-to-room shrink used to be applied to each
+  // of them on its own: the long row overflowed the vector face and shrank, the short
+  // remainder did not, and the same sentence rendered at two sizes (reported from KUFRIK
+  // in the `ai` tier — this is that line). Only a browser can see it, because the
+  // overflow comes from measuring a real font: `newSubtitle` wraps against the ORIGINAL
+  // BITMAP metrics (URoom.pas:592, and those wrap points stay), while the row is drawn in
+  // FreeSans-Bold 20% larger.
+  //
+  // Read off computed style rather than the internal fit, so a rule applied per block but
+  // written per row still fails.
+  await p.evaluate(() => window.__ff.clearSubtitles());
+  await p.evaluate(() =>
+    window.__ff.pushSubtitle('Nyní začínáme znovu - můžeme však nahrát uloženou pozici klávesou F3.', 'M'),
+  );
+  await tickSleep(p, 5);
+  const rowPx = await p.evaluate(() =>
+    [...(document.getElementById('domsubs')?.children ?? [])].map((el) =>
+      parseFloat(getComputedStyle(el).fontSize),
+    ),
+  );
+  expect(rowPx.length > 1, `[ai] the fixture line wraps to several rows (${rowPx.length})`);
+  expect(
+    Math.max(...rowPx) - Math.min(...rowPx) < 0.01,
+    `[ai] every row of one sentence is drawn at the same size (${rowPx.map((v) => v.toFixed(2)).join(', ')})`,
+  );
+  await p.evaluate(() => window.__ff.clearSubtitles());
+  await tickSleep(p, 2);
+  await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
+  await tickSleep(p, 5);
 
   // A tier switch mid-line. The renderer does not change, so "the text is still there"
   // is nearly free and proves little on its own — what actually has to happen is that the

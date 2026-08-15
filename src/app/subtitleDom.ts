@@ -28,7 +28,7 @@ import {
   VECTOR_GEOM,
   bevelBottomRgb,
   bevelSpan,
-  fitFontPx,
+  fitBlockFontPx,
   lineAnchor,
   strokeWidth,
   waveDy,
@@ -49,13 +49,16 @@ interface DomLine {
   /** Last vertical position written, to skip no-op style writes. */
   y: number;
   /**
-   * Fit-to-room factor for this line, kept because measuring it is a forced layout.
+   * Fit-to-room factor for this row, kept because measuring it is a forced layout.
    *
    * `y` has to be recomputed every tick (the line scrolls) and depends on this, so
    * without it stored the measurement ran once per line PER FRAME — a synchronous
    * layout in the path whose whole purpose is keeping work off the main thread, and one
    * that gets more expensive under exactly the load this renderer exists to survive.
-   * It only depends on (font, text), both of which are already in the line's cache key.
+   *
+   * Shared by every row of the same message (see the fit pass in `syncDomSubtitles`), so
+   * it is NOT a function of this row's own text: it depends on (font, message), and a
+   * row keeps the value it was built with for as long as it exists.
    */
   fit: number;
 }
@@ -151,6 +154,16 @@ function measureTextWidth(font: string, text: string): number {
   return w;
 }
 
+/**
+ * The cache key for one rendered row.
+ *
+ * `startcount` + speaker + text: a row is rebuilt only when one of those changes, and
+ * its position (`ys`) deliberately is not part of it — that is what scrolls.
+ */
+function lineKey(t: { startcount: number; barva: string; obsah: string }): string {
+  return `${t.startcount}|${t.barva}|${t.obsah}`;
+}
+
 /** The damped-cosine wave, as keyframes the compositor can run on its own. */
 function waveFrames(ampCss: number): Keyframe[] {
   const out: Keyframe[] = [];
@@ -223,23 +236,58 @@ export function syncDomSubtitles(
     L.lines.clear();
   }
 
-  const want = new Set<string>();
-  for (const t of sys.debugLines()) {
-    const key = `${t.startcount}|${t.barva}|${t.obsah}`;
-    want.add(key);
-    // Fit the line inside the room the way `fitFontPx` defines it: shrink the font
-    // rather than wrap, and a line that overflowed here was clipped by the host's
-    // bounds, losing its last word. Measured on the TEXT and BEFORE the element is
-    // built, because everything below is derived from the size the line ends up at —
-    // the baseline offset in `y`, the stroke width, and the bevel stops. Shrinking
-    // afterwards (by writing fontSize onto a finished element) left all three sized for
-    // a font the line was no longer drawn in.
+  const lines = sys.debugLines();
+  // ONE fit per message, not one per row.
+  //
+  // Fitting means shrinking the font rather than wrapping or overflowing: a row that
+  // overflowed here was clipped by the host's bounds and lost its last word. It is
+  // needed even though `newSubtitle` already wrapped the text, because that wraps
+  // against the ORIGINAL BITMAP font's metrics (NovyTitulek, URoom.pas:592, deliberately
+  // faithful) while this draws a different face 20% larger (SUB_SCALE), so a faithfully
+  // wrapped row can still measure too wide.
+  //
+  // Applied per row, that shrank the long first row of a sentence and left its short
+  // remainder at full size — two sizes in one spoken line. So the fits of a message's
+  // rows are collected first and the smallest is given to all of them
+  // (`fitBlockFontPx`), and the result is known BEFORE any element is built, because
+  // everything below is derived from the size a row ends up at: the baseline offset in
+  // `y`, the stroke width and the bevel stops. Shrinking afterwards (by writing
+  // fontSize onto a finished element) leaves all three sized for a font the row is no
+  // longer drawn in.
+  //
+  // A row already on screen keeps the fit it was built with, so no measurement is
+  // repeated — the rows of a message are all added by the same `newSubtitle` call and
+  // therefore always built together, in this one pass.
+  const blockFit = new Map<number, number>();
+  const blockNatural = new Map<number, number[]>();
+  for (const t of lines) {
+    const built = L.lines.get(lineKey(t));
+    if (built) {
+      const cur = blockFit.get(t.block);
+      if (cur === undefined || built.fit < cur) blockFit.set(t.block, built.fit);
+      continue;
+    }
     // Measured at the display scale, but fitted in NATIVE units, because that is where
-    // the rule is defined (subtitleGeom) — dividing out `scale` keeps a
-    // fit-to-room decision from depending on the window size. Measured ONLY for a line
-    // being built: it is a forced layout, and it cannot change while the line exists.
+    // the rule is defined (subtitleGeom) — dividing out `scale` keeps a fit-to-room
+    // decision from depending on the window size. Measured ONLY for a row being built:
+    // it is a forced layout, and it cannot change while the row exists.
+    const natural = measureTextWidth(font, t.obsah) / scale;
+    const list = blockNatural.get(t.block);
+    if (list) list.push(natural);
+    else blockNatural.set(t.block, [natural]);
+  }
+  for (const [block, naturals] of blockNatural) {
+    const f = fitBlockFontPx(naturals, screenW) / VECTOR_GEOM.fontPx;
+    const cur = blockFit.get(block);
+    if (cur === undefined || f < cur) blockFit.set(block, f);
+  }
+
+  const want = new Set<string>();
+  for (const t of lines) {
+    const key = lineKey(t);
+    want.add(key);
     let line = L.lines.get(key);
-    const fit = line ? line.fit : fitFontPx(measureTextWidth(font, t.obsah) / scale, screenW) / VECTOR_GEOM.fontPx;
+    const fit = line ? line.fit : blockFit.get(t.block)!;
     // A scalable font's baseline inset and line-box height scale with its size, so the
     // measured pair can be scaled rather than re-measured (which would be a second
     // forced layout per line).
