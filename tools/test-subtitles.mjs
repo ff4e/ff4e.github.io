@@ -104,10 +104,24 @@ await withApp(async ({ p, expect }) => {
   // wrong reason: with the font marked missing the line must still be live but absent
   // from the DOM (not simply dropped), and turning the font back on must bring it back
   // (so the gate is what moved it, not a subtitle system left broken by the flag).
+  //
+  // The `ai` pass is NOT the `enhanced` pass again. `useVecSubs` is the same boolean in
+  // both, so on its own the second iteration would re-assert the first one's proposition
+  // and buy nothing. What is ai-only is the knock-on: a baked line cannot be composited
+  // by the hi-res AI compositor, so `bakedSubsNeeded` pulls that whole path out of the
+  // frame for as long as the line is up (art.ts -> aiRoomGateAllows, roomAi.ts). That
+  // wiring is invisible to `roomAi`'s unit tests, which cover the RULE and not what is
+  // fed into it, and it costs no extra game ticks to check here.
   for (const tier of ['enhanced', 'ai']) {
     await p.evaluate((t) => window.__ff.setGraphics(t), tier);
     await p.evaluate(() => window.__ff.clearSubtitles());
     await tickSleep(p, 2);
+    // The ai tier has to be actually compositing before "it stops" can mean anything.
+    // Waited for rather than assumed: the tier switch has to fetch the room's AI art.
+    if (tier === 'ai') {
+      await p.waitForFunction(() => window.__ff.aiRoomActive()).catch(() => {});
+      expect(await p.evaluate(() => window.__ff.aiRoomActive()), '[ai] the tier is compositing before the font fails');
+    }
     await p.evaluate(() => window.__ff.subFontReady(false));
     await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
     await tickSleep(p, 5);
@@ -116,10 +130,19 @@ await withApp(async ({ p, expect }) => {
       `[${tier}] with no subtitle font the line is still being said`,
     );
     expect((await domLines(p)) === 0, `[${tier}] with no subtitle font nothing is drawn as DOM text (baked instead)`);
+    if (tier === 'ai') {
+      expect(
+        (await p.evaluate(() => window.__ff.aiRoomActive())) === false,
+        '[ai] a baked line takes the hi-res compositor out of the frame (bakedSubsNeeded)',
+      );
+    }
 
     await p.evaluate(() => window.__ff.subFontReady(true));
     await tickSleep(p, 5);
     expect((await domLines(p)) > 0, `[${tier}] the same line comes back as DOM text once a font is available`);
+    if (tier === 'ai') {
+      expect(await p.evaluate(() => window.__ff.aiRoomActive()), '[ai] and the compositor comes back with it');
+    }
   }
   await p.evaluate(() => window.__ff.clearSubtitles());
   await tickSleep(p, 2);

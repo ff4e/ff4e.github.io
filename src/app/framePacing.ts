@@ -309,7 +309,7 @@ export function loopThrottleOk(): boolean {
       // classic bitmap path, which is baked into the frame at the tick rate.
       //
       // Gated on enhancedArtActive() — every tier that USES the vector overlay (see
-      // useVecSubs in drawRoom), not the literal 'enhanced' tier. Checking
+      // useVecSubs in framePainter's `draw`), not the literal 'enhanced' tier. Checking
       // `graphics === 'enhanced'` left the ai tier idle-throttled at 12.5fps for the
       // whole line: measured rAF 12fps in ai against 121fps in enhanced, which is
       // exactly the juddering-subtitle report.
