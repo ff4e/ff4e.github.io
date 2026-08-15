@@ -62,6 +62,24 @@ await withApp(async ({ p, expect }) => {
   expect(await p.evaluate(() => window.__ff.subsActive()), 'ai: subtitle active');
   expect((await domLines(p)) > 0, 'ai: subtitle painted as real DOM text');
 
+  // ── two identical rows are two rows ──
+  //
+  // The renderer keeps one element per engine row. Recognising the row by its CONTENT
+  // (startcount, speaker, text) is not an identity: the same short line said twice on one
+  // tick collapses onto a single element and the player sees one line where the engine
+  // has two. Only a browser can see this — it is about what reached the DOM.
+  await p.evaluate(() => window.__ff.clearSubtitles());
+  await tickSleep(p, 2);
+  await p.evaluate(() => {
+    window.__ff.pushSubtitle('Echo.', 'M');
+    window.__ff.pushSubtitle('Echo.', 'M'); // same tick, same speaker, same text
+  });
+  await tickSleep(p, 5);
+  expect(
+    (await domLines(p)) === 2,
+    `two identical lines on one tick are two rows in the DOM (${await domLines(p)})`,
+  );
+
   // ── one sentence, one font size ──
   //
   // A wrapped line is several rows, and the fit-to-room shrink used to be applied to each
@@ -70,7 +88,7 @@ await withApp(async ({ p, expect }) => {
   // in the `ai` tier — this is that line). Only a browser can see it, because the
   // overflow comes from measuring a real font: `newSubtitle` wraps against the ORIGINAL
   // BITMAP metrics (URoom.pas:592, and those wrap points stay), while the row is drawn in
-  // FreeSans-Bold 20% larger.
+  // the bundled vector face (Mulish Medium by default) 20% larger.
   //
   // Read off computed style rather than the internal fit, so a rule applied per block but
   // written per row still fails.
@@ -214,18 +232,28 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.fitMode('fixed'));
   await tickSleep(p, 4);
   const overflow = await p.evaluate(() => {
-    const host = document.getElementById('domsubs').getBoundingClientRect();
+    const hostEl = document.getElementById('domsubs');
+    const host = hostEl.getBoundingClientRect();
     let worst = 0;
-    for (const line of document.getElementById('domsubs').children) {
+    let glyphs = 0;
+    for (const line of hostEl.children) {
       for (const sp of line.querySelectorAll('span')) {
         const r = sp.getBoundingClientRect();
         if (r.width === 0 && r.height === 0) continue;
+        glyphs++;
         worst = Math.max(worst, host.left - r.left, r.right - host.right);
       }
     }
-    return worst;
+    return { worst, glyphs };
   });
-  expect(overflow <= 1, `a line refits when the fit mode changes under it (overflow ${overflow.toFixed(1)}px)`);
+  // The line has to still BE there. Without this the check passes on an empty layer —
+  // no glyphs, no overflow — which is exactly what a rebuild that dropped the line
+  // would look like.
+  expect(overflow.glyphs > 0, `the line survives the fit-mode change (${overflow.glyphs} glyphs)`);
+  expect(
+    overflow.worst <= 1,
+    `a line refits when the fit mode changes under it (overflow ${overflow.worst.toFixed(1)}px)`,
+  );
   await p.evaluate(() => window.__ff.fitMode('medium'));
   await p.evaluate(() => window.__ff.clearSubtitles());
   await p.setViewportSize(SUITE_VIEWPORT);

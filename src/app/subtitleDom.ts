@@ -75,7 +75,15 @@ export type SubOwner = 'room' | 'cut';
 
 interface Layer {
   host: HTMLDivElement | null;
-  lines: Map<string, DomLine>;
+  /**
+   * One entry per engine row, keyed by the row's own id.
+   *
+   * Keyed by identity and not by content: (startcount, speaker, text) can be shared by
+   * two distinct rows — the same short line said twice on one tick, or a sentence
+   * wrapping into two identical rows — and both then collapsed onto one element, so the
+   * engine had two rows and the player saw one.
+   */
+  lines: Map<number, DomLine>;
   /** Font the measurements below were taken at; a change rebuilds the glyph boxes. */
   lastFont: string;
   /**
@@ -165,16 +173,6 @@ function measureTextWidth(font: string, text: string): number {
   const w = probe.getBoundingClientRect().width;
   probe.remove();
   return w;
-}
-
-/**
- * The cache key for one rendered row.
- *
- * `startcount` + speaker + text: a row is rebuilt only when one of those changes, and
- * its position (`ys`) deliberately is not part of it — that is what scrolls.
- */
-function lineKey(t: { startcount: number; barva: string; obsah: string }): string {
-  return `${t.startcount}|${t.barva}|${t.obsah}`;
 }
 
 /** The damped-cosine wave, as keyframes the compositor can run on its own. */
@@ -285,7 +283,7 @@ export function syncDomSubtitles(
   const blockFit = new Map<number, number>();
   const blockNatural = new Map<number, number[]>();
   for (const t of lines) {
-    const built = L.lines.get(lineKey(t));
+    const built = L.lines.get(t.id);
     if (built) {
       const cur = blockFit.get(t.block);
       if (cur === undefined || built.fit < cur) blockFit.set(t.block, built.fit);
@@ -306,11 +304,10 @@ export function syncDomSubtitles(
     if (cur === undefined || f < cur) blockFit.set(block, f);
   }
 
-  const want = new Set<string>();
+  const want = new Set<number>();
   for (const t of lines) {
-    const key = lineKey(t);
-    want.add(key);
-    let line = L.lines.get(key);
+    want.add(t.id);
+    let line = L.lines.get(t.id);
     const fit = line ? line.fit : blockFit.get(t.block)!;
     // A scalable font's baseline inset and line-box height scale with its size, so the
     // measured pair can be scaled rather than re-measured (which would be a second
@@ -396,7 +393,7 @@ export function syncDomSubtitles(
       });
       host.appendChild(el);
       line = { el, spans, y, fit };
-      L.lines.set(key, line);
+      L.lines.set(t.id, line);
     }
     // The scroll: the only thing written per tick, and a transform, so the compositor
     // interpolates it (see the 80ms transition, one logic tick).
@@ -405,9 +402,9 @@ export function syncDomSubtitles(
       line.y = y;
     }
   }
-  for (const [key, l] of L.lines) {
-    if (want.has(key)) continue;
+  for (const [id, l] of L.lines) {
+    if (want.has(id)) continue;
     l.el.remove();
-    L.lines.delete(key);
+    L.lines.delete(id);
   }
 }

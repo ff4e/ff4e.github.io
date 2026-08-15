@@ -192,10 +192,14 @@ export function lineOffset(ys: number): number {
  * per room AND per line: exactly the symptom this is supposed to remove, reintroduced
  * through the fit. Reported from 'x1'.
  *
- * Capping at the room's own scale makes those modes behave as they did before any of
- * this (text scales with the room) while the graded modes — where the room is never
- * drawn smaller than the stage, and which include the shipped default — get the constant
- * size. In 'fixed' the two are equal and the cap does nothing.
+ * Capping at the room's own scale is only active where the room IS smaller than the
+ * stage, which is the half of those modes that was broken: there the text goes back to
+ * scaling with the room, as it did before any of this. Where a crisp mode draws a room
+ * BIGGER than the stage ('native' in a small room reaches 3.5x against a stage near
+ * 1.65) the cap does nothing and the text keeps the constant stage size — which is
+ * wanted, and is the same rule the graded modes get. The graded modes, including the
+ * shipped default, never draw a room smaller than the stage, so the cap never fires for
+ * them at all. In 'fixed' the two numbers are equal by definition.
  */
 export function subtitleScale(stageScale: number, boxScale: number): number {
   return Math.min(stageScale, boxScale);

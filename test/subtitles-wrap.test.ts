@@ -62,6 +62,32 @@ describe('subtitle word-wrap fits the room width', () => {
  * That is the only reason `block` exists — the original never needed it, because the
  * bitmap path draws every line at the same size.
  */
+describe('id: which row is which', () => {
+  // The DOM renderer keeps one element per row and recognises the row again next frame.
+  // It used to do that by (startcount, speaker, text), which is not an identity — two
+  // rows can agree on all three, and the renderer then drew one element where the engine
+  // had two rows, losing one.
+  it('gives every row a distinct id, even when two rows are identical', () => {
+    const sub = new SubtitleSystem(fakeFont, palette, 40, 600, 100);
+    sub.newSubtitle('same line', 'M', 7);
+    sub.newSubtitle('same line', 'M', 7); // same tick, same speaker, same text
+    const ls = sub.debugLines();
+    expect(ls).toHaveLength(2);
+    expect(ls[0]!.id).not.toBe(ls[1]!.id);
+  });
+
+  // Not reset by `clear()`: an id that can come round again is not an identity, and the
+  // renderer would match a fresh row against the element of a dead one.
+  it('never reuses an id after a clear', () => {
+    const sub = new SubtitleSystem(fakeFont, palette, 40, 600, 100);
+    sub.newSubtitle('a line', 'M', 0);
+    const first = sub.debugLines()[0]!.id;
+    sub.clear();
+    sub.newSubtitle('a line', 'M', 0);
+    expect(sub.debugLines()[0]!.id).not.toBe(first);
+  });
+});
+
 describe('block: which lines are one message', () => {
   it('tags every line of a wrapped sentence with the same block', () => {
     const sub = new SubtitleSystem(fakeFont, palette, 9, 140, 100);

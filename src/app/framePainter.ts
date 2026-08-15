@@ -233,11 +233,12 @@ export function draw(): void {
  *    up to a third larger in a small room than in a large one. That was reported.
  *
  * So the subtitle takes `stage.scale`, which every room shares, while the room keeps its
- * own zoom — capped at the room's own scale, because the crisp-integer modes draw a room
- * SMALLER than the stage and stage-sized text would not fit in one (`subtitleScale` has
- * the numbers). The layer still covers the room's box and the text is still anchored to
- * the room's bottom edge; only the size is taken from elsewhere. In `fixed` and `x1` the
- * cap and the stage agree, and nothing changes at all.
+ * own zoom — capped at the room's own scale, because the crisp-integer modes can draw a
+ * room SMALLER than the stage and stage-sized text would not fit in one (`subtitleScale`
+ * has the numbers, and is precise about when the cap actually fires). The layer still
+ * covers the room's box and the text is still anchored to the room's bottom edge; only
+ * the size is taken from elsewhere. In `fixed` the two numbers are equal by definition,
+ * so nothing changes there at all.
  */
 export function updateRoomSubtitles(useVecSubs: boolean, xform?: string): void {
   if (useVecSubs && subs?.active && room) {
