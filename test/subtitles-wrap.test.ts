@@ -57,6 +57,35 @@ describe('subtitle word-wrap fits the room width', () => {
 });
 
 /**
+ * A wrapped sentence is several lines, and the vector renderer has to know which lines
+ * came from one `newSubtitle` call so it can size them together (see `fitBlockFontPx`).
+ * That is the only reason `block` exists — the original never needed it, because the
+ * bitmap path draws every line at the same size.
+ */
+describe('block: which lines are one message', () => {
+  it('tags every line of a wrapped sentence with the same block', () => {
+    const sub = new SubtitleSystem(fakeFont, palette, 9, 140, 100);
+    sub.newSubtitle('aaaa bbbb cccc dddd', 'a', 0);
+    const ls = sub.debugLines();
+    expect(ls.length).toBeGreaterThan(1); // it wrapped, so there is something to group
+    expect(new Set(ls.map((l) => l.block)).size).toBe(1);
+  });
+
+  // The reason a `startcount`+speaker key is not enough: two calls CAN land on the same
+  // tick with the same colour code (a scripted line while `talk()` fires, or the
+  // `pushSubtitle` debug hook), and merging them would size one sentence to another's
+  // longest row.
+  it('separates two messages sent on the same tick by the same speaker', () => {
+    const sub = new SubtitleSystem(fakeFont, palette, 40, 600, 100);
+    sub.newSubtitle('first line', 'M', 7);
+    sub.newSubtitle('second line', 'M', 7);
+    const ls = sub.debugLines();
+    expect(ls).toHaveLength(2);
+    expect(ls[0]!.block).not.toBe(ls[1]!.block);
+  });
+});
+
+/**
  * `vectorAnimating` is what holds the render loop off the idle throttle while a line is
  * still moving (framePacing.ts) — so the interesting edge is the FALSE case: a line that
  * has settled and parked is still on screen, and the loop must be allowed to throttle
