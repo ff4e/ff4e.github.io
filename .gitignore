@@ -25,12 +25,11 @@ tools/studio/cache/
 # Upscaler experiment galleries: side-by-side comparison sheets used to CHOOSE the
 # models (room-matrix, map-contest, …). ~430 MB of derived PNGs — the generators
 # (tools/build-room-matrix.mjs and friends) are committed, so these are reproducible
-# and only the resulting picks in tools/studio/selections.json matter.
+# and only the resulting picks in tools/studio/selections.json matter. Keep that true:
+# an entry whose generator has been deleted is not reproducible, so it goes with it.
 tools/room-matrix/
 tools/room-gallery/
-tools/room-detex/
 tools/room-algo/
-tools/room-refine/
 tools/room-contest/
 tools/room-compare/
 tools/map-matrix/
