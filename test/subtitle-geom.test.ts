@@ -21,7 +21,9 @@ import {
   bevelSpan,
   fitBlockFontPx,
   fitFontPx,
+  fitScreenW,
   lineAnchor,
+  lineOffset,
   strokeWidth,
   waveDy,
   wavePhase,
@@ -190,6 +192,45 @@ describe('lineAnchor — where a line sits and how far its wave swings', () => {
 
   it('moves the baseline down with a taller screen, since ys is measured from the bottom', () => {
     expect(lineAnchor(-26, 400).baseline - lineAnchor(-26, 225).baseline).toBeCloseTo(175, 10);
+  });
+});
+
+describe('lineOffset and fitScreenW — text drawn at a different scale from the room', () => {
+  // The port zooms rooms to fit and the subtitle deliberately does not follow (the room's
+  // fit factor spans 1.006-1.35 over the 71 real rooms in the default mode, which is the
+  // reported symptom). That splits the old single multiplication in two, and this is the
+  // identity that says the split is exact.
+  it('lineOffset is lineAnchor.baseline with the box height taken out of it', () => {
+    for (const ys of [-130, -26, 0, 15]) {
+      for (const h of [210, 225, 585]) {
+        expect(h + lineOffset(ys)).toBeCloseTo(lineAnchor(ys, h).baseline, 10);
+      }
+    }
+  });
+
+  it('is negative for the rows on screen, which sit above the bottom edge', () => {
+    expect(lineOffset(-26)).toBeCloseTo(-38.4, 10); // -26*1.2 - 7.2
+    expect(lineOffset(-130)).toBeLessThan(lineOffset(-26)); // …and more so the further up it has scrolled
+  });
+
+  // The fit budget is in the TEXT's units, so a room physically wider than those units
+  // say has to widen it — otherwise a long line is shrunk while it still has room, and
+  // most in exactly the small rooms the zoom enlarges most.
+  it('widens the fit budget by however much the room outscales the text', () => {
+    expect(fitScreenW(600, 1.35, 1)).toBeCloseTo(810, 10);
+    expect(fitScreenW(600, 2.7, 2)).toBeCloseTo(810, 10);
+  });
+
+  it('changes nothing when the text and the room share a scale', () => {
+    expect(fitScreenW(600, 1, 1)).toBe(600);
+    expect(fitScreenW(600, 2.5, 2.5)).toBeCloseTo(600, 10);
+  });
+
+  // An unmeasurable scale must not divide the budget to Infinity and hand every line the
+  // full size regardless of width.
+  it('falls back to the plain room width on a nonsense text scale', () => {
+    expect(fitScreenW(600, 1.35, 0)).toBe(600);
+    expect(fitScreenW(600, 1.35, -1)).toBe(600);
   });
 });
 

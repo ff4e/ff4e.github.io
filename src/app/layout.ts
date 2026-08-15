@@ -14,12 +14,17 @@
  *    is a constant size across all rooms (it no longer tracks the room height).
  *  - Each piece of content (room / map / cutscene) is drawn at `contentScale`
  *    and centered inside the stage box:
- *      * mode 'fixed'  (D, default): contentScale === stageScale, so objects are
- *        an identical on-screen size in every room; small rooms are letterboxed.
+ *      * mode 'fixed'  (Approach D, the faithful one): contentScale === stageScale, so
+ *        objects are an identical on-screen size in every room; small rooms are
+ *        letterboxed.
  *      * the graded "fill" modes (C): small content is enlarged up to a per-mode
  *        bound (FIT_FACTORS) to fill more of the stage box, keeping object-size
  *        variance bounded. 'small'→'large' pick how aggressive that is; 'fill'
  *        grows content until it exactly fills the stage box (no bound).
+ *        **'medium' is the shipped default** (core/settings.ts), not 'fixed' — so out
+ *        of the box a room IS zoomed to fit, by 1.006x to 1.35x across the 71 rooms.
+ *        That spread is why subtitles are sized from the stage and not from the room
+ *        (app/framePainter.ts, updateRoomSubtitles).
  *      * mode 'native': the largest INTEGER display scale that still fits the stage
  *        box (1×/2×/3×…). With `image-rendering: pixelated` this gives uniform,
  *        crisp nearest-neighbour pixels — the closest thing to the original's 1:1

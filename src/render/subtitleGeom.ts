@@ -147,6 +147,11 @@ export function waveDy(p: number, amp: number): number {
  * `ys` is the line's row from the tick logic, which the bitmap path draws from too, so it
  * is taken through SUB_SCALE here rather than there — the row pitch and the wave grow
  * with the glyphs, and the faithful path keeps the original's numbers.
+ *
+ * `baseline` is measured from the TOP of the content box, so it carries the box's own
+ * height in it. That is only usable while the text and the box are drawn at the same
+ * scale; when they are not, use `lineOffset` and add the box's bottom edge separately
+ * (`lineAnchor(ys, h).baseline === h + lineOffset(ys)`, pinned in the tests).
  */
 export function lineAnchor(ys: number, screenH: number): { baseline: number; amp: number } {
   const scaled = ys * SUB_SCALE;
@@ -154,6 +159,36 @@ export function lineAnchor(ys: number, screenH: number): { baseline: number; amp
     baseline: scaled + screenH + SUB_BASELINE_OFF,
     amp: VECTOR_GEOM.under * SUB_SCALE - scaled,
   };
+}
+
+/**
+ * A line's baseline as an offset from the BOTTOM edge of the content box.
+ *
+ * Negative: the rows sit above the bottom edge, and the further up a line has scrolled
+ * the more negative it gets. Split out of `lineAnchor` because the subtitle is no longer
+ * necessarily drawn at the content's own scale — the room zooms to fit and the text
+ * deliberately does not (see `syncDomSubtitles`) — so the two halves of the old sum have
+ * to be scaled by different factors: the bottom edge is a position in the ROOM, and this
+ * is a distance in the TEXT.
+ */
+export function lineOffset(ys: number): number {
+  return ys * SUB_SCALE + SUB_BASELINE_OFF;
+}
+
+/**
+ * The width `fitFontPx` must fit inside, when the text is drawn at a different scale
+ * from the content it sits on.
+ *
+ * `fitFontPx` works in the subtitle's own native units, and its budget is the room's
+ * width in those units. While text and room shared a scale that was simply `screenW`.
+ * With the text pinned to the stage and the room zoomed to fit, the room is physically
+ * `boxScale / textScale` times wider than the text's units say, and a budget of plain
+ * `screenW` would shrink long lines that have room to spare — the more so in exactly the
+ * small rooms the zoom enlarges most.
+ */
+export function fitScreenW(screenW: number, boxScale: number, textScale: number): number {
+  if (!(textScale > 0)) return screenW;
+  return (screenW * boxScale) / textScale;
 }
 
 /** Outline width for a glyph at `fs`: strokeText's lineWidth, centred on the path. */

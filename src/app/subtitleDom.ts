@@ -29,7 +29,9 @@ import {
   bevelBottomRgb,
   bevelSpan,
   fitBlockFontPx,
+  fitScreenW,
   lineAnchor,
+  lineOffset,
   strokeWidth,
   waveDy,
 } from '../render/subtitleGeom.js';
@@ -183,6 +185,10 @@ function waveFrames(ampCss: number): Keyframe[] {
  * Cheap per frame by construction: a line's glyphs are built once, and the only per-tick
  * write is the line's own `transform` for the scroll. The wave is not touched at all
  * after it starts — it is running on the compositor.
+ *
+ * `boxScale` is the content's own display scale (native px -> css px) and places the
+ * bottom edge the text is anchored to. `textScale` sizes the text itself, and is
+ * deliberately NOT the same number for a room — see the note on it below.
  */
 export function syncDomSubtitles(
   owner: SubOwner,
@@ -190,7 +196,8 @@ export function syncDomSubtitles(
   count: number,
   cssW: number,
   cssH: number,
-  scale: number,
+  boxScale: number,
+  textScale: number,
   family: string,
   weight: string | number,
   xform?: string,
@@ -226,7 +233,7 @@ export function syncDomSubtitles(
   // be scaled down by the tier's transform.
   host.style.transform = L.lastXform ? `${L.lastXform} ${scaleT}`.trim() : scaleT;
 
-  const fontPx = VECTOR_GEOM.fontPx * scale;
+  const fontPx = VECTOR_GEOM.fontPx * textScale;
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
   if (font !== L.lastFont) {
     ({ inset: L.baselineInset, height: L.boxHeight } = measureBaseline(font));
@@ -268,16 +275,17 @@ export function syncDomSubtitles(
       continue;
     }
     // Measured at the display scale, but fitted in NATIVE units, because that is where
-    // the rule is defined (subtitleGeom) — dividing out `scale` keeps a fit-to-room
+    // the rule is defined (subtitleGeom) — dividing out `textScale` keeps a fit-to-room
     // decision from depending on the window size. Measured ONLY for a row being built:
     // it is a forced layout, and it cannot change while the row exists.
-    const natural = measureTextWidth(font, t.obsah) / scale;
+    const natural = measureTextWidth(font, t.obsah) / textScale;
     const list = blockNatural.get(t.block);
     if (list) list.push(natural);
     else blockNatural.set(t.block, [natural]);
   }
+  const fitW = fitScreenW(screenW, boxScale, textScale);
   for (const [block, naturals] of blockNatural) {
-    const f = fitBlockFontPx(naturals, screenW) / VECTOR_GEOM.fontPx;
+    const f = fitBlockFontPx(naturals, fitW) / VECTOR_GEOM.fontPx;
     const cur = blockFit.get(block);
     if (cur === undefined || f < cur) blockFit.set(block, f);
   }
@@ -299,7 +307,11 @@ export function syncDomSubtitles(
     // to be part of the element's FIRST style: a `transition` plus a transform written
     // after insertion animates from the untransformed position — the top of the game box
     // — so a new line visibly fell from the ceiling before starting its wave.
-    const y = lineAnchor(t.ys, screenH).baseline * scale - inset;
+    //
+    // Two scales, deliberately: the bottom edge of the ROOM is a position in the room
+    // (boxScale), while the line's distance up from it is a distance in the TEXT
+    // (textScale). While the two were the same number this was one multiplication.
+    const y = screenH * boxScale + lineOffset(t.ys) * textScale - inset;
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
@@ -331,7 +343,9 @@ export function syncDomSubtitles(
       // The line's own age, so a line already part-way through its wave starts there
       // rather than replaying it from the beginning.
       const ageMs = ((count - t.startcount) / TICKS_PER_SEC) * 1000;
-      const ampCss = lineAnchor(t.ys, screenH).amp * scale;
+      // The wave is a distance the glyph travels, so it rides the TEXT's scale — the
+      // amplitude has to grow and shrink with the glyphs it moves, not with the room.
+      const ampCss = lineAnchor(t.ys, screenH).amp * textScale;
       const frames = waveFrames(ampCss);
       const stepMs = 1000 / (VECTOR_GEOM.wavePerTick * TICKS_PER_SEC);
       const durMs = (VECTOR_GEOM.waveLen / VECTOR_GEOM.wavePerTick / TICKS_PER_SEC) * 1000;

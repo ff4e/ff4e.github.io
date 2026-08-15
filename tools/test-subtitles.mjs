@@ -4,7 +4,8 @@
  *  - `classic` bakes them into the pixel frame, so nothing appears in the DOM at all.
  *  - ANY tier bakes them when no subtitle font loaded — the one fallback left.
  * Also guards the idle-skip (no DOM text when no subtitle is showing), a wrapped sentence
- * being drawn at ONE size rather than one per row, and a tier switch
+ * being drawn at ONE size rather than one per row, the same line being the same size in a
+ * small room and a large one, and a tier switch
  * with a line already up: the renderer does not change, but the room's box and the tier's
  * own scale do, so the layer has to follow both rather than be left as it was. Finally,
  * leaving the room has to take an abandoned line off the screen.
@@ -123,6 +124,50 @@ await withApp(async ({ p, expect }) => {
   const backInAi = await layerBox();
   expect((await domLines(p)) > 0, 'and survives switching back');
   expect(/scale\(/.test(backInAi?.transform ?? ''), `[ai] the shrink comes back with the tier (transform "${backInAi?.transform}")`);
+
+  // ── the same sentence is the same size in a small room and a large one ──
+  //
+  // The reported symptom A: subtitles were sized from the ROOM's zoom-to-fit, so the same
+  // line was drawn a third larger in a small room than in a large one. They are sized
+  // from the stage now (framePainter has the fidelity argument), and this is the property
+  // that says so — asserted on the rendered text rather than on the scale that feeds it,
+  // because the number being right and the text being right are different claims.
+  //
+  // The rooms are the two ends of the range: DRAKAR (795x435) barely zooms at all, MIKRO
+  // (360x210) hits the default mode's cap. The zoom itself is read back and asserted to
+  // still differ, or the whole check would pass vacuously the day the modes change.
+  await p.evaluate(() => window.__ff.setGraphics('enhanced'));
+  const lineInk = async (num) => {
+    await p.evaluate(() => window.__ff.clearSubtitles());
+    await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
+    await p.waitForFunction((n) => window.__ff.roomNum() === n, num);
+    await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
+    await p.waitForFunction(() => (document.getElementById('domsubs')?.children.length ?? 0) > 0);
+    await tickSleep(p, 5);
+    // The LARGEST size on the layer, not the ink box: a room says its own lines as you
+    // walk in, so the layer is not ours alone, and the union of everything on it measures
+    // however many rows happen to be up. This line is short enough that the fit never
+    // shrinks it in either room, so it is the largest thing there — and a size is a size
+    // whether or not the wave has finished moving it.
+    return p.evaluate(() => {
+      const px = [...document.getElementById('domsubs').children].map((el) =>
+        parseFloat(getComputedStyle(el).fontSize),
+      );
+      return { fs: Math.max(...px), zoom: window.__ff.roomGeom()?.scale ?? 0 };
+    });
+  };
+  const big = await lineInk(17); // DRAKAR — the least-zoomed room
+  const small = await lineInk(33); // MIKRO — the most-zoomed
+  expect(
+    Math.abs(small.zoom / big.zoom - 1) > 0.1,
+    `the two rooms really are zoomed differently (${big.zoom.toFixed(3)} vs ${small.zoom.toFixed(3)})`,
+  );
+  expect(
+    big.fs > 0 && Math.abs(small.fs / big.fs - 1) < 0.02,
+    `the same line is the same size in both (${big.fs.toFixed(2)}px in DRAKAR, ${small.fs.toFixed(2)}px in MIKRO)`,
+  );
+  await p.evaluate(() => window.__ff.clearSubtitles());
+  await tickSleep(p, 2);
 
   // ── the font-failure fallback ──
   //

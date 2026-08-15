@@ -1,5 +1,6 @@
 /**
- * Scaling/layout maths for the public-release stage (Approach D default, C options).
+ * Scaling/layout maths for the public-release stage (Approach D, with the graded C
+ * options — 'medium' is what ships as the default; see core/settings.ts).
  * Pure functions — verifies the two invariants that drove the design decision:
  *   - 'fixed' (D): every room gets an IDENTICAL on-screen object scale.
  *   - graded fits (C): small-room enlargement is bounded per mode (never unbounded
