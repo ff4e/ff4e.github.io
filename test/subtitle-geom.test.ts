@@ -25,6 +25,7 @@ import {
   lineAnchor,
   lineOffset,
   strokeWidth,
+  subtitleScale,
   waveDy,
   wavePhase,
 } from '../src/render/subtitleGeom.js';
@@ -192,6 +193,36 @@ describe('lineAnchor — where a line sits and how far its wave swings', () => {
 
   it('moves the baseline down with a taller screen, since ys is measured from the bottom', () => {
     expect(lineAnchor(-26, 400).baseline - lineAnchor(-26, 225).baseline).toBeCloseTo(175, 10);
+  });
+});
+
+describe('subtitleScale — constant on screen, but never too big for the room', () => {
+  const stageScale = 1.655; // a 1600x1000 viewport
+
+  // The graded modes (and the shipped default) never draw a room smaller than the stage,
+  // so the cap does nothing and the text is the same size in every room. That is the
+  // whole point.
+  it('takes the stage scale when the room is drawn at least that big', () => {
+    expect(subtitleScale(stageScale, 1.665)).toBeCloseTo(stageScale, 10); // the least-zoomed room
+    expect(subtitleScale(stageScale, 2.234)).toBeCloseTo(stageScale, 10); // the most-zoomed
+    expect(subtitleScale(stageScale, stageScale)).toBeCloseTo(stageScale, 10); // 'fixed'
+  });
+
+  // 'x1' at dpr 2 draws every room at 0.5 while the stage sits at 1.655. Uncapped, the
+  // text is over three times too big for the room and fitFontPx shrinks nearly every line
+  // by whatever that room's width and that sentence's length demand — text that varies
+  // per room and per line, which is the symptom, not the fix. Reported from 'x1'.
+  it('falls back to the room when the room is drawn smaller than the stage', () => {
+    expect(subtitleScale(stageScale, 0.5)).toBe(0.5);
+    expect(subtitleScale(stageScale, 1)).toBe(1);
+  });
+
+  // 'native' spans 1.5..3.5 on that viewport: the low end is capped to the room, the high
+  // end to the stage. Neither is ever bigger than the room can carry.
+  it('never returns more than the room scale', () => {
+    for (const box of [0.5, 1, 1.5, 2, 3.5]) {
+      expect(subtitleScale(stageScale, box)).toBeLessThanOrEqual(box);
+    }
   });
 });
 

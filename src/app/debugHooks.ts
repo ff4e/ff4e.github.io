@@ -148,6 +148,7 @@ import {
 import { canvas, ctx, glCanvas, loadingEl } from './dom.js';
 import type { FeedbackUi } from './feedback.js';
 import { IntroPlayer } from './intro.js';
+import { isFitMode } from './layout.js';
 import type { RoomGeometry } from './layout.js';
 
 /**
@@ -422,6 +423,26 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     scriptMusicVolume: () => activeScript?.s.musicVolume ?? null,
     subtitleMode: () => host.settings.subtitles,
     titDef: () => host.settings.titDef,
+    /**
+     * The stage fit mode — read it, or set it to drive a probe.
+     *
+     * Writable because nothing else could reach the modes that draw a room at a scale
+     * OTHER than the stage's ('native', 'x1'..'x4'), and two subtitle-geometry defects
+     * have now lived in exactly those modes: a room drawn smaller than the stage does
+     * not fit stage-sized text, and a fit change with a line already up rescales the
+     * room without changing the font. Both are cheap to assert and were unassertable.
+     * Mirrors the dev bar's own handler, repaint and wake included, so a probe sees what
+     * a player would.
+     */
+    fitMode: (v?: string) => {
+      if (v !== undefined && isFitMode(v)) {
+        host.settings.fitMode = v;
+        saveSettings(host.settings);
+        host.forceRoomRedraw = true;
+        host.wake();
+      }
+      return host.settings.fitMode;
+    },
     // Help overlay (for UI probes): open/close + page state.
     helpOpen: () => ui.helpOpen,
     // Feedback form (for UI probes): open/close, plus the payload and links exactly as

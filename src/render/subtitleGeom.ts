@@ -176,6 +176,32 @@ export function lineOffset(ys: number): number {
 }
 
 /**
+ * The scale a subtitle is drawn at: constant on screen, but never bigger than the room
+ * it sits in can carry.
+ *
+ * The first half is the point — `stageScale` is the same number in every room, so the
+ * text stops changing size as the player walks between rooms (the room's own zoom spans
+ * 1.006x to 1.35x in the default fit mode). The second half is what makes that hold in
+ * the fit modes that draw a room SMALLER than the stage.
+ *
+ * The crisp-integer modes ('native', 'x1'..'x4') snap the room down to a whole number of
+ * physical pixels, so at dpr 2 an 'x1' room is drawn at 0.5 while the stage sits near
+ * 1.65 — the text would be over three times too big for the room it is centred in, and
+ * `fitFontPx` would then shrink nearly every line by whatever that particular room's
+ * width and that particular sentence's length demanded. The result is text that varies
+ * per room AND per line: exactly the symptom this is supposed to remove, reintroduced
+ * through the fit. Reported from 'x1'.
+ *
+ * Capping at the room's own scale makes those modes behave as they did before any of
+ * this (text scales with the room) while the graded modes — where the room is never
+ * drawn smaller than the stage, and which include the shipped default — get the constant
+ * size. In 'fixed' the two are equal and the cap does nothing.
+ */
+export function subtitleScale(stageScale: number, boxScale: number): number {
+  return Math.min(stageScale, boxScale);
+}
+
+/**
  * The width `fitFontPx` must fit inside, when the text is drawn at a different scale
  * from the content it sits on.
  *

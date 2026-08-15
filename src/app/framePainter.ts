@@ -25,6 +25,7 @@ import { classicArtFor, drawAiGpu, drawGpu, enhancedArtFor, glAiFailed, glFailed
 import { enhancedArtActive, renderer } from './renderSettings.js';
 import { renderRoomRgba, type FishFrame } from '../render/renderRoom.js';
 import { setLastRoomBackend, smoothLog } from './framePacing.js';
+import { subtitleScale } from '../render/subtitleGeom.js';
 import {
   subFontFamily,
   subFontReady,
@@ -232,14 +233,17 @@ export function draw(): void {
  *    up to a third larger in a small room than in a large one. That was reported.
  *
  * So the subtitle takes `stage.scale`, which every room shares, while the room keeps its
- * own zoom. The layer still covers the room's box and the text is still anchored to the
- * room's bottom edge — only the size is taken from elsewhere. In `fixed` and `x1` the two
- * scales are equal and nothing changes at all.
+ * own zoom — capped at the room's own scale, because the crisp-integer modes draw a room
+ * SMALLER than the stage and stage-sized text would not fit in one (`subtitleScale` has
+ * the numbers). The layer still covers the room's box and the text is still anchored to
+ * the room's bottom edge; only the size is taken from elsewhere. In `fixed` and `x1` the
+ * cap and the stage agree, and nothing changes at all.
  */
 export function updateRoomSubtitles(useVecSubs: boolean, xform?: string): void {
   if (useVecSubs && subs?.active && room) {
     const g = roomGeometry(room);
-    syncDomSubtitles('room', subs, count, g.cssW, g.cssH, g.scale, stage.scale, subFontFamily, subFontWeight, xform);
+    const textScale = subtitleScale(stage.scale, g.scale);
+    syncDomSubtitles('room', subs, count, g.cssW, g.cssH, g.scale, textScale, subFontFamily, subFontWeight, xform);
   } else {
     // Not showing vector subtitles at all: either nothing is being said, or the font
     // never loaded and they are baked into the frame instead.

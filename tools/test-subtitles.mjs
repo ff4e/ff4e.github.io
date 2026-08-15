@@ -137,18 +137,33 @@ await withApp(async ({ p, expect }) => {
   // (360x210) hits the default mode's cap. The zoom itself is read back and asserted to
   // still differ, or the whole check would pass vacuously the day the modes change.
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
+  // A bigger window than the suite's default 1200x640, for the whole of this block.
+  //
+  // The integer fit modes only diverge from the stage when the stage has grown past one
+  // physical pixel per game pixel: at 1200x640 the stage sits near 1.06 and 'x1' at 1.00,
+  // a 6% gap that hides the defect entirely. On the reported machine (a retina display,
+  // a large window) the stage is ~1.65 against an 'x1' room at 0.5. This reproduces that
+  // shape without needing a device pixel ratio the pool does not have.
+  const SUITE_VIEWPORT = { width: 1200, height: 640 };
+  await p.setViewportSize({ width: 1934, height: 1200 });
+  await tickSleep(p, 3);
   const lineInk = async (num) => {
     await p.evaluate(() => window.__ff.clearSubtitles());
     await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
     await p.waitForFunction((n) => window.__ff.roomNum() === n, num);
-    await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
+    // Long enough that the defect is loud (an oversized line is cut down by whatever the
+    // room's width allows, so a longer line diverges further), short enough that it never
+    // WRAPS in MIKRO, the narrowest room. Both matter: a wrapped line is fitted as a
+    // block against wrap points that differ per room, so its size legitimately differs
+    // between rooms and it cannot be the oracle here.
+    await p.evaluate(() => window.__ff.pushSubtitle('Careful, little fish!', 'M'));
     await p.waitForFunction(() => (document.getElementById('domsubs')?.children.length ?? 0) > 0);
     await tickSleep(p, 5);
     // The LARGEST size on the layer, not the ink box: a room says its own lines as you
     // walk in, so the layer is not ours alone, and the union of everything on it measures
-    // however many rows happen to be up. This line is short enough that the fit never
-    // shrinks it in either room, so it is the largest thing there — and a size is a size
-    // whether or not the wave has finished moving it.
+    // however many rows happen to be up. This line never shrinks when the geometry is
+    // right, so it is the largest thing there — and a size is a size whether or not the
+    // wave has finished moving it.
     return p.evaluate(() => {
       const px = [...document.getElementById('domsubs').children].map((el) =>
         parseFloat(getComputedStyle(el).fontSize),
@@ -156,18 +171,65 @@ await withApp(async ({ p, expect }) => {
       return { fs: Math.max(...px), zoom: window.__ff.roomGeom()?.scale ?? 0 };
     });
   };
-  const big = await lineInk(17); // DRAKAR — the least-zoomed room
-  const small = await lineInk(33); // MIKRO — the most-zoomed
-  expect(
-    Math.abs(small.zoom / big.zoom - 1) > 0.1,
-    `the two rooms really are zoomed differently (${big.zoom.toFixed(3)} vs ${small.zoom.toFixed(3)})`,
-  );
-  expect(
-    big.fs > 0 && Math.abs(small.fs / big.fs - 1) < 0.02,
-    `the same line is the same size in both (${big.fs.toFixed(2)}px in DRAKAR, ${small.fs.toFixed(2)}px in MIKRO)`,
-  );
+
+  // Both families of fit mode, because they fail differently. In 'medium' the rooms are
+  // zoomed by different amounts and the text must not follow. In 'x1' every room is drawn
+  // at the SAME scale — but one smaller than the stage, so stage-sized text does not fit
+  // and every line gets shrunk by whatever its own room's width demands. That second case
+  // is the one that was reported, and it looks nothing like the first.
+  for (const mode of ['medium', 'x1']) {
+    await p.evaluate((m) => window.__ff.fitMode(m), mode);
+    const big = await lineInk(17); // DRAKAR — the widest room
+    const small = await lineInk(33); // MIKRO — the smallest
+    if (mode === 'medium') {
+      expect(
+        Math.abs(small.zoom / big.zoom - 1) > 0.1,
+        `[${mode}] the two rooms really are zoomed differently (${big.zoom.toFixed(3)} vs ${small.zoom.toFixed(3)})`,
+      );
+    }
+    expect(
+      big.fs > 0 && Math.abs(small.fs / big.fs - 1) < 0.02,
+      `[${mode}] the same line is the same size in both rooms ` +
+        `(${big.fs.toFixed(2)}px in DRAKAR, ${small.fs.toFixed(2)}px in MIKRO, ` +
+        `room scales ${big.zoom.toFixed(2)}/${small.zoom.toFixed(2)})`,
+    );
+  }
+
+  // A fit-mode change with a line ALREADY up, from 'small' to 'fixed'.
+  //
+  // That exact pair, for two reasons. Both draw the room at least as big as the stage, so
+  // the text scale — and with it the font string — is identical in the two while the
+  // width a row is fitted inside is not: the case a font-keyed cache cannot see, where
+  // the row keeps a fit decided against the wider budget and then overflows the narrower
+  // room, which the host clips, losing the last word. And both are narrow enough for the
+  // fit to be doing anything at all — a room enlarged by 1.2x or more already carries the
+  // vector face's own +20% (SUB_SCALE), so between, say, 'fill' and 'medium' no line is
+  // ever shrunk and a stale factor of 1 stays harmlessly correct.
+  await p.evaluate(() => window.__ff.fitMode('small'));
   await p.evaluate(() => window.__ff.clearSubtitles());
-  await tickSleep(p, 2);
+  await p.evaluate(() =>
+    window.__ff.pushSubtitle('Nyní začínáme znovu - můžeme však nahrát uloženou pozici klávesou F3.', 'M'),
+  );
+  await tickSleep(p, 4);
+  await p.evaluate(() => window.__ff.fitMode('fixed'));
+  await tickSleep(p, 4);
+  const overflow = await p.evaluate(() => {
+    const host = document.getElementById('domsubs').getBoundingClientRect();
+    let worst = 0;
+    for (const line of document.getElementById('domsubs').children) {
+      for (const sp of line.querySelectorAll('span')) {
+        const r = sp.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        worst = Math.max(worst, host.left - r.left, r.right - host.right);
+      }
+    }
+    return worst;
+  });
+  expect(overflow <= 1, `a line refits when the fit mode changes under it (overflow ${overflow.toFixed(1)}px)`);
+  await p.evaluate(() => window.__ff.fitMode('medium'));
+  await p.evaluate(() => window.__ff.clearSubtitles());
+  await p.setViewportSize(SUITE_VIEWPORT);
+  await tickSleep(p, 3);
 
   // ── the font-failure fallback ──
   //
