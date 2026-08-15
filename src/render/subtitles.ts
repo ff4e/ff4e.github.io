@@ -30,6 +30,16 @@ interface TitleLine {
   startcount: number;
   killcount: number;
   /**
+   * This row's identity — port bookkeeping, not the original's.
+   *
+   * The DOM renderer keeps one element per row and has to recognise the row again on the
+   * next frame. It used to do that by (startcount, speaker, text), which is not an
+   * identity: two rows can agree on all three — the same short line said twice on one
+   * tick, or a sentence that wraps into two identical rows — and the renderer then drew
+   * one element where the engine had two rows, silently losing one.
+   */
+  id: number;
+  /**
    * Which `newSubtitle` call produced this line — port bookkeeping, not the original's.
    *
    * The original had no use for it: it drew every line with the same bitmap font at the
@@ -61,7 +71,11 @@ function nearestColor(pal: readonly FfrPaletteEntry[], r: number, g: number, b: 
 
 export class SubtitleSystem {
   private readonly titles: TitleLine[] = [];
-  /** Message counter behind `TitleLine.block`; monotonic, never reset by `clear()`. */
+  /**
+   * Counters behind `TitleLine.id` and `.block`. Monotonic and never reset by `clear()`:
+   * an id that can come round again is not an identity, which is the whole point of it.
+   */
+  private rowSeq = 0;
   private blockSeq = 0;
   /** Letter colour codes -> 6 palette-index shades (fontcol). */
   private readonly fontcol = new Map<string, number[]>();
@@ -157,6 +171,7 @@ export class SubtitleSystem {
       cilys: BASETITLE - ROWTITLE,
       startcount: count,
       killcount,
+      id: ++this.rowSeq,
       block,
     });
   }
@@ -269,6 +284,7 @@ export class SubtitleSystem {
     ys: number;
     cilys: number;
     startcount: number;
+    id: number;
     block: number;
     rgb: [number, number, number];
   }[] {
@@ -278,6 +294,7 @@ export class SubtitleSystem {
       ys: t.ys,
       cilys: t.cilys,
       startcount: t.startcount,
+      id: t.id,
       block: t.block,
       rgb: this.vectorColor(t.barva),
     }));

@@ -21,8 +21,11 @@ import {
   bevelSpan,
   fitBlockFontPx,
   fitFontPx,
+  fitScreenW,
   lineAnchor,
+  lineOffset,
   strokeWidth,
+  subtitleScale,
   waveDy,
   wavePhase,
 } from '../src/render/subtitleGeom.js';
@@ -190,6 +193,75 @@ describe('lineAnchor — where a line sits and how far its wave swings', () => {
 
   it('moves the baseline down with a taller screen, since ys is measured from the bottom', () => {
     expect(lineAnchor(-26, 400).baseline - lineAnchor(-26, 225).baseline).toBeCloseTo(175, 10);
+  });
+});
+
+describe('subtitleScale — constant on screen, but never too big for the room', () => {
+  const stageScale = 1.655; // a 1600x1000 viewport
+
+  // The graded modes (and the shipped default) never draw a room smaller than the stage,
+  // so the cap does nothing and the text is the same size in every room. That is the
+  // whole point.
+  it('takes the stage scale when the room is drawn at least that big', () => {
+    expect(subtitleScale(stageScale, 1.665)).toBeCloseTo(stageScale, 10); // the least-zoomed room
+    expect(subtitleScale(stageScale, 2.234)).toBeCloseTo(stageScale, 10); // the most-zoomed
+    expect(subtitleScale(stageScale, stageScale)).toBeCloseTo(stageScale, 10); // 'fixed'
+  });
+
+  // 'x1' at dpr 2 draws every room at 0.5 while the stage sits at 1.655. Uncapped, the
+  // text is over three times too big for the room and fitFontPx shrinks nearly every line
+  // by whatever that room's width and that sentence's length demand — text that varies
+  // per room and per line, which is the symptom, not the fix. Reported from 'x1'.
+  it('falls back to the room when the room is drawn smaller than the stage', () => {
+    expect(subtitleScale(stageScale, 0.5)).toBe(0.5);
+    expect(subtitleScale(stageScale, 1)).toBe(1);
+  });
+
+  // 'native' spans 1.5..3.5 on that viewport: the low end is capped to the room, the high
+  // end to the stage. Neither is ever bigger than the room can carry.
+  it('never returns more than the room scale', () => {
+    for (const box of [0.5, 1, 1.5, 2, 3.5]) {
+      expect(subtitleScale(stageScale, box)).toBeLessThanOrEqual(box);
+    }
+  });
+});
+
+describe('lineOffset and fitScreenW — text drawn at a different scale from the room', () => {
+  // The port zooms rooms to fit and the subtitle deliberately does not follow (the room's
+  // fit factor spans 1.006-1.35 over the 71 real rooms in the default mode, which is the
+  // reported symptom). That splits the old single multiplication in two, and this is the
+  // identity that says the split is exact.
+  it('lineOffset is lineAnchor.baseline with the box height taken out of it', () => {
+    for (const ys of [-130, -26, 0, 15]) {
+      for (const h of [210, 225, 585]) {
+        expect(h + lineOffset(ys)).toBeCloseTo(lineAnchor(ys, h).baseline, 10);
+      }
+    }
+  });
+
+  it('is negative for the rows on screen, which sit above the bottom edge', () => {
+    expect(lineOffset(-26)).toBeCloseTo(-38.4, 10); // -26*1.2 - 7.2
+    expect(lineOffset(-130)).toBeLessThan(lineOffset(-26)); // …and more so the further up it has scrolled
+  });
+
+  // The fit budget is in the TEXT's units, so a room physically wider than those units
+  // say has to widen it — otherwise a long line is shrunk while it still has room, and
+  // most in exactly the small rooms the zoom enlarges most.
+  it('widens the fit budget by however much the room outscales the text', () => {
+    expect(fitScreenW(600, 1.35, 1)).toBeCloseTo(810, 10);
+    expect(fitScreenW(600, 2.7, 2)).toBeCloseTo(810, 10);
+  });
+
+  it('changes nothing when the text and the room share a scale', () => {
+    expect(fitScreenW(600, 1, 1)).toBe(600);
+    expect(fitScreenW(600, 2.5, 2.5)).toBeCloseTo(600, 10);
+  });
+
+  // An unmeasurable scale must not divide the budget to Infinity and hand every line the
+  // full size regardless of width.
+  it('falls back to the plain room width on a nonsense text scale', () => {
+    expect(fitScreenW(600, 1.35, 0)).toBe(600);
+    expect(fitScreenW(600, 1.35, -1)).toBe(600);
   });
 });
 

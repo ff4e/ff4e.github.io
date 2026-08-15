@@ -13,7 +13,7 @@
 import type { AiRoomFrame } from '../render/roomAi.js';
 import { Dir } from '../core/dir.js';
 import type { HookSystem } from '../core/hooks.js';
-import { EXIT_CELLS, roomGeometry, scalingFilterFor } from './stageGeometry.js';
+import { EXIT_CELLS, roomGeometry, scalingFilterFor, stage } from './stageGeometry.js';
 import { FALL_FRAMES, MOVE_FRAMES } from '../core/stepEngine.js';
 import { FSIZE } from '../render/roomWalk.js';
 import { aiRoom, aiRoomRenderActive, ensureEnhancedFallback, roomArtPending } from './art.js';
@@ -25,6 +25,7 @@ import { classicArtFor, drawAiGpu, drawGpu, enhancedArtFor, glAiFailed, glFailed
 import { enhancedArtActive, renderer } from './renderSettings.js';
 import { renderRoomRgba, type FishFrame } from '../render/renderRoom.js';
 import { setLastRoomBackend, smoothLog } from './framePacing.js';
+import { subtitleScale } from '../render/subtitleGeom.js';
 import {
   subFontFamily,
   subFontReady,
@@ -217,11 +218,33 @@ export function draw(): void {
  * scroll transform, once per tick. `xform` is the room's shake/shove, which the layer
  * has to ride; it is left alone when the caller has no fresh one, since a frame that did
  * not repaint the room cannot have changed it either.
+ *
+ * The text is sized from the STAGE, not from the room. This is a deliberate deviation
+ * from what the port did before, and the fidelity argument is on its side:
+ *
+ *  - The 1998 game ran a fixed window with each room's playfield centred inside it, so
+ *    everything — art and subtitles alike — was a constant ON-SCREEN size in every room
+ *    (layout.ts, top of file). It never zoomed a room to fit.
+ *  - The zoom is the port's own addition, and it made "constant relative to the room"
+ *    and "constant on the player's screen" two different things for the first time. The
+ *    port had been honouring the first; the original only ever demonstrated the second.
+ *  - Measured over the 71 real room sizes, the room's fit factor spans 1.006 to 1.35 in
+ *    the default `medium` mode (and up to 2.22 in `fill`), so the same sentence was drawn
+ *    up to a third larger in a small room than in a large one. That was reported.
+ *
+ * So the subtitle takes `stage.scale`, which every room shares, while the room keeps its
+ * own zoom — capped at the room's own scale, because the crisp-integer modes can draw a
+ * room SMALLER than the stage and stage-sized text would not fit in one (`subtitleScale`
+ * has the numbers, and is precise about when the cap actually fires). The layer still
+ * covers the room's box and the text is still anchored to the room's bottom edge; only
+ * the size is taken from elsewhere. In `fixed` the two numbers are equal by definition,
+ * so nothing changes there at all.
  */
 export function updateRoomSubtitles(useVecSubs: boolean, xform?: string): void {
   if (useVecSubs && subs?.active && room) {
     const g = roomGeometry(room);
-    syncDomSubtitles('room', subs, count, g.cssW, g.cssH, g.scale, subFontFamily, subFontWeight, xform);
+    const textScale = subtitleScale(stage.scale, g.scale);
+    syncDomSubtitles('room', subs, count, g.cssW, g.cssH, g.scale, textScale, subFontFamily, subFontWeight, xform);
   } else {
     // Not showing vector subtitles at all: either nothing is being said, or the font
     // never loaded and they are baked into the frame instead.

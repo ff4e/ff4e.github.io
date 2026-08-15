@@ -349,10 +349,15 @@ export function cutsceneCaption(name: string): number {
  * they are identical in both and must not be duplicated per path. The cutscene's own box
  * and content scale are handed over, not the room's — a cutscene is 720x555 whatever room
  * it was started from.
+ *
+ * Which is also why a caption is still sized from its own content scale while a ROOM
+ * subtitle is now sized from the stage (framePainter): a cutscene has exactly one size,
+ * so there is no room-to-room variation here to normalise, and pinning captions to the
+ * stage would resize the briefcase intro to fix a symptom it does not have.
  */
 export function updateCutsceneCaptions(cssW: number, cssH: number, cs: number): void {
   if (!cutsceneSubs?.active) return;
-  syncDomSubtitles('cut', cutsceneSubs, count, cssW, cssH, cs, subFontFamily, subFontWeight);
+  syncDomSubtitles('cut', cutsceneSubs, count, cssW, cssH, cs, cs, subFontFamily, subFontWeight);
 }
 
 /**

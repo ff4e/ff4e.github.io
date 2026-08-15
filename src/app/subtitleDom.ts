@@ -29,7 +29,9 @@ import {
   bevelBottomRgb,
   bevelSpan,
   fitBlockFontPx,
+  fitScreenW,
   lineAnchor,
+  lineOffset,
   strokeWidth,
   waveDy,
 } from '../render/subtitleGeom.js';
@@ -73,9 +75,27 @@ export type SubOwner = 'room' | 'cut';
 
 interface Layer {
   host: HTMLDivElement | null;
-  lines: Map<string, DomLine>;
+  /**
+   * One entry per engine row, keyed by the row's own id.
+   *
+   * Keyed by identity and not by content: (startcount, speaker, text) can be shared by
+   * two distinct rows — the same short line said twice on one tick, or a sentence
+   * wrapping into two identical rows — and both then collapsed onto one element, so the
+   * engine had two rows and the player saw one.
+   */
+  lines: Map<number, DomLine>;
   /** Font the measurements below were taken at; a change rebuilds the glyph boxes. */
   lastFont: string;
+  /**
+   * Fit budget the rows' `fit` was decided against; a change rebuilds them too.
+   *
+   * Watched separately from the font because the two can now move independently: the
+   * font follows the STAGE and the budget follows the ROOM, so changing the fit mode
+   * with a line up rescales the room without touching the font string. Left unwatched,
+   * a row fitted to a wide room stayed too wide for a narrow one and was clipped by the
+   * host's bounds — the exact failure `fitFontPx` exists to prevent.
+   */
+  lastFitW: number;
   /** The owner's own transform (the room's shake / shove), so the layer moves with it. */
   lastXform: string;
   /** Distance from a line box's top to the text baseline, for `lastFont`. */
@@ -84,7 +104,7 @@ interface Layer {
   boxHeight: number;
 }
 
-const newLayer = (): Layer => ({ host: null, lines: new Map(), lastFont: '', lastXform: '', baselineInset: 0, boxHeight: 0 });
+const newLayer = (): Layer => ({ host: null, lines: new Map(), lastFont: '', lastFitW: 0, lastXform: '', baselineInset: 0, boxHeight: 0 });
 const layers: Record<SubOwner, Layer> = { room: newLayer(), cut: newLayer() };
 /** The element id each layer's host carries, so a probe can find it. */
 const HOST_ID: Record<SubOwner, string> = { room: 'domsubs', cut: 'domsubs-cut' };
@@ -112,6 +132,7 @@ export function clearDomSubtitles(owner?: SubOwner): void {
     L.host = null;
   }
   L.lastFont = '';
+  L.lastFitW = 0;
   L.lastXform = '';
 }
 
@@ -154,16 +175,6 @@ function measureTextWidth(font: string, text: string): number {
   return w;
 }
 
-/**
- * The cache key for one rendered row.
- *
- * `startcount` + speaker + text: a row is rebuilt only when one of those changes, and
- * its position (`ys`) deliberately is not part of it — that is what scrolls.
- */
-function lineKey(t: { startcount: number; barva: string; obsah: string }): string {
-  return `${t.startcount}|${t.barva}|${t.obsah}`;
-}
-
 /** The damped-cosine wave, as keyframes the compositor can run on its own. */
 function waveFrames(ampCss: number): Keyframe[] {
   const out: Keyframe[] = [];
@@ -183,6 +194,10 @@ function waveFrames(ampCss: number): Keyframe[] {
  * Cheap per frame by construction: a line's glyphs are built once, and the only per-tick
  * write is the line's own `transform` for the scroll. The wave is not touched at all
  * after it starts — it is running on the compositor.
+ *
+ * `boxScale` is the content's own display scale (native px -> css px) and places the
+ * bottom edge the text is anchored to. `textScale` sizes the text itself, and is
+ * deliberately NOT the same number for a room — see the note on it below.
  */
 export function syncDomSubtitles(
   owner: SubOwner,
@@ -190,7 +205,8 @@ export function syncDomSubtitles(
   count: number,
   cssW: number,
   cssH: number,
-  scale: number,
+  boxScale: number,
+  textScale: number,
   family: string,
   weight: string | number,
   xform?: string,
@@ -226,11 +242,17 @@ export function syncDomSubtitles(
   // be scaled down by the tier's transform.
   host.style.transform = L.lastXform ? `${L.lastXform} ${scaleT}`.trim() : scaleT;
 
-  const fontPx = VECTOR_GEOM.fontPx * scale;
+  const fontPx = VECTOR_GEOM.fontPx * textScale;
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
-  if (font !== L.lastFont) {
-    ({ inset: L.baselineInset, height: L.boxHeight } = measureBaseline(font));
+  // The width a row is fitted inside. Not the same thing as the font any more, so it is
+  // watched on its own — see `Layer.lastFitW`.
+  const fitW = fitScreenW(screenW, boxScale, textScale);
+  if (font !== L.lastFont || fitW !== L.lastFitW) {
+    // The baseline pair depends only on the font, so a budget change does not pay for a
+    // second forced layout.
+    if (font !== L.lastFont) ({ inset: L.baselineInset, height: L.boxHeight } = measureBaseline(font));
     L.lastFont = font;
+    L.lastFitW = fitW;
     // Glyph boxes are laid out for the old size; rebuild them.
     for (const l of L.lines.values()) l.el.remove();
     L.lines.clear();
@@ -261,32 +283,31 @@ export function syncDomSubtitles(
   const blockFit = new Map<number, number>();
   const blockNatural = new Map<number, number[]>();
   for (const t of lines) {
-    const built = L.lines.get(lineKey(t));
+    const built = L.lines.get(t.id);
     if (built) {
       const cur = blockFit.get(t.block);
       if (cur === undefined || built.fit < cur) blockFit.set(t.block, built.fit);
       continue;
     }
     // Measured at the display scale, but fitted in NATIVE units, because that is where
-    // the rule is defined (subtitleGeom) — dividing out `scale` keeps a fit-to-room
+    // the rule is defined (subtitleGeom) — dividing out `textScale` keeps a fit-to-room
     // decision from depending on the window size. Measured ONLY for a row being built:
     // it is a forced layout, and it cannot change while the row exists.
-    const natural = measureTextWidth(font, t.obsah) / scale;
+    const natural = measureTextWidth(font, t.obsah) / textScale;
     const list = blockNatural.get(t.block);
     if (list) list.push(natural);
     else blockNatural.set(t.block, [natural]);
   }
   for (const [block, naturals] of blockNatural) {
-    const f = fitBlockFontPx(naturals, screenW) / VECTOR_GEOM.fontPx;
+    const f = fitBlockFontPx(naturals, fitW) / VECTOR_GEOM.fontPx;
     const cur = blockFit.get(block);
     if (cur === undefined || f < cur) blockFit.set(block, f);
   }
 
-  const want = new Set<string>();
+  const want = new Set<number>();
   for (const t of lines) {
-    const key = lineKey(t);
-    want.add(key);
-    let line = L.lines.get(key);
+    want.add(t.id);
+    let line = L.lines.get(t.id);
     const fit = line ? line.fit : blockFit.get(t.block)!;
     // A scalable font's baseline inset and line-box height scale with its size, so the
     // measured pair can be scaled rather than re-measured (which would be a second
@@ -299,7 +320,11 @@ export function syncDomSubtitles(
     // to be part of the element's FIRST style: a `transition` plus a transform written
     // after insertion animates from the untransformed position — the top of the game box
     // — so a new line visibly fell from the ceiling before starting its wave.
-    const y = lineAnchor(t.ys, screenH).baseline * scale - inset;
+    //
+    // Two scales, deliberately: the bottom edge of the ROOM is a position in the room
+    // (boxScale), while the line's distance up from it is a distance in the TEXT
+    // (textScale). While the two were the same number this was one multiplication.
+    const y = screenH * boxScale + lineOffset(t.ys) * textScale - inset;
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
@@ -331,7 +356,9 @@ export function syncDomSubtitles(
       // The line's own age, so a line already part-way through its wave starts there
       // rather than replaying it from the beginning.
       const ageMs = ((count - t.startcount) / TICKS_PER_SEC) * 1000;
-      const ampCss = lineAnchor(t.ys, screenH).amp * scale;
+      // The wave is a distance the glyph travels, so it rides the TEXT's scale — the
+      // amplitude has to grow and shrink with the glyphs it moves, not with the room.
+      const ampCss = lineAnchor(t.ys, screenH).amp * textScale;
       const frames = waveFrames(ampCss);
       const stepMs = 1000 / (VECTOR_GEOM.wavePerTick * TICKS_PER_SEC);
       const durMs = (VECTOR_GEOM.waveLen / VECTOR_GEOM.wavePerTick / TICKS_PER_SEC) * 1000;
@@ -366,7 +393,7 @@ export function syncDomSubtitles(
       });
       host.appendChild(el);
       line = { el, spans, y, fit };
-      L.lines.set(key, line);
+      L.lines.set(t.id, line);
     }
     // The scroll: the only thing written per tick, and a transform, so the compositor
     // interpolates it (see the 80ms transition, one logic tick).
@@ -375,9 +402,9 @@ export function syncDomSubtitles(
       line.y = y;
     }
   }
-  for (const [key, l] of L.lines) {
-    if (want.has(key)) continue;
+  for (const [id, l] of L.lines) {
+    if (want.has(id)) continue;
     l.el.remove();
-    L.lines.delete(key);
+    L.lines.delete(id);
   }
 }

@@ -147,6 +147,11 @@ export function waveDy(p: number, amp: number): number {
  * `ys` is the line's row from the tick logic, which the bitmap path draws from too, so it
  * is taken through SUB_SCALE here rather than there — the row pitch and the wave grow
  * with the glyphs, and the faithful path keeps the original's numbers.
+ *
+ * `baseline` is measured from the TOP of the content box, so it carries the box's own
+ * height in it. That is only usable while the text and the box are drawn at the same
+ * scale; when they are not, use `lineOffset` and add the box's bottom edge separately
+ * (`lineAnchor(ys, h).baseline === h + lineOffset(ys)`, pinned in the tests).
  */
 export function lineAnchor(ys: number, screenH: number): { baseline: number; amp: number } {
   const scaled = ys * SUB_SCALE;
@@ -154,6 +159,66 @@ export function lineAnchor(ys: number, screenH: number): { baseline: number; amp
     baseline: scaled + screenH + SUB_BASELINE_OFF,
     amp: VECTOR_GEOM.under * SUB_SCALE - scaled,
   };
+}
+
+/**
+ * A line's baseline as an offset from the BOTTOM edge of the content box.
+ *
+ * Negative: the rows sit above the bottom edge, and the further up a line has scrolled
+ * the more negative it gets. Split out of `lineAnchor` because the subtitle is no longer
+ * necessarily drawn at the content's own scale — the room zooms to fit and the text
+ * deliberately does not (see `syncDomSubtitles`) — so the two halves of the old sum have
+ * to be scaled by different factors: the bottom edge is a position in the ROOM, and this
+ * is a distance in the TEXT.
+ */
+export function lineOffset(ys: number): number {
+  return ys * SUB_SCALE + SUB_BASELINE_OFF;
+}
+
+/**
+ * The scale a subtitle is drawn at: constant on screen, but never bigger than the room
+ * it sits in can carry.
+ *
+ * The first half is the point — `stageScale` is the same number in every room, so the
+ * text stops changing size as the player walks between rooms (the room's own zoom spans
+ * 1.006x to 1.35x in the default fit mode). The second half is what makes that hold in
+ * the fit modes that draw a room SMALLER than the stage.
+ *
+ * The crisp-integer modes ('native', 'x1'..'x4') snap the room down to a whole number of
+ * physical pixels, so at dpr 2 an 'x1' room is drawn at 0.5 while the stage sits near
+ * 1.65 — the text would be over three times too big for the room it is centred in, and
+ * `fitFontPx` would then shrink nearly every line by whatever that particular room's
+ * width and that particular sentence's length demanded. The result is text that varies
+ * per room AND per line: exactly the symptom this is supposed to remove, reintroduced
+ * through the fit. Reported from 'x1'.
+ *
+ * Capping at the room's own scale is only active where the room IS smaller than the
+ * stage, which is the half of those modes that was broken: there the text goes back to
+ * scaling with the room, as it did before any of this. Where a crisp mode draws a room
+ * BIGGER than the stage ('native' in a small room reaches 3.5x against a stage near
+ * 1.65) the cap does nothing and the text keeps the constant stage size — which is
+ * wanted, and is the same rule the graded modes get. The graded modes, including the
+ * shipped default, never draw a room smaller than the stage, so the cap never fires for
+ * them at all. In 'fixed' the two numbers are equal by definition.
+ */
+export function subtitleScale(stageScale: number, boxScale: number): number {
+  return Math.min(stageScale, boxScale);
+}
+
+/**
+ * The width `fitFontPx` must fit inside, when the text is drawn at a different scale
+ * from the content it sits on.
+ *
+ * `fitFontPx` works in the subtitle's own native units, and its budget is the room's
+ * width in those units. While text and room shared a scale that was simply `screenW`.
+ * With the text pinned to the stage and the room zoomed to fit, the room is physically
+ * `boxScale / textScale` times wider than the text's units say, and a budget of plain
+ * `screenW` would shrink long lines that have room to spare — the more so in exactly the
+ * small rooms the zoom enlarges most.
+ */
+export function fitScreenW(screenW: number, boxScale: number, textScale: number): number {
+  if (!(textScale > 0)) return screenW;
+  return (screenW * boxScale) / textScale;
 }
 
 /** Outline width for a glyph at `fs`: strokeText's lineWidth, centred on the path. */
