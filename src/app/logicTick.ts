@@ -140,6 +140,18 @@ export function step(): boolean {
     const bubble = maybeBubble((n) => Math.floor(Math.random() * n), audio.playing(1000));
     if (bubble) audio.play(bubble, EFFECT_VOL, 1000);
   }
+  // gspec=5 (WIN's bonus level): a rescued elderly fish is parked at X=1 and is no
+  // longer playable, so control passes to the other one — the same guard as the
+  // died-fish switch below, and from the same line (URoom.pas:26997-26998):
+  //   if (aktivni=mala) and (… or (gspec=5) and (Items[Little]^.X=1)) then aktivni:=velka
+  // Without it the player is left steering a fish that has already left the level.
+  if (room.gspec === 5) {
+    const r = room;
+    const parked = (which: 'little' | 'big'): boolean =>
+      r.items[which === 'little' ? r.littleIdx : r.bigIdx]!.x === 1;
+    const other = engine.active === 'little' ? 'big' : 'little';
+    if (parked(engine.active) && !parked(other)) engine.active = other;
+  }
   // Death: skeletons erode; if the active fish died, control passes to the
   // survivor (URoom.pas:26998). Auto-restart only when *both* fish are out of play
   // and it is not a win (URoom.pas:24337) — a lone survivor keeps playing until the

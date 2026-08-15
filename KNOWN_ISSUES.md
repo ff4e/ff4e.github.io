@@ -57,12 +57,12 @@ Severity: 🔴 breaks play · 🟠 visible/audible glitch · 🟡 minor/cosmetic
 
 The solutions harness (`test/solutions.test.ts` → `test/solutionsHarness.ts` → the shared
 `src/core/stepEngine.ts`) replays known-good FFNG solution move-strings per room and asserts
-each ends **won, no death, 0 blocked moves** (currently 62/64 mapped solutions). Run standalone
+each ends **won, no death, 0 blocked moves** (currently 63/64 mapped solutions). Run standalone
 with `npm run test:solutions` (needs game data at `$FFNG_DATA`).
 
-Both rooms' FFNG level layouts were verified to match the port's original `.ffr` exactly
+The room's FFNG level layout was verified to match the port's original `.ffr` exactly
 (room size + item positions align, per `fillets-ng-data` 1.0.1 on sources.debian.org), so
-these are genuine behavioural gaps, not corpus/layout mismatches. They are skipped in the
+this is a genuine behavioural gap, not a corpus/layout mismatch. It is skipped in the
 test via `KNOWN_DIVERGENT` in `test/solutionsMapping.ts` and must stay skipped until fixed.
 
 ### CHODBA #56 (`corridor`) — autonomous robo-dog / darkness timing
@@ -76,15 +76,31 @@ test via `KNOWN_DIVERGENT` in `test/solutionsMapping.ts` and must stay skipped u
   timing may legitimately differ. Decide port-bug vs FFNG-vs-Delphi difference, then either
   fix the port or record a Delphi-native solution instead.
 
-### WIN #68 (`windoze`) — gspec=5 bonus level
-- Layout matches FFNG `windoze` (45×33) exactly.
-- Two gaps: (a) the solution uses a **second control-symbol set** (`w/x/y/z`, `W/X/Y/Z`)
-  for the bonus "elderly" fish that the move decoder does not model; (b) `win.ts` flags the
-  gspec=5 bonus-gameplay/render path as **partly deferred**. Both fish die in the bonus, and
-  even a correct `w/x/y/z` direction mapping still dies — so the bonus gameplay itself needs
-  completing, not just the decode.
-- **To resolve:** model the elderly-fish control set in `decodeMove` (gated to the bonus /
-  swapped `littleIdx/bigIdx`), and finish the gspec=5 rescue in `src/rooms/win.ts`.
+### WIN #68 (`windoze`) — RESOLVED, and it was never a port bug
+
+Kept here because the diagnosis is the useful part. The port's physics and its `WIN` script
+replay the bonus level exactly; three things were wrong or missing around it.
+
+1. **The move decoder dropped a quarter of the solution.** `solutionsHarness.ts` silently
+   discarded any character it could not decode, so the 214 `w/x/y/z` bonus moves (27% of
+   the 783) never ran and nothing said so. The decoder now models the elderly pair —
+   `w`=up, `x`=down, `y`=left, `z`=right, read off FFNG's model kinds `fish_extra-wxyz` /
+   `fish_EXTRA-WXYZ` and `ModelFactory::parseExtraControlSym` — and an undecodable
+   character now throws instead of shortening the replay.
+2. **gspec=5 was documented as cosmetic and is not.** `URoom.pas:24825-24880` completes
+   every move/turn/fall on its first frame while the bonus is running, the `repeat/until`
+   at `24927-24928` resolves the whole move-plus-fall chain inside one tick, and
+   `26997-26998` takes control away from an elderly fish already parked at x=1. None of it
+   was ported; all three now live in `src/core/stepEngine.ts`.
+3. **FFNG and Delphi open the bonus at different moments**, so the corpus string hands
+   control to the elderly fish two moves before a Delphi-faithful port can accept it.
+   Delphi triggers on a position (`URoom.pas:17944`); FFNG triggers on a *blocked* push
+   whose obstacle chain reaches the window (`script/windoze/code.lua:64`, `Rules.cpp:615`),
+   and a blocked push is never recorded — so the corpus contains no characters for the
+   handover at all. The recording is reordered to enter the bonus at the one point on its
+   own route where the big fish reaches Delphi's trigger column through open water; the
+   eleven inserted characters and why they are neutral are in
+   `test/fixtures/solutions/README.md`.
 
 ## Room solvability net — coverage gaps (no committed solution)
 

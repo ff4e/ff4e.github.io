@@ -112,6 +112,18 @@ export class StepEngine {
     // that fish is busy (mid-dialogue, turned to face the player). Not counted as a
     // blocked push — the command is simply never dispatched.
     if (room.busy[which] > 0) return 'busy';
+    // gspec=5 (WIN's bonus level): a rescued elderly fish has been parked at X=1 by
+    // WIN_Programky (URoom.pas:18078/18090) and is out of the level. The original stops
+    // the player steering it by moving `aktivni` off it on every command dispatch
+    // (URoom.pas:26997-26998):
+    //   if (aktivni=mala) and (… or (gspec=5) and (Items[Little]^.X=1)) then aktivni:=velka
+    // so a press aimed at a parked fish is never a real push. Drop it like a busy
+    // command rather than counting it blocked — it also spans the one tick between the
+    // second rescue and VypniBonuslevel, which cannot fire until the `prog` AFTER the
+    // parking that its own condition reads (URoom.pas:17971 runs before 18078).
+    if (room.gspec === 5 && room.items[which === 'little' ? room.littleIdx : room.bigIdx]!.x === 1) {
+      return 'busy';
+    }
     if ((dir === Dir.left && room.facingRight[which]) || (dir === Dir.right && !room.facingRight[which])) {
       this.phase = 'turn';
       this.animFrame = 0;
@@ -276,15 +288,34 @@ export class StepEngine {
         }
       }
     }
-    if (this.phase === 'move' || this.phase === 'fall') {
-      this.animFrame++;
-      if (this.animFrame >= (this.phase === 'fall' ? FALL_FRAMES : this.cellFrames)) this.completeStep();
-    } else if (this.phase === 'turn') {
-      this.animFrame++;
-      if (this.animFrame >= TURN_FRAMES) {
-        room.facingRight[this.activeAnimFish] = !room.facingRight[this.activeAnimFish];
-        this.phase = 'idle';
-      }
+    // gspec=5 (WIN's bonus level, URoom.pas:24825-24880): the elderly fish are drawn as
+    // static sprites, so a move/turn ends on its FIRST gfaze step instead of running the
+    // fazi_* animation — and the `repeat … until` at URoom.pas:24927-24928 keeps spinning
+    // the state machine while gstav is stav_ma_padat or any of the move/turn/fall states,
+    // so the whole move-plus-fall chain resolves inside ONE tick and the room is back at
+    // stav_klid before the next command is read. FFNG mirrors this with
+    // `game_setFastFalling(true)` (windoze/code.lua:40). stav_ven is NOT in that set, so
+    // an exit slide still animates over several ticks.
+    const fastBonus = room.gspec === 5;
+    if (this.phase === 'move' || this.phase === 'fall' || this.phase === 'turn') {
+      let spin = 0;
+      do {
+        this.animFrame++;
+        if (this.phase === 'turn') {
+          if (this.animFrame >= (fastBonus ? 1 : TURN_FRAMES)) {
+            room.facingRight[this.activeAnimFish] = !room.facingRight[this.activeAnimFish];
+            this.phase = 'idle';
+          }
+        } else if (
+          this.animFrame >= (this.phase === 'fall' ? FALL_FRAMES : fastBonus ? 1 : this.cellFrames)
+        ) {
+          this.completeStep();
+        }
+      } while (
+        fastBonus &&
+        ++spin < 10_000 &&
+        (this.phase === 'move' || this.phase === 'fall' || this.phase === 'turn')
+      );
     } else if (this.phase === 'exit') {
       this.animFrame++;
       if (this.animFrame >= this.exitFrames && this.exiting) {

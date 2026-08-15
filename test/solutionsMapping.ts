@@ -108,10 +108,13 @@ export const SOLUTION_ROOMS: Record<string, number> = {
  *     into play — their patrol desyncs from the recorded cadence. Resolving it needs a
  *     behaviour comparison against the DELPHI original (not FFNG), since the port targets
  *     1998 fidelity and FFNG's dog/tick timing may legitimately differ.
- *   - windoze  → WIN    #68 (45×33, layout matches): the gspec=5 bonus level. win.ts
- *     flags the gspec=5 control-swap path as partly deferred, AND the solution uses a
- *     second w/x/y/z control-symbol set for the bonus (elderly) fish that the port does
- *     not model — both fish die in the bonus. Fix = model the elderly-fish control set
- *     and the gspec=5 rescue. (Physics-only "won" only by skipping the bonus entirely.)
+ *
+ * WIN #68 (`windoze`) used to be here and is not a port bug: the port's physics and its
+ * WIN script replay the bonus level exactly. What diverges is WHEN the two engines hand
+ * control to the elderly fish — Delphi on a position (URoom.pas:17944), FFNG on a blocked
+ * push it never records (script/windoze/code.lua:64 + Rules.cpp:615) — so the corpus
+ * string hands over two moves early. The recording is reordered to enter the bonus where
+ * Delphi accepts it; see `test/fixtures/solutions/README.md` for the exact eleven
+ * characters and why they are neutral.
  */
-export const KNOWN_DIVERGENT = new Set(['corridor', 'windoze']);
+export const KNOWN_DIVERGENT = new Set(['corridor']);

@@ -9,11 +9,17 @@
  * to the exit (x=1), which rescues them and swaps control back (VypniBonusLevel). The
  * room also chatters about the desktop (notepad, windows, the "steel" VGA hole, etc.).
  *
+ * gspec=5 is NOT only a render mode: while it is set, every move/turn/fall completes on
+ * its first frame and the whole move-plus-fall chain resolves inside one tick
+ * (URoom.pas:24825-24880 + the repeat/until at 24927-24928), and a fish already parked at
+ * x=1 stops being steerable (URoom.pas:26997-26998). Both live in `src/core/stepEngine.ts`
+ * — the elderly pair really is played, not just drawn.
+ *
  * DEFERRED (cosmetic): the exact gspec=5 render (which draws the young fish via the
  * animated fish body and the old fish as static sprites, URoom.pas:26227-26260) is not
  * yet ported — the port currently renders whichever pair is `littleIdx/bigIdx` (the old
- * fish, in the bonus) with the normal fish body. Gameplay (control swap + rescue) is
- * faithful; the sprite inversion is a deferred render-pass task.
+ * fish, in the bonus) with the normal fish body. The sprite inversion is a deferred
+ * render-pass task; nothing about the gameplay depends on it.
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';

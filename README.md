@@ -255,19 +255,24 @@ still overrides it — and missing data is now a **failure**, not a skip.
 
 Two tests hold the net together:
 
-- `test/solutions.test.ts` — the replays, plus a guard that asserts all 62 rooms it is about to
+- `test/solutions.test.ts` — the replays, plus a guard that asserts all 63 rooms it is about to
   replay are present and readable, so the file cannot contribute zero coverage while the run
   reports success.
-- `test/solutionsCoverage.test.ts` — the inventory: 65 recordings, 64 mapped, 2 known
-  divergences, 62 clean, every mapping pointing at a distinct real room. Dropping a mapping
+- `test/solutionsCoverage.test.ts` — the inventory: 65 recordings, 64 mapped, 1 known
+  divergence, 63 clean, every mapping pointing at a distinct real room. Dropping a mapping
   fails here even with no room data at all.
 
-The promise is "every room with a clean recorded solution is still solvable" — **62 of 72**, not
-all 72. Ten rooms are outside it: SPUNT #29, ZELVA #37, BARELY #44 and POHON #58 await a
+The promise is "every room with a clean recorded solution is still solvable" — **63 of 72**, not
+all 72. Nine rooms are outside it: SPUNT #29, ZELVA #37, BARELY #44 and POHON #58 await a
 hand-recorded solution; LODE #19 and GRAL #64 are `gspec=9` push-out rooms the FFNG corpus ships
-nothing for; ZAVER #71 and SCORE #72 are non-playable screens; and CHODBA #56 and WIN #68 are
-known port divergences. The shortfall is printed on every run and pinned by name in the coverage
+nothing for; ZAVER #71 and SCORE #72 are non-playable screens; and CHODBA #56 is a known port
+divergence. The shortfall is printed on every run and pinned by name in the coverage
 test, rather than rounded away. See [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+
+WIN #68 was the tenth until its bonus level was finished: `gspec=5` turned out to change
+gameplay, not just the render (`URoom.pas:24825-24928`), and the corpus recording had to be
+reordered because FFNG hands control to the elderly fish two moves before the Delphi trigger
+fires — see `test/fixtures/solutions/README.md`.
 
 ### Randomness in the unit suite
 
