@@ -19,10 +19,11 @@
  * this saves ~13 700 tokens where the grouped version saved ~8 100.
  *
  * ── The seam ──────────────────────────────────────────────────────────────────
- * Every name this file needs that ONLY main.ts has arrives in `host`: 100 members, down
- * from 144. Members are getters, so they read live state at the moment a probe asks, and
- * the four that probes deliberately WRITE (`aiSubScale`, `forceRoomRedraw`, `smoothLog`,
- * `waterAnimMs`) are settable. The interface was generated from the TypeScript checker
+ * Every name this file needs that ONLY main.ts has arrives in `host` — a hundred or so
+ * members, down from 144. They are getters, so they read live state at the moment a probe
+ * asks, and the ones probes deliberately WRITE (`aiSubScale`, `forceRoomRedraw`,
+ * `smoothLog`, `waterAnimMs`) are settable. Named rather than counted: a list goes stale
+ * loudly, a number goes stale silently. The interface was generated from the TypeScript checker
  * rather than hand-written, so it states main.ts's real types instead of a guess at them.
  *
  * The forty that left did not need a seam at all. They were game state, and it now has
@@ -96,6 +97,7 @@ import {
 } from './gameState.js';
 import { renderer, setRendererValue } from './renderSettings.js';
 import { ui } from './screenState.js';
+import { setSubFontReady, subFontReady } from './stageState.js';
 import { artFailureShown } from './artFailure.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
@@ -151,7 +153,7 @@ import type { RoomGeometry } from './layout.js';
 /**
  * What the debug hooks see of the running game.
  *
- * Generated from main.ts's own declarations; keep it that way. Four members are
+ * Generated from main.ts's own declarations; keep it that way. A few members are
  * writable because probes set them (`aiSubScale`, `forceRoomRedraw`, `smoothLog`,
  * `waterAnimMs`); the rest are read-only views.
  */
@@ -257,7 +259,6 @@ export interface DebugHost {
   readonly SUB_FONT_CANDIDATES: readonly { name: string; family: string; weight: string; }[];
   readonly subFontFamily: string;
   readonly subFontIdx: number;
-  readonly subFontReady: boolean;
   readonly subFontWeight: string;
   readonly subLang: () => "cz" | "en";
   readonly talk: (which: "little" | "big") => void;
@@ -1362,7 +1363,30 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       const crisp2 = intermediates(false);
       return { webgl: true, crisp1, smooth, crisp2 };
     },
-    subFontReady: () => host.subFontReady,
+    /**
+     * Did a bundled subtitle face load? Settable, so a probe can reach the fallback every
+     * tier takes when none did: the subtitles are BAKED into the pixel frame with the
+     * game's own bitmap font instead of drawn as DOM text (see `useVecSubs` in
+     * framePainter). `boot.ts` is the only other writer, and it writes once, so a probe
+     * can hold it false for as long as it needs to.
+     *
+     * Not the only way to get there — route-aborting the four `FontFace.load()` fetches
+     * would reach it through the production path, the way `test-fatal-screen` and
+     * `test-asset-retry` fail an asset. It is the only way to flip it WITH A LINE ALREADY
+     * ON SCREEN, which is what lets a probe assert the same subtitle move between the two
+     * paths and back, rather than comparing two separately booted pages.
+     *
+     * The room is not repainting while it is idle, so this forces the frame that shows
+     * the change — same reason `subScale` does.
+     */
+    subFontReady: (v?: boolean) => {
+      if (v !== undefined) {
+        setSubFontReady(v);
+        host.forceRoomRedraw = true;
+        host.wake();
+      }
+      return subFontReady;
+    },
     // the current art source (classic/enhanced). Isolates the compositing+present
     // cost from the rAF vsync cap, so it reveals real headroom (both backends sit
     // at 60fps under vsync when there's slack). WebGL is timed with a gl.finish()
