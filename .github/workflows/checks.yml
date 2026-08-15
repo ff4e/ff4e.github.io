@@ -17,6 +17,13 @@
 # repo; those skip themselves cleanly (see test/solutions.test.ts). Measured without
 # it: 1529 of 1597 pass in ~3 seconds.
 #
+# So this job is NOT the solvability guard, and that is a deliberate choice: replaying
+# the reference solutions needs the commercial 1998 game data, which cannot be committed
+# to a public repo. `npm run test:all` runs it locally before every PR and now FAILS
+# without the data instead of skipping. What CI does cover is the half that needs no
+# data — test/solutionsCoverage.test.ts pins the corpus inventory, so a room silently
+# losing its solution goes red here. README has the full statement.
+#
 # `vite build` runs too. `tsc --noEmit` does not link or resolve assets, so a bundling
 # break (a bad import path, an esbuild-only failure) passes typecheck and fails only
 # when somebody serves the app — which, without this step, would be nobody until the

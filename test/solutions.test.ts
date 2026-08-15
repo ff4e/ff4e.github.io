@@ -7,9 +7,19 @@
  * the end `won === true && anyFishDead === false && blocked === 0` — a blocked move
  * means the port's physics diverged from the reference, so we hard-fail on it.
  *
- * The FFR game data is not in the repo (copyright), so these tests SKIP cleanly when
- * it isn't present. Point $FFNG_DATA at the extracted MAINDIR to run them, exactly
- * like test/rooms.test.ts.
+ * The FFR game data is not in the repo (copyright), so the REPLAYS below skip when it
+ * isn't present. Point $FFNG_DATA at the extracted MAINDIR to run them, exactly like
+ * test/rooms.test.ts.
+ *
+ * That skip used to be silent, which made a run with ZERO solvability coverage look
+ * exactly like a green one — a `console.warn` nobody reads in a passing run. Two things
+ * fix that now:
+ *   - the coverage half moved to `solutionsCoverage.test.ts`, needs no game data, and so
+ *     runs everywhere INCLUDING CI (that is what catches a room losing its solution);
+ *   - `npm run test:solutions` sets $FFNG_REQUIRE_SOLUTIONS, which turns the skip into a
+ *     hard failure. It is part of `npm run test:all`, so the pre-PR gate can no longer
+ *     pass while quietly checking nothing. CI does NOT set it: CI cannot have the data,
+ *     and pretending otherwise would just be a permanently red job (see README).
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
@@ -20,17 +30,30 @@ import { Room } from '../src/core/room.js';
 import { ROOMS } from '../src/data/roomTable.js';
 import { replaySolution } from './solutionsHarness.js';
 import { SOLUTION_ROOMS, KNOWN_DIVERGENT } from './solutionsMapping.js';
+import { recordedMoves } from './solutionsSource.js';
 
 const DATA = process.env.FFNG_DATA ?? join(homedir(), '.cache/ffng-orig/extracted/MAINDIR');
 const GRAPHIC = join(DATA, 'Graphic');
 const hasData = existsSync(GRAPHIC);
-const CORPUS = join(process.cwd(), 'test/fixtures/solutions');
+const dataRequired = process.env.FFNG_REQUIRE_SOLUTIONS === '1';
 
 const ffrPath = (num: number): string => join(GRAPHIC, `${String(num).padStart(3, '0')}.ffr`);
-const readMoves = (slug: string): string => readFileSync(join(CORPUS, `${slug}.moves`), 'utf8').trim();
 const loadRoom = (num: number): Room => new Room(parseFfr(new Uint8Array(readFileSync(ffrPath(num)))));
 
 const slugs = Object.keys(SOLUTION_ROOMS).sort();
+
+// Always runs. Without $FFNG_REQUIRE_SOLUTIONS it is a no-op; with it, a missing data
+// directory fails the run instead of skipping 62 assertions behind a warning.
+describe('the solvability replay is actually running', () => {
+  it.skipIf(!dataRequired)('has the original game data it needs', () => {
+    expect(
+      hasData,
+      `$FFNG_REQUIRE_SOLUTIONS is set but the game data is missing at ${GRAPHIC}. ` +
+        `Every room-solvability assertion would have skipped silently. ` +
+        `Point $FFNG_DATA at the extracted MAINDIR, or run \`npm test\` instead of \`npm run test:solutions\`.`,
+    ).toBe(true);
+  });
+});
 
 describe.skipIf(!hasData)('every mapped room is solvable by its reference solution', () => {
   for (const slug of slugs) {
@@ -47,7 +70,7 @@ describe.skipIf(!hasData)('every mapped room is solvable by its reference soluti
     }
 
     it(`${title} is solvable (won, no death, 0 blocked)`, () => {
-      const r = replaySolution(loadRoom(num), jmeno, readMoves(slug));
+      const r = replaySolution(loadRoom(num), jmeno, recordedMoves(slug));
       expect(r.dead, `${title}: a fish died during replay`).toBe(false);
       expect(r.blocked, `${title}: ${r.blocked} move(s) blocked — physics diverged from reference`).toBe(0);
       expect(r.won, `${title}: room not solved after ${r.steps} moves`).toBe(true);
@@ -55,24 +78,6 @@ describe.skipIf(!hasData)('every mapped room is solvable by its reference soluti
   }
 });
 
-describe.skipIf(!hasData)('coverage', () => {
-  it('reports solution coverage across the 72 rooms', () => {
-    const mapped = new Set(Object.values(SOLUTION_ROOMS));
-    const clean = slugs.filter((s) => !KNOWN_DIVERGENT.has(s));
-    const uncovered = ROOMS.filter((r) => !mapped.has(r.num)).map((r) => `#${r.num} ${r.jmeno}`);
-    // eslint-disable-next-line no-console
-    console.log(
-      `[solutions] ${clean.length}/${slugs.length} solutions clean; ` +
-        `${mapped.size}/${ROOMS.length} rooms have a solution; ` +
-        `${KNOWN_DIVERGENT.size} known divergences (${[...KNOWN_DIVERGENT].sort().join(', ')}).\n` +
-        `[solutions] rooms with no committed solution (${uncovered.length}): ${uncovered.join(', ')}`,
-    );
-    // Guardrail: the clean set must not silently shrink.
-    expect(clean.length).toBeGreaterThanOrEqual(62);
-  });
-});
-
-if (!hasData) {
-  // eslint-disable-next-line no-console
-  console.warn(`[solutions.test] skipped — game data not found at ${GRAPHIC} (set $FFNG_DATA to enable)`);
-}
+// The coverage assertions used to live here, inside the same skipIf — so on CI they never
+// ran, and a room losing its solution was indistinguishable from a green run. They are now
+// in solutionsCoverage.test.ts, which needs no game data and runs everywhere.

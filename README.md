@@ -217,12 +217,13 @@ Automated, deterministic, **non-AI** (no LLM/vision at runtime — plain asserti
     npm test        # unit + physics (Vitest, headless, no browser, no game data needed)
     npm run test:ui # browser/integration (Playwright; builds the app and serves it)
     npm run test:ui -- cheat options   # ...or just the probes whose name matches
-    npm run test:all # typecheck + unit + UI, in sequence, fail-fast (the full gate)
-    npm run test:solutions # replay known FFNG solutions per room (needs $FFNG_DATA)
+    npm run test:all # typecheck + unit + solvability + UI, in sequence, fail-fast (the full gate)
+    npm run test:solutions # replay known FFNG solutions per room (REQUIRES $FFNG_DATA — fails without it)
 
-`npm run test:all` chains `typecheck && test && test:ui` — the full gate, and what to run
-before opening a PR (it stops at the first failing phase). For smaller changes CONTRIBUTING.md
-has a table of how much checking is actually warranted; a docs-only change needs none of this.
+`npm run test:all` chains `typecheck && test && test:solutions && test:ui` — the full gate, and
+what to run before opening a PR (it stops at the first failing phase). For smaller changes
+CONTRIBUTING.md has a table of how much checking is actually warranted; a docs-only change needs
+none of this.
 
 The full UI suite is ~315 s, so for the inner loop pass a pattern and run only what your
 change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a gate. See
@@ -235,6 +236,30 @@ CONTRIBUTING.md for how much checking a given change actually needs, and for the
 probes need macOS/Metal. A few unit tests need the original extracted data
 (`$FFNG_DATA`), which genuinely is not in the repo; they skip themselves, and 1529 of
 1597 still run without it.
+
+### What actually guarantees the rooms are still solvable
+
+Worth stating plainly, because the honest answer has two halves and only one of them is CI's:
+
+- **Are the rooms still solvable?** `npm run test:solutions` replays 62 recorded reference
+  solutions through the shared step-engine and asserts each room ends won, with no death and no
+  blocked move — 1.4 s for the lot. It **requires `$FFNG_DATA`**, the original 1998 game data,
+  which is commercial and cannot be committed to a public repo. So it runs **locally, as part of
+  `npm run test:all`, before every PR** — and it now *fails* rather than skips when the data is
+  missing, which is the whole difference from how it used to behave.
+- **Did a room silently lose its solution?** `test/solutionsCoverage.test.ts` pins the inventory
+  — 65 recordings, 64 mapped, 2 known divergences, 62 clean — and needs no game data at all, so
+  it runs in **CI on every push**. Dropping a mapping fails there.
+
+**CI is deliberately not the solvability guard**; the pre-PR gate is. The alternatives were
+fetching the game data into CI behind a secret, or committing a derived fixture (a copyright
+question before a technical one), and neither buys coverage the release gate does not already
+provide.
+
+The promise is "every room with a clean recorded solution is still solvable" — **62 of 72**, not
+all 72. SPUNT #29, ZELVA #37, BARELY #44 and POHON #58 have no recorded solution, and CHODBA #56
+and WIN #68 are known port divergences. The shortfall is printed on every run rather than rounded
+away; see [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 ### Randomness in the unit suite
 
@@ -319,12 +344,19 @@ the same assertions.
   per-frame motion), add it to `EXCLUSIVE` in the runner so it gets the machine to itself.
   Do not relax its bounds instead.
 
-- **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test`): the
-  **solvability net** — replays committed known-good FFNG solution move-strings
-  (`test/fixtures/solutions/`) per room through the shared step-engine and asserts each ends
-  **won, no death, 0 blocked** (auto-skips when the game data isn't present). 62/64 mapped
+- **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test` and by
+  `npm run test:all`): the **solvability net** — replays committed known-good FFNG solution
+  move-strings (`test/fixtures/solutions/`) per room through the shared step-engine and asserts
+  each ends **won, no death, 0 blocked**. It needs `$FFNG_DATA` and, invoked through this script,
+  **fails rather than skips** when it is absent (`$FFNG_REQUIRE_SOLUTIONS`). 62/64 mapped
   solutions pass; the remaining gaps and two confirmed same-layout divergences (CHODBA #56,
   WIN #68) are documented in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+
+- **`test/solutionsCoverage.test.ts`**: the data-free half of that net — pins the corpus inventory
+  (65 recorded / 64 mapped / 2 divergent / 62 clean) and checks every mapping points at a distinct
+  real room. Needs no game data, so unlike the replays it **runs in CI**, and a room quietly losing
+  its solution fails there. `test/solutionsSource.ts` is the single accessor for where recordings
+  live, so the assertions survive them moving into the room modules.
 
 - **`npm test`** (`test/*.test.ts`, 66 assertions): the move-record helpers, the `goanim` Anim-string
   interpreter, the **physics/mechanics** (movement, pushing, the light/heavy push rules, gravity/falling,
