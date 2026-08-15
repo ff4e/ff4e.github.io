@@ -10,19 +10,18 @@
  * at them and the cache has to be dropped when the cutscene ends.
  */
 import { audio } from './audioEngine.js';
-import { canvas, ctx, glCanvas, subCanvas, subCtx } from './dom.js';
+import { canvas, ctx, glCanvas } from './dom.js';
 import { perfPaint, roomLoadSeq, roomLoading, setPerfPaint } from './framePacing.js';
-import { activeScript, alpha, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneAssets, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
+import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneAssets, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
 import { glCompositor, glFailed, markGlFailed } from './glPlumbing.js';
-import { applySubScale, clearSubOverlay, subOverlaySignature, syncSubOverlaySized } from './introOverlay.js';
-import { clearDomSubtitles, domSubsEnabled, syncDomSubtitles } from './subtitleDom.js';
+import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
 import { clearHeldKey, restore, tryStep } from './movement.js';
 import { subLang, subsOn } from './playerSettings.js';
 import { enhancedArtActive, graphics, renderer } from './renderSettings.js';
 import { roomVoicesReady } from './roomLoad.js';
 import { ui } from './screenState.js';
 import { DEFAULT_LINE_TICKS, LOGIC_SEC, contentScaleFor, scalingFilterFor } from './stageGeometry.js';
-import { setSubOverlayPainted, setSubOverlayPaints, setSubOverlaySig, subFontFamily, subFontReady, subFontWeight, subOverlayGate, subOverlayPainted, subOverlayPaints, subOverlaySig } from './stageState.js';
+import { subFontFamily, subFontReady, subFontWeight } from './stageState.js';
 import { Dir } from '../core/dir.js';
 import { AKCE, KDO, parseHelpCap } from '../intro/helpCap.js';
 import type { CapAction } from '../intro/helpCap.js';
@@ -344,39 +343,16 @@ export function cutsceneCaption(name: string): number {
 }
 
 /**
- * Paint the cutscene's KD-* captions.
+ * Reconcile the cutscene's KD-* caption layer.
  *
- * Shared by the faithful and the AI cutscene paths: the captions are their own layer,
- * so they are identical in both and must not be duplicated per path.
- *
- * Which renderer draws them follows the same choice the room's subtitles follow
- * (`resolveSubRenderer`) rather than a second policy — a KD-* line waving in over the
- * briefcase movie wants the compositor for the same reason room dialogue does. The
- * cutscene's own box and content scale are handed over, not the room's: a cutscene is
- * 720x555 whatever room it was started from.
+ * Shared by the faithful and the AI cutscene paths: the captions are their own layer, so
+ * they are identical in both and must not be duplicated per path. The cutscene's own box
+ * and content scale are handed over, not the room's — a cutscene is 720x555 whatever room
+ * it was started from.
  */
-export function updateCutsceneSubOverlay(cssW: number, cssH: number, cs: number, dpr: number): void {
+export function updateCutsceneCaptions(cssW: number, cssH: number, cs: number): void {
   if (!cutsceneSubs?.active) return;
-  if (domSubsEnabled()) {
-    if (subOverlayPainted) clearSubOverlay(); // the canvas is not the one showing them now
-    syncDomSubtitles('cut', cutsceneSubs, count, cssW, cssH, cs, subFontFamily, subFontWeight);
-    return;
-  }
-  clearDomSubtitles('cut');
-  // The cutscene paints on every rAF (it has no dirty check), so without this
-  // gate the captions were re-shaped ~60x a second to produce the same image.
-  const sig = subOverlaySignature('cut', cutsceneSubs, cs * dpr);
-  if (!subOverlayGate || sig !== subOverlaySig) {
-    subCtx.setTransform(1, 0, 0, 1, 0, 0);
-    subCtx.clearRect(0, 0, subCanvas.width, subCanvas.height);
-    subCtx.setTransform(cs * dpr, 0, 0, cs * dpr, 0, 0);
-    applySubScale(subCtx, cutsceneSubs);
-    cutsceneSubs.drawVector(subCtx, count, subFontFamily, subFontWeight, alpha);
-    setSubOverlayPaints(subOverlayPaints + 1);
-    setSubOverlayPainted(true);
-    setSubOverlaySig(sig);
-  }
-  subCanvas.style.transform = '';
+  syncDomSubtitles('cut', cutsceneSubs, count, cssW, cssH, cs, subFontFamily, subFontWeight);
 }
 
 /**
@@ -493,7 +469,7 @@ export function drawCutscene(): void {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(aiKufr.base, 0, 0);
     ctx.drawImage(aiBmp, aiKufr.region.x * S, aiKufr.region.y * S);
-    updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
+    updateCutsceneCaptions(cssW, cssH, cs);
     setPerfPaint(perfPaint + 1);
     return;
   }
@@ -545,19 +521,12 @@ export function drawCutscene(): void {
     const rgba = frame.toRgba(cutscene.palette);
     ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), w, h), 0, 0);
   }
-  // Mulish captions on the vector overlay (enhanced). Same coordinate convention
-  // as room subtitles: the overlay spans the on-screen box and its context is
-  // scaled by SCALE*dpr so drawVector positions in native (720×555) game pixels.
-  // The caption box is the CUTSCENE's for as long as the cutscene is up, whether or not
-  // a line happens to be on screen and whichever renderer draws it. #subs is still a live
-  // element that other code reads as that box, and it would otherwise sit at the size the
-  // room left it at until the first KD-* line arrived.
-  syncSubOverlaySized(cssW, cssH);
+  // Mulish captions, in the same coordinate convention as the room's subtitles: the
+  // layer spans the on-screen box and is placed from native (720x555) game pixels.
   if (useVec && cutsceneSubs!.active) {
-    updateCutsceneSubOverlay(cssW, cssH, cs, dpr);
+    updateCutsceneCaptions(cssW, cssH, cs);
   } else {
-    // Baked captions, or none at all: whichever layer was showing them stands down.
+    // Baked captions, or none at all: the layer stands down.
     clearDomSubtitles('cut');
-    if (subOverlayPainted) clearSubOverlay();
   }
 }

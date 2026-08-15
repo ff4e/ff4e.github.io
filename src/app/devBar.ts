@@ -19,11 +19,10 @@
 import { ROOMS } from '../data/roomTable.js';
 import { isFitMode } from './layout.js';
 import { devWinRoom } from './cheats.js';
-import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, subRendererSelect, winRoomBtn } from './dom.js';
+import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, winRoomBtn } from './dom.js';
 import { relayout } from './loadingUi.js';
 import { settings } from './playerSettings.js';
 import { saveSettings } from '../core/settings.js';
-import { selectSubRenderer, subRendererPref } from './subtitleDom.js';
 import {
   graphics,
   devEnabled,
@@ -100,18 +99,6 @@ export function initDevBar(h: DevBarHost): void {
     el.addEventListener('change', () => {
       const v = el.value;
       setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
-    });
-  }
-  // Dev-bar subtitle-renderer combobox. Mirrors `__ff.setSubRenderer`, which is the
-  // same call — selectSubRenderer keeps this select in sync when the console drives
-  // it, so the two can never disagree about what is on screen. `auto` is the shipped
-  // behaviour (the ai tier paints DOM text); the other two force one renderer.
-  if (subRendererSelect) {
-    const el = subRendererSelect;
-    el.value = subRendererPref();
-    el.addEventListener('change', () => {
-      const v = el.value;
-      selectSubRenderer(v === 'dom' || v === 'canvas' ? v : 'auto');
     });
   }
   if (idleDirtyToggle) {

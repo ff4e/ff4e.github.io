@@ -32,20 +32,6 @@ export let subFontIdx = 0;
 export let subFontFamily = SUB_FONT_CANDIDATES[0]!.family;
 export let subFontWeight = SUB_FONT_CANDIDATES[0]!.weight;
 export let subFontReady = false;
-// True while the overlay currently shows a subtitle, so idle frames skip the
-// (large) clear/redraw entirely and we wipe it exactly once when it clears.
-export let subOverlayPainted = false;
-// Diagnostics: how many times the vector overlay has actually been re-rendered
-// (perf probes read the rate — every redraw between two logic ticks is waste).
-export let subOverlayPaints = 0;
-// What the overlay currently SHOWS (SubtitleSystem.vectorSignature + the inputs
-// outside it: which system, the font, the backing size). The wave offset only
-// advances on a logic tick and stops entirely once a line has settled, so at 60fps
-// most frames would repaint the identical image — this skips them.
-export let subOverlaySig = '';
-// Perf A/B switch (tools/bench-subtitles.mjs): false replays the pre-gate behaviour,
-// repainting the overlay on every frame that draws it.
-export let subOverlayGate = true;
 export let booted = false; // true once boot succeeds — before that, any error is fatal
 
 export function setSubFontIdx(v: number): void {
@@ -62,22 +48,6 @@ export function setSubFontWeight(v: string): void {
 
 export function setSubFontReady(v: boolean): void {
   subFontReady = v;
-}
-
-export function setSubOverlayPainted(v: boolean): void {
-  subOverlayPainted = v;
-}
-
-export function setSubOverlayPaints(v: number): void {
-  subOverlayPaints = v;
-}
-
-export function setSubOverlaySig(v: string): void {
-  subOverlaySig = v;
-}
-
-export function setSubOverlayGate(v: boolean): void {
-  subOverlayGate = v;
 }
 
 export function setBooted(v: boolean): void {

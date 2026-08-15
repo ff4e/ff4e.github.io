@@ -8,9 +8,9 @@
  * to 12.5fps for the whole of a subtitle, so the text visibly juddered while `enhanced`
  * was smooth, with nothing logged and every unit test green.
  *
- * Every other perf probe in this suite runs in a single tier (`test-subtitles-perf` and
- * `test-subtitles-parity` select `enhanced`; `test-smoothness`, `test-idlefps`,
- * `test-timing` and `test-mapinfo` just use the default). So none of them could see it.
+ * Every other perf probe in this suite runs in a single tier (`test-smoothness`,
+ * `test-idlefps`, `test-timing` and `test-mapinfo` just use the default; `test-aisubs`
+ * covers `enhanced` and `ai` but not `classic`). So none of them could see it.
  * This one is deliberately parametrised over ALL tiers instead of asserting frame rates,
  * because the contract — not the fps number — is what a new tier breaks.
  *
@@ -24,7 +24,7 @@
  */
 import { withApp } from './ui-lib.mjs';
 
-/** Tiers, and whether they draw subtitles through the vector overlay. */
+/** Tiers, and whether they draw subtitles as vector text rather than baking them. */
 const TIERS = [
   { id: 'classic', vectorSubs: false },
   { id: 'enhanced', vectorSubs: true },

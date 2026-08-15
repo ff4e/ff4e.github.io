@@ -500,10 +500,10 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `main.ts` | 19.1 k | The composition root: the leftover state, the boot-time wiring of every module below, and the keyboard and pointer routers. |
 | `boot.ts` | 2.5 k | The boot sequence in load order — fonts, panel and map graphics, sound packages, room 7, first frame. |
 | `deviceGate.ts` | 1.4 k | Refusing to run on a phone. Runs before every side effect. |
-| `dom.ts` | 1.5 k | The element handles and their 2D contexts. |
+| `dom.ts` | 1.3 k | The element handles and their 2D contexts. |
 | `gameState.ts` | 2.6 k | The live room and how it is currently being played. Live bindings plus setters, because of the 1 237 references only 74 are writes. |
 | `screenState.ts` | 1.9 k | Which screen is showing, and everything layered over it. A mutable bag — the reads are many and the shape is flat. |
-| `stageState.ts` | 1.1 k | The subtitle font in use, what the subtitle overlay holds, and `booted`. |
+| `stageState.ts` | 0.8 k | The subtitle font in use and whether it loaded, plus `booted`. |
 | `persist.ts` | 2.5 k | Everything kept in localStorage: solved, cheated, scores, saves, and the migration. |
 | **The frame** | | |
 | `frameClock.ts` | 1.6 k | When the next frame happens, and at what rate. |
@@ -522,12 +522,11 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. |
-| `cutscene.ts` | 6.0 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
+| `cutscene.ts` | 5.8 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
-| `introOverlay.ts` | 2.2 k | The logo and intro movies, and the vector-subtitle layer above the canvas. |
+| `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the fatal screen and the resize handler. |
-| `subRendererChoice.ts` | 0.6 k | Which renderer paints the vector subtitles: DOM text by default, plus the fallback when the browser cannot animate. Pure, so the decision is unit-tested. |
-| `subtitleDom.ts` | 3.7 k | Subtitles as DOM text, animated by the compositor — the renderer for `enhanced`, `ai` and cutscene captions, one layer each for the room and a cutscene. Forced either way by the dev bar's Subtitles picker or `__ff.setSubRenderer()`. |
+| `subtitleDom.ts` | 4.0 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
 | `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
@@ -540,7 +539,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `stageGeometry.ts` | 2.2 k | How big the game is drawn, and the constants the simulation is timed by. |
 | `cheats.ts` | 6.2 k | The typed codes, the effects they switch on, and the Tetris minigame. |
 | **Development** | | |
-| `debugHooks.ts` | 19.2 k | `window.__ff`, the debug/test interface the 86 UI probes drive the game through. |
+| `debugHooks.ts` | 18.6 k | `window.__ff`, the debug/test interface the 86 UI probes drive the game through. |
 | `devBar.ts` | 1.4 k | The developer bar, and the relayout watchers. |
 | `feedback.ts` | 2.9 k | The player feedback affordance and form. |
 
@@ -583,8 +582,8 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |
 | `help.ts` | 0.6 k | The control-help screens (`Help.pas`). |
-| `subtitleGeom.ts` | 1.7 k | The geometry a vector subtitle line is built from — fit-to-room size, wave phase and curve, baseline and amplitude, stroke and bevel. Pure and import-free, so both renderers measure from it and it is unit-tested. |
-| `subtitles.ts` | 5.2 k | Colour mapping, glyph rendering, and the scrolling line. |
+| `subtitleGeom.ts` | 1.8 k | The geometry a vector subtitle line is built from — fit-to-room size, wave phase and curve, baseline and amplitude, stroke and bevel. Pure and import-free, so the renderer and the tick logic both measure from it and it is unit-tested. |
+| `subtitles.ts` | 3.1 k | Colour mapping, glyph rendering, and the scrolling line. |
 | `font.ts` | 0.9 k | The bitmap font from the original `Chars.dat`/`Chartab.dat`/`Charcol.dat`. |
 | `tetrisRender.ts` | 1.3 k | The Tetris minigame's picture. |
 | `filmEffects.ts` | 1.1 k | Full-frame effects for the `xsilent` and `xinterlaced` cheats. |

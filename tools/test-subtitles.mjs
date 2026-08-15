@@ -1,29 +1,22 @@
 /**
- * UI test: each art tier's subtitles are painted by the renderer that tier chose.
- *  - `enhanced` and `ai` paint real DOM text (#domsubs), leaving the overlay canvas empty.
- *  - `classic` bakes them into the pixel frame, so NEITHER layer shows anything.
- * Also guards the idle-skip optimisation (the overlay stays empty when no subtitle is
- * showing) and the handover when the RENDERER changes with a line already on screen —
- * whichever one is standing down has to take its own output off the screen, or both are
- * visible at once. It also pins the DOM line against the canvas line in the same tier,
- * which is the only comparison that can catch an error common to every DOM line.
- * Asserts painted-vs-empty, never pixel-exact positions or wave timing, so it is not flaky.
+ * UI test: each art tier's subtitles are painted the way that tier paints them.
+ *  - `enhanced` and `ai` paint real DOM text (#domsubs).
+ *  - `classic` bakes them into the pixel frame, so nothing appears in the DOM at all.
+ * Also guards the idle-skip (no DOM text when no subtitle is showing), and a tier switch
+ * with a line already up: the renderer does not change, but the room's box and the tier's
+ * own scale do, so the layer has to follow both rather than be left as it was. Finally,
+ * leaving the room has to take an abandoned line off the screen.
+ * Asserts painted-vs-empty and the layer's box, never pixel-exact glyph positions or wave
+ * timing, so it is not flaky.
+ *
+ * What is NOT here any more: the DOM line measured against the canvas line in the same
+ * tier. That was the strongest oracle this file had — it is what caught every line being
+ * drawn ~5% too small — and it died with the canvas renderer, because it needed a second
+ * implementation to compare against. The geometry it was really guarding is now pinned in
+ * test/subtitle-geom.test.ts at unit-test cost; what is no longer covered anywhere is the
+ * DOM path's own measurement and CSS placement.
  */
 import { selectRoom, tickSleep, withApp } from './ui-lib.mjs';
-
-/** Count of non-transparent pixels on the #subs overlay (capped, for speed). */
-async function overlayPixels(p) {
-  return p.evaluate(() => {
-    const c = document.getElementById('subs');
-    if (!c || !c.width || !c.height) return 0;
-    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-    let n = 0;
-    for (let i = 3; i < d.length; i += 4) {
-      if (d[i] !== 0 && ++n > 100) break;
-    }
-    return n;
-  });
-}
 
 /** How many subtitle lines exist as real DOM text right now. */
 async function domLines(p) {
@@ -39,126 +32,69 @@ await withApp(async ({ p, expect }) => {
   await tickSleep(p, 3);
 
   // Idle (no subtitle): nothing is drawn anywhere.
-  expect((await overlayPixels(p)) === 0, 'enhanced idle: overlay is empty');
   expect((await domLines(p)) === 0, 'enhanced idle: no DOM text');
 
-  // enhanced: real DOM text, and the canvas overlay left alone.
+  // enhanced: real DOM text.
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
   await tickSleep(p, 5); // let the wave-in run (it advances on the game tick)
   expect(await p.evaluate(() => window.__ff.subsActive()), 'enhanced: subtitle active');
   expect((await domLines(p)) > 0, 'enhanced: subtitle painted as real DOM text');
-  expect((await overlayPixels(p)) === 0, 'enhanced: the overlay canvas stays empty');
 
-  // Classic is the third renderer and the one this change never touches: it bakes its
-  // subtitles into the pixel frame, so neither layer shows anything.
+  // Classic is the one tier this whole line of work never touches: it bakes its
+  // subtitles into the pixel frame, so nothing reaches the DOM at all.
   await p.evaluate(() => window.__ff.setGraphics('classic'));
   await tickSleep(p, 3);
   expect((await domLines(p)) === 0, 'classic: the DOM layer is cleared on switch');
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
   await tickSleep(p, 5);
   expect(await p.evaluate(() => window.__ff.subsActive()), 'classic: subtitle active');
-  expect((await overlayPixels(p)) === 0, 'classic: overlay stays empty (subs baked into frame)');
   expect((await domLines(p)) === 0, 'classic: no DOM text either (subs baked into frame)');
 
   // ai: same renderer as enhanced. Switched with a line ALREADY on screen, because the
-  // tier change still resizes and rescales the layer even though it no longer swaps it.
+  // tier change resizes and rescales the layer.
   await p.evaluate(() => window.__ff.setGraphics('ai'));
   await tickSleep(p, 3);
-  expect(
-    (await p.evaluate(() => window.__ff.subRenderer())) === 'dom',
-    'ai: the DOM renderer is the default (no override set)',
-  );
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
   await tickSleep(p, 5);
   expect(await p.evaluate(() => window.__ff.subsActive()), 'ai: subtitle active');
   expect((await domLines(p)) > 0, 'ai: subtitle painted as real DOM text');
-  expect((await overlayPixels(p)) === 0, 'ai: the overlay canvas stays empty');
 
-  // The handover, which is now driven by the PREFERENCE rather than by the tier. Both
-  // directions, mid-line: whichever renderer stands down has to take its own output off
-  // the screen, or the two are visible at once.
-  await p.evaluate(() => window.__ff.setSubRenderer('canvas'));
+  // A tier switch mid-line. The renderer does not change, so "the text is still there"
+  // is nearly free and proves little on its own — what actually has to happen is that the
+  // layer follows the new tier: it must still cover the room's box, and it must pick up
+  // the tier's own scale (`ai` shrinks its subtitles about the bottom edge, `enhanced`
+  // does not). Both are read off the live element, so a layer left at the previous tier's
+  // geometry fails here rather than passing as "a line is present".
+  const layerBox = () =>
+    p.evaluate(() => {
+      const s = document.getElementById('domsubs');
+      const room = document.getElementById('screen');
+      if (!s || !room) return null;
+      return { w: s.style.width, roomW: room.style.width, transform: s.style.transform };
+    });
+
+  const inAi = await layerBox();
+  expect(inAi !== null && inAi.w === inAi.roomW, `[ai] the layer covers the room box (layer ${inAi?.w}, room ${inAi?.roomW})`);
+  expect(/scale\(/.test(inAi?.transform ?? ''), `[ai] the layer carries the tier's shrink (transform "${inAi?.transform}")`);
+
+  await p.evaluate(() => window.__ff.setGraphics('enhanced'));
   await tickSleep(p, 5);
-  expect((await domLines(p)) === 0, "switching to 'canvas' mid-line takes the DOM text down");
-  expect((await overlayPixels(p)) > 0, "switching to 'canvas' mid-line hands the line to the overlay");
-  await p.evaluate(() => window.__ff.setSubRenderer('dom'));
+  const inEnh = await layerBox();
+  expect((await domLines(p)) > 0, 'the line survives a tier switch mid-line');
+  expect(inEnh !== null && inEnh.w === inEnh.roomW, `[enhanced] the layer follows the new room box (layer ${inEnh?.w}, room ${inEnh?.roomW})`);
+  expect(!/scale\(/.test(inEnh?.transform ?? ''), `[enhanced] the ai shrink is dropped on the way back (transform "${inEnh?.transform}")`);
+
+  await p.evaluate(() => window.__ff.setGraphics('ai'));
   await tickSleep(p, 5);
-  expect((await domLines(p)) > 0, "switching back to 'dom' mid-line puts the text back");
-  expect((await overlayPixels(p)) === 0, "switching back to 'dom' mid-line clears the overlay");
+  const backInAi = await layerBox();
+  expect((await domLines(p)) > 0, 'and survives switching back');
+  expect(/scale\(/.test(backInAi?.transform ?? ''), `[ai] the shrink comes back with the tier (transform "${backInAi?.transform}")`);
 
-  // ── the DOM line must be the size the canvas draws it ──
-  //
-  // Every other geometry check compares one DOM measurement against another (ai against
-  // enhanced, in test-aisubs), so an error common to EVERY DOM line cancels out and
-  // passes. That is not hypothetical: the fit-to-room step measured the line's
-  // full-width container instead of its text, so the shrink fired on every line and drew
-  // all of them ~5% small — invisible to a ratio, and it just read as "the text looks a
-  // bit off". The only oracle that can see it is the other renderer, same tier, same
-  // line, same units. Done here rather than in test-aisubs because this probe injects a
-  // known line into a wide room, so neither wrapping nor the room's own chatter is in
-  // the measurement.
-  //
-  // Not pixel parity: the browser shapes and rasterises this text, so a fraction of a
-  // percent is expected and fine. 5% is not.
-  const lineWidthCss = (which) =>
-    p.evaluate((w) => {
-      const c = document.getElementById('subs');
-      const frame = c.getBoundingClientRect();
-      if (w === 'dom') {
-        let x0 = 1e9, x1 = -1;
-        for (const sp of document.getElementById('domsubs')?.querySelectorAll('span') ?? []) {
-          const r = sp.getBoundingClientRect();
-          if (r.width === 0 && r.height === 0) continue;
-          x0 = Math.min(x0, r.left); x1 = Math.max(x1, r.right);
-        }
-        return { w: x1 - x0, cx: (x0 + x1) / 2 - frame.left, frameW: frame.width };
-      }
-      const d = c.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, c.width, c.height).data;
-      let x0 = 1e9, x1 = -1;
-      for (let y = 0; y < c.height; y++) {
-        for (let x = 0; x < c.width; x++) {
-          if (d[(y * c.width + x) * 4 + 3] > 40) {
-            if (x < x0) x0 = x;
-            if (x > x1) x1 = x;
-          }
-        }
-      }
-      const k = frame.width / c.width; // backing store -> CSS px
-      return { w: (x1 - x0) * k, cx: ((x0 + x1) / 2) * k, frameW: frame.width };
-    }, which);
-
-  for (const tier of ['enhanced', 'ai']) {
-    const seen = {};
-    for (const which of ['canvas', 'dom']) {
-      await p.evaluate((t) => window.__ff.setGraphics(t), tier);
-      await p.evaluate((w) => window.__ff.setSubRenderer(w), which);
-      await p.evaluate(() => window.__ff.clearSubtitles());
-      await tickSleep(p, 2);
-      await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
-      await tickSleep(p, 20); // let the wave finish: this is the resting line
-      seen[which] = await lineWidthCss(which);
-    }
-    const ratio = seen.dom.w / seen.canvas.w;
-    expect(
-      Math.abs(ratio - 1) < 0.04,
-      `[${tier}] the DOM line is the width the canvas draws it ` +
-        `(${seen.dom.w.toFixed(1)}px vs ${seen.canvas.w.toFixed(1)}px, ratio ${ratio.toFixed(3)})`,
-    );
-    expect(
-      Math.abs(seen.dom.cx - seen.canvas.cx) < 0.02 * seen.dom.frameW,
-      `[${tier}] the DOM line is centred where the canvas centres it ` +
-        `(${seen.dom.cx.toFixed(1)}px vs ${seen.canvas.cx.toFixed(1)}px of ${seen.dom.frameW.toFixed(0)}px)`,
-    );
-  }
-
-  // Restore the default so this probe leaves no persisted choice behind for others.
-  await p.evaluate(() => window.__ff.setSubRenderer('auto'));
-
-  // Leaving the ROOM with a line still up must take the DOM text down. Nothing in the
-  // non-room draw branches clears it — they wipe the canvas overlay, which is a
-  // different element — so a line survived onto the world map, painted over it. The
-  // guard covers the help page, a cutscene and a room load by the same condition; the
-  // map is the one a player actually walks into.
+  // Leaving the ROOM with a line still up must take the DOM text down. No draw branch
+  // clears it on its own — a branch paints #screen, and the layer is a sibling element —
+  // so a line survived onto the world map and sat over it. The render loop's guard covers
+  // the help page, a cutscene and a room load by the same condition; the map is the one a
+  // player actually walks into.
   await p.evaluate(() => window.__ff.setGraphics('ai'));
   await tickSleep(p, 3);
   await p.evaluate(() => window.__ff.pushSubtitle('Careful, fish!', 'M'));
