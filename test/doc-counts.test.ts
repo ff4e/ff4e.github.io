@@ -14,18 +14,30 @@
  * data, so it runs in CI on every push like the rest of the unit suite.
  *
  * ── Why this shape ───────────────────────────────────────────────────────────
- * It matches the exact phrase `<n> UI probes`, not `<n> probes`, so that ordinary prose
- * about a subset ("the three ~100 s probes", "the 2 flakiest probes") cannot trip it. The
- * two places that said `<n> probes` about the whole suite were reworded to match rather
- * than the pattern being loosened — a guard that has to be taught about exceptions stops
- * being trusted.
+ * It matches the phrase `<n> UI probes` rather than a bare `<n> probes`, so that prose
+ * about a subset cannot trip it. The two places that said `<n> probes` about the whole
+ * suite were reworded to match, rather than the pattern being loosened — a guard that has
+ * to be taught about exceptions stops being trusted.
  *
- * What is deliberately NOT guarded here is the `window.__ff` entry count, also quoted in
- * AGENTS.md. Counting it honestly means reading `Object.keys(window.__ff)` in a browser,
- * which is a ~7.4 s probe rather than a ~2.5 ms test, and it changes whenever a hook is
- * added — so the guard would cost 3 000x more and fire as routine noise rather than as a
- * signal. It is a hand-checked number; if you change the hook surface, re-read it with
- * `Object.keys(window.__ff).length`.
+ * Markdown emphasis is allowed between the two, because this file sits in docs whose every
+ * other figure is bolded (`**~2.5 ms**`, `**~9.5 s**`): without it, someone writing
+ * `**89** UI probes` would drop that claim out of the guard SILENTLY, which is the one
+ * outcome a drift test must not have. Failing loudly is fine; going quiet is not.
+ *
+ * Two holes it does NOT close, stated so nobody assumes otherwise. A count written in a
+ * form the phrase misses (`89 probes`, `eighty-nine UI probes`) is invisible to it — the
+ * rewording made today's text guardable, it cannot make tomorrow's text guardable. And a
+ * NEW markdown file is only covered because the list below is every tracked `*.md` at the
+ * repo root rather than a hand-picked pair.
+ *
+ * What is deliberately NOT guarded is the `window.__ff` entry count, also quoted in
+ * AGENTS.md. Not on cost grounds — `window.__ff` is assigned once from a single object
+ * literal, so a depth-1 key scan of `debugHooks.ts` counts it in milliseconds without a
+ * browser. The reason is that such a scan re-implements the shape of that literal, and a
+ * second copy of a rule is how the two drift apart; it would be a guard that fails for
+ * being out of date about parsing rather than about the count. It is a hand-checked
+ * number: if you change the hook surface, re-read it with `Object.keys(window.__ff).length`
+ * in the browser and update `AGENTS.md` and `src/app/main.ts`, which both state it.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
@@ -38,7 +50,14 @@ function probeCount(): number {
   return readdirSync(join(root, 'tools')).filter((f) => f.startsWith('test-') && f.endsWith('.mjs')).length;
 }
 
-const DOCS = ['AGENTS.md', 'README.md'];
+/**
+ * Every markdown file at the repo root, rather than a hand-picked pair: only AGENTS.md and
+ * README.md state a probe count today, but a list that has to be remembered is one more
+ * thing to forget, and reading five small files costs nothing.
+ */
+function rootDocs(): string[] {
+  return readdirSync(root).filter((f) => f.endsWith('.md'));
+}
 
 describe('the docs state the real number of UI probes', () => {
   it('every "<n> UI probes" claim matches the files on disk', () => {
@@ -47,13 +66,17 @@ describe('the docs state the real number of UI probes', () => {
     // become 0 and this test would "pass" by agreeing with nonsense.
     expect(actual).toBeGreaterThan(50);
 
-    for (const doc of DOCS) {
+    let total = 0;
+    for (const doc of rootDocs()) {
       const text = readFileSync(join(root, doc), 'utf8');
-      const claims = [...text.matchAll(/(\d+) UI probes/g)];
-      expect(claims.length, `${doc} should state the probe count at least once`).toBeGreaterThan(0);
+      // `[*_\s]*` so bolded or italicised counts are still seen — see the header.
+      const claims = [...text.matchAll(/(\d+)[*_\s]*\s+UI probes/g)];
+      total += claims.length;
       for (const m of claims) {
-        expect(Number(m[1]), `${doc} says "${m[0]}" but tools/ has ${actual} probes`).toBe(actual);
+        expect(Number(m[1]), `${doc} says "${m[0].trim()}" but tools/ has ${actual} probes`).toBe(actual);
       }
     }
+    // Otherwise a rewording that hid every claim would leave this test green and useless.
+    expect(total, 'the docs should state the probe count somewhere').toBeGreaterThan(0);
   });
 });

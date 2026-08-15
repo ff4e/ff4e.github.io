@@ -283,8 +283,8 @@ pick, the host's lip-sync and blink — so the one swap covers all of them.
 
 `tools/run-ui-tests.mjs` builds the app (`vite build`, ~2s), serves the result on a port it
 picks for that run, and runs the probes **concurrently**. It used to run them one at a time,
-each in its own cold Chromium, which took ~15 minutes; it now takes ~3, with the same probes and
-the same assertions.
+each in its own cold Chromium; the pool is what turns ~1 540–1 900 probe-seconds into **~5–6
+minutes** of wall clock, with the same probes and the same assertions.
 
 - **A fresh server on a per-run port.** The runner always serves the build it just made and
   never adopts a server that happens to be listening (reusing a stale dev server on 5173 once

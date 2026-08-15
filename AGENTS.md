@@ -58,8 +58,8 @@ calls the task takes. Measured on this repo before the `main.ts` split: a sessio
 
 That is the lens for the rules below. They are not tidiness for its own sake.
 
-**What the code already looks like** (404 files under `src/`, `tools/`, `test/`): median **126 lines**, 90th
-percentile **388**, and only 14 files over 700. The codebase is already small-module. The cost was never
+**What the code already looks like** (447 files under `src/`, `tools/`, `test/`): median **132 lines**, 90th
+percentile **386**, and only 15 files over 700. The codebase is already small-module. The cost was never
 spread evenly — it was concentrated in one file, which also happened to be the most-changed file in the repo
 (32 of the last 60 commits touched `main.ts`). **Size only costs when it meets churn.** A large generated
 table nobody opens is free; a large file everyone edits is the expensive thing.
@@ -85,7 +85,7 @@ table nobody opens is free; a large file everyone edits is the expensive thing.
    same file now closes that gap: **any file in `src/app/` over 520 lines must have a budget.** It is not a cap
    — crossing the line does not fail because the file is too big, it fails because nothing was watching a file
    that had become worth watching. It is scoped to `src/app/` because that is where churn concentrates
-   (`main.ts` alone is 84 of the project's 180 commits, against six for all of `src/rooms/`), and set just above
+   (`main.ts` alone is 103 of the project's 231 commits, against six for all of `src/rooms/`), and set just above
    the largest unbudgeted file there today, so it stays quiet on the status quo. A blanket limit on every file
    would be the wrong shape: `src/rooms/banka.ts` is 896 lines and has been touched twice, and budgeting it
    would only teach people to ignore the guard.
@@ -102,9 +102,15 @@ own:
 | | cost |
 | --- | --- |
 | one unit test | **~2.5 ms** (1 670 of them run in ~5 s) |
-| one UI probe | **~7.4 s** median — about **3 000×** a unit test |
+| one UI probe | **~9.5 s** median — about **3 800×** a unit test |
 | the fixed part of any probe | 1.3–2.7 s, just to launch a browser and boot the app |
-| the full UI suite | 89 UI probes, ~1 550-1 900 s of serial work, ~5-6 min wall |
+| the full UI suite | 89 UI probes, ~1 540–1 900 s of probe-seconds, ~5–6 min wall |
+
+The probe figures are the `cost:` line `npm run test:ui` prints, across four full runs on one
+10-core machine. Read "probe-seconds" literally: they are per-probe WALL times measured inside
+the parallel pool, so they include the contention of up to eight probes sharing the machine —
+the real serial cost would be lower. They move with load, which is why they are a range and not
+a figure; the same runs put the median between 9.3 s and 9.9 s.
 
 So, in order:
 

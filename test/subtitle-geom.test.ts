@@ -5,7 +5,7 @@
  * decide where a subtitle actually appears. They used to exist twice, once per renderer,
  * which is how the two drifted: the DOM path had no 8px floor on the fit and started its
  * wave one step early. The canvas renderer is gone, but the rules stay pinned here at
- * ~2.5 ms a test rather than in a ~7.4 s probe — which is the reason the module is pure
+ * ~2.5 ms a test rather than in a ~9.5 s probe — which is the reason the module is pure
  * and import-free.
  */
 import { describe, it, expect } from 'vitest';
