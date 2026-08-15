@@ -77,7 +77,10 @@ export const introMovie = (): string =>
  */
 // `let` for the same reason as waterAnimMs and RIPPLE: it is a look decision, so it has
 // to be judgeable on screen without a rebuild. Nothing in the game writes to it.
-export let aiSubScale = 0.5;
+// Tuned on screen: 0.5 was too small once the text stopped being enlarged by small rooms'
+// zoom (framePainter, updateRoomSubtitles), which had been flattering it in exactly the
+// rooms that are easiest to read.
+export let aiSubScale = 0.75;
 
 /** Build the intro player and probe for the AI movie variants. Call once, from `main.ts`. */
 export function initIntro(): void {
