@@ -235,7 +235,8 @@ CONTRIBUTING.md for how much checking a given change actually needs, and for the
 probes need macOS/Metal. A few unit tests still default to a private extraction of the
 original game (`~/.cache/ffng-orig`, via `$FFNG_DATA` / `$FF_DATA_DIR`) and skip without
 it — `rooms.test.ts`, `gral-pushout.test.ts`, `render-parity.test.ts`,
-`enhanced-mapping.test.ts`, about 208 assertions. The solvability net used to be among
+`enhanced-mapping.test.ts` — 146 assertions (measured: 148 skip without any data, 2 of which
+are the known room divergences that skip regardless). The solvability net used to be among
 them and no longer is; the others could be unskipped the same way.
 
 ### What actually guarantees the rooms are still solvable

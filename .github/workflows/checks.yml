@@ -22,8 +22,8 @@
 # missing data fails instead of skipping.
 #
 # A few tests still default to ~/.cache/ffng-orig and do skip here (rooms.test.ts,
-# gral-pushout.test.ts, and $FF_DATA_DIR in render-parity/enhanced-mapping) — about 208
-# assertions that could be unskipped the same way, separately from the solvability work.
+# gral-pushout.test.ts, and $FF_DATA_DIR in render-parity/enhanced-mapping) — 146 assertions
+# that could be unskipped the same way, separately from the solvability work.
 #
 # `vite build` runs too. `tsc --noEmit` does not link or resolve assets, so a bundling
 # break (a bad import path, an esbuild-only failure) passes typecheck and fails only
