@@ -241,12 +241,12 @@ them and no longer is; the others could be unskipped the same way.
 
 ### What actually guarantees the rooms are still solvable
 
-`npm test` replays 62 recorded reference solutions through the shared step-engine and asserts
+`npm test` replays 63 recorded reference solutions through the shared step-engine and asserts
 each room ends won, with no death and no blocked move — the whole set in under a second. It
 runs **in CI on every push**, and locally in every `npm test`.
 
 It did not always. Until recently the replays were gated on a *private* extraction of the
-original game at `~/.cache/ffng-orig`, so CI skipped all 62 assertions on every push and still
+original game at `~/.cache/ffng-orig`, so CI skipped every one of those assertions on every push and still
 reported green. The premise was wrong: the room data is not withheld from this repo. ALTAR
 GPL-released the Fish Fillets data in 2002 (see [CONTRIBUTING.md](./CONTRIBUTING.md)), all 72
 `Graphic/*.ffr` are tracked under `public/data/` because the site ships them, and they are
@@ -255,19 +255,24 @@ still overrides it — and missing data is now a **failure**, not a skip.
 
 Two tests hold the net together:
 
-- `test/solutions.test.ts` — the replays, plus a guard that asserts all 62 rooms it is about to
+- `test/solutions.test.ts` — the replays, plus a guard that asserts all 63 rooms it is about to
   replay are present and readable, so the file cannot contribute zero coverage while the run
   reports success.
-- `test/solutionsCoverage.test.ts` — the inventory: 65 recordings, 64 mapped, 2 known
-  divergences, 62 clean, every mapping pointing at a distinct real room. Dropping a mapping
+- `test/solutionsCoverage.test.ts` — the inventory: 65 recordings, 64 mapped, 1 known
+  divergence, 63 clean, every mapping pointing at a distinct real room. Dropping a mapping
   fails here even with no room data at all.
 
-The promise is "every room with a clean recorded solution is still solvable" — **62 of 72**, not
-all 72. Ten rooms are outside it: SPUNT #29, ZELVA #37, BARELY #44 and POHON #58 await a
+The promise is "every room with a clean recorded solution is still solvable" — **63 of 72**, not
+all 72. Nine rooms are outside it: SPUNT #29, ZELVA #37, BARELY #44 and POHON #58 await a
 hand-recorded solution; LODE #19 and GRAL #64 are `gspec=9` push-out rooms the FFNG corpus ships
-nothing for; ZAVER #71 and SCORE #72 are non-playable screens; and CHODBA #56 and WIN #68 are
-known port divergences. The shortfall is printed on every run and pinned by name in the coverage
+nothing for; ZAVER #71 and SCORE #72 are non-playable screens; and CHODBA #56 is a known port
+divergence. The shortfall is printed on every run and pinned by name in the coverage
 test, rather than rounded away. See [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+
+WIN #68 was the tenth until its bonus level was finished: `gspec=5` turned out to change
+gameplay, not just the render (`URoom.pas:24825-24928`), and the corpus recording had to be
+reordered because FFNG hands control to the elderly fish two moves before the Delphi trigger
+fires — see `test/fixtures/solutions/README.md`.
 
 ### Randomness in the unit suite
 
@@ -356,12 +361,12 @@ assertions.
 - **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test` and so by CI):
   the **solvability net** — replays committed known-good FFNG solution move-strings
   (`test/fixtures/solutions/`) per room through the shared step-engine and asserts each ends
-  **won, no death, 0 blocked**, off the repo's own `public/data` (`$FFNG_DATA` overrides). 62/64
-  mapped solutions pass; the remaining gaps and two confirmed same-layout divergences (CHODBA
-  #56, WIN #68) are documented in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+  **won, no death, 0 blocked**, off the repo's own `public/data` (`$FFNG_DATA` overrides). 63/64
+  mapped solutions pass; the remaining gaps and the one confirmed same-layout divergence (CHODBA
+  #56) are documented in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 - **`test/solutionsCoverage.test.ts`**: the inventory half of that net — pins the corpus
-  (65 recorded / 64 mapped / 2 divergent / 62 clean), names the 8 rooms with no recording, and
+  (65 recorded / 64 mapped / 1 divergent / 63 clean), names the 8 rooms with no recording, and
   checks every mapping points at a distinct real room. Needs no room data at all, so a room
   quietly losing its solution fails even in a stripped checkout. `test/solutionsSource.ts` is the
   single accessor for where recordings live, so the assertions survive them moving into the room

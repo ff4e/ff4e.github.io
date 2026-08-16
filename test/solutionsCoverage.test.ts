@@ -37,7 +37,7 @@ describe('solution coverage', () => {
   it('the recorded corpus is exactly the pinned inventory', () => {
     expect(slugs.length, 'recorded solutions').toBe(65);
     expect(mappedSlugs.length, 'solutions pinned to a room').toBe(64);
-    expect([...KNOWN_DIVERGENT].sort(), 'known port divergences').toEqual(['corridor', 'windoze']);
+    expect([...KNOWN_DIVERGENT].sort(), 'known port divergences').toEqual(['corridor']);
   });
 
   it('every mapped slug has a recording, and every unmapped recording is a deliberate one', () => {
@@ -65,11 +65,11 @@ describe('solution coverage', () => {
 
   /**
    * The promise this project actually makes. It is NOT "all 72 rooms are solvable" — it is
-   * "every room with a clean recorded solution is still solvable", which is 62 of 72. The
+   * "every room with a clean recorded solution is still solvable", which is 63 of 72. The
    * shortfall is printed on every run so the gap is visible now rather than discovered later;
    * closing it belongs to the solutions-harness work, not here.
    */
-  it('62 of the 72 rooms have a clean recorded solution — and the shortfall is reported', () => {
+  it('63 of the 72 rooms have a clean recorded solution — and the shortfall is reported', () => {
     const mapped = new Set(Object.values(SOLUTION_ROOMS));
     const uncovered = ROOMS.filter((r) => !mapped.has(r.num)).map((r) => `#${r.num} ${r.jmeno}`);
 
@@ -80,7 +80,7 @@ describe('solution coverage', () => {
         `[solutions] no recorded solution (${uncovered.length}): ${uncovered.join(', ')}`,
     );
 
-    expect(cleanSlugs.length, 'rooms with a clean recorded solution').toBe(62);
+    expect(cleanSlugs.length, 'rooms with a clean recorded solution').toBe(63);
     // Pinned by name, not just by count: the 8 are four rooms awaiting a hand-recorded
     // solution (SPUNT, ZELVA, BARELY, POHON), two gspec=9 push-out rooms the FFNG corpus
     // ships nothing for (LODE, GRAL), and two non-playable screens (ZAVER, SCORE).

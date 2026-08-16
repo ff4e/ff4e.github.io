@@ -276,15 +276,34 @@ export class StepEngine {
         }
       }
     }
-    if (this.phase === 'move' || this.phase === 'fall') {
-      this.animFrame++;
-      if (this.animFrame >= (this.phase === 'fall' ? FALL_FRAMES : this.cellFrames)) this.completeStep();
-    } else if (this.phase === 'turn') {
-      this.animFrame++;
-      if (this.animFrame >= TURN_FRAMES) {
-        room.facingRight[this.activeAnimFish] = !room.facingRight[this.activeAnimFish];
-        this.phase = 'idle';
-      }
+    // gspec=5 (WIN's bonus level, URoom.pas:24825-24880): the elderly fish are drawn as
+    // static sprites, so a move/turn ends on its FIRST gfaze step instead of running the
+    // fazi_* animation — and the `repeat … until` at URoom.pas:24927-24928 keeps spinning
+    // the state machine while gstav is stav_ma_padat or any of the move/turn/fall states,
+    // so the whole move-plus-fall chain resolves inside ONE tick and the room is back at
+    // stav_klid before the next command is read. FFNG mirrors this with
+    // `game_setFastFalling(true)` (windoze/code.lua:40). stav_ven is NOT in that set, so
+    // an exit slide still animates over several ticks.
+    const fastBonus = room.gspec === 5;
+    if (this.phase === 'move' || this.phase === 'fall' || this.phase === 'turn') {
+      let spin = 0;
+      do {
+        this.animFrame++;
+        if (this.phase === 'turn') {
+          if (this.animFrame >= (fastBonus ? 1 : TURN_FRAMES)) {
+            room.facingRight[this.activeAnimFish] = !room.facingRight[this.activeAnimFish];
+            this.phase = 'idle';
+          }
+        } else if (
+          this.animFrame >= (this.phase === 'fall' ? FALL_FRAMES : fastBonus ? 1 : this.cellFrames)
+        ) {
+          this.completeStep();
+        }
+      } while (
+        fastBonus &&
+        ++spin < 10_000 &&
+        (this.phase === 'move' || this.phase === 'fall' || this.phase === 'turn')
+      );
     } else if (this.phase === 'exit') {
       this.animFrame++;
       if (this.animFrame >= this.exitFrames && this.exiting) {

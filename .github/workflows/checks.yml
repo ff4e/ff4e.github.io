@@ -13,9 +13,9 @@
 # adding a macOS job later is a real option rather than an impossibility.
 #
 # The unit suite, by contrast, is nearly free — and it now includes the solvability net:
-# all 62 recorded reference solutions are replayed here on every push. That used to skip,
+# all 63 recorded reference solutions are replayed here on every push. That used to skip,
 # because the replays were keyed on a PRIVATE extraction of the game at ~/.cache/ffng-orig
-# which no runner has, so 62 assertions vanished silently and this job still went green.
+# which no runner has, so every one of those assertions vanished silently and this job still went green.
 # There was never a reason for it: the room data is GPL-released (CONTRIBUTING.md) and all
 # 72 Graphic/*.ffr are committed under public/data/, which is also why the note above says
 # the probes could in principle run here. test/gameData.ts now resolves to that data, and
