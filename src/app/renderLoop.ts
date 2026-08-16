@@ -27,6 +27,7 @@ import { enhancedArtActive, graphics, renderOnDirty, renderer } from './renderSe
 import { tickMapLaunch } from './roomLaunch.js';
 import { ui } from './screenState.js';
 import { LOGIC_MS, MAX_STEPS_PER_FRAME, roomGeometry } from './stageGeometry.js';
+import { solveSpeed } from './solveMode.js';
 import { subFontReady } from './stageState.js';
 import { INFO_FAZE_MS, INFO_SETTLE_FAZE } from '../render/mapInfo.js';
 
@@ -60,7 +61,15 @@ export function loop(now: number): void {
   // Drop a backlog (slow/backgrounded frame) instead of fast-forwarding: like
   // Jedeme, we run at most one step per frame and never batch-catch-up, so under
   // load the game just slows down.
-  if (acc > LOGIC_MS * (MAX_STEPS_PER_FRAME + 1)) setAcc(LOGIC_MS);
+  // The dev-only solution replay may ask for a faster wall-clock, purely so a 6 045-move
+  // recording is not minutes of watching. It SHORTENS THE TICK rather than skipping ticks
+  // or feeding extra moves: every 80 ms step still happens, in order, doing exactly what it
+  // does at real speed, so the run being tested is the same run — only compressed. It is 1
+  // (i.e. LOGIC_MS, untouched) in every player session; `solveSpeed()` is inert unless a
+  // solution replay is actually running. MAX_STEPS_PER_FRAME still caps a frame, so a very
+  // large multiplier saturates rather than stalling the frame.
+  const logicMs = LOGIC_MS / solveSpeed();
+  if (acc > logicMs * (MAX_STEPS_PER_FRAME + 1)) setAcc(logicMs);
   let steps = 0;
   // While a hold is active, pause the simulation too, so the room's
   // scripts/gravity/subtitle timers/audio don't advance under a frame the player was
@@ -92,15 +101,15 @@ export function loop(now: number): void {
   // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
   tickTetris(dt);
   const frozen = tetrisModal();
-  while (!simPaused && !frozen && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
-    setAcc(acc - LOGIC_MS);
+  while (!simPaused && !frozen && acc >= logicMs && steps < MAX_STEPS_PER_FRAME) {
+    setAcc(acc - logicMs);
     steps++;
     if (host.step()) {
       setAcc(0); // room rebuilt: discard partial-tick interpolation
       break;
     }
   }
-  setAlpha(Math.min(acc / LOGIC_MS, 1)); // clamp so a slow frame can't overshoot a cell
+  setAlpha(Math.min(acc / logicMs, 1)); // clamp so a slow frame can't overshoot a cell
   // The WebGL room overlay (#screen-gl) is only ever shown by the room draw()
   // path or the (enhanced) cutscene. Hide it for every other screen
   // (map/menu/intro/credits/help), which repaint the 2D #screen underneath —

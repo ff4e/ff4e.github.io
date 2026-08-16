@@ -16,6 +16,7 @@ import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, ff
 import { glCompositor, glFailed, markGlFailed } from './glPlumbing.js';
 import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
 import { clearHeldKey, restore, tryStep } from './movement.js';
+import { cancelSolve } from './solveMode.js';
 import { subLang, subsOn } from './playerSettings.js';
 import { enhancedArtActive, graphics, renderer } from './renderSettings.js';
 import { roomVoicesReady } from './roomLoad.js';
@@ -145,6 +146,7 @@ export function endShowmode(): void {
   setShowmodeSave(null);
   setLoadmode(null);
   setReplaymode(null); // a room change / exit also ends a best-solution replay
+  cancelSolve(); // …and a dev solution replay: restart/load/room change all land here
   if (engine) engine.swim = null;
   if (activeScript) activeScript.s.showmode = false;
 }

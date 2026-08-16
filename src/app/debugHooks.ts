@@ -95,6 +95,7 @@ import {
   cutsceneSubs,
   subs,
 } from './gameState.js';
+import { cancelSolve, solveStatus } from './solveMode.js';
 import { renderer, setRendererValue } from './renderSettings.js';
 import { ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
@@ -133,6 +134,7 @@ import {
   cheatFishSprites,
   cheatSolveRoom,
   closeTetris,
+  devSolveRoom,
   devWinRoom,
   interlacedFaze,
   mapCheats,
@@ -526,6 +528,18 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     clickMap: (x: number, y: number) => host.clickMapAt(x, y),
     replayActive: () => host.inReplay(),
     replayIndex: () => replaymode?.idx ?? -1,
+    /**
+     * Dev-only solution replay (`solvemode`). The room plays itself from its own recorded
+     * solution through the real game loop, speaking normally and recording normally, and
+     * stops loudly on trouble. `speed` shortens the logic tick so a long recording is not
+     * minutes of wall-clock; every tick still happens.
+     *
+     * Returns null when armed, or `{ error, detail }` when the room cannot be played —
+     * `missing` is ZAVER #71 and SCORE #72, which are not puzzles.
+     */
+    solveRoom: (speed = 1) => devSolveRoom(speed),
+    solveStatus: () => solveStatus(),
+    solveCancel: () => cancelSolve(),
     bestRecord: (n: number) => host.bestRecord(n) ?? null,
     bestRecords: () => Object.fromEntries(host.bestRecords),
     markBest: (n: number, rec: string) => host.forceBest(n, rec, lengthOfRecord(rec)),
