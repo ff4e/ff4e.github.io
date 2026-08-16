@@ -114,7 +114,7 @@ import {
   subFontReady,
   subFontWeight,
 } from './stageState.js';
-import { initDevBar } from './devBar.js';
+import { initDevBar, syncSolveBtn } from './devBar.js';
 import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
@@ -239,7 +239,6 @@ import {
   applyRoomCheat,
   applySpriteCheats,
   closeTetris,
-  devWinRoom,
   initCheats,
   mapCheats,
   oldWater,
@@ -611,6 +610,9 @@ function selectFish(which: 'little' | 'big'): void {
 const ffrUrl = (num: number): string => `/data/Graphic/${String(num).padStart(3, '0')}.ffr`;
 
 function setInfo(): void {
+  // The room changed (or something about it did), so re-ask whether it has a solution to
+  // play: the button greys out for the two rooms that are not puzzles.
+  syncSolveBtn();
   const d = ffr ? ROOMS[Number(select.value) - 1] : undefined;
   const base = d && ffr ? `${d.jmeno} — ${d.en} — ${ffr.width}x${ffr.height}, ${ffr.itemCount} items` : '';
   const roomNum = Number(select.value);
@@ -1467,13 +1469,6 @@ window.addEventListener('keydown', (e) => {
     if (e.code === 'KeyF') {
       // Cycle the vector-subtitle font (Shift+F for previous) and show a sample line.
       previewSubFont(!e.shiftKey);
-      return;
-    }
-    if (e.code === 'KeyW' && e.shiftKey) {
-      // Genuinely win the current room (also the dev-bar "Win room" button). Uses the
-      // real win path, so an end-of-leg room reveals its story page. Spot-check aid.
-      // Shift-gated so it never collides with a typed cheat string (e.g. xwemaketherules).
-      devWinRoom();
       return;
     }
   }

@@ -27,7 +27,8 @@ import { enhancedArtActive, graphics, renderOnDirty, renderer } from './renderSe
 import { tickMapLaunch } from './roomLaunch.js';
 import { ui } from './screenState.js';
 import { LOGIC_MS, MAX_STEPS_PER_FRAME, roomGeometry } from './stageGeometry.js';
-import { solveSpeed } from './solveMode.js';
+import { solvemode, solveSpeed } from './solveMode.js';
+import { syncSolveBtn } from './devBar.js';
 import { subFontReady } from './stageState.js';
 import { INFO_FAZE_MS, INFO_SETTLE_FAZE } from '../render/mapInfo.js';
 
@@ -110,6 +111,10 @@ export function loop(now: number): void {
     }
   }
   setAlpha(Math.min(acc / logicMs, 1)); // clamp so a slow frame can't overshoot a cell
+  // Show the solution replay's progress and its abort reason on its own button. Only while
+  // a run exists — this is inert for every player session, and `syncSolveBtn` writes to the
+  // DOM only when a string actually changed, so a 6 045-move run is not 6 045 relayouts.
+  if (solvemode) syncSolveBtn();
   // The WebGL room overlay (#screen-gl) is only ever shown by the room draw()
   // path or the (enhanced) cutscene. Hide it for every other screen
   // (map/menu/intro/credits/help), which repaint the 2D #screen underneath —

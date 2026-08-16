@@ -53,17 +53,19 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.screen())) === 'map', 'a shallow room returns straight to the map, no story page');
   expect((await p.evaluate(() => window.__ff.legImage())) === null, 'no story page for a non-leg-final room');
 
-  // --- Dev "Win room" button (dev pane): genuinely wins the current room via the real
-  // win path, so a leg-final room reveals its story page — a spot-check shortcut. ---
+  // --- Dev win (`__ff.winRoom()`): genuinely wins the current room via the real win path,
+  // so a leg-final room reveals its story page — a spot-check shortcut. It lost its dev-bar
+  // button when that button became the solution replay, but kept the hook, precisely so
+  // this assertion and `test-zaverpage.mjs` still have a way to reach a story page. ---
   await p.evaluate(() => window.__ff.showMap());
   await selectRoom(p, 29); // last room of leg 2
   await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won && !window.__ff.state().venku.little && !window.__ff.state().venku.big);
-  await p.click('#winroom');
+  await p.evaluate(() => window.__ff.winRoom());
   await p.waitForFunction(() => window.__ff.screen() === 'legimage', null, { timeout: budget(15000) });
-  expect((await p.evaluate(() => window.__ff.legImage())) === 2, 'the dev Win-room button shows leg 2\'s story page');
+  expect((await p.evaluate(() => window.__ff.legImage())) === 2, 'the dev win shows leg 2\'s story page');
   await p.click('#screen');
   await p.waitForFunction(() => window.__ff.screen() === 'map');
-  expect((await p.evaluate(() => window.__ff.solvedRooms().includes(29))), 'the dev Win-room button records the room as solved (not cheated)');
+  expect((await p.evaluate(() => window.__ff.solvedRooms().includes(29))), 'the dev win records the room as solved (not cheated)');
 
   // --- Re-entry (daClickAndRun, UMain.pas:958/1030): Run/Replay on an already-solved
   // leg-final room shows that leg's story page FIRST, then loads/replays the room once
