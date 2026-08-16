@@ -237,10 +237,13 @@ export function advanceLoadmode(): void {
     engine.phase = 'idle';
     setLoadmode(null);
     // The original's loadmode branch ends `LoadDone; kdo:=0; ...; hrac_nespi`
-    // (URoom.pas:24111). A load can fast-forward thousands of recorded moves with the
-    // player watching and touching nothing, so without this the room resumes with idle
-    // timers that have been running the whole time — and immediately fires whatever they
-    // gate. Same reason the keyboard resets them on every key (:26787).
+    // (URoom.pas:24111). What that reset is FOR here is the ambient-chatter clock
+    // (casposlzmeny), not the fish idle timers: `logicTick` returns at the loadmode branch
+    // before it ever reaches `runScript`, so `delay[]` is frozen for the whole load (the
+    // same freeze the cutscene comment in `logicTick.ts` describes) while `count` — and so
+    // the chatter clock — keeps running. A load can fast-forward thousands of recorded
+    // moves with the player watching and touching nothing, and without this the room
+    // resumes already overdue for a StdKecej line.
     host.hracNespi();
     host.setInfo();
   }

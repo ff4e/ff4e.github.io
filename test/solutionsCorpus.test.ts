@@ -32,13 +32,15 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseFfr } from '../src/data/ffr.js';
+import type { FfrRoom } from '../src/data/ffr.js';
 import { ROOMS } from '../src/data/roomTable.js';
 import { SOLUTION_ROOMS } from './solutionsMapping.js';
 import { recordedMoves } from './solutionsSource.js';
 import { gameDataDir } from './gameData.js';
 
-const roomWidth = (num: number): number =>
-  parseFfr(new Uint8Array(readFileSync(join(gameDataDir(), 'Graphic', `${String(num).padStart(3, '0')}.ffr`)))).width;
+const roomFfr = (num: number) =>
+  parseFfr(new Uint8Array(readFileSync(join(gameDataDir(), 'Graphic', `${String(num).padStart(3, '0')}.ffr`))));
+const roomWidth = (num: number): number => roomFfr(num).width;
 
 /**
  * One control channel = one driveable slot, with its own left/right characters.
@@ -53,21 +55,31 @@ const roomWidth = (num: number): number =>
  * cancellation, and with the opposite sign it would invent a failure instead.
  */
 const CHANNELS = [
-  { name: 'little fish', left: 'l', right: 'r' },
-  { name: 'big fish', left: 'L', right: 'R' },
-  { name: 'elderly little fish (WIN bonus)', left: 'y', right: 'z' },
-  { name: 'elderly big fish (WIN bonus)', left: 'Y', right: 'Z' },
+  { name: 'little fish', left: 'l', right: 'r', startsRight: (f: FfrRoom) => f.startFacingRight.small },
+  { name: 'big fish', left: 'L', right: 'R', startsRight: (f: FfrRoom) => f.startFacingRight.big },
+  // The elderly pair only exists inside WIN #68's bonus, and `ZapniBonuslevel` forces BOTH
+  // to face right on the way in (`src/rooms/win.ts:59-60`, URoom.pas:23700). So their start
+  // facing is a constant, not a property of the `.ffr`.
+  { name: 'elderly little fish (WIN bonus)', left: 'y', right: 'z', startsRight: () => true },
+  { name: 'elderly big fish (WIN bonus)', left: 'Y', right: 'Z', startsRight: () => true },
 ] as const;
 
 /**
  * Columns one channel needs. A press against the facing turns in place and costs no cell,
- * which matches both the port (`stepEngine.press`) and FFNG's `Unit::goRight`/`goLeft`;
- * assuming otherwise would only make the span smaller, so the bound stays honest either way.
+ * which matches both the port (`stepEngine.press`) and FFNG's `Unit::goRight`/`goLeft`.
+ *
+ * `startsRight` is NOT a detail: the first press either turns or moves depending on it, so
+ * guessing it shifts the span by one in whichever direction the guess was wrong, and a bound
+ * that can be one too LARGE is not a lower bound at all. It comes from the room's own `.ffr`
+ * (`Room` reads the same field, `src/core/room.ts:333-335`). Assuming `true` for everything
+ * reported `cave`'s little fish as 29 columns against a real 28, and `elevator1`'s as 26
+ * against 27 — the first of those is the shape that invents failures.
+ *
  * Returns 0 for a channel the recording never uses.
  */
-export function horizontalSpan(moves: string, left: string, right: string): number {
+export function horizontalSpan(moves: string, left: string, right: string, startsRight: boolean): number {
   let x = 0;
-  let facingRight = true;
+  let facingRight = startsRight;
   let min = 0;
   let max = 0;
   let used = false;
@@ -96,7 +108,8 @@ describe('recorded solutions fit the room they are pinned to', () => {
 
     it(`${slug} → #${num} ${jmeno} needs no more columns than the room has`, () => {
       const moves = recordedMoves(slug);
-      const width = roomWidth(num);
+      const ffr = roomFfr(num);
+      const width = ffr.width;
       const caveat =
         num === NATVRDO_ROOM
           ? ' — NOTE: #37 is the one room whose turtle moves a fish sideways on its own ' +
@@ -106,7 +119,7 @@ describe('recorded solutions fit the room they are pinned to', () => {
             'not a port bug';
       for (const c of CHANNELS) {
         expect(
-          horizontalSpan(moves, c.left, c.right),
+          horizontalSpan(moves, c.left, c.right, c.startsRight(ffr)),
           `${slug}: the ${c.name} sweeps more columns than #${num} ${jmeno} has (${width})${caveat}`,
         ).toBeLessThanOrEqual(width);
       }
@@ -124,12 +137,16 @@ describe('the check catches the recording CHODBA was misfiled on', () => {
    */
   const CORRUPT_HEAD = 'l' + 'r'.repeat(24) + 'd'.repeat(18);
 
+  const chodbaFacesRight = () => roomFfr(56).startFacingRight.small;
+
   it('flags it', () => {
-    expect(horizontalSpan(CORRUPT_HEAD.repeat(5), 'l', 'r')).toBeGreaterThan(roomWidth(56));
+    expect(horizontalSpan(CORRUPT_HEAD.repeat(5), 'l', 'r', chodbaFacesRight())).toBeGreaterThan(roomWidth(56));
   });
 
   it('and passes the recording that replaced it', () => {
-    expect(horizontalSpan(recordedMoves('corridor'), 'l', 'r')).toBeLessThanOrEqual(roomWidth(56));
+    expect(horizontalSpan(recordedMoves('corridor'), 'l', 'r', chodbaFacesRight())).toBeLessThanOrEqual(
+      roomWidth(56),
+    );
   });
 
   /**
@@ -139,7 +156,8 @@ describe('the check catches the recording CHODBA was misfiled on', () => {
    */
   it("counts WIN #68's two control sets separately, since summing them under-reports", () => {
     const windoze = recordedMoves('windoze');
-    expect(horizontalSpan(windoze, 'L', 'R')).toBe(39);
-    expect(horizontalSpan(windoze, 'Y', 'Z')).toBe(12);
+    const bigStartsRight = roomFfr(68).startFacingRight.big;
+    expect(horizontalSpan(windoze, 'L', 'R', bigStartsRight)).toBe(39);
+    expect(horizontalSpan(windoze, 'Y', 'Z', true)).toBe(12);
   });
 });

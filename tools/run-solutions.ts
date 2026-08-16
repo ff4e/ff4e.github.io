@@ -42,10 +42,10 @@ function main(): void {
     if (ok) pass++;
     else
       fails.push(
-        // `applied` and not just `steps`: the replay stops at a death, so blocked/steps
+        // `consumed` and not just `steps`: the replay stops at a death, so blocked/steps
         // read as a rate lies whenever a fish died. See ReplayResult.
         `${slug.padEnd(12)} -> #${num} ${jmeno}: won=${r.won} dead=${r.dead} ` +
-          `blocked=${r.blocked} of ${r.applied} applied (${r.steps} recorded)`,
+          `blocked=${r.blocked} of ${r.consumed} consumed (${r.steps} recorded)`,
       );
   }
   if (fails.length) console.log('FAILURES:\n' + fails.join('\n'));

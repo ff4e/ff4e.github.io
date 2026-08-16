@@ -254,23 +254,32 @@ GPL-released the Fish Fillets data in 2002 (see [CONTRIBUTING.md](./CONTRIBUTING
 byte-identical to a private extraction. `test/gameData.ts` resolves the directory — `$FFNG_DATA`
 still overrides it — and missing data is now a **failure**, not a skip.
 
-Two tests hold the net together:
+Three tests hold the net together:
 
-- `test/solutions.test.ts` — the replays, plus a guard that asserts all 63 rooms it is about to
+- `test/solutions.test.ts` — the replays, plus a guard that asserts all 70 rooms it is about to
   replay are present and readable, so the file cannot contribute zero coverage while the run
-  reports success.
-- `test/solutionsCoverage.test.ts` — the inventory: 65 recordings, 64 mapped, 1 known
-  divergence, 63 clean, every mapping pointing at a distinct real room. Dropping a mapping
+  reports success. It also pins how much of each recording is consumed, because the replay stops
+  at the win and would otherwise never look at what follows it.
+- `test/solutionsCoverage.test.ts` — the inventory: 71 recordings, 70 mapped, 0 known
+  divergences, 70 clean, every mapping pointing at a distinct real room. Dropping a mapping
   fails here even with no room data at all.
+- `test/solutionsCorpus.test.ts` — whether a recording is *possible* before asking whether the
+  port replays it. A fish's X changes only through its own recorded left/right move, so a
+  recording's horizontal span lower-bounds the width of the room it came from. CHODBA #56 spent
+  months filed as a port bug while its recording needed 1398 columns of a 34-column room.
 
-The promise is "every room with a clean recorded solution is still solvable" — **63 of 72**, not
-all 72. Nine rooms are outside it: SPUNT #29, ZELVA #37, BARELY #44 and POHON #58 await a
-hand-recorded solution; LODE #19 and GRAL #64 are `gspec=9` push-out rooms the FFNG corpus ships
-nothing for; ZAVER #71 and SCORE #72 are non-playable screens; and CHODBA #56 is a known port
-divergence. The shortfall is printed on every run and pinned by name in the coverage
-test, rather than rounded away. See [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+The promise is "every room with a clean recorded solution is still solvable" — **70 of 72**, and
+the two left are ZAVER #71 and SCORE #72, the ending and results screens, which are not puzzles.
+So every playable room in the game is covered, and none is skipped: `KNOWN_DIVERGENT` is empty.
+The coverage line is printed on every run and the uncovered rooms are pinned by name in the
+coverage test, rather than rounded away. See [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
-WIN #68 was the tenth until its bonus level was finished: `gspec=5` turned out to change
+It reached that only with a second corpus. The recordings came from one collection, which was
+missing seven levels — read for years as "no solution exists", and for two rooms written up as
+a reason one never could. Brian Raiter's archive has every level of both games; six of its
+seven relevant recordings replayed clean unmodified.
+
+WIN #68 was one of the last to join, and not for want of a recording: `gspec=5` turned out to change
 gameplay, not just the render (`URoom.pas:24825-24928`), and the corpus recording had to be
 reordered because FFNG hands control to the elderly fish two moves before the Delphi trigger
 fires — see `test/fixtures/solutions/README.md`.
@@ -379,7 +388,7 @@ assertions.
   single accessor for where recordings live, so the assertions survive them moving into the room
   modules.
 
-- **`npm test`** (`test/*.test.ts`, 66 assertions): the move-record helpers, the `goanim` Anim-string
+- **`npm test`** (`test/*.test.ts`, ~1 800 assertions): the move-record helpers, the `goanim` Anim-string
   interpreter, the **physics/mechanics** (movement, pushing, the light/heavy push rules, gravity/falling,
   stacking, **crushing/death** — heavy-on-fish, a box falling onto a fish, a box shoved sideways onto the
   fish, a fish stepping down under its carried box; and the counter-cases that must *not* crush — plus

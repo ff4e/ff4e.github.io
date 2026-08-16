@@ -31,21 +31,26 @@ export interface ReplayResult {
   blocked: number;
   steps: number;
   /**
-   * How many recorded moves were actually APPLIED before the replay stopped. The loop
-   * aborts on a win and on a death, so this is < `steps` whenever either happened.
+   * How many recorded commands the replay CONSUMED before it stopped. The loop aborts on a
+   * win and on a death, so this is < `steps` whenever either happened.
+   *
+   * "Consumed", not "applied", and the distinction is the point: a command the engine
+   * refuses still consumes its step (the recording moves on), while one dropped as `busy`
+   * does not (it is retried next tick). So this counts commands taken off the recording,
+   * which is what you want for "how far did we get" — it is not a count of successful moves.
    *
    * It is reported because reading `blocked / steps` as a rate is a live trap. A
    * case-swapped CHODBA replay scores "6 blocked of 3669", which reads like a room that
-   * almost works; it applied 15 moves before a fish died, so the real rate is 6 of 15.
+   * almost works; it got 15 commands in before a fish died, so the real rate is 6 of 15.
    * That reading is what put "the fish identities are swapped in CHODBA and POHON" on the
    * table for a while — see the corridor note in `solutionsMapping.ts`.
    *
-   * `blocked` is NOT a count over `applied`, though it is usually the same thing: the
-   * engine also presses on its own behalf, for ZELVA's possession retry and the auto-swim
+   * `blocked` is not a count over this either, though it usually matches: the engine also
+   * presses on its own behalf, for ZELVA's possession retry and the auto-swim
    * (`stepEngine.ts:372,377`), and a refusal there lands in the same counter. If `blocked`
-   * ever exceeds `applied`, that is where the difference went — not a recorded move.
+   * ever exceeds `consumed`, that is where the difference went — not a recorded move.
    */
-  applied: number;
+  consumed: number;
   wonAt: number; // step index the win latched at (-1 if never)
   blockedAt: number[]; // step indices the engine rejected (for diagnosis)
 }
@@ -178,5 +183,5 @@ export function replaySolution(room: Room, jmeno: string, moves: string): Replay
   }
   if (engine.won && wonAt < 0) wonAt = mi;
 
-  return { won: engine.won, dead: room.anyFishDead, blocked: engine.blocked, steps: steps.length, applied: mi, wonAt, blockedAt };
+  return { won: engine.won, dead: room.anyFishDead, blocked: engine.blocked, steps: steps.length, consumed: mi, wonAt, blockedAt };
 }
