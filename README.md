@@ -610,6 +610,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `layout.ts` | 2.2 k | Display layout and scaling. |
 | `stageGeometry.ts` | 2.2 k | How big the game is drawn, and the constants the simulation is timed by. |
 | `cheats.ts` | 6.2 k | The typed codes, the effects they switch on, and the Tetris minigame. |
+| `showmodeHolds.ts` | 2.7 k | Pauses lengthened by hand in the KUFRIK demonstration — its only deviation from the 1998 recording. |
 | **Development** | | |
 | `debugHooks.ts` | 18.6 k | `window.__ff`, the debug/test interface the UI probes drive the game through. |
 | `devBar.ts` | 1.4 k | The developer bar, and the relayout watchers. |

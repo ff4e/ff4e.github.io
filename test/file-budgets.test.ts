@@ -64,7 +64,12 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // fourth mode has to be torn down too. One line each plus the import; review found live
   // hangs at two of the three, so they are not optional. The explanation lives in
   // `solveMode.ts`, not here, which is why it is a handful of lines and not thirty.
-  ['src/app/cutscene.ts', 545],
+  //
+  // 545 -> 560 for SHOWMODE_HOLDS (the KUFRIK demonstration's hand-lengthened pauses).
+  // The table and its whole rationale live in `showmodeHolds.ts`; what is left here is the
+  // hold counter itself, which has to sit in `advanceShowmode` because that is the one
+  // place the recorded stream is consumed. There is no cheaper home for it.
+  ['src/app/cutscene.ts', 560],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
   // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine

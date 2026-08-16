@@ -152,6 +152,9 @@ export let showmodeHelptext = 0;
 // Guards a recorded restart RUN (the ~12 consecutive akce_restart entries the demo's
 // death-restart produces) so the room is rebuilt only once per run.
 export let showmodeRestarted = false;
+// Idle ticks still to burn before the next recorded action is consumed — the demo's
+// only deliberate deviation from the 1998 recording (SHOWMODE_HOLDS in cutscene.ts).
+export let showmodeHold = 0;
 // The demo's own save slot (akce_save/akce_load, URoom.pas:24480). The demonstration
 // saves a checkpoint (help7: "we can load a saved position with F3") and reloads it
 // after each death — kept in memory so it never touches the player's real save.
@@ -200,6 +203,9 @@ export function setShowmodeHelptext(v: number): void {
 }
 export function setShowmodeRestarted(v: boolean): void {
   showmodeRestarted = v;
+}
+export function setShowmodeHold(v: number): void {
+  showmodeHold = v;
 }
 export function setShowmodeSave(v: { rec: string; snapshot: ScriptSnapshot | null } | null): void {
   showmodeSave = v;
