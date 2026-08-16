@@ -64,6 +64,13 @@ data is committed under `public/data`).
 two rooms without a recording are ZAVER #71 and SCORE #72, the ending and results screens,
 which are not puzzles and are excluded by design.
 
+A recording is **room data**, not a corpus the harness goes and fetches: it lives on the
+room's `RoomScript` as `solution`, out of the generated `src/rooms/solutions.ts`.
+`test/fixtures/solutions/*.moves` is the staging area. To add one: drop `<slug>.moves`
+there, pin it in `test/solutionsMapping.ts`, run `npm run gen-solutions`, and move the
+pinned counts in `test/solutionsCoverage.test.ts` in the same change.
+`test/solutionsData.test.ts` fails if the generated data and the staging area disagree.
+
 Getting here closed a long-standing gap of nine rooms, and none of the nine turned out to be
 what it was filed as — see Resolved. Two lessons worth keeping:
 

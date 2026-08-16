@@ -369,11 +369,20 @@ assertions.
   Do not relax its bounds instead.
 
 - **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test` and so by CI):
-  the **solvability net** — replays committed known-good FFNG solution move-strings
-  (`test/fixtures/solutions/`) per room through the shared step-engine and asserts each ends
-  **won, no death, 0 blocked**, off the repo's own `public/data` (`$FFNG_DATA` overrides). All 70
-  mapped solutions pass — every playable room in the game. The two rooms without a
-  recording are the ending and results screens; see [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+  the **solvability net** — replays each room's known-good FFNG solution move-string through
+  the shared step-engine and asserts each ends **won, no death, 0 blocked**, off the repo's own
+  `public/data` (`$FFNG_DATA` overrides). All 70 mapped solutions pass — every playable room in
+  the game. The two rooms without a recording are the ending and results screens; see
+  [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+
+  A solution is **room data**: it lives on the room's `RoomScript` as `solution`, out of the
+  generated `src/rooms/solutions.ts` (`npm run gen-solutions`), keyed by the same `Jmeno` as
+  the script registry. `test/fixtures/solutions/*.moves` is the staging area the generator
+  reads, and `test/solutionsData.test.ts` pins the two byte-for-byte so they cannot drift.
+  Resolving the ambiguous FFNG-slug → room match at generation time is the point: the running
+  game never looks it up. To add a recording: drop `<slug>.moves` in the staging area, pin it
+  in `test/solutionsMapping.ts`, run `npm run gen-solutions`, and move the pinned counts in
+  `test/solutionsCoverage.test.ts` in the same change.
 
 - **`test/solutionsCorpus.test.ts`**: asks whether a recording is even POSSIBLE before asking
   whether the port replays it. A fish's X moves only on its own recorded left/right move, so a

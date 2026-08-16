@@ -66,6 +66,19 @@ export interface RoomScript {
   readonly name: string;
   init(s: Script): void;
   prog(s: Script): void;
+  /**
+   * A recorded solution for this room: one character per move, lowercase = the little
+   * fish, UPPERCASE = the big one, `u`/`d`/`l`/`r` = up/down/left/right (WIN #68's bonus
+   * level adds a second set, `w`/`x`/`y`/`z`, for the elderly pair). Absent for the two
+   * rooms that are not puzzles (ZAVER #71, SCORE #72).
+   *
+   * The moves are room DATA, like the room's behaviour, so they live beside it rather
+   * than in a corpus the game has to fetch. They are not authored here: the room modules
+   * are hand-maintained and an opaque multi-kB string in one would be read on every
+   * change to it, so the strings sit in the generated `src/rooms/solutions.ts` and
+   * `roomScript()` attaches them. Ask `solutionFor(jmeno)` rather than reading this.
+   */
+  readonly solution?: string;
 }
 
 export class Script {

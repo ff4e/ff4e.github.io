@@ -2,6 +2,11 @@
  * Run every committed solution against its PINNED room through the step-engine and
  * report won/dead/blocked. The pinned mapping resolves the ambiguous/needs-script
  * rows in mapping.tsv. Run from the port dir:  npx tsx tools/run-solutions.ts
+ *
+ * This reads the STAGING area (`test/fixtures/solutions/`, overridable as argv[2]) rather
+ * than the room data, on purpose: its job is to try a recording BEFORE it is promoted into
+ * a room by `npm run gen-solutions`. It is not a second source of truth — once promoted the
+ * two are byte-identical, which `test/solutionsData.test.ts` asserts.
  */
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
