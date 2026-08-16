@@ -152,6 +152,43 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🟠 KUFRIK's first tutorial line ended in half a second of buzz — fixed 2026-08-16
+
+The last 0.47 s of `002/help1` — *"Teď na nic nesahej, jen se dívej…"*, the first thing the
+automatic demonstration says — decoded to a full-scale ~370 Hz square wave. It lands where help2
+begins, which is why it was first reported as a defect in the big fish's next line.
+
+**Not a decoding bug.** `src/audio/ffs.ts` was compared instruction by instruction with ALTAR's
+`Decompres` assembler (`RSound.pas:258-333`) — `CBW; SAL AX,2; ADD DX,AX; ADD CX,DX` is exactly
+`cdif += (int8)d << 2; clast += cdif`, 16-bit and wrapping — and matches byte for byte. On this one
+sample the encoded deltas hand `cdif` a DC offset it never sheds from sample 137191, so `clast`
+ramps into the rail and wraps until the sound ends. **The 1998 release plays the buzz too.**
+Dropping the `<<2` gain destroys 1701 of the 1705 voices, so the gain is right; saturating instead
+of wrapping does not rescue the tail either.
+
+- **The one place `public/data/` is not the 1998 bytes.** Fixed in the package
+  (`tools/fix-help1-buzz.ts`, idempotent, `--check` reports) rather than in the decoder, because
+  the alternative was a runtime rule inspecting every decoded sample in the game to catch one
+  known-bad block. `public/restored/README.md` explains why that directory exists rather than
+  patching data, and this is the deliberate exception to it.
+- **The edit is as small as the format allows:** only the delta bytes *inside help1's own
+  compressed block* are rewritten — 9045 bytes in `5687632..5697976`. Every control byte keeps its
+  value, so the package is the same length (9370022 B), `002.fft` is untouched, and all 48 other
+  sounds in the room decode bit-identically. Verified by decoding the package before and after.
+- **The length is unchanged**, deliberately. `Audio.duration()` reads `delka`, so `dialogy`'s
+  `voiceEndCount` still waits the full 6.69 s: the tail is silent, not absent. `help.cap` is a
+  recorded input stream paced against these voice lengths, so shortening a line would move every
+  line after it — including the `akce_load` the demo narrates with help7.
+- **Seven other samples clip and recover** (4–67 ms bursts inside loud speech, followed by
+  1.1–3.2 s of normal audio): `017/dr-4-stejne`, `030/re-k-spim`, `030/re-k-au`, and four in 052.
+  They sound like a tick at worst and are **left alone**. Of the game's 1705 room voices, help1 is
+  the only one that never recovers.
+- Pinned by `test/help1-tail.test.ts`, which asserts the silence, the unchanged length, that
+  nothing else in the package moved, and the SHA-256 of `002.ffs`.
+- **Bears on the open "beep right after the steel pipe drops" entry above:** the whole-game scan
+  run here confirms `sp-ocel1` and every other room-002 voice decodes clean, so that beep is
+  indeed not a played sound file. Two different beeps.
+
 ### 🟠 The keyboard did not count as activity while a fish was talking — fixed 2026-08-16
 
 Filed as a narrow ordering question (`dispatchHeldMove` busy-gates before `hracNespi`, while
