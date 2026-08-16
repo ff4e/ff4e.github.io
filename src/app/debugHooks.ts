@@ -1540,6 +1540,11 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // BUG-001 busy-input-gate testing: read/stage a fish's `busy` flag so a probe can
     // verify that input is dropped (fish stays put, keeps facing the player) while it talks.
     busy: (which: 'little' | 'big') => (room ? room.busy[which] : 0),
+    // The idle timers (delay[mala/velka]) the busy gate used to freeze. A key going down
+    // resets them however busy the fish is (FormKeyDown, URoom.pas:26787), so a probe can
+    // tell "the player is holding a key" apart from "the player has walked away" — which
+    // is the difference PRVNI's hint, KAJUTA2's chatter and ZELVA's turtle all read.
+    delay: (which: 'little' | 'big') => (room ? room.idle[which] : 0),
     setBusy: (which: 'little' | 'big', val: number) => {
       if (room) room.busy[which] = val;
     },
