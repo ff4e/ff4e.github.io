@@ -3,10 +3,15 @@
 Known-good FFNG solution move-strings, one per level, replayed by the solutions
 harness (`test/solutions.test.ts`) to verify each room is solvable in the port.
 
-- **Source:** the GPL Fish Fillets NG remake's community solution repo
-  [`alfonz19/ff-ng-saves`](https://github.com/alfonz19/ff-ng-saves) → `solved/*.lua`.
-- **Licence:** GPL-2.0-or-later — the same licence as this port, so the corpus is
-  safe to commit here.
+- **Source 1 — `alfonz19/ff-ng-saves`:** the Fish Fillets NG remake's community solution
+  repo [`alfonz19/ff-ng-saves`](https://github.com/alfonz19/ff-ng-saves) → `solved/*.lua`.
+  65 recordings. It is one player's collection, not a complete set: it has nothing for
+  seven of the levels, and its `corridor` recording is corrupt (below).
+- **Source 2 — Brian Raiter's Fish Fillets Solution Archive**
+  (<https://www.muppetlabs.com/~breadbox/fillets/>), which has every level of both the
+  original and FFNG, each recorded by a named player. The seven files taken from it are
+  `gods`, `atlantis`, `turtle`, `barrel`, `corridor`, `propulsion`, `grail` — the six rooms
+  the corpus had nothing for, plus a working replacement for the corrupt `corridor`.
 - `*.moves` — one file per FFNG level, containing just the move string.
   Encoding: lowercase = little (small) fish, UPPERCASE = big; `u/d/l/r` = up/down/
   left/right. `windoze` additionally uses a second control-symbol set for the bonus
@@ -19,6 +24,23 @@ harness (`test/solutions.test.ts`) to verify each room is solvable in the port.
   same two slots and `solutionsHarness.ts` decodes them identically.
 - `mapping.tsv` — auto-derived slug → original room number + Jmeno (see
   `test/solutionsMapping.ts` for the pinned, disambiguated mapping actually used).
+
+## The corrupt recording, and the one that is not a solution
+
+- **`corridor` (replaced).** The `ff-ng-saves` version was 3669 moves and impossible:
+  replayed as pure kinematics its little fish swept **1398 columns of a 34-column room**,
+  in ~50 repeats of an `l r×24 d×18` block that never came back left. It got CHODBA #56
+  filed as a port bug for months. The file here now is Brian Raiter's 523-move recording
+  by Amic Frouvelle, which replays won / no death / 0 blocked. `test/solutionsCorpus.test.ts`
+  checks every recording that is pinned to a room for that class of defect before the
+  replay runs. (`rush` is not checked — with no room to check against, there is no bound.)
+- **`rush` (kept, unmapped).** Solves FFNG's own "Filled Car Park", chapter "Branch of the
+  New Generation" — one of nine levels the 1998 original never had, so this port does not
+  contain it. It was long mistaken for POHON #58; POHON's counterpart is `propulsion`.
+
+**Match a recording to a room on the level TITLE, not the slug.** FFNG groups levels under
+chapter names, and reading the chapter as the level name is exactly how POHON spent a long
+time recorded as "a level FFNG redesigned".
 
 ## The one edited recording: `windoze`
 

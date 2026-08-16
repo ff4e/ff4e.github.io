@@ -30,6 +30,22 @@ export interface ReplayResult {
   dead: boolean;
   blocked: number;
   steps: number;
+  /**
+   * How many recorded moves were actually APPLIED before the replay stopped. The loop
+   * aborts on a win and on a death, so this is < `steps` whenever either happened.
+   *
+   * It is reported because reading `blocked / steps` as a rate is a live trap. A
+   * case-swapped CHODBA replay scores "6 blocked of 3669", which reads like a room that
+   * almost works; it applied 15 moves before a fish died, so the real rate is 6 of 15.
+   * That reading is what put "the fish identities are swapped in CHODBA and POHON" on the
+   * table for a while — see the corridor note in `solutionsMapping.ts`.
+   *
+   * `blocked` is NOT a count over `applied`, though it is usually the same thing: the
+   * engine also presses on its own behalf, for ZELVA's possession retry and the auto-swim
+   * (`stepEngine.ts:372,377`), and a refusal there lands in the same counter. If `blocked`
+   * ever exceeds `applied`, that is where the difference went — not a recorded move.
+   */
+  applied: number;
   wonAt: number; // step index the win latched at (-1 if never)
   blockedAt: number[]; // step indices the engine rejected (for diagnosis)
 }
@@ -132,6 +148,22 @@ export function replaySolution(room: Room, jmeno: string, moves: string): Replay
     if (mi < steps.length) {
       const s = steps[mi]!;
       engine.active = s.which; // the moved fish becomes active (aktivni)
+      // DalsiPrikaz calls hrac_nespi as it reads each command out of the capture file
+      // (URoom.pas:26985) — a replayed command counts as the player being awake, exactly
+      // like a keypress (26787) or a click (26871). It is deliberately BEFORE the busy
+      // gate: the original reaches `busy[mala]>0 -> kdo:=0` only at :27003, so a command
+      // dropped mid-dialogue has already reset the timers. Without this the idle timers
+      // (delay[]) only ever grow here, because nothing else in the shared step-engine
+      // resets them: `hracNespi` lives in `src/app/`, and the browser's own replay path
+      // calls it (`cutscene.ts:199`).
+      //
+      // ZELVA #37 is the room that notices. Its telepathic turtle SEIZES a fish and walks
+      // it across the room once `delay[mala] > 40` and `delay[velka] > 40` (`zelva.ts:85`),
+      // which under a replay used to be "always, from move ~40 on" — so the port drove the
+      // big fish off the recorded route, refused the player's moves in runs while it did,
+      // and killed the little fish 111 moves into a 620-move solution. It looked exactly
+      // like a physics divergence and was not one.
+      room.hracNespi();
       const before = engine.blocked;
       const r = engine.press(s.which, s.dir);
       // DalsiPrikaz drops a command while the fish is busy (mid-dialogue). The recording
@@ -146,5 +178,5 @@ export function replaySolution(room: Room, jmeno: string, moves: string): Replay
   }
   if (engine.won && wonAt < 0) wonAt = mi;
 
-  return { won: engine.won, dead: room.anyFishDead, blocked: engine.blocked, steps: steps.length, wonAt, blockedAt };
+  return { won: engine.won, dead: room.anyFishDead, blocked: engine.blocked, steps: steps.length, applied: mi, wonAt, blockedAt };
 }

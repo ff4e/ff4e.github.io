@@ -7,19 +7,22 @@
  * explicitly below, choosing the room the solution is actually FOR and keeping
  * coverage distinct.
  *
- * Not covered by any committed solution (out of scope for this net): SPUNT #29,
- * ZELVA #37, BARELY #44 (playable, no corpus solution — hand-record later); POHON #58
- * (FFNG's `rush` is a redesigned 37×37 level with colored pistons, NOT the original
- * 41×38 beast-push room — verified via fillets-ng-data 1.0.1 models.lua — so its moves
- * do not fit the port and it is unmapped); SCORE #72 (results screen, non-playable);
- * LODE #19, GRAL #64 (gspec=9 push-out rooms with no corpus solution — see below).
+ * Every playable room is now mapped. The only rooms without a solution are ZAVER #71 and
+ * SCORE #72, which are the ending and results screens and are not puzzles.
  *
- * LODE/GRAL were long labelled "loose geometric catch-all rooms many strings reach".
+ * That was not true until the corpus gained a second source. `alfonz19/ff-ng-saves` is one
+ * player's collection and simply never had seven of the levels; the gap was long recorded
+ * here as "no known solution exists", and for CHODBA #56 the corpus even shipped a
+ * corrupted recording that got the room filed as a port bug for months (see the note at
+ * the bottom of this file). Brian Raiter's archive has all of them. See
+ * `test/fixtures/solutions/README.md` for both sources.
+ *
+ * LODE/GRAL were separately labelled "loose geometric catch-all rooms many strings reach".
  * That was an artifact of `tools/map-ffng.ts` replaying physics only: it ignored
  * `gspec` and let fish exit rooms the original forbids them to exit
  * (`if (gspec<>9)and(kontroluj_okraje>0)`, URoom.pas:24295), so unrelated move strings
- * appeared to win them. The tool now honours gspec and they no longer swallow anything;
- * they are simply unmapped because the FFNG corpus ships no solution for either.
+ * appeared to win them. The tool now honours gspec and they no longer swallow anything.
+ * Both are mapped now (`gods`, `grail`) and both replay clean.
  */
 export const SOLUTION_ROOMS: Record<string, number> = {
   // --- clean auto-derived (unique physics-win) ---
@@ -89,32 +92,70 @@ export const SOLUTION_ROOMS: Record<string, number> = {
   // --- script-gated rows (no physics-only win; need prog() during replay) ---
   party2: 18, // PARTY2  — window-guest frees the exit window
   map: 51, // MAPA    — gspec=9 push the treasure map off the edge
-  corridor: 56, // CHODBA  — dark corridor + robo-dog (KNOWN DIVERGENCE, see harness test)
   floppy: 70, // DISKETA — gspec=9 push the giant floppy off the edge
-  // NOTE: `rush` is intentionally NOT mapped. FFNG redesigned that level (37×37 with
-  // colored pistons); it is not the original 41×38 POHON #58, so its moves cannot solve
-  // the port's POHON. See the header comment; rush.moves stays in the corpus for the record.
+
+  // --- from Brian Raiter's archive; the seven ff-ng-saves never had ---
+  gods: 19, // LODE    — gspec=9 push-out
+  atlantis: 29, // SPUNT
+  turtle: 37, // ZELVA   — telepathic turtle; needs the hrac_nespi reset, see solutionsHarness
+  barrel: 44, // BARELY
+  corridor: 56, // CHODBA
+  propulsion: 58, // POHON
+  grail: 64, // GRAL    — gspec=9 push-out
+  // NOTE: `rush` is intentionally NOT mapped — see the note below.
 };
 
 /**
- * Rooms whose port physics/script genuinely diverge from the FFNG reference solution
- * for the SAME level (verified: FFNG's level layout matches the port's original .ffr).
- * The harness FLAGS these (its core value) rather than silently skipping them; the main
- * test asserts every OTHER room stays clean while these remain a documented, tracked
- * gap. Each is a real port bug to fix (not a cadence artifact, not a layout mismatch):
- *   - corridor → CHODBA #56 (34×37, layout matches fillets-ng-data): the early moves
- *     replay fine; the divergence appears DEEP in the 3669-move solution once the dark/
- *     light switch + the two autonomous robo-dogs (item_light robright/robleft) come
- *     into play — their patrol desyncs from the recorded cadence. Resolving it needs a
- *     behaviour comparison against the DELPHI original (not FFNG), since the port targets
- *     1998 fidelity and FFNG's dog/tick timing may legitimately differ.
+ * `rush` — recorded, and correctly unmapped, but NOT because "FFNG redesigned POHON",
+ * which is what this file used to say. FFNG ships a faithful POHON: `script/propulsion/`
+ * is 41×38 with `fish_small` at (32,26) and `fish_big` at (14,12) — cell-for-cell the
+ * port's #58 — and `worlddesc.lua:787` names it en "The Real Propulsion" / cs "Skutečný
+ * pohon" under the chapter "UFO", which is roomTable.ts:82 verbatim. It is mapped above
+ * and replays clean in 1964 moves.
  *
- * WIN #68 (`windoze`) used to be here and is not a port bug: the port's physics and its
- * WIN script replay the bonus level exactly. What diverges is WHEN the two engines hand
- * control to the elderly fish — Delphi on a position (URoom.pas:17944), FFNG on a blocked
- * push it never records (script/windoze/code.lua:64 + Rules.cpp:615) — so the corpus
- * string hands over two moves early. The recording is reordered to enter the bonus where
- * Delphi accepts it; see `test/fixtures/solutions/README.md` for the exact eleven
- * characters and why they are neutral.
+ * `rush` is a different level altogether: `worlddesc.lua:990` calls it "Filled Car Park" /
+ * "Zaplněné parkoviště" in the chapter "Branch of the New Generation" — one of the nine
+ * levels FFNG added that the 1998 original never had, so this port does not contain it.
+ * `rush.moves` stays in the corpus for the record.
+ *
+ * Reading that chapter name as the level name is what kept POHON written off. **Match a
+ * recording to a room on the level TITLE, not the slug.**
  */
-export const KNOWN_DIVERGENT = new Set(['corridor']);
+
+/**
+ * Rooms whose port physics/script genuinely diverge from the FFNG reference solution for
+ * the SAME level (verified: FFNG's level layout matches the port's original `.ffr`). The
+ * harness FLAGS these (its core value) rather than silently skipping them; the main test
+ * asserts every OTHER room stays clean while these remain a documented, tracked gap.
+ *
+ * It is EMPTY, and every playable room replays clean. Keep the set — it is the right place
+ * for the next one — but a slug belongs here only with a measurement showing the RECORDING
+ * is sound and the PORT is what disagrees. All three entries it ever held failed that test
+ * rather than passing it, each in a different way, which is the reason for the caution:
+ *
+ *   - WIN #68 (`windoze`) — a Delphi-vs-FFNG control-handover difference. Fixed by
+ *     re-cutting the recording at a point Delphi accepts.
+ *   - CHODBA #56 (`corridor`) — a corrupt recording (see the note below).
+ *   - ZELVA #37 (`turtle`) — a gap in the REPLAY HARNESS, not in the port. `DalsiPrikaz`
+ *     calls `hrac_nespi` as it reads each recorded command (URoom.pas:26985); the headless
+ *     harness did not, so the idle timers only ever grew, and ZELVA's telepathic turtle —
+ *     which seizes a fish once both have idled 40 ticks (`zelva.ts:85`) — possessed the big
+ *     fish partway through every replay, walked it off the recorded route and killed the
+ *     little fish. See the comment at the call site in `solutionsHarness.ts`.
+ */
+export const KNOWN_DIVERGENT = new Set<string>([]);
+
+/**
+ * A note kept because it cost months: CHODBA #56 sat in KNOWN_DIVERGENT with a confident
+ * write-up ("the divergence is deep in the 3669-move solution, once the dark/light switch
+ * and the two autonomous robo-dogs come into play") and was never a port bug at all. The
+ * `corridor.moves` that produced it — from `alfonz19/ff-ng-saves` — was corrupt: replayed
+ * as pure kinematics its little fish swept **1398 columns of a 34-column room**, in ~50
+ * repeats of an `l r×24 d×18` block that never returned left. FFNG could not have replayed
+ * it either (`Room::makeMove` throws `LoadException("load error - bad move")` on the first
+ * refused symbol). The port was right the whole time: the 523-move recording now in the
+ * corpus replays it won, no death, 0 blocked.
+ *
+ * `test/solutionsCorpus.test.ts` now checks every recording for that class of defect before
+ * the replay ever runs, which takes ~1 ms per recording and would have said so immediately.
+ */
