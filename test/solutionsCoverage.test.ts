@@ -66,9 +66,10 @@ describe('solution coverage', () => {
 
   /**
    * The promise this project actually makes. It is NOT "all 72 rooms are solvable" — it is
-   * "every room with a clean recorded solution is still solvable", which is 70 of 72. The
-   * shortfall is printed on every run so the gap is visible now rather than discovered later;
-   * closing it belongs to the solutions-harness work, not here.
+   * "every room with a clean recorded solution is still solvable", which is 70 of 72, i.e.
+   * every playable room. The remaining two are the ending and results screens, so there is
+   * no shortfall left to close; the line is still printed on every run because a number that
+   * only ever gets asserted is a number nobody looks at.
    */
   it('70 of the 72 rooms have a clean recorded solution — and the shortfall is reported', () => {
     const mapped = new Set(Object.values(SOLUTION_ROOMS));

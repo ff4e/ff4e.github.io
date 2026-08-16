@@ -1056,13 +1056,18 @@ function startRoom(num: number, replay: string | undefined, takeStage: boolean):
 /** Dispatch a control-panel button (ZaznamenejPrikazMysi, Uovl.pas:630).
  *  `panelX` is the click's panel x-coordinate, used by the volume sliders (PomObl). */
 function panelAction(region: number, panelX = 0): void {
+  // `TOvl.OvlMouseDown`'s first statement is `hrac_nespi` (Uovl.pas:946), before it has even
+  // worked out which region was hit — the same unconditional shape as the room image
+  // (URoom.pas:26871) and the keyboard (:26787). It used to sit inside the two direction
+  // cases, below their `idle()`/`fishBusy` guards, so a player driving the fish entirely
+  // from the on-screen panel stopped counting as awake the moment a fish started talking.
+  hracNespi();
   switch (region) {
     case 1:
     case 2:
     case 3:
     case 4: // little fish up/down/left/right (region == Dir value)
       if (idle() && engine && !fishBusy('little')) {
-        hracNespi();
         engine.swim = null;
         engine.active = 'little';
         tryStep('little', region);
@@ -1076,7 +1081,6 @@ function panelAction(region: number, panelX = 0): void {
     case 8:
     case 9: // big fish up/down/left/right (Dir = region - 5)
       if (idle() && engine && !fishBusy('big')) {
-        hracNespi();
         engine.swim = null;
         engine.active = 'big';
         tryStep('big', region - 5);
@@ -1650,12 +1654,18 @@ canvas.addEventListener('mousedown', (e) => {
   // Right button (in a room): step the active fish toward the click (mbRight).
   if (e.button === 2) {
     e.preventDefault();
-    if (ui.screen !== 'room' || !room || room.won || !idle() || !engine) return;
+    if (ui.screen !== 'room' || !room) return;
+    // Image1MouseDown's first statement is `hrac_nespi` (URoom.pas:26871), the same shape as
+    // FormKeyDown's (:26787): a mouse-down on the room counts as the player being awake
+    // whatever it turns out to do — including one dropped because the fish is talking. This
+    // used to sit below the busy gate, so a player who only right-clicked at a talking fish
+    // still looked idle. The keyboard half of that was fixed first; this is the rest of it.
+    hracNespi();
+    if (room.won || !idle() || !engine) return;
     if (fishBusy(engine.active)) return; // sys dir_* dropped while the active fish is busy
     const { cx, cy } = cellFromEvent(e);
     const dir = dirToward(engine.active, cx, cy);
     if (dir !== Dir.no) {
-      hracNespi();
       engine.swim = null;
       tryStep(engine.active, dir);
       setInfo();

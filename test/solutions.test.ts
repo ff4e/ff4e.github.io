@@ -40,6 +40,27 @@ const GRAPHIC = join(gameDataDir(), 'Graphic');
 const ffrPath = (num: number): string => join(GRAPHIC, `${String(num).padStart(3, '0')}.ffr`);
 const loadRoom = (num: number): Room => new Room(parseFfr(new Uint8Array(readFileSync(ffrPath(num)))));
 
+/**
+ * How many recorded moves the win is expected to arrive BEFORE, per room. Zero everywhere
+ * unless listed.
+ *
+ * The replay stops the moment the room is won, so "won, no death, 0 blocked" on its own says
+ * nothing about the rest of the file: a premature-win regression, or a recording that grew a
+ * corrupt tail, both stay green. (Demonstrated: appending twelve `r` to `turtle.moves` still
+ * passed.) Pinning the tail closes that, and turns "the port wins at a different moment than
+ * the recording expected" from invisible into a failure.
+ *
+ * The two entries are both gspec=9 push-out rooms, where the win latches as the pushed item
+ * leaves (`vytlacit` hits 0) and the recording then keeps going — its last ~50 characters are
+ * one fish swimming down and out. Whether FFNG also required the fish to leave is an open
+ * question and NOT settled here; what is pinned is only that the port wins where it wins
+ * today, so a change to that moment has to be argued for rather than absorbed.
+ */
+const UNPLAYED_TAIL: Record<string, number> = {
+  floppy: 66, // DISKETA #70
+  map: 67, // MAPA #51
+};
+
 const slugs = Object.keys(SOLUTION_ROOMS).sort();
 const clean = slugs.filter((s) => !KNOWN_DIVERGENT.has(s));
 
@@ -79,6 +100,11 @@ describe('every mapped room is solvable by its reference solution', () => {
       expect(r.dead, `${title}: a fish died during replay`).toBe(false);
       expect(r.blocked, `${title}: ${r.blocked} move(s) blocked — physics diverged from reference`).toBe(0);
       expect(r.won, `${title}: room not solved after ${r.steps} moves`).toBe(true);
+      expect(
+        r.steps - r.consumed,
+        `${title}: the win latched with ${r.steps - r.consumed} recorded move(s) unplayed, expected ` +
+          `${UNPLAYED_TAIL[slug] ?? 0} — see UNPLAYED_TAIL`,
+      ).toBe(UNPLAYED_TAIL[slug] ?? 0);
     });
   }
 });
