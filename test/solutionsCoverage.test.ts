@@ -22,13 +22,11 @@ import { SOLUTION_ROOMS, KNOWN_DIVERGENT } from './solutionsMapping.js';
 import { recordedSlugs, recordedMoves } from './solutionsSource.js';
 
 /**
- * Recorded but deliberately NOT mapped to a room, each for a reason pinned in the long
- * notes in `solutionsMapping.ts`: `rush` solves FFNG's own "Filled Car Park" (a level the
- * 1998 original never had — POHON #58's real FFNG counterpart is `propulsion`, which the
- * corpus has no save for), and `corridor` is a corrupt recording whose little fish needs
- * 1398 columns of a 34-column room. Both stay in the corpus for the record.
+ * Recorded but deliberately NOT mapped to a room: `rush` solves FFNG's own "Filled Car
+ * Park", one of nine levels the 1998 original never had, so this port does not contain it.
+ * POHON #58's counterpart is `propulsion`, which is mapped. See `solutionsMapping.ts`.
  */
-const DELIBERATELY_UNMAPPED = new Set(['corridor', 'rush']);
+const DELIBERATELY_UNMAPPED = new Set(['rush']);
 
 describe('solution coverage', () => {
   const slugs = recordedSlugs();
@@ -36,8 +34,8 @@ describe('solution coverage', () => {
   const cleanSlugs = mappedSlugs.filter((s) => !KNOWN_DIVERGENT.has(s));
 
   it('the recorded corpus is exactly the pinned inventory', () => {
-    expect(slugs.length, 'recorded solutions').toBe(65);
-    expect(mappedSlugs.length, 'solutions pinned to a room').toBe(63);
+    expect(slugs.length, 'recorded solutions').toBe(71);
+    expect(mappedSlugs.length, 'solutions pinned to a room').toBe(70);
     expect([...KNOWN_DIVERGENT].sort(), 'known port divergences').toEqual([]);
   });
 
@@ -66,11 +64,11 @@ describe('solution coverage', () => {
 
   /**
    * The promise this project actually makes. It is NOT "all 72 rooms are solvable" — it is
-   * "every room with a clean recorded solution is still solvable", which is 63 of 72. The
+   * "every room with a clean recorded solution is still solvable", which is 70 of 72. The
    * shortfall is printed on every run so the gap is visible now rather than discovered later;
    * closing it belongs to the solutions-harness work, not here.
    */
-  it('63 of the 72 rooms have a clean recorded solution — and the shortfall is reported', () => {
+  it('70 of the 72 rooms have a clean recorded solution — and the shortfall is reported', () => {
     const mapped = new Set(Object.values(SOLUTION_ROOMS));
     const uncovered = ROOMS.filter((r) => !mapped.has(r.num)).map((r) => `#${r.num} ${r.jmeno}`);
 
@@ -82,22 +80,10 @@ describe('solution coverage', () => {
         `[solutions] no recorded solution (${uncovered.length}): ${uncovered.join(', ')}`,
     );
 
-    expect(cleanSlugs.length, 'rooms with a clean recorded solution').toBe(63);
-    // Pinned by name, not just by count: the 9 are five rooms awaiting a hand-recorded
-    // solution (CHODBA, SPUNT, ZELVA, BARELY, POHON), two gspec=9 push-out rooms the FFNG
-    // corpus ships nothing for (LODE, GRAL), and two non-playable screens (ZAVER, SCORE).
-    // CHODBA and POHON each have a plausible-looking recording that is NOT theirs — read
-    // the two notes in `solutionsMapping.ts` before assuming either can simply be pinned.
-    expect(uncovered, 'rooms with no recorded solution at all').toEqual([
-      '#19 LODE',
-      '#29 SPUNT',
-      '#37 ZELVA',
-      '#44 BARELY',
-      '#56 CHODBA',
-      '#58 POHON',
-      '#64 GRAL',
-      '#71 ZAVER',
-      '#72 SCORE',
-    ]);
+    expect(cleanSlugs.length, 'rooms with a clean recorded solution').toBe(70);
+    // Pinned by name, not just by count. Every playable room in the game now has a
+    // recording and every one of them replays clean; the two left are the ending and the
+    // results screens, which are not puzzles. There is nothing else to close.
+    expect(uncovered, 'rooms with no recorded solution at all').toEqual(['#71 ZAVER', '#72 SCORE']);
   });
 });

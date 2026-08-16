@@ -53,38 +53,25 @@ Severity: 🔴 breaks play · 🟠 visible/audible glitch · 🟡 minor/cosmetic
   cheaply kill click/pop artifacts; (c) capture ~3 s of output around the drop and inspect the
   beep's frequency/shape.
 
-## Room solvability net — no confirmed same-layout divergence is open
+## Room solvability net — closed: every playable room replays clean
 
 The solutions harness (`test/solutions.test.ts` → `test/solutionsHarness.ts` → the shared
 `src/core/stepEngine.ts`) replays known-good FFNG solution move-strings per room and asserts
-each ends **won, no death, 0 blocked moves** (currently 63/63 mapped solutions). Run standalone
-with `npm run test:solutions` (the room data is committed under `public/data`).
+each ends **won, no death, 0 blocked moves**. That is now **70 of 70 mapped solutions —
+every playable room in the game**. Run standalone with `npm run test:solutions` (the room
+data is committed under `public/data`).
 
-`KNOWN_DIVERGENT` in `test/solutionsMapping.ts` is **empty**. Both slugs it ever held turned
-out not to be port bugs: WIN #68 was a Delphi-vs-FFNG handover-timing difference (resolved,
-below) and CHODBA #56 was a corrupt recording (resolved, below). The set is kept because it is
-the right place for the next one — but a slug belongs in it only with a measurement showing the
-RECORDING is sound and the PORT is what disagrees.
+`KNOWN_DIVERGENT` in `test/solutionsMapping.ts` is **empty**, and no room is skipped. The only
+two rooms without a recording are ZAVER #71 and SCORE #72, the ending and results screens,
+which are not puzzles and are excluded by design.
 
-## Room solvability net — coverage gaps (no committed solution)
+Getting here closed a long-standing gap of nine rooms, and none of the nine turned out to be
+what it was filed as — see Resolved. Two lessons worth keeping:
 
-These playable rooms have **no known solution** to replay (they were never in the FFNG
-`ff-ng-saves` corpus, and the 1998 original ships none). They are simply not asserted.
-
-- **CHODBA #56**, **POHON #58** — each has a *plausible-looking* corpus recording that is not
-  a usable solution for it. Read the two long notes in `test/solutionsMapping.ts` before
-  attempting to pin either; the short versions are in Resolved, below.
-- **SPUNT #29**, **ZELVA #37**, **BARELY #44** — playable, unsolved.
-- **LODE #19**, **GRAL #64** — playable, unsolved. Both are gspec=9 push-out rooms; they
-  were previously written off as "loose geometric catch-all rooms many strings reach",
-  which turned out to be a tooling artifact (see Resolved, below), not a property of the
-  rooms.
-- **To resolve:** source a walkthrough (or play the port and capture `srecord` via the
-  `__ff` debug hook), then add `<slug>.moves` to `test/fixtures/solutions/` and a pin in
-  `SOLUTION_ROOMS`. A brute-force engine solver is infeasible (e.g. SPUNT is 50×35 with 10
-  movable objects — the state space is far too large). **Match on the level TITLE, not the
-  slug** — FFNG groups levels under chapter names, which is exactly how POHON got written
-  off (below).
+- **A recording can be wrong.** Before treating a failing replay as a port bug, check the
+  recording is possible at all: `test/solutionsCorpus.test.ts` does that in ~1 ms per file.
+- **Match a recording to a room on the level TITLE, not the slug.** FFNG groups levels under
+  chapter names; reading a chapter as a level name is what kept POHON #58 written off.
 
 
 ## Rendering: 🟡 the `ai` tier's water wobble differs between the two backends
@@ -161,60 +148,85 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Excluded by design (not issues)
 
+- **ZAVER #71** — non-playable ending screen.
 - **SCORE #72** — non-playable results screen.
 
 ## Resolved
 
-### 🔵 CHODBA #56 (`corridor`) was not a port bug — the recording is impossible — closed 2026-08-16
+### 🔵 The last nine uncovered rooms — closed 2026-08-16, taking the net from 63/72 to 70/72
 
-Filed above for a long time as "the divergence is **deep** in the 3669-move solution, once the
-dark/light switch and the two autonomous robo-dogs come into play — their patrol desyncs from
-the recorded cadence", with a prescription to compare dog/darkness timing against `URoom.pas`.
+Seven rooms had "no known solution" and two more had a recording that was not theirs. The
+common cause was that the corpus came from **one** source, `alfonz19/ff-ng-saves`, which is
+one player's collection — and the missing entries had been read as "no solution exists".
+Brian Raiter's archive (<https://www.muppetlabs.com/~breadbox/fillets/>) has every level of
+both the original and FFNG. Six of its seven relevant recordings replayed **won / no death /
+0 blocked on the first try, unmodified**; the seventh exposed a harness bug (below).
+
+That is the lesson worth keeping: none of the nine was the thing it was filed as, and none
+needed a change to the game.
+
+**CHODBA #56 (`corridor`) — a corrupt recording, filed for months as a port bug.**
+It sat in `KNOWN_DIVERGENT` as "the divergence is **deep** in the 3669-move solution, once
+the dark/light switch and the two autonomous robo-dogs come into play — their patrol desyncs
+from the recorded cadence", with a prescription to compare dog timing against `URoom.pas`.
 Every part of that was wrong, and following it would have started ~3 000 moves from anything.
 
-- **The divergence is not deep. It is move 25 of 3669** — the little fish's very first move,
-  right after 24 big-fish moves that replay perfectly. Nothing script-driven has happened yet.
-- **The room is the right one.** FFNG's `corridor` is 34×37 like the port's #56, and
-  `script/corridor/models.lua` places `fish_small` at (27,6) and `fish_big` at (4,5) — exactly
-  where the port's `.ffr` puts its little and big fish. The fish identities are not swapped
-  (`ModelFactory.cpp:110`/`118` confirm lowercase = small, uppercase = big).
-- **What blocks move 25** is ordinary geometry: the 5-cell heavy pillar plugging the ceiling
-  hole at x=30 falls at load and lands at (30,3)–(30,7), sealing the little fish's alcove. That
-  is identical in FFNG, so no port change can unblock it.
-- **The recording is not a recording.** A fish's X changes only through its own recorded
-  left/right move, so a recording's horizontal span is a lower bound on the width of the room
-  it came from. `corridor`'s little fish sweeps **1398 columns** of a **34**-column room, in
-  ~50 repeats of a `l r×24 d×18` block that never returns left — wider than the widest room in
-  the game by 27×. FFNG could not replay it either: `Room::makeMove` throws
-  `LoadException("load error - bad move")` on the first refused symbol, and `Unit::goRight`
-  only records a symbol for a move that succeeded or a turn. The file is verbatim from
-  `alfonz19/ff-ng-saves` `solved/corridor.lua`; what corrupted it upstream is unknown. Only the
-  little-fish channel is affected — the big-fish track spans a plausible 24×33.
+- The divergence was not deep: the first blocked move was **index 25 of 3669**, the little
+  fish's very first move, right after 24 big-fish moves that replay perfectly.
+- The room was the right one. FFNG's `corridor` is 34×37 like the port's #56 and
+  `script/corridor/models.lua` places `fish_small` at (27,6) and `fish_big` at (4,5) —
+  exactly where the port's `.ffr` puts them. The fish identities are not swapped
+  (`ModelFactory.cpp:110`/`118`: lowercase = small, uppercase = big).
+- What blocked move 25 was ordinary geometry: the 5-cell heavy pillar plugging the ceiling
+  hole at x=30 falls at load onto (30,3)–(30,7) and seals the little fish's alcove —
+  identical in FFNG.
+- The recording could not have been recorded. A fish's X changes only through its own
+  recorded left/right move, so a recording's horizontal span is a lower bound on the width
+  of the room it came from; that little fish swept **1398 columns of a 34-column room**, in
+  ~50 repeats of an `l r×24 d×18` block that never returned left. FFNG could not replay it
+  either — `Room::makeMove` throws `LoadException("load error - bad move")` on the first
+  refused symbol, and `Unit::goRight` records a symbol only for a move that succeeded or a
+  turn. Only the little-fish channel was affected, which is why the file looked genuine.
 
-So CHODBA left `KNOWN_DIVERGENT`, and `corridor` left `SOLUTION_ROOMS`: the room now sits with
-the other rooms awaiting a hand-recorded solution. `test/solutionsCorpus.test.ts` pins the span
-measurement so the room cannot be re-filed as a port bug, and `ReplayResult` now reports how
-many moves were actually **applied** — reading `blocked / steps` as a rate is what made a
-case-swapped replay look like a near miss ("6 blocked of 3669" was 6 of 15 applied, after which
-a fish died) and put a fish-identity swap on the table in the first place.
+Replaced with Amic Frouvelle's 523-move recording: won, no death, 0 blocked.
+`test/solutionsCorpus.test.ts` now checks every recording for that class of defect before
+the replay runs, and `ReplayResult` reports how many moves were actually **applied** —
+reading `blocked / steps` as a rate is what made a case-swapped replay look like a near miss
+("6 blocked of 3669" was 6 of 15 applied, after which a fish died) and put a fish-identity
+swap on the table in the first place.
 
-### 🔵 POHON #58 is uncovered for an ordinary reason, not because FFNG redesigned it — closed 2026-08-16
+**POHON #58 — a chapter name read as a level name.**
+This file and `solutionsMapping.ts` both said FFNG's `rush` was "a *redesigned* 37×37 level
+with colored pistons, **not** the original 41×38 beast-push room". `rush` is indeed not
+POHON, but it is not a redesign of it either, and the framing hid the fact that FFNG ships a
+faithful POHON. `script/propulsion/` is 41×38 with `fish_small` at (32,26) and `fish_big` at
+(14,12) — cell-for-cell the port's #58 — and `worlddesc.lua:787` names it en "The Real
+Propulsion" / cs "Skutečný pohon" under the chapter **"UFO"**, which is `roomTable.ts:82`
+verbatim. `worlddesc.lua:990` names `rush` "Filled Car Park" in the chapter "Branch of the
+New Generation", one of nine levels FFNG added that the 1998 original never had. POHON now
+replays clean in 1964 moves; `rush` stays in the corpus, unmapped.
 
-`test/solutionsMapping.ts` and this file both said FFNG's `rush` was "a *redesigned* 37×37 level
-with colored pistons, **not** the original 41×38 beast-push room". `rush` is indeed not POHON,
-but it is not a redesign of it either — and the framing hid the fact that FFNG **does** ship a
-faithful POHON:
+**ZELVA #37 (`turtle`) — a gap in the replay harness, not in the port.**
+The one recording that did not pass first time, and the only one of the nine that pointed at
+real code. The port refused moves the recording made — the big fish blocked on `L` twelve
+times in a row at (5,31) — and the little fish died 111 moves into 620.
 
-- `script/propulsion/` is 41×38 with `fish_small` at (32,26) and `fish_big` at (14,12) —
-  cell-for-cell the port's #58 — and `worlddesc.lua:787` names it en "The Real Propulsion" /
-  cs "Skutečný pohon" under the chapter "UFO", which is `roomTable.ts:82` verbatim.
-- `worlddesc.lua:990` names `rush` "Filled Car Park" / "Zaplněné parkoviště" in the chapter
-  "Branch of the New Generation" — one of the nine levels FFNG added that the 1998 original
-  never had.
+`DalsiPrikaz` calls `hrac_nespi` as it reads each command out of the capture file
+(`URoom.pas:26985`), exactly as a keypress (`:26787`) or a click (`:26871`) does. The
+headless harness never did, and nothing else in the shared step-engine resets the idle
+timers — `hracNespi` lives in `src/app/`, and the browser's own replay path calls it
+(`cutscene.ts:199`). So `delay[]` only ever grew during a replay, and ZELVA's telepathic
+turtle — which seizes a fish and walks it across the room once **both** fish have idled 40
+ticks (`zelva.ts:85`) — possessed the big fish partway through every replay, drove it off
+the recorded route, and refused the player's commands while it did.
 
-So POHON is uncovered simply because `alfonz19/ff-ng-saves` ships no `propulsion` save. The
-chapter name is what caused the mix-up, which is the reason the coverage note now says to match
-on the level **title**, not the slug.
+ZELVA is the only room that gates on those timers, which is why nothing else ever noticed.
+One `room.hracNespi()` at the harness's command-dispatch point fixes it; the room then
+replays won, no death, 0 blocked.
+
+**LODE #19, SPUNT #29, BARELY #44, GRAL #64** — no diagnosis needed. `gods`, `atlantis`,
+`barrel` and `grail` all replay clean, unmodified. LODE and GRAL had the additional
+`gspec:=9` history below.
 
 ### 🔴 WIN #68 (`windoze`) — the gspec=5 bonus level was unplayed and unported — fixed 2026-08-16
 

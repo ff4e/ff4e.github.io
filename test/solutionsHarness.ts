@@ -144,6 +144,20 @@ export function replaySolution(room: Room, jmeno: string, moves: string): Replay
     if (mi < steps.length) {
       const s = steps[mi]!;
       engine.active = s.which; // the moved fish becomes active (aktivni)
+      // DalsiPrikaz calls hrac_nespi as it reads each command out of the capture file
+      // (URoom.pas:26985) — a replayed command counts as the player being awake, exactly
+      // like a keypress (26787) or a click (26871). Without it the idle timers (delay[])
+      // only ever grow here, because nothing else in the shared step-engine resets them:
+      // `hracNespi` lives in `src/app/`, and the browser's own replay path calls it
+      // (`cutscene.ts:199`).
+      //
+      // ZELVA #37 is the room that notices. Its telepathic turtle SEIZES a fish and walks
+      // it across the room once `delay[mala] > 40` and `delay[velka] > 40` (`zelva.ts:85`),
+      // which under a replay used to be "always, from move ~40 on" — so the port drove the
+      // big fish off the recorded route, refused the player's moves in runs while it did,
+      // and killed the little fish 111 moves into a 620-move solution. It looked exactly
+      // like a physics divergence and was not one.
+      room.hracNespi();
       const before = engine.blocked;
       const r = engine.press(s.which, s.dir);
       // DalsiPrikaz drops a command while the fish is busy (mid-dialogue). The recording

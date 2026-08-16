@@ -24,7 +24,7 @@ import { join } from 'node:path';
 import { parseFfr } from '../src/data/ffr.js';
 import { ROOMS } from '../src/data/roomTable.js';
 import { SOLUTION_ROOMS } from './solutionsMapping.js';
-import { recordedSlugs, recordedMoves } from './solutionsSource.js';
+import { recordedMoves } from './solutionsSource.js';
 import { gameDataDir } from './gameData.js';
 
 const roomWidth = (num: number): number =>
@@ -83,23 +83,21 @@ describe('recorded solutions fit the room they are pinned to', () => {
   }
 });
 
-describe('corridor is unmappable, not merely unmapped', () => {
+describe('the check catches the recording CHODBA was misfiled on', () => {
   /**
-   * Pinned as a number so nobody re-files CHODBA as a port bug. 1398 columns is not "a bit
-   * over" 34 — it is wider than the widest room in the game by a factor of 27, and the track
-   * is ~50 repeats of a `l r×24 d×18` block that never returns left. See solutionsMapping.ts.
+   * Kept as a regression pin with the corrupt string inline, because the file it used to
+   * live in has been replaced by a working 523-move recording, and this measurement is the
+   * only thing standing between CHODBA and being re-filed as a port bug a second time.
+   * This is the head of the repeating block that made the old recording impossible:
+   * `l r×24 d×18`, five repeats of which already need more columns than the room has.
    */
-  it('corridor.moves needs more columns than any of the 72 rooms', () => {
-    expect(recordedSlugs()).toContain('corridor');
-    const span = horizontalSpan(recordedMoves('corridor'), true);
-    expect(span, 'corridor little-fish horizontal span').toBe(1398);
+  const CORRUPT_HEAD = 'l' + 'r'.repeat(24) + 'd'.repeat(18);
 
-    const widest = Math.max(...ROOMS.map((r) => roomWidth(r.num)));
-    expect(span, `widest room in the game is ${widest} columns`).toBeGreaterThan(widest);
+  it('flags it', () => {
+    expect(horizontalSpan(CORRUPT_HEAD.repeat(5), true)).toBeGreaterThan(roomWidth(56));
   });
 
-  /** The other channel is ordinary, which is why the file looks like a real recording. */
-  it("corridor.moves' big-fish track is room-sized, so only the little-fish channel is corrupt", () => {
-    expect(horizontalSpan(recordedMoves('corridor'), false)).toBeLessThanOrEqual(roomWidth(56));
+  it('and passes the recording that replaced it', () => {
+    expect(horizontalSpan(recordedMoves('corridor'), true)).toBeLessThanOrEqual(roomWidth(56));
   });
 });

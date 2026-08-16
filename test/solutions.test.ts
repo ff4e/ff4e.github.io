@@ -47,16 +47,16 @@ const clean = slugs.filter((s) => !KNOWN_DIVERGENT.has(s));
  * The guard against this file quietly checking nothing. It is not enough to know the data
  * directory exists: a `.skip`, a renamed file, or a resolution bug upstream would each
  * leave the run green with zero replays. So assert the exact set of rooms that is about to
- * be replayed is real and readable — if this passes, the 63 tests below have their input.
+ * be replayed is real and readable — if this passes, the 70 tests below have their input.
  */
 describe('the solvability net is armed', () => {
-  it('has readable room data for all 63 rooms it is about to replay', () => {
+  it('has readable room data for all 70 rooms it is about to replay', () => {
     expect(existsSync(GRAPHIC), `no room data at ${GRAPHIC} — set $FFNG_DATA, or check public/data is intact`).toBe(
       true,
     );
     const unreadable = clean.filter((s) => !existsSync(ffrPath(SOLUTION_ROOMS[s]!)));
     expect(unreadable, `no .ffr for these rooms under ${GRAPHIC}`).toEqual([]);
-    expect(clean.length, 'rooms about to be replayed').toBe(63);
+    expect(clean.length, 'rooms about to be replayed').toBe(70);
   });
 });
 
