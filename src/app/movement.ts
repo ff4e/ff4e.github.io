@@ -25,7 +25,7 @@ export interface MovementHost {
   readonly buildRoom: (carryPole?: boolean) => void;
   /** Ends any running KUFRIK demonstration. */
   readonly endShowmode: () => void;
-  /** The player is awake — resets the screensaver countdown. */
+  /** The player is awake: reset the idle timers (delay[]) and the ambient-chatter clock. */
   readonly hracNespi: () => void;
   /** Refresh the info line under the room. */
   readonly setInfo: () => void;
@@ -94,7 +94,14 @@ export function beginHeldMove(code: string, sys: boolean, which: 'little' | 'big
 
 /** DalsiPrikaz (URoom.pas:26941): dispatch the held key on a rest tick and advance its
  *  KeyRoom state (1→2 held, 3→0 released). The move is busy-gated exactly like a fresh
- *  press; the state still advances if the move is dropped, so it retries next tick. */
+ *  press; the state still advances if the move is dropped, so it retries next tick.
+ *
+ *  No `hracNespi()` here, deliberately. DalsiPrikaz's `hrac_nespi` (URoom.pas:26985) sits
+ *  in its SHOWMODE branch — it is how a REPLAYED command counts as activity, which is why
+ *  the port's replay paths call it (`cutscene.ts`, `test/solutionsHarness.ts`) and this
+ *  one does not. A live command was already counted when the key went down
+ *  (FormKeyDown, :26787). Resetting again on every engine-driven repeat tick would be a
+ *  stronger reset than the original's, which only refreshes on the OS's own key repeat. */
 export function dispatchHeldMove(): void {
   if (heldState === 0 || !engine || !room) return;
   const which = heldSys ? engine.active : heldWhich;
@@ -102,7 +109,6 @@ export function dispatchHeldMove(): void {
   heldState = release ? 0 : 2;
   if (release) heldKey = null;
   if (fishBusy(which)) return; // dropped while the fish is talking (kdo:=0)
-  host.hracNespi();
   engine.swim = null;
   engine.active = which;
   tryStep(which, heldDir);
@@ -230,6 +236,12 @@ export function advanceLoadmode(): void {
     room.clearAllDirs();
     engine.phase = 'idle';
     setLoadmode(null);
+    // The original's loadmode branch ends `LoadDone; kdo:=0; ...; hrac_nespi`
+    // (URoom.pas:24111). A load can fast-forward thousands of recorded moves with the
+    // player watching and touching nothing, so without this the room resumes with idle
+    // timers that have been running the whole time — and immediately fires whatever they
+    // gate. Same reason the keyboard resets them on every key (:26787).
+    host.hracNespi();
     host.setInfo();
   }
 }

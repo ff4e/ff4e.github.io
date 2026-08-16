@@ -1383,6 +1383,20 @@ window.addEventListener('keydown', (e) => {
     }
     return;
   }
+  // TRoom.FormKeyDown's very first statement is `hrac_nespi` (URoom.pas:26787) — before
+  // the held-key gate, before the command mapping, before anything. The player touched a
+  // key, so the idle timers (delay[]) and the ambient-chatter clock restart, whatever the
+  // key turns out to do and whether or not it ends up doing anything.
+  //
+  // The port had no equivalent: the only keyboard reset was inside `dispatchHeldMove`,
+  // which is busy-gated, so while a fish was mid-dialogue the keyboard stopped counting as
+  // activity entirely. Everything downstream of `delay[]` then behaved as if the player had
+  // walked away — PRVNI's "why aren't we moving?" hint, KAJUTA2's "we should think", NCP's
+  // grin at the seahorse, ZELVA's turtle possession, and StdKecej's idle chatter.
+  //
+  // Gated on being in a room because this is the ROOM form's handler; the map, the help
+  // screens, Tetris and the cutscenes are separate forms with their own, above.
+  if (ui.screen === 'room') hracNespi();
   // Typed cheat codes (ZaznamenejPrikazKlavesou, Uovl.pas:744; the map screen keeps
   // its own buffer, UMain.pas:1750). `X` arms the machine; while a code is part-typed
   // the letters are swallowed, and the first letter that cannot continue any code

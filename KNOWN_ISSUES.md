@@ -5,26 +5,6 @@ next steps. Keep resolved items (with the fix) rather than deleting, so the hist
 
 Severity: 🔴 breaks play · 🟠 visible/audible glitch · 🟡 minor/cosmetic · 🔵 investigation lead
 
-## Input: 🔵 `dispatchHeldMove` busy-gates BEFORE `hrac_nespi`; the original does it the other way
-
-- **Symptom:** none observed. It is a fidelity question about the order of two lines, noticed
-  while giving the replay harness the `hrac_nespi` call it was missing (see Resolved).
-- **What's known:** `DalsiPrikaz` (`URoom.pas:26941`) calls `hrac_nespi` at **:26985**, as it
-  reads the command, and only reaches the busy gate — `mala: if not zije[mala] or
-  (busy[mala]>0) then kdo:=0` — at **:27003**. So in the original a command dropped because
-  the fish is mid-dialogue *has already reset the idle timers*: the player pressed a key, and
-  `hrac_nespi` is about the player, not about the fish. `src/app/movement.ts:104-105` returns
-  on `fishBusy(which)` before calling `host.hracNespi()`, inverting that. The keyboard and
-  pointer paths in `main.ts` call it first and are fine; this is only the held-key repeat.
-- **Why it might matter:** the idle timers (`delay[]`) drive idle animations and chatter, and
-  ZELVA #37 gates its turtle possession on them (`zelva.ts:85`). A fish talks fairly often, so
-  the divergence is not rare — it just fails to accumulate to anything most of the time.
-- **Where to look:** `src/app/movement.ts:98-110`, against `URoom.pas:26975-27005`.
-- **Next steps:** move `host.hracNespi()` above the `fishBusy` return, in its own small PR.
-  Deliberately NOT done in the change that found it: that PR was making the *replay* path
-  faithful, and quietly altering the interactive path in the same commit would mix an
-  unreviewed behaviour change into it.
-
 ## Test interface: 🟡 `__ff.setRenderer` does less than the real `setRenderer`
 - **Symptom:** switching the render backend from a probe does not do everything switching it
   from the game does. No known misbehaviour — filed because it is a silent difference between
@@ -171,6 +151,43 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 - **SCORE #72** — non-playable results screen.
 
 ## Resolved
+
+### 🟠 The keyboard did not count as activity while a fish was talking — fixed 2026-08-16
+
+Filed as a narrow ordering question (`dispatchHeldMove` busy-gates before `hracNespi`, while
+`DalsiPrikaz` resets first). Looking properly, the port was missing the reset at a more basic
+level: **no keydown handler called `hracNespi` at all.**
+
+`TRoom.FormKeyDown` runs `hrac_nespi` as its **first statement** (`URoom.pas:26787`) — before
+the held-key gate, before the command is even mapped. Touching a key is the player being
+awake, whatever the key does and whether or not it ends up doing anything. The port's only
+keyboard reset lived inside `dispatchHeldMove`, downstream of `if (fishBusy(which)) return`,
+so while a fish was mid-dialogue the keyboard stopped counting as activity entirely.
+
+- **Symptom:** hold or tap a direction while a fish is talking and the game treats you as
+  having walked away. Everything gated on `delay[]` then fires the moment the dialogue ends:
+  PRVNI #1's "why aren't we moving?" tutorial hint (`prvni.ts:73`), KAJUTA2 #49's "we should
+  think" exchange (`kajuta2.ts:170`), NCP's grin at the seahorse — which has an *upper* bound
+  of 40, so it can be suppressed rather than triggered (`ncp.ts:291,307`) — ZELVA #37's turtle
+  seizing a fish (`zelva.ts:85`), and StdKecej's ambient chatter, whose clock `hracNespi` also
+  resets (`logicTick.ts:60-63`).
+- **How big:** measured by the probe below, 12 game ticks of hammering keys at a busy fish
+  left `delay` at **25**; it is **≤ 4** now. Dialogue is common, and several gates trip at 40.
+- **Fix:** one `hracNespi()` in the keydown listener, gated on being in a room because this is
+  the ROOM form's handler (`main.ts`, before the cheat buffer — the original feeds every key
+  through that too). The call in `dispatchHeldMove` is **removed** rather than reordered:
+  `DalsiPrikaz`'s `hrac_nespi` (`:26985`) is in its SHOWMODE branch, i.e. it is how a
+  *replayed* command counts as activity, which is why `cutscene.ts` and the solutions harness
+  call it and the live held-key path should not. Keeping it would reset on every engine-driven
+  repeat tick, a stronger reset than the original's, which refreshes on the OS's own key
+  repeat.
+- **Also fixed, same cause:** a fast-forward load (`advanceLoadmode`) replays thousands of
+  recorded moves while the player watches and touches nothing, and did not reset on
+  completion. The original's loadmode branch ends `LoadDone; kdo:=0; ...; hrac_nespi`
+  (`URoom.pas:24111`).
+- **Covered by:** an assertion in `tools/test-busygate.mjs`, which already stages a busy fish
+  and hammers every input surface — the natural home, and no new probe launch. It reads a new
+  `__ff.delay(which)` hook. Verified to fail (`delay=25`) with the fix reverted.
 
 ### 🔵 The last nine uncovered rooms — closed 2026-08-16, taking the net from 63/72 to 70/72
 

@@ -35,6 +35,18 @@ await withApp(async ({ p, expect }) => {
     `busy little fish must not move (was ${before.x},${before.y}, now ${during.x},${during.y})`,
   );
 
+  // ...but a dropped command is still the player being awake. FormKeyDown runs
+  // `hrac_nespi` as its FIRST statement (URoom.pas:26787), before the held-key gate and
+  // long before DalsiPrikaz decides to drop the command (:27003) — so hammering keys at a
+  // talking fish must keep the idle timers near zero. The port used to reset them only
+  // inside the busy-gated dispatch, so 12 ticks of hammering left `delay` at ~12 and the
+  // game treated a player leaning on the keyboard as one who had walked away.
+  const delayWhileBusy = await p.evaluate(() => window.__ff.delay('little'));
+  expect(
+    delayWhileBusy <= 4,
+    `keys pressed at a busy fish must still reset the idle timer, got delay=${delayWhileBusy} after 12 ticks of input`,
+  );
+
   // Clear busy: input must now take effect (facing flips and/or it moves).
   await p.evaluate(() => window.__ff.setBusy('little', 0));
   await press('KeyJ');
