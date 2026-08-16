@@ -112,18 +112,6 @@ export class StepEngine {
     // that fish is busy (mid-dialogue, turned to face the player). Not counted as a
     // blocked push — the command is simply never dispatched.
     if (room.busy[which] > 0) return 'busy';
-    // gspec=5 (WIN's bonus level): a rescued elderly fish has been parked at X=1 by
-    // WIN_Programky (URoom.pas:18078/18090) and is out of the level. The original stops
-    // the player steering it by moving `aktivni` off it on every command dispatch
-    // (URoom.pas:26997-26998):
-    //   if (aktivni=mala) and (… or (gspec=5) and (Items[Little]^.X=1)) then aktivni:=velka
-    // so a press aimed at a parked fish is never a real push. Drop it like a busy
-    // command rather than counting it blocked — it also spans the one tick between the
-    // second rescue and VypniBonuslevel, which cannot fire until the `prog` AFTER the
-    // parking that its own condition reads (URoom.pas:17971 runs before 18078).
-    if (room.gspec === 5 && room.items[which === 'little' ? room.littleIdx : room.bigIdx]!.x === 1) {
-      return 'busy';
-    }
     if ((dir === Dir.left && room.facingRight[which]) || (dir === Dir.right && !room.facingRight[which])) {
       this.phase = 'turn';
       this.animFrame = 0;

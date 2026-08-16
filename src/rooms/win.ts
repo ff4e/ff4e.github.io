@@ -11,15 +11,19 @@
  *
  * gspec=5 is NOT only a render mode: while it is set, every move/turn/fall completes on
  * its first frame and the whole move-plus-fall chain resolves inside one tick
- * (URoom.pas:24825-24880 + the repeat/until at 24927-24928), and a fish already parked at
- * x=1 stops being steerable (URoom.pas:26997-26998). Both live in `src/core/stepEngine.ts`
- * — the elderly pair really is played, not just drawn.
+ * (URoom.pas:24825-24880 + the repeat/until at 24927-24928) — both in
+ * `src/core/stepEngine.ts` — and a fish already rescued (parked at x=1) stops being the
+ * active one (URoom.pas:26997-26998, in `src/app/logicTick.ts`). The elderly pair really
+ * is played, not just drawn.
  *
- * DEFERRED (cosmetic): the exact gspec=5 render (which draws the young fish via the
- * animated fish body and the old fish as static sprites, URoom.pas:26227-26260) is not
- * yet ported — the port currently renders whichever pair is `littleIdx/bigIdx` (the old
- * fish, in the bonus) with the normal fish body. The sprite inversion is a deferred
- * render-pass task; nothing about the gameplay depends on it.
+ * The render's half of the bonus IS ported: `src/render/roomWalk.ts` draws the animated
+ * fish body for the YOUNG pair (StartLittle/StartBig) and the controlled elderly pair as
+ * their plain item sprites (URoom.pas:26259-26260), covered by `test/gspec5.test.ts`.
+ *
+ * DEFERRED (cosmetic): the elderly sprites' own frame choice — URoom.pas:26227-26248
+ * picks `afaze` 0/1 by facing and 2/3 for a skeleton, and hides a fish that has left
+ * (spec:=11). The port sets spec here in `prog` but always draws frame 0, so the old
+ * fish do not turn to face the way they swim. Nothing about the gameplay depends on it.
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';

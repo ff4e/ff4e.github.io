@@ -241,12 +241,12 @@ them and no longer is; the others could be unskipped the same way.
 
 ### What actually guarantees the rooms are still solvable
 
-`npm test` replays 62 recorded reference solutions through the shared step-engine and asserts
+`npm test` replays 63 recorded reference solutions through the shared step-engine and asserts
 each room ends won, with no death and no blocked move — the whole set in under a second. It
 runs **in CI on every push**, and locally in every `npm test`.
 
 It did not always. Until recently the replays were gated on a *private* extraction of the
-original game at `~/.cache/ffng-orig`, so CI skipped all 62 assertions on every push and still
+original game at `~/.cache/ffng-orig`, so CI skipped every one of those assertions on every push and still
 reported green. The premise was wrong: the room data is not withheld from this repo. ALTAR
 GPL-released the Fish Fillets data in 2002 (see [CONTRIBUTING.md](./CONTRIBUTING.md)), all 72
 `Graphic/*.ffr` are tracked under `public/data/` because the site ships them, and they are
@@ -361,12 +361,12 @@ assertions.
 - **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test` and so by CI):
   the **solvability net** — replays committed known-good FFNG solution move-strings
   (`test/fixtures/solutions/`) per room through the shared step-engine and asserts each ends
-  **won, no death, 0 blocked**, off the repo's own `public/data` (`$FFNG_DATA` overrides). 62/64
-  mapped solutions pass; the remaining gaps and two confirmed same-layout divergences (CHODBA
-  #56, WIN #68) are documented in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+  **won, no death, 0 blocked**, off the repo's own `public/data` (`$FFNG_DATA` overrides). 63/64
+  mapped solutions pass; the remaining gaps and the one confirmed same-layout divergence (CHODBA
+  #56) are documented in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
 
 - **`test/solutionsCoverage.test.ts`**: the inventory half of that net — pins the corpus
-  (65 recorded / 64 mapped / 2 divergent / 62 clean), names the 8 rooms with no recording, and
+  (65 recorded / 64 mapped / 1 divergent / 63 clean), names the 8 rooms with no recording, and
   checks every mapping points at a distinct real room. Needs no room data at all, so a room
   quietly losing its solution fails even in a stripped checkout. `test/solutionsSource.ts` is the
   single accessor for where recordings live, so the assertions survive them moving into the room

@@ -79,7 +79,8 @@ test via `KNOWN_DIVERGENT` in `test/solutionsMapping.ts` and must stay skipped u
 ### WIN #68 (`windoze`) — RESOLVED, and it was never a port bug
 
 Kept here because the diagnosis is the useful part. The port's physics and its `WIN` script
-replay the bonus level exactly; three things were wrong or missing around it.
+replay the bonus level exactly — what was wrong was the decoder, two unported `gspec=5`
+behaviours, and the recording, which encodes FFNG's control handover rather than Delphi's.
 
 1. **The move decoder dropped a quarter of the solution.** `solutionsHarness.ts` silently
    discarded any character it could not decode, so the 214 `w/x/y/z` bonus moves (27% of
@@ -91,7 +92,8 @@ replay the bonus level exactly; three things were wrong or missing around it.
    every move/turn/fall on its first frame while the bonus is running, the `repeat/until`
    at `24927-24928` resolves the whole move-plus-fall chain inside one tick, and
    `26997-26998` takes control away from an elderly fish already parked at x=1. None of it
-   was ported; all three now live in `src/core/stepEngine.ts`.
+   was ported; the first two are now in `src/core/stepEngine.ts` and the active-fish switch
+   in `src/app/logicTick.ts`.
 3. **FFNG and Delphi open the bonus at different moments**, so the corpus string hands
    control to the elderly fish two moves before a Delphi-faithful port can accept it.
    Delphi triggers on a position (`URoom.pas:17944`); FFNG triggers on a *blocked* push

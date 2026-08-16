@@ -52,8 +52,22 @@ without touching anything: after the 12-step rightward run along y=8 that leaves
 | --- | --- |
 | `RRRR` (before the bonus block) | (15,8) → (19,8) through open water; Delphi's trigger fires |
 | the corpus's 214 `w/x/y/z` moves, unchanged | the whole bonus level, verbatim |
-| `LLLLLR` (after it) | turn, four steps back to (15,8), turn back to facing right |
-| `l` | `VypniBonuslevel` (`URoom.pas:23723`) forces BOTH fish to face right; the corpus expects the little fish still facing left, so turn it back |
+| `z` (after it) | one turn-in-place for the rescued elderly little fish, see below |
+| `LLLLLR` | turn, four steps back to (15,8), turn back to facing right |
+
+Every inserted character is a command the original would have **accepted and recorded**:
+`ToRecord` runs only on a successful `posun_ryby` or on a turn (`URoom.pas:24718-24738`),
+so a recording never contains a rejected push — which is also why `blocked === 0` is the
+right assertion here.
+
+The lone `z` is the least obvious of them. `WIN_Programky` checks "both elderly fish are
+home" (`URoom.pas:17971`) **before** the block that parks a rescued one at x=1
+(`18078`/`18090`), so `VypniBonuslevel` can only run on the `prog` AFTER the second rescue
+— one tick in which the bonus is over but control has not come back. A turn is accepted in
+that tick where a push would not be, and it does a second job: `VypniBonuslevel`
+(`URoom.pas:23723`) forces BOTH fish to face right, and the turn resolves after it
+(`prog` runs before the state machine), so the little fish is left facing left — which is
+how the corpus expects to find it.
 
 783 → 794 characters. The corpus original is recoverable exactly: delete the eleven
 inserted characters and put the 214-character bonus block back between the `…lllluuuU`
