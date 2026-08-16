@@ -32,7 +32,8 @@ harness (`test/solutions.test.ts`) to verify each room is solvable in the port.
   in ~50 repeats of an `l r×24 d×18` block that never came back left. It got CHODBA #56
   filed as a port bug for months. The file here now is Brian Raiter's 523-move recording
   by Amic Frouvelle, which replays won / no death / 0 blocked. `test/solutionsCorpus.test.ts`
-  checks every recording for that class of defect before the replay runs.
+  checks every recording that is pinned to a room for that class of defect before the
+  replay runs. (`rush` is not checked — with no room to check against, there is no bound.)
 - **`rush` (kept, unmapped).** Solves FFNG's own "Filled Car Park", chapter "Branch of the
   New Generation" — one of nine levels the 1998 original never had, so this port does not
   contain it. It was long mistaken for POHON #58; POHON's counterpart is `propulsion`.

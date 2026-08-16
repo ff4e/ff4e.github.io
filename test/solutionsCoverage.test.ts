@@ -1,14 +1,16 @@
 /**
  * Solution COVERAGE — the half of the solvability net that needs no game data.
  *
- * `solutions.test.ts` replays every recorded solution and is therefore gated on the
- * original 1998 `.ffr` data, which cannot live in a public repo. That gate used to cover
- * the coverage assertions too, so on CI — which has no data — a room could lose its
- * solution, or the corpus could shrink, and every check still reported green.
+ * `solutions.test.ts` replays every recorded solution and so needs the room `.ffr` data.
+ * That used to be believed impossible in CI — the data was thought to be unshippable — and
+ * the coverage assertions sat behind the same gate, so on CI a room could lose its solution,
+ * or the corpus could shrink, and every check still reported green. The premise was wrong
+ * (`test/gameData.ts` has the history; the data is committed under `public/data`) and the
+ * replays run everywhere now, but the split is still worth keeping.
  *
- * Nothing here needs the game data: a recorded solution is a move-string, and the mapping
- * is source. So these assertions run EVERYWHERE, including CI, and they are what makes
- * "a room silently lost its solution" a failure rather than a skip.
+ * Nothing here needs the game data at all: a recorded solution is a move-string, and the
+ * mapping is source. So these assertions hold even in a checkout with the data stripped, and
+ * they are what makes "a room silently lost its solution" a failure rather than a skip.
  *
  * The numbers are pinned exactly, on purpose, so that a room quietly losing its solution
  * is a failure rather than a smaller number nobody looks at. They are not frozen: coverage

@@ -5,8 +5,27 @@ next steps. Keep resolved items (with the fix) rather than deleting, so the hist
 
 Severity: 🔴 breaks play · 🟠 visible/audible glitch · 🟡 minor/cosmetic · 🔵 investigation lead
 
-## Test interface: 🟡 `__ff.setRenderer` does less than the real `setRenderer`
+## Input: 🔵 `dispatchHeldMove` busy-gates BEFORE `hrac_nespi`; the original does it the other way
 
+- **Symptom:** none observed. It is a fidelity question about the order of two lines, noticed
+  while giving the replay harness the `hrac_nespi` call it was missing (see Resolved).
+- **What's known:** `DalsiPrikaz` (`URoom.pas:26941`) calls `hrac_nespi` at **:26985**, as it
+  reads the command, and only reaches the busy gate — `mala: if not zije[mala] or
+  (busy[mala]>0) then kdo:=0` — at **:27003**. So in the original a command dropped because
+  the fish is mid-dialogue *has already reset the idle timers*: the player pressed a key, and
+  `hrac_nespi` is about the player, not about the fish. `src/app/movement.ts:104-105` returns
+  on `fishBusy(which)` before calling `host.hracNespi()`, inverting that. The keyboard and
+  pointer paths in `main.ts` call it first and are fine; this is only the held-key repeat.
+- **Why it might matter:** the idle timers (`delay[]`) drive idle animations and chatter, and
+  ZELVA #37 gates its turtle possession on them (`zelva.ts:85`). A fish talks fairly often, so
+  the divergence is not rare — it just fails to accumulate to anything most of the time.
+- **Where to look:** `src/app/movement.ts:98-110`, against `URoom.pas:26975-27005`.
+- **Next steps:** move `host.hracNespi()` above the `fishBusy` return, in its own small PR.
+  Deliberately NOT done in the change that found it: that PR was making the *replay* path
+  faithful, and quietly altering the interactive path in the same commit would mix an
+  unreviewed behaviour change into it.
+
+## Test interface: 🟡 `__ff.setRenderer` does less than the real `setRenderer`
 - **Symptom:** switching the render backend from a probe does not do everything switching it
   from the game does. No known misbehaviour — filed because it is a silent difference between
   the path the tests exercise and the path a player takes, which is the kind of gap that makes
