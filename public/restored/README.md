@@ -1,10 +1,11 @@
 # `public/restored/` — two lines the 1998 release shipped without
 
-Everything under `public/data/` is the 1998 ALTAR release, byte for byte. **This
-directory is not.** It holds two dialogue lines that the released game's code calls for
-but that its data packages do not contain, restored from sources that are themselves
-GPL-licensed. Keeping them here rather than patching `025.fft`/`063.ffs` is the whole
-point: what is original stays trivially auditable.
+Everything under `public/data/` is the 1998 ALTAR release, byte for byte, with **one
+documented exception** (`002/help1`'s buzzing tail — see `KNOWN_ISSUES.md` and
+`tools/fix-help1-buzz.ts`). **This directory is not.** It holds two dialogue lines that
+the released game's code calls for but that its data packages do not contain, restored
+from sources that are themselves GPL-licensed. Keeping them here rather than patching
+`025.fft`/`063.ffs` is the whole point: what is original stays trivially auditable.
 
 | sound | room | Czech |
 |---|---|---|

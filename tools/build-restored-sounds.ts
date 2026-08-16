@@ -5,9 +5,10 @@
  *   npx tsx tools/build-restored-sounds.ts
  *
  * Why a separate package rather than patching 025/063: the committed
- * `public/data/**` is the 1998 release byte-for-byte, and it stays that way. The
- * restored lines live in their own file, loaded like the x00/x02/x03 globals, so
- * what is original and what is not stays trivially auditable.
+ * `public/data/**` is the 1998 release byte-for-byte — with one documented exception,
+ * `002/help1`'s buzzing tail (KNOWN_ISSUES.md, tools/fix-help1-buzz.ts) — and it stays
+ * that way. The restored lines live in their own file, loaded like the x00/x02/x03
+ * globals, so what is original and what is not stays trivially auditable.
  *
  * Provenance of each field:
  *   audio     fillets-ng-data (GPL) — see public/restored/README.md. Its PCM length

@@ -152,6 +152,62 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🟠 KUFRIK's first tutorial line ended in half a second of buzz — fixed 2026-08-16
+
+The last 0.47 s of `002/help1` — *"Teď na nic nesahej, jen se dívej…"*, the first thing the
+automatic demonstration says — decoded to a full-scale ~370 Hz square wave. It lands where help2
+begins, which is why it was first reported as a defect in the big fish's next line.
+
+**Not a decoding bug.** `src/audio/ffs.ts` was compared instruction by instruction with ALTAR's
+`Decompres` assembler (`RSound.pas:258-333`) — `CBW; SAL AX,2; ADD DX,AX; ADD CX,DX` is exactly
+`cdif += (int8)d << 2; clast += cdif`, 16-bit and wrapping — and matches byte for byte. On this one
+sample the encoded deltas hand `cdif` a DC offset it never sheds from sample 137191, so `clast`
+ramps into the rail and wraps until the sound ends. **The 1998 release plays the buzz too.**
+Dropping the `<<2` gain destroys 1701 of the 1705 voices, so the gain is right; saturating instead
+of wrapping does not rescue the tail either.
+
+- **The one place `public/data/` is not the 1998 bytes.** Fixed in the package
+  (`tools/fix-help1-buzz.ts`, idempotent, `--check` reports) rather than in the decoder, because
+  the alternative was a runtime rule inspecting every decoded sample in the game to catch one
+  known-bad block. `public/restored/README.md` explains why that directory exists rather than
+  patching data, and this is the deliberate exception to it.
+- **The edit is as small as the format allows:** only the delta bytes *inside help1's own
+  compressed block* are rewritten — 9045 bytes in `5687632..5697976`. No token changes kind or
+  size, so the package is the same length (9370022 B), `002.fft` is untouched, and all 48 other
+  sounds in the room decode bit-identically. Verified by decoding the package before and after.
+  (The tool's literal branch would rewrite a literal's control byte as well, keeping its high bit
+  clear; help1's tail happens to contain no literal, so in the shipped bytes every control byte is
+  untouched.)
+- **The original stays auditable**, which is the point of the rule being bent. `002.ffs` is
+  `sha256 5569e059dcf71255dbdac12725e46edea1ea4f478133673e187f7e5ee86ad26b` as ALTAR shipped it and
+  `sha256 0ff5d925a62ec4c14b6a1d32139afd8d60b7c56f0d47674671e6ea4c7de07716` after the patch, so
+  "the 1998 file plus exactly this edit" is checkable without excavating git history.
+- **ALTAR's own compressor agrees with the edit.** Re-encoding the patched sound with
+  `tools/lib/ffsEncode.ts` (ported from `PrZvuku/Uprevod.pas`) reproduces the patched bytes
+  exactly, help1 included — the hand-written deltas are precisely what the original compressor
+  emits for that waveform, so `public/restored/README.md`'s round-trip claim still holds.
+- **The length is unchanged**, deliberately. `Audio.duration()` reads `delka`, so `dialogy`'s
+  `voiceEndCount` still waits the full 6.69 s: the tail is silent, not absent. `help.cap` is a
+  recorded input stream paced against these voice lengths, so shortening a line would move every
+  line after it — including the `akce_load` the demo narrates with help7.
+- **Seven other samples clip and recover** (4–67 ms bursts inside loud speech, followed by
+  0.8–2.2 s of clean audio after the last wrap): `017/dr-4-stejne`, `030/re-k-spim`,
+  `030/re-k-au`, and four in 052. They sound like a tick at worst and are **left alone**. Of the
+  game's 1705 room voices, help1 is the only one that never recovers. The 113 global sounds
+  (`x00`-`x03`) were scanned too: `x00/sp-smrt1` wraps five times and then recovers with 274 ms of
+  clean tail, so nothing there needs doing either.
+- Pinned by `test/help1-tail.test.ts`, which asserts the silence, the unchanged length, a digest of
+  every other decoded sound in the package, and the SHA-256 of `002.ffs`.
+- **Bears on the open "beep right after the steel pipe drops" entry above — but not the way it
+  first looked.** `sp-ocel1` is a *global* sound (`x00`), not a room-002 one, and it decodes clean;
+  so does every other sound in `x00`-`x03` and in room 002. What this entry does undermine is that
+  entry's *reasoning*: it concludes "the beep is NOT a played sound file" from "no other sound was
+  logged for the beep". help1 is a counterexample to that step — a voice that IS logged, and that
+  6.2 s later turns into a sustained high-volume beep, in the same room, during the same
+  demonstration, matching its symptom text. Before more work goes into the degenerate-loop
+  hypothesis, establish when `sp-ocel1` fires relative to help1: if the two reports are the same
+  beep, that entry is already closed.
+
 ### 🟠 The keyboard did not count as activity while a fish was talking — fixed 2026-08-16
 
 Filed as a narrow ordering question (`dispatchHeldMove` busy-gates before `hracNespi`, while
