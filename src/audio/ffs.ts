@@ -13,6 +13,12 @@
  *                      cdif = sample - clast; clast = sample; emit sample
  *
  * All arithmetic is 16-bit wrapping signed, exactly as the original DX/CX/AX.
+ *
+ * One documented divergence, unreachable on the shipped data: control byte $80 (run
+ * count 0). The assembler's `@blok` sets BL:=0 and falls into `@pokr`, so `DEC BL; JNZ`
+ * makes it a run of 256; this emits zero samples and would desync. No $80 control byte
+ * occurs in any of the 1818 shipped sounds (scanned), so the two are equivalent for
+ * every input the game has — which is what "byte-exact" means here.
  */
 
 const toI16 = (v: number): number => (v << 16) >> 16;

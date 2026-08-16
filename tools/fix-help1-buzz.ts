@@ -37,6 +37,14 @@
  *     demonstration's pacing (help.cap is paced against these voice lengths) does not
  *     move by a tick.
  *
+ * So that "the 1998 file plus exactly this edit" stays checkable without excavating git
+ * history, both digests of `public/data/Sound/002.ffs` are recorded here:
+ *
+ *   as ALTAR shipped it  sha256 5569e059dcf71255dbdac12725e46edea1ea4f478133673e187f7e5ee86ad26b
+ *   after this patch     sha256 0ff5d925a62ec4c14b6a1d32139afd8d60b7c56f0d47674671e6ea4c7de07716
+ *
+ * Running this tool on the first reproduces the second byte for byte.
+ *
  * The rewritten deltas drive the decoder's own state to rest: a short cosine ramp takes
  * `clast` from wherever the speech left it down to zero, after which `cdif = 0` and
  * every remaining delta byte is zero — the codec's natural encoding of silence.
@@ -94,7 +102,7 @@ function patch(ffs: Uint8Array, zvuk: number, delka: number): boolean {
           cdif = i16(cdif + i16(d << 2));
           clast = i16(clast + cdif);
         } else {
-          if (n === CUT) rampFrom = clast;
+          if (n === CUT) rampFrom = clast; // whatever the speech left; the ramp starts here
           // The delta that would put `clast` exactly on target next sample.
           const wantCdif = target(n - CUT) - clast;
           const d = clampByte(Math.round((wantCdif - cdif) / 4));
@@ -118,6 +126,15 @@ function patch(ffs: Uint8Array, zvuk: number, delka: number): boolean {
       } else {
         // A literal in the tail: write sample 0 into both of its bytes, which lands
         // `clast` on zero exactly and leaves `cdif` at -clast, i.e. zero once settled.
+        //
+        // help1's tail contains no literal (its 44421 literals are all before CUT, and the
+        // token spanning CUT is a run of 127 starting exactly there), so this branch does not
+        // run on the shipped data. It is still written to be correct, because CUT is a
+        // hand-measured constant: `rampFrom` is captured here too, or a literal landing on the
+        // cut would leave it 0 and turn the ramp into a hard click; and this is the one place a
+        // CONTROL byte is rewritten, which is why the "no control byte changes" claim is stated
+        // for the shipped bytes rather than for the algorithm.
+        if (n === CUT) rampFrom = clast;
         if (ffs[pos - 1] !== 0 || ffs[pos] !== 0) changed = true;
         ffs[pos - 1] = 0;
         ffs[pos] = 0;
@@ -132,15 +149,22 @@ function patch(ffs: Uint8Array, zvuk: number, delka: number): boolean {
 }
 
 function main(): void {
-  const checkOnly = process.argv.includes('--check');
+  const args = process.argv.slice(2);
+  const unknown = args.filter((a) => a !== '--check');
+  if (unknown.length) {
+    // Silently ignoring a mistyped flag would WRITE the file when the caller meant not to.
+    console.error(`unknown argument(s): ${unknown.join(' ')} — the only flag is --check`);
+    process.exit(2);
+  }
+  const checkOnly = args.includes('--check');
   const fft = parseFft(new Uint8Array(readFileSync(fftPath)));
   const e = fft.find((x) => x.name === NAME);
   if (!e) throw new Error(`${NAME} is not in ${ROOM}.fft`);
 
-  const ffs = new Uint8Array(readFileSync(ffsPath));
-  const before = ffs.length;
+  const onDisk = new Uint8Array(readFileSync(ffsPath));
+  const onDiskSha = createHash('sha256').update(onDisk).digest('hex');
+  const ffs = Uint8Array.from(onDisk);
   const changed = patch(ffs, e.zvuk, e.delka);
-  if (ffs.length !== before) throw new Error('the package changed length — that must never happen');
 
   // Verify against the real decoder, not against the patcher's own bookkeeping.
   const pcm = decodeSound(ffs, e.zvuk, e.delka);
@@ -150,10 +174,11 @@ function main(): void {
   for (let i = 1; i < CUT; i++) peak = Math.max(peak, Math.abs(pcm[i]! - pcm[i - 1]!));
   if (peak > 40000) throw new Error('the speech before the cut was disturbed');
 
-  const sha = createHash('sha256').update(ffs).digest('hex');
   console.log(`${NAME}: ${e.delka} samples (${(e.delka / FFS_SAMPLE_RATE).toFixed(2)} s)`);
   console.log(`  silence from sample ${CUT + RAMP} (${((CUT + RAMP) / FFS_SAMPLE_RATE).toFixed(2)} s)`);
-  console.log(`  ${ROOM}.ffs: ${ffs.length} bytes, sha256 ${sha}`);
+  // Always the digest of what is ON DISK, so `--check` on an unpatched file cannot print a
+  // hash the file does not have.
+  console.log(`  ${ROOM}.ffs on disk: ${onDisk.length} bytes, sha256 ${onDiskSha}`);
 
   if (!changed) {
     console.log('  already patched — nothing to do');
@@ -164,7 +189,7 @@ function main(): void {
     process.exit(1);
   }
   writeFileSync(ffsPath, ffs);
-  console.log('  patched');
+  console.log(`  patched — sha256 ${createHash('sha256').update(ffs).digest('hex')}`);
 }
 
 main();

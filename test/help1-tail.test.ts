@@ -21,6 +21,7 @@ import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { parseFft } from '../src/data/fft.js';
 import { decodeSound, FFS_SAMPLE_RATE } from '../src/audio/ffs.js';
+import { encodeSound, quantize } from '../tools/lib/ffsEncode.js';
 
 const dataDir = join(__dirname, '..', 'public', 'data');
 const ffs = new Uint8Array(readFileSync(join(dataDir, 'Sound', '002.ffs')));
@@ -33,10 +34,11 @@ const WRAP = 40000;
 
 describe('KUFRIK help1 (patched package)', () => {
   it('keeps its full length, so the demonstration is paced as before', () => {
-    // 6.687 s. help.cap is a recorded input stream paced against these voice lengths:
-    // shorten one line and every line after it moves.
+    // 6.687 s, read from the UNTOUCHED 002.fft — which is what `Audio.duration()` reports
+    // and what `dialogy`'s voiceEndCount is derived from. help.cap is a recorded input
+    // stream paced against these voice lengths: shorten one line and every line after it
+    // moves. (`pcm.length` is not worth asserting: decodeSound allocates `delka` samples.)
     expect(help1.delka).toBe(147456);
-    expect(pcm.length).toBe(147456);
   });
 
   it('no longer wraps anywhere', () => {
@@ -64,20 +66,36 @@ describe('KUFRIK help1 (patched package)', () => {
   });
 
   it('left every other sound in the package alone', () => {
-    // The patch is confined to help1's compressed block, so the package is the same
-    // length and every other entry decodes from its original offset. A regression that
-    // re-encoded the package would move these and fail here.
+    // The patch is confined to help1's compressed block, so the package is the same length
+    // and every other entry still decodes from its 1998 offset to its 1998 audio.
+    //
+    // Pinned as a digest of the DECODED samples rather than of the file: unlike the
+    // file-level SHA below, this also fails if `decodeSound` itself ever changes, so it is
+    // a codec canary as well as a "nothing moved" check. A per-sound `wraps` heuristic was
+    // tried first and is worthless here — shifting an offset by two bytes leaves 26 of the
+    // 48 with zero wraps.
     expect(ffs.length).toBe(9370022);
     const others = fft.filter((e) => e.delka > 0 && e.name !== 'help1');
     expect(others.length).toBe(48);
+    const h = createHash('sha256');
     for (const e of others) {
       const s = decodeSound(ffs, e.zvuk, e.delka);
-      expect(s.length, e.name).toBe(e.delka);
-      // Every 1998 sample ends on a sane value; a shifted offset decodes to noise.
-      let wraps = 0;
-      for (let i = 1; i < s.length; i++) if (Math.abs(s[i]! - s[i - 1]!) > WRAP) wraps++;
-      expect(wraps, e.name).toBeLessThan(40);
+      h.update(e.name).update(new Uint8Array(s.buffer, s.byteOffset, s.length * 2));
     }
+    expect(h.digest('hex')).toBe(
+      'ed4fe8f0e22b0af768422ce810d9805684e36729a38b7c93eb861d3c18ec7d19',
+    );
+  });
+
+  it("is what ALTAR's own compressor would have emitted for this waveform", () => {
+    // The strongest fidelity evidence available: `ffsEncode` is ported from ALTAR's
+    // compressor (PrZvuku/Uprevod.pas) and re-encoding all 1818 shipped sounds reproduces
+    // the release bytes exactly (public/restored/README.md). Round-tripping the PATCHED
+    // help1 through it reproduces the patched block byte for byte too, so the hand-written
+    // deltas are not merely a stream that happens to decode to silence — they are the
+    // encoding the original tooling produces.
+    const re = encodeSound(quantize(pcm));
+    expect(Array.from(re)).toEqual(Array.from(ffs.subarray(help1.zvuk, help1.zvuk + re.length)));
   });
 
   it('pins the patched package, so a rebuild that drifts is a failure', () => {
