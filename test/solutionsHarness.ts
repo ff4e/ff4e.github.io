@@ -30,6 +30,18 @@ export interface ReplayResult {
   dead: boolean;
   blocked: number;
   steps: number;
+  /**
+   * How many recorded moves were actually APPLIED before the replay stopped. The loop
+   * aborts on a win and on a death, so this is < `steps` whenever either happened — and
+   * `blocked` is counted over THIS many moves, not over `steps`.
+   *
+   * It is reported because reading `blocked / steps` as a rate is a live trap. A
+   * case-swapped CHODBA replay scores "6 blocked of 3669", which reads like a room that
+   * almost works; it applied 15 moves before a fish died, so the real rate is 6 of 15.
+   * That reading is what put "the fish identities are swapped in CHODBA and POHON" on the
+   * table for a while — see the corridor note in `solutionsMapping.ts`.
+   */
+  applied: number;
   wonAt: number; // step index the win latched at (-1 if never)
   blockedAt: number[]; // step indices the engine rejected (for diagnosis)
 }
@@ -146,5 +158,5 @@ export function replaySolution(room: Room, jmeno: string, moves: string): Replay
   }
   if (engine.won && wonAt < 0) wonAt = mi;
 
-  return { won: engine.won, dead: room.anyFishDead, blocked: engine.blocked, steps: steps.length, wonAt, blockedAt };
+  return { won: engine.won, dead: room.anyFishDead, blocked: engine.blocked, steps: steps.length, applied: mi, wonAt, blockedAt };
 }

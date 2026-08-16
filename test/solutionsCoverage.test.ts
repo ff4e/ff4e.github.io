@@ -22,12 +22,13 @@ import { SOLUTION_ROOMS, KNOWN_DIVERGENT } from './solutionsMapping.js';
 import { recordedSlugs, recordedMoves } from './solutionsSource.js';
 
 /**
- * Recorded but deliberately NOT mapped to a room. FFNG redesigned POHON #58 as a 37x37
- * level with colored pistons (the port has the original 41x38 beast-push room), so
- * `rush.moves` cannot solve it; the recording is kept for the record. See the header of
- * `solutionsMapping.ts`.
+ * Recorded but deliberately NOT mapped to a room, each for a reason pinned in the long
+ * notes in `solutionsMapping.ts`: `rush` solves FFNG's own "Filled Car Park" (a level the
+ * 1998 original never had — POHON #58's real FFNG counterpart is `propulsion`, which the
+ * corpus has no save for), and `corridor` is a corrupt recording whose little fish needs
+ * 1398 columns of a 34-column room. Both stay in the corpus for the record.
  */
-const DELIBERATELY_UNMAPPED = new Set(['rush']);
+const DELIBERATELY_UNMAPPED = new Set(['corridor', 'rush']);
 
 describe('solution coverage', () => {
   const slugs = recordedSlugs();
@@ -36,8 +37,8 @@ describe('solution coverage', () => {
 
   it('the recorded corpus is exactly the pinned inventory', () => {
     expect(slugs.length, 'recorded solutions').toBe(65);
-    expect(mappedSlugs.length, 'solutions pinned to a room').toBe(64);
-    expect([...KNOWN_DIVERGENT].sort(), 'known port divergences').toEqual(['corridor']);
+    expect(mappedSlugs.length, 'solutions pinned to a room').toBe(63);
+    expect([...KNOWN_DIVERGENT].sort(), 'known port divergences').toEqual([]);
   });
 
   it('every mapped slug has a recording, and every unmapped recording is a deliberate one', () => {
@@ -76,19 +77,23 @@ describe('solution coverage', () => {
     // eslint-disable-next-line no-console
     console.log(
       `[solutions] coverage: ${cleanSlugs.length}/${ROOMS.length} rooms guarded by a clean solution ` +
-        `(${mapped.size} mapped, ${KNOWN_DIVERGENT.size} divergent: ${[...KNOWN_DIVERGENT].sort().join(', ')}).\n` +
+        `(${mapped.size} mapped, ${KNOWN_DIVERGENT.size} divergent` +
+        `${KNOWN_DIVERGENT.size ? `: ${[...KNOWN_DIVERGENT].sort().join(', ')}` : ''}).\n` +
         `[solutions] no recorded solution (${uncovered.length}): ${uncovered.join(', ')}`,
     );
 
     expect(cleanSlugs.length, 'rooms with a clean recorded solution').toBe(63);
-    // Pinned by name, not just by count: the 8 are four rooms awaiting a hand-recorded
-    // solution (SPUNT, ZELVA, BARELY, POHON), two gspec=9 push-out rooms the FFNG corpus
-    // ships nothing for (LODE, GRAL), and two non-playable screens (ZAVER, SCORE).
+    // Pinned by name, not just by count: the 9 are five rooms awaiting a hand-recorded
+    // solution (CHODBA, SPUNT, ZELVA, BARELY, POHON), two gspec=9 push-out rooms the FFNG
+    // corpus ships nothing for (LODE, GRAL), and two non-playable screens (ZAVER, SCORE).
+    // CHODBA and POHON each have a plausible-looking recording that is NOT theirs — read
+    // the two notes in `solutionsMapping.ts` before assuming either can simply be pinned.
     expect(uncovered, 'rooms with no recorded solution at all').toEqual([
       '#19 LODE',
       '#29 SPUNT',
       '#37 ZELVA',
       '#44 BARELY',
+      '#56 CHODBA',
       '#58 POHON',
       '#64 GRAL',
       '#71 ZAVER',

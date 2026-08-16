@@ -20,6 +20,27 @@ harness (`test/solutions.test.ts`) to verify each room is solvable in the port.
 - `mapping.tsv` — auto-derived slug → original room number + Jmeno (see
   `test/solutionsMapping.ts` for the pinned, disambiguated mapping actually used).
 
+## The two recordings that are NOT solutions: `corridor` and `rush`
+
+Both are kept because they are part of the corpus as published, and because deleting them
+would only invite someone to fetch them again and re-pin them. Neither is mapped to a room,
+and the reasons are written out at length in `test/solutionsMapping.ts`:
+
+- **`corridor`** is not a usable solution for CHODBA #56 — and the room is not at fault. The
+  layout matches FFNG's `corridor` exactly, including both fish start cells, but the
+  recording itself is impossible: replayed as pure kinematics its little fish sweeps **1398
+  columns** of a **34**-column room, in ~50 repeats of a `l r×24 d×18` block that never comes
+  back left. Its first blocked move in the port is index 25 of 3669 — the little fish's very
+  first move. `test/solutionsCorpus.test.ts` pins that measurement.
+- **`rush`** solves an FFNG-only level. `worlddesc.lua:990` calls it "Filled Car Park", in the
+  chapter "Branch of the New Generation" — one of nine levels the 1998 original never had.
+  POHON #58's real FFNG counterpart is `propulsion` (41×38, same two fish cells, en "The Real
+  Propulsion", chapter "UFO"), and `alfonz19/ff-ng-saves` ships no save for it.
+
+**Match a recording to a room on the level TITLE, not the slug.** FFNG groups levels under
+chapter names, and reading the chapter as the level name is exactly how POHON spent a long
+time recorded as "a level FFNG redesigned".
+
 ## The one edited recording: `windoze`
 
 Every other file is the corpus string verbatim. `windoze` is the corpus string with the

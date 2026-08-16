@@ -53,38 +53,27 @@ Severity: 🔴 breaks play · 🟠 visible/audible glitch · 🟡 minor/cosmetic
   cheaply kill click/pop artifacts; (c) capture ~3 s of output around the drop and inspect the
   beep's frequency/shape.
 
-## Room solvability net — the one confirmed same-layout divergence
+## Room solvability net — no confirmed same-layout divergence is open
 
 The solutions harness (`test/solutions.test.ts` → `test/solutionsHarness.ts` → the shared
 `src/core/stepEngine.ts`) replays known-good FFNG solution move-strings per room and asserts
-each ends **won, no death, 0 blocked moves** (currently 63/64 mapped solutions). Run standalone
-with `npm run test:solutions` (needs game data at `$FFNG_DATA`).
+each ends **won, no death, 0 blocked moves** (currently 63/63 mapped solutions). Run standalone
+with `npm run test:solutions` (the room data is committed under `public/data`).
 
-The room's FFNG level layout was verified to match the port's original `.ffr` exactly
-(room size + item positions align, per `fillets-ng-data` 1.0.1 on sources.debian.org), so
-this is a genuine behavioural gap, not a corpus/layout mismatch. It is skipped in the
-test via `KNOWN_DIVERGENT` in `test/solutionsMapping.ts` and must stay skipped until fixed.
-
-### CHODBA #56 (`corridor`) — autonomous robo-dog / darkness timing
-- Layout matches FFNG `corridor` (34×37) exactly.
-- The early moves replay fine; the divergence is **deep** in the 3669-move solution, once
-  the dark/light switch (`vypinac`) and the two autonomous robo-dogs (`item_light`
-  robright/robleft) come into play — their patrol desyncs from the recorded cadence and
-  the fish path is then blocked repeatedly.
-- **To resolve:** compare the port's dog/darkness behaviour against the **Delphi original**
-  (`URoom.pas` CHODBA), not FFNG — the port targets 1998 fidelity, and FFNG's tick/dog
-  timing may legitimately differ. Decide port-bug vs FFNG-vs-Delphi difference, then either
-  fix the port or record a Delphi-native solution instead.
+`KNOWN_DIVERGENT` in `test/solutionsMapping.ts` is **empty**. Both slugs it ever held turned
+out not to be port bugs: WIN #68 was a Delphi-vs-FFNG handover-timing difference (resolved,
+below) and CHODBA #56 was a corrupt recording (resolved, below). The set is kept because it is
+the right place for the next one — but a slug belongs in it only with a measurement showing the
+RECORDING is sound and the PORT is what disagrees.
 
 ## Room solvability net — coverage gaps (no committed solution)
 
 These playable rooms have **no known solution** to replay (they were never in the FFNG
 `ff-ng-saves` corpus, and the 1998 original ships none). They are simply not asserted.
 
-- **POHON #58** — the FFNG slug `rush` is a *redesigned* 37×37 level with colored pistons,
-  **not** the original 41×38 beast-push room, so its moves cannot solve the port's POHON.
-  `rush` is intentionally left unmapped in `test/solutionsMapping.ts`; `rush.moves` stays in
-  the corpus for the record only.
+- **CHODBA #56**, **POHON #58** — each has a *plausible-looking* corpus recording that is not
+  a usable solution for it. Read the two long notes in `test/solutionsMapping.ts` before
+  attempting to pin either; the short versions are in Resolved, below.
 - **SPUNT #29**, **ZELVA #37**, **BARELY #44** — playable, unsolved.
 - **LODE #19**, **GRAL #64** — playable, unsolved. Both are gspec=9 push-out rooms; they
   were previously written off as "loose geometric catch-all rooms many strings reach",
@@ -93,7 +82,10 @@ These playable rooms have **no known solution** to replay (they were never in th
 - **To resolve:** source a walkthrough (or play the port and capture `srecord` via the
   `__ff` debug hook), then add `<slug>.moves` to `test/fixtures/solutions/` and a pin in
   `SOLUTION_ROOMS`. A brute-force engine solver is infeasible (e.g. SPUNT is 50×35 with 10
-  movable objects — the state space is far too large).
+  movable objects — the state space is far too large). **Match on the level TITLE, not the
+  slug** — FFNG groups levels under chapter names, which is exactly how POHON got written
+  off (below).
+
 
 ## Rendering: 🟡 the `ai` tier's water wobble differs between the two backends
 
@@ -173,14 +165,65 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🔵 CHODBA #56 (`corridor`) was not a port bug — the recording is impossible — closed 2026-08-16
+
+Filed above for a long time as "the divergence is **deep** in the 3669-move solution, once the
+dark/light switch and the two autonomous robo-dogs come into play — their patrol desyncs from
+the recorded cadence", with a prescription to compare dog/darkness timing against `URoom.pas`.
+Every part of that was wrong, and following it would have started ~3 000 moves from anything.
+
+- **The divergence is not deep. It is move 25 of 3669** — the little fish's very first move,
+  right after 24 big-fish moves that replay perfectly. Nothing script-driven has happened yet.
+- **The room is the right one.** FFNG's `corridor` is 34×37 like the port's #56, and
+  `script/corridor/models.lua` places `fish_small` at (27,6) and `fish_big` at (4,5) — exactly
+  where the port's `.ffr` puts its little and big fish. The fish identities are not swapped
+  (`ModelFactory.cpp:110`/`118` confirm lowercase = small, uppercase = big).
+- **What blocks move 25** is ordinary geometry: the 5-cell heavy pillar plugging the ceiling
+  hole at x=30 falls at load and lands at (30,3)–(30,7), sealing the little fish's alcove. That
+  is identical in FFNG, so no port change can unblock it.
+- **The recording is not a recording.** A fish's X changes only through its own recorded
+  left/right move, so a recording's horizontal span is a lower bound on the width of the room
+  it came from. `corridor`'s little fish sweeps **1398 columns** of a **34**-column room, in
+  ~50 repeats of a `l r×24 d×18` block that never returns left — wider than the widest room in
+  the game by 27×. FFNG could not replay it either: `Room::makeMove` throws
+  `LoadException("load error - bad move")` on the first refused symbol, and `Unit::goRight`
+  only records a symbol for a move that succeeded or a turn. The file is verbatim from
+  `alfonz19/ff-ng-saves` `solved/corridor.lua`; what corrupted it upstream is unknown. Only the
+  little-fish channel is affected — the big-fish track spans a plausible 24×33.
+
+So CHODBA left `KNOWN_DIVERGENT`, and `corridor` left `SOLUTION_ROOMS`: the room now sits with
+the other rooms awaiting a hand-recorded solution. `test/solutionsCorpus.test.ts` pins the span
+measurement so the room cannot be re-filed as a port bug, and `ReplayResult` now reports how
+many moves were actually **applied** — reading `blocked / steps` as a rate is what made a
+case-swapped replay look like a near miss ("6 blocked of 3669" was 6 of 15 applied, after which
+a fish died) and put a fish-identity swap on the table in the first place.
+
+### 🔵 POHON #58 is uncovered for an ordinary reason, not because FFNG redesigned it — closed 2026-08-16
+
+`test/solutionsMapping.ts` and this file both said FFNG's `rush` was "a *redesigned* 37×37 level
+with colored pistons, **not** the original 41×38 beast-push room". `rush` is indeed not POHON,
+but it is not a redesign of it either — and the framing hid the fact that FFNG **does** ship a
+faithful POHON:
+
+- `script/propulsion/` is 41×38 with `fish_small` at (32,26) and `fish_big` at (14,12) —
+  cell-for-cell the port's #58 — and `worlddesc.lua:787` names it en "The Real Propulsion" /
+  cs "Skutečný pohon" under the chapter "UFO", which is `roomTable.ts:82` verbatim.
+- `worlddesc.lua:990` names `rush` "Filled Car Park" / "Zaplněné parkoviště" in the chapter
+  "Branch of the New Generation" — one of the nine levels FFNG added that the 1998 original
+  never had.
+
+So POHON is uncovered simply because `alfonz19/ff-ng-saves` ships no `propulsion` save. The
+chapter name is what caused the mix-up, which is the reason the coverage note now says to match
+on the level **title**, not the slug.
+
 ### 🔴 WIN #68 (`windoze`) — the gspec=5 bonus level was unplayed and unported — fixed 2026-08-16
 
 The room sat in `KNOWN_DIVERGENT` recorded as a port bug, with both fish dying in the bonus.
 It was never a port bug: the port's physics and its `WIN` script replay the bonus level
 exactly. What was wrong was the decoder, two unported `gspec=5` behaviours, and the
 recording, which encodes FFNG's control handover rather than Delphi's. Kept at length
-because CHODBA #56 above needs the same question asked of it, and this is what the answer
-looks like.
+because it is what the answer looks like when a "port bug" turns out not to be one — CHODBA
+#56 above was the next such case, and turned out not to be a port bug either.
 
 1. **The move decoder dropped a quarter of the solution.** `solutionsHarness.ts` silently
    discarded any character it could not decode, so the 214 `w/x/y/z` bonus moves (27% of

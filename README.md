@@ -235,8 +235,9 @@ CONTRIBUTING.md for how much checking a given change actually needs, and for the
 probes need macOS/Metal. A few unit tests still default to a private extraction of the
 original game (`~/.cache/ffng-orig`, via `$FFNG_DATA` / `$FF_DATA_DIR`) and skip without
 it — `rooms.test.ts`, `gral-pushout.test.ts`, `render-parity.test.ts`,
-`enhanced-mapping.test.ts` — 146 assertions (measured: 148 skip without any data, 2 of which
-are the known room divergences that skip regardless). The solvability net used to be among
+`enhanced-mapping.test.ts` — 146 assertions that skip without any data. (The count used to
+read 148, the extra two being `it.skip`s for known room divergences that skipped even with
+data; `KNOWN_DIVERGENT` is empty now, so they are gone.) The solvability net used to be among
 them and no longer is; the others could be unskipped the same way.
 
 ### What actually guarantees the rooms are still solvable
@@ -361,12 +362,18 @@ assertions.
 - **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test` and so by CI):
   the **solvability net** — replays committed known-good FFNG solution move-strings
   (`test/fixtures/solutions/`) per room through the shared step-engine and asserts each ends
-  **won, no death, 0 blocked**, off the repo's own `public/data` (`$FFNG_DATA` overrides). 63/64
-  mapped solutions pass; the remaining gaps and the one confirmed same-layout divergence (CHODBA
-  #56) are documented in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+  **won, no death, 0 blocked**, off the repo's own `public/data` (`$FFNG_DATA` overrides). All
+  63 mapped solutions pass; the 9 rooms with no usable recording are documented in
+  [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+
+- **`test/solutionsCorpus.test.ts`**: asks whether a recording is even POSSIBLE before asking
+  whether the port replays it. A fish's X moves only on its own recorded left/right move, so a
+  recording's horizontal span is a lower bound on the width of the room it came from. This is
+  what CHODBA #56 needed: it sat filed as a port bug while its little fish swept 1398 columns
+  of a 34-column room.
 
 - **`test/solutionsCoverage.test.ts`**: the inventory half of that net — pins the corpus
-  (65 recorded / 64 mapped / 1 divergent / 63 clean), names the 8 rooms with no recording, and
+  (65 recorded / 63 mapped / 0 divergent / 63 clean), names the 9 rooms with no recording, and
   checks every mapping points at a distinct real room. Needs no room data at all, so a room
   quietly losing its solution fails even in a stripped checkout. `test/solutionsSource.ts` is the
   single accessor for where recordings live, so the assertions survive them moving into the room

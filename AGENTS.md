@@ -186,7 +186,7 @@ This is the trap the repo has already articulated:
 A test that reads its expectation from the same code it is testing will pass happily while the game changes
 underneath it. So know what each net is actually watching:
 
-- **`test/solutions.test.ts`** replays the committed FFNG solutions (64 of the 72 rooms have one) through the shared step engine. Strong
+- **`test/solutions.test.ts`** replays the committed FFNG solutions (63 of the 72 rooms have one) through the shared step engine. Strong
   evidence about physics and room scripts. It exercises `src/core/stepEngine.ts` — **not** `src/app/`.
 - **The two mutation harnesses** (`tools/mutate-room-walk.mjs`, `tools/mutate-gl-room-ai.mjs`) break one
   rule at a time and assert the suite goes red. They are the strongest evidence in the repo — but they
