@@ -62,6 +62,8 @@ import { SubtitleSystem } from '../render/subtitles.js';
 import { renderTetris, tetrisRgba } from '../render/tetrisRender.js';
 import type { TetrisArt } from '../render/tetrisRender.js';
 import { select } from './dom.js';
+import { armSolve, setSolvemode } from './solveMode.js';
+import type { SolveArmError } from './solveMode.js';
 
 /** What the cheats see of the running game. Read-only but for the two setters. */
 export interface CheatsHost {
@@ -149,6 +151,32 @@ export function devWinRoom(): void {
   if (!host.devEnabled || host.screen !== 'room' || !host.engine || !host.room) return;
   if (host.engine.phase !== 'idle' || host.room.won) return;
   host.engine.triggerWin();
+}
+
+/** Why a solution replay could not be started, if it could not. `null` means it is running. */
+export type SolveStartResult = { error: SolveArmError | 'unavailable'; detail: string } | null;
+
+/**
+ * Dev-only: play the current room from its own recorded solution through the real game
+ * loop — the live counterpart of the headless solvability net. The driver, the abort
+ * conditions and the speed multiplier are `solveMode.ts`; this is only the dev gate and
+ * the "which room am I in" lookup, kept beside `devWinRoom` because both are dev-bar
+ * actions on the room currently on screen.
+ *
+ * `speed` shortens the logic tick so a 6 045-move recording is not minutes of watching;
+ * 1 is real speed, which is the point of the mode and the default.
+ */
+export function devSolveRoom(speed = 1): SolveStartResult {
+  if (!host.devEnabled || host.screen !== 'room' || !host.engine || !host.room) {
+    return { error: 'unavailable', detail: 'needs the dev pane enabled and a room on screen' };
+  }
+  if (host.room.won) return { error: 'unavailable', detail: 'the room is already won' };
+  const jmeno = host.activeScript?.def.name;
+  if (!jmeno) return { error: 'unavailable', detail: 'the room has no script, so no solution to look up' };
+  const armed = armSolve(jmeno, speed);
+  if ('error' in armed) return armed;
+  setSolvemode(armed);
+  return null;
 }
 
 // ---------------------------------------------------------------------------

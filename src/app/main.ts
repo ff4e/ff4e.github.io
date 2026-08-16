@@ -78,6 +78,7 @@ import {
   startCutscene,
   startShowmode,
 } from './cutscene.js';
+import { cancelSolve, inAutoPlay } from './solveMode.js';
 import {
   closeMapOverlay,
   dismissLegImage,
@@ -1480,7 +1481,7 @@ window.addEventListener('keydown', (e) => {
   // which the tutorial fish teach ("1st-m-backspace"). It is NOT a single-move undo.
   if (e.code === 'Backspace') {
     e.preventDefault();
-    restartRoom();
+    restartRoom(); // ends any solution replay too: it calls endShowmode()
     return;
   }
   if (e.code === 'F2') {
@@ -1496,6 +1497,7 @@ window.addEventListener('keydown', (e) => {
 
   if (e.code === 'Escape') {
     e.preventDefault();
+    cancelSolve(); // always an escape hatch: an auto-play the player cannot stop is a trap
     if (ui.screen === 'map') {
       if (ui.mapInfoRoom !== null) closeMapInfo(); // close the record panel first (daCancel)
       else if (ui.mapOverlay !== 'none') closeMapOverlay(); // close an open menu overlay
@@ -1507,7 +1509,7 @@ window.addEventListener('keydown', (e) => {
   if (activeScript?.s.natvrdo === 1) return; // possessed by ZELVA: input is ignored
   if (activeScript?.s.zavermode) return; // ZAVER finale cutscene: only restart/exit above work
   if (inShowmode()) return; // KUFRIK demonstration: fish keys blocked (Backspace/Escape end it above)
-  if (inReplay()) return; // map "Replay" playback: player fish keys are blocked
+  if (inAutoPlay()) return; // "Replay"/solution playback: player fish keys are blocked
   if (loadmode) return; // fast-forward load in progress: ignore fish keys (Backspace above aborts it)
   if (e.code === 'Space') {
     e.preventDefault();
@@ -1643,8 +1645,8 @@ canvas.addEventListener('mousedown', (e) => {
     e.preventDefault(); // KUFRIK demonstration: mouse input ignored while it plays
     return;
   }
-  if (ui.screen === 'room' && inReplay()) {
-    e.preventDefault(); // map "Replay" playback: mouse input ignored while it plays
+  if (ui.screen === 'room' && inAutoPlay()) {
+    e.preventDefault(); // "Replay"/solution playback: mouse input ignored while it plays
     return;
   }
   if (ui.screen === 'room' && loadmode) {
@@ -1818,8 +1820,8 @@ panelCanvas.addEventListener('mousedown', (e) => {
     e.preventDefault(); // modal minigame: the control panel is inert behind it
     return;
   }
-  if (inReplay()) {
-    e.preventDefault(); // map "Replay" playback: the control panel is inert
+  if (inAutoPlay()) {
+    e.preventDefault(); // "Replay"/solution playback: the control panel is inert
     return;
   }
   // Right-click anywhere on the panel toggles the options sub-panel (Uovl.pas:633-639),
