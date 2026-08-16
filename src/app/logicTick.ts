@@ -12,7 +12,8 @@ import { advanceReplay, advanceShowmode, cutsceneCaption, disposeAiKufr, inRepla
 import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, room, roomDepth, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
-import { advanceLoadmode, dispatchHeldMove } from './movement.js';
+import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
+import { advanceSolve, solvemode, tickSolveWatchdog } from './solveMode.js';
 import { subsOn } from './playerSettings.js';
 import { ui } from './screenState.js';
 import { EFFECT_VOL, LOGIC_MS } from './stageGeometry.js';
@@ -252,6 +253,7 @@ export function step(): boolean {
     !room.anyFishDead &&
     !showmode &&
     !replaymode &&
+    !solvemode &&
     activeScript?.s.natvrdo !== 1 &&
     !activeScript?.s.zavermode
   ) {
@@ -264,5 +266,27 @@ export function step(): boolean {
   if (engine.phase === 'idle' && !room.won && showmode) advanceShowmode();
   // Map "Replay": play back the best solution one move per idle tick (daReplay).
   if (engine.phase === 'idle' && !room.won && replaymode) advanceReplay();
+  // Dev-only solution replay: the same one-move-per-idle-tick shape, off the room's own
+  // recorded solution, aborting loudly on trouble instead of slipping back to the map.
+  // The win is NOT excluded here the way it is above — `advanceSolve` needs the tick the
+  // room was won on to latch `won`, which is what tells the dev bar the run succeeded
+  // rather than merely stopped. It plays no move on that tick.
+  if (solvemode) {
+    const eng = engine;
+    if (eng.phase === 'idle') {
+      advanceSolve({
+        anyFishDead: room.anyFishDead,
+        won: room.won,
+        play: (which, dir) => {
+          eng.active = which;
+          return tryStep(which, dir);
+        },
+        wake: hracNespi,
+      });
+    }
+    // Every tick, not just the idle ones: a run wedged mid-swim never reaches the branch
+    // above, and a watchdog that cannot see the hang it is for is not a watchdog.
+    tickSolveWatchdog();
+  }
   return false;
 }

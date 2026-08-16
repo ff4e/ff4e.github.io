@@ -594,6 +594,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. |
 | `cutscene.ts` | 5.8 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
+| `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the fatal screen and the resize handler. |

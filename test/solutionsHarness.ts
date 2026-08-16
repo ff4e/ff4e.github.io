@@ -4,26 +4,19 @@
  * physics + prog() + win-hook path the browser game loop uses), reporting whether
  * the room is solved cleanly (won, no death, no blocked move).
  *
- * Move encoding: lowercase = little (small) fish, UPPERCASE = big; u/d/l/r = up/
- * down/left/right. "Turn-in-place first" (a horizontal press while facing away only
- * flips facing, consuming no cell) matches the port, so step counts line up.
- *
- * WIN #68's bonus level adds a SECOND symbol set, w/x/y/z (+ W/X/Y/Z). FFNG models the
- * two elderly fish as extra units whose control symbols are spelled out in the model
- * kind — `fish_extra-wxyz` / `fish_EXTRA-WXYZ` in `script/windoze/models.lua` — and
- * `ModelFactory::parseExtraControlSym` reads those four characters as (up, down, left,
- * right) in that order. Hence w=up, x=down, y=left, z=right, lowercase = `staramala`
- * and uppercase = `staravelka`. The Delphi original has no second set: ZapniBonuslevel
- * (URoom.pas:23700) re-points Little/Big at the elderly pair, so the SAME two slots are
- * being driven and the letters simply map onto little/big.
+ * Move encoding lives in `src/core/solutionMoves.ts`, which this shares with the dev-bar
+ * solution replay — including WIN #68's second control set. "Turn-in-place first" (a
+ * horizontal press while facing away only flips facing, consuming no cell) matches the
+ * port, so step counts line up.
  */
 import { Room } from '../src/core/room.js';
-import { Dir } from '../src/core/dir.js';
 import { Script } from '../src/core/script.js';
+import { decodeMoves } from '../src/core/solutionMoves.js';
+import type { Which } from '../src/core/solutionMoves.js';
 import { StepEngine } from '../src/core/stepEngine.js';
 import { roomScript } from '../src/rooms/index.js';
 
-export type Which = 'little' | 'big';
+export type { Which };
 
 export interface ReplayResult {
   won: boolean;
@@ -53,25 +46,6 @@ export interface ReplayResult {
   consumed: number;
   wonAt: number; // step index the win latched at (-1 if never)
   blockedAt: number[]; // step indices the engine rejected (for diagnosis)
-}
-
-/** Direction letters per control set: the standard fish pair, then WIN's elderly pair. */
-const MOVE_LETTERS: Readonly<Record<string, number>> = {
-  u: Dir.up,
-  d: Dir.down,
-  l: Dir.left,
-  r: Dir.right,
-  w: Dir.up,
-  x: Dir.down,
-  y: Dir.left,
-  z: Dir.right,
-};
-
-export function decodeMove(ch: string): { which: Which; dir: number } | null {
-  const l = ch.toLowerCase();
-  const dir = MOVE_LETTERS[l];
-  if (dir === undefined) return null;
-  return { which: (ch === l ? 'little' : 'big') as Which, dir };
 }
 
 /** Deterministic RNG so replays never vary (the engine only uses it for cheer/bubble sound choice). */
@@ -111,19 +85,15 @@ export function replaySolution(room: Room, jmeno: string, moves: string): Replay
 
   // An undecodable character used to be dropped here silently, which is how 214 of
   // windoze's 783 moves (27% of the solution) went missing without the replay ever
-  // saying so — it "passed" a quarter of a room it never played. A recording that
-  // grows a character this decoder does not know is a bug in one of the two, so say
-  // so loudly rather than replaying a shorter solution.
-  const steps = [...moves].map((ch, i) => {
-    const m = decodeMove(ch);
-    if (!m) {
-      throw new Error(
-        `undecodable move character ${JSON.stringify(ch)} at index ${i} of the ${jmeno} recording ` +
-          `(known: ${Object.keys(MOVE_LETTERS).join('')} in either case)`,
-      );
-    }
-    return m;
-  });
+  // saying so — it "passed" a quarter of a room it never played. `decodeMoves` throws
+  // instead, so a recording that grows a character the decoder does not know fails
+  // rather than replaying a shorter solution.
+  let steps;
+  try {
+    steps = decodeMoves(moves);
+  } catch (e) {
+    throw new Error(`${(e as Error).message} of the ${jmeno} recording`);
+  }
   let wonAt = -1;
   const blockedAt: number[] = [];
 
