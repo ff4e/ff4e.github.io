@@ -95,7 +95,7 @@ import {
   cutsceneSubs,
   subs,
 } from './gameState.js';
-import { cancelSolve, solveStatus } from './solveMode.js';
+import { cancelSolve, setSolveSpeed, solveStatus } from './solveMode.js';
 import { renderer, setRendererValue } from './renderSettings.js';
 import { ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
@@ -539,6 +539,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      */
     solveRoom: (speed = 1) => devSolveRoom(speed),
     solveStatus: () => solveStatus(),
+    /** Speed up a run already going — the test knob half of the speed decision. */
+    solveSetSpeed: (n: number) => setSolveSpeed(n),
     solveCancel: () => cancelSolve(),
     bestRecord: (n: number) => host.bestRecord(n) ?? null,
     bestRecords: () => Object.fromEntries(host.bestRecords),

@@ -141,12 +141,21 @@ export function cheatSolveRoom(): void {
   }
 }
 
-/** Dev-only: genuinely win the current room (dev-bar "Win room" button / the W hotkey).
- *  Unlike cheatSolveRoom (xwemaketherulez), which jumps straight to the map and marks the
- *  room "cheated", this drives the real win path — engine.triggerWin -> onWin bookkeeping
- *  (marks the room solved) -> the auto-return countdown -> returnFromRoom — so an
- *  end-of-leg room reveals its story page exactly as a real solve would. Meant purely as a
- *  spot-check aid for the win/story-page flow; armed only while the dev pane is enabled. */
+/**
+ * Dev-only: genuinely win the current room. Unlike cheatSolveRoom (xwemaketherulez), which
+ * jumps straight to the map and marks the room "cheated", this drives the real win path —
+ * engine.triggerWin -> onWin bookkeeping (marks the room solved) -> the auto-return
+ * countdown -> returnFromRoom — so an end-of-leg room reveals its story page exactly as a
+ * real solve would. Armed only while the dev pane is enabled.
+ *
+ * It has NO button and no hotkey any more: the dev bar's button now plays the room's
+ * recorded solution instead (`devSolveRoom`), which is the more useful thing to have a
+ * button for. This survives as `__ff.winRoom()` because a solution replay cannot replace
+ * it — reaching a story page is still the only way to spot-check that flow, and the room
+ * that proves it is ZAVER #71, the endgame, which has no recorded solution at all because
+ * it is not a puzzle. `tools/test-zaverpage.mjs` and `tools/test-legimage.mjs` are the
+ * callers.
+ */
 export function devWinRoom(): void {
   if (!host.devEnabled || host.screen !== 'room' || !host.engine || !host.room) return;
   if (host.engine.phase !== 'idle' || host.room.won) return;

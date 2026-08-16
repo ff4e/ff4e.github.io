@@ -18,8 +18,10 @@
  */
 import { ROOMS } from '../data/roomTable.js';
 import { isFitMode } from './layout.js';
-import { devWinRoom } from './cheats.js';
-import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, winRoomBtn } from './dom.js';
+import { devSolveRoom } from './cheats.js';
+import { solveStatus } from './solveMode.js';
+import { solutionFor } from '../rooms/index.js';
+import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn } from './dom.js';
 import { relayout } from './loadingUi.js';
 import { settings } from './playerSettings.js';
 import { saveSettings } from '../core/settings.js';
@@ -106,10 +108,13 @@ export function initDevBar(h: DevBarHost): void {
     el.checked = renderOnDirty;
     el.addEventListener('change', () => setRenderOnDirty(el.checked));
   }
-  if (winRoomBtn) {
-    const el = winRoomBtn;
+  if (solveRoomBtn) {
+    const el = solveRoomBtn;
     el.addEventListener('click', () => {
-      devWinRoom();
+      const failed = devSolveRoom();
+      // Only ever reachable when the button is enabled, so a failure here is a real
+      // surprise and belongs on the button rather than in the console.
+      if (failed) el.title = `cannot run: ${failed.detail}`;
       el.blur(); // drop button focus so a Space/Enter dismiss doesn't re-click it
     });
   }
@@ -134,4 +139,50 @@ export function initDevBar(h: DevBarHost): void {
     };
     watchDpr();
   }
+}
+
+/**
+ * Reflect the solution replay on its button: whether it can run here, how far it has got,
+ * and why it stopped.
+ *
+ * The disabled state is the honest one — a button that looks live and does nothing is
+ * worse than a greyed one — and the reason goes in the tooltip because the two cases are
+ * different problems. Today `missing` is only ZAVER #71 and SCORE #72, which are the
+ * ending and the results screens rather than puzzles, so there is nothing to go and fix;
+ * `undecodable` would mean a recording grew a character the decoder does not know, which
+ * is a real bug in one of the two.
+ *
+ * Called from the render loop only while a run is going, and on room change. It touches
+ * the DOM only when a string actually changed, so a 6 045-move run is not 6 045 layout
+ * invalidations.
+ */
+export function syncSolveBtn(): void {
+  const el = solveRoomBtn;
+  if (!el) return;
+  const s = solveStatus();
+  const jmeno = ROOMS[Number(select.value) - 1]?.jmeno;
+  const avail = jmeno ? solutionFor(jmeno) : { known: 'missing' as const };
+
+  let label = 'Solve room';
+  let title =
+    'Play the room from its recorded solution, live: real speed, fish speak, moves recorded. ' +
+    'Stops and says so if anything goes wrong.';
+  let disabled = avail.known !== 'ok';
+  if (disabled) title = `No recorded solution for ${jmeno ?? 'this room'} — it is not a puzzle, so there is none to record.`;
+
+  if (s.running) {
+    label = `Solving ${s.idx}/${s.total}`;
+    title = `Playing ${s.jmeno}'s recorded solution — press Escape to stop.`;
+    disabled = true;
+  } else if (s.abort) {
+    label = `✗ ${s.abort.reason} @ ${s.abort.at + 1}/${s.abort.of}`;
+    title = `${s.jmeno}: ${s.abort.detail}`;
+  } else if (s.won) {
+    label = `✓ solved in ${s.total}`;
+    title = `${s.jmeno} played its recorded solution to a win.`;
+  }
+
+  if (el.textContent !== label) el.textContent = label;
+  if (el.title !== title) el.title = title;
+  if (el.disabled !== disabled) el.disabled = disabled;
 }

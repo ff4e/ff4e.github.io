@@ -127,6 +127,16 @@ export function solveSpeed(): number {
   return inSolvemode() ? Math.max(1, solvemode!.speed) : 1;
 }
 
+/**
+ * Change the multiplier of a run already going. The dev bar starts every run at real
+ * speed, because watching it at real speed is the point; this is the other half of D5 —
+ * the knob for when it is being used as a test rather than watched, which is what the UI
+ * probe does. Clamped so a stray 0 cannot stop the clock.
+ */
+export function setSolveSpeed(n: number): void {
+  if (solvemode) solvemode.speed = Math.max(1, Math.min(50, Math.floor(n) || 1));
+}
+
 export type SolveArmError = 'missing' | 'undecodable';
 
 /**
