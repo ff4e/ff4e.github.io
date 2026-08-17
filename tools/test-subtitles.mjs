@@ -256,6 +256,45 @@ await withApp(async ({ p, expect }) => {
   );
   await p.evaluate(() => window.__ff.fitMode('medium'));
   await p.evaluate(() => window.__ff.clearSubtitles());
+
+  // ── the readable band ──
+  //
+  // Subtitle size tracks the stage, which tracks the window, and a window's size is
+  // bounded by nothing: measured across real displays the ai line ran from 23.5 CSS px in
+  // a small laptop window to 70 on an unscaled 4K desktop. The band holds both ends.
+  //
+  // Checked on the FONT size, not on what the ai tier finally paints: the tier's shrink
+  // is a transform on the layer, and it has to stay a constant factor on top of the band
+  // rather than be flattened into it (test-aisubs owns that ratio, and reads 1.00 instead
+  // of 0.75 when a clamp is applied past the shrink).
+  const bandPx = async () =>
+    p.evaluate(() => {
+      const el = document.getElementById('domsubs')?.children[0];
+      return el ? parseFloat(getComputedStyle(el).fontSize) : null;
+    });
+  const [minPx, maxPx] = await p.evaluate(() => window.__ff.subPxBand());
+  await p.evaluate(() => window.__ff.setGraphics('ai'));
+  for (const [label, w, h, side] of [
+    ['a 4K desktop', 3840, 2030, 'ceiling'],
+    ['a small window', 900, 560, 'floor'],
+  ]) {
+    await p.setViewportSize({ width: w, height: h });
+    await p.evaluate(() => window.__ff.clearSubtitles());
+    await tickSleep(p, 3);
+    // Short, so the fit-to-room shrink is not in play. It has to stay out of it for the
+    // FLOOR especially: a line that does not fit must still be allowed below the floor,
+    // because a clipped word is worse than a small one.
+    await p.evaluate(() => window.__ff.pushSubtitle('Careful!', 'M'));
+    await p.waitForFunction(() => (document.getElementById('domsubs')?.children.length ?? 0) > 0);
+    await tickSleep(p, 3);
+    const px = await bandPx();
+    expect(
+      px !== null && px <= maxPx + 0.01 && px >= minPx - 0.01,
+      `[${label}] the subtitle stays in the ${minPx}-${maxPx}px band (${px === null ? 'no line' : px.toFixed(1) + 'px'}, ${side})`,
+    );
+  }
+  await p.evaluate(() => window.__ff.setGraphics('enhanced'));
+  await p.evaluate(() => window.__ff.clearSubtitles());
   await p.setViewportSize(SUITE_VIEWPORT);
   await tickSleep(p, 3);
 

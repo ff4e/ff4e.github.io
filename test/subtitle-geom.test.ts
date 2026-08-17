@@ -8,7 +8,7 @@
  * milliseconds a test rather than in a ~10 s probe — which is the reason the module is pure
  * and import-free.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   BORDERTITLE,
   SUB_FONT_PX,
@@ -19,11 +19,15 @@ import {
   WAVE_PER_TICK,
   bevelBottomRgb,
   bevelSpan,
+  SUB_MAX_PX,
+  SUB_MIN_PX,
+  clampTextScale,
   fitBlockFontPx,
   fitFontPx,
   fitScreenW,
   lineAnchor,
   lineOffset,
+  setSubPxBand,
   strokeWidth,
   subtitleScale,
   waveDy,
@@ -223,6 +227,54 @@ describe('subtitleScale — constant on screen, but never too big for the room',
     for (const box of [0.5, 1, 1.5, 2, 3.5]) {
       expect(subtitleScale(stageScale, box)).toBeLessThanOrEqual(box);
     }
+  });
+});
+
+describe('clampTextScale — hold the font in a readable band', () => {
+  const rendered = (textScale) => clampTextScale(textScale) * SUB_FONT_PX;
+
+  it('pulls an oversized line down to the ceiling', () => {
+    expect(rendered(3.4)).toBeCloseTo(SUB_MAX_PX, 10); // an unscaled 4K desktop
+  });
+
+  it('lifts an undersized line up to the floor', () => {
+    expect(rendered(0.3)).toBeCloseTo(SUB_MIN_PX, 10); // a small window
+  });
+
+  // The common case has to be left alone, or this is not a clamp but a resize.
+  it('leaves a size already inside the band exactly as it was', () => {
+    const inBand = (SUB_MIN_PX + SUB_MAX_PX) / 2 / SUB_FONT_PX;
+    expect(clampTextScale(inBand)).toBe(inBand);
+  });
+
+  // The band is on the FAITHFUL size. The ai tier draws a fraction of that with a
+  // container transform, and that fraction has to survive the clamp — pinning both tiers
+  // into one band collapses aiSubScale to nothing, which is what happened when this was
+  // first written against the rendered size. Asserted here so the unit suite says it too,
+  // and not only test-aisubs at ~10s.
+  it('leaves the tier ratio alone: two sizes clamped the same way keep their ratio', () => {
+    const AI = 0.75;
+    for (const textScale of [0.3, 1.07, 3.4]) {
+      const faithful = clampTextScale(textScale) * SUB_FONT_PX;
+      expect((faithful * AI) / faithful).toBeCloseTo(AI, 10);
+    }
+  });
+});
+
+describe('setSubPxBand — the band is tunable, but not into nonsense', () => {
+  const before = [SUB_MIN_PX, SUB_MAX_PX];
+  afterEach(() => setSubPxBand(before[0], before[1]));
+
+  it('takes a sane band', () => {
+    setSubPxBand(20, 30);
+    expect([SUB_MIN_PX, SUB_MAX_PX]).toEqual([20, 30]);
+  });
+
+  it('refuses a reversed or non-positive band, leaving the old one', () => {
+    setSubPxBand(40, 20);
+    expect([SUB_MIN_PX, SUB_MAX_PX]).toEqual(before);
+    setSubPxBand(0, 30);
+    expect([SUB_MIN_PX, SUB_MAX_PX]).toEqual(before);
   });
 });
 

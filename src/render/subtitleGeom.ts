@@ -206,6 +206,64 @@ export function subtitleScale(stageScale: number, boxScale: number): number {
 }
 
 /**
+ * The readable band a subtitle is held inside, in CSS pixels.
+ *
+ * The size otherwise tracks the stage, which tracks the window, and a window's size is
+ * not bounded by anything. Measured across plausible displays the rendered `ai` line runs
+ * from 23.5 CSS px in a small laptop window to 70 CSS px on an unscaled 4K desktop — a
+ * 2.9x spread against a picture designed at 800x600, where 70 px is a line taller than an
+ * eighth of the room.
+ *
+ * Note what this can and cannot do. A CSS pixel is already the DPI-independent unit — it
+ * is what `devicePixelRatio` divides out — and there is no true physical unit available:
+ * CSS `pt`/`mm`/`in` are fixed multiples of `px` on a screen (1in === 96px by
+ * definition), and nothing in a browser reports the display's actual size. So this cannot
+ * make the text a constant number of millimetres. What it does is bound the size relative
+ * to the game picture, which also narrows the physical spread as a side effect: across
+ * the same displays, 5.3-10.9 mm becomes 5.9-9.8 mm. The residue is OS scaling, which is
+ * the player's own choice about how big everything on their screen should be.
+ *
+ * The band is on the FAITHFUL font size; the `ai` tier then draws its own fraction of
+ * that (`aiSubScale`), so its line sits proportionally below the band.
+ *
+ * `let`, for the same reason as `aiSubScale`: it is a look decision and has to be
+ * judgeable on screen without a rebuild (`__ff.subPxBand()`).
+ */
+export let SUB_MIN_PX = 26;
+export let SUB_MAX_PX = 40;
+
+/** Set the band (debug hook). Rejects a reversed or non-positive pair. */
+export function setSubPxBand(min: number, max: number): void {
+  if (!(min > 0) || !(max >= min)) return;
+  SUB_MIN_PX = min;
+  SUB_MAX_PX = max;
+}
+
+/**
+ * `textScale`, held so the font size lands inside the band.
+ *
+ * Applied to the FAITHFUL size — the font, before the `ai` tier's container shrink — and
+ * deliberately not to the size the player ends up seeing. Clamping the rendered size was
+ * tried first, on the reasoning that a readability band should be about what is on the
+ * screen, and it is wrong: the shrink is what makes the `ai` tier's subtitle smaller than
+ * the faithful one (`aiSubScale`), and pinning BOTH tiers into one band collapses that
+ * difference to nothing. It was caught by test-aisubs, whose whole subject is that ratio:
+ * it read 1.00 where it must read 0.75. So the band sizes the font and the tier shrink
+ * stays a constant factor on top of it.
+ *
+ * Applied BEFORE the fit budget is computed, so the fit is decided against the size the
+ * text will really be drawn at.
+ *
+ * The floor is best-effort, and cannot be otherwise: `fitFontPx` may still shrink a line
+ * below it, and must be allowed to, because a line that does not fit the room is a
+ * clipped word. In a genuinely small window the room is small too, and there is no size
+ * that is both bigger and still inside it — the honest fix there is a bigger window.
+ */
+export function clampTextScale(textScale: number): number {
+  return Math.min(SUB_MAX_PX / SUB_FONT_PX, Math.max(SUB_MIN_PX / SUB_FONT_PX, textScale));
+}
+
+/**
  * The width `fitFontPx` must fit inside, when the text is drawn at a different scale
  * from the content it sits on.
  *

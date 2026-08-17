@@ -28,6 +28,7 @@ import {
   VECTOR_GEOM,
   bevelBottomRgb,
   bevelSpan,
+  clampTextScale,
   fitBlockFontPx,
   fitScreenW,
   lineAnchor,
@@ -242,6 +243,11 @@ export function syncDomSubtitles(
   // be scaled down by the tier's transform.
   host.style.transform = L.lastXform ? `${L.lastXform} ${scaleT}`.trim() : scaleT;
 
+  // Hold the font inside the readable band, before `fitW` below so the fit is decided
+  // against the size the text will really be. The band is on the faithful size and NOT on
+  // what the player sees: the tier's shrink above is what makes an `ai` subtitle smaller
+  // than a faithful one, and clamping past it would erase that (see `clampTextScale`).
+  textScale = clampTextScale(textScale);
   const fontPx = VECTOR_GEOM.fontPx * textScale;
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
   // The width a row is fitted inside. Not the same thing as the font any more, so it is
