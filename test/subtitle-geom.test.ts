@@ -231,33 +231,61 @@ describe('subtitleScale — constant on screen, but never too big for the room',
 });
 
 describe('clampTextScale — hold the font in a readable band', () => {
-  const rendered = (textScale) => clampTextScale(textScale) * SUB_FONT_PX;
+  const NO_CAP = Infinity; // a room big enough that the floor is free to act
+  const px = (textScale, maxScale = NO_CAP) => clampTextScale(textScale, maxScale) * SUB_FONT_PX;
 
   it('pulls an oversized line down to the ceiling', () => {
-    expect(rendered(3.4)).toBeCloseTo(SUB_MAX_PX, 10); // an unscaled 4K desktop
+    expect(px(3.4)).toBeCloseTo(SUB_MAX_PX, 10); // an unscaled 4K desktop
   });
 
   it('lifts an undersized line up to the floor', () => {
-    expect(rendered(0.3)).toBeCloseTo(SUB_MIN_PX, 10); // a small window
+    expect(px(0.3)).toBeCloseTo(SUB_MIN_PX, 10); // a small window
   });
 
   // The common case has to be left alone, or this is not a clamp but a resize.
   it('leaves a size already inside the band exactly as it was', () => {
     const inBand = (SUB_MIN_PX + SUB_MAX_PX) / 2 / SUB_FONT_PX;
-    expect(clampTextScale(inBand)).toBe(inBand);
+    expect(clampTextScale(inBand, NO_CAP)).toBe(inBand);
   });
 
-  // The band is on the FAITHFUL size. The ai tier draws a fraction of that with a
-  // container transform, and that fraction has to survive the clamp — pinning both tiers
-  // into one band collapses aiSubScale to nothing, which is what happened when this was
-  // first written against the rendered size. Asserted here so the unit suite says it too,
-  // and not only test-aisubs at ~10s.
-  it('leaves the tier ratio alone: two sizes clamped the same way keep their ratio', () => {
+  // The floor may not lift the text past the room. `subtitleScale` holds it at the room
+  // scale in the crisp-integer modes precisely so it stays ONE size; text bigger than the
+  // room is then cut back by fitFontPx to whatever each room and each line allow, which
+  // is the per-room variation that cap removes. Measured at 'x1' on a large retina
+  // window, a floor that ignored the room gave the same line 26.0px in one room and
+  // 14.0px in another.
+  it('does not lift the text past what the room can carry', () => {
+    const room = 0.5; // 'x1' at dpr 2
+    expect(clampTextScale(room, room)).toBe(room);
+    expect(px(room, room)).toBeCloseTo(SUB_FONT_PX * room, 10);
+    expect(px(room, room)).toBeLessThan(SUB_MIN_PX); // …and so lands BELOW the floor, deliberately
+  });
+
+  // The ceiling has no such caveat: a smaller line always fits, so the room never limits
+  // it. Asserted because capping the floor at the room must not accidentally cap this.
+  it('still applies the ceiling in a room smaller than the text wants to be', () => {
+    expect(px(3.4, 1.2)).toBeCloseTo(SUB_MAX_PX, 10);
+  });
+
+  // The band sizes the FAITHFUL font; the ai tier draws a fraction of that with a
+  // container transform. The first version of this clamped the RENDERED size, which put
+  // both tiers into one band and collapsed aiSubScale — test-aisubs read 1.00 where it
+  // must read 0.75. The assertion that catches that is the ai line sitting BELOW the
+  // ceiling when the faithful line is on it; a bare ratio of x*0.75 to x cannot, since
+  // that is 0.75 for any x at all.
+  it('leaves the ai tier its own smaller size, below the band', () => {
     const AI = 0.75;
-    for (const textScale of [0.3, 1.07, 3.4]) {
-      const faithful = clampTextScale(textScale) * SUB_FONT_PX;
-      expect((faithful * AI) / faithful).toBeCloseTo(AI, 10);
-    }
+    const faithful = px(3.4); // pinned to the ceiling
+    expect(faithful).toBeCloseTo(SUB_MAX_PX, 10);
+    expect(faithful * AI).toBeCloseTo(SUB_MAX_PX * AI, 10);
+    expect(faithful * AI).toBeLessThan(SUB_MAX_PX - 1); // the old clamp-past-the-tier made this 40 too
+  });
+
+  // A room scale that cannot be read must not become a cap of zero and size every line
+  // off the screen.
+  it('treats an unusable room scale as no cap rather than a cap of nothing', () => {
+    expect(px(1.2, 0)).toBeCloseTo(SUB_FONT_PX * 1.2, 10);
+    expect(px(0.3, -1)).toBeCloseTo(SUB_MIN_PX, 10);
   });
 });
 

@@ -66,7 +66,9 @@ export const introMovie = (): string =>
  * (It used to be put as "the same size relative to the room", which was true while the
  * text was scaled by the room's zoom-to-fit. It is not any more — a room subtitle is
  * sized from the STAGE now, see framePainter's updateRoomSubtitles — so the text is a
- * constant size on screen instead, which is what the original demonstrated.)
+ * constant size on screen instead, which is what the original demonstrated, and is then
+ * held inside a readable band so a very large or very small window cannot run away with
+ * it, see clampTextScale.)
  *
  * Applied as a pure PRESENTATION transform by the subtitle layer's own container scale —
  * the engine's line positions (`ys`/`cilys`, advanced by PosunTitulky at the logic tick)

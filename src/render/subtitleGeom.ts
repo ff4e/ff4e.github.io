@@ -176,8 +176,11 @@ export function lineOffset(ys: number): number {
 }
 
 /**
- * The scale a subtitle is drawn at: constant on screen, but never bigger than the room
- * it sits in can carry.
+ * How the room's zoom feeds the subtitle's scale: constant on screen, but never bigger
+ * than the room it sits in can carry.
+ *
+ * NOT the final size — `clampTextScale` then holds the result inside a readable band, and
+ * is given this same room scale so that its floor cannot undo the cap below.
  *
  * The first half is the point — `stageScale` is the same number in every room, so the
  * text stops changing size as the player walks between rooms (the room's own zoom spans
@@ -251,16 +254,30 @@ export function setSubPxBand(min: number, max: number): void {
  * it read 1.00 where it must read 0.75. So the band sizes the font and the tier shrink
  * stays a constant factor on top of it.
  *
+ * `maxScale` is the room's own scale, and the FLOOR may not raise the text past it. That
+ * is not a detail: `subtitleScale` above exists precisely because text bigger than the
+ * room does not stay one size — `fitFontPx` then cuts each line down to whatever ITS room
+ * and ITS length allow, which is the per-room, per-line variation the cap was added to
+ * remove. A floor that ignored the cap put it straight back. Measured at 'x1' on a large
+ * retina window, where the cap holds the text at the room's 0.5 and the floor would lift
+ * it to 0.942: the same short line came out 26.0px in DRAKAR and 14.0px in MIKRO.
+ *
+ * So the floor is best-effort by construction, and separately best-effort in practice:
+ * `fitFontPx` may still shrink a line below it, and must be allowed to, because a line
+ * that does not fit the room is a clipped word. Where the room itself is small there is
+ * no size that is both bigger and still inside it.
+ *
+ * The ceiling has no such caveat. Making a line smaller can never fail to fit.
+ *
  * Applied BEFORE the fit budget is computed, so the fit is decided against the size the
  * text will really be drawn at.
- *
- * The floor is best-effort, and cannot be otherwise: `fitFontPx` may still shrink a line
- * below it, and must be allowed to, because a line that does not fit the room is a
- * clipped word. In a genuinely small window the room is small too, and there is no size
- * that is both bigger and still inside it — the honest fix there is a bigger window.
  */
-export function clampTextScale(textScale: number): number {
-  return Math.min(SUB_MAX_PX / SUB_FONT_PX, Math.max(SUB_MIN_PX / SUB_FONT_PX, textScale));
+export function clampTextScale(textScale: number, maxScale: number): number {
+  const ceiling = SUB_MAX_PX / SUB_FONT_PX;
+  // A room scale that cannot be read is no cap at all, rather than a cap of zero.
+  const room = maxScale > 0 ? maxScale : Infinity;
+  const floor = Math.min(SUB_MIN_PX / SUB_FONT_PX, room);
+  return Math.min(ceiling, Math.max(floor, textScale));
 }
 
 /**

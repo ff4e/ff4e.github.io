@@ -260,39 +260,46 @@ await withApp(async ({ p, expect }) => {
   // ── the readable band ──
   //
   // Subtitle size tracks the stage, which tracks the window, and a window's size is
-  // bounded by nothing: measured across real displays the ai line ran from 23.5 CSS px in
-  // a small laptop window to 70 on an unscaled 4K desktop. The band holds both ends.
+  // bounded by nothing: measured across real displays the faithful line ran from 24 CSS
+  // px in a small laptop window to 90 on an unscaled 4K desktop.
   //
-  // Checked on the FONT size, not on what the ai tier finally paints: the tier's shrink
-  // is a transform on the layer, and it has to stay a constant factor on top of the band
-  // rather than be flattened into it (test-aisubs owns that ratio, and reads 1.00 instead
-  // of 0.75 when a clamp is applied past the shrink).
-  const bandPx = async () =>
-    p.evaluate(() => {
-      const el = document.getElementById('domsubs')?.children[0];
-      return el ? parseFloat(getComputedStyle(el).fontSize) : null;
-    });
-  const [minPx, maxPx] = await p.evaluate(() => window.__ff.subPxBand());
+  // Only the CEILING is checked here, and it is checked as an EQUALITY. The arithmetic is
+  // already a millisecond unit test, so what a ~10s probe is worth is proving the wire-up
+  // — and `<= max` would not: this block runs after a 1934x1200 viewport that is already
+  // pinned to the ceiling, so an in-band assertion would hold even if setViewportSize did
+  // nothing at all. The stage scale is read back for the same reason. The FLOOR is not
+  // checked here on purpose: it is capped by the room (see `clampTextScale`), so what it
+  // lands on depends on the room, and that composition is a unit test.
+  //
+  // Read on the FONT size, not on what the ai tier finally paints: the tier's shrink is a
+  // transform on the layer and has to stay a constant factor on top of the band rather
+  // than be flattened into it (test-aisubs owns that ratio, and reads 1.00 instead of
+  // 0.75 when a clamp is applied past the shrink).
+  const [, maxPx] = await p.evaluate(() => window.__ff.subPxBand());
   await p.evaluate(() => window.__ff.setGraphics('ai'));
-  for (const [label, w, h, side] of [
-    ['a 4K desktop', 3840, 2030, 'ceiling'],
-    ['a small window', 900, 560, 'floor'],
-  ]) {
-    await p.setViewportSize({ width: w, height: h });
-    await p.evaluate(() => window.__ff.clearSubtitles());
-    await tickSleep(p, 3);
-    // Short, so the fit-to-room shrink is not in play. It has to stay out of it for the
-    // FLOOR especially: a line that does not fit must still be allowed below the floor,
-    // because a clipped word is worse than a small one.
-    await p.evaluate(() => window.__ff.pushSubtitle('Careful!', 'M'));
-    await p.waitForFunction(() => (document.getElementById('domsubs')?.children.length ?? 0) > 0);
-    await tickSleep(p, 3);
-    const px = await bandPx();
-    expect(
-      px !== null && px <= maxPx + 0.01 && px >= minPx - 0.01,
-      `[${label}] the subtitle stays in the ${minPx}-${maxPx}px band (${px === null ? 'no line' : px.toFixed(1) + 'px'}, ${side})`,
-    );
-  }
+  await p.setViewportSize({ width: 3840, height: 2030 });
+  await p.evaluate(() => window.__ff.clearSubtitles());
+  await tickSleep(p, 3);
+  await p.evaluate(() => window.__ff.pushSubtitle('Careful!', 'M'));
+  await p.waitForFunction(() => (document.getElementById('domsubs')?.children.length ?? 0) > 0);
+  await tickSleep(p, 3);
+  const band = await p.evaluate(() => {
+    const el = document.getElementById('domsubs')?.children[0];
+    return {
+      px: el ? parseFloat(getComputedStyle(el).fontSize) : null,
+      wanted: window.__ff.roomGeom()?.scale ?? 0,
+    };
+  });
+  // The room would carry a far bigger line than the ceiling allows, or the ceiling is not
+  // what is holding it down and this proves nothing.
+  expect(
+    band.wanted * 27.6 > maxPx * 1.5,
+    `[4K] the room is asking for a much bigger line than the ceiling (room scale ${band.wanted.toFixed(2)})`,
+  );
+  expect(
+    band.px !== null && Math.abs(band.px - maxPx) < 0.01,
+    `[4K] the subtitle is held at the ${maxPx}px ceiling (${band.px === null ? 'no line' : band.px.toFixed(1) + 'px'})`,
+  );
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
   await p.evaluate(() => window.__ff.clearSubtitles());
   await p.setViewportSize(SUITE_VIEWPORT);

@@ -1043,7 +1043,6 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * or tuning probe can sweep the look without a rebuild; the game never writes to it.
      */
     rippleTuning: () => RIPPLE,
-    /** Vector-subtitle size in the `ai` tier, as a fraction of the faithful size. */
     /**
      * The readable band a subtitle is held inside, in CSS px: read it, or set it to tune.
      *
@@ -1058,6 +1057,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       }
       return [SUB_MIN_PX, SUB_MAX_PX];
     },
+    /** Vector-subtitle size in the `ai` tier, as a fraction of the faithful size. */
     subScale: (v?: number) => {
       if (v !== undefined) {
         host.aiSubScale = Math.max(0.2, Math.min(1, v));
