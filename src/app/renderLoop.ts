@@ -67,10 +67,19 @@ export function loop(now: number): void {
   // or feeding extra moves: every 80 ms step still happens, in order, doing exactly what it
   // does at real speed, so the run being tested is the same run — only compressed. It is 1
   // (i.e. LOGIC_MS, untouched) in every player session; `solveSpeed()` is inert unless a
-  // solution replay is actually running. MAX_STEPS_PER_FRAME still caps a frame, so a very
-  // large multiplier saturates rather than stalling the frame.
-  const logicMs = LOGIC_MS / solveSpeed();
-  if (acc > logicMs * (MAX_STEPS_PER_FRAME + 1)) setAcc(logicMs);
+  // solution replay is actually running.
+  //
+  // It also lifts the one-step-per-frame cap, for the duration of the run and no longer.
+  // `MAX_STEPS_PER_FRAME` is 1 because the PLAYER's game must never batch-catch-up — under
+  // load it slows down instead, like Jedeme. A dev replay wants the opposite, and can have
+  // it safely: every tick still runs, in order, doing exactly what it does at real speed,
+  // so batching them into one frame changes only how many are drawn. Without this the
+  // multiplier is silently capped by the frame rate (~4.8x at 60 fps) and collapses under
+  // a loaded machine — the probe went 76 s alone to 263 s inside the suite before this.
+  const speed = solveSpeed();
+  const logicMs = LOGIC_MS / speed;
+  const maxSteps = speed > 1 ? speed : MAX_STEPS_PER_FRAME;
+  if (acc > logicMs * (maxSteps + 1)) setAcc(logicMs);
   let steps = 0;
   // While a hold is active, pause the simulation too, so the room's
   // scripts/gravity/subtitle timers/audio don't advance under a frame the player was
@@ -102,7 +111,7 @@ export function loop(now: number): void {
   // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
   tickTetris(dt);
   const frozen = tetrisModal();
-  while (!simPaused && !frozen && acc >= logicMs && steps < MAX_STEPS_PER_FRAME) {
+  while (!simPaused && !frozen && acc >= logicMs && steps < maxSteps) {
     setAcc(acc - logicMs);
     steps++;
     if (host.step()) {

@@ -18,6 +18,7 @@ import {
   armSolve,
   cancelSolve,
   inSolvemode,
+  noteSolveWin,
   setSolvemode,
   solveSpeed,
   solveStatus,
@@ -54,7 +55,16 @@ function harness(outcomes: Outcome | Outcome[] = 'moving') {
  * `armSolve` itself is covered by its own case below.
  */
 const arm = (moves: string, speed = 1): void => {
-  setSolvemode({ jmeno: 'TEST', moves: decodeMoves(moves), idx: 0, speed, idleTicks: 0, abort: null, won: false });
+  setSolvemode({
+    jmeno: 'TEST',
+    moves: decodeMoves(moves),
+    idx: 0,
+    speed,
+    idleTicks: 0,
+    idleAfterMoves: 0,
+    abort: null,
+    won: false,
+  });
 };
 
 describe('solvemode', () => {
@@ -126,18 +136,68 @@ describe('solvemode', () => {
     expect(solveStatus().abort, 'busy is not a failure').toBeNull();
   });
 
-  it('aborts when the moves run out without a win', () => {
+  /**
+   * The grace window, and why it exists: the recording ends when the PLAYER stopped
+   * pressing keys, not when the room finished resolving. Eight gspec=9 push-out rooms
+   * latch their win from the at-rest `spec9` mark and the exit slide that follows, all
+   * AFTER the final recorded move. Failing on the first idle tick failed every one of them
+   * — LODE #19 reported `exhausted` on a recording the headless net proves solves it.
+   */
+  it('does not call exhausted until the room has had its grace window', () => {
     const h = harness();
     arm('ud');
     advanceSolve(h.ctx());
     advanceSolve(h.ctx());
     expect(solveStatus().abort, 'not yet — every move was accepted').toBeNull();
-    advanceSolve(h.ctx());
 
+    for (let i = 0; i < 120; i++) advanceSolve(h.ctx());
+    expect(solveStatus().abort, 'still waiting: a win can arrive on its own').toBeNull();
+
+    advanceSolve(h.ctx());
     const { abort } = solveStatus();
     expect(abort?.reason).toBe('exhausted');
     expect(abort?.at).toBe(2);
     expect(abort?.detail).toContain('all 2 moves played');
+  });
+
+  it('a win arriving inside the grace window is a win, not an exhaustion', () => {
+    const h = harness();
+    arm('ud');
+    advanceSolve(h.ctx());
+    advanceSolve(h.ctx());
+    for (let i = 0; i < 60; i++) advanceSolve(h.ctx()); // idling, moves already spent
+    h.state.won = true; // the push-out finally latches
+    advanceSolve(h.ctx());
+
+    const s = solveStatus();
+    expect(s.won, 'a late autonomous win still counts').toBe(true);
+    expect(s.abort).toBeNull();
+  });
+
+  /**
+   * The win has to latch from OUTSIDE the idle branch. A win starts the auto-return
+   * countdown and `logicTick` then returns for the whole tick, so `advanceSolve` is never
+   * reached again — a gspec=9 room would be torn down by `returnFromRoom` with the run
+   * still reading "running", and the probe would wait for a status that never arrives.
+   */
+  it('noteSolveWin latches a win reported anywhere in the tick', () => {
+    arm('uuuu');
+    noteSolveWin(false);
+    expect(solveStatus().won, 'no win yet').toBe(false);
+    noteSolveWin(true);
+    expect(solveStatus().won, 'latched without ever reaching an idle tick').toBe(true);
+    expect(inSolvemode(), 'the run is over, so the lockout lifts').toBe(false);
+    expect(solveStatus().abort, 'a win is never an abort').toBeNull();
+  });
+
+  it('noteSolveWin does not resurrect or overwrite a run that already aborted', () => {
+    const h = harness(['blocked']);
+    arm('uuuu');
+    advanceSolve(h.ctx());
+    expect(solveStatus().abort?.reason).toBe('blocked');
+    noteSolveWin(true);
+    expect(solveStatus().won, 'an aborted run does not become a win').toBe(false);
+    expect(solveStatus().abort?.reason, 'and keeps its abort').toBe('blocked');
   });
 
   it('aborts when nothing moves for long enough, rather than hanging', () => {

@@ -98,6 +98,7 @@ export async function startCutscene(): Promise<void> {
   // point in *samples* (bytes/2 for 16-bit audio), i.e. 78660. It persists after
   // the demo — DoneKufrDemo never stops it — so it keeps playing in the room.
   void audio.playMusic('kufrik', '/data/Music/kufrik.wav', 78660);
+  cancelSolve(); // `step()` gives the tick to the cutscene: a run left armed here freezes
   setCutscene(demo);
 }
 
@@ -112,6 +113,7 @@ export async function startCutscene(): Promise<void> {
 export function startShowmode(): void {
   if (showmode || showmodeLoading || !room) return;
   clearHeldKey(); // the demo takes over — drop any held movement key
+  cancelSolve(); // two playback drivers on one room derail both; the room's script wins
   setShowmodeLoading(true);
   setShowmodeHelptext(0);
   setShowmodeRestarted(false);
@@ -156,7 +158,8 @@ export function inShowmode(): boolean {
   return showmode !== null || showmodeLoading;
 }
 
-/** True while a map "Replay" (best-solution playback) is running — blocks player input. */
+/** True while a map "Replay" is running. The SILENCE predicate (`scriptTalk`, `Zvuky_okoli`;
+ *  faithful, `loadtype=nej`); the input lockout is `inAutoPlay()` in `solveMode.ts`. */
 export function inReplay(): boolean {
   return replaymode !== null;
 }

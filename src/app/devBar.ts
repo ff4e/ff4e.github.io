@@ -1,6 +1,6 @@
 /**
  * The developer bar: the room picker, the fit/renderer/graphics selects, the idle-render
- * toggle and the win-room button — plus the resize, fullscreen and DPR watchers that keep
+ * toggle and the solve-room button — plus the resize, fullscreen and DPR watchers that keep
  * the stage sized.
  *
  * All of it is dev-only chrome (`body.dev` in CSS) except the relayout triggers, which the
@@ -175,7 +175,11 @@ export function syncSolveBtn(): void {
     title = `Playing ${s.jmeno}'s recorded solution — press Escape to stop.`;
     disabled = true;
   } else if (s.abort) {
-    label = `✗ ${s.abort.reason} @ ${s.abort.at + 1}/${s.abort.of}`;
+    // `at` is a 0-based index for the move-shaped aborts, and +1 makes it the human "move
+    // N of M". `exhausted` is the exception: it has no failing move — every move was
+    // played — so `at` is already the total, and +1 rendered it as "534/533".
+    const at = s.abort.reason === 'exhausted' ? s.abort.of : s.abort.at + 1;
+    label = `✗ ${s.abort.reason} @ ${at}/${s.abort.of}`;
     title = `${s.jmeno}: ${s.abort.detail}`;
   } else if (s.won) {
     label = `✓ solved in ${s.total}`;

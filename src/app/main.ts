@@ -78,7 +78,7 @@ import {
   startCutscene,
   startShowmode,
 } from './cutscene.js';
-import { cancelSolve, inAutoPlay } from './solveMode.js';
+import { cancelSolve, inAutoPlay, inSolvemode } from './solveMode.js';
 import {
   closeMapOverlay,
   dismissLegImage,
@@ -331,6 +331,7 @@ initCheats({
   get devEnabled() {
     return devEnabled;
   },
+  playbackBusy: () => inReplay() || inShowmode() || loadmode !== null,
   get engine() {
     return engine;
   },
@@ -1415,6 +1416,12 @@ window.addEventListener('keydown', (e) => {
     // fed as a cancelling key and then handled normally below.
     const entry = ui.screen === 'map' ? mapCheats : roomCheats;
     const letter = e.key.length === 1 && /[a-z]/i.test(e.key);
+    // A solution replay is a measurement, and a typed cheat would change the thing being
+    // measured — xmorph and friends rewrite sprites, ultraviolence spawns a hook — so any
+    // abort after one would be blamed on the recording. Deliberately keyed on
+    // `inSolvemode()` and NOT `inAutoPlay()`: the map's "Replay" has always accepted typed
+    // cheats and that is not this change's business to alter.
+    if (inSolvemode() && ui.screen === 'room') return;
     const r = letter ? entry.press(e.key) : entry.cancel();
     if (r.cheat) {
       if (ui.screen === 'map') applyMapCheat(r.cheat);
@@ -1481,7 +1488,9 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'F2') {
     e.preventDefault();
-    if (atRest()) saveGame();
+    // Not mid-replay: `atRest()` only asks whether the ENGINE is idle, which it is between
+    // the recording's moves, so this would bank a half-played record as the player's save.
+    if (atRest() && !inSolvemode()) saveGame();
     return;
   }
   if (e.code === 'F3') {

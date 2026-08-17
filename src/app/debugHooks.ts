@@ -1538,7 +1538,10 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       engine.phase = 'exit';
       engine.animFrame = 0;
     },
-    // Dev-only "Win room" (dev-bar button / Shift+W hotkey): genuinely win via the real path.
+    // Dev-only: genuinely win via the real path. No button and no hotkey any more — the
+    // dev bar's button plays the room's recorded solution instead — but kept as a hook,
+    // because ZAVER #71 has no solution and reaching a story page still needs this
+    // (`tools/test-zaverpage.mjs`, `tools/test-legimage.mjs`).
     winRoom: () => devWinRoom(),
     // ZELVA telepathic possession (natvrdo): force the turtle to seize a fish and
     // drive it to (tx,ty); read the flag and the fish's current cell.
