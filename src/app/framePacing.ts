@@ -86,8 +86,8 @@ export let roomLoadSeq = 0;
 // Idle-loop throttle (perf): when the room is fully idle (saver on, nothing
 // animating), stop the 60fps rAF spin and wake via a timer at the logic rate so
 // the loop's own per-frame overhead (JS + browser scheduling) stops too. Input
-// wakes it back to 60fps instantly. Only rooms are throttled; other screens
-// (map/intro/credits/cutscene) keep rAF. IDLE_LOOP_MS = the 80ms game tick, so a
+// wakes it back to 60fps instantly. Rooms, the map, the story page and the cutscene
+// are throttled; the intro movie is not. IDLE_LOOP_MS = the 80ms game tick, so a
 // throttled wake still does exactly one logic step + one paint (12.5fps).
 let IDLE_LOOP_MS = 80; // set from LOGIC_MS by initFramePacing
 // The ZX "Emulator" room (gspec=42) animates its loading bands once per paint (the
@@ -97,6 +97,23 @@ let IDLE_LOOP_MS = 80; // set from LOGIC_MS by initFramePacing
 // a ZX room the loop wakes at this rate and force-repaints, so the bands scroll at
 // ~2.4x the original — smoother than 12.5fps, far cheaper than 60fps.
 const ZX_ANIM_MS = 33; // ~30fps
+/**
+ * Idle wake period during a cutscene: HALF the logic tick, deliberately.
+ *
+ * A cutscene advances in `logicTick` like everything else, so it wants one paint per
+ * 80ms tick and no more — but it cannot ASK for 80ms, because the throttle sleeps on
+ * `setTimeout`, which is never early, and `MAX_STEPS_PER_FRAME` is 1. A wake period at
+ * the tick period therefore loses a tick to jitter every so often: the leftover
+ * accumulates in `acc` until the backlog guard drops it. Measured on the briefcase
+ * intro, an 80ms wake ran the animation at 12.33 ticks/sec against a true 12.5 — 1.3%
+ * slow on an idle machine, and it degrades with load, which is where nobody measures.
+ *
+ * At 40ms there is a whole spare wake of margin, so `acc` reaches the tick threshold
+ * without ever reaching the guard: measured 12.50 ticks/sec, exact. The extra wake costs
+ * one predicate and no paint (the frame is identical), which is a great deal cheaper
+ * than the 9.5 duplicate paints per animation frame this replaces.
+ */
+const CUTSCENE_ANIM_MS = 40; // ~25fps: two wakes per 80ms logic tick
 /**
  * Idle wake period for the `ai` tier's smooth water, on the GPU path only.
  *
@@ -286,16 +303,31 @@ export function roomAnimating(): boolean {
 }
 
 /**
- * Whether the loop may drop to the throttled (timer) wake rate. Two idle cases
- * qualify (both need the saver on, no cutscene/intro, no smoothness recording):
+ * Whether the loop may drop to the throttled (timer) wake rate. Three idle cases
+ * qualify (all need the saver on, no intro movie, no smoothness recording):
  *  - a steady ROOM: nothing animating, no held key / KUFRIK demo / load fast-forward,
- *    the panel in its normal (non-scrolling) state, no room-art hold; or
+ *    the panel in its normal (non-scrolling) state, no room-art hold;
  *  - a settled MAP: no overlay (credits/options), and the reveal animation finished
- *    (only the ~7fps node pulse is left, which the throttled 12.5fps wake captures).
+ *    (only the ~7fps node pulse is left, which the throttled 12.5fps wake captures); or
+ *  - a CUTSCENE, which advances only on the logic tick (see below).
  * Anything else keeps 60fps. Input (incl. map hover) wakes it via wake().
  */
 export function loopThrottleOk(): boolean {
-  if (!host.renderOnDirty || cutscene || host.intro.playing || smoothLog !== null) return false;
+  if (!host.renderOnDirty || host.intro.playing || smoothLog !== null) return false;
+  // A cutscene's picture is a pure function of state that changes once per logic tick:
+  // it advances in logicTick, `drawCutscene` reads no clock and no `alpha`, and its
+  // captions are DOM text animated through the Web Animations API — which runs on the
+  // COMPOSITOR thread and keeps its own time (subtitleDom.ts), so it does not need the
+  // main thread to be awake to stay smooth. Painting it faster than the tick can
+  // therefore only produce duplicate frames, and it did: measured on the briefcase
+  // intro, 119.3 loop fps against a 12.49fps animation — 9.5 paints per frame, 8.5 of
+  // them byte-identical, for the whole 20-odd seconds.
+  //
+  // This clause used to read `|| cutscene ||` and exclude every cutscene outright. There
+  // is no commit explaining it — `git log -S` bottoms out at the squashed v1.0.0 root —
+  // and the obvious hypothesis (that a cutscene does not mark frames dirty and would
+  // stall under the saver) is not what the code does.
+  if (cutscene) return true;
   // The leg story page is a static full-screen image; once blitted it can idle at the
   // throttled wake rate (a click/key wakes it via wake() to dismiss).
   if (ui.screen === 'legimage') return ui.legImageDrawn;
@@ -345,6 +377,9 @@ export function loopThrottleOk(): boolean {
  */
 function idleDelayMs(): number | null {
   if (!loopThrottleOk()) return null;
+  // A cutscene needs its tick delivered on time, so it wakes at half the tick — see
+  // CUTSCENE_ANIM_MS for why not at the tick itself.
+  if (cutscene) return CUTSCENE_ANIM_MS;
   // A ZX room keeps animating its bands, so it wakes at ~30fps; any other idle
   // room/map wakes at the 12.5fps logic rate.
   return ui.screen === 'room' && room?.gspec === 42
