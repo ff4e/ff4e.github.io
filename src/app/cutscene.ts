@@ -354,6 +354,8 @@ export function cutsceneCaption(name: string): number {
  * subtitle is now sized from the stage (framePainter): a cutscene has exactly one size,
  * so there is no room-to-room variation here to normalise, and pinning captions to the
  * stage would resize the briefcase intro to fix a symptom it does not have.
+ * The readable band still applies (it lives in `syncDomSubtitles`, not at either call
+ * site): a cutscene tracks the same viewport, so only room-to-room is cutscene-exempt.
  */
 export function updateCutsceneCaptions(cssW: number, cssH: number, cs: number): void {
   if (!cutsceneSubs?.active) return;

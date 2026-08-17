@@ -149,6 +149,7 @@ import { canvas, ctx, glCanvas, loadingEl } from './dom.js';
 import type { FeedbackUi } from './feedback.js';
 import { IntroPlayer } from './intro.js';
 import { isFitMode } from './layout.js';
+import { SUB_MAX_PX, SUB_MIN_PX, setSubPxBand } from '../render/subtitleGeom.js';
 import type { RoomGeometry } from './layout.js';
 
 /**
@@ -1042,6 +1043,20 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      * or tuning probe can sweep the look without a rebuild; the game never writes to it.
      */
     rippleTuning: () => RIPPLE,
+    /**
+     * The readable band a subtitle is held inside, in CSS px: read it, or set it to tune.
+     *
+     * A look decision, so it is judged on screen rather than argued about — same reason
+     * `subScale` is writable. Takes effect on the next frame that reconciles the layer.
+     */
+    subPxBand: (min?: number, max?: number) => {
+      if (min !== undefined && max !== undefined) {
+        setSubPxBand(min, max);
+        host.forceRoomRedraw = true;
+        host.wake();
+      }
+      return [SUB_MIN_PX, SUB_MAX_PX];
+    },
     /** Vector-subtitle size in the `ai` tier, as a fraction of the faithful size. */
     subScale: (v?: number) => {
       if (v !== undefined) {

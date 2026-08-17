@@ -8,7 +8,7 @@
  * milliseconds a test rather than in a ~10 s probe — which is the reason the module is pure
  * and import-free.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   BORDERTITLE,
   SUB_FONT_PX,
@@ -19,11 +19,15 @@ import {
   WAVE_PER_TICK,
   bevelBottomRgb,
   bevelSpan,
+  SUB_MAX_PX,
+  SUB_MIN_PX,
+  clampTextScale,
   fitBlockFontPx,
   fitFontPx,
   fitScreenW,
   lineAnchor,
   lineOffset,
+  setSubPxBand,
   strokeWidth,
   subtitleScale,
   waveDy,
@@ -223,6 +227,82 @@ describe('subtitleScale — constant on screen, but never too big for the room',
     for (const box of [0.5, 1, 1.5, 2, 3.5]) {
       expect(subtitleScale(stageScale, box)).toBeLessThanOrEqual(box);
     }
+  });
+});
+
+describe('clampTextScale — hold the font in a readable band', () => {
+  const NO_CAP = Infinity; // a room big enough that the floor is free to act
+  const px = (textScale, maxScale = NO_CAP) => clampTextScale(textScale, maxScale) * SUB_FONT_PX;
+
+  it('pulls an oversized line down to the ceiling', () => {
+    expect(px(3.4)).toBeCloseTo(SUB_MAX_PX, 10); // an unscaled 4K desktop
+  });
+
+  it('lifts an undersized line up to the floor', () => {
+    expect(px(0.3)).toBeCloseTo(SUB_MIN_PX, 10); // a small window
+  });
+
+  // The common case has to be left alone, or this is not a clamp but a resize.
+  it('leaves a size already inside the band exactly as it was', () => {
+    const inBand = (SUB_MIN_PX + SUB_MAX_PX) / 2 / SUB_FONT_PX;
+    expect(clampTextScale(inBand, NO_CAP)).toBe(inBand);
+  });
+
+  // The floor may not lift the text past the room. `subtitleScale` holds it at the room
+  // scale in the crisp-integer modes precisely so it stays ONE size; text bigger than the
+  // room is then cut back by fitFontPx to whatever each room and each line allow, which
+  // is the per-room variation that cap removes. Measured at 'x1' on a large retina
+  // window, a floor that ignored the room gave the same line 26.0px in one room and
+  // 14.0px in another.
+  it('does not lift the text past what the room can carry', () => {
+    const room = 0.5; // 'x1' at dpr 2
+    expect(clampTextScale(room, room)).toBe(room);
+    expect(px(room, room)).toBeCloseTo(SUB_FONT_PX * room, 10);
+    expect(px(room, room)).toBeLessThan(SUB_MIN_PX); // …and so lands BELOW the floor, deliberately
+  });
+
+  // The ceiling has no such caveat: a smaller line always fits, so the room never limits
+  // it. Asserted because capping the floor at the room must not accidentally cap this.
+  it('still applies the ceiling in a room smaller than the text wants to be', () => {
+    expect(px(3.4, 1.2)).toBeCloseTo(SUB_MAX_PX, 10);
+  });
+
+  // The band sizes the FAITHFUL font; the ai tier draws a fraction of that with a
+  // container transform. The first version of this clamped the RENDERED size, which put
+  // both tiers into one band and collapsed aiSubScale — test-aisubs read 1.00 where it
+  // must read 0.75. The assertion that catches that is the ai line sitting BELOW the
+  // ceiling when the faithful line is on it; a bare ratio of x*0.75 to x cannot, since
+  // that is 0.75 for any x at all.
+  it('leaves the ai tier its own smaller size, below the band', () => {
+    const AI = 0.75;
+    const faithful = px(3.4); // pinned to the ceiling
+    expect(faithful).toBeCloseTo(SUB_MAX_PX, 10);
+    expect(faithful * AI).toBeCloseTo(SUB_MAX_PX * AI, 10);
+    expect(faithful * AI).toBeLessThan(SUB_MAX_PX - 1); // the old clamp-past-the-tier made this 40 too
+  });
+
+  // A room scale that cannot be read must not become a cap of zero and size every line
+  // off the screen.
+  it('treats an unusable room scale as no cap rather than a cap of nothing', () => {
+    expect(px(1.2, 0)).toBeCloseTo(SUB_FONT_PX * 1.2, 10);
+    expect(px(0.3, -1)).toBeCloseTo(SUB_MIN_PX, 10);
+  });
+});
+
+describe('setSubPxBand — the band is tunable, but not into nonsense', () => {
+  const before = [SUB_MIN_PX, SUB_MAX_PX];
+  afterEach(() => setSubPxBand(before[0], before[1]));
+
+  it('takes a sane band', () => {
+    setSubPxBand(20, 30);
+    expect([SUB_MIN_PX, SUB_MAX_PX]).toEqual([20, 30]);
+  });
+
+  it('refuses a reversed or non-positive band, leaving the old one', () => {
+    setSubPxBand(40, 20);
+    expect([SUB_MIN_PX, SUB_MAX_PX]).toEqual(before);
+    setSubPxBand(0, 30);
+    expect([SUB_MIN_PX, SUB_MAX_PX]).toEqual(before);
   });
 });
 
