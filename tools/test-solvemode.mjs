@@ -15,11 +15,18 @@
  * Cost is a real decision here, so: THREE rooms, not seventy. A full sweep at one move per
  * idle tick would be minutes of wall-clock (MAPA's recording alone is 6 045 moves), and it
  * would buy almost nothing — `npm run test:solutions` is the exhaustive one and it is
- * fast. What is chosen instead is one of each shape:
+ * fast. What is chosen instead is one room per SHAPE, and nothing that merely repeats a
+ * shape already covered (DELA #47, the corpus's shortest, was dropped for exactly that
+ * reason once WIN joined — "it is quick" is not coverage):
  *
- *   DELA  #47 — the shortest recording in the corpus (39 moves): the cheap smoke test.
  *   PRVNI #1  — the tutorial room, which TALKS: the case that proves this mode is not
  *               silent the way the player-facing replay deliberately is.
+ *   WIN   #68 — the bonus level (794 moves): the only room with a SECOND control set
+ *               (`w`/`x`/`y`/`z`, the elderly pair) and the only `gspec=5`. Its bonus opens
+ *               from a POSITIONAL trigger inside `prog`, which makes it the one room that
+ *               notices if a move is played on a tick that had not yet given `prog` an
+ *               at-rest pass: the fish arrives one cell past the trigger column and is
+ *               crushed. It failed at move 143/794 while the other three passed.
  *   LODE  #19 — a gspec=9 PUSH-OUT room (533 moves), and the reason this list is not two
  *               rooms long. Eight rooms win by shoving an item off the edge with the fish
  *               still inside, so `room.won` (both fish outside) is never true and the win
@@ -46,13 +53,13 @@ import { budget, observed, withApp } from './ui-lib.mjs';
 const SPEED = 20;
 
 const ROOMS = [
-  { num: 47, jmeno: 'DELA', talks: false, speed: SPEED },
   // PRVNI runs at REAL speed, and that is the point of it. Above 1 the logic tick shortens
   // while WebAudio stays on the wall clock, so the dialogue is SCHEDULED faster than it can
   // be spoken — `lines()` would still count up and prove only that `scriptTalk` ran. At
   // speed 1 the count means what the assertion says it means. It costs ~4 s: 54 moves.
   { num: 1, jmeno: 'PRVNI', talks: true, speed: 1 },
   { num: 19, jmeno: 'LODE', talks: false, speed: SPEED },
+  { num: 68, jmeno: 'WIN', talks: false, speed: SPEED },
 ];
 
 await withApp(async ({ p, expect }) => {

@@ -203,6 +203,19 @@ function fail(s: SolveModeState, reason: SolveAbortReason, detail: string): void
 export function advanceSolve(ctx: {
   anyFishDead: boolean;
   won: boolean;
+  /**
+   * Was the room at rest when this tick STARTED — not merely by the time it got here?
+   *
+   * A move may only be played on such a tick, exactly as `test/solutionsHarness.ts` does
+   * it. A tick that only became idle inside `advance()` has not yet given the room's
+   * `prog` an at-rest pass, and the recording assumes it has: the player who recorded it
+   * could not press a key mid-animation either. Playing a move there steals the tick from
+   * autonomous at-rest logic and puts the fish one cell further along than the recording
+   * meant. WIN #68 is where that was fatal — its bonus level opens from a positional
+   * trigger in `prog`, so the extra cell moved the handover past the trigger column and
+   * killed the elderly fish on arrival.
+   */
+  startedIdle: boolean;
   /** Applies one move through the REAL game loop (`tryStep`) and reports what it did. */
   play: (which: Which, dir: number) => 'moving' | 'turning' | 'blocked' | 'busy';
   wake: () => void;
@@ -221,6 +234,7 @@ export function advanceSolve(ctx: {
     fail(s, 'dead', `a fish died at move ${s.idx + 1}/${s.moves.length}`);
     return;
   }
+  if (!ctx.startedIdle) return; // not a tick this may move on — see `startedIdle`
   if (s.idx >= s.moves.length) {
     // Every recorded move has been played. Do NOT call that a failure yet — give the room
     // the same grace the headless harness gives it, because a win can still arrive on its

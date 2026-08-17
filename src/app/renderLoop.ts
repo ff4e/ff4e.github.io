@@ -79,7 +79,12 @@ export function loop(now: number): void {
   const speed = solveSpeed();
   const logicMs = LOGIC_MS / speed;
   const maxSteps = speed > 1 ? speed : MAX_STEPS_PER_FRAME;
-  if (acc > logicMs * (maxSteps + 1)) setAcc(logicMs);
+  // Dropping the backlog is right for a player — the game slows down instead of
+  // fast-forwarding — but during a dev replay it is what a slow frame uses to undo the
+  // whole speed-up: with a 4 ms tick the threshold is ~84 ms, so any frame slower than that
+  // threw the backlog away and left ONE step for the frame. Under a loaded machine that is
+  // every frame, which is how the probe went 97 s to 475 s. Keep a frame's worth instead.
+  if (acc > logicMs * (maxSteps + 1)) setAcc(speed > 1 ? logicMs * maxSteps : logicMs);
   let steps = 0;
   // While a hold is active, pause the simulation too, so the room's
   // scripts/gravity/subtitle timers/audio don't advance under a frame the player was
