@@ -29,6 +29,7 @@ import type { CapAction } from '../intro/helpCap.js';
 import { KufrDemo } from '../intro/kufrDemo.js';
 import type { AiKufr } from '../intro/kufrDemo.js';
 import { IndexedScreen } from '../render/framebuffer.js';
+import { drawIndexedRegion } from '../render/indexedRegion.js';
 import { AI_ROOM_SCALE } from '../render/roomAi.js';
 import { SubtitleSystem } from '../render/subtitles.js';
 import { SHOWMODE_HOLDS } from './showmodeHolds.js';
@@ -405,7 +406,7 @@ export async function ensureAiKufr(): Promise<void> {
   try {
     const res = await fetch('/enhanced-ai/_kufr/ai.json');
     if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
-    const man = (await res.json()) as { scale: number; region: AiKufr['region']; order: string[] };
+    const man = (await res.json()) as { scale: number; region: AiKufr['region']; order: string[]; original?: string[] };
     const bres = await fetch('/enhanced-ai/_kufr/base.webp');
     if (!bres.ok || !(bres.headers.get('content-type') ?? '').startsWith('image/')) return;
     aiKufr = {
@@ -413,6 +414,7 @@ export async function ensureAiKufr(): Promise<void> {
       scale: Number(man.scale) || AI_ROOM_SCALE,
       region: man.region,
       order: man.order ?? [],
+      original: new Set(man.original ?? []),
     };
   } catch (e) {
     console.warn('AI briefcase cutscene unavailable:', e);
@@ -422,6 +424,8 @@ export async function ensureAiKufr(): Promise<void> {
 /** Fetch a cutscene frame (and prefetch the next few, since playback is linear). */
 export function loadAiKufrFrame(name: string): void {
   if (!name || aiKufrFrames.has(name) || aiKufrLoading.has(name)) return;
+  // A `"model": "original"` frame ships no upscale, so asking for one is a certain 404.
+  if (aiKufr?.original.has(name)) return;
   aiKufrLoading.add(name);
   void (async () => {
     try {
@@ -472,19 +476,24 @@ export function drawCutscene(): void {
   if (graphics === 'ai' && !aiKufrTried) void ensureAiKufr();
   const aiFrameIdx = Math.max(0, cutscene.framesShown - 1);
   const aiFrameName = aiKufr ? aiKufr.order[aiFrameIdx] ?? '' : '';
-  // Running past the end means the shipped sequence and the decoder disagree. The
-  // consequence is a silent mid-cutscene drop back to the faithful renderer, which is
-  // exactly how the framesDrawn/framesShown mix-up hid, so say it once.
+  // Running past the end means the shipped sequence and the decoder disagree. It no
+  // longer drops the whole picture back to the faithful renderer (the frame plays as the
+  // original region instead), so this warning is the only report of it — and that
+  // mid-cutscene drop is exactly how the framesDrawn/framesShown mix-up hid.
   if (aiKufr && !aiFrameName && !aiKufrRangeWarned) {
     aiKufrRangeWarned = true;
-    console.warn(`AI cutscene: frame ${aiFrameIdx} is past the shipped sequence (${aiKufr.order.length}); falling back`);
+    console.warn(`AI cutscene: frame ${aiFrameIdx} is past the shipped sequence (${aiKufr.order.length}); playing the original art`);
   }
   if (aiKufr && aiFrameName) {
     loadAiKufrFrame(aiFrameName);
     for (let i = 1; i <= 4; i++) loadAiKufrFrame(aiKufr.order[cutscene.framesShown - 1 + i] ?? '');
   }
-  const aiBmp = graphics === 'ai' && useVec && aiKufr ? aiKufrFrames.get(aiFrameName) ?? null : null;
-  if (aiBmp && aiKufr) {
+  // Stay on the upscaled path for EVERY frame and vary only what fills the region: the
+  // shipped upscale when there is one, the original pixels when there is not (a
+  // `"model": "original"` pick, or a frame still streaming in).
+  const aiOn = graphics === 'ai' && useVec && aiKufr !== null;
+  const aiBmp = aiOn ? aiKufrFrames.get(aiFrameName) ?? null : null;
+  if (aiOn && aiKufr) {
     const S = aiKufr.scale;
     glCanvas.style.display = 'none';
     if (canvas.width !== w * S || canvas.height !== h * S) { canvas.width = w * S; canvas.height = h * S; }
@@ -495,7 +504,10 @@ export function drawCutscene(): void {
     if (canvas.style.imageRendering !== wantSmooth) canvas.style.imageRendering = wantSmooth;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(aiKufr.base, 0, 0);
-    ctx.drawImage(aiBmp, aiKufr.region.x * S, aiKufr.region.y * S);
+    if (aiBmp) ctx.drawImage(aiBmp, aiKufr.region.x * S, aiKufr.region.y * S);
+    // The 1998 pixels, over the same base at the same scale — see indexedRegion.ts for
+    // why the region is repainted rather than handed to the faithful renderer.
+    else drawIndexedRegion(ctx, cutscene.pixels, cutscene.palette, w, aiKufr.region, S);
     updateCutsceneCaptions(cssW, cssH, cs);
     setPerfPaint(perfPaint + 1);
     return;

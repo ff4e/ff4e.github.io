@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-scene model overrides for the briefcase cutscene (_kufr). Indices are into the shipped playback order (ai.json 'order'), inclusive, and are the same numbers tools/kufr-compare.html shows. Frames outside every range use the anim.png card's pick from the Studio. A model change is only invisible ACROSS A SCENE CUT, so a range must cover a whole shot — never part of one.",
+  "_comment": "Per-scene model overrides for the briefcase cutscene (_kufr). Indices are into the shipped playback order (ai.json 'order'), inclusive, and are the numbers tools/kufr-compare.html shows as '#N'. Frames outside every range use the anim.png card's pick from the Studio. A model change is only invisible ACROSS A SCENE CUT, so a range must cover a whole shot — never part of one. Use \"model\": \"original\" to ship NO upscale for a shot whose 1998 art reads better than any model's version of it: the build writes no file for those frames and lists them in ai.json 'original', and the game paints the original pixels into the region over the upscaled base (src/render/indexedRegion.ts). Pick them with tools/kufr-compare.html — 'keep original' marks a frame, 'preview picks' shows what will play, 'export' emits ranges to paste here.",
   "ranges": [
     {
       "from": 63,

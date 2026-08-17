@@ -69,7 +69,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // The table and its whole rationale live in `showmodeHolds.ts`; what is left here is the
   // hold counter itself, which has to sit in `advanceShowmode` because that is the one
   // place the recorded stream is consumed. There is no cheaper home for it.
-  ['src/app/cutscene.ts', 560],
+  //
+  // 560 -> 572 for the per-frame `"model": "original"` choice, which needed the AI branch
+  // to stop being "draw the upscale" and become "draw the base, then whichever source
+  // this frame wants". The blit that does the second half is NOT here — it went to
+  // `src/render/indexedRegion.ts`, because it is mechanism and the rest of this file is
+  // the cutscene machine. What is left is the decision and its reasoning, which has to
+  // sit at the branch it explains.
+  ['src/app/cutscene.ts', 572],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
   // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine

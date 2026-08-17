@@ -464,6 +464,12 @@ function buildKufr(report) {
   // because a model change mid-shot flickers — but across a scene CUT it is invisible,
   // and different scenes genuinely want different models (the planets scene carries
   // small handwritten annotations that the cel-art model dissolves into blobs).
+  //
+  // `"model": "original"` is the same mechanism used to opt a scene OUT of upscaling
+  // altogether: no file is emitted for those frames and the runtime plays the 1998
+  // pixels inside the upscaled scene (src/render/indexedRegion.ts). It obeys the same
+  // whole-shot rule, and for the same reason — what changes at the boundary is the
+  // character of the picture, so it has to land on a cut.
   const rangeFile = join(studioDir, 'kufr-models.json');
   let ranges = [];
   if (existsSync(rangeFile)) {
@@ -489,7 +495,14 @@ function buildKufr(report) {
     console.warn(`  ! _kufr: ${straddling.length} frame(s) fall in ranges with DIFFERENT models (${[...new Set(straddling)].slice(0, 3).join(', ')}); adjust kufr-models.json so ranges follow scene cuts`);
     return false;
   }
-  const overridden = [...fileModel.values()].filter((m) => m !== anim.model).length;
+  // Frames chosen to play as the original ship no upscale at all. Listed in ai.json so
+  // the runtime knows not to ask for a file that was never written — an unlisted miss
+  // still renders correctly, but costs a 404 per playback.
+  const ORIGINAL = 'original';
+  const originalFiles = new Set([...fileModel].filter(([, m]) => m === ORIGINAL).map(([f]) => f));
+  // Counted apart from `overridden`, which is "upscaled with a different model" — these
+  // are not upscaled at all, and adding them to both makes the summary line lie.
+  const overridden = [...fileModel.values()].filter((m) => m !== anim.model && m !== ORIGINAL).length;
 
   const stampFile = join(dstDir, '.build-stamp.json');
   const prev = existsSync(stampFile) ? JSON.parse(readFileSync(stampFile, 'utf8')) : {};
@@ -522,9 +535,18 @@ function buildKufr(report) {
   if (!DRY) mkdirSync(join(dstDir, 'frames'), { recursive: true });
   one(join(srcDir, 'base.png'), join(dstDir, 'base.webp'), 'base.webp', base.hash, base.model);
   const frames = listPngs(framesSrc).sort();
+  const upscaled = [];
   for (const f of frames) {
+    const outAbs = join(dstDir, 'frames', webpName(f));
+    if (originalFiles.has(f)) {
+      // Chosen to play as the original: emit nothing, and clear any file a previous
+      // build left behind, or the runtime would keep loading the upscale it replaced.
+      if (!DRY && existsSync(outAbs)) rmSync(outAbs);
+      continue;
+    }
+    upscaled.push(f);
     const srcAbs = join(framesSrc, f);
-    one(srcAbs, join(dstDir, 'frames', webpName(f)), `frames/${webpName(f)}`, hashFile(srcAbs), fileModel.get(f) ?? anim.model);
+    one(srcAbs, outAbs, `frames/${webpName(f)}`, hashFile(srcAbs), fileModel.get(f) ?? anim.model);
   }
   if (!DRY) {
     // The playback order + region geometry the runtime replays.
@@ -534,11 +556,12 @@ function buildKufr(report) {
       region: meta.region,
       base: meta.base,
       order: meta.order.map(webpName),
-      frames: frames.map(webpName),
+      frames: upscaled.map(webpName),
+      original: [...originalFiles].sort().map(webpName),
     }));
     writeFileSync(stampFile, JSON.stringify(next));
   }
-  console.log(`  _kufr: ${wrote} written, ${skipped} unchanged${failed ? `, ${failed} FAILED` : ''} (base=${base.model}, frames=${anim.model}${overridden ? `, ${overridden} overridden by kufr-models.json` : ''}, x${SCALE})`);
+  console.log(`  _kufr: ${wrote} written, ${skipped} unchanged${failed ? `, ${failed} FAILED` : ''}${originalFiles.size ? `, ${originalFiles.size} kept original` : ''} (base=${base.model}, frames=${anim.model}${overridden ? `, ${overridden} overridden by kufr-models.json` : ''}, x${SCALE})`);
   return failed === 0;
 }
 

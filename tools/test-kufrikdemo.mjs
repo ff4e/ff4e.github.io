@@ -138,4 +138,69 @@ await withApp(async ({ p, expect }) => {
     'leaving the room with a cutscene live takes its captions off the map',
   );
   await p.evaluate(() => window.__ff.skipCutscene());
+
+  // ── frames that play as the ORIGINAL art ──
+  //
+  // A scene whose 1998 pixels beat every upscaler ships no upscaled file and is listed in
+  // ai.json's `original` (tools/studio/kufr-models.json, `"model": "original"`). Two
+  // things have to hold, and both are invisible in a screenshot:
+  //
+  //  1. the frame is never REQUESTED — the file does not exist, so a miss is a 404 per
+  //     playback rather than a one-off;
+  //  2. the picture stays on the upscaled canvas. That is the whole reason the region is
+  //     repainted instead of the frame being handed to the faithful renderer: the two
+  //     present through DIFFERENT elements (#screen vs #screen-gl) and size the canvas
+  //     differently, so falling through swaps the source of the WHOLE picture and pops
+  //     the background — measured at 9.4/255 across 73% of the screen, on every switch.
+  //
+  // Marked here as every OTHER frame, which is the worst case the design claims to
+  // support and the one that made the old fallthrough flicker ~4 times a second.
+  const requested = new Set();
+  p.on('request', (r) => {
+    const m = /_kufr\/frames\/(f\d+\.webp)/.exec(r.url());
+    if (m) requested.add(m[1]);
+  });
+  let marked = [];
+  await p.route('**/enhanced-ai/_kufr/ai.json', async (route) => {
+    const res = await route.fetch();
+    const man = await res.json();
+    marked = [...new Set(man.order.filter((_, i) => i % 2 === 1))];
+    man.original = marked;
+    await route.fulfill({ response: res, body: JSON.stringify({ ...man }) });
+  });
+
+  await p.evaluate(() => window.__ff.setGraphics('ai'));
+  await p.waitForFunction(() => window.__ff.graphics() === 'ai');
+  await startDemo();
+  await p.waitForFunction(() => window.__ff.kufrAi() !== null);
+  // The first ticks legitimately run on the faithful renderer, while ai.json and the base
+  // are still loading. Sample only once the upscaled path has taken over.
+  await p.waitForFunction(() => document.getElementById('screen-gl')?.style.display === 'none');
+
+  const swapped = await p.evaluate(async () => {
+    const gl = document.getElementById('screen-gl');
+    let seen = 0, onFaithful = 0, last = -1;
+    // ~20 game ticks, enough to cross a dozen marked/unmarked boundaries.
+    while (seen < 20 && window.__ff.cutsceneActive()) {
+      const t = window.__ff.count();
+      if (t !== last) {
+        last = t;
+        seen++;
+        if (getComputedStyle(gl).display !== 'none') onFaithful++;
+      }
+      await new Promise((r) => requestAnimationFrame(r));
+    }
+    return { seen, onFaithful };
+  });
+
+  expect(
+    swapped.onFaithful === 0,
+    `the picture stays on the upscaled canvas across original frames (${swapped.onFaithful} of ${swapped.seen} ticks fell back)`,
+  );
+  const leaked = marked.filter((f) => requested.has(f));
+  expect(
+    marked.length > 0 && leaked.length === 0,
+    `frames listed as original are never requested (${marked.length} listed, ${leaked.length} requested anyway)`,
+  );
+  await p.evaluate(() => window.__ff.skipCutscene());
 });

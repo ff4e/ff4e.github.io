@@ -45,13 +45,32 @@
   label { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
   code { color: #ffcc33; }
   #status { color: #7d858f; margin-left: auto; font-variant-numeric: tabular-nums; }
+  /* The pick strip lines up under the frame slider: one tick per frame kept original. */
+  #markwrap { position: relative; width: 340px; height: 6px; margin-top: 3px; background: #232830; border-radius: 3px; overflow: hidden; }
+  #markwrap i { position: absolute; top: 0; bottom: 0; background: #56b6c2; }
+  .stack { display: flex; flex-direction: column; }
+  #keep.on { background: #56b6c2; border-color: #56b6c2; color: #14161a; }
+  #preview.on { background: #56b6c2; border-color: #56b6c2; color: #14161a; }
+  dialog { background: #1b1f26; color: #d7dbe0; border: 1px solid #333a45; border-radius: 8px; max-width: 70vw; }
+  dialog textarea { width: 60vw; height: 40vh; background: #14161a; color: #d7dbe0; border: 1px solid #333a45; border-radius: 5px; font: 12px/1.4 ui-monospace, monospace; padding: 8px; }
+  dialog p { margin: 0 0 8px; color: #7d858f; }
+  #setup {
+    display: none; padding: 10px 14px; background: #4a2020; border-bottom: 1px solid #703030; color: #ffd9d9;
+  }
+  #setup code { color: #ffcc33; }
 </style>
 </head>
 <body>
 <header>
   <h1>Briefcase demo — original vs AI upscale</h1>
-  <span class="hint">drag on the picture to wipe · <code>space</code> play/pause · <code>←/→</code> step</span>
+  <span class="hint">drag on the picture to wipe · <code>space</code> play/pause · <code>←/→</code> step · <code>O</code> keep original · <code>P</code> preview</span>
 </header>
+
+<div id="setup">
+  The original frames are not on disk, so the left side is only the static canvas and there is
+  nothing to compare. They are derived from <code>demo.pck</code> and gitignored — generate them with
+  <code>npx tsx tools/studio/stage-kufr.ts</code>, then reload.
+</div>
 
 <div id="stagewrap">
   <div id="stage">
@@ -65,7 +84,10 @@
 
 <footer>
   <button id="play">▶︎ Play</button>
-  <label>frame <input type="range" id="frame" min="0" value="0"></label>
+  <span class="stack">
+    <label>frame <input type="range" id="frame" min="0" value="0"></label>
+    <span id="markwrap"></span>
+  </span>
   <span id="fnum">0</span>
   <label>fps <input type="range" id="fps" min="1" max="30" value="13"></label>
   <span id="fpsv">13</span>
@@ -78,8 +100,19 @@
     </select>
   </label>
   <button id="region" title="Show only the animated TV-screen region">region only</button>
+  <button id="keep" title="Keep this frame's ORIGINAL art instead of the upscale (O)">keep original</button>
+  <button id="preview" title="Show the AI side as the game will actually play it, honouring the picks (P)">preview picks</button>
+  <button id="export" title="Emit the kufr-models.json ranges for these picks">export…</button>
   <span id="status">loading…</span>
 </footer>
+
+<dialog id="out">
+  <p>Paste into <code>tools/studio/kufr-models.json</code> → <code>ranges</code>, then rebuild with
+     <code>node tools/studio/build-ai.mjs _kufr</code>. Indices are 0-based, matching
+     <code>#N</code> in the readout.</p>
+  <textarea id="outtext" readonly></textarea>
+  <p style="margin:8px 0 0"><button id="outcopy">copy</button> <button id="outclose">close</button></p>
+</dialog>
 
 <script type="module">
 // Paths are repo-relative; serve this file from the repository root.
@@ -113,6 +146,50 @@ const frameOf = async (name) => {
 };
 
 let idx = 0, playing = false, fps = 13, wipe = 0.5, zoom = 'fit', regionOnly = false;
+
+// ---- the picks ------------------------------------------------------------
+// Which ORDER indices should play as the original art. Kept in localStorage because
+// choosing them is a long eyeballing session and a reload should not cost it. Seeded
+// from what is already shipped, so the tool opens showing the current state of the game
+// rather than an empty sheet.
+const KEY = 'ff.kufr.keepOriginal';
+const keep = new Set();
+{
+  const shipped = new Set(man.original ?? []);
+  ORDER.forEach((name, i) => { if (shipped.has(name)) keep.add(i); });
+  try {
+    const saved = JSON.parse(localStorage.getItem(KEY) ?? 'null');
+    if (Array.isArray(saved)) { keep.clear(); for (const i of saved) keep.add(i); }
+  } catch { /* corrupt entry: fall back to what is shipped */ }
+}
+const saveKeep = () => {
+  try { localStorage.setItem(KEY, JSON.stringify([...keep].sort((a, b) => a - b))); }
+  catch { /* private mode: the picks just do not survive a reload */ }
+};
+let preview = false;
+
+/** The picks as inclusive index ranges, which is how kufr-models.json expresses them. */
+function ranges() {
+  const out = [];
+  for (const i of [...keep].sort((a, b) => a - b)) {
+    const last = out[out.length - 1];
+    if (last && i === last.to + 1) last.to = i;
+    else out.push({ from: i, to: i });
+  }
+  return out;
+}
+
+function paintMarks() {
+  const wrap = document.getElementById('markwrap');
+  wrap.textContent = '';
+  for (const r of ranges()) {
+    const el = document.createElement('i');
+    el.style.left = `${(r.from / ORDER.length) * 100}%`;
+    el.style.width = `${Math.max(0.4, ((r.to - r.from + 1) / ORDER.length) * 100)}%`;
+    wrap.appendChild(el);
+  }
+  document.getElementById('keep').classList.toggle('on', keep.has(idx));
+}
 
 const stage = document.getElementById('stage');
 const handle = document.getElementById('handle');
@@ -156,16 +233,25 @@ async function draw() {
   og.drawImage(natBase, ox, oy, BASE.w * S, BASE.h * S);
   if (nat) og.drawImage(nat, ox + REG.x * S, oy + REG.y * S, REG.w * S, REG.h * S);
 
-  // AI: the shipped upscale, drawn 1:1.
+  // AI: the shipped upscale, drawn 1:1. Under "preview picks" a kept frame is drawn the
+  // way the game draws it — the ORIGINAL region over the upscaled base, nearest-neighbour
+  // (src/render/indexedRegion.ts, drawIndexedRegion) — so this side is what will actually play.
+  const asOriginal = preview && keep.has(idx);
   ag.imageSmoothingEnabled = false;
   ag.setTransform(1, 0, 0, 1, 0, 0);
   ag.clearRect(0, 0, aiC.width, aiC.height);
   ag.drawImage(aiBase, ox, oy);
-  if (ai) ag.drawImage(ai, ox + REG.x * S, oy + REG.y * S);
+  if (asOriginal) {
+    if (nat) ag.drawImage(nat, ox + REG.x * S, oy + REG.y * S, REG.w * S, REG.h * S);
+  } else if (ai) {
+    ag.drawImage(ai, ox + REG.x * S, oy + REG.y * S);
+  }
 
-  document.getElementById('fnum').textContent = `${idx + 1} / ${ORDER.length}`;
+  document.getElementById('tagR').textContent = asOriginal ? 'ORIGINAL (kept)' : 'AI UPSCALE';
+  document.getElementById('fnum').textContent = `#${idx}  (${idx + 1} / ${ORDER.length})`;
   document.getElementById('frame').value = String(idx);
-  status.textContent = `${name}${nat ? '' : '  (native frame missing)'}`;
+  status.textContent = `${name}${nat ? '' : '  (native frame missing)'}${keep.size ? `  ·  ${keep.size} kept original` : ''}`;
+  paintMarks();
 }
 
 // ---- playback -------------------------------------------------------------
@@ -206,6 +292,47 @@ regionBtn.addEventListener('click', () => {
   layout(); void draw();
 });
 
+// ---- picking --------------------------------------------------------------
+const keepBtn = document.getElementById('keep');
+const toggleKeep = () => {
+  if (keep.has(idx)) keep.delete(idx); else keep.add(idx);
+  saveKeep();
+  void draw();
+};
+keepBtn.addEventListener('click', toggleKeep);
+const previewBtn = document.getElementById('preview');
+previewBtn.addEventListener('click', () => {
+  preview = !preview;
+  previewBtn.classList.toggle('on', preview);
+  void draw();
+});
+// Clicking the strip jumps to that frame, which is the fastest way back to a pick.
+document.getElementById('markwrap').addEventListener('click', (e) => {
+  const r = e.currentTarget.getBoundingClientRect();
+  idx = Math.min(ORDER.length - 1, Math.max(0, Math.floor(((e.clientX - r.left) / r.width) * ORDER.length)));
+  void draw();
+});
+
+const dlg = document.getElementById('out');
+document.getElementById('export').addEventListener('click', () => {
+  // Emitted in kufr-models.json's own shape so it can be pasted straight in. `note` is
+  // left as a prompt rather than filled with something untrue: that file's existing
+  // entry carries the REASON and the verified scene boundaries, and that is the part
+  // worth keeping.
+  const text = JSON.stringify(
+    ranges().map((r) => ({ from: r.from, to: r.to, model: 'original', note: 'WHY these frames read better as the original, and the scene cuts that bound them' })),
+    null,
+    2,
+  );
+  document.getElementById('outtext').value = text || '[]';
+  dlg.showModal();
+});
+document.getElementById('outcopy').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText(document.getElementById('outtext').value); }
+  catch { document.getElementById('outtext').select(); }
+});
+document.getElementById('outclose').addEventListener('click', () => dlg.close());
+
 // Drag anywhere on the picture to move the wipe.
 let dragging = false;
 const setWipe = (clientX) => {
@@ -218,14 +345,28 @@ stage.addEventListener('pointermove', (e) => { if (dragging) setWipe(e.clientX);
 stage.addEventListener('pointerup', (e) => { dragging = false; stage.releasePointerCapture(e.pointerId); });
 
 window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLTextAreaElement) return;
+  // The export dialog is modal, so a shortcut fired behind it would toggle a pick the
+  // user cannot see — and they would find it later with no idea where it came from.
+  if (dlg.open) return;
   if (e.code === 'Space') { e.preventDefault(); playBtn.click(); }
   else if (e.code === 'ArrowRight') { idx = (idx + 1) % ORDER.length; void draw(); }
   else if (e.code === 'ArrowLeft') { idx = (idx - 1 + ORDER.length) % ORDER.length; void draw(); }
+  else if (e.code === 'KeyO') { e.preventDefault(); toggleKeep(); }
+  else if (e.code === 'KeyP') { e.preventDefault(); previewBtn.click(); }
 });
 window.addEventListener('resize', layout);
 
 layout();
 await draw();
+// A fresh worktree has no `public/enhanced/_kufr/frames/` — it is derived from demo.pck
+// and gitignored. Without it the ORIGINAL side is just the static canvas, which looks
+// like "the upscale changed nothing" rather than like missing input, so say so once and
+// loudly instead of leaving a per-frame footnote in the status line.
+{
+  const probe = await frameOf(ORDER[Math.min(20, ORDER.length - 1)]);
+  if (!probe.nat) document.getElementById('setup').style.display = 'block';
+}
 // Warm the first stretch so playback is smooth from the start.
 for (let i = 0; i < 40 && i < ORDER.length; i++) void frameOf(ORDER[i]);
 </script>
