@@ -1,8 +1,9 @@
 /**
  * Solutions E2E harness — the port's regression net over physics + room scripts.
  *
- * For each committed FFNG solution (test/fixtures/solutions/*.moves) we replay the
- * move-string against its pinned room through the SHARED step-engine (the same
+ * For each recorded solution — now room DATA, read through `solutionsSource.ts`, which
+ * takes it off the room's own `RoomScript.solution` — we replay the move-string against
+ * its pinned room through the SHARED step-engine (the same
  * physics + prog() + win-hook path the browser game loop uses). A room PASSES iff at
  * the end `won === true && anyFishDead === false && blocked === 0` — a blocked move
  * means the port's physics diverged from the reference, so we hard-fail on it.

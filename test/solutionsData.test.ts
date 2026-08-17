@@ -28,7 +28,10 @@ describe('solutions as room data', () => {
   const jmenoOf = (slug: string): string => ROOMS[SOLUTION_ROOMS[slug]! - 1]!.jmeno;
   const portedSlugs = recordedSlugs().filter((s) => !UNPORTED.has(s));
 
-  it('every staged recording that belongs to a room round-trips byte-identically', () => {
+  // "Identical" up to the trailing-newline trim both sides apply — a `.moves` file ends
+  // with one and a TypeScript string literal does not. Everything else, including the case
+  // that carries which fish moves, is compared exactly.
+  it('every staged recording that belongs to a room round-trips character for character', () => {
     const drifted = portedSlugs.filter((s) => ROOM_SOLUTIONS[jmenoOf(s)] !== stagedRecording(s));
     expect(drifted, 'room data differs from the staged recording — run `npm run gen-solutions`').toEqual([]);
   });

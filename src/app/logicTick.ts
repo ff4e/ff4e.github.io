@@ -13,7 +13,7 @@ import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicke
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
 import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
-import { advanceSolve, solvemode, tickSolveWatchdog } from './solveMode.js';
+import { advanceSolve, inSolvemode, noteSolveWin, solvemode, tickSolveWatchdog } from './solveMode.js';
 import { subsOn } from './playerSettings.js';
 import { ui } from './screenState.js';
 import { EFFECT_VOL, LOGIC_MS } from './stageGeometry.js';
@@ -71,6 +71,13 @@ export function hracNespi(): void {
 export function step(): boolean {
   if (ui.screen !== 'room') return false; // the map/intro screens have no game clock
   setCount(count + 1);
+  // Age a solution replay ONCE per tick, above every early return below. It used to be
+  // aged next to where it advances, at the bottom — which meant any path that returned
+  // early froze the run instead of failing it: KUFRIK's briefcase cutscene (the very next
+  // branch) held one at 27/259 indefinitely, button stuck on "Solving", with no abort
+  // because the watchdog that exists for exactly that was never reached. A watchdog behind
+  // a `return` is not a watchdog.
+  if (solvemode) tickSolveWatchdog();
   // Briefcase cutscene takes over while it plays.
   if (cutscene) {
     cutsceneSubs?.tick(count);
@@ -100,6 +107,11 @@ export function step(): boolean {
     }
   }
   if (!room || !engine) return false;
+  // Latch a solution replay's win FIRST, before any of the early returns below. A win
+  // starts the auto-return countdown and this function then returns for the whole tick, so
+  // by the time the idle branch at the bottom would see it the run is already over — and a
+  // gspec=9 push-out wins with the fish still inside, several ticks after its last move.
+  if (solvemode) noteSolveWin(engine.won);
   // Fast-forward load animation (loadmode): replay the saved record at LoadSpeed
   // moves/tick while it plays, skipping normal gameplay + the showmode replay (the
   // original's DalsiPrikaz exits early during a load, URoom.pas:26930).
@@ -253,7 +265,12 @@ export function step(): boolean {
     !room.anyFishDead &&
     !showmode &&
     !replaymode &&
-    !solvemode &&
+    // `inSolvemode()`, not `solvemode` — the two must agree with the input lockout, which
+    // is also `inSolvemode()`. Gating on the raw object kept held-key repeat suppressed
+    // after a run ABORTED, while the lockout had already lifted: the player got their keys
+    // back and the fish would not move, which reads as a wedged engine rather than as the
+    // diagnosable stopped-room the abort is meant to leave behind.
+    !inSolvemode() &&
     activeScript?.s.natvrdo !== 1 &&
     !activeScript?.s.zavermode
   ) {
@@ -276,7 +293,7 @@ export function step(): boolean {
     if (eng.phase === 'idle') {
       advanceSolve({
         anyFishDead: room.anyFishDead,
-        won: room.won,
+        won: eng.won, // engine.won, not room.won — gspec=9 wins with the fish still inside
         play: (which, dir) => {
           eng.active = which;
           return tryStep(which, dir);
@@ -284,9 +301,6 @@ export function step(): boolean {
         wake: hracNespi,
       });
     }
-    // Every tick, not just the idle ones: a run wedged mid-swim never reaches the branch
-    // above, and a watchdog that cannot see the hang it is for is not a watchdog.
-    tickSolveWatchdog();
   }
   return false;
 }

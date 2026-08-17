@@ -69,6 +69,8 @@ import type { SolveArmError } from './solveMode.js';
 export interface CheatsHost {
   readonly screen: "map" | "room" | "intro" | "legimage";
   readonly devEnabled: boolean;
+  /** True while any other automated playback mode owns the room (replay / demo / load). */
+  readonly playbackBusy: () => boolean;
   readonly engine: StepEngine | null;
   readonly room: Room | null;
   readonly ffr: FfrRoom | null;
@@ -180,6 +182,20 @@ export function devSolveRoom(speed = 1): SolveStartResult {
     return { error: 'unavailable', detail: 'needs the dev pane enabled and a room on screen' };
   }
   if (host.room.won) return { error: 'unavailable', detail: 'the room is already won' };
+  // A recording starts from the room's SPAWN state and assumes it is the only thing
+  // pressing keys. Refuse if another playback mode already owns the room, and refuse mid
+  // animation — starting on a half-finished swim or fall replays the recording against a
+  // room it does not describe, and every abort it then reports is a false one.
+  if (host.playbackBusy()) {
+    return { error: 'unavailable', detail: 'another playback mode (replay/demo/load) is running' };
+  }
+  if (host.engine.phase !== 'idle') {
+    return { error: 'unavailable', detail: 'the room is still moving — wait for it to settle' };
+  }
+  if (host.room.anyFishDead) return { error: 'unavailable', detail: 'a fish is dead — restart first' };
+  if (host.engine.srecord !== '') {
+    return { error: 'unavailable', detail: 'the room has already been played — restart it first' };
+  }
   const jmeno = host.activeScript?.def.name;
   if (!jmeno) return { error: 'unavailable', detail: 'the room has no script, so no solution to look up' };
   const armed = armSolve(jmeno, speed);

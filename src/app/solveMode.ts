@@ -69,6 +69,13 @@ export interface SolveModeState {
   speed: number;
   /** Ticks since the recording last advanced or the engine last did something. */
   idleTicks: number;
+  /**
+   * Idle ticks since the last recorded move was played. A room is not required to be won
+   * ON the final move: a gspec=9 push-out latches its win from the at-rest `spec9` mark a
+   * tick or more later, and the cork slide runs after that. So "moves exhausted" only
+   * becomes a failure once the room has also been idle for a while.
+   */
+  idleAfterMoves: number;
   /** Set once, when it stops. Non-null means the run is over and the room is left as it fell. */
   abort: SolveAbort | null;
   /** Latched on the tick the room was won, so a finished run is distinguishable from an aborted one. */
@@ -85,6 +92,18 @@ export interface SolveModeState {
  * game time).
  */
 const STALL_TICKS = 600;
+
+/**
+ * How long to keep waiting for an autonomous win after the last recorded move.
+ *
+ * The same 120 the headless harness uses (`test/solutionsHarness.ts`), and for the same
+ * reason: the recording ends when the PLAYER stopped pressing keys, not when the room
+ * finished resolving. Eight rooms win by pushing an item out (gspec=9 — LODE, SPUNT,
+ * ZELVA, BARELY, MAPA, POHON, GRAL, DISKETA), where the win is latched by the at-rest
+ * `spec9` mark and the exit slide that follows, all of it after the final move. Calling
+ * `exhausted` on the first idle tick failed every one of them.
+ */
+const WIN_GRACE_TICKS = 120;
 
 export let solvemode: SolveModeState | null = null;
 
@@ -156,6 +175,7 @@ export function armSolve(jmeno: string, speed = 1): SolveModeState | { error: So
       idx: 0,
       speed,
       idleTicks: 0,
+      idleAfterMoves: 0,
       abort: null,
       won: false,
     };
@@ -191,8 +211,9 @@ export function advanceSolve(ctx: {
   if (!s || s.abort || s.won) return;
 
   if (ctx.won) {
-    // The win latched on a previous tick's move. Let the normal win path (countdown ->
-    // returnFromRoom) carry on exactly as it would for a player; nothing to abort.
+    // Already won on an earlier tick (usually latched by `noteSolveWin` before this branch
+    // is even reachable). Let the normal win path — countdown -> returnFromRoom — carry on
+    // exactly as it would for a player; nothing to abort, and no further move to play.
     s.won = true;
     return;
   }
@@ -201,15 +222,26 @@ export function advanceSolve(ctx: {
     return;
   }
   if (s.idx >= s.moves.length) {
-    // Every recorded move was played and the room is still not won. The headless net says
-    // these moves DO solve this room, so if this happens the divergence is in something
-    // only the live loop has.
-    fail(s, 'exhausted', `all ${s.moves.length} moves played and the room is not won`);
+    // Every recorded move has been played. Do NOT call that a failure yet — give the room
+    // the same grace the headless harness gives it, because a win can still arrive on its
+    // own (see WIN_GRACE_TICKS). Only once it has been idle this long with no win is the
+    // recording genuinely not solving the room, and that IS worth reporting: the headless
+    // net says these moves solve it, so the divergence is in something only the live loop
+    // has.
+    if (++s.idleAfterMoves <= WIN_GRACE_TICKS) return;
+    fail(s, 'exhausted', `all ${s.moves.length} moves played and the room did not win within ${WIN_GRACE_TICKS} ticks`);
     return;
   }
 
   const at = s.idx;
   const m = s.moves[at]!;
+  // Count as player activity BEFORE the move is offered, not after it is accepted — the
+  // headless harness does the same (`room.hracNespi()` ahead of its busy gate) and its
+  // comment records why: ZELVA's turtle seizes a fish that has been idle 40 ticks, and a
+  // long scripted line can hold a fish `busy` for longer than that. Waking only on an
+  // accepted move let the idle timers climb during exactly the window the harness keeps
+  // them down, so the live replay could be possessed where the headless one is not.
+  ctx.wake();
   const outcome = ctx.play(m.which, m.dir);
   if (outcome === 'busy') {
     // Not a failure and not progress: the engine was not ready for it, so the move is NOT
@@ -227,7 +259,26 @@ export function advanceSolve(ctx: {
   }
   s.idx = at + 1;
   s.idleTicks = 0;
-  ctx.wake();
+}
+
+/**
+ * Latch a win the moment the ENGINE reports one, from wherever in the tick this is called.
+ *
+ * It must be `engine.won`, not `room.won`: `room.won` is `venku.little && venku.big` (both
+ * fish outside), and the eight gspec=9 push-out rooms win with the fish still INSIDE —
+ * only the pushed item leaves. `stepEngine.ts` says so where `won` is declared, and the
+ * headless harness asserts `engine.won` for exactly this reason.
+ *
+ * And it must be latched OUTSIDE the idle branch. A win immediately starts the auto-return
+ * countdown, and `logicTick` returns early for the whole tick while that runs (and again
+ * while anything is still falling), so `advanceSolve` is never reached again after the win.
+ * Latching only there left a solved push-out room reported as a failure — or as nothing at
+ * all, once `returnFromRoom` tore the run down.
+ */
+export function noteSolveWin(engineWon: boolean): void {
+  const s = solvemode;
+  if (!s || s.abort || s.won) return;
+  if (engineWon) s.won = true;
 }
 
 /**

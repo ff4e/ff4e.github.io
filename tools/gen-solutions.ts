@@ -58,8 +58,8 @@ const header = `/**
  * what \`replaymode\` feeds through \`tryStep\` — one per idle tick.
  *
  * WIN #68's bonus level adds a SECOND symbol set, \`w\`/\`x\`/\`y\`/\`z\` (+ uppercase), for the
- * elderly fish pair — see the header of \`test/solutionsHarness.ts\` for why. Any decoder of
- * these strings has to accept both sets; \`decodeMove\` there is the reference.
+ * elderly fish pair. Any decoder of these strings has to accept both sets;
+ * \`src/core/solutionMoves.ts\` is the one decoder, shared by the game and the harness.
  *
  * These live in the PLAYER bundle, not behind the dev flag. That is deliberate and costs
  * ~12 kB gzipped (${rows.reduce((n, r) => n + r.moves.length, 0)} B of move characters; GitHub Pages gzips text on the wire).
