@@ -35,9 +35,10 @@ function harness(outcomes: Outcome | Outcome[] = 'moving') {
   return {
     played,
     state,
-    ctx: () => ({
+    ctx: (startedIdle = true) => ({
       anyFishDead: state.anyFishDead,
       won: state.won,
+      startedIdle,
       play: (which: 'little' | 'big', dir: number): Outcome => {
         played.push({ which, dir });
         return Array.isArray(outcomes) ? (outcomes[i++] ?? 'moving') : outcomes;
@@ -255,6 +256,36 @@ describe('solvemode', () => {
     const ok = armSolve('PRVNI');
     expect('error' in ok, 'a real puzzle room arms').toBe(false);
     expect('moves' in ok && ok.moves.length, 'and carries its decoded moves').toBeGreaterThan(0);
+  });
+
+  /**
+   * The rule that WIN #68 paid for. A tick that only became idle inside `advance()` has
+   * not given the room's `prog` an at-rest pass yet, so a move played there arrives one
+   * cell ahead of where the recording meant it — and WIN's bonus level opens on a
+   * positional trigger, so that cell crushed the elderly fish at move 143 of 794 on a
+   * recording the headless net wins with.
+   */
+  it('will not play a move on a tick that only became idle part-way through', () => {
+    const h = harness();
+    arm('uuuu');
+    advanceSolve(h.ctx(false));
+    advanceSolve(h.ctx(false));
+    expect(h.played.length, 'nothing played on a tick that did not start at rest').toBe(0);
+    expect(solveStatus().idx).toBe(0);
+    expect(solveStatus().abort, 'and it is not an error, just not this tick').toBeNull();
+
+    advanceSolve(h.ctx(true));
+    expect(h.played.length, 'and it plays on the next tick that does').toBe(1);
+  });
+
+  it('a non-idle tick still counts toward the stall watchdog', () => {
+    const h = harness();
+    arm('uuuu');
+    for (let i = 0; i < 601; i++) {
+      advanceSolve(h.ctx(false));
+      tickSolveWatchdog();
+    }
+    expect(solveStatus().abort?.reason, 'a room wedged mid-animation still fails').toBe('stalled');
   });
 
   it('cancelling stops the run and unlocks input', () => {

@@ -107,6 +107,10 @@ export function step(): boolean {
     }
   }
   if (!room || !engine) return false;
+  // Was the room at rest when this tick STARTED? A solution replay may only play a move on
+  // such a tick — see where it is used below. Captured here, before `prog` and before
+  // `advance()`, which is where the headless harness captures it too.
+  const idleAtTickStart = engine.phase === 'idle';
   // Latch a solution replay's win FIRST, before any of the early returns below. A win
   // starts the auto-return countdown and this function then returns for the whole tick, so
   // by the time the idle branch at the bottom would see it the run is already over — and a
@@ -294,6 +298,9 @@ export function step(): boolean {
       advanceSolve({
         anyFishDead: room.anyFishDead,
         won: eng.won, // engine.won, not room.won — gspec=9 wins with the fish still inside
+        // Not merely "idle now": see `startedIdle` in `solveMode.ts` for why the tick has
+        // to have BEGUN at rest, and what it cost in WIN #68 when it did not.
+        startedIdle: idleAtTickStart,
         play: (which, dir) => {
           eng.active = which;
           return tryStep(which, dir);
