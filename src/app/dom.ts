@@ -29,11 +29,27 @@ export const ctx = canvas.getContext('2d')!;
 // the GlScreen can bind its context lazily on first use.
 export const glCanvas = document.createElement('canvas');
 glCanvas.id = 'screen-gl';
-// The fixed stage box (sized by relayout): rooms/map/cutscene are centered inside
-// it and letterboxed, so the side panel stays put while the room canvas resizes.
+// The stage box (sized by relayout): rooms/map/cutscene are centered inside it and
+// letterboxed vertically. Its WIDTH hugs the content so the side panel sits beside the
+// room rather than beside the box's empty slack; `stage.stageW` is its max-width.
 export const stageBox = document.createElement('div');
 stageBox.id = 'stagebox';
 export const wrap = document.createElement('div');
+/**
+ * Close button for the help overlay, top-left of the help page.
+ *
+ * Help.pas closes on any key or a right-click and shows no button; this is a deliberate
+ * addition, because neither of those is discoverable and the control panel — which is
+ * where a player would look — is deliberately hidden while help is up (see drawPanel).
+ * It lives in `wrap` so it is positioned against the help canvas rather than the stage
+ * box, which now hugs its content.
+ */
+export const helpClose = document.createElement('button');
+helpClose.id = 'help-close';
+helpClose.type = 'button';
+helpClose.textContent = '✕';
+helpClose.hidden = true;
+helpClose.setAttribute('aria-label', 'Close help');
 
 export const panelCanvas = document.getElementById('panel') as HTMLCanvasElement;
 export const panelCtx = panelCanvas.getContext('2d')!;
@@ -87,4 +103,8 @@ export function buildStage(): void {
   glCanvas.style.display = 'none';
   glCanvas.style.pointerEvents = 'none';
   wrap.appendChild(glCanvas);
+  // Above both canvases, and the one overlay in here that DOES take clicks — the
+  // mousedown listener that pages through help lives on #screen underneath, so a click
+  // that lands on this button never reaches it.
+  wrap.appendChild(helpClose);
 }

@@ -31,6 +31,7 @@ import {
 } from './layout.js';
 import { roomScreenSize } from '../render/renderRoom.js';
 import { settings } from './playerSettings.js';
+import { defaultSettings } from '../core/settings.js';
 import type { Room } from '../core/room.js';
 import type { Settings } from '../core/settings.js';
 
@@ -42,8 +43,9 @@ import type { Settings } from '../core/settings.js';
 // Measured in initStageGeometry(), not here: reading window.innerWidth at module scope
 // would happen BEFORE main.ts's phone gate, and this module's whole contract is that
 // importing it does nothing. The literal below is the same fallback the old expression
-// used when there was no window at all.
-export let stage: StageLayout = computeStageLayout(1600, 1200);
+// used when there was no window at all; the fit mode is the shipped default rather than
+// the player's, because `settings` has not been loaded yet at this point.
+export let stage: StageLayout = computeStageLayout(1600, 1200, defaultSettings().fitMode);
 
 /** Recompute the stage box; called on resize, fullscreen and DPR changes. */
 export function setStage(v: StageLayout): void {
@@ -74,7 +76,7 @@ export function contentScaleFor(w: number, h: number): number {
   // Pass devicePixelRatio so 'native' can snap to whole PHYSICAL pixels (crisp at
   // any browser zoom / display scaling); the other modes ignore it.
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  return fitScale(w, h, stage.scale, settings.fitMode, dpr);
+  return fitScale(w, h, stage.scale, settings.fitMode, dpr, stage.boxW);
 }
 
 /**
@@ -159,6 +161,6 @@ export const EXIT_CELLS = 5; // cells of travel to slide fully off-screen (rende
  */
 export function initStageGeometry(): void {
   if (typeof window !== 'undefined') {
-    stage = computeStageLayout(window.innerWidth, window.innerHeight);
+    stage = computeStageLayout(window.innerWidth, window.innerHeight, settings.fitMode);
   }
 }

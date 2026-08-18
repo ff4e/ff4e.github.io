@@ -79,6 +79,10 @@ export class AudioEngine {
   /** Bumped by every start and every stop, so an in-flight start can tell whether it
    *  is still the current intent by the time its decode resolves (see playMusic). */
   private musicGen = 0;
+  /** True while a modal overlay has deliberately suspended the context (setModalPause). */
+  private modalPaused = false;
+  /** Wall-clock time the modal pause began, so `activeUntil` can be carried across it. */
+  private modalPausedAt = 0;
   private musicBufs = new Map<string, AudioBuffer>();
   /** Debug: recent play names with a timestamp (ring buffer) + a console line so the
    *  source of any glitch can be identified live in the browser console. */
@@ -159,8 +163,55 @@ export class AudioEngine {
         this.buses[bus] = g;
       }
     }
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    // Browsers start the context suspended until a gesture unlocks it, so any call
+    // that is about to make a sound nudges it awake. `modalPaused` is the one state
+    // where a suspended context is DELIBERATE (see setModalPause): without this guard
+    // the next play()/busNode() from anywhere would silently un-pause the whole game.
+    if (this.ctx.state === 'suspended' && !this.modalPaused) void this.ctx.resume();
     return this.ctx;
+  }
+
+  /**
+   * Pause or resume every sound at once, keeping each one's place.
+   *
+   * Suspending the AudioContext stops its clock, so a half-spoken line and the music
+   * loop both continue from where they were rather than restarting or being lost —
+   * which is what a frozen game should sound like. Killing the voices instead would
+   * drop whatever a fish was in the middle of saying.
+   *
+   * Used by the help overlay (app/panel.ts), which is the only thing in the port that
+   * covers the whole play area while the game is still notionally running.
+   */
+  setModalPause(on: boolean): void {
+    if (this.modalPaused === on) return;
+    this.modalPaused = on;
+    const ctx = this.ctx;
+    if (on) {
+      this.modalPausedAt = performance.now();
+      if (ctx) void ctx.suspend();
+      return;
+    }
+    // Suspending stops the AUDIO clock; `activeUntil` is bookkeeping on the WALL clock
+    // (startTracked writes performance.now() + duration), and that one kept running. So
+    // without this the game comes back believing every line it paused mid-way has
+    // finished: `talking()` goes false while the tail is audibly still playing, the
+    // speaking fish's mouth closes over it, and a script waiting on `!playing(p)` starts
+    // the next line on top of it — the exact overlap the priority bookkeeping exists to
+    // prevent. Found by review, reproduced at a 4.5s line held under help for 5.3s.
+    //
+    // Only entries that were still sounding when we paused are moved, and Infinity
+    // (looping effects, MusicCycle) is left alone. A one-shot STARTED during the pause
+    // would be over-held by up to the pause length, which is the safe direction and is
+    // unreachable anyway: the logic tick is frozen, so nothing is calling play().
+    const delta = performance.now() - this.modalPausedAt;
+    if (delta > 0) {
+      for (const [prior, until] of this.activeUntil) {
+        if (until !== Infinity && until > this.modalPausedAt) {
+          this.activeUntil.set(prior, until + delta);
+        }
+      }
+    }
+    if (ctx) void ctx.resume();
   }
 
   /** Set a category bus gain multiplier (a slider index -> level, via settings). */

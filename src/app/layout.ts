@@ -12,6 +12,33 @@
  *    and the world map (640x480). The stage box + side panel are scaled together
  *    (`stageScale`) to be as large as the available viewport allows, so the panel
  *    is a constant size across all rooms (it no longer tracks the room height).
+ *    The box's WIDTH is elastic (see `stageBoxWidth`): STAGE_W is its minimum, and
+ *    on a window wider than the 967x600 footprint's 1.61:1 it grows into the width
+ *    the height-bound scale has already declined to use. It is still the same box
+ *    for every room — that invariant is the point of this file — but it now tracks
+ *    the window, so one room is no longer the same size on differently-shaped
+ *    windows. That is a deliberate extension of the deviation below, taken because
+ *    the leftover width was otherwise simply empty and it is the ONLY thing that
+ *    enlarges a room whose fit is width-bound (measured: the wide, short rooms gain
+ *    up to +27% on a 2048x1017 window; 44 of the 72 rooms are unaffected, and the
+ *    object-size spread across all 72 tightens slightly, 1.342x -> 1.316x). The
+ *    panel's position was NOT the constraint and moving it changes nothing: the
+ *    room is centred in the box, and the panel sits beside that box.
+ *  - That box is the SCALING envelope, and it is room-independent. The DOM element
+ *    that holds the content (`#stagebox`) is sized to the CONTENT instead, so the
+ *    panel sits beside the room rather than beside the box's empty slack — a room
+ *    narrower than the box was otherwise pushed away from its own controls by a
+ *    median 230px, up to 593px. That is a second deliberate deviation: the original's
+ *    panel was a FIXED side column, so a narrow room genuinely did sit far from it,
+ *    whereas here the panel's x tracks the room. The room itself does not move — its
+ *    centre is `availW/2 - (gap + panelW)/2`, which the box width cancels out of.
+ *  - Note for anything reading a room's scale: `contentScale` is now a function of the
+ *    elastic box, so the ROOM's scale moves with the viewport width even though
+ *    `stageScale` does not. Subtitle sizing reads both (`subtitleScale` takes the min of
+ *    the two, `fitScreenW` takes the room's), so it is NOT invariant here: in the
+ *    graded modes the min still returns `stageScale`, but in the crisp-integer modes a
+ *    wider box raises the room's scale and the subtitle grows with it, toward — never
+ *    past — the constant stage size. See render/subtitleGeom.ts.
  *  - Each piece of content (room / map / cutscene) is drawn at `contentScale`
  *    and centered inside the stage box:
  *      * mode 'fixed'  (Approach D, the faithful one): contentScale === stageScale, so
@@ -115,6 +142,17 @@ export const STAGE_W = 800;
 export const STAGE_H = 600;
 /** Native-pixel gap between the stage box and the side panel. */
 export const STAGE_GAP = 12;
+/**
+ * Native-pixel margin kept between the stage box + panel group and each viewport edge.
+ *
+ * The elastic box (`stageBoxWidth`) would otherwise spend every spare pixel and leave the
+ * group touching both edges — which `#stagebox`'s `overflow: hidden` then clips, because
+ * the row is centred and any rounding lands on one side. Reserving a margin is what makes
+ * "use the spare width" mean "use the spare width, not all of it".
+ */
+export const STAGE_EDGE = 12;
+/** The widest content the stage box ever has to hold (DRAKAR/PUCLIK are 795 native px wide). */
+export const MAX_CONTENT_W = 795;
 /** Control-panel native size (mirrors PANEL_W/PANEL_H in data/ffp.ts). */
 export const PANEL_NATIVE_W = 155;
 export const PANEL_NATIVE_H = 395;
@@ -128,6 +166,14 @@ export interface StageLayout {
   scale: number;
   /** Gap between stage box and panel, in display px. */
   gap: number;
+  /**
+   * Stage box WIDTH IN NATIVE px — `STAGE_W` or wider, per `stageBoxWidth()`.
+   *
+   * Carried on the layout rather than read from the `STAGE_W` constant, because it is now
+   * a property of the viewport and every consumer must use the SAME one. `contentScale`
+   * takes it as an argument for exactly that reason.
+   */
+  boxW: number;
   /** Stage box size in display px. */
   stageW: number;
   stageH: number;
@@ -139,6 +185,11 @@ export interface StageLayout {
 /**
  * The scale that fits the stage box + gap + panel into the available area, as
  * large as possible. Clamped to a floor so it never collapses on tiny viewports.
+ *
+ * Computed from the MINIMUM box (`STAGE_W`), never the elastic one: the box only ever
+ * grows into width the scale has already declined to use, so letting it feed back into
+ * the scale would be circular — and would trade a bigger scale for a wider box, which is
+ * the opposite of the point.
  */
 export function computeStageScale(availW: number, availH: number): number {
   const footprintW = STAGE_W + STAGE_GAP + PANEL_NATIVE_W;
@@ -148,13 +199,67 @@ export function computeStageScale(availW: number, availH: number): number {
   return Math.max(MIN_STAGE_SCALE, s);
 }
 
+/**
+ * How wide the stage box may grow before a wider one buys nothing, in native px.
+ *
+ * A GRADED mode enlarges a room by at most its own bound, so once the box can hold the
+ * widest content at that bound, extra width buys nothing. Measured across the 72 rooms,
+ * the mean gain saturates exactly there: `medium` stops moving at 795x1.35 = 1073,
+ * `large` at 795x1.6 = 1272. `fixed`'s bound is 1, which lands below `STAGE_W`, so it
+ * never widens the box — right, and it falls out rather than being special-cased, since
+ * `contentScale === stageScale` in `fixed`.
+ *
+ * `fill` and the crisp-integer family are bounded by the VIEWPORT instead — see the note
+ * in the body for why a native-px ceiling is the wrong instrument for the integer modes.
+ */
+export function stageBoxCeiling(mode: FitMode): number {
+  // The crisp-integer family is bounded by its own `k = min(target, kMax)` and by the
+  // viewport, not by a width in native px. Its target is PHYSICAL pixels per game pixel,
+  // so the box width it needs depends on `stageScale` and `dpr` — neither of which a
+  // room-independent ceiling can know. Multiplying MAX_CONTENT_W by it mixes the two
+  // units and silently denies the mode a scale it could have had: measured at 1600x500,
+  // dpr 1, 'x1' on UTES 780x225, a 936 box was available and would have given the exact
+  // 1.0 the mode asks for, but a 795 ceiling clamped the box to STAGE_W and the room was
+  // drawn at 0.855. Leaving them viewport-bounded costs nothing now that the DOM box
+  // hugs its content, so a box wider than the content cannot push the panel away.
+  if (NATIVE_TARGET[mode] !== undefined) return Infinity;
+  return MAX_CONTENT_W * (FIT_FACTORS[mode] ?? 1);
+}
+
+/**
+ * The stage box width for a viewport, in native px — `STAGE_W` or wider.
+ *
+ * The layout is height-bound on any window wider than the 967x600 footprint's 1.61:1, and
+ * the leftover width was simply empty: the room is centred in a FIXED box, so the panel
+ * was never what limited it. This spends that leftover on the box, which is the only
+ * thing that enlarges a room whose fit is width-bound — the wide, short ones.
+ *
+ * Never below `STAGE_W`, so nothing is ever smaller than it was; never above
+ * `stageBoxCeiling(mode)`, past which no room can grow. A width-bound viewport (narrower
+ * than 1.61:1 — a 16:10 laptop panel at true fullscreen is one) has no leftover and gets
+ * exactly today's box.
+ *
+ * The box stays the same for every room, which is the invariant this file exists to keep
+ * (see the header). What is new is that it tracks the WINDOW, so one room is no longer
+ * the same size on differently-shaped windows — a deliberate extension of the deviation
+ * documented in the header, not a new one.
+ */
+export function stageBoxWidth(availW: number, availH: number, scale: number, mode: FitMode): number {
+  if (!Number.isFinite(scale) || scale <= 0) return STAGE_W;
+  const usable = availW / scale - STAGE_GAP - PANEL_NATIVE_W - 2 * STAGE_EDGE;
+  if (!Number.isFinite(usable)) return STAGE_W;
+  return Math.max(STAGE_W, Math.min(stageBoxCeiling(mode), usable));
+}
+
 /** Full stage layout (stage box + panel display sizes) for an available area. */
-export function computeStageLayout(availW: number, availH: number): StageLayout {
+export function computeStageLayout(availW: number, availH: number, mode: FitMode): StageLayout {
   const scale = computeStageScale(availW, availH);
+  const boxW = stageBoxWidth(availW, availH, scale, mode);
   return {
     scale,
     gap: STAGE_GAP * scale,
-    stageW: STAGE_W * scale,
+    boxW,
+    stageW: boxW * scale,
     stageH: STAGE_H * scale,
     panelW: PANEL_NATIVE_W * scale,
     panelH: PANEL_NATIVE_H * scale,
@@ -177,6 +282,11 @@ export function computeStageLayout(availW: number, availH: number): StageLayout 
  *    fills more of the stage box ('fill' = grow until it fills the box exactly);
  *    content that already fills the box is left as-is.
  * Never enlarges past the point where content would overflow the stage box.
+ *
+ * `boxW` is the stage box's NATIVE width — `stage.boxW`, which is elastic (see
+ * `stageBoxWidth`). It is a parameter and not a read of `STAGE_W` so that every consumer
+ * is forced to use the same box the layout actually sized; defaulting to `STAGE_W` keeps
+ * the pre-elastic behaviour for callers that genuinely have no layout to hand.
  */
 export function contentScale(
   w: number,
@@ -184,8 +294,9 @@ export function contentScale(
   stageScale: number,
   mode: FitMode,
   dpr = 1,
+  boxW: number = STAGE_W,
 ): number {
-  const fill = Math.min(STAGE_W / w, STAGE_H / h); // grow-to-fill-the-box factor (≥1)
+  const fill = Math.min(boxW / w, STAGE_H / h); // grow-to-fill-the-box factor (≥1)
   const target = NATIVE_TARGET[mode];
   if (target !== undefined) {
     const maxFit = stageScale * fill; // largest CSS scale that still fits the box

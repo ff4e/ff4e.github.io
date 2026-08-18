@@ -79,7 +79,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // index) and `roomSolution` (so it can compare what was recorded against what was given,
   // character for character, rather than by counting). Both of the latter were asked for in
   // review, to replace assertions that were weaker than the claims beside them.
-  ['src/app/debugHooks.ts', 1644],
+  // 1 644 -> 1 646 for one line: the `fitMode` setter now calls `relayout()`. The stage
+  // box's width ceiling became per-mode (`stageBoxCeiling`, app/layout.ts), so a mode
+  // change that only repainted would leave the box at the previous mode's width — and
+  // this hook is how every probe changes the mode, so without it they would all measure a
+  // stale box. It mirrors what the dev bar's own handler does; the alternative was routing
+  // it through the host, which costs more lines here and widens the hook surface.
+  ['src/app/debugHooks.ts', 1646],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
