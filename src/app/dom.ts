@@ -29,8 +29,9 @@ export const ctx = canvas.getContext('2d')!;
 // the GlScreen can bind its context lazily on first use.
 export const glCanvas = document.createElement('canvas');
 glCanvas.id = 'screen-gl';
-// The fixed stage box (sized by relayout): rooms/map/cutscene are centered inside
-// it and letterboxed, so the side panel stays put while the room canvas resizes.
+// The stage box (sized by relayout): rooms/map/cutscene are centered inside it and
+// letterboxed vertically. Its WIDTH hugs the content so the side panel sits beside the
+// room rather than beside the box's empty slack; `stage.stageW` is its max-width.
 export const stageBox = document.createElement('div');
 stageBox.id = 'stagebox';
 export const wrap = document.createElement('div');

@@ -134,7 +134,7 @@ await withApp(async ({ p, expect }) => {
     { width: 1200, height: 640 },
   ]) {
     const was = await p.evaluate(() => ({
-      box: document.getElementById('stagebox').style.width,
+      box: document.getElementById('stagebox').style.maxWidth,
       panel: document.getElementById('panel').style.width,
     }));
     await p.setViewportSize(vp);
@@ -144,9 +144,13 @@ await withApp(async ({ p, expect }) => {
     // panel of the PREVIOUS viewport, and the geometry assertions below silently
     // described the wrong window. Both change at every step here, so both are real
     // signals.
+    //
+    // maxWidth and not width: the stage box HUGS its content now (loadingUi.relayout),
+    // so `style.width` is always '' and never changes. `style.maxWidth` is what relayout
+    // writes the stage width to, so it is the same readiness signal this always meant.
     await p.waitForFunction(
       (w) =>
-        document.getElementById('stagebox').style.width !== w.box &&
+        document.getElementById('stagebox').style.maxWidth !== w.box &&
         document.getElementById('panel').style.width !== w.panel,
       was,
     );

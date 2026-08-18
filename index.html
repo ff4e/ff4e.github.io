@@ -35,7 +35,9 @@
         overflow: hidden;
         min-height: 0;
       }
-      /* Fixed stage box: rooms/map/cutscene are centered inside it, letterboxed. */
+      /* Stage box: rooms/map/cutscene are centered inside it and letterboxed
+         vertically. The width is left to the content (see relayout) so the side
+         panel sits beside the ROOM, not beside the box's empty slack. */
       #stagebox {
         position: relative;
         display: flex;
