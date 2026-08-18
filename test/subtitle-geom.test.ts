@@ -33,6 +33,7 @@ import {
   waveDy,
   wavePhase,
 } from '../src/render/subtitleGeom.js';
+import { STAGE_W, computeStageLayout, contentScale } from '../src/app/layout.js';
 
 const SCREEN_W = 780; // a wide room
 const maxW = SCREEN_W - BORDERTITLE * 2;
@@ -226,6 +227,40 @@ describe('subtitleScale — constant on screen, but never too big for the room',
   it('never returns more than the room scale', () => {
     for (const box of [0.5, 1, 1.5, 2, 3.5]) {
       expect(subtitleScale(stageScale, box)).toBeLessThanOrEqual(box);
+    }
+  });
+
+  // The elastic stage box (app/layout.ts) means the ROOM's scale now moves with the
+  // viewport WIDTH even though stageScale does not — so subtitle size is not invariant
+  // here, contrary to what the elastic-box change first claimed. This pins the actual
+  // rule, in both directions, so the claim cannot be quietly re-asserted:
+  //   - graded modes: the room is never drawn smaller than the stage, so the min still
+  //     returns stageScale and a wider box cannot move the text at all;
+  //   - crisp-integer modes: a wider box raises the room's scale, and the text rises
+  //     WITH it, toward — never past — the constant stage size.
+  it('a wider stage box moves the text only where the room is drawn below the stage', () => {
+    // Driven through the REAL layout rather than hand-picked scales, because the thing
+    // that was got wrong here is precisely how contentScale's elastic box feeds this.
+    const vp = { w: 2048, h: 1017 }; // height-bound, so the box grows
+    const room = [780, 225] as const; // UTES — width-bound in the old 800 box
+    for (const mode of ['medium', 'native'] as const) {
+      const l = computeStageLayout(vp.w, vp.h, mode);
+      const before = contentScale(room[0], room[1], l.scale, mode, 1, STAGE_W);
+      const after = contentScale(room[0], room[1], l.scale, mode, 1, l.boxW);
+      expect(after).toBeGreaterThan(before); // the box really does enlarge this room
+      const textBefore = subtitleScale(l.scale, before);
+      const textAfter = subtitleScale(l.scale, after);
+      if (mode === 'medium') {
+        // Graded: the room is never drawn below the stage, so the min returns the stage
+        // scale either way and the text cannot move at all.
+        expect(textAfter).toBeCloseTo(textBefore, 10);
+        expect(textAfter).toBeCloseTo(l.scale, 10);
+      } else {
+        // Crisp: the room was drawn BELOW the stage, so the text was capped to it and
+        // rises with it — toward, never past, the constant stage size.
+        expect(textAfter).toBeGreaterThan(textBefore);
+        expect(textAfter).toBeLessThanOrEqual(l.scale + 1e-9);
+      }
     }
   });
 });

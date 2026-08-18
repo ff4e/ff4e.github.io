@@ -35,7 +35,9 @@
         overflow: hidden;
         min-height: 0;
       }
-      /* Fixed stage box: rooms/map/cutscene are centered inside it, letterboxed. */
+      /* Stage box: rooms/map/cutscene are centered inside it and letterboxed
+         vertically. The width is left to the content (see relayout) so the side
+         panel sits beside the ROOM, not beside the box's empty slack. */
       #stagebox {
         position: relative;
         display: flex;
@@ -45,6 +47,26 @@
         flex: 0 0 auto;
       }
       #panel { cursor: pointer; flex: 0 0 auto; }
+      /* Close button for the help overlay (src/app/dom.ts). Sits at the top-left of the
+         help page; the rest of the page pages forward on click, so this has to be the
+         one thing in the stage that takes a click of its own. */
+      #help-close {
+        position: absolute;
+        left: 8px;
+        top: 8px;
+        z-index: 60;
+        width: 26px;
+        height: 26px;
+        padding: 0;
+        line-height: 24px;
+        font-size: 14px;
+        cursor: pointer;
+        color: #cdd;
+        background: rgba(10, 10, 16, 0.72);
+        border: 1px solid #556;
+        border-radius: 4px;
+      }
+      #help-close:hover { background: rgba(40, 40, 56, 0.9); color: #fff; }
       /* The panel column: the control panel with the feedback strip hanging under it.
          The strip is `position: absolute` so it contributes NOTHING to the column's
          size — the stage layout is computed from the panel's 155×395 and must stay

@@ -24,6 +24,21 @@
  *    object-size spread across all 72 tightens slightly, 1.342x -> 1.316x). The
  *    panel's position was NOT the constraint and moving it changes nothing: the
  *    room is centred in the box, and the panel sits beside that box.
+ *  - That box is the SCALING envelope, and it is room-independent. The DOM element
+ *    that holds the content (`#stagebox`) is sized to the CONTENT instead, so the
+ *    panel sits beside the room rather than beside the box's empty slack — a room
+ *    narrower than the box was otherwise pushed away from its own controls by a
+ *    median 230px, up to 593px. That is a second deliberate deviation: the original's
+ *    panel was a FIXED side column, so a narrow room genuinely did sit far from it,
+ *    whereas here the panel's x tracks the room. The room itself does not move — its
+ *    centre is `availW/2 - (gap + panelW)/2`, which the box width cancels out of.
+ *  - Note for anything reading a room's scale: `contentScale` is now a function of the
+ *    elastic box, so the ROOM's scale moves with the viewport width even though
+ *    `stageScale` does not. Subtitle sizing reads both (`subtitleScale` takes the min of
+ *    the two, `fitScreenW` takes the room's), so it is NOT invariant here: in the
+ *    graded modes the min still returns `stageScale`, but in the crisp-integer modes a
+ *    wider box raises the room's scale and the subtitle grows with it, toward — never
+ *    past — the constant stage size. See render/subtitleGeom.ts.
  *  - Each piece of content (room / map / cutscene) is drawn at `contentScale`
  *    and centered inside the stage box:
  *      * mode 'fixed'  (Approach D, the faithful one): contentScale === stageScale, so
@@ -187,20 +202,28 @@ export function computeStageScale(availW: number, availH: number): number {
 /**
  * How wide the stage box may grow before a wider one buys nothing, in native px.
  *
- * A room is enlarged by at most its mode's bound, so once the box can hold the widest
- * content at that bound, extra width only pushes the panel away from the room. Measured
- * across the 72 rooms, the mean gain saturates exactly here: in `medium` it stops moving
- * at 795x1.35 = 1073, in `large` at 795x1.6 = 1272.
+ * A GRADED mode enlarges a room by at most its own bound, so once the box can hold the
+ * widest content at that bound, extra width buys nothing. Measured across the 72 rooms,
+ * the mean gain saturates exactly there: `medium` stops moving at 795x1.35 = 1073,
+ * `large` at 795x1.6 = 1272. `fixed`'s bound is 1, which lands below `STAGE_W`, so it
+ * never widens the box — right, and it falls out rather than being special-cased, since
+ * `contentScale === stageScale` in `fixed`.
  *
- * `fixed` and `x1` land on 795, below `STAGE_W`, so they never widen the box at all —
- * which is right, and falls out rather than being special-cased: in `fixed`
- * `contentScale === stageScale`, and `x1` asks for exactly one physical pixel per game
- * pixel. The unbounded modes (`native`, `fill`) return Infinity and are bounded by the
- * viewport instead, which is what "grow until it fills the box" asks for.
+ * `fill` and the crisp-integer family are bounded by the VIEWPORT instead — see the note
+ * in the body for why a native-px ceiling is the wrong instrument for the integer modes.
  */
 export function stageBoxCeiling(mode: FitMode): number {
-  const target = NATIVE_TARGET[mode];
-  return MAX_CONTENT_W * (target !== undefined ? target : (FIT_FACTORS[mode] ?? 1));
+  // The crisp-integer family is bounded by its own `k = min(target, kMax)` and by the
+  // viewport, not by a width in native px. Its target is PHYSICAL pixels per game pixel,
+  // so the box width it needs depends on `stageScale` and `dpr` — neither of which a
+  // room-independent ceiling can know. Multiplying MAX_CONTENT_W by it mixes the two
+  // units and silently denies the mode a scale it could have had: measured at 1600x500,
+  // dpr 1, 'x1' on UTES 780x225, a 936 box was available and would have given the exact
+  // 1.0 the mode asks for, but a 795 ceiling clamped the box to STAGE_W and the room was
+  // drawn at 0.855. Leaving them viewport-bounded costs nothing now that the DOM box
+  // hugs its content, so a box wider than the content cannot push the panel away.
+  if (NATIVE_TARGET[mode] !== undefined) return Infinity;
+  return MAX_CONTENT_W * (FIT_FACTORS[mode] ?? 1);
 }
 
 /**

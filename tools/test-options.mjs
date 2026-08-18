@@ -61,6 +61,57 @@ await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.helpPage())) === 1, 'ArrowRight advances the help page');
   await p.keyboard.press('ArrowLeft');
   expect((await p.evaluate(() => window.__ff.helpPage())) === 0, 'ArrowLeft goes back');
+
+  // The panel is hidden while help is up, and the close button is the way back.
+  //
+  // The help page is drawn at its own unscaled size and the stage box hugs its content
+  // (app/loadingUi.ts), so a panel left visible slid a long way sideways the moment help
+  // opened — measured 541px at 2048x1017. It is hidden instead, which takes away the only
+  // discoverable way out (Help.pas closes on any key or a right-click, neither of which
+  // announces itself), so the button is a deliberate addition. Both halves are asserted
+  // here because either one alone is a trap.
+  const helpLayout = await p.evaluate(() => {
+    const pc = document.getElementById('panelcol');
+    const hc = document.getElementById('help-close');
+    const cv = document.getElementById('screen').getBoundingClientRect();
+    const hr = hc.getBoundingClientRect();
+    return {
+      panelShown: getComputedStyle(pc).display !== 'none',
+      btnShown: !hc.hidden,
+      btnInsidePage: hr.left >= cv.left && hr.top >= cv.top && hr.right <= cv.right && hr.bottom <= cv.bottom,
+    };
+  });
+  expect(!helpLayout.panelShown, 'the control panel is hidden while help is open');
+  expect(helpLayout.btnShown, 'the help close button is shown while help is open');
+  expect(helpLayout.btnInsidePage, 'the help close button sits inside the help page');
+  // The game freezes behind the pages. The original's help did NOT freeze it
+  // (ToggleHelp calls FHelp.Show, Uovl.pas:252 — non-modal, and its window left the
+  // game visible beside it), but this port draws help over the whole play area, so a
+  // running game would advance scripts and speak idle chatter unseen — with its
+  // subtitles suppressed, at that, since renderLoop clears those layers while help is
+  // up. Deliberate deviation; asserted so it cannot lapse back.
+  const tickBefore = await p.evaluate(() => window.__ff.count());
+  await new Promise((r) => setTimeout(r, 700)); // ~8 logic ticks at 80ms
+  const tickAfter = await p.evaluate(() => window.__ff.count());
+  expect(
+    tickAfter === tickBefore,
+    `the game clock is frozen while help is open (${tickBefore} -> ${tickAfter})`,
+  );
+  await p.click('#help-close');
+  expect((await p.evaluate(() => window.__ff.helpOpen())) === false, 'the close button closes help');
+  const tickResumed = await p.evaluate(() => window.__ff.count());
+  await new Promise((r) => setTimeout(r, 700));
+  expect(
+    (await p.evaluate(() => window.__ff.count())) > tickResumed,
+    'the game clock runs again once help is closed',
+  );
+  await p.waitForFunction(() => getComputedStyle(document.getElementById('panelcol')).display !== 'none');
+  expect(
+    await p.evaluate(() => document.getElementById('help-close').hidden),
+    'the close button goes away with the help page',
+  );
+
+  await p.evaluate(() => window.__ff.panelAction(23));
   await p.keyboard.press('Escape');
   expect((await p.evaluate(() => window.__ff.helpOpen())) === false, 'a key closes help');
 
