@@ -501,7 +501,15 @@
         <option value="ai">AI-upscaled</option>
       </select></label>
       <label title="Repaint an idle room only when it changes (~12.5fps) instead of 60fps"><input type="checkbox" id="idledirty" checked> Idle-FPS saver</label>
-      <button id="solveroom" type="button" title="Play the room from its recorded solution, live: real speed, fish speak, moves recorded. Stops and says so if anything goes wrong.">Solve room</button>
+      <button id="solveroom" type="button" title="Play the room from its recorded solution, live: fish speak, moves recorded. Stops and says so if anything goes wrong.">Solve room</button>
+      <select id="solvespeed" title="How fast a solution replay runs. It shortens the logic tick — every tick still happens, in order — so the run is the same, only compressed. 1x is the pace a player would see.">
+        <option value="1">1x</option>
+        <option value="2">2x</option>
+        <option value="4">4x</option>
+        <option value="8" selected>8x</option>
+        <option value="16">16x</option>
+        <option value="32">32x</option>
+      </select>
       <label>Room <select id="room"></select></label>
     </div>
     <div class="stage">

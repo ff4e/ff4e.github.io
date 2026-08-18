@@ -47,11 +47,12 @@ import { budget, observed, withApp } from './ui-lib.mjs';
  * loop, in order, with the script running.
  *
  * `renderLoop.ts` lifts the one-step-per-frame cap for the duration of a run, so this is a
- * real multiplier rather than a request the frame rate quietly caps: a 16 ms frame at 20
- * runs four 4 ms ticks. It is clamped to 50 at every entry point, because `Infinity` would
- * mean a 0 ms tick and an uncapped loop.
+ * real multiplier rather than a request the frame rate quietly caps. It is clamped to 50 at
+ * every entry point, because `Infinity` would mean a 0 ms tick and an uncapped loop. The
+ * value must be one the dev bar's `#solvespeed` control actually offers, because the probe
+ * drives that control rather than the debug hook.
  */
-const SPEED = 20;
+const SPEED = 16; // must be one of the dev bar's own options — the probe sets that control
 
 const ROOMS = [
   // PRVNI runs at REAL speed, and that is the point of it. Above 1 the logic tick shortens
@@ -84,6 +85,13 @@ await withApp(async ({ p, expect }) => {
     await p.waitForFunction(() => window.__ff.phase() === 'idle');
 
     const before = await p.evaluate(() => window.__ff.lines());
+    // Set the dev bar's own speed control first: the BUTTON reads it, so this also asserts
+    // that wiring. PRVNI is deliberately left at 1x — see its entry above.
+    await p.evaluate((v) => {
+      const el = document.getElementById('solvespeed');
+      el.value = String(v);
+      el.dispatchEvent(new Event('change'));
+    }, speed);
     // Drive it through the dev-bar BUTTON, not the hook, so the wiring is what is asserted.
     await p.click('#solveroom');
     const armed = await p.evaluate(() => window.__ff.solveStatus());
@@ -91,7 +99,7 @@ await withApp(async ({ p, expect }) => {
     expect(armed.running, `${jmeno} started playing its solution (button says: ${why})`);
     expect(armed.total > 0, `${jmeno} has moves to play (${armed.total})`);
     expect(!(await p.evaluate(() => window.__ff.replayActive())), `${jmeno} is NOT the map replay — that one is silent`);
-    if (speed > 1) await p.evaluate((s) => window.__ff.solveSetSpeed(s), speed);
+    expect(armed.speed === speed, `${jmeno} took its speed from the dev bar (${armed.speed}x, wanted ${speed}x)`);
 
     // The player is locked out while it plays: a fish key must not reach the room. The
     // move INDEX cannot witness that — it only ever goes up, so `idx >= before` is true

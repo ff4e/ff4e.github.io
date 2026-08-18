@@ -19,9 +19,9 @@
 import { ROOMS } from '../data/roomTable.js';
 import { isFitMode } from './layout.js';
 import { devSolveRoom } from './cheats.js';
-import { solveStatus } from './solveMode.js';
+import { setSolveSpeed, solveStatus } from './solveMode.js';
 import { solutionFor } from '../rooms/index.js';
-import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn } from './dom.js';
+import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn, solveSpeedSelect } from './dom.js';
 import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
 import { settings } from './playerSettings.js';
@@ -110,10 +110,21 @@ export function initDevBar(h: DevBarHost): void {
     el.checked = renderOnDirty;
     el.addEventListener('change', () => setRenderOnDirty(el.checked));
   }
+  if (solveSpeedSelect) {
+    const el = solveSpeedSelect;
+    // Persisted, because the whole point is not having to re-pick it on every reload.
+    const saved = localStorage.getItem('ff.solveSpeed');
+    if (saved && [...el.options].some((o) => o.value === saved)) el.value = saved;
+    el.addEventListener('change', () => {
+      localStorage.setItem('ff.solveSpeed', el.value);
+      setSolveSpeed(Number(el.value)); // take effect mid-run, not just on the next one
+      el.blur();
+    });
+  }
   if (solveRoomBtn) {
     const el = solveRoomBtn;
     el.addEventListener('click', () => {
-      const failed = devSolveRoom();
+      const failed = devSolveRoom(solveSpeed());
       // Only ever reachable when the button is enabled, so a failure here is a real
       // surprise and belongs on the button rather than in the console.
       if (failed) el.title = `cannot run: ${failed.detail}`;
@@ -141,6 +152,11 @@ export function initDevBar(h: DevBarHost): void {
     };
     watchDpr();
   }
+}
+
+/** The speed the dev bar is currently set to run a solution replay at. */
+function solveSpeed(): number {
+  return Number(solveSpeedSelect?.value ?? 1) || 1;
 }
 
 /**
@@ -184,7 +200,7 @@ export function syncSolveBtn(): void {
   }
 
   if (s.running) {
-    label = `Solving ${s.idx}/${s.total}`;
+    label = `Solving ${s.idx}/${s.total}${s.speed > 1 ? ` (${s.speed}x)` : ''}`;
     title = `Playing ${s.jmeno}'s recorded solution — press Escape to stop.`;
     disabled = true;
   } else if (s.abort) {
