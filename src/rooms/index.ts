@@ -1,8 +1,15 @@
 /**
  * Registry of ported per-room scripts, keyed by RoomName (Desc[].Jmeno).
  * Rooms without an entry simply have no scripted behaviour yet.
+ *
+ * Each room's recorded solution is attached here rather than authored into the room
+ * module: the modules are hand-maintained and read whole, so an opaque multi-kB move
+ * string in one would be paid for on every change to it, while a generated table nobody
+ * opens is free. `ROOM_SOLUTIONS` is that table (`src/rooms/solutions.ts`), keyed by the
+ * same `Jmeno`, so the moves still travel with the room's data as `RoomScript.solution`.
  */
 import type { RoomScript } from '../core/script.js';
+import { ROOM_SOLUTIONS } from './solutions.js';
 import { UTES } from './utes.js';
 import { PRVNI } from './prvni.js';
 import { KUFRIK } from './kufrik.js';
@@ -76,7 +83,7 @@ import { ZAVER } from './zaver.js';
 import { ZX } from './zx.js';
 import { WIN } from './win.js';
 
-const SCRIPTS: Record<string, RoomScript> = {
+const RAW_SCRIPTS: Record<string, RoomScript> = {
   [UTES.name]: UTES,
   [PRVNI.name]: PRVNI,
   [KUFRIK.name]: KUFRIK,
@@ -150,6 +157,25 @@ const SCRIPTS: Record<string, RoomScript> = {
   [ZX.name]: ZX,
   [WIN.name]: WIN,
 };
+
+const SCRIPTS: Record<string, RoomScript> = Object.fromEntries(
+  Object.entries(RAW_SCRIPTS).map(([name, s]) => {
+    const solution = ROOM_SOLUTIONS[name];
+    return [name, solution ? { ...s, solution } : s];
+  }),
+);
+
+/**
+ * What a room's recorded solution is, and why it might not be there. One question in one
+ * place, so callers never have to distinguish "no script module" from "no recording".
+ *
+ * `missing` means no recording exists for that room. That is ZAVER #71 and SCORE #72 — the
+ * ending and the results screens, which are not puzzles — and any name that is not a room.
+ */
+export function solutionFor(name: string): { moves: string; known: 'ok' } | { moves: null; known: 'missing' } {
+  const moves = SCRIPTS[name]?.solution;
+  return moves ? { moves, known: 'ok' } : { moves: null, known: 'missing' };
+}
 
 export function roomScript(name: string): RoomScript | undefined {
   return SCRIPTS[name];
