@@ -84,8 +84,27 @@ await withApp(async ({ p, expect }) => {
   expect(!helpLayout.panelShown, 'the control panel is hidden while help is open');
   expect(helpLayout.btnShown, 'the help close button is shown while help is open');
   expect(helpLayout.btnInsidePage, 'the help close button sits inside the help page');
+  // The game freezes behind the pages. The original's help did NOT freeze it
+  // (ToggleHelp calls FHelp.Show, Uovl.pas:252 — non-modal, and its window left the
+  // game visible beside it), but this port draws help over the whole play area, so a
+  // running game would advance scripts and speak idle chatter unseen — with its
+  // subtitles suppressed, at that, since renderLoop clears those layers while help is
+  // up. Deliberate deviation; asserted so it cannot lapse back.
+  const tickBefore = await p.evaluate(() => window.__ff.count());
+  await new Promise((r) => setTimeout(r, 700)); // ~8 logic ticks at 80ms
+  const tickAfter = await p.evaluate(() => window.__ff.count());
+  expect(
+    tickAfter === tickBefore,
+    `the game clock is frozen while help is open (${tickBefore} -> ${tickAfter})`,
+  );
   await p.click('#help-close');
   expect((await p.evaluate(() => window.__ff.helpOpen())) === false, 'the close button closes help');
+  const tickResumed = await p.evaluate(() => window.__ff.count());
+  await new Promise((r) => setTimeout(r, 700));
+  expect(
+    (await p.evaluate(() => window.__ff.count())) > tickResumed,
+    'the game clock runs again once help is closed',
+  );
   await p.waitForFunction(() => getComputedStyle(document.getElementById('panelcol')).display !== 'none');
   expect(
     await p.evaluate(() => document.getElementById('help-close').hidden),

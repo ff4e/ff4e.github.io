@@ -25,6 +25,7 @@ import {
   type PanelState,
 } from '../render/hud.js';
 import { aiPanel, ensureAiPanel } from './art.js';
+import { audio } from './audioEngine.js';
 import { canvas, ctx, feedbar, helpClose, panelCanvas, panelCol, panelCtx } from './dom.js';
 import { wake } from './frameClock.js';
 import { engine, room } from './gameState.js';
@@ -142,12 +143,17 @@ export function openHelp(): void {
   if (ui.mapOverlay === 'options') host.closeMapOverlay();
   ui.helpOpen = true;
   helpScreens.page = 0;
+  // Silence the room and the map, keeping each sound's place. The logic tick freezes
+  // with it (renderLoop) — see the note there for why the port deviates from the
+  // original's non-modal FHelp.Show here.
+  audio.setModalPause(true);
   void helpScreens.load(subLang());
 }
 
 /** Close the help overlay (any key, Help.pas:FormKeyDown). */
 export function closeHelp(): void {
   ui.helpOpen = false;
+  audio.setModalPause(false);
 }
 
 /** Draw the current help page full-screen on the main canvas (Help.pas:TabControl1Change). */

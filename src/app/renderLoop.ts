@@ -88,10 +88,17 @@ export function loop(now: number): void {
   // under the NEXT room, because that KillSnd is the only thing a room change ever does
   // about it (buildRoom only re-kills on a restart).
   const simPaused = ui.screen !== 'map' && !cutscene && (roomLoading || roomArtPending());
-  // The minigame is modal in the original, so the room's timer does not run while
-  // it is open (Tetris.ShowModal, URoom.pas:24565). It keeps its own 55ms clock.
+  // The minigame keeps its own 55ms clock, independent of the game's logic tick.
   tickTetris(dt);
-  const frozen = tetrisModal();
+  // Frozen while a modal overlay owns the game. Tetris is modal in the original
+  // (Tetris.ShowModal, URoom.pas:24565); the help pages are NOT — ToggleHelp calls
+  // FHelp.Show (Uovl.pas:252), and the original's help was a small separate window
+  // that left the game visible and running beside it. This port draws help over the
+  // whole play area and hides the panel behind it, so the game would otherwise run
+  // unseen: scripts advancing and idle chatter speaking lines whose subtitles this
+  // very loop suppresses (see clearDomSubtitles below). Freezing it is a deliberate
+  // deviation, taken because the port's help covers what the original's did not.
+  const frozen = tetrisModal() || ui.helpOpen;
   while (!simPaused && !frozen && acc >= LOGIC_MS && steps < MAX_STEPS_PER_FRAME) {
     setAcc(acc - LOGIC_MS);
     steps++;

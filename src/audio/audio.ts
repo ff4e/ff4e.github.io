@@ -79,6 +79,8 @@ export class AudioEngine {
   /** Bumped by every start and every stop, so an in-flight start can tell whether it
    *  is still the current intent by the time its decode resolves (see playMusic). */
   private musicGen = 0;
+  /** True while a modal overlay has deliberately suspended the context (setModalPause). */
+  private modalPaused = false;
   private musicBufs = new Map<string, AudioBuffer>();
   /** Debug: recent play names with a timestamp (ring buffer) + a console line so the
    *  source of any glitch can be identified live in the browser console. */
@@ -159,8 +161,32 @@ export class AudioEngine {
         this.buses[bus] = g;
       }
     }
-    if (this.ctx.state === 'suspended') void this.ctx.resume();
+    // Browsers start the context suspended until a gesture unlocks it, so any call
+    // that is about to make a sound nudges it awake. `modalPaused` is the one state
+    // where a suspended context is DELIBERATE (see setModalPause): without this guard
+    // the next play()/busNode() from anywhere would silently un-pause the whole game.
+    if (this.ctx.state === 'suspended' && !this.modalPaused) void this.ctx.resume();
     return this.ctx;
+  }
+
+  /**
+   * Pause or resume every sound at once, keeping each one's place.
+   *
+   * Suspending the AudioContext stops its clock, so a half-spoken line and the music
+   * loop both continue from where they were rather than restarting or being lost —
+   * which is what a frozen game should sound like. Killing the voices instead would
+   * drop whatever a fish was in the middle of saying.
+   *
+   * Used by the help overlay (app/panel.ts), which is the only thing in the port that
+   * covers the whole play area while the game is still notionally running.
+   */
+  setModalPause(on: boolean): void {
+    if (this.modalPaused === on) return;
+    this.modalPaused = on;
+    const ctx = this.ctx;
+    if (!ctx) return; // nothing has made a sound yet — nothing to pause
+    if (on) void ctx.suspend();
+    else void ctx.resume();
   }
 
   /** Set a category bus gain multiplier (a slider index -> level, via settings). */
