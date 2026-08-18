@@ -25,7 +25,8 @@ import {
   type PanelState,
 } from '../render/hud.js';
 import { aiPanel, ensureAiPanel } from './art.js';
-import { canvas, ctx, feedbar, panelCanvas, panelCol, panelCtx } from './dom.js';
+import { canvas, ctx, feedbar, helpClose, panelCanvas, panelCol, panelCtx } from './dom.js';
+import { wake } from './frameClock.js';
 import { engine, room } from './gameState.js';
 import { settings, subLang } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
@@ -45,6 +46,12 @@ let host!: PanelHost;
 /** Hand this module its view of the game. Called once, from `main.ts`, during boot. */
 export function initPanel(h: PanelHost): void {
   host = h;
+  // The help overlay's own way out. Registered here rather than in dom.ts because that
+  // module must stay free of behaviour (and importing panel.ts from it would be a cycle).
+  helpClose.addEventListener('click', () => {
+    closeHelp();
+    wake();
+  });
 }
 
 export function panelState(): PanelState {
@@ -162,7 +169,13 @@ export function drawHelp(): void {
 export function drawPanel(): void {
   if (!ui.panel) return;
   const asMapOverlay = ui.screen === 'map' && ui.mapOverlay === 'options';
-  const visible = ui.screen === 'room' || asMapOverlay;
+  // Hidden while the help pages are up. The help page is drawn at its own unscaled size
+  // (drawHelp), and the stage box hugs its content, so a visible panel would slide a long
+  // way left the moment help opened and back again when it closed — measured 541px at
+  // 2048x1017. Hiding it removes the jump at its source rather than damping it, and the
+  // page is self-contained anyway: nothing on the panel acts on it. `helpClose` is the
+  // way out that this takes away (dom.ts).
+  const visible = (ui.screen === 'room' || asMapOverlay) && !ui.helpOpen;
   // Hide the COLUMN, not just the canvas inside it. `display: none` takes an element
   // out of the flex row entirely, and with it the row's gap; hiding only the canvas
   // would leave a zero-width column still claiming that gap, so the map sat half a gap

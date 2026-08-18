@@ -228,6 +228,25 @@ describe('subtitleScale — constant on screen, but never too big for the room',
       expect(subtitleScale(stageScale, box)).toBeLessThanOrEqual(box);
     }
   });
+
+  // The elastic stage box (app/layout.ts) means the ROOM's scale now moves with the
+  // viewport WIDTH even though stageScale does not — so subtitle size is not invariant
+  // here, contrary to what the elastic-box change first claimed. This pins the actual
+  // rule, in both directions, so the claim cannot be quietly re-asserted:
+  //   - graded modes: the room is never drawn smaller than the stage, so the min still
+  //     returns stageScale and a wider box cannot move the text at all;
+  //   - crisp-integer modes: a wider box raises the room's scale, and the text rises
+  //     WITH it, toward — never past — the constant stage size.
+  it('a wider stage box moves the text only where the room is drawn below the stage', () => {
+    // graded: untouched whatever the box does to the room.
+    expect(subtitleScale(stageScale, 1.738)).toBeCloseTo(stageScale, 10);
+    expect(subtitleScale(stageScale, 2.211)).toBeCloseTo(stageScale, 10);
+    // crisp: measured at 2048x1017 in 'native', room 07, box 800 -> 1017 native.
+    const before = subtitleScale(stageScale, 1); // room drawn at 1x
+    const after = subtitleScale(stageScale, 2); // the wider box lets it reach 2x
+    expect(after).toBeGreaterThan(before);
+    expect(after).toBeLessThanOrEqual(stageScale); // never past the constant stage size
+  });
 });
 
 describe('clampTextScale — hold the font in a readable band', () => {

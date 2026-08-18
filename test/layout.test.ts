@@ -144,21 +144,50 @@ describe('stageBoxWidth — the elastic stage box', () => {
     expect(wayPast).toBeCloseTo(atCeiling, 9);
   });
 
-  it("'fixed' and 'x1' never widen the box — a wider one cannot help them", () => {
-    // fixed: contentScale === stageScale by definition. x1: exactly 1 physical px per
-    // game px. Both ceilings land below STAGE_W, so the floor wins — no special case.
+  it("'fixed' never widens the box — a wider one cannot help it", () => {
+    // contentScale === stageScale in 'fixed', so the box is irrelevant to it. Its bound
+    // is 1, which lands below STAGE_W, so the floor wins — no special case needed.
     expect(stageBoxCeiling('fixed')).toBeLessThan(STAGE_W);
-    expect(stageBoxCeiling('x1')).toBeLessThan(STAGE_W);
     expect(box(wide, 'fixed')).toBe(STAGE_W);
-    expect(box(wide, 'x1')).toBe(STAGE_W);
+    const l = computeStageLayout(wide.w, wide.h, 'fixed');
+    for (const [w, h] of ROOMS) {
+      expect(contentScale(w, h, l.scale, 'fixed', 1, l.boxW)).toBe(l.scale);
+    }
   });
 
   it('is one width shared by every room at a given viewport', () => {
     // The box is a property of the VIEWPORT, not of the content — that invariant is what
     // keeps a room the same size relative to every other room (see the file header).
-    const l = computeStageLayout(wide.w, wide.h, 'medium');
-    const scales = ROOMS.map(([w, h]) => contentScale(w, h, l.scale, 'fixed', 1, l.boxW));
-    for (const s of scales) expect(s).toBe(l.scale);
+    // Asserted on computeStageLayout itself, which takes no room argument: driving it
+    // through contentScale in 'fixed' would prove nothing, because that mode returns
+    // stageScale without reading boxW at all.
+    for (const mode of FIT_MODES) {
+      const a = computeStageLayout(wide.w, wide.h, mode);
+      const b2 = computeStageLayout(wide.w, wide.h, mode);
+      expect(a.boxW).toBe(b2.boxW);
+      // ...and it is a width every room is measured against, not one derived per room:
+      // a room that is width-bound in it and one that is height-bound get the same box.
+      const wideRoom = contentScale(780, 225, a.scale, mode, 1, a.boxW);
+      const tallRoom = contentScale(315, 555, a.scale, mode, 1, a.boxW);
+      expect(Number.isFinite(wideRoom) && wideRoom > 0).toBe(true);
+      expect(Number.isFinite(tallRoom) && tallRoom > 0).toBe(true);
+    }
+  });
+
+  it('the ceiling never denies a crisp-integer mode a scale the viewport allows', () => {
+    // NATIVE_TARGET is PHYSICAL px per game px; the box is native px and bounds `fill`,
+    // a multiplier on stageScale. A native-px ceiling built from that target mixes units.
+    // Regression case: 1600x500, dpr 1, 'x1', UTES 780x225 — a 936 box is available, and
+    // 'x1' means exactly 1.0. A 795-based ceiling clamped the box to STAGE_W and gave
+    // 0.855 instead.
+    const l = computeStageLayout(1600, 500, 'x1');
+    expect(contentScale(780, 225, l.scale, 'x1', 1, l.boxW)).toBeCloseTo(1, 9);
+    for (const mode of ['native', 'x1', 'x2', 'x3', 'x4'] as const) {
+      expect(stageBoxCeiling(mode)).toBe(Infinity);
+    }
+    // The graded modes keep a real ceiling — that is where a wider box genuinely stops
+    // buying anything.
+    expect(stageBoxCeiling('medium')).toBeCloseTo(MAX_CONTENT_W * FIT_FACTORS.medium, 9);
   });
 });
 

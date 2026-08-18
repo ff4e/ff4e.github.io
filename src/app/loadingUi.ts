@@ -172,7 +172,7 @@ export function relayout(): void {
   // `availW/2 - (gap + panelW)/2` regardless of the box width, because the row is centred
   // and the gap and panel are constant.
   stageBox.style.width = '';
-  stageBox.style.maxWidth = `${Math.round(stage.stageW)}px`;
+  stageBox.style.maxWidth = `${Math.ceil(stage.stageW)}px`;
   stageBox.style.height = `${Math.round(stage.stageH)}px`;
   if (stageRow) stageRow.style.gap = `${Math.round(stage.gap)}px`;
   setForceRoomRedraw(true); // the room canvas CSS size is set in draw() — repaint to rescale

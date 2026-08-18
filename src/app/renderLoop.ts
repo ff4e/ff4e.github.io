@@ -11,7 +11,7 @@
  */
 import { aiRoomRenderActive, beginMapArt, mapArtHolding, roomArtPending, setMapPresented } from './art.js';
 import { frameEffectsActive, tetrisModal, tickTetris } from './cheats.js';
-import { canvas, ctx, glCanvas } from './dom.js';
+import { canvas, ctx, glCanvas, helpClose } from './dom.js';
 import { scheduleNextFrame } from './frameClock.js';
 import { acc, forceRoomRedraw, lastRoomBackend, lastRoomSig, lastTime, loopTicks, perfPaint, roomAnimating, roomLoading, roomPaints, setAcc, setForceRoomRedraw, setLastRoomSig, setLastTime, setLastWaterPaint, setLoopTicks, setPerfPaint, setRoomPaints, updatePerfHud, waterOwesRepaint } from './framePacing.js';
 import { draw, updateRoomSubtitles } from './framePainter.js';
@@ -125,6 +125,11 @@ export function loop(now: number): void {
   // `painted` (UMain.pas:1489-1493 — the paint sets daRealyRun, Spust runs after it).
   tickMapLaunch();
   if (ui.helpOpen || ui.screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
+  // The help overlay's close button, derived here for the same reason the layers below
+  // are: nothing that paints #screen can take a sibling element down, and `drawHelp` only
+  // runs while help is OPEN, so it could never hide it again. Guarded rather than assigned
+  // every frame — this runs on an idle room too.
+  if (helpClose.hidden === ui.helpOpen) helpClose.hidden = !ui.helpOpen;
   // The room's and the cutscene's subtitles are DOM layers of their own (subtitleDom.ts),
   // and no draw branch below clears them: a branch paints #screen, and a sibling element
   // is not something painting over #screen can touch. So a line still on screen when the
