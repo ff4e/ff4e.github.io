@@ -31,7 +31,7 @@ import { wake } from './frameClock.js';
 import { engine, room } from './gameState.js';
 import { settings, subLang } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
-import { scalingFilterFor, stage } from './stageGeometry.js';
+import { contentScaleFor, scalingFilterFor, stage } from './stageGeometry.js';
 import type { VolumeBus } from '../core/settings.js';
 import { ui, O_NORMAL, O_OPTIONS, O_SC_DOWN, O_SC_UP, PANEL_SCROLL_MS, SCMAX, SCMIN, helpScreens } from './screenState.js';
 
@@ -50,6 +50,15 @@ export function initPanel(h: PanelHost): void {
   // The help overlay's own way out. Registered here rather than in dom.ts because that
   // module must stay free of behaviour (and importing panel.ts from it would be a cycle).
   helpClose.addEventListener('click', () => {
+    closeHelp();
+    wake();
+  });
+  // A right-click anywhere on the help page closes it, and the button is part of the
+  // page — without this it would be the one spot where the secondary button raised the
+  // browser's context menu instead. The page's own handler is on #screen underneath and
+  // a click on the button never reaches it, so it is repeated here rather than shared.
+  helpClose.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
     closeHelp();
     wake();
   });
@@ -137,9 +146,13 @@ export function togglePanelOptions(): void {
  * uses tit_def) and show the overlay from the first page.
  */
 export function openHelp(): void {
-  // On the map the Options panel floats as a fixed, centred overlay (zIndex 50) that
-  // would otherwise cover the full-screen help pages — close it first so Help isn't
-  // hidden behind it (in-room the panel sits beside the play area, so no overlap).
+  // Leaving the map's Options overlay open here used to render it ON TOP of the
+  // full-screen help pages and hide them, because the column floats at zIndex 50. That
+  // can no longer happen — drawPanel hides the column outright while help is open — so
+  // this now only decides where the player lands when help closes: the plain map. That
+  // is the established behaviour and tools/test-options.mjs pins it; kept deliberately
+  // rather than dropped, since restoring Options instead is a different choice, not a
+  // bug fix.
   if (ui.mapOverlay === 'options') host.closeMapOverlay();
   ui.helpOpen = true;
   helpScreens.page = 0;
@@ -165,9 +178,27 @@ export function drawHelp(): void {
   if (canvas.width !== pg.w || canvas.height !== pg.h) {
     canvas.width = pg.w;
     canvas.height = pg.h;
-    canvas.style.width = `${pg.w}px`;
-    canvas.style.height = `${pg.h}px`;
   }
+  // Shrink to fit the stage box, but never enlarge past 1:1.
+  //
+  // The page is a fixed-resolution bitmap the original blitted at its own size, so
+  // scaling it UP would only blur art the player is meant to read — 1:1 is the faithful
+  // ceiling and the size on any ordinary window. But the page is 642x482 and the box is
+  // 800x600 NATIVE, so on a small window the box is the smaller of the two in CSS px and
+  // `overflow: hidden` simply cut the page off: measured at 700x620 the box was 580px
+  // against a 642px page, and at 900x420 it was 420px tall against 482. That took the
+  // close button (top-left, inside the page) off screen with it — the one affordance
+  // that exists BECAUSE the panel is hidden here. Found by review.
+  const cs = Math.min(1, contentScaleFor(pg.w, pg.h));
+  const cssW = `${Math.floor(pg.w * cs)}px`; // floor, so it can never round OVER the box
+  const cssH = `${Math.floor(pg.h * cs)}px`;
+  if (canvas.style.width !== cssW) canvas.style.width = cssW;
+  if (canvas.style.height !== cssH) canvas.style.height = cssH;
+  // Nearest-neighbour is right for art shown at 1:1; a fractional shrink of a photographic
+  // page aliases badly, so let the browser filter that case (the same trade scalingFilterFor
+  // makes for the AI tier's upscaled store).
+  const want = cs < 1 ? 'auto' : '';
+  if (canvas.style.imageRendering !== want) canvas.style.imageRendering = want;
   ctx.putImageData(new ImageData(new Uint8ClampedArray(pg.rgba), pg.w, pg.h), 0, 0);
 }
 

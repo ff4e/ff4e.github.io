@@ -33,6 +33,7 @@ import {
   waveDy,
   wavePhase,
 } from '../src/render/subtitleGeom.js';
+import { STAGE_W, computeStageLayout, contentScale } from '../src/app/layout.js';
 
 const SCREEN_W = 780; // a wide room
 const maxW = SCREEN_W - BORDERTITLE * 2;
@@ -238,14 +239,29 @@ describe('subtitleScale — constant on screen, but never too big for the room',
   //   - crisp-integer modes: a wider box raises the room's scale, and the text rises
   //     WITH it, toward — never past — the constant stage size.
   it('a wider stage box moves the text only where the room is drawn below the stage', () => {
-    // graded: untouched whatever the box does to the room.
-    expect(subtitleScale(stageScale, 1.738)).toBeCloseTo(stageScale, 10);
-    expect(subtitleScale(stageScale, 2.211)).toBeCloseTo(stageScale, 10);
-    // crisp: measured at 2048x1017 in 'native', room 07, box 800 -> 1017 native.
-    const before = subtitleScale(stageScale, 1); // room drawn at 1x
-    const after = subtitleScale(stageScale, 2); // the wider box lets it reach 2x
-    expect(after).toBeGreaterThan(before);
-    expect(after).toBeLessThanOrEqual(stageScale); // never past the constant stage size
+    // Driven through the REAL layout rather than hand-picked scales, because the thing
+    // that was got wrong here is precisely how contentScale's elastic box feeds this.
+    const vp = { w: 2048, h: 1017 }; // height-bound, so the box grows
+    const room = [780, 225] as const; // UTES — width-bound in the old 800 box
+    for (const mode of ['medium', 'native'] as const) {
+      const l = computeStageLayout(vp.w, vp.h, mode);
+      const before = contentScale(room[0], room[1], l.scale, mode, 1, STAGE_W);
+      const after = contentScale(room[0], room[1], l.scale, mode, 1, l.boxW);
+      expect(after).toBeGreaterThan(before); // the box really does enlarge this room
+      const textBefore = subtitleScale(l.scale, before);
+      const textAfter = subtitleScale(l.scale, after);
+      if (mode === 'medium') {
+        // Graded: the room is never drawn below the stage, so the min returns the stage
+        // scale either way and the text cannot move at all.
+        expect(textAfter).toBeCloseTo(textBefore, 10);
+        expect(textAfter).toBeCloseTo(l.scale, 10);
+      } else {
+        // Crisp: the room was drawn BELOW the stage, so the text was capped to it and
+        // rises with it — toward, never past, the constant stage size.
+        expect(textAfter).toBeGreaterThan(textBefore);
+        expect(textAfter).toBeLessThanOrEqual(l.scale + 1e-9);
+      }
+    }
   });
 });
 

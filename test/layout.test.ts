@@ -155,22 +155,18 @@ describe('stageBoxWidth — the elastic stage box', () => {
     }
   });
 
-  it('is one width shared by every room at a given viewport', () => {
-    // The box is a property of the VIEWPORT, not of the content — that invariant is what
-    // keeps a room the same size relative to every other room (see the file header).
-    // Asserted on computeStageLayout itself, which takes no room argument: driving it
-    // through contentScale in 'fixed' would prove nothing, because that mode returns
-    // stageScale without reading boxW at all.
+  it('is one box that contains every room at a given viewport', () => {
+    // The box takes no room argument, so "room-independent" is structural — what is
+    // worth asserting is the consequence: ONE box, and every room fits inside that same
+    // one. A box derived per room would let a room fill a box of its own and break the
+    // containment that keeps rooms comparable in size (see the file header).
     for (const mode of FIT_MODES) {
-      const a = computeStageLayout(wide.w, wide.h, mode);
-      const b2 = computeStageLayout(wide.w, wide.h, mode);
-      expect(a.boxW).toBe(b2.boxW);
-      // ...and it is a width every room is measured against, not one derived per room:
-      // a room that is width-bound in it and one that is height-bound get the same box.
-      const wideRoom = contentScale(780, 225, a.scale, mode, 1, a.boxW);
-      const tallRoom = contentScale(315, 555, a.scale, mode, 1, a.boxW);
-      expect(Number.isFinite(wideRoom) && wideRoom > 0).toBe(true);
-      expect(Number.isFinite(tallRoom) && tallRoom > 0).toBe(true);
+      const l = computeStageLayout(wide.w, wide.h, mode);
+      for (const [w, h] of ROOMS) {
+        const s = contentScale(w, h, l.scale, mode, 1, l.boxW);
+        expect(w * s).toBeLessThanOrEqual(l.boxW * l.scale + 1e-6);
+        expect(h * s).toBeLessThanOrEqual(STAGE_H * l.scale + 1e-6);
+      }
     }
   });
 
