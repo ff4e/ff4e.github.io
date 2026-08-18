@@ -39,6 +39,12 @@
 
 /** Extra idle ticks to spend after consuming the `help.cap` entry at this index. */
 export const SHOWMODE_HOLDS = new Map<number, number>([
+  // idx 302-363 is a 62-tick pause between help7 — "Nyní začínáme znovu - můžeme však
+  // nahrát uloženou pozici klávesou F3", 74 ticks — and the recorded `akce_load` at 364
+  // that the line is announcing. The load rebuilds the room and kills every voice
+  // (TRoom.Load → KillExcept(-999), URoom.pas:1905-1912), so the line describing F3 was
+  // cut off by F3 with 13 of its 74 ticks still to run. +10 makes the pause 72 ticks.
+  [302, 10],
   // idx 498-503 is a 6-tick pause. help10 — "Některé předměty mají takový tvar, že bych je
   // mohla zároveň držet i posouvat - ale to také nesmím" — starts at 485 and runs 75 ticks,
   // and the `move left` at 504 is the one that gets the little fish crushed. Six ticks is
