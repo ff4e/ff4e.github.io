@@ -11,9 +11,13 @@ import {
   computeStageScale,
   computeStageLayout,
   contentScale,
+  stageBoxCeiling,
+  stageBoxWidth,
   STAGE_W,
   STAGE_H,
   STAGE_GAP,
+  STAGE_EDGE,
+  MAX_CONTENT_W,
   PANEL_NATIVE_W,
   CAPPED_MAX,
   FIT_FACTORS,
@@ -52,11 +56,153 @@ describe('computeStageScale', () => {
 
 describe('computeStageLayout', () => {
   it('derives panel + stage display sizes from one scale', () => {
-    const l = computeStageLayout(4000, 3000);
-    expect(l.stageW).toBeCloseTo(STAGE_W * l.scale, 5);
+    const l = computeStageLayout(4000, 3000, 'medium');
+    expect(l.stageW).toBeCloseTo(l.boxW * l.scale, 5);
     expect(l.stageH).toBeCloseTo(STAGE_H * l.scale, 5);
     expect(l.panelW).toBeCloseTo(PANEL_NATIVE_W * l.scale, 5);
     expect(l.gap).toBeCloseTo(STAGE_GAP * l.scale, 5);
+  });
+});
+
+/**
+ * The elastic stage box (see stageBoxWidth). The room is centred in the box and the panel
+ * sits BESIDE the box, so the box width — not the panel's position — is the only thing
+ * that can enlarge a room whose fit is width-bound. These pin the three properties that
+ * make that safe: it never shrinks, it never exceeds what the mode can use, and it is one
+ * width shared by every room.
+ */
+describe('stageBoxWidth — the elastic stage box', () => {
+  // 967x600 footprint => any viewport wider than 1.611:1 leaves width over.
+  const wide = { w: 2048, h: 1017 }; // 2.01:1 — a maximised window on a 4K-scaled display
+  const narrow = { w: 1512, h: 982 }; // 1.54:1 — a 16:10 laptop panel at true fullscreen
+  const box = (v: { w: number; h: number }, mode: Parameters<typeof stageBoxWidth>[3]) =>
+    computeStageLayout(v.w, v.h, mode).boxW;
+
+  it('never goes below the old fixed width, at any viewport or mode', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of [
+        [1, 1],
+        [320, 240],
+        [narrow.w, narrow.h],
+        [wide.w, wide.h],
+        [3440, 1400],
+        [100000, 100],
+      ] as const) {
+        expect(computeStageLayout(w, h, mode).boxW).toBeGreaterThanOrEqual(STAGE_W);
+      }
+    }
+  });
+
+  it('gives a width-bound viewport exactly the old box (no slack to spend)', () => {
+    // Narrower than the footprint's aspect: the scale is already limited by width.
+    expect(box(narrow, 'medium')).toBe(STAGE_W);
+    expect(computeStageScale(narrow.w, narrow.h)).toBeCloseTo(
+      narrow.w / (STAGE_W + STAGE_GAP + PANEL_NATIVE_W),
+      5,
+    );
+  });
+
+  it('spends the leftover width of a height-bound viewport', () => {
+    expect(box(wide, 'medium')).toBeGreaterThan(STAGE_W);
+    // The scale itself is untouched — the box grows into width the scale declined to use,
+    // so subtitle sizing (which reads stage.scale) cannot move.
+    expect(computeStageScale(wide.w, wide.h)).toBeCloseTo(wide.h / STAGE_H, 5);
+  });
+
+  it('keeps the whole group inside the viewport, with the edge margin reserved', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of [
+        [1512, 860],
+        [wide.w, wide.h],
+        [3440, 1400],
+        [2560, 1380],
+      ] as const) {
+        const l = computeStageLayout(w, h, mode);
+        const used = l.stageW + l.gap + l.panelW + 2 * STAGE_EDGE * l.scale;
+        expect(used).toBeLessThanOrEqual(w + 1e-6);
+      }
+    }
+  });
+
+  it('never exceeds the width the mode can actually use', () => {
+    for (const mode of FIT_MODES) {
+      const ceiling = stageBoxCeiling(mode);
+      // A viewport far wider than anything real, so only the ceiling can bind.
+      const l = computeStageLayout(100000, 1200, mode);
+      expect(l.boxW).toBeLessThanOrEqual(Math.max(STAGE_W, ceiling) + 1e-6);
+    }
+  });
+
+  it('the ceiling is the point past which the widest room stops growing', () => {
+    // medium: 795 x 1.35 = 1073. Beyond it the widest content is already at its bound.
+    expect(stageBoxCeiling('medium')).toBeCloseTo(MAX_CONTENT_W * FIT_FACTORS.medium, 9);
+    expect(stageBoxCeiling('large')).toBeCloseTo(MAX_CONTENT_W * FIT_FACTORS.large, 9);
+    const stageScale = 2;
+    const [w, h] = [795, 435]; // DRAKAR — the widest room, and width-bound in the old box
+    const atCeiling = contentScale(w, h, stageScale, 'medium', 1, stageBoxCeiling('medium'));
+    const wayPast = contentScale(w, h, stageScale, 'medium', 1, stageBoxCeiling('medium') * 4);
+    expect(wayPast).toBeCloseTo(atCeiling, 9);
+  });
+
+  it("'fixed' and 'x1' never widen the box — a wider one cannot help them", () => {
+    // fixed: contentScale === stageScale by definition. x1: exactly 1 physical px per
+    // game px. Both ceilings land below STAGE_W, so the floor wins — no special case.
+    expect(stageBoxCeiling('fixed')).toBeLessThan(STAGE_W);
+    expect(stageBoxCeiling('x1')).toBeLessThan(STAGE_W);
+    expect(box(wide, 'fixed')).toBe(STAGE_W);
+    expect(box(wide, 'x1')).toBe(STAGE_W);
+  });
+
+  it('is one width shared by every room at a given viewport', () => {
+    // The box is a property of the VIEWPORT, not of the content — that invariant is what
+    // keeps a room the same size relative to every other room (see the file header).
+    const l = computeStageLayout(wide.w, wide.h, 'medium');
+    const scales = ROOMS.map(([w, h]) => contentScale(w, h, l.scale, 'fixed', 1, l.boxW));
+    for (const s of scales) expect(s).toBe(l.scale);
+  });
+});
+
+describe('contentScale — with an elastic box', () => {
+  const stageScale = 2;
+  const wider = 1000; // between STAGE_W and the 'medium' ceiling
+
+  it('enlarges a width-bound room and leaves a height-bound one alone', () => {
+    // UTES 780x225 is width-bound in the 800 box (800/780 = 1.026 < 600/225 = 2.67).
+    const utesBefore = contentScale(780, 225, stageScale, 'medium', 1, STAGE_W);
+    const utesAfter = contentScale(780, 225, stageScale, 'medium', 1, wider);
+    expect(utesAfter).toBeGreaterThan(utesBefore);
+    // VRAK 315x555 is height-bound; a wider box cannot help it.
+    expect(contentScale(315, 555, stageScale, 'medium', 1, wider)).toBe(
+      contentScale(315, 555, stageScale, 'medium', 1, STAGE_W),
+    );
+  });
+
+  it('still never enlarges content past the box it was given', () => {
+    for (const mode of ['small', 'medium', 'large', 'fill', 'native'] as const) {
+      for (const [w, h] of ROOMS) {
+        const s = contentScale(w, h, stageScale, mode, 1, wider);
+        expect(w * s).toBeLessThanOrEqual(wider * stageScale + 1e-6);
+        expect(h * s).toBeLessThanOrEqual(STAGE_H * stageScale + 1e-6);
+      }
+    }
+  });
+
+  it('still respects the per-mode enlargement bound', () => {
+    for (const [w, h] of ROOMS) {
+      const f = contentScale(w, h, stageScale, 'medium', 1, wider) / stageScale;
+      expect(f).toBeGreaterThanOrEqual(1);
+      expect(f).toBeLessThanOrEqual(CAPPED_MAX + 1e-9);
+    }
+  });
+
+  it('defaults to the old fixed box when no box is passed', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of ROOMS) {
+        expect(contentScale(w, h, stageScale, mode)).toBe(
+          contentScale(w, h, stageScale, mode, 1, STAGE_W),
+        );
+      }
+    }
   });
 });
 

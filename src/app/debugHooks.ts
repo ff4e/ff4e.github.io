@@ -96,6 +96,7 @@ import {
   subs,
 } from './gameState.js';
 import { renderer, setRendererValue } from './renderSettings.js';
+import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
 import { artFailureShown } from './artFailure.js';
@@ -440,6 +441,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         host.settings.fitMode = v;
         saveSettings(host.settings);
         host.forceRoomRedraw = true;
+        relayout(); // per-mode box width ceiling (stageBoxCeiling) — mirrors the dev bar
         host.wake();
       }
       return host.settings.fitMode;

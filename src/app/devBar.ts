@@ -80,6 +80,7 @@ export function initDevBar(h: DevBarHost): void {
       settings.fitMode = isFitMode(v) ? v : 'medium';
       saveSettings(settings);
       setForceRoomRedraw(true); // the fit scale changes the room canvas size — repaint
+      relayout(); // the box's width ceiling is per-mode (stageBoxCeiling) — resize it too
       wake();
     });
   }

@@ -26,7 +26,7 @@ import { fatalEl, loadingEl, loadingMsg, stageBox, stageRow } from './dom.js';
 import { setForceRoomRedraw, roomLoading } from './framePacing.js';
 import { wake } from './frameClock.js';
 import { booted } from './stageState.js';
-import { subLang } from './playerSettings.js';
+import { subLang, settings } from './playerSettings.js';
 import { renderer } from './renderSettings.js';
 import { ui } from './screenState.js';
 import { computeStageLayout } from './layout.js';
@@ -147,13 +147,17 @@ export function maybeShowWebglNote(): void {
 
 /**
  * Recompute the stage scale from the available game area and size the stage box +
- * side panel. Called on boot, window resize, and fullscreen change. The room/map/
- * cutscene canvases are sized per-frame in their draw functions from `stage`.
+ * side panel. Called on boot, window resize, and fullscreen change.
+ *
+ * Also on a FIT MODE change: the box's width ceiling depends on the mode
+ * (`stageBoxCeiling`), so a mode switch that only repainted would leave the box at the
+ * previous mode's width. The room/map/cutscene canvases are sized per-frame in their draw
+ * functions from `stage`.
  */
 export function relayout(): void {
   const availW = stageRow?.clientWidth || window.innerWidth;
   const availH = stageRow?.clientHeight || window.innerHeight;
-  setStage(computeStageLayout(availW, availH));
+  setStage(computeStageLayout(availW, availH, settings.fitMode));
   stageBox.style.width = `${Math.round(stage.stageW)}px`;
   stageBox.style.height = `${Math.round(stage.stageH)}px`;
   if (stageRow) stageRow.style.gap = `${Math.round(stage.gap)}px`;
