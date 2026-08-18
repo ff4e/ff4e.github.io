@@ -2,6 +2,12 @@
   "_comment": "Per-scene model overrides for the briefcase cutscene (_kufr). Indices are into the shipped playback order (ai.json 'order'), inclusive, and are the numbers tools/kufr-compare.html shows as '#N'. Frames outside every range use the anim.png card's pick from the Studio. A model change is only invisible ACROSS A SCENE CUT, so a range must cover a whole shot — never part of one. Use \"model\": \"original\" to ship NO upscale for a shot whose 1998 art reads better than any model's version of it: the build writes no file for those frames and lists them in ai.json 'original', and the game paints the original pixels into the region over the upscaled base (src/render/indexedRegion.ts). Pick them with tools/kufr-compare.html — 'keep original' marks a frame, 'preview picks' shows what will play, 'export' emits ranges to paste here.",
   "ranges": [
     {
+      "from": 56,
+      "to": 56,
+      "model": "original",
+      "note": "A dense dithered green field, one tick long. The dither IS the texture here, and the shipped upscale flattens it into a smooth blob and loses the highlight in the top-left corner, so the frame reads as a flat green card where the original reads as a surface. Verified boundaries: 55 is the last ALTAR-logo frame and 57 is the first grey photo card, so this range is exactly one shot — a one-frame one."
+    },
+    {
       "from": 63,
       "to": 94,
       "model": "siax",
