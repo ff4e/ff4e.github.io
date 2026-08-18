@@ -51,4 +51,9 @@ export const SHOWMODE_HOLDS = new Map<number, number>([
   // 0.48 s, so she was flattened with most of her own warning still unsaid. +14 makes the
   // pause 20 ticks (1.6 s); measured, the line's window grows from 92 ticks to 106.
   [498, 14],
+  // idx 743-764 is a 22-tick pause after help13 — "A já, na rozdíl od většího kamaráda,
+  // nejen že nepohnu s ocelovými předměty, ale nesmím je ani držet", 85 ticks — begins at
+  // 734, and before the nine-cell `move left` run at 765-773 that demonstrates it and
+  // crushes her. +18 makes the pause 40 ticks (3.2 s).
+  [743, 18],
 ]);
