@@ -112,5 +112,18 @@ await withApp(async ({ p, expect }) => {
     afterRestart.x === realSpawn.little.x && afterRestart.y === realSpawn.little.y,
     `fish rebuilt to spawn at the recorded restart (want ${realSpawn.little.x},${realSpawn.little.y}, got ${afterRestart.x},${afterRestart.y})`,
   );
-  console.log(`demo survived death-restart, re-synced to spawn (${afterRestart.x},${afterRestart.y}), help7 fired — showmode probe OK`);
+  // Past the first deliberate hold. SHOWMODE_HOLDS keys index 302, and a hold that
+  // re-armed itself instead of advancing would sit on that entry for ever — a real bug
+  // once, and one nothing else in the suite can see, because the wait above is satisfied
+  // by index 301, the entry immediately before it. Crossing 304 costs the ten held ticks,
+  // under a second.
+  await p.waitForFunction(() => window.__ff.showmodeState().active && window.__ff.showmodeState().idx >= 304, null, {
+    timeout: budget(10000),
+  });
+  expect(
+    await p.evaluate(() => window.__ff.showmodeState().idx) >= 304,
+    'the replay advanced past its first deliberate hold instead of re-arming on it',
+  );
+
+  console.log(`demo survived death-restart, re-synced to spawn (${afterRestart.x},${afterRestart.y}), help7 fired, cleared its first hold — showmode probe OK`);
 });

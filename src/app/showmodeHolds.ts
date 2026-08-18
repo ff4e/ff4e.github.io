@@ -22,14 +22,19 @@
  * in front of the next entry, exactly as a longer run of recorded `kdo=0` no-ops would have:
  * it never skips, reorders or rewrites an action, so the recording is still played in full.
  *
- * Two rules for adding one:
+ * **The one rule: a hold key must name an entry that does nothing.** That is an entry with
+ * `kdo = 0` whose `akce` is neither `akce_restart` (30) nor `akce_load` (10). Those two are
+ * the exceptions to "kdo=0 means no-op": `applyCapAction` tests `akce === restart` before it
+ * tests `kdo` at all, so a `kdo=0` restart still rebuilds the room, and all three restart
+ * runs in the recording are `kdo=0`. Keying a hold on a no-op entry cannot desync anything —
+ * the fish are stationary, and every later `akce_go` names an absolute target cell, so
+ * positions re-converge regardless. `test/showmodeHolds.test.ts` enforces this against the
+ * real `help.cap` rather than leaving it to be remembered.
  *
- *   - **Hold on a `kdo=0` wait.** Extending a pause the demo already takes cannot desync the
- *     replay: the fish are stationary, and every later `akce_go` names an absolute target
- *     cell, so positions re-converge regardless.
- *   - **Never hold in front of a recorded `akce_restart` or `akce_load` run.** Those rebuild
- *     the room and re-sync the fish; delaying one changes what the player sees on screen
- *     rather than merely when they see it.
+ * Delaying a room rebuild is fine, and is sometimes the whole point: `[302, 10]` exists
+ * precisely to push the recorded `akce_load` at 364 later, so help7 can finish describing
+ * the F3 load before the F3 load kills it. What must not happen is keying the hold *on* one
+ * of those entries, where it would sit inside the run rather than in front of it.
  *
  * The indices are chosen from a listing of the recording — every helptext, move, wait,
  * save, load and restart with its index. `npx tsx tools/dump-showmode.ts` prints it, reads
@@ -49,7 +54,8 @@ export const SHOWMODE_HOLDS = new Map<number, number>([
   // mohla zároveň držet i posouvat - ale to také nesmím" — starts at 485 and runs 75 ticks,
   // and the `move left` at 504 is the one that gets the little fish crushed. Six ticks is
   // 0.48 s, so she was flattened with most of her own warning still unsaid. +14 makes the
-  // pause 20 ticks (1.6 s); measured, the line's window grows from 92 ticks to 106.
+  // pause 20 ticks (1.6 s); measured with all three holds in place, the line's window grows
+  // from 92 ticks to 105.
   [498, 14],
   // idx 743-764 is a 22-tick pause after help13 — "A já, na rozdíl od většího kamaráda,
   // nejen že nepohnu s ocelovými předměty, ale nesmím je ani držet", 85 ticks — begins at

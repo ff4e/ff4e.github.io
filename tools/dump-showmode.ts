@@ -52,6 +52,7 @@ const DIR: Record<number, string> = { 1: 'up', 2: 'down', 3: 'left', 4: 'right' 
 interface Row {
   i: number;
   n: number;
+  akce: number;
   what: string;
   who: string;
   voice: string;
@@ -69,6 +70,7 @@ for (let i = 0; i < cap.length; i++) {
     rows.push({
       i,
       n: 1,
+      akce: a.akce,
       what: `**${name}**`,
       who: BIG_VOICED.has(ht) ? 'big' : 'little',
       voice: `**${ticks(name)}** (${secs(name).toFixed(2)} s)`,
@@ -78,7 +80,20 @@ for (let i = 0; i < cap.length; i++) {
   }
   let what = '';
   let detail = '';
-  if (a.kdo === KDO.none) what = '_wait_';
+  // The order here mirrors `applyCapAction` (cutscene.ts), and it has to. A recorded
+  // RESTART is `kdo=0` — all three restart runs in help.cap are — yet `applyCapAction`
+  // tests `akce === restart` BEFORE any `kdo` test, so those entries really do rebuild
+  // the room. Test `kdo === none` first, as an earlier version of this tool did, and the
+  // three room rebuilds print as ordinary idle pauses: the listing then hides exactly the
+  // entries `showmodeHolds.ts` says never to hold near.
+  if (a.akce === AKCE.restart) {
+    what = '_**restart**_';
+    detail = '**kills the voice + subtitle** (TRoom.Restart), and rebuilds the room';
+  } else if (a.kdo === KDO.sys && a.akce === AKCE.save) what = '_save (F2)_';
+  else if (a.kdo === KDO.sys && a.akce === AKCE.load) {
+    what = '_**load (F3)**_';
+    detail = '**kills the voice** (TRoom.Load → KillExcept(-999)), and rebuilds the room';
+  } else if (a.kdo === KDO.none) what = '_wait_';
   else if (a.akce >= AKCE.up && a.akce <= AKCE.right) {
     what = `move ${DIR[a.akce]}`;
     detail = 'one cell';
@@ -87,22 +102,17 @@ for (let i = 0; i < cap.length; i++) {
     detail = `toward cell (${a.x},${a.y})`;
   } else if (a.akce === AKCE.set) what = 'select fish';
   else if (a.akce === AKCE.switch) what = 'swap fish';
-  else if (a.akce === AKCE.save) what = '_save (F2)_';
-  else if (a.akce === AKCE.load) {
-    what = '_**load (F3)**_';
-    detail = '**kills the voice** (TRoom.Load → KillExcept(-999))';
-  } else if (a.akce === AKCE.restart) {
-    what = '_**restart**_';
-    detail = '**kills the voice + subtitle** (TRoom.Restart)';
-  } else if (a.akce === AKCE.exit) what = '_end of demo_';
-  else what = `akce ${a.akce}`;
+  else if (a.akce === AKCE.exit) what = '_end of demo_';
+  else what = `akce ${a.akce} (ignored — kdo=${a.kdo})`;
 
   const w = who(a.kdo);
-  if (last && last.what === what && last.who === w && last.detail === detail) {
+  // `akce` is part of the collapse key as well as the rendered text: without it a restart
+  // run merges into the `kdo=0` wait beside it and disappears from the listing.
+  if (last && last.akce === a.akce && last.what === what && last.who === w && last.detail === detail) {
     last.n++;
     continue;
   }
-  rows.push({ i, n: 1, what, who: w, voice: '', detail });
+  rows.push({ i, n: 1, akce: a.akce, what, who: w, voice: '', detail });
 }
 
 /** Extra ticks held anywhere inside a row's index range. */
@@ -191,7 +201,7 @@ sample itself, tail and all.
   pauses: the cheapest place to add delay is to lengthen one of them.
 - A **move or swim entry is not ${LOGIC_MS} ms** — it costs one idle tick to consume, plus
   however many ticks the animation runs, during which no further entries are consumed.
-  Measured over the whole demo: 1604 entries take 1752 ticks, ≈1.09 ticks per entry, and
+  Measured over the whole demo: 1604 consumed entries take 1752 ticks, ≈1.09 ticks per entry, and
   the excess is all in the moving stretches.
 - \`swim toward (x,y)\` is re-issued every idle step until the fish arrives, so ×N ≈ N cells
   of travel.
