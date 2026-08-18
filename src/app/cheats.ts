@@ -62,11 +62,15 @@ import { SubtitleSystem } from '../render/subtitles.js';
 import { renderTetris, tetrisRgba } from '../render/tetrisRender.js';
 import type { TetrisArt } from '../render/tetrisRender.js';
 import { select } from './dom.js';
+import { armSolve, setSolvemode } from './solveMode.js';
+import type { SolveArmError } from './solveMode.js';
 
 /** What the cheats see of the running game. Read-only but for the two setters. */
 export interface CheatsHost {
   readonly screen: "map" | "room" | "intro" | "legimage";
   readonly devEnabled: boolean;
+  /** True while any other automated playback mode owns the room (replay / demo / load). */
+  readonly playbackBusy: () => boolean;
   readonly engine: StepEngine | null;
   readonly room: Room | null;
   readonly ffr: FfrRoom | null;
@@ -139,16 +143,65 @@ export function cheatSolveRoom(): void {
   }
 }
 
-/** Dev-only: genuinely win the current room (dev-bar "Win room" button / the W hotkey).
- *  Unlike cheatSolveRoom (xwemaketherulez), which jumps straight to the map and marks the
- *  room "cheated", this drives the real win path — engine.triggerWin -> onWin bookkeeping
- *  (marks the room solved) -> the auto-return countdown -> returnFromRoom — so an
- *  end-of-leg room reveals its story page exactly as a real solve would. Meant purely as a
- *  spot-check aid for the win/story-page flow; armed only while the dev pane is enabled. */
+/**
+ * Dev-only: genuinely win the current room. Unlike cheatSolveRoom (xwemaketherulez), which
+ * jumps straight to the map and marks the room "cheated", this drives the real win path —
+ * engine.triggerWin -> onWin bookkeeping (marks the room solved) -> the auto-return
+ * countdown -> returnFromRoom — so an end-of-leg room reveals its story page exactly as a
+ * real solve would. Armed only while the dev pane is enabled.
+ *
+ * It has NO button and no hotkey any more: the dev bar's button now plays the room's
+ * recorded solution instead (`devSolveRoom`), which is the more useful thing to have a
+ * button for. This survives as `__ff.winRoom()` because a solution replay cannot replace
+ * it — reaching a story page is still the only way to spot-check that flow, and the room
+ * that proves it is ZAVER #71, the endgame, which has no recorded solution at all because
+ * it is not a puzzle. `tools/test-zaverpage.mjs` and `tools/test-legimage.mjs` are the
+ * callers.
+ */
 export function devWinRoom(): void {
   if (!host.devEnabled || host.screen !== 'room' || !host.engine || !host.room) return;
   if (host.engine.phase !== 'idle' || host.room.won) return;
   host.engine.triggerWin();
+}
+
+/** Why a solution replay could not be started, if it could not. `null` means it is running. */
+export type SolveStartResult = { error: SolveArmError | 'unavailable'; detail: string } | null;
+
+/**
+ * Dev-only: play the current room from its own recorded solution through the real game
+ * loop — the live counterpart of the headless solvability net. The driver, the abort
+ * conditions and the speed multiplier are `solveMode.ts`; this is only the dev gate and
+ * the "which room am I in" lookup, kept beside `devWinRoom` because both are dev-bar
+ * actions on the room currently on screen.
+ *
+ * `speed` shortens the logic tick so a 6 045-move recording is not minutes of watching;
+ * 1 is real speed, which is the point of the mode and the default.
+ */
+export function devSolveRoom(speed = 1): SolveStartResult {
+  if (!host.devEnabled || host.screen !== 'room' || !host.engine || !host.room) {
+    return { error: 'unavailable', detail: 'needs the dev pane enabled and a room on screen' };
+  }
+  if (host.room.won) return { error: 'unavailable', detail: 'the room is already won' };
+  // A recording starts from the room's SPAWN state and assumes it is the only thing
+  // pressing keys. Refuse if another playback mode already owns the room, and refuse mid
+  // animation — starting on a half-finished swim or fall replays the recording against a
+  // room it does not describe, and every abort it then reports is a false one.
+  if (host.playbackBusy()) {
+    return { error: 'unavailable', detail: 'another playback mode (replay/demo/load) is running' };
+  }
+  if (host.engine.phase !== 'idle') {
+    return { error: 'unavailable', detail: 'the room is still moving — wait for it to settle' };
+  }
+  if (host.room.anyFishDead) return { error: 'unavailable', detail: 'a fish is dead — restart first' };
+  if (host.engine.srecord !== '') {
+    return { error: 'unavailable', detail: 'the room has already been played — restart it first' };
+  }
+  const jmeno = host.activeScript?.def.name;
+  if (!jmeno) return { error: 'unavailable', detail: 'the room has no script, so no solution to look up' };
+  const armed = armSolve(jmeno, speed);
+  if ('error' in armed) return armed;
+  setSolvemode(armed);
+  return null;
 }
 
 // ---------------------------------------------------------------------------

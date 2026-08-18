@@ -95,6 +95,9 @@ import {
   cutsceneSubs,
   subs,
 } from './gameState.js';
+import { cancelSolve, setSolveSpeed, solveStatus } from './solveMode.js';
+import { solutionFor } from '../rooms/index.js';
+import { ROOMS } from '../data/roomTable.js';
 import { renderer, setRendererValue } from './renderSettings.js';
 import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
@@ -134,6 +137,7 @@ import {
   cheatFishSprites,
   cheatSolveRoom,
   closeTetris,
+  devSolveRoom,
   devWinRoom,
   interlacedFaze,
   mapCheats,
@@ -528,6 +532,28 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     clickMap: (x: number, y: number) => host.clickMapAt(x, y),
     replayActive: () => host.inReplay(),
     replayIndex: () => replaymode?.idx ?? -1,
+    /**
+     * Dev-only solution replay (`solvemode`). The room plays itself from its own recorded
+     * solution through the real game loop, speaking normally and recording normally, and
+     * stops loudly on trouble. `speed` shortens the logic tick so a long recording is not
+     * minutes of wall-clock; every tick still happens.
+     *
+     * Returns null when armed, or `{ error, detail }` when the room cannot be played —
+     * `missing` is ZAVER #71 and SCORE #72, which are not puzzles.
+     */
+    solveRoom: (speed = 1) => devSolveRoom(speed),
+    solveStatus: () => solveStatus(),
+    /** The engine's refused-push counter. A key that reaches the room while a replay is
+     *  running shows up here even when it changes nothing else. */
+    blockedMoves: () => engine?.blocked ?? 0,
+    /** The current room's recorded solution, for probes that compare it to what was played. */
+    roomSolution: () => {
+      const jmeno = ROOMS[host.curNum - 1]?.jmeno;
+      return jmeno ? (solutionFor(jmeno).moves ?? null) : null;
+    },
+    /** Speed up a run already going — the test knob half of the speed decision. */
+    solveSetSpeed: (n: number) => setSolveSpeed(n),
+    solveCancel: () => cancelSolve(),
     bestRecord: (n: number) => host.bestRecord(n) ?? null,
     bestRecords: () => Object.fromEntries(host.bestRecords),
     markBest: (n: number, rec: string) => host.forceBest(n, rec, lengthOfRecord(rec)),
@@ -1524,7 +1550,10 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       engine.phase = 'exit';
       engine.animFrame = 0;
     },
-    // Dev-only "Win room" (dev-bar button / Shift+W hotkey): genuinely win via the real path.
+    // Dev-only: genuinely win via the real path. No button and no hotkey any more — the
+    // dev bar's button plays the room's recorded solution instead — but kept as a hook,
+    // because ZAVER #71 has no solution and reaching a story page still needs this
+    // (`tools/test-zaverpage.mjs`, `tools/test-legimage.mjs`).
     winRoom: () => devWinRoom(),
     // ZELVA telepathic possession (natvrdo): force the turtle to seize a fish and
     // drive it to (tx,ty); read the flag and the fish's current cell.

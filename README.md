@@ -369,11 +369,20 @@ assertions.
   Do not relax its bounds instead.
 
 - **`npm run test:solutions`** (`test/solutions.test.ts`, also run by `npm test` and so by CI):
-  the **solvability net** — replays committed known-good FFNG solution move-strings
-  (`test/fixtures/solutions/`) per room through the shared step-engine and asserts each ends
-  **won, no death, 0 blocked**, off the repo's own `public/data` (`$FFNG_DATA` overrides). All 70
-  mapped solutions pass — every playable room in the game. The two rooms without a
-  recording are the ending and results screens; see [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+  the **solvability net** — replays each room's known-good FFNG solution move-string through
+  the shared step-engine and asserts each ends **won, no death, 0 blocked**, off the repo's own
+  `public/data` (`$FFNG_DATA` overrides). All 70 mapped solutions pass — every playable room in
+  the game. The two rooms without a recording are the ending and results screens; see
+  [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md).
+
+  A solution is **room data**: it lives on the room's `RoomScript` as `solution`, out of the
+  generated `src/rooms/solutions.ts` (`npm run gen-solutions`), keyed by the same `Jmeno` as
+  the script registry. `test/fixtures/solutions/*.moves` is the staging area the generator
+  reads, and `test/solutionsData.test.ts` pins the two byte-for-byte so they cannot drift.
+  Resolving the ambiguous FFNG-slug → room match at generation time is the point: the running
+  game never looks it up. To add a recording: drop `<slug>.moves` in the staging area, pin it
+  in `test/solutionsMapping.ts`, run `npm run gen-solutions`, and move the pinned counts in
+  `test/solutionsCoverage.test.ts` in the same change.
 
 - **`test/solutionsCorpus.test.ts`**: asks whether a recording is even POSSIBLE before asking
   whether the port replays it. A fish's X moves only on its own recorded left/right move, so a
@@ -585,6 +594,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. |
 | `cutscene.ts` | 5.8 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
+| `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the fatal screen and the resize handler. |

@@ -16,6 +16,7 @@ import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, ff
 import { glCompositor, glFailed, markGlFailed } from './glPlumbing.js';
 import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
 import { clearHeldKey, restore, tryStep } from './movement.js';
+import { cancelSolve } from './solveMode.js';
 import { subLang, subsOn } from './playerSettings.js';
 import { enhancedArtActive, graphics, renderer } from './renderSettings.js';
 import { roomVoicesReady } from './roomLoad.js';
@@ -97,6 +98,7 @@ export async function startCutscene(): Promise<void> {
   // point in *samples* (bytes/2 for 16-bit audio), i.e. 78660. It persists after
   // the demo — DoneKufrDemo never stops it — so it keeps playing in the room.
   void audio.playMusic('kufrik', '/data/Music/kufrik.wav', 78660);
+  cancelSolve(); // `step()` gives the tick to the cutscene: a run left armed here freezes
   setCutscene(demo);
 }
 
@@ -111,6 +113,7 @@ export async function startCutscene(): Promise<void> {
 export function startShowmode(): void {
   if (showmode || showmodeLoading || !room) return;
   clearHeldKey(); // the demo takes over — drop any held movement key
+  cancelSolve(); // two playback drivers on one room derail both; the room's script wins
   setShowmodeLoading(true);
   setShowmodeHelptext(0);
   setShowmodeRestarted(false);
@@ -145,6 +148,7 @@ export function endShowmode(): void {
   setShowmodeSave(null);
   setLoadmode(null);
   setReplaymode(null); // a room change / exit also ends a best-solution replay
+  cancelSolve(); // …and a dev solution replay: restart/load/room change all land here
   if (engine) engine.swim = null;
   if (activeScript) activeScript.s.showmode = false;
 }
@@ -154,7 +158,8 @@ export function inShowmode(): boolean {
   return showmode !== null || showmodeLoading;
 }
 
-/** True while a map "Replay" (best-solution playback) is running — blocks player input. */
+/** True while a map "Replay" is running. The SILENCE predicate (`scriptTalk`, `Zvuky_okoli`;
+ *  faithful, `loadtype=nej`); the input lockout is `inAutoPlay()` in `solveMode.ts`. */
 export function inReplay(): boolean {
   return replaymode !== null;
 }

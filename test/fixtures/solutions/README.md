@@ -1,7 +1,26 @@
-# Room solution corpus (test fixtures)
+# Room solution corpus — the STAGING area
 
-Known-good FFNG solution move-strings, one per level, replayed by the solutions
-harness (`test/solutions.test.ts`) to verify each room is solvable in the port.
+Known-good FFNG solution move-strings, one per level. **This directory is no longer what
+the game or the tests read.** A recording's home is the room it solves: `npm run
+gen-solutions` resolves the ambiguous slug → room match once (via the pinned map in
+`test/solutionsMapping.ts`) and writes `src/rooms/solutions.ts`, which `src/rooms/index.ts`
+attaches to each `RoomScript` as `solution`. `test/solutionsData.test.ts` proves the two
+agree byte-for-byte, so the two cannot drift apart in silence.
+
+So this is the **import/staging area**: a newly recorded solution lands here as
+`<slug>.moves`, gets a pin in `solutionsMapping.ts`, and is promoted into the room data by
+the generator. One recording stays here for good — `rush` solves an FFNG level the 1998
+original never had, so there is no room for it to move into.
+
+**The licence and attribution below travel with the strings.** They are GPL-2.0-or-later,
+the same licence as this port, and are now also compiled into `src/rooms/solutions.ts`,
+whose header repeats this credit. Do not let it be dropped in a refactor.
+
+`mapping.tsv` is **not** part of any of this and must not be removed with the `.moves`
+files: it is the base jmeno → FFNG codename map for the enhanced-art pipeline
+(`tools/lib/ffngCodename.ts` → `stage-enhanced*.ts`, `render-enhanced.ts`).
+
+## Where the recordings came from
 
 - **Source 1 — `alfonz19/ff-ng-saves`:** the Fish Fillets NG remake's community solution
   repo [`alfonz19/ff-ng-saves`](https://github.com/alfonz19/ff-ng-saves) → `solved/*.lua`.

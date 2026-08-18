@@ -78,6 +78,7 @@ import {
   startCutscene,
   startShowmode,
 } from './cutscene.js';
+import { cancelSolve, inAutoPlay, inSolvemode } from './solveMode.js';
 import {
   closeMapOverlay,
   dismissLegImage,
@@ -113,7 +114,7 @@ import {
   subFontReady,
   subFontWeight,
 } from './stageState.js';
-import { initDevBar } from './devBar.js';
+import { initDevBar, syncSolveBtn } from './devBar.js';
 import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
@@ -238,7 +239,6 @@ import {
   applyRoomCheat,
   applySpriteCheats,
   closeTetris,
-  devWinRoom,
   initCheats,
   mapCheats,
   oldWater,
@@ -331,6 +331,9 @@ initCheats({
   get devEnabled() {
     return devEnabled;
   },
+  // `cutscene` counts too: it leaves `ui.screen` alone, so every other arming guard passes
+  // during the briefcase demo, and `step()` gives it the whole tick.
+  playbackBusy: () => inReplay() || inShowmode() || loadmode !== null || cutscene !== null,
   get engine() {
     return engine;
   },
@@ -610,6 +613,9 @@ function selectFish(which: 'little' | 'big'): void {
 const ffrUrl = (num: number): string => `/data/Graphic/${String(num).padStart(3, '0')}.ffr`;
 
 function setInfo(): void {
+  // The room changed (or something about it did), so re-ask whether it has a solution to
+  // play: the button greys out for the two rooms that are not puzzles.
+  syncSolveBtn();
   const d = ffr ? ROOMS[Number(select.value) - 1] : undefined;
   const base = d && ffr ? `${d.jmeno} — ${d.en} — ${ffr.width}x${ffr.height}, ${ffr.itemCount} items` : '';
   const roomNum = Number(select.value);
@@ -1412,13 +1418,24 @@ window.addEventListener('keydown', (e) => {
     // fed as a cancelling key and then handled normally below.
     const entry = ui.screen === 'map' ? mapCheats : roomCheats;
     const letter = e.key.length === 1 && /[a-z]/i.test(e.key);
-    const r = letter ? entry.press(e.key) : entry.cancel();
-    if (r.cheat) {
-      if (ui.screen === 'map') applyMapCheat(r.cheat);
-      else applyRoomCheat(r.cheat);
-      return;
+    // A solution replay is a measurement, and a typed cheat would change the thing being
+    // measured — xmorph and friends rewrite sprites, ultraviolence spawns a hook — so any
+    // abort after one would be blamed on the recording. Deliberately keyed on
+    // `inSolvemode()` and NOT `inAutoPlay()`: the map's "Replay" has always accepted typed
+    // cheats and that is not this change's business to alter.
+    //
+    // Skips only the BUFFER, and must never `return`: Escape, Backspace, F2/F3 and the
+    // dev-pane toggle are all handled BELOW this block, so returning here took away every
+    // keyboard way to stop a run — including the Escape the button's tooltip promises.
+    if (!(inSolvemode() && ui.screen === 'room')) {
+      const r = letter ? entry.press(e.key) : entry.cancel();
+      if (r.cheat) {
+        if (ui.screen === 'map') applyMapCheat(r.cheat);
+        else applyRoomCheat(r.cheat);
+        return;
+      }
+      if (r.swallowed) return;
     }
-    if (r.swallowed) return;
   }
   // Ctrl+Alt+D: enable/disable the developer pane (persisted). This is the ONLY
   // way in/out of dev mode; while enabled it shows the tuning chrome + perf HUD and
@@ -1468,34 +1485,32 @@ window.addEventListener('keydown', (e) => {
       previewSubFont(!e.shiftKey);
       return;
     }
-    if (e.code === 'KeyW' && e.shiftKey) {
-      // Genuinely win the current room (also the dev-bar "Win room" button). Uses the
-      // real win path, so an end-of-leg room reveals its story page. Spot-check aid.
-      // Shift-gated so it never collides with a typed cheat string (e.g. xwemaketherules).
-      devWinRoom();
-      return;
-    }
   }
   // Backspace restarts the room (TRoom.Restart) — the original's Restart action,
   // which the tutorial fish teach ("1st-m-backspace"). It is NOT a single-move undo.
   if (e.code === 'Backspace') {
     e.preventDefault();
-    restartRoom();
+    restartRoom(); // ends any solution replay too: it calls endShowmode()
     return;
   }
   if (e.code === 'F2') {
     e.preventDefault();
-    if (atRest()) saveGame();
+    // `atRest()` is true between the recording's moves, so without this a running replay
+    // would bank a half-played record as the player's save.
+    if (atRest() && !inSolvemode()) saveGame();
     return;
   }
   if (e.code === 'F3') {
     e.preventDefault();
-    if (atRest()) loadGame();
+    // Same hole as F2: `atRest()` is true between the recording's moves, and a load would
+    // drop a saved room on top of a running replay. Escape is how you stop one.
+    if (atRest() && !inSolvemode()) loadGame();
     return;
   }
 
   if (e.code === 'Escape') {
     e.preventDefault();
+    cancelSolve(); // always an escape hatch: an auto-play the player cannot stop is a trap
     if (ui.screen === 'map') {
       if (ui.mapInfoRoom !== null) closeMapInfo(); // close the record panel first (daCancel)
       else if (ui.mapOverlay !== 'none') closeMapOverlay(); // close an open menu overlay
@@ -1507,7 +1522,7 @@ window.addEventListener('keydown', (e) => {
   if (activeScript?.s.natvrdo === 1) return; // possessed by ZELVA: input is ignored
   if (activeScript?.s.zavermode) return; // ZAVER finale cutscene: only restart/exit above work
   if (inShowmode()) return; // KUFRIK demonstration: fish keys blocked (Backspace/Escape end it above)
-  if (inReplay()) return; // map "Replay" playback: player fish keys are blocked
+  if (inAutoPlay()) return; // "Replay"/solution playback: player fish keys are blocked
   if (loadmode) return; // fast-forward load in progress: ignore fish keys (Backspace above aborts it)
   if (e.code === 'Space') {
     e.preventDefault();
@@ -1643,8 +1658,8 @@ canvas.addEventListener('mousedown', (e) => {
     e.preventDefault(); // KUFRIK demonstration: mouse input ignored while it plays
     return;
   }
-  if (ui.screen === 'room' && inReplay()) {
-    e.preventDefault(); // map "Replay" playback: mouse input ignored while it plays
+  if (ui.screen === 'room' && inAutoPlay()) {
+    e.preventDefault(); // "Replay"/solution playback: mouse input ignored while it plays
     return;
   }
   if (ui.screen === 'room' && loadmode) {
@@ -1818,8 +1833,8 @@ panelCanvas.addEventListener('mousedown', (e) => {
     e.preventDefault(); // modal minigame: the control panel is inert behind it
     return;
   }
-  if (inReplay()) {
-    e.preventDefault(); // map "Replay" playback: the control panel is inert
+  if (inAutoPlay()) {
+    e.preventDefault(); // "Replay"/solution playback: the control panel is inert
     return;
   }
   // Right-click anywhere on the panel toggles the options sub-panel (Uovl.pas:633-639),

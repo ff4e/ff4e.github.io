@@ -135,7 +135,9 @@ export const blink = { little: 0, big: 0 };
 // ~6% chance to wink out (random(100)<6). Kept tick-stable like `blink`.
 export const darkFlicker = { little: false, big: false };
 
-// ── The three playback modes, and the cutscene ──────────────────────────────
+// ── The playback modes, and the cutscene ────────────────────────────────────
+// Three of them live here; the dev-only fourth, `solvemode`, owns its own state in
+// `solveMode.ts` because it is not part of the player-facing game.
 export let cutscene: KufrDemo | null = null;
 export let cutsceneSubs: SubtitleSystem | null = null;
 export let cutsceneAssets: { bmp: Uint8Array; pck: Uint8Array; script: string } | null = null;

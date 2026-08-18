@@ -125,6 +125,12 @@ const EXCLUSIVE = new Set([
   // Samples loopThrottleOk() over wall-clock windows to catch a line while it is
   // still animating; a loaded machine can settle the line before it samples.
   'test-tierperf.mjs',
+  // Plays 1 381 recorded moves through the real loop. It asserts nothing about wall clock,
+  // but its RUNTIME is bounded by it: the sim advances per rendered frame, so sharing the
+  // machine does not just slow the probe, it multiplies it — measured 97 s in the pool
+  // against 48 s alone, and 475 s once a fourth room joined. Alone it is predictable and
+  // the suite's total wall time is lower, because the pool no longer waits on this tail.
+  'test-solvemode.mjs',
 ]);
 
 // Pool width. Sized by measurement, and the right number went DOWN once the probes

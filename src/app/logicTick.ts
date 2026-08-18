@@ -12,7 +12,8 @@ import { advanceReplay, advanceShowmode, cutsceneCaption, disposeAiKufr, inRepla
 import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, room, roomDepth, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
-import { advanceLoadmode, dispatchHeldMove } from './movement.js';
+import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
+import { advanceSolve, inSolvemode, noteSolveDeath, noteSolveWin, solvemode, tickSolveWatchdog } from './solveMode.js';
 import { subsOn } from './playerSettings.js';
 import { ui } from './screenState.js';
 import { EFFECT_VOL, LOGIC_MS } from './stageGeometry.js';
@@ -70,6 +71,13 @@ export function hracNespi(): void {
 export function step(): boolean {
   if (ui.screen !== 'room') return false; // the map/intro screens have no game clock
   setCount(count + 1);
+  // Age a solution replay ONCE per tick, above every early return below. It used to be
+  // aged next to where it advances, at the bottom — which meant any path that returned
+  // early froze the run instead of failing it: KUFRIK's briefcase cutscene (the very next
+  // branch) held one at 27/259 indefinitely, button stuck on "Solving", with no abort
+  // because the watchdog that exists for exactly that was never reached. A watchdog behind
+  // a `return` is not a watchdog.
+  if (solvemode) tickSolveWatchdog();
   // Briefcase cutscene takes over while it plays.
   if (cutscene) {
     cutsceneSubs?.tick(count);
@@ -99,6 +107,19 @@ export function step(): boolean {
     }
   }
   if (!room || !engine) return false;
+  // Was the room at rest when this tick STARTED? A solution replay may only play a move on
+  // such a tick — see where it is used below. Captured here, before `prog` and before
+  // `advance()`, which is where the headless harness captures it too.
+  const idleAtTickStart = engine.phase === 'idle';
+  // Latch a solution replay's win FIRST, before any of the early returns below. A win
+  // starts the auto-return countdown and this function then returns for the whole tick, so
+  // by the time the idle branch at the bottom would see it the run is already over — and a
+  // gspec=9 push-out wins with the fish still inside, several ticks after its last move.
+  if (solvemode) {
+    noteSolveWin(engine.won);
+    // …and a death, before the death-restart below can rebuild the room out from under it.
+    noteSolveDeath(room.anyFishDead);
+  }
   // Fast-forward load animation (loadmode): replay the saved record at LoadSpeed
   // moves/tick while it plays, skipping normal gameplay + the showmode replay (the
   // original's DalsiPrikaz exits early during a load, URoom.pas:26930).
@@ -252,6 +273,12 @@ export function step(): boolean {
     !room.anyFishDead &&
     !showmode &&
     !replaymode &&
+    // `inSolvemode()`, not `solvemode` — the two must agree with the input lockout, which
+    // is also `inSolvemode()`. Gating on the raw object kept held-key repeat suppressed
+    // after a run ABORTED, while the lockout had already lifted: the player got their keys
+    // back and the fish would not move, which reads as a wedged engine rather than as the
+    // diagnosable stopped-room the abort is meant to leave behind.
+    !inSolvemode() &&
     activeScript?.s.natvrdo !== 1 &&
     !activeScript?.s.zavermode
   ) {
@@ -264,5 +291,28 @@ export function step(): boolean {
   if (engine.phase === 'idle' && !room.won && showmode) advanceShowmode();
   // Map "Replay": play back the best solution one move per idle tick (daReplay).
   if (engine.phase === 'idle' && !room.won && replaymode) advanceReplay();
+  // Dev-only solution replay: the same one-move-per-idle-tick shape, off the room's own
+  // recorded solution, aborting loudly on trouble instead of slipping back to the map.
+  // The win is NOT excluded here the way it is above — `advanceSolve` needs the tick the
+  // room was won on to latch `won`, which is what tells the dev bar the run succeeded
+  // rather than merely stopped. It plays no move on that tick.
+  if (solvemode) {
+    const eng = engine;
+    if (eng.phase === 'idle') {
+      advanceSolve({
+        anyFishDead: room.anyFishDead,
+        won: eng.won, // engine.won, not room.won — gspec=9 wins with the fish still inside
+        // Not merely "idle now": see `startedIdle` in `solveMode.ts` for why the tick has
+        // to have BEGUN at rest, what it cost in WIN #68, and why the same cadence was
+        // deliberately NOT imposed on `replaymode` or on held-key repeat.
+        startedIdle: idleAtTickStart,
+        play: (which, dir) => {
+          eng.active = which;
+          return tryStep(which, dir);
+        },
+        wake: hracNespi,
+      });
+    }
+  }
   return false;
 }

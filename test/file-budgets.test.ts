@@ -57,12 +57,35 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // Went 560 -> 566 while the captions carried both painters, then 566 -> 540 when the
   // canvas overlay was deleted and `updateCutsceneCaptions` lost its canvas branch and
   // the signature/gate bookkeeping with it. That was the ratchet the 566 entry promised.
-  ['src/app/cutscene.ts', 540],
+  //
+  // 540 -> 545 for the dev solution replay. This file owns the teardown of every automated
+  // playback mode, so the three points where one takes the room over — `endShowmode`, the
+  // KUFRIK demonstration starting, and the briefcase cutscene starting — are where the
+  // fourth mode has to be torn down too. One line each plus the import; review found live
+  // hangs at two of the three, so they are not optional. The explanation lives in
+  // `solveMode.ts`, not here, which is why it is a handful of lines and not thirty.
+  ['src/app/cutscene.ts', 545],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
-  // fine — but it is worth noticing when it does. Came DOWN from 1 700 when the canvas
+  // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
+  // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine
+  // and was refused, which changes neither the record nor the move index), `roomSolution`
+  // (so it can compare what was recorded against what was given, character for character,
+  // rather than counting) and `solveSetSpeed`. Came DOWN from 1 700 when the canvas
   // subtitle overlay went and took `subPaints`, `setSubsGate`, `subsPaintAt`, `benchSubs`
   // and the renderer-preference hooks with it.
-  ['src/app/debugHooks.ts', 1620],
+  // 1 620 -> 1 644 for the dev solution replay's hooks: `solveRoom`/`solveStatus`/
+  // `solveCancel`/`solveSetSpeed`, plus `blockedMoves` (so a probe can see a key that
+  // REACHED the engine and was refused, which changes neither the record nor the move
+  // index) and `roomSolution` (so it can compare what was recorded against what was given,
+  // character for character, rather than by counting). Both of the latter were asked for in
+  // review, to replace assertions that were weaker than the claims beside them.
+  // 1 644 -> 1 646 for one line: the `fitMode` setter now calls `relayout()`. The stage
+  // box's width ceiling became per-mode (`stageBoxCeiling`, app/layout.ts), so a mode
+  // change that only repainted would leave the box at the previous mode's width — and
+  // this hook is how every probe changes the mode, so without it they would all measure a
+  // stale box. It mirrors what the dev bar's own handler does; the alternative was routing
+  // it through the host, which costs more lines here and widens the hook surface.
+  ['src/app/debugHooks.ts', 1646],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
