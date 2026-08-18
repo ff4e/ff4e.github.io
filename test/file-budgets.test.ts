@@ -66,7 +66,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `solveMode.ts`, not here, which is why it is a handful of lines and not thirty.
   ['src/app/cutscene.ts', 545],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
-  // fine — but it is worth noticing when it does. Came DOWN from 1 700 when the canvas
+  // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
+  // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine
+  // and was refused, which changes neither the record nor the move index), `roomSolution`
+  // (so it can compare what was recorded against what was given, character for character,
+  // rather than counting) and `solveSetSpeed`. Came DOWN from 1 700 when the canvas
   // subtitle overlay went and took `subPaints`, `setSubsGate`, `subsPaintAt`, `benchSubs`
   // and the renderer-preference hooks with it.
   // 1 620 -> 1 644 for the dev solution replay's hooks: `solveRoom`/`solveStatus`/

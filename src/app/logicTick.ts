@@ -13,7 +13,7 @@ import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicke
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
 import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
-import { advanceSolve, inSolvemode, noteSolveWin, solvemode, tickSolveWatchdog } from './solveMode.js';
+import { advanceSolve, inSolvemode, noteSolveDeath, noteSolveWin, solvemode, tickSolveWatchdog } from './solveMode.js';
 import { subsOn } from './playerSettings.js';
 import { ui } from './screenState.js';
 import { EFFECT_VOL, LOGIC_MS } from './stageGeometry.js';
@@ -115,7 +115,11 @@ export function step(): boolean {
   // starts the auto-return countdown and this function then returns for the whole tick, so
   // by the time the idle branch at the bottom would see it the run is already over — and a
   // gspec=9 push-out wins with the fish still inside, several ticks after its last move.
-  if (solvemode) noteSolveWin(engine.won);
+  if (solvemode) {
+    noteSolveWin(engine.won);
+    // …and a death, before the death-restart below can rebuild the room out from under it.
+    noteSolveDeath(room.anyFishDead);
+  }
   // Fast-forward load animation (loadmode): replay the saved record at LoadSpeed
   // moves/tick while it plays, skipping normal gameplay + the showmode replay (the
   // original's DalsiPrikaz exits early during a load, URoom.pas:26930).
@@ -299,7 +303,8 @@ export function step(): boolean {
         anyFishDead: room.anyFishDead,
         won: eng.won, // engine.won, not room.won — gspec=9 wins with the fish still inside
         // Not merely "idle now": see `startedIdle` in `solveMode.ts` for why the tick has
-        // to have BEGUN at rest, and what it cost in WIN #68 when it did not.
+        // to have BEGUN at rest, what it cost in WIN #68, and why the same cadence was
+        // deliberately NOT imposed on `replaymode` or on held-key repeat.
         startedIdle: idleAtTickStart,
         play: (which, dir) => {
           eng.active = which;

@@ -46,9 +46,10 @@ import { budget, observed, withApp } from './ui-lib.mjs';
  * batch moves — it shortens the logic tick, so every move still plays through the real
  * loop, in order, with the script running.
  *
- * The effective ceiling is the frame rate, not this number: `MAX_STEPS_PER_FRAME` is 1, so
- * at 60 fps the sim tops out around 4.8x whatever is asked for. 20 simply means "as fast
- * as the frame rate allows".
+ * `renderLoop.ts` lifts the one-step-per-frame cap for the duration of a run, so this is a
+ * real multiplier rather than a request the frame rate quietly caps: a 16 ms frame at 20
+ * runs four 4 ms ticks. It is clamped to 50 at every entry point, because `Infinity` would
+ * mean a 0 ms tick and an uncapped loop.
  */
 const SPEED = 20;
 
@@ -101,7 +102,12 @@ await withApp(async ({ p, expect }) => {
     // Both numbers in ONE evaluate: the sim runs between round-trips (and fast, with the
     // per-frame cap lifted), so two separate reads are not a snapshot of the same tick and
     // the comparison drifts by however many moves landed in between.
-    const snap = () => p.evaluate(() => ({ rec: window.__ff.moves(), idx: window.__ff.solveStatus().idx }));
+    const snap = () =>
+      p.evaluate(() => ({
+        rec: window.__ff.moves(),
+        idx: window.__ff.solveStatus().idx,
+        blocked: window.__ff.blockedMoves(),
+      }));
     const preKeys = await snap();
     await p.keyboard.press('ArrowUp');
     await p.keyboard.press('ArrowDown');
@@ -113,6 +119,13 @@ await withApp(async ({ p, expect }) => {
     expect(
       postKeys.rec - preKeys.rec === postKeys.idx - preKeys.idx,
       `${jmeno}: two stray keys added no moves of their own (record +${postKeys.rec - preKeys.rec}, recording +${postKeys.idx - preKeys.idx})`,
+    );
+    // A key that reaches the room but is REFUSED changes neither the record nor the index,
+    // so the equality above cannot see it — but it still ran the engine's blocked-push path
+    // (`onBlockedMove`: the KAJUTA1 screen-shove, the gspec latch). The counter can see it.
+    expect(
+      postKeys.blocked === preKeys.blocked,
+      `${jmeno}: two stray keys never reached the engine at all (blocked +${postKeys.blocked - preKeys.blocked})`,
     );
 
     const done = await observed(
@@ -140,11 +153,34 @@ await withApp(async ({ p, expect }) => {
     // `__ff.moves()` is `lengthOfRecord`, which is what the player's move counter shows.
     const recMoves = await p.evaluate(() => window.__ff.moves());
     expect(recMoves === end.total, `${jmeno} recorded every move it played (${recMoves} of ${end.total})`);
+    // …and that it recorded the SAME moves, not merely as many. `srecord` is the host key
+    // alphabet (IJKL little, WASD big) and the recording is u/d/l/r (+ WIN's w/x/y/z), so
+    // this translates one to the other and compares character for character, with the
+    // engine's own consequence markers (`q`+3 for a gspec=9 push-out, `x`/`o`/`b`+1)
+    // stripped. Counting alone would pass a replay that played the right NUMBER of wrong
+    // moves, which is exactly the shape a control-set bug takes in WIN #68.
+    const sol = await p.evaluate(() => window.__ff.roomSolution());
+    const raw = await p.evaluate(() => window.__ff.record());
+    const KEY = { u: 'I', d: 'K', l: 'J', r: 'L', w: 'I', x: 'K', y: 'J', z: 'L' };
+    const BIG = { I: 'W', K: 'S', J: 'A', L: 'D' };
+    const want = [...sol]
+      .map((c) => {
+        const low = c.toLowerCase();
+        const little = KEY[low];
+        return c === low ? little : BIG[little];
+      })
+      .join('');
+    const got = raw.replace(/q\d{3}/g, '').replace(/[xob]./g, '');
+    expect(got === want, `${jmeno} recorded the same moves it was given (first difference at ${[...want].findIndex((c, i) => got[i] !== c)})`);
 
-    // Spoke normally: `replaymode` is deliberately silent (loadtype=nej, UMain.pas:1027)
-    // and this must not be. PRVNI is the tutorial room, so it has lines to say.
+    // Dialogue FIRED: `replaymode` is deliberately silent (loadtype=nej, UMain.pas:1027)
+    // and this must not be. Deliberately not phrased as "was audible" — `lines()` counts
+    // `scriptTalk` calls, and a missing or unloaded voice sample still increments it, so
+    // this proves the dialogue path ran and was not suppressed, which is the thing that
+    // distinguishes the two modes. Real audio output is not assertable from a headless
+    // browser and is not claimed here.
     const spoke = (await p.evaluate(() => window.__ff.lines())) - before;
-    if (talks) expect(spoke > 0, `${jmeno} spoke while it played (${spoke} lines) — it must not inherit the replay's silence`);
+    if (talks) expect(spoke > 0, `${jmeno} ran its dialogue while it played (${spoke} lines) — it must not inherit the replay's silence`);
 
     // The normal win path runs and hands the screen on by itself. Which screen depends on
     // the room: a leg-final room reveals its story page first and only then the map, which
@@ -161,4 +197,34 @@ await withApp(async ({ p, expect }) => {
     await p.waitForFunction(() => window.__ff.screen() === 'map', null, { timeout: budget(15000) });
     expect((await p.evaluate(() => window.__ff.solvedRooms())).includes(num), `${jmeno} is recorded as solved, like a real win`);
   }
+
+  // --- The escape hatches. A run the player cannot stop is a trap, and MAPA's recording is
+  // 6 045 moves, so this is not a theoretical complaint. It is asserted here because it was
+  // once broken and nothing noticed: a guard meant to keep typed cheats out of a run was
+  // placed above the Escape/Backspace handlers and swallowed every key instead. ---
+  await p.evaluate(() => window.__ff.enterRoomAwait(19));
+  await p.waitForFunction(
+    "window.__ff.roomNum() === 19 && window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won",
+  );
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
+  await p.click('#solveroom');
+  await p.waitForFunction(() => window.__ff.solveStatus().idx > 0);
+  await p.keyboard.press('Escape');
+  await p.waitForFunction(() => !window.__ff.solveStatus().running, null, { timeout: budget(5000) });
+  expect(!(await p.evaluate(() => window.__ff.solveStatus().running)), 'Escape stops a running replay');
+  expect((await p.evaluate(() => window.__ff.screen())) === 'map', 'and leaves the room, as Escape always does');
+
+  await p.evaluate(() => window.__ff.enterRoomAwait(19));
+  await p.waitForFunction(
+    "window.__ff.roomNum() === 19 && window.__ff.screen() === 'room' && window.__ff.count() > 0 && !window.__ff.state().won",
+  );
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
+  // The button has to be usable again after a run was stopped — it is disabled while one
+  // runs, and it used to stay that way.
+  expect(!(await p.evaluate(() => document.getElementById('solveroom').disabled)), 'the button is armed again after a stopped run');
+  await p.click('#solveroom');
+  await p.waitForFunction(() => window.__ff.solveStatus().idx > 0);
+  await p.keyboard.press('Backspace');
+  await p.waitForFunction(() => !window.__ff.solveStatus().running, null, { timeout: budget(5000) });
+  expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'Backspace restarts the room and stops the replay');
 });

@@ -96,6 +96,8 @@ import {
   subs,
 } from './gameState.js';
 import { cancelSolve, setSolveSpeed, solveStatus } from './solveMode.js';
+import { solutionFor } from '../rooms/index.js';
+import { ROOMS } from '../data/roomTable.js';
 import { renderer, setRendererValue } from './renderSettings.js';
 import { ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
@@ -539,6 +541,14 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
      */
     solveRoom: (speed = 1) => devSolveRoom(speed),
     solveStatus: () => solveStatus(),
+    /** The engine's refused-push counter. A key that reaches the room while a replay is
+     *  running shows up here even when it changes nothing else. */
+    blockedMoves: () => engine?.blocked ?? 0,
+    /** The current room's recorded solution, for probes that compare it to what was played. */
+    roomSolution: () => {
+      const jmeno = ROOMS[host.curNum - 1]?.jmeno;
+      return jmeno ? (solutionFor(jmeno).moves ?? null) : null;
+    },
     /** Speed up a run already going — the test knob half of the speed decision. */
     solveSetSpeed: (n: number) => setSolveSpeed(n),
     solveCancel: () => cancelSolve(),

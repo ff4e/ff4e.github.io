@@ -18,8 +18,10 @@ import {
   armSolve,
   cancelSolve,
   inSolvemode,
+  noteSolveDeath,
   noteSolveWin,
   setSolvemode,
+  setSolveSpeed,
   solveSpeed,
   solveStatus,
   tickSolveWatchdog,
@@ -248,6 +250,33 @@ describe('solvemode', () => {
     expect(solveSpeed(), 'and it returns to real time the moment the run ends').toBe(1);
   });
 
+  /**
+   * `renderLoop` divides `LOGIC_MS` by the speed and uses it as the per-frame step cap, so
+   * an unclamped one is a browser hang: `Infinity` gives a 0 ms tick and `steps < Infinity`,
+   * and `NaN` gives `acc >= NaN` — false forever, a run that never advances and never fails.
+   * Both are reachable by typing `__ff.solveRoom(n)` into a console.
+   */
+  it('clamps any speed it is handed, at arming and afterwards', () => {
+    for (const [given, want] of [
+      [Infinity, 50],
+      [NaN, 1],
+      [-5, 1],
+      [0, 1],
+      [1e9, 50],
+      [2.7, 2],
+    ] as const) {
+      const armed = armSolve('PRVNI', given);
+      expect('error' in armed, `${given} still arms`).toBe(false);
+      expect('speed' in armed && armed.speed, `armSolve(${given})`).toBe(want);
+
+      arm('uuuu');
+      setSolveSpeed(given);
+      expect(solveStatus().speed, `setSolveSpeed(${given})`).toBe(want);
+      expect(Number.isFinite(solveSpeed()), `solveSpeed() stays finite for ${given}`).toBe(true);
+      cancelSolve();
+    }
+  });
+
   it('arming reports missing rather than throwing, for the two rooms that are not puzzles', () => {
     for (const jmeno of ['ZAVER', 'SCORE', 'NOT_A_ROOM']) {
       const r = armSolve(jmeno);
@@ -286,6 +315,68 @@ describe('solvemode', () => {
       tickSolveWatchdog();
     }
     expect(solveStatus().abort?.reason, 'a room wedged mid-animation still fails').toBe('stalled');
+  });
+
+  /**
+   * The death-restart path calls `buildRoom(true)` and returns WITHOUT tearing playback
+   * down — deliberately, so the KUFRIK demonstration survives its own scripted deaths. A
+   * run must therefore latch the death from the top of the tick, not from the move branch,
+   * or it carries on feeding the rest of the recording to a freshly spawned room.
+   */
+  it('latches a death from the top of the tick, without needing a playable tick', () => {
+    arm('uuuu');
+    noteSolveDeath(false);
+    expect(solveStatus().abort, 'no death, nothing to latch').toBeNull();
+    noteSolveDeath(true);
+    expect(solveStatus().abort?.reason).toBe('dead');
+    expect(inSolvemode(), 'the run is over').toBe(false);
+
+    // And it does not keep re-latching over itself as the skeleton erodes.
+    const first = solveStatus().abort;
+    noteSolveDeath(true);
+    expect(solveStatus().abort).toEqual(first);
+  });
+
+  it('a death cannot be overwritten by a win latched afterwards', () => {
+    arm('uuuu');
+    noteSolveDeath(true);
+    noteSolveWin(true);
+    expect(solveStatus().won, 'a dead run does not become a win').toBe(false);
+    expect(solveStatus().abort?.reason).toBe('dead');
+  });
+
+  /**
+   * A run does not choose when it is torn down: a win starts the auto-return countdown, and
+   * when that lapses `returnFromRoom` -> `endShowmode` -> `cancelSolve()` clears the state.
+   * At a high multiplier all of that fits in ONE frame, so a caller polling the status would
+   * see "running" and then nothing — never the win it was waiting for.
+   */
+  it('the verdict survives the teardown that follows it', () => {
+    arm('uuuu');
+    noteSolveWin(true);
+    cancelSolve();
+    const s = solveStatus();
+    expect(s.won, 'still reports the win after the state is gone').toBe(true);
+    expect(s.running).toBe(false);
+    expect(s.jmeno).toBe('TEST');
+
+    const h = harness(['blocked']);
+    arm('uuuu');
+    expect(solveStatus().won, 'arming a new run clears the old verdict').toBe(false);
+    advanceSolve(h.ctx());
+    cancelSolve();
+    expect(solveStatus().abort?.reason, 'and an abort survives it too').toBe('blocked');
+  });
+
+  it('cancelling a run that reached no verdict reports nothing', () => {
+    const h = harness();
+    arm('uuuu');
+    advanceSolve(h.ctx());
+    cancelSolve();
+    const s = solveStatus();
+    expect(s.won).toBe(false);
+    expect(s.abort, 'stopping early is not a result').toBeNull();
+    expect(s.jmeno, 'and leaves nothing to report on').toBeNull();
   });
 
   it('cancelling stops the run and unlocks input', () => {

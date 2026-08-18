@@ -331,7 +331,9 @@ initCheats({
   get devEnabled() {
     return devEnabled;
   },
-  playbackBusy: () => inReplay() || inShowmode() || loadmode !== null,
+  // `cutscene` counts too: it leaves `ui.screen` alone, so every other arming guard passes
+  // during the briefcase demo, and `step()` gives it the whole tick.
+  playbackBusy: () => inReplay() || inShowmode() || loadmode !== null || cutscene !== null,
   get engine() {
     return engine;
   },
@@ -1421,14 +1423,19 @@ window.addEventListener('keydown', (e) => {
     // abort after one would be blamed on the recording. Deliberately keyed on
     // `inSolvemode()` and NOT `inAutoPlay()`: the map's "Replay" has always accepted typed
     // cheats and that is not this change's business to alter.
-    if (inSolvemode() && ui.screen === 'room') return;
-    const r = letter ? entry.press(e.key) : entry.cancel();
-    if (r.cheat) {
-      if (ui.screen === 'map') applyMapCheat(r.cheat);
-      else applyRoomCheat(r.cheat);
-      return;
+    //
+    // Skips only the BUFFER, and must never `return`: Escape, Backspace, F2/F3 and the
+    // dev-pane toggle are all handled BELOW this block, so returning here took away every
+    // keyboard way to stop a run — including the Escape the button's tooltip promises.
+    if (!(inSolvemode() && ui.screen === 'room')) {
+      const r = letter ? entry.press(e.key) : entry.cancel();
+      if (r.cheat) {
+        if (ui.screen === 'map') applyMapCheat(r.cheat);
+        else applyRoomCheat(r.cheat);
+        return;
+      }
+      if (r.swallowed) return;
     }
-    if (r.swallowed) return;
   }
   // Ctrl+Alt+D: enable/disable the developer pane (persisted). This is the ONLY
   // way in/out of dev mode; while enabled it shows the tuning chrome + perf HUD and
@@ -1488,14 +1495,16 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'F2') {
     e.preventDefault();
-    // Not mid-replay: `atRest()` only asks whether the ENGINE is idle, which it is between
-    // the recording's moves, so this would bank a half-played record as the player's save.
+    // `atRest()` is true between the recording's moves, so without this a running replay
+    // would bank a half-played record as the player's save.
     if (atRest() && !inSolvemode()) saveGame();
     return;
   }
   if (e.code === 'F3') {
     e.preventDefault();
-    if (atRest()) loadGame();
+    // Same hole as F2: `atRest()` is true between the recording's moves, and a load would
+    // drop a saved room on top of a running replay. Escape is how you stop one.
+    if (atRest() && !inSolvemode()) loadGame();
     return;
   }
 

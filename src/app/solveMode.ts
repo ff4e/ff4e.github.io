@@ -105,7 +105,32 @@ const STALL_TICKS = 600;
  */
 const WIN_GRACE_TICKS = 120;
 
+/**
+ * The only way a speed ever reaches the state. Anything else is a browser hang waiting to
+ * happen: `renderLoop` divides `LOGIC_MS` by this and uses it as the per-frame step cap, so
+ * `Infinity` gives a 0 ms tick and an uncapped loop (`acc >= 0 && steps < Infinity` never
+ * ends), and `NaN` gives `acc >= NaN`, which is false forever — a run that silently never
+ * advances. Both are reachable from `__ff.solveRoom(n)`, which is a dev hook a human types
+ * into a console, so "no one would pass that" is not an argument.
+ *
+ * 50 is well past the point the frame rate stops being the limit; `Math.floor(n) || 1` maps
+ * NaN, 0 and -0 to 1.
+ */
+const clampSpeed = (n: number): number => Math.max(1, Math.min(50, Math.floor(n) || 1));
+
 export let solvemode: SolveModeState | null = null;
+
+/**
+ * The verdict of the last run, kept after `solvemode` itself is gone.
+ *
+ * A run does not get to choose when it is torn down. Winning starts the auto-return
+ * countdown, and when that lapses `returnFromRoom` -> `endShowmode` -> `cancelSolve()`
+ * clears the state — at a high multiplier that can all happen inside ONE frame, so a
+ * caller polling `solveStatus()` would see "running" and then nothing, never the win.
+ * Keeping the verdict here means the answer to "how did it go" survives the cleanup, which
+ * is also what lets the dev bar still show it once the map is back.
+ */
+let lastResult: { jmeno: string; idx: number; total: number; won: boolean; abort: SolveAbort | null } | null = null;
 
 export function setSolvemode(v: SolveModeState | null): void {
   solvemode = v;
@@ -143,7 +168,7 @@ export function inAutoPlay(): boolean {
  * so this is inert for every player session.
  */
 export function solveSpeed(): number {
-  return inSolvemode() ? Math.max(1, solvemode!.speed) : 1;
+  return inSolvemode() ? clampSpeed(solvemode!.speed) : 1;
 }
 
 /**
@@ -153,7 +178,7 @@ export function solveSpeed(): number {
  * probe does. Clamped so a stray 0 cannot stop the clock.
  */
 export function setSolveSpeed(n: number): void {
-  if (solvemode) solvemode.speed = Math.max(1, Math.min(50, Math.floor(n) || 1));
+  if (solvemode) solvemode.speed = clampSpeed(n);
 }
 
 export type SolveArmError = 'missing' | 'undecodable';
@@ -169,11 +194,12 @@ export function armSolve(jmeno: string, speed = 1): SolveModeState | { error: So
   const found = solutionFor(jmeno);
   if (found.known !== 'ok') return { error: 'missing', detail: `${jmeno} has no recorded solution` };
   try {
+    lastResult = null; // a new run's verdict is not the old one's
     return {
       jmeno,
       moves: decodeMoves(found.moves),
       idx: 0,
-      speed,
+      speed: clampSpeed(speed),
       idleTicks: 0,
       idleAfterMoves: 0,
       abort: null,
@@ -186,11 +212,38 @@ export function armSolve(jmeno: string, speed = 1): SolveModeState | { error: So
 
 /** Stop a run without calling it a failure — the player pressed Escape, or left the room. */
 export function cancelSolve(): void {
+  if (solvemode) {
+    // Preserve a verdict the run had already reached; a teardown is not a result of its own.
+    if (solvemode.won || solvemode.abort) rememberResult(solvemode);
+    else lastResult = null;
+  }
   solvemode = null;
+}
+
+function rememberResult(s: SolveModeState): void {
+  lastResult = { jmeno: s.jmeno, idx: s.idx, total: s.moves.length, won: s.won, abort: s.abort };
 }
 
 function fail(s: SolveModeState, reason: SolveAbortReason, detail: string): void {
   s.abort = { reason, at: s.idx, of: s.moves.length, detail };
+  rememberResult(s);
+}
+
+/**
+ * Latch a DEATH as early as the win is latched, from the top of the tick.
+ *
+ * `advanceSolve` sees a death only on a tick it could also have played a move on, and the
+ * death-restart path does not wait for one: once both fish have eroded (~14 ticks) it calls
+ * `buildRoom(true)` and returns, deliberately WITHOUT tearing playback down, because the
+ * KUFRIK demonstration has to survive its own scripted deaths. A run left armed across that
+ * rebuild would carry on feeding the rest of the recording to a freshly spawned room, and
+ * report the resulting nonsense as a `blocked` at some later index instead of the death
+ * that actually happened.
+ */
+export function noteSolveDeath(anyFishDead: boolean): void {
+  const s = solvemode;
+  if (!s || s.abort || s.won || !anyFishDead) return;
+  fail(s, 'dead', `a fish died at move ${s.idx + 1}/${s.moves.length}`);
 }
 
 /**
@@ -207,13 +260,27 @@ export function advanceSolve(ctx: {
    * Was the room at rest when this tick STARTED — not merely by the time it got here?
    *
    * A move may only be played on such a tick, exactly as `test/solutionsHarness.ts` does
-   * it. A tick that only became idle inside `advance()` has not yet given the room's
-   * `prog` an at-rest pass, and the recording assumes it has: the player who recorded it
-   * could not press a key mid-animation either. Playing a move there steals the tick from
-   * autonomous at-rest logic and puts the fish one cell further along than the recording
-   * meant. WIN #68 is where that was fatal — its bonus level opens from a positional
-   * trigger in `prog`, so the extra cell moved the handover past the trigger column and
-   * killed the elderly fish on arrival.
+   * it. A tick that only became idle inside `advance()` has not yet given the room's `prog`
+   * an at-rest pass, so a move played there steals the tick from autonomous at-rest logic
+   * and puts the fish one cell further along than the recording meant.
+   *
+   * Be precise about WHY, because the obvious reason is wrong: it is NOT that a player
+   * cannot press a key mid-animation. This port's held-key repeat does exactly that —
+   * `dispatchHeldMove` runs deliberately AFTER `advance()` (`logicTick.ts`) so a completed
+   * cell starts the next one on the same tick. The rule is a property of how the FFNG
+   * corpus was recorded and of the harness that validates it, which is precisely why it
+   * belongs to this mode and was not imposed on `replaymode` or on held keys.
+   *
+   * WIN #68 is where the difference is fatal. Its bonus level (`ZapniBonuslevel`,
+   * URoom.pas:17944/23700) re-points little/big at the elderly pair from a positional
+   * trigger in `prog`. The trigger still fires under the loose cadence — what breaks is
+   * that a move issued on the SAME tick as the handover lands the pair at (25,11)/(25,13)
+   * instead of (24,11)/(24,13), and the big one arrives crushed.
+   *
+   * That divergence is NOT confined to this mode, and this rule masks rather than fixes it:
+   * the map's "Replay" and a held key both use the loose cadence, so WIN #68 and GRAL #64
+   * are reachable failures there today. Recorded as a task rather than fixed here, because
+   * the fix belongs in the tick and is player-facing.
    */
   startedIdle: boolean;
   /** Applies one move through the REAL game loop (`tryStep`) and reports what it did. */
@@ -292,7 +359,9 @@ export function advanceSolve(ctx: {
 export function noteSolveWin(engineWon: boolean): void {
   const s = solvemode;
   if (!s || s.abort || s.won) return;
-  if (engineWon) s.won = true;
+  if (!engineWon) return;
+  s.won = true;
+  rememberResult(s);
 }
 
 /**
@@ -326,13 +395,24 @@ export function solveStatus(): {
   abort: SolveAbort | null;
 } {
   const s = solvemode;
+  if (!s) {
+    return {
+      running: false,
+      jmeno: lastResult?.jmeno ?? null,
+      idx: lastResult?.idx ?? 0,
+      total: lastResult?.total ?? 0,
+      speed: 1,
+      won: lastResult?.won ?? false,
+      abort: lastResult?.abort ?? null,
+    };
+  }
   return {
     running: inSolvemode(),
-    jmeno: s?.jmeno ?? null,
-    idx: s?.idx ?? 0,
-    total: s?.moves.length ?? 0,
-    speed: s?.speed ?? 1,
-    won: s?.won ?? false,
-    abort: s?.abort ?? null,
+    jmeno: s.jmeno,
+    idx: s.idx,
+    total: s.moves.length,
+    speed: s.speed,
+    won: s.won,
+    abort: s.abort,
   };
 }

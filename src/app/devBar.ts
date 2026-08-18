@@ -23,6 +23,7 @@ import { solveStatus } from './solveMode.js';
 import { solutionFor } from '../rooms/index.js';
 import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn } from './dom.js';
 import { relayout } from './loadingUi.js';
+import { ui } from './screenState.js';
 import { settings } from './playerSettings.js';
 import { saveSettings } from '../core/settings.js';
 import {
@@ -158,7 +159,12 @@ export function initDevBar(h: DevBarHost): void {
  */
 export function syncSolveBtn(): void {
   const el = solveRoomBtn;
-  if (!el) return;
+  // Cheap enough to call every frame, and it has to be: the button's state has to be able
+  // to come BACK from "Solving …, disabled" when a run ends, and a run can end from paths
+  // that never touch the dev bar (Escape, a restart, the auto-return after a win). Syncing
+  // only while a run existed left it stuck disabled after a cancel, with no way to start
+  // another. Nothing below allocates, and the writes are guarded on an actual change.
+  if (!el || !document.body.classList.contains('dev')) return;
   const s = solveStatus();
   const jmeno = ROOMS[Number(select.value) - 1]?.jmeno;
   const avail = jmeno ? solutionFor(jmeno) : { known: 'missing' as const };
@@ -169,6 +175,12 @@ export function syncSolveBtn(): void {
     'Stops and says so if anything goes wrong.';
   let disabled = avail.known !== 'ok';
   if (disabled) title = `No recorded solution for ${jmeno ?? 'this room'} — it is not a puzzle, so there is none to record.`;
+  if (ui.screen !== 'room') {
+    // Stated rather than inherited: there is nothing to solve from the map, and the arming
+    // guard would refuse anyway. Being greyed here was previously a side effect.
+    disabled = true;
+    title = 'Enter a room first.';
+  }
 
   if (s.running) {
     label = `Solving ${s.idx}/${s.total}`;

@@ -84,6 +84,10 @@ export function loop(now: number): void {
   // whole speed-up: with a 4 ms tick the threshold is ~84 ms, so any frame slower than that
   // threw the backlog away and left ONE step for the frame. Under a loaded machine that is
   // every frame, which is how the probe went 97 s to 475 s. Keep a frame's worth instead.
+  //
+  // Note what that means: during a run there IS bounded catch-up, up to `maxSteps` in the
+  // frame after a stall or a hold — bounded, never unbounded, and still zero for a player,
+  // where `speed` is 1 and this line behaves exactly as it always did.
   if (acc > logicMs * (maxSteps + 1)) setAcc(speed > 1 ? logicMs * maxSteps : logicMs);
   let steps = 0;
   // While a hold is active, pause the simulation too, so the room's
@@ -128,7 +132,10 @@ export function loop(now: number): void {
   // Show the solution replay's progress and its abort reason on its own button. Only while
   // a run exists — this is inert for every player session, and `syncSolveBtn` writes to the
   // DOM only when a string actually changed, so a 6 045-move run is not 6 045 relayouts.
-  if (solvemode) syncSolveBtn();
+  // Unconditional: the button has to be able to come back from "Solving …, disabled" when
+  // a run ends by a path that never touches the dev bar. `syncSolveBtn` no-ops unless the
+  // dev pane is actually showing.
+  syncSolveBtn();
   // The WebGL room overlay (#screen-gl) is only ever shown by the room draw()
   // path or the (enhanced) cutscene. Hide it for every other screen
   // (map/menu/intro/credits/help), which repaint the 2D #screen underneath —
