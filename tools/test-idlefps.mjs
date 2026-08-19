@@ -8,7 +8,7 @@
  * heldState stayed "held" — the fish kept swimming and, because loopThrottleOk needs
  * heldState===0, the loop spun on rAF forever until a room restart cleared it.
  */
-import { observed, withApp } from './ui-lib.mjs';
+import { observed, tickBudget, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff && window.__ff.throttleInfo);
@@ -90,12 +90,19 @@ await withApp(async ({ p, expect }) => {
     'a cutscene idle-throttles instead of holding the full display rate',
   );
 
-  const paced = await p.evaluate(async () => {
+  const paced = await p.evaluate(async (deadlineMs) => {
     const t0 = window.__ff.count();
     const l0 = window.__ff.throttleInfo().loops;
+    // Bounded by wall clock as well as by tick count. The `ticks >= 12` assertion below
+    // exists to catch a throttle that STALLED the tick — and in exactly that failure the
+    // tick count never arrives and `cutsceneActive()` stays true, so an unbounded loop
+    // would hang to the runner's SIGTERM instead of failing fast with the sentence that
+    // explains it. Same reason ui-lib budgets every game-time wait.
+    const until = performance.now() + deadlineMs;
     await new Promise((res) => {
       const step = () => {
         if (window.__ff.count() - t0 >= 12 || !window.__ff.cutsceneActive()) return res();
+        if (performance.now() > until) return res();
         requestAnimationFrame(step);
       };
       requestAnimationFrame(step);
@@ -105,7 +112,7 @@ await withApp(async ({ p, expect }) => {
       loops: window.__ff.throttleInfo().loops - l0,
       onTimer: window.__ff.throttleInfo().onTimer,
     };
-  });
+  }, tickBudget(12));
   expect(paced.onTimer, 'the cutscene is paced by the idle timer, not requestAnimationFrame');
   // The animation must still ADVANCE — a throttle that stalled the tick would also
   // satisfy a "few loops" bound, so the two are asserted together.
