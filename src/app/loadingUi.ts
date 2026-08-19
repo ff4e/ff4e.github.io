@@ -22,6 +22,7 @@
  */
 import { mapArtHolding, mapPresented, roomArtPending } from './art.js';
 import { artFailureShown } from './artFailure.js';
+import { roomAudioPending } from './roomLoad.js';
 import { fatalEl, loadingEl, loadingMsg, stageBox, stageRow } from './dom.js';
 import { setForceRoomRedraw, roomLoading } from './framePacing.js';
 import { wake } from './frameClock.js';
@@ -95,7 +96,10 @@ export function syncLoadingUi(now: number): void {
     mapLoadingDueAt = 0;
     return;
   }
-  const roomWaiting = ui.screen === 'room' && (roomLoading || roomArtPending());
+  // The audio hold counts as waiting: since a room is not handed the stage until its
+  // sound is in, an entry that reaches the room screen with audio still coming would
+  // otherwise sit there explaining nothing.
+  const roomWaiting = ui.screen === 'room' && (roomLoading || roomArtPending() || roomAudioPending());
   const mapWaiting = mapArtHolding();
   if (!roomWaiting) roomLoadingSince = 0;
   if (!mapWaiting) mapLoadingDueAt = 0;

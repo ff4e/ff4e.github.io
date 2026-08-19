@@ -169,7 +169,15 @@ await withApp(
 
     // === Release the AI art: the room appears, in AI art, for the first time. ===
     releaseAi();
-    await p.waitForFunction(() => !window.__ff.loadingVisible() && window.__ff.aiRoomActive());
+    // `roomAudioPending` as well as the art: a room is not handed the stage until it can
+    // be HEARD as well as seen (roomLoad.ts), so the art landing is no longer the last
+    // thing between this and the first painted frame. Only the WAIT moves — what is
+    // asserted below, that the first frame the room ever paints is the AI one, is
+    // unchanged, and it is still `__firstPaint` (sampled from the very first frame) that
+    // answers it rather than anything re-read afterwards.
+    await p.waitForFunction(
+      () => !window.__ff.loadingVisible() && window.__ff.aiRoomActive() && !window.__ff.roomAudioPending(),
+    );
     await waitFrames(p, 3);
     const final = await p.evaluate(() => {
       window.__sampling = false;

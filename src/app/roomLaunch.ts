@@ -40,6 +40,7 @@ import { AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { curNum } from './art.js';
 import { isTransient } from '../render/assetFetch.js';
 import { showLoadNote } from './loadNote.js';
+import { roomAudioPending } from './roomLoad.js';
 import type { AiWorldMap } from '../render/worldMapAi.js';
 
 /** What this module needs to see of the running game. */
@@ -302,7 +303,10 @@ export function tickMapLaunch(): void {
       l.settle(load);
       return;
     }
-    if (host.roomLoading || host.roomArtPending()) return;
+    // The room takes the stage when it can be both SEEN and HEARD. `roomAudioPending`
+    // is read straight from its owning module rather than through the host: it is state
+    // roomLoad.ts owns, and an accessor would be one more thing to mis-wire.
+    if (host.roomLoading || host.roomArtPending() || roomAudioPending()) return;
     finishMapLaunch(l);
   } catch (e) {
     // This is the one thing in loop() that STARTS a room, and loop() reschedules itself
@@ -387,6 +391,29 @@ function abortMapLaunch(l: MapLaunch, err: unknown): void {
   } catch (e2) {
     console.error('failed to report a failed room launch:', e2);
   }
+}
+
+/**
+ * An entry that cannot be completed, from wherever the failure was noticed.
+ *
+ * `abortMapLaunch` needs the launch object, which only this module has — so the loaders
+ * that fail LATE (the audio, which lands after the room is built) call this instead. If
+ * the launch is still armed it is abandoned exactly as an early failure would be, and
+ * the player is left on the map. If it is not, there is no map to return to and the note
+ * is raised where they are.
+ */
+export function failRoomEntry(num: number, err: unknown): void {
+  const l = mapLaunch;
+  if (l && l.room === num) {
+    abortMapLaunch(l, err);
+    return;
+  }
+  showLoadNote({
+    subject: 'room',
+    room: num,
+    transient: isTransient(err),
+    ...(isTransient(err) ? { retry: () => void beginMapLaunch(num).catch(() => {}) } : {}),
+  });
 }
 
 /** Hand the stage from the map to the room the launch `l` loaded, and end the launch. */

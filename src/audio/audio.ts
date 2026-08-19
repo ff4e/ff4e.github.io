@@ -541,6 +541,33 @@ export class AudioEngine {
    * (MusCycle/2), so the intro plays once and only the body repeats. No-op if the
    * same track is already playing (so it survives death-restarts within a room).
    */
+  /** Is this track already decoded and cached? (Room entry asks before fetching.) */
+  hasMusic(name: string): boolean {
+    return this.musicBufs.has(name);
+  }
+
+  /**
+   * Decode a music track into the cache, so `playMusic` can start it without a fetch.
+   *
+   * Split out of `playMusic` so the room entry can OWN the download: inside `playMusic`
+   * a failure is swallowed ("stay silent"), which is right for the menu and the KUFRIK
+   * demo and wrong for a room, where a track that never arrives used to mean a room
+   * played through with no music and nothing said. Here it throws, and the entry fails.
+   *
+   * The native sample rate comes out of the WAV header (offset 24) exactly as it does in
+   * `playMusic`, and is stashed on the buffer the same way — `loopStart` is computed from
+   * it, so getting it wrong makes the track's intro repeat instead of only its body.
+   */
+  async decodeMusic(name: string, bytes: Uint8Array): Promise<void> {
+    if (this.musicBufs.has(name)) return;
+    const ctx = this.ensureCtx();
+    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const nativeRate = new DataView(ab).getUint32(24, true) || 22050;
+    const buf = await ctx.decodeAudioData(ab.slice(0));
+    (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
+    this.musicBufs.set(name, buf);
+  }
+
   async playMusic(name: string, url: string, loopSample: number): Promise<void> {
     if (this.musicName === name && this.musicSrc) {
       this.activeUntil.set(MUSIC_PRIOR, Infinity); // ensure playing(-999) reflects it

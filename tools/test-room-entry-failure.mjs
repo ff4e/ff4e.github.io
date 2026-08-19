@@ -190,6 +190,55 @@ await withApp(
     expect(/missing from the game files/i.test(gone.note), 'a 404 is reported as a problem with the game');
     expect(!gone.retry, 'a permanent failure offers no Try again, because retrying an answer cannot help');
     await p.unroute('**/data/Graphic/003.ffr');
+    await p.click('#load-note-x');
+
+    // ── 6-8. The audio a room needs is part of loading it ─────────────────────
+    // A room used to be shown the moment it could be DRAWN, with its sound still coming;
+    // a package that never arrived was never mentioned, so a room could be played through
+    // mute with nothing said. Now the entry waits for all of it and fails if any of it is
+    // missing — so each of the three is failed separately here, because they are three
+    // different loaders and only one of them (the voices) was ever on the room's own path.
+    //
+    // Each room is chosen COLD and for a distinct track: room 1 cached rybky04 in §3, so a
+    // room sharing that track would be a cache hit and would issue no request to fail.
+    for (const [label, room, route] of [
+      ['voices', 4, '**/data/Sound/004.ffs'], // VRAK
+      ['music', 5, '**/data/Music/rybky03.wav'], // SCHODY — rybky03, not yet fetched
+      ['leg-final remarks', 19, '**/data/Sound/x01.ffs'], // LODE — depth 15, the only rooms that load x01
+    ]) {
+      await p.evaluate(() => window.__ff.showMap());
+      await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+      await p.route(route, (r) => r.abort('failed'));
+      await p.evaluate((n) => {
+        void window.__ff.enterRoomAwait(n).catch(() => {});
+      }, room);
+      await settled(p);
+      const a = await p.evaluate(() => ({
+        screen: window.__ff.screen(),
+        note: window.__ff.loadNoteShown(),
+        held: window.__ff.roomAudioPending(),
+      }));
+      expect(a.screen === 'map', `a room whose ${label} fail does not enter`);
+      expect(a.note, `the player is told the ${label} did not load`);
+      // A hold that outlives its load is a room that can never be entered again.
+      expect(!a.held, `the audio hold is released after the ${label} failure`);
+      await p.unroute(route);
+      await p.click('#load-note-x');
+    }
+
+    // ── 9. …and with the network back, the same room enters and is heard ──────
+    // The counterpart that stops 6-8 from passing against a build that simply refuses
+    // every room: the retry has to actually complete, audio and all.
+    await p.evaluate(() => {
+      void window.__ff.enterRoomAwait(4).catch(() => {});
+    });
+    await p.waitForFunction(
+      () => window.__ff.screen() === 'room' && window.__ff.roomNum() === 4 && !window.__ff.roomAudioPending(),
+      null,
+      { timeout: tickBudget(60) },
+    );
+    expect(true, 'the same room enters normally once its audio can be fetched');
+    expect(!(await p.evaluate(() => window.__ff.loadNoteShown())), 'no note is left over a room that did load');
   },
   // The launch logs the failure it is recovering from, which is diagnostics worth keeping:
   // the note tells the player, the console tells whoever reads the bug report. The fetch
