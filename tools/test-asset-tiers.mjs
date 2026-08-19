@@ -243,23 +243,38 @@ await withApp(async ({ p, expect, allowed }) => {
   // once therefore leaves `loadAiPlaque` — the actual hover-driven fetch, and the one the
   // bug was about — never called at all.
   //
-  // And the negatives are asserted AFTER the retry budget is spent, not straight after
-  // the gesture. Both mistakes were made here and both let a re-tiering of `loadAiPlaque`
-  // to `mustHave` pass this probe: a failure does not exist until ~1.25 s of retries have
-  // gone by, so "no failure screen yet" a frame later is not the claim being made.
-  const RETRIES_SPENT = budget(2500); // 250 ms + 1000 ms, jittered +25%, plus the requests
+  // And the negatives are asserted only once the failures have actually LANDED, not a
+  // frame after the gesture. That mistake was made here and it let a re-tiering of
+  // `loadAiPlaque` to `mustHave` pass this probe: a failure does not exist until ~1.25 s
+  // of retries have gone by, so "no failure screen yet" a frame later is not the claim.
+  //
+  // Waited on the console rather than slept, for two reasons. `budget()` multiplies by
+  // 12, so `waitForTimeout(budget(2500))` is a THIRTY SECOND sleep — it is built for
+  // upper bounds on waits, not for durations, and using it as one is what made this probe
+  // the slowest in the suite. And a log line is the honest condition anyway: every tier
+  // logs, `niceToHave` included, so waiting for it proves the loader really ran and
+  // really failed instead of assuming it from a timer.
+  const settled = async (re, n) => {
+    const before = allowed.filter((t) => re.test(t)).length;
+    await p.waitForFunction(() => true); // yield to the page once before polling
+    for (let i = 0; i < 200; i++) {
+      if (allowed.filter((t) => re.test(t)).length >= before + n) return;
+      await p.waitForTimeout(50);
+    }
+    throw new Error(`waited 10 s and only ${allowed.filter((t) => re.test(t)).length - before} of ${n} ${re} failures were logged`);
+  };
 
   await reloadApp(p);
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
   await p.evaluate(() => window.__ff.setGraphics('ai'));
 
   /** Open four different rooms' record panels, which is what asks for four plaques. */
-  const hoverRooms = async () => {
-    for (const n of [3, 5, 7, 9]) {
-      await p.evaluate((r) => window.__ff.openMapInfo(r), n);
+  const hoverRooms = async (re, n) => {
+    for (const num of [3, 5, 7, 9]) {
+      await p.evaluate((r) => window.__ff.openMapInfo(r), num);
       await waitFrames(p, 2);
     }
-    await p.waitForTimeout(RETRIES_SPENT);
+    await settled(re, n);
     return p.evaluate(() => ({
       fatal: window.__ff.fatalShown(),
       note: window.__ff.loadNoteShown(),
@@ -278,7 +293,8 @@ await withApp(async ({ p, expect, allowed }) => {
   };
   p.on('request', countPlaques);
   await failing(p, '**/enhanced-ai/_desky/*.webp');
-  const images = await hoverRooms();
+  // Three plaque images, not four: the first room opened has no geometry yet.
+  const images = await hoverRooms(/_desky\/\w+\.webp/, 3);
   p.off('request', countPlaques);
   expect(!images.fatal, 'a plaque that will not load does not end the session — THE bug this file guards');
   expect(!images.note, 'and does not interrupt with a note either: it is nice-to-have, not should-have');
@@ -304,7 +320,7 @@ await withApp(async ({ p, expect, allowed }) => {
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
   await failing(p, '**/enhanced-ai/_desky/plaques.json');
   await p.evaluate(() => window.__ff.setGraphics('ai'));
-  const geom = await hoverRooms();
+  const geom = await hoverRooms(/_desky\/plaques\.json/, 1);
   expect(!geom.fatal, 'nor does the plaque GEOMETRY failing, which is the same gesture one step earlier');
   expect(!geom.note && geom.screen === 'map' && geom.presented, 'and it too passes without a word');
   await p.evaluate(() => window.__ff.closeMapInfo());
