@@ -140,7 +140,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // masked by the wall's alpha, plus the `paint`/`paintBg` split that lets it reuse the
   // wobbled-background half rather than copy it.
   ['src/render/aiTarget.ts', 780],
-  ['src/audio/audio.ts', 680],
+  // 680 -> 710 for the two things a room's music needs now that ROOM ENTRY owns its
+  // download (it has to: only the entry can fail on it). `decodeMusic` is the fetch-free
+  // half of `playMusic`, split out so a track that does not arrive fails the entry instead
+  // of being swallowed by the "stay silent" path that is right for the menu; and
+  // `beginMusicLoad` lets a start JOIN that download, because a download outside the
+  // engine is invisible to `musicBufs`/`musicStarting` and KANKAN re-cues its track on the
+  // first idle tick — fetching and decoding the same 1.24 MB file twice.
+  ['src/audio/audio.ts', 710],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

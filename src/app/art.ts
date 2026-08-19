@@ -565,7 +565,8 @@ export async function ensureAiRoom(num: number): Promise<void> {
     // The hold STAYS, and the player is asked. Both the guard and the hold matter:
     // these loads outlive the room that started them, so a stale failure must not
     // raise a screen over the room the player has since walked into. (The mirror of
-    // that was measured on the note this replaces — a stale SUCCESS cleared it.)
+    // that was measured on an earlier, dismissable form of this — a stale SUCCESS
+    // cleared it.)
     if (curNum === num) raiseArtFailure('The artwork for this room', e);
     else clearAiPending(num);
   }
@@ -583,7 +584,7 @@ export async function ensureAiRoom(num: number): Promise<void> {
  * wakes on the way out; the failure path holds instead, so without this the loop can
  * still be asleep — and `syncLoadingUi` only runs from the loop, so the loading spinner
  * it is supposed to stand down would stay up ON TOP of this screen (same z-index, later
- * in the DOM) and swallow the click on Try again. Found exactly that way.
+ * in the DOM) and swallow the click on the screen's own button. Found exactly that way.
  */
 function raiseArtFailure(what: string, err?: unknown): void {
   failAssets(what, err === undefined ? true : isTransient(err));

@@ -389,8 +389,8 @@ function abortMapLaunch(l: MapLaunch, err: unknown): void {
  * `abortMapLaunch` needs the launch object, which only this module has — so the loaders
  * that fail LATE (the audio, which lands after the room is built) call this instead. If
  * the launch is still armed it is abandoned exactly as an early failure would be, and
- * the player is left on the map. If it is not, there is no map to return to and the note
- * is raised where they are.
+ * the player is taken off it. Either way the failure screen goes up: it is the same
+ * screen wherever the entry was noticed to have failed.
  */
 export function failRoomEntry(num: number, err: unknown): void {
   const l = mapLaunch;

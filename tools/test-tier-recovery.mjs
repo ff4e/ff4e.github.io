@@ -156,19 +156,35 @@ await withApp(
       'the room is held rather than painted one tier down',
     );
 
-    // The only exit the screen offers, and therefore the one that has to work. It also
-    // proves the failure was not REMEMBERED: with the outage over, the very asset that
-    // failed is refetched, and an `aiRoomCache` entry written on failure would hand back
-    // the same empty result to a page that has not been reloaded... which this one has.
-    // The stronger form of that claim is the enhanced half below, which reloads ONCE and
-    // then re-enters, so a remembered failure would still be in the cache.
+    // ── The cache assertion, made BEFORE any reload ──────────────────────────
+    // This is the one that actually pins the original bug, and it has to happen here.
+    // `aiRoomCache` / `enhancedCache` are module-scope Maps: a page reload erases them
+    // unconditionally, so "fail, reload, it works" would pass identically with the
+    // retract-on-failure code deleted — a test that proves the browser can restart, not
+    // that the app forgot. So: with the outage over and the SAME page still running, ask
+    // for the room again. A cache entry written on failure is still there and would hand
+    // back the same empty result.
+    //
+    // `enterRoomAwait` rather than a click: the fatal screen is opaque and covers the
+    // dev bar, correctly — the player is being told the session is over. The hook is not
+    // blocked by it, and what is under test is the loader, not the overlay.
+    await p.unrouteAll({ behavior: 'ignoreErrors' });
+    await p.evaluate(() => {
+      void window.__ff.enterRoomAwait(5).catch(() => {});
+    });
+    const forgot = await p
+      .waitForFunction(() => window.__ff.aiRoomLoaded(), null, { timeout: budget(15000) })
+      .then(() => true, () => false);
+    expect(forgot, 'the failure was not remembered: asking again on the SAME page loads the art');
+
+    // Only now the reload, which is what the screen offers the player.
     await p.unrouteAll({ behavior: 'ignoreErrors' });
     await reloadApp(p);
     await enterRoom(p, SCHODY);
     const recovered = await p
       .waitForFunction(() => window.__ff.aiRoomLoaded())
       .then(() => true, () => false);
-    expect(recovered, 'a reload plays the room in the art that failed');
+    expect(recovered, 'and a reload — the screen\u2019s only exit — plays the room too');
     expect(
       (await p.evaluate(() => window.__ff.fatalShown())) === false,
       'and the failure screen is gone with it',

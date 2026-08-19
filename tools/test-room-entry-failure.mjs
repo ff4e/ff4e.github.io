@@ -32,7 +32,7 @@
  *  6-8. The three audio loaders, each failed separately.
  *  9. …and with the network back, the same room enters and is heard.
  */
-import { budget, reloadApp, tickBudget, waitFrames, withApp } from './ui-lib.mjs';
+import { budget, observed, reloadApp, tickBudget, waitFrames, withApp } from './ui-lib.mjs';
 
 /** Room 1 = PRVNI. Unvisited on a fresh profile, and never fetched by boot. */
 const ROOM = 1;
@@ -42,8 +42,8 @@ const FFT = '**/data/Title/001.fft';
 const BOOT_ROOM = 7;
 
 /**
- * Wait until the entry has RESOLVED one way or the other — the note went up, or the screen
- * went to a room. Deliberately not "wait for the note": against the old behaviour that
+ * Wait until the entry has RESOLVED one way or the other — the failure screen went up, or
+ * the screen went to a room. Deliberately not "wait for the failure": against the old behaviour that
  * would time out after 72 seconds and report nothing about the wrong room being shown,
  * which is the finding this probe exists to make. Settle first, assert second.
  */
@@ -224,6 +224,82 @@ await withApp(
     );
     expect(true, 'the same room enters normally once its audio can be fetched');
     expect(!(await p.evaluate(() => window.__ff.fatalShown())), 'no failure screen over a room that did load');
+
+    // ── 10. The DIRECT route reports too ──────────────────────────────────────
+    // Entering from inside a room (the dev picker, the story-page chain, SCORE/ZAVER, an
+    // Escape restart) takes `startRoom(..., takeStage: true)` instead of the map launch,
+    // and that route had NO failure handling: the launch's `load.catch` is what reported
+    // a failed entry, and it only exists for launches. After boot nothing hijacks
+    // unhandled rejections either, so an FFR that failed here left the player on a room
+    // screen showing the room they came from — the reported bug, reached by another door.
+    // §9 left us in room 4, so this is genuinely the direct route.
+    expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'starting from inside a room');
+    await p.route('**/data/Graphic/008.ffr', (r) => r.abort('failed'));
+    const before10 = await p.evaluate(() => window.__ff.roomNum());
+    await p.evaluate(() => {
+      void window.__ff.enterRoomAwait(8).catch(() => {});
+    });
+    await p.waitForFunction(() => window.__ff.fatalShown(), null, { timeout: budget(6000) });
+    expect(true, 'a failed entry from inside a room reports it too');
+    expect(
+      (await p.evaluate(() => window.__ff.roomNum())) === before10,
+      'and the room the player came from is not passed off as the room they asked for',
+    );
+    await p.unroute('**/data/Graphic/008.ffr');
+
+    // ── 11. …but a failure for a room nobody is waiting for stays quiet ───────
+    // The mirror of §10, and the trap in it: `curNum` keeps naming the last room BUILT, so
+    // it still matches after the player has gone back to the map. Deciding the report on
+    // `curNum` ends the session over a download nobody is waiting for — a failure screen
+    // on the world map, for a room left minutes ago.
+    //
+    // Two details this section needs, both learned the hard way. The audio is DELAYED
+    // before it is failed, so the room builds and the player leaves before it lands — and
+    // the delay is paid THREE times, because `fetchAsset` retries a transport failure
+    // twice, so the total is ~3x the delay plus backoff. And the entry is the DIRECT one
+    // (from inside a room), because leaving a room entered off the map means abandoning a
+    // launch that is still armed, and `beginMapLaunch` then ignores the next entry.
+    await reloadApp(p);
+    await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+    await p.evaluate(() => {
+      void window.__ff.enterRoomAwait(10).catch(() => {});
+    });
+    await p.waitForFunction(
+      () => window.__ff.screen() === 'room' && window.__ff.roomNum() === 10 && !window.__ff.roomAudioPending(),
+      null,
+      { timeout: tickBudget(60) },
+    );
+    await p.route('**/data/Sound/009.ffs', async (r) => {
+      await new Promise((done) => setTimeout(done, 1200));
+      await r.abort('failed').catch(() => {});
+    });
+    await p.evaluate(() => {
+      void window.__ff.enterRoomAwait(9).catch(() => {});
+    });
+    // The room BUILDS well before its audio: that is the window this section needs.
+    await p.waitForFunction(() => window.__ff.roomNum() === 9, null, { timeout: budget(8000) });
+    await p.evaluate(() => window.__ff.showMap());
+    await p.waitForFunction(() => window.__ff.screen() === 'map');
+    // The hold has to come off even though the report does not: waiting for it IS the
+    // assertion that a room the player walked out of cannot wedge every later entry.
+    const released = await observed(
+      p.waitForFunction(() => !window.__ff.roomAudioPending(), null, { timeout: budget(12000) }),
+    );
+    expect(released, 'the hold is released even for a room the player has left');
+    expect(
+      !(await p.evaluate(() => window.__ff.fatalShown())),
+      'a failure for a room the player has left does not end the session',
+    );
+    await p.unroute('**/data/Sound/009.ffs');
+    await p.evaluate(() => {
+      void window.__ff.enterRoomAwait(3).catch(() => {});
+    });
+    await p.waitForFunction(
+      () => window.__ff.screen() === 'room' && window.__ff.roomNum() === 3 && !window.__ff.roomAudioPending(),
+      null,
+      { timeout: tickBudget(60) },
+    );
+    expect(true, 'a later room still enters normally after that');
   },
   // The launch logs the failure it is recovering from, which is diagnostics worth keeping:
   // the note tells the player, the console tells whoever reads the bug report. The fetch

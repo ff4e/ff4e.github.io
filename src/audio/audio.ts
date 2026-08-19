@@ -72,6 +72,8 @@ export class AudioEngine {
   private musicSrc: AudioBufferSourceNode | null = null;
   private musicGain: GainNode | null = null;
   private musicName = '';
+  /** Track downloads started OUTSIDE this engine (room entry), so starts can join them. */
+  private musicLoads = new Map<string, Promise<void>>();
   /** Name of the track whose async decode/start is currently in flight, if any.
    *  Guards against a second concurrent start for the same track spawning a second
    *  overlapping loop that stopMusic() can't fully cancel (see playMusic). */
@@ -547,6 +549,28 @@ export class AudioEngine {
   }
 
   /**
+   * Tell the engine a track is already on its way, so `playMusic` joins it rather than
+   * starting a second download of the same file.
+   *
+   * Room entry owns its music download (see startRoomMusic — it has to, because only the
+   * entry can fail on it), which puts that download outside everything `playMusic` uses to
+   * deduplicate: `musicBufs` is empty until the decode finishes and `musicStarting` only
+   * knows about starts `playMusic` itself began. KANKAN then re-cues its track on the
+   * first tick it sees the channel idle (`if (!s.playing(MUSIC_PRIOR)) s.musiccyc(...)`,
+   * kankan.ts:216) and the 1.24 MB file is fetched and decoded TWICE on a cold entry.
+   */
+  beginMusicLoad(name: string, load: Promise<unknown>): void {
+    const done = load.then(
+      () => {},
+      () => {},
+    );
+    this.musicLoads.set(name, done);
+    void done.then(() => {
+      if (this.musicLoads.get(name) === done) this.musicLoads.delete(name);
+    });
+  }
+
+  /**
    * Decode a music track into the cache, so `playMusic` can start it without a fetch.
    *
    * Split out of `playMusic` so the room entry can OWN the download: inside `playMusic`
@@ -602,6 +626,15 @@ export class AudioEngine {
     try {
       const ctx = this.ensureCtx();
       let buf = this.musicBufs.get(name);
+      if (!buf) {
+        // Join a download the room entry already started rather than opening a second one
+        // for the same file (see beginMusicLoad).
+        const inflight = this.musicLoads.get(name);
+        if (inflight) {
+          await inflight;
+          buf = this.musicBufs.get(name);
+        }
+      }
       if (!buf) {
         const bytes = await fetch(url, { priority: 'low' } as RequestInit).then((r) => r.arrayBuffer());
         // WAV loop point is in samples at the file's native rate (header @ offset 24).

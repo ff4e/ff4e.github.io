@@ -73,6 +73,29 @@ const RETRY_DELAYS_MS = [250, 1000] as const;
 const JITTER = 0.25;
 
 /**
+ * ── The stall ─────────────────────────────────────────────────────────────────
+ *
+ * `fetch` does not time out. A connection that DIES rejects and is retried above; a
+ * connection that merely stops — a phone radio going to sleep, a tunnel, a proxy holding
+ * the socket open — never rejects at all, and every recovery in this codebase is built on
+ * a rejection. Without a bound on it, a stalled request means: no failure, so no failure
+ * screen; the room hold never releases, so the room never appears; and the map's input
+ * guards stay armed, so nothing can be clicked. The player is left at a parchment with no
+ * way out but the browser's own reload — the one failure mode that is WORSE than the bug
+ * this whole branch exists to fix, because at least that one left a playable game.
+ *
+ * So a request that has not produced RESPONSE HEADERS in this long is treated as the
+ * failure it is, and joins the retry above.
+ *
+ * Bounded at the headers deliberately, and not at the whole transfer: the assets here run
+ * to 9 MB, which is 48 s of honest downloading on the 1.5 Mbps link this game is measured
+ * against, so any total-transfer deadline short enough to catch a stall would also kill
+ * slow connections that are working perfectly. A body that stalls AFTER its headers is
+ * therefore still unbounded — see the note on `assetBytes`.
+ */
+const HEADERS_TIMEOUT_MS = 20000;
+
+/**
  * How long to wait before attempt `n + 1` (0-based), or null when the budget is spent.
  *
  * Jittered so a burst of assets failing together — which is what a dropped connection
@@ -98,6 +121,8 @@ export interface RetryPolicy {
   /** Wait before attempt `n + 1`, or null to stop. Defaults to `retryDelayMs`. */
   delayMs?: (attempt: number) => number | null;
   sleep?: (ms: number) => Promise<void>;
+  /** How long to wait for response HEADERS before calling it a stall. For tests. */
+  headersMs?: number;
 }
 
 const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -114,17 +139,25 @@ const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r
  * that matters, since every request succeeding is overwhelmingly the common one.
  *
  * A body that arrives TRUNCATED is not retried here: it is reported transient by
- * `assetBlob` / `assetJson`, after this function has already returned its response. That
- * is a real gap and a deliberate one — retrying it means re-issuing the whole request
- * from the caller, and the caller already recovers on the next room entry because a
- * transient failure is not remembered.
+ * `assetBlob` / `assetBytes` / `assetJson`, after this function has already returned its
+ * response. That is a real gap and a deliberate one — retrying it means re-issuing the
+ * whole request from the caller. It is also where the headers deadline stops helping: a
+ * body that stalls after its headers have arrived is still unbounded, because the only
+ * honest bound on it is a per-chunk stall watchdog over a streamed body, which is a
+ * bigger change than this one.
  */
 export async function fetchAsset(url: string, init?: RequestInit, retry?: RetryPolicy): Promise<Response> {
   const nextDelay = retry?.delayMs ?? retryDelayMs;
   const sleep = retry?.sleep ?? realSleep;
   for (let attempt = 0; ; attempt++) {
+    // One controller per attempt: aborting a stalled attempt must not poison the retry.
+    const stall = new AbortController();
+    const timer = setTimeout(() => stall.abort(new Error('no response headers')), retry?.headersMs ?? HEADERS_TIMEOUT_MS);
     try {
-      const res = await fetch(url, init);
+      // The caller's own signal still has to work — it is how a room that has been left
+      // cancels its loads — so the two are combined rather than one replacing the other.
+      const signal = init?.signal ? AbortSignal.any([init.signal, stall.signal]) : stall.signal;
+      const res = await fetch(url, { ...init, signal });
       if (retryableStatus(res.status)) throw new TransientAssetError(url, `HTTP ${res.status}`);
       return res;
     } catch (e) {
@@ -140,6 +173,11 @@ export async function fetchAsset(url: string, init?: RequestInit, retry?: RetryP
       // deliberate: acquiring a second slot from inside one can deadlock the pool, and
       // holding it also stops a failing room from spending its whole budget re-queuing.
       await sleep(delay);
+    } finally {
+      // Cleared once the headers are in, which is what makes the deadline a HEADERS
+      // deadline: leaving it armed would abort the body mid-download and turn every slow
+      // but healthy transfer into a failure.
+      clearTimeout(timer);
     }
   }
 }

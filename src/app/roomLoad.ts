@@ -132,27 +132,32 @@ export async function loadRoom(num: number): Promise<void> {
     // to, and the window was silent-but-playable; the cost of that was that a voice
     // package which never arrived was never mentioned either, so a room could be played
     // through mute with nothing said. Now the entry holds until every sound the room
-    // needs is in, and fails — back to the map, with the note — if any of it does not
-    // arrive. The hold is `roomAudioPending()`, separate from `roomLoading` so that the
+    // needs is in, and fails — the game stops and says so — if any of it does not arrive. The hold is `roomAudioPending()`, separate from `roomLoading` so that the
     // room is still BUILT at the same moment it always was.
     //
     // The wait is real and lands on slow links: ~6.2 MB typical, ~33 s at 1.5 Mbps. It is
     // almost entirely uncompressed PCM (22 kHz mono, 352.8 kbps) — see the
     // fish_fillets_audio_compression task, which takes it to ~0.9 MB.
-    setRoomAudioPending(!bootLoad);
+    setRoomAudioPending(bootLoad ? 0 : num);
     const audioDone = bootLoad ? Promise.resolve() : art.then(() => loadRoomAudio(num, nnn, fftBytes));
-    // Both arms clear the hold: a hold that outlives its load is a room that never
-    // appears. On failure the entry is abandoned (failRoomEntry) rather than silently
-    // completing, which is the whole point of waiting for it.
+    // Both arms release the hold — a hold that outlives its load is a room that never
+    // appears — and both release it BY ROOM, so a late outcome cannot free a hold a later
+    // entry has since armed.
     void audioDone.then(
       () => {
-        if (curNum === num) setRoomAudioPending(false);
+        clearRoomAudioPending(num);
         wake();
       },
       (e: unknown) => {
-        if (curNum !== num) return; // the player is elsewhere; their entry owns the hold now
-        setRoomAudioPending(false);
-        // `warn`, matching art.ts's transient path: the player has been TOLD (the note
+        clearRoomAudioPending(num);
+        // `enteringRoom`, not `curNum`. `curNum` is not a liveness token: it keeps naming
+        // the last room BUILT, so it still equals `num` after the player has gone back to
+        // the map, and it still equals the OLD room while a superseding entry is in flight
+        // (it only advances at `beginRoomArt`). Deciding on it would end the session over a
+        // download for a room nobody is waiting for — observed as a failure screen raised
+        // on the world map, minutes after the room it names was left.
+        if (!enteringRoom(num)) return;
+        // `warn`, matching art.ts's transient path: the player has been TOLD (the screen
         // is the report), and this is the breadcrumb beside it. It is also the difference
         // between a breadcrumb and noise — a page torn down mid-download truncates a
         // 2.43 MB package, which is not a fault to shout about.
@@ -161,6 +166,19 @@ export async function loadRoom(num: number): Promise<void> {
         wake();
       },
     );
+  } catch (e) {
+    // EVERY route into a room comes through here, which is why the report belongs here
+    // and not in the launch. The map route had its own recovery (`abortMapLaunch`, via the
+    // rejection this rethrows); the DIRECT route — the dev room picker, the story-page
+    // chain, SCORE/ZAVER, an Escape restart, and the launch's own "the map was taken away"
+    // fallback — had none at all, and after boot nothing hijacks unhandled rejections
+    // (loadingUi.ts). So an FFR or FFT that failed on those routes left the player on a
+    // room screen showing the room they came from, silently: the very bug this branch
+    // exists to fix, reachable by a different door.
+    //
+    // Rethrown, because the callers that await an entry still have to see it fail.
+    failRoomEntry(num, e);
+    throw e;
   } finally {
     // Always drop the guard, even if a fetch/parse threw. On success it runs once the
     // room is built, so the next frame paints the new room.
@@ -168,8 +186,8 @@ export async function loadRoom(num: number): Promise<void> {
     // On FAILURE this used to be the whole recovery, and the comment here used to say so:
     // the guard came off, the launch flipped the screen to `room`, and the player was
     // handed the PREVIOUS room — built, live, accepting input, with nothing said. That is
-    // no longer what happens; `abortMapLaunch` (roomLaunch.ts) returns them to the map and
-    // raises the note. What the drop still does, and why it stays unconditional, is let
+    // no longer what happens; the catch above reports it and the game stops. What the drop
+    // still does, and why it stays unconditional, is let
     // the next frame PAINT: `roomLoading` suppresses the room draw, and the map's own
     // repaint path runs through the same wake(). Leaving it set on the failure path would
     // strand a frozen frame over a game that is otherwise fine.
@@ -255,14 +273,34 @@ export async function requireSoundPkg(
  * nothing and the border remark was silent, subtitles included, in every leg-final room.
  */
 let borderLinesLoaded = false;
+let borderLinesLoad: Promise<void> | null = null;
 async function loadBorderLines(num: number): Promise<void> {
   if (borderLinesLoaded || depthOfRoom(num) !== 15) return;
   // Awaited now, and no longer swallowed: it used to warn to the console and leave the
   // eight border remarks silent, which is a room quietly missing lines it is supposed to
   // speak. The flag is set only on SUCCESS, so a failed entry re-fetches on the retry
   // rather than remembering the failure — the same rule as every other loader here.
-  await requireSoundPkg('x01', '/data/Title/x01.fft', '/data/Sound/x01.ffs', true);
-  borderLinesLoaded = true;
+  //
+  // Single-flight, for the same reason the .ffs path is (see `voiceLoads`): two entries to
+  // depth-15 rooms can overlap before the flag latches — a die-and-restart inside one is
+  // enough, since the room is live and interactive while its audio is still coming — and
+  // two concurrent writes of one 0.74 MB cache entry fail with ERR_CACHE_WRITE_FAILURE.
+  // That is a transient error, so without this the second entry would end the session over
+  // a package the first was already fetching successfully.
+  if (borderLinesLoad === null) {
+    borderLinesLoad = requireSoundPkg('x01', '/data/Title/x01.fft', '/data/Sound/x01.ffs', true);
+    // Retracted on failure so the next leg-final room retries rather than joining a
+    // rejected promise for the rest of the session.
+    void borderLinesLoad.then(
+      () => {
+        borderLinesLoaded = true;
+      },
+      () => {
+        borderLinesLoad = null;
+      },
+    );
+  }
+  await borderLinesLoad;
 }
 
 /**
@@ -296,10 +334,21 @@ const voiceLoads = new Map<string, Promise<Uint8Array>>();
  * but it is not handed the stage until it can be heard as well as seen. Cleared on both
  * arms of the audio load — a hold that outlives its load is a room that never appears.
  */
-let audioPending = false;
-export const roomAudioPending = (): boolean => audioPending;
-export function setRoomAudioPending(v: boolean): void {
-  audioPending = v;
+let audioPendingNum = 0;
+export const roomAudioPending = (): boolean => audioPendingNum !== 0;
+/**
+ * Arm or release the hold, scoped to the room that owns it.
+ *
+ * Scoped for the same reason `clearAiPending` is (art.ts): these loads outlive the entry
+ * that started them, so an outcome arriving for room A must not release a hold that room
+ * B has since armed — which would present B before its sound was in, silently, and only
+ * when the player happened to move fast enough.
+ */
+function setRoomAudioPending(num: number): void {
+  audioPendingNum = num;
+}
+function clearRoomAudioPending(num: number): void {
+  if (audioPendingNum === num) audioPendingNum = 0;
 }
 
 export let roomVoicesSettled = true;
@@ -391,9 +440,17 @@ export async function startRoomMusic(num: number): Promise<void> {
     // demonstration starts `kufrik` the moment the room is entered, and an unguarded room
     // track landing a second later silenced it (caught by test-kufrikdemo).
     const claimed = audio.currentMusic;
-    const res = await fetchAsset(url, { priority: 'low' } as RequestInit);
-    requireAsset(res, url, `the music for room ${num}`);
-    await audio.decodeMusic(music.name, await assetBytes(url, res));
+    // Registered with the engine BEFORE the first await, so a script that re-cues the same
+    // track while it is still coming joins this download instead of opening a second one.
+    // KANKAN does exactly that on its first tick — `if (!s.playing(MUSIC_PRIOR))
+    // s.musiccyc(...)` — and paid for its 1.24 MB track twice.
+    const load = (async () => {
+      const res = await fetchAsset(url, { priority: 'low' } as RequestInit);
+      requireAsset(res, url, `the music for room ${num}`);
+      await audio.decodeMusic(music.name, await assetBytes(url, res));
+    })();
+    audio.beginMusicLoad(music.name, load);
+    await load;
     if (audio.currentMusic !== claimed) return; // something else owns the channel now
   }
   if (!enteringRoom(num)) return; // they left while it downloaded
@@ -405,10 +462,8 @@ export async function startRoomMusic(num: number): Promise<void> {
  * leg-final room, and its music. Awaited by the room entry, which does not complete
  * until this does — and fails if it does not.
  *
- * Sequenced deliberately. The voices are what the room speaks from its first tick, so
- * they go first and the music (the larger of the two, but background) follows. Running
- * them in parallel would let a 6.75 MB track contend with the 2.43 MB the opening
- * conversation needs, which is the same argument that puts all of this behind the art.
+ * Fetched in parallel; the reasoning is in the comment on the call itself, which is where
+ * the trade actually lives.
  */
 async function loadRoomAudio(num: number, nnn: string, fftBytes: Uint8Array): Promise<void> {
   // In PARALLEL, and the reason is a change of metric. While the room appeared before its
