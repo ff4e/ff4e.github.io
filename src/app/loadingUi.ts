@@ -21,7 +21,6 @@
  * importer. See AGENTS.md, "the module-evaluation trap".
  */
 import { mapArtHolding, mapPresented, roomArtPending } from './art.js';
-import { artFailureShown } from './artFailure.js';
 import { roomAudioPending } from './roomLoad.js';
 import { fatalEl, loadingEl, loadingMsg, stageBox, stageRow } from './dom.js';
 import { setForceRoomRedraw, roomLoading } from './framePacing.js';
@@ -87,10 +86,10 @@ export function beginRoomLoadingUi(num: number): void {
  */
 export function syncLoadingUi(now: number): void {
   if (!booted || !loadingEl) return;
-  // The art-failure screen holds the art on purpose, so both predicates below are true
-  // while it is up — and the spinner would sit under it saying the opposite, for ever.
-  // The screen has taken over the waiting; there is nothing left to wait for.
-  if (artFailureShown()) {
+  // A failed load leaves its holds ON — nothing releases them, because nothing is going
+  // to arrive — so every predicate below stays true for ever. The fatal screen has taken
+  // over the waiting; the spinner underneath would only sit there saying the opposite.
+  if (fatalShown()) {
     if (!loadingEl.hidden) loadingEl.hidden = true;
     roomLoadingSince = 0;
     mapLoadingDueAt = 0;
@@ -121,6 +120,52 @@ export function syncLoadingUi(now: number): void {
     (roomWaiting && roomLoadingSince !== 0 && now - roomLoadingSince >= LOADING_DELAY_MS) ||
     (mapWaiting && now >= mapLoadingDueAt);
   if (loadingEl.hidden === show) loadingEl.hidden = !show;
+}
+
+/**
+ * An asset the game needed did not arrive: stop, and say so.
+ *
+ * ── One mechanism, deliberately ───────────────────────────────────────────────
+ * This replaces two earlier player-facing failure surfaces — a modal that held the room
+ * and offered to refetch just its artwork, and a non-blocking note that left the player
+ * on the world map to click the room again. Both tried to keep the game alive around a
+ * failure. The rule now is simpler and is the one to keep in mind when adding a loader:
+ * **a load that FAILED ends the session.** The page says what happened and reloads.
+ *
+ * The simplicity is the point. A partial game is a game that lies about its own state —
+ * a room quietly missing its voices, a tier quietly one level below the setting that
+ * claims it — and every attempt to recover in place needed its own retry closure, its own
+ * scoping rules for which success answers which failure, and its own probe. A reload has
+ * none of that and cannot be wrong.
+ *
+ * ── What must NOT come here ───────────────────────────────────────────────────
+ * ABSENT assets. The absent/failed split in `src/render/assetFetch.ts` is what makes this
+ * safe, and it is not a nicety: SCORE ships with no enhanced art at all, CHODBA and WIN
+ * draw a classic background by design, 21 object sprites are legitimately unstaged, and
+ * every one of those is a 404 on a working, correctly deployed game. Route those here and
+ * the game becomes unplayable in rooms that are behaving exactly as intended. Only a load
+ * that FAILED — no answer at all, or a file a manifest promised and the server does not
+ * have — belongs on this screen.
+ */
+export function failAssets(what: string, transient: boolean): void {
+  // The two cases want opposite sentences. A request that got no answer is the player's
+  // connection and is worth trying again; a 404 is an answer, and telling that player to
+  // check their connection sends them to debug their own wifi over a broken deploy.
+  showFatal(
+    transient
+      ? `${what} didn't finish loading. Check your connection and reload.`
+      : `${what} is missing from the game files. This is a problem with the game, not with your connection.`,
+  );
+}
+
+/** Is the fatal screen up? Read by the loading overlay, which must not fight it. */
+export function fatalShown(): boolean {
+  return fatalEl?.hidden === false;
+}
+
+/** What the fatal screen says. For the `__ff` hook the UI probes read. */
+export function fatalText(): string {
+  return fatalShown() ? (document.getElementById('fatal-msg')?.textContent ?? '') : '';
 }
 
 /** Reveal the fatal-error screen (missing/broken assets or a boot exception). */

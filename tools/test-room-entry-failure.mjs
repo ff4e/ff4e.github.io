@@ -22,13 +22,15 @@
  *
  * ── What each section covers ──────────────────────────────────────────────────
  *  1. Nothing has fetched room 1 yet, and room 7 (boot's) is the live room.
- *  2. Network off, enter room 1: still on the MAP, room 7 not presented, note shown,
- *     wording blames the connection, launch disarmed, frame loop still running.
- *  3. Dismiss, a second attempt is accepted, and Try again enters the room for real.
+ *  2. Network off, enter room 1: the game stops on its failure screen, room 7 is NOT
+ *     presented, the wording blames the connection, the launch is disarmed and the frame
+ *     loop is still running.
+ *  3. A reload with the network back plays the room — the failure was not remembered.
  *  4. The SUBTITLE index alone failing also fails the entry — it used to fall back to an
  *     empty table and play the room through in silence.
- *  5. A 404 is not a blip: different wording, and no retry button, because retrying an
- *     answer cannot help.
+ *  5. A 404 is not a blip: it is reported as a problem with the game, not the connection.
+ *  6-8. The three audio loaders, each failed separately.
+ *  9. …and with the network back, the same room enters and is heard.
  */
 import { budget, reloadApp, tickBudget, waitFrames, withApp } from './ui-lib.mjs';
 
@@ -46,7 +48,7 @@ const BOOT_ROOM = 7;
  * which is the finding this probe exists to make. Settle first, assert second.
  */
 const settled = (p) =>
-  p.waitForFunction(() => window.__ff.loadNoteShown() || window.__ff.screen() === 'room', null, {
+  p.waitForFunction(() => window.__ff.fatalShown() || window.__ff.screen() === 'room', null, {
     timeout: budget(6000),
   });
 
@@ -90,11 +92,11 @@ await withApp(
       screen: window.__ff.screen(),
       room: window.__ff.roomNum(),
       launching: window.__ff.mapLaunching(),
-      note: window.__ff.loadNoteText(),
+      note: window.__ff.fatalText(),
       loading: window.__ff.roomLoading(),
     }));
 
-    expect(after.screen === 'map', 'the player stays on the world map');
+    expect(after.screen !== 'room', 'the player is not put into a room');
     // The reported symptom, stated directly. `roomNum()` alone is not enough to catch it:
     // under the old behaviour `curNum` stayed at 7 (loadRoom throws before it advances)
     // while `screen` flipped to `room`, so "the live room is still 7" was TRUE at the
@@ -106,8 +108,8 @@ await withApp(
     expect(after.room === BOOT_ROOM, 'the live room is untouched — a failed entry does not half-replace it');
     expect(after.launching === null, 'the launch is disarmed, so the map is not frozen behind a parchment');
     expect(after.loading === false, 'the room-loading guard is not left stuck on');
-    expect(/check your connection/i.test(after.note), `the note blames the connection: "${after.note}"`);
-    expect(/PRVNI/.test(after.note), 'the note names the room that failed');
+    expect(/check your connection/i.test(after.note), `the screen blames the connection: "${after.note}"`);
+    expect(/PRVNI/.test(after.note), 'the screen names the room that failed');
 
     // The frame loop is what the old code's `screen = 'room'` was protecting: letting the
     // exception unwind out of tickMapLaunch stopped it dead (3 iterations in 1.5s against
@@ -116,38 +118,24 @@ await withApp(
     const loopsAfter = await p.evaluate(() => window.__ff.throttleInfo().loops);
     expect(loopsAfter > loopsBefore + 2, `the frame loop is still running (${loopsBefore} -> ${loopsAfter})`);
 
-    // ── 3. Dismiss, retry, and a real entry ───────────────────────────────────
-    expect(
-      await p.evaluate(() => document.getElementById('load-note-retry')?.hidden === false),
-      'a transient failure offers Try again',
-    );
-
-    // A second attempt, still offline. This is what shows the map is genuinely USABLE
-    // rather than merely painted: the entry has to be accepted, which it is not while the
-    // launch is still armed (every input guard reads `mapLaunching()`). The note is
-    // dismissed through its own button first, so its return is evidence of the second
-    // attempt and not a leftover from the first.
-    await p.click('#load-note-x');
-    expect(!(await p.evaluate(() => window.__ff.loadNoteShown())), 'Dismiss takes the note down');
+    // ── 3. The only exit is a reload, and it works ────────────────────────────
+    // Also the proof that the failure was not REMEMBERED: the reload refetches the very
+    // assets that failed. There is no in-page recovery to test any more — the screen
+    // offers a reload and nothing else, deliberately.
+    await p.unroute(FFR);
+    await p.unroute(FFT);
+    await reloadApp(p);
+    await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+    expect(!(await p.evaluate(() => window.__ff.fatalShown())), 'the reload clears the failure screen');
     await p.evaluate((n) => {
       void window.__ff.enterRoomAwait(n).catch(() => {});
     }, ROOM);
-    await settled(p);
-    expect(
-      (await p.evaluate(() => window.__ff.screen())) === 'map',
-      'a second attempt while still offline is accepted, and still keeps the player on the map',
-    );
-
-    await p.unroute(FFR);
-    await p.unroute(FFT);
-    await p.click('#load-note-retry');
     await p.waitForFunction(
       (n) => window.__ff.screen() === 'room' && window.__ff.roomNum() === n && !window.__ff.roomLoading(),
       ROOM,
-      { timeout: tickBudget(40) },
+      { timeout: tickBudget(60) },
     );
-    expect(true, 'Try again enters the room once the network is back');
-    expect(!(await p.evaluate(() => window.__ff.loadNoteShown())), 'the note is gone after a successful entry');
+    expect(true, 'the room enters after a reload with the network back');
 
     // ── 4. The subtitle index alone ───────────────────────────────────────────
     // Room 2 is likewise cold. Only its .fft is failed, and with a 404 rather than an
@@ -171,7 +159,8 @@ await withApp(
     expect(subs.screen === 'map', 'a room whose subtitles fail does not enter either');
     expect(subs.room !== 2, 'the half-loadable room is not presented');
     await p.unroute('**/data/Title/002.fft');
-    await p.click('#load-note-x');
+    await reloadApp(p);
+    await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
 
     // ── 5. A 404 is an ANSWER, not a blip ─────────────────────────────────────
     await p.route('**/data/Graphic/003.ffr', (r) => r.fulfill({ status: 404, body: '' }));
@@ -179,18 +168,15 @@ await withApp(
       void window.__ff.enterRoomAwait(3).catch(() => {});
     });
     await settled(p);
-    const gone = await p.evaluate(() => ({
-      note: window.__ff.loadNoteText(),
-      retry: document.getElementById('load-note-retry')?.hidden === false,
-    }));
+    const gone = await p.evaluate(() => ({ note: window.__ff.fatalText() }));
     expect(
       !/check your connection/i.test(gone.note),
       `a 404 does not send the player to debug their wifi: "${gone.note}"`,
     );
     expect(/missing from the game files/i.test(gone.note), 'a 404 is reported as a problem with the game');
-    expect(!gone.retry, 'a permanent failure offers no Try again, because retrying an answer cannot help');
     await p.unroute('**/data/Graphic/003.ffr');
-    await p.click('#load-note-x');
+    await reloadApp(p);
+    await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
 
     // ── 6-8. The audio a room needs is part of loading it ─────────────────────
     // A room used to be shown the moment it could be DRAWN, with its sound still coming;
@@ -206,8 +192,6 @@ await withApp(
       ['music', 5, '**/data/Music/rybky03.wav'], // SCHODY — rybky03, not yet fetched
       ['leg-final remarks', 19, '**/data/Sound/x01.ffs'], // LODE — depth 15, the only rooms that load x01
     ]) {
-      await p.evaluate(() => window.__ff.showMap());
-      await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
       await p.route(route, (r) => r.abort('failed'));
       await p.evaluate((n) => {
         void window.__ff.enterRoomAwait(n).catch(() => {});
@@ -215,15 +199,16 @@ await withApp(
       await settled(p);
       const a = await p.evaluate(() => ({
         screen: window.__ff.screen(),
-        note: window.__ff.loadNoteShown(),
+        note: window.__ff.fatalShown(),
         held: window.__ff.roomAudioPending(),
       }));
-      expect(a.screen === 'map', `a room whose ${label} fail does not enter`);
+      expect(a.screen !== 'room', `a room whose ${label} fail does not enter`);
       expect(a.note, `the player is told the ${label} did not load`);
       // A hold that outlives its load is a room that can never be entered again.
       expect(!a.held, `the audio hold is released after the ${label} failure`);
       await p.unroute(route);
-      await p.click('#load-note-x');
+      await reloadApp(p);
+      await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
     }
 
     // ── 9. …and with the network back, the same room enters and is heard ──────
@@ -238,7 +223,7 @@ await withApp(
       { timeout: tickBudget(60) },
     );
     expect(true, 'the same room enters normally once its audio can be fetched');
-    expect(!(await p.evaluate(() => window.__ff.loadNoteShown())), 'no note is left over a room that did load');
+    expect(!(await p.evaluate(() => window.__ff.fatalShown())), 'no failure screen over a room that did load');
   },
   // The launch logs the failure it is recovering from, which is diagnostics worth keeping:
   // the note tells the player, the console tells whoever reads the bug report. The fetch

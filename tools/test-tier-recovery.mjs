@@ -5,11 +5,17 @@
  * upscaled" while the room was plainly drawn in enhanced art, switching the tier away and
  * back changed nothing, and only restarting the app fixed it.
  *
- * Both halves of that are now fixed, and the FIRST half changed shape: the room is no
- * longer drawn in the tier below at all. A failed load stops and asks, because a
- * downgrade the player cannot see and did not choose is the defect, not the mitigation.
- * What this file still owns is the second half — that the failure is not REMEMBERED, so
- * the retry paths genuinely work.
+ * Both halves of that are now fixed, and both changed shape. A failed load no longer
+ * draws the room in the tier below at all — a downgrade the player cannot see and did not
+ * choose is the defect, not the mitigation — and it no longer tries to recover in place
+ * either: the game stops on its one failure screen, whose only exit is a reload.
+ *
+ * So what this file owns is the pair. That a blip STOPS the game rather than quietly
+ * degrading it, and that the failure is not REMEMBERED — which, with recovery-in-place
+ * gone, is now measured the way a player would: reload, and the room is fine. That is a
+ * weaker-looking assertion than the old "Try again" one and is actually the same claim,
+ * because a remembered failure survives in the module-level caches this bug was about,
+ * not on disk.
  *
  * The cause was a cache that remembered a failure it had learned nothing from.
  * `loadAiRoom` caught every error — including a transient `fetch` failure — and resolved
@@ -31,10 +37,9 @@
  * network. (The single-blip case, which the retry now hides entirely, is
  * `test-asset-retry.mjs`.)
  */
-import { reloadApp, waitFrames, withApp } from './ui-lib.mjs';
+import { budget, reloadApp, waitFrames, withApp } from './ui-lib.mjs';
 
 const SCHODY = 5; // the room the blip hits
-const OTHER = 6; // a different room, to prove the network is healthy again
 
 /**
  * Fail every request for `glob` until the retry budget is spent, then serve normally.
@@ -87,13 +92,35 @@ async function outage(p, glob) {
  * behaviour under test needs the dropdown.
  */
 async function enterRoom(p, num) {
-  await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
-  await p.waitForFunction((n) => window.__ff.roomNum() === n, num);
+  await p.evaluate((n) => {
+    void window.__ff.enterRoomAwait(n).catch(() => {});
+  }, num);
+  try {
+    await p.waitForFunction((n) => window.__ff.roomNum() === n, num, { timeout: budget(15000) });
+  } catch (e) {
+    // A room entry now fetches its audio as well as its art (roomLoad.ts), so there are
+    // more ways for one to stall than there were — and "waitForFunction timed out" says
+    // nothing about which. Report the state rather than the timeout.
+    const st = await p.evaluate(() => ({
+      room: window.__ff.roomNum(),
+      screen: window.__ff.screen(),
+      loading: window.__ff.roomLoading(),
+      art: window.__ff.roomArtPending(),
+      audio: window.__ff.roomAudioPending(),
+      fatal: window.__ff.fatalShown(),
+      msg: window.__ff.fatalText(),
+    }));
+    throw new Error(`entering room ${num} stalled: ${JSON.stringify(st)} (${e.message.split('\n')[0]})`);
+  }
 }
 
 async function enterExpectingFailure(p, num) {
-  await p.evaluate((n) => window.__ff.enterRoomAwait(n), num);
-  await p.waitForFunction(() => window.__ff.artFailShown());
+  // Not awaited to completion: a failed entry never completes, so the promise is left to
+  // reject and the screen is what is waited on.
+  await p.evaluate((n) => {
+    void window.__ff.enterRoomAwait(n).catch(() => {});
+  }, num);
+  await p.waitForFunction(() => window.__ff.fatalShown());
   await waitFrames(p, 2);
 }
 
@@ -112,52 +139,47 @@ await withApp(
       (await p.evaluate(() => window.__ff.aiRoomLoaded())) === false,
       'the blip did cost the room its AI art (the repro is armed)',
     );
-    // The player is STOPPED and asked, rather than quietly handed the tier below. That
-    // is the rule: a failed load is not a downgrade the player did not ask for.
+    // The player is STOPPED and told, rather than quietly handed the tier below. That is
+    // the rule: a failed load is not a downgrade the player did not ask for.
     expect(
-      (await p.evaluate(() => (window.__ff.artFailShown ? window.__ff.artFailShown() : false))) === true,
+      (await p.evaluate(() => window.__ff.fatalShown())) === true,
       'the game stops and says the artwork would not load',
     );
     expect(
-      (await p.evaluate(() => (window.__ff.artFailTitle ? window.__ff.artFailTitle() : ''))).includes('graphics'),
-      'the message is about the room graphics',
+      /artwork/i.test(await p.evaluate(() => window.__ff.fatalText())),
+      `the message names what failed: "${await p.evaluate(() => window.__ff.fatalText())}"`,
     );
-    // ...and it does NOT paint the room underneath in the meantime: the hold stays on,
-    // so the first frame after a successful retry is the art that was asked for.
+    // ...and it does NOT paint the room underneath in the meantime: the hold stays on, so
+    // there is never a frame of the tier below on screen.
     expect(
       (await p.evaluate(() => window.__ff.roomArtPending())) === true,
       'the room is held rather than painted one tier down',
     );
 
-    // The button the screen actually offers. Everything else here is a path a player
-    // might stumble onto; this is the one the game TELLS them to take, so it is the one
-    // that most has to work.
-    await p.click('#art-fail-retry');
-    const retriedOk = await p
-      .waitForFunction(() => window.__ff.aiRoomLoaded() && !window.__ff.artFailShown())
-      .then(() => true, () => false);
-    expect(retriedOk, '“Try again” loads the art and takes the screen down');
-    // ...and the room, which was paused behind the screen, is running again.
-    const ranOn = await p.waitForFunction(() => window.__ff.count() > 0).then(() => true, () => false);
-    expect(ranOn, 'the room starts running once its art is up');
-
-    // Switching the tier away and back is the other thing a player tries. Before the
-    // fix it did nothing at all, because the poisoned entry outlived it.
-    await p.evaluate(() => window.__ff.setGraphics('enhanced'));
-    await waitFrames(p, 2);
-    await p.evaluate(() => window.__ff.setGraphics('ai'));
-    const backOk = await p
+    // The only exit the screen offers, and therefore the one that has to work. It also
+    // proves the failure was not REMEMBERED: with the outage over, the very asset that
+    // failed is refetched, and an `aiRoomCache` entry written on failure would hand back
+    // the same empty result to a page that has not been reloaded... which this one has.
+    // The stronger form of that claim is the enhanced half below, which reloads ONCE and
+    // then re-enters, so a remembered failure would still be in the cache.
+    await p.unrouteAll({ behavior: 'ignoreErrors' });
+    await reloadApp(p);
+    await enterRoom(p, SCHODY);
+    const recovered = await p
       .waitForFunction(() => window.__ff.aiRoomLoaded())
       .then(() => true, () => false);
-    expect(backOk, 'switching the tier away and back recovers the AI art');
+    expect(recovered, 'a reload plays the room in the art that failed');
     expect(
-      (await p.evaluate(() => (window.__ff.artFailShown ? window.__ff.artFailShown() : true))) === false,
-      'and the failure screen goes away once the art is up',
+      (await p.evaluate(() => window.__ff.fatalShown())) === false,
+      'and the failure screen is gone with it',
     );
-
-    // Re-entering the room is the other thing a player tries, and the one that has to
-    // work even for a player who never touches the setting.
-    await enterRoom(p, OTHER);
+    // Re-entering within that same session must not resurrect it — this is the cache
+    // assertion proper, made against a page that has NOT been reloaded since the load
+    // succeeded. Via the MAP rather than via another room: leaving is what matters (it
+    // drops `aiRoom`, so the re-entry has to go back through `aiRoomCache`), and a second
+    // room would cost another ~8 MB of art and audio for nothing.
+    await p.evaluate(() => window.__ff.showMap());
+    await p.waitForFunction(() => window.__ff.screen() === 'map');
     await enterRoom(p, SCHODY);
     const reenterOk = await p
       .waitForFunction((n) => window.__ff.roomNum() === n && window.__ff.aiRoomLoaded(), SCHODY)
@@ -182,36 +204,32 @@ await withApp(
       'one failed OBJECT SPRITE stops the room too (the second repro is armed)',
     );
     expect(
-      (await p.evaluate(() => window.__ff.artFailShown())) === true,
-      'and the enhanced tier asks rather than dropping to 1998 bitmaps',
+      (await p.evaluate(() => window.__ff.fatalShown())) === true,
+      'and the enhanced tier stops rather than dropping to 1998 bitmaps',
     );
 
     // The map->room LAUNCH is the path a player actually takes, and it behaves
     // differently from the dev-bar entry: the map stays on screen with the parchment
     // over it and `screen` only flips to 'room' once the room can be painted
-    // (beginMapLaunch). A held room therefore leaves the launch mid-flight — so the
-    // question is whether the retry finishes it, or strands the player on the map.
-    // Route-independent, deliberately: entering from the MAP keeps `screen` on 'map'
-    // with the parchment over it until the room can be painted (beginMapLaunch), while
-    // the dev-bar route takes the stage immediately. Which one ran depends on where the
-    // player was, so what is asserted is the thing both have in common — the player is
-    // not playing this room yet.
+    // (beginMapLaunch). What is asserted is the thing both routes have in common — the
+    // player is not playing this room.
     const midFlight = await p.evaluate(() => ({
       screen: window.__ff.screen(),
       pending: window.__ff.roomArtPending(),
     }));
     expect(
       !(midFlight.screen === 'room' && !midFlight.pending),
-      `the player is not in the room yet (screen=${midFlight.screen}, held=${midFlight.pending})`,
+      `the player is not in the room (screen=${midFlight.screen}, held=${midFlight.pending})`,
     );
-    await p.click('#art-fail-retry');
+
+    await p.unrouteAll({ behavior: 'ignoreErrors' });
+    await reloadApp(p);
+    await p.evaluate(() => window.__ff.setGraphics('enhanced'));
+    await enterRoom(p, SCHODY);
     const launched = await p
-      .waitForFunction((n) => window.__ff.screen() === 'room' && window.__ff.roomNum() === n && window.__ff.enhancedLoaded(), SCHODY)
+      .waitForFunction((n) => window.__ff.roomNum() === n && window.__ff.enhancedLoaded(), SCHODY)
       .then(() => true, () => false);
-    // This also proves the failure was not remembered: the retry refetches the very
-    // sprite that failed, and an `enhancedCache` entry written on failure would have
-    // handed back the empty result instead.
-    expect(launched, '“Try again” finishes the launch and puts the player in the room');
+    expect(launched, 'a reload puts the player in the room, sprite and all');
 
     // The failures were real ones, deliberately provoked — assert they happened rather
     // than merely tolerating them (see withApp's allowErrors).

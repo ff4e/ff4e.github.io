@@ -102,8 +102,7 @@ import { renderer, setRendererValue } from './renderSettings.js';
 import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
-import { artFailureShown } from './artFailure.js';
-import { loadNoteShown, loadNoteText } from './loadNote.js';
+import { fatalShown, fatalText } from './loadingUi.js';
 import { roomAudioPending } from './roomLoad.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
@@ -408,14 +407,12 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     enhancedLoaded: () => host.enhancedArt !== null,
     // Is the "artwork would not load" screen up? Read off the DOM rather than from a
     // state flag: what matters to a probe is that the player was actually shown it.
-    artFailShown: () => artFailureShown(),
-    // The post-boot "that room did not load" note (src/app/loadNote.ts). Two hooks, not
-    // one: the wording is chosen from the absent/failed taxonomy, so a probe that only
-    // asserted something was up would pass on the sentence blaming the player's wifi for
-    // a 404.
+    // The one failure screen. Two hooks, not one: its WORDING is chosen from the
+    // absent/failed taxonomy, so a probe that only asked whether it was up would pass
+    // just as happily on the sentence blaming the player's wifi for a 404.
     roomAudioPending: () => roomAudioPending(),
-    loadNoteShown: () => loadNoteShown(),
-    loadNoteText: () => loadNoteText(),
+    fatalShown: () => fatalShown(),
+    fatalText: () => fatalText(),
     artFailTitle: () => document.getElementById('art-fail-title')?.textContent ?? '',
     enhancedActive: () =>
       host.enhancedArtActive() &&

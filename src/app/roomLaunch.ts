@@ -38,8 +38,9 @@ import { parseBmp, bmpToRgba } from '../data/bmp.js';
 import { MAP_W } from '../render/worldMap.js';
 import { AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { curNum } from './art.js';
+import { ROOMS } from '../data/roomTable.js';
 import { isTransient } from '../render/assetFetch.js';
-import { showLoadNote } from './loadNote.js';
+import { failAssets } from './loadingUi.js';
 import { roomAudioPending } from './roomLoad.js';
 import type { AiWorldMap } from '../render/worldMapAi.js';
 
@@ -370,20 +371,9 @@ function abortMapLaunch(l: MapLaunch, err: unknown): void {
   // the room was loading, and nothing else here matters if the next frame never comes.
   try {
     host.wake();
-    showLoadNote({
-      subject: 'room',
-      room: l.room,
-      // An answer ("not there") and no answer at all want opposite sentences — see
-      // src/render/assetFetch.ts. Only the second is worth a retry button.
-      transient: isTransient(err),
-      retry: isTransient(err)
-        ? () => {
-            // Re-arm the ordinary launch, parchment and all. The rejection is swallowed
-            // because failing again lands right back here, which raises the note again.
-            void beginMapLaunch(l.room, l.replay).catch(() => {});
-          }
-        : undefined,
-    });
+    // An answer ("not there") and no answer at all want opposite sentences — see
+    // src/render/assetFetch.ts.
+    failAssets(roomLabel(l.room), isTransient(err));
     // The picker names the room actually on screen, which is the one the player came
     // from: `startRoom` pointed it at the room it was about to load, and that load is
     // what just failed. `curNum` only advances once a load succeeds.
@@ -408,12 +398,13 @@ export function failRoomEntry(num: number, err: unknown): void {
     abortMapLaunch(l, err);
     return;
   }
-  showLoadNote({
-    subject: 'room',
-    room: num,
-    transient: isTransient(err),
-    ...(isTransient(err) ? { retry: () => void beginMapLaunch(num).catch(() => {}) } : {}),
-  });
+  failAssets(roomLabel(num), isTransient(err));
+}
+
+/** The room's own name (PRVNI, KOSTE…), for the failure screen's sentence. */
+function roomLabel(num: number): string {
+  const jmeno = ROOMS[num - 1]?.jmeno;
+  return jmeno === undefined ? `Room ${num}` : `The room ${jmeno}`;
 }
 
 /** Hand the stage from the map to the room the launch `l` loaded, and end the launch. */

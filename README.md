@@ -597,13 +597,11 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
-| `loadingUi.ts` | 2.3 k | The loading overlay, the fatal screen and the resize handler. |
+| `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and the game's one failure screen: any load that FAILED ends the session and says so. Art that is genuinely ABSENT never reaches it and still falls back silently. |
 | `subtitleDom.ts` | 5.0 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
 | `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
-| `artFailure.ts` | 0.9 k | The "artwork would not load — try again" screen. Raised for a FAILED load only; art that is genuinely absent still falls back silently. |
-| `loadNote.ts` | 1.4 k | The non-blocking note for a room that could not be loaded at all. A note and not a screen: the player stays on the world map, which stays clickable underneath. |
 | `glPlumbing.ts` | 4.2 k | The per-tier art sources and the two WebGL compositors. |
 | `audioEngine.ts` | 0.3 k | Who owns the `AudioEngine`. |
 | `renderSettings.ts` | 2.0 k | What the game is drawn WITH — the four persisted choices: art tier, backend, idle-FPS saver, developer pane. |

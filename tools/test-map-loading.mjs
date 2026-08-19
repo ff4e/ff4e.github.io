@@ -269,11 +269,11 @@ await withApp(
       widths: [...window.__map.widths],
       loaded: window.__ff.aiMapLoaded(),
       presented: window.__ff.mapPresented(),
-      failScreen: window.__ff.artFailShown(),
+      failScreen: window.__ff.fatalShown(),
     }));
     expect(!failed.loaded, 'the AI map really did fail to load');
     expect(failed.presented, 'an absent AI map still gets the player a map — the hold released');
-    expect(!failed.failScreen, 'and no failure screen, because a retry could not help');
+    expect(!failed.failScreen, 'and no failure screen: an ABSENT asset is not a failure');
     expect(
       failed.widths.length === 1 && failed.widths[0] === 640,
       `it falls back to the faithful composite, once (${JSON.stringify(failed.widths)})`,
@@ -283,7 +283,7 @@ await withApp(
     // === 5b. A map load that FAILED is the opposite case: the art exists, the player
     //         asked for it, and quietly presenting the 1998 map under an `ai` setting is
     //         a downgrade they cannot see and did not choose. So the map is HELD and the
-    //         player is asked.
+    //         game stops on its one failure screen.
     //
     //         Served as a 200 of garbage, so the failure lands in createImageBitmap —
     //         which `decodeAsset` classifies as transient on purpose (a truncated
@@ -292,41 +292,43 @@ await withApp(
     await p.route(GATED, (route) => route.fulfill({ status: 200, contentType: 'image/webp', body: 'not an image' }));
     // Boot's own room (7, UTES) is SLOWED so its art lands AFTER the map has failed.
     // That ordering is the bug this pins: a successful ROOM load used to dismiss the
-    // MAP's screen — the Try again button resolved and then went invisible mid-click,
-    // because `hideArtFailure` did not know which of the two the screen was about.
-    // Left to chance the order flips with machine load, and the assertion becomes a
-    // coin toss that mostly passes.
+    // MAP's screen, which went invisible under the player mid-click. The screen no
+    // longer comes down for anything, so this now guards against a hide being
+    // reintroduced rather than against a mis-scoped one — worth keeping, because it is
+    // the exact mistake that was made before. Left to chance the order flips with
+    // machine load, and the assertion becomes a coin toss that mostly passes.
     await p.route('**/enhanced-ai/UTES/**', async (route) => {
       await new Promise((r) => setTimeout(r, 1500));
       await route.continue().catch(() => {});
     });
     await p.reload({ waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => window.__ff !== undefined);
-    await p.waitForFunction(() => window.__ff.artFailShown());
+    await p.waitForFunction(() => window.__ff.fatalShown());
     await waitFrames(p, 4);
     // Now let the slowed room art land underneath it.
     await p.waitForFunction(() => window.__ff.aiRoomLoaded());
     await waitFrames(p, 4);
     expect(
-      (await p.evaluate(() => window.__ff.artFailShown())) === true,
+      (await p.evaluate(() => window.__ff.fatalShown())) === true,
       "a room's art landing does not dismiss the MAP's failure screen",
     );
     await p.unroute('**/enhanced-ai/UTES/**').catch(() => {});
     const mapHeld = await p.evaluate(() => ({
-      title: document.getElementById('art-fail-title')?.textContent ?? '',
+      title: window.__ff.fatalText(),
       pending: window.__ff.mapArtPending(),
       spinner: window.__ff.loadingVisible(),
     }));
-    expect(mapHeld.title.toLowerCase().includes('map'), `the message names the map (“${mapHeld.title}”)`);
+    expect(mapHeld.title.toLowerCase().includes('world map'), `the message names the map (“${mapHeld.title}”)`);
     expect(mapHeld.pending, 'the map is held rather than presented in the wrong tier');
     expect(!mapHeld.spinner, 'the loading spinner stands down — the screen has taken over the wait');
 
-    // Serving the real art again and pressing the button gets the player their map.
+    // The screen's only exit is a reload, so that is what has to get the player their
+    // map — and it doubles as the proof that the failure was not remembered.
     await p.unroute(GATED).catch(() => {});
-    await p.click('#art-fail-retry');
-    await p.waitForFunction(() => window.__ff.aiMapLoaded() && !window.__ff.artFailShown());
-    expect(true, '“Try again” recovers the AI map');
-    await p.unroute(GATED).catch(() => {});
+    await p.reload({ waitUntil: 'domcontentloaded' });
+    await p.waitForFunction(() => window.__ff !== undefined);
+    await p.waitForFunction(() => window.__ff.aiMapLoaded() && !window.__ff.fatalShown());
+    expect(true, 'a reload recovers the AI map');
 
     // === 6. Tier parity: `classic` and `enhanced` fetch no AI map and never hold, so
     //        the map goes up as directly as it always did. ===

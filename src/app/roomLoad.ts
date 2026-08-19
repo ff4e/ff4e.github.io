@@ -15,7 +15,6 @@ import { ROOMS } from '../data/roomTable.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
 import { assetBytes, fetchAsset, requireAsset } from '../render/assetFetch.js';
 import { audio } from './audioEngine.js';
-import { hideLoadNote } from './loadNote.js';
 import { beginRoomArt, curNum, ensureAiRoom, ensureEnhancedArt } from './art.js';
 import { booted } from './stageState.js';
 import { count, fftEntries, setFfr, setFftEntries, setPokus, subs, talkIdx } from './gameState.js';
@@ -100,10 +99,6 @@ export async function loadRoom(num: number): Promise<void> {
     armRoomVoices(bootLoad);
     setPokus(1); // fresh attempt on entering a room
     host.buildRoom();
-    // A room that loaded answers whatever the last one that did not left on screen.
-    // Placed here, after the build, so it is the ROOM being live that clears it and not
-    // merely the fetches coming back.
-    hideLoadNote();
     // Point the art layer at this room: clear the previous room's decoded art and arm
     // the two "hold the frame until it lands" flags (see beginRoomArt).
     beginRoomArt(num);
