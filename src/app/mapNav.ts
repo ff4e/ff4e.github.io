@@ -26,6 +26,7 @@ import { bmpToRgba, parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
 import { REGISTERED_ROOMS, branchOfRoom, depthOfRoom } from '../data/world.js';
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
+import { assetBlob, assetBytes, optionalAsset, requiredAsset } from '../render/assetFetch.js';
 import type { MapAction } from '../render/worldMap.js';
 
 /**
@@ -160,8 +161,8 @@ export function returnFromRoom(): void {
 export async function showLegImage(leg: number, pending?: { room: number; replay?: string }): Promise<void> {
   let bmp: Bmp;
   try {
-    const buf = await fetch(`/data/Menu/00${leg}.$dv`).then((r) => r.arrayBuffer());
-    bmp = parseBmp(new Uint8Array(buf));
+    const url = `/data/Menu/00${leg}.$dv`;
+    bmp = parseBmp(await assetBytes(url, await requiredAsset(url, `the story page for leg ${leg}`)));
   } catch {
     // Image unavailable: skip straight to the pending launch, or back to the map.
     if (pending) void host.enterRoom(pending.room, pending.replay);
@@ -251,9 +252,9 @@ export function drawLegImage(): void {
 export async function ensureLegImageAi(leg: number): Promise<void> {
   if (graphics !== 'ai') return;
   try {
-    const res = await fetch(`/enhanced-ai/_story/leg${leg}.webp`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
-    const bmp = await createImageBitmap(await res.blob());
+    const url = `/enhanced-ai/_story/leg${leg}.webp`;
+    const res = await requiredAsset(url, `the AI story page for leg ${leg}`, { expect: 'image' });
+    const bmp = await createImageBitmap(await assetBlob(url, res));
     if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
     ui.legImageAi?.close();
     ui.legImageAi = bmp;
@@ -340,18 +341,24 @@ export function closeMapOverlay(): void {
 export async function openCredits(): Promise<void> {
   if (ui.mapOverlay !== 'none') return;
   if (!ui.credits) {
-    const bmp = async (f: string): Promise<Bmp> => {
-      const r = await fetch(`/data/Menu/${f}`);
-      if (!r.ok) throw new Error(`${f}: ${r.status}`);
-      return parseBmp(new Uint8Array(await r.arrayBuffer()));
+    const bmp = async (f: string, what: string): Promise<Bmp> => {
+      const url = `/data/Menu/${f}`;
+      return parseBmp(await assetBytes(url, await requiredAsset(url, what)));
     };
     try {
       // CredMov_port is the shipped strip with the web-port card prepended
       // (tools/build-credits-port.py). It is a drop-in in the same palette, and since
       // the strip's height defines `delka`, the roll extends to cover it by itself.
       // Falls back to the untouched original when the port variant isn't built.
-      const mov = await bmp('CredMov_port.BMP').catch(() => bmp('CredMov.BMP'));
-      ui.credits = new Credits(await bmp('CredStat1.BMP'), mov);
+      //
+      // The ONE place a 404 is asked for on purpose outside the art tiers, so it is the
+      // one place `optionalAsset` appears here: a build without the tool's output is a
+      // legitimate build, and this is how the code asks which one it is running on. The
+      // fallback itself is required — one of the two must exist.
+      const portUrl = '/data/Menu/CredMov_port.BMP';
+      const port = await optionalAsset(portUrl);
+      const mov = port ? parseBmp(await assetBytes(portUrl, port)) : await bmp('CredMov.BMP', 'the credits');
+      ui.credits = new Credits(await bmp('CredStat1.BMP', 'the credits'), mov);
     } catch {
       return; // credits assets missing — leave the map as-is
     }

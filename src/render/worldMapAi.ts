@@ -21,7 +21,7 @@
  * the map falls back to the faithful CPU composite. classic/enhanced never touch it.
  */
 import { MAP_W, MAP_H, type MapAction, type WorldMap } from './worldMap.js';
-import { assetBlob, decodeAsset, fetchAsset, isTransient } from './assetFetch.js';
+import { assetBlob, decodeAsset, isTransient, requiredAsset } from './assetFetch.js';
 
 /** Upscale factor of the committed AI art (must match tools/build-map-ai.mjs AI_SCALE). */
 export const AI_MAP_SCALE = 4;
@@ -49,11 +49,9 @@ export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorl
   try {
     const load = async (file: string): Promise<ImageBitmap> => {
       const url = `${base}Menu/${file}`;
-      const res = await fetchAsset(url);
-      // A status that is an ANSWER ("not there") stays a plain Error and is caught
-      // below as an absence. Only a request that got no answer is transient, and
-      // fetchAsset has already thrown for that.
-      if (!res.ok) throw new Error(`${file}: ${res.status}`);
+      // REQUIRED: the tier's world-map art ships in full, so "not there" is a broken
+      // deploy. The catch below still turns it into a fallback for now.
+      const res = await requiredAsset(url, 'the AI world map', { expect: 'image' });
       const blob = await assetBlob(url, res);
       return decodeAsset(url, () => createImageBitmap(blob));
     };

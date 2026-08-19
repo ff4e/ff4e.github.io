@@ -147,7 +147,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `beginMusicLoad` lets a start JOIN that download, because a download outside the
   // engine is invisible to `musicBufs`/`musicStarting` and KANKAN re-cues its track on the
   // first idle tick — fetching and decoding the same 1.24 MB file twice.
-  ['src/audio/audio.ts', 710],
+  //
+  // 710 -> 711 for the import of the asset door: the two music fetches here were the last
+  // bare `fetch` calls in the audio layer, and "stay silent" is no longer one of the
+  // answers this file is allowed to give (test/asset-fetch-discipline.test.ts).
+  ['src/audio/audio.ts', 711],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

@@ -39,7 +39,7 @@ import { MAP_W } from '../render/worldMap.js';
 import { AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { curNum } from './art.js';
 import { ROOMS } from '../data/roomTable.js';
-import { isTransient } from '../render/assetFetch.js';
+import { assetBytes, isTransient, requiredAsset } from '../render/assetFetch.js';
 import { failAssets } from './loadingUi.js';
 import { roomAudioPending } from './roomLoad.js';
 import type { AiWorldMap } from '../render/worldMapAi.js';
@@ -92,8 +92,8 @@ let parchmentCanvas: HTMLCanvasElement | null = null;
  */
 export async function loadParchment(): Promise<void> {
   try {
-    const buf = await fetch('/data/Menu/loading.BMP').then((r) => r.arrayBuffer());
-    const bmp = parseBmp(new Uint8Array(buf));
+    const url = '/data/Menu/loading.BMP';
+    const bmp = parseBmp(await assetBytes(url, await requiredAsset(url, 'the room-entry parchment')));
     parchment = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
   } catch {
     /* parchment optional — room entry keeps the overlay */

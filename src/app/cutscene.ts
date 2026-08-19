@@ -29,6 +29,7 @@ import type { CapAction } from '../intro/helpCap.js';
 import { KufrDemo } from '../intro/kufrDemo.js';
 import type { AiKufr } from '../intro/kufrDemo.js';
 import { IndexedScreen } from '../render/framebuffer.js';
+import { assetBlob, assetBytes, assetJson, assetText, requiredAsset } from '../render/assetFetch.js';
 import { drawIndexedRegion } from '../render/indexedRegion.js';
 import { AI_ROOM_SCALE } from '../render/roomAi.js';
 import { SubtitleSystem } from '../render/subtitles.js';
@@ -75,12 +76,14 @@ export async function startCutscene(): Promise<void> {
   if (stale()) return;
   clearHeldKey(); // the briefcase cutscene takes over
   if (!cutsceneAssets) {
+    const what = 'the briefcase demonstration';
+    const bytes = async (u: string): Promise<Uint8Array> => assetBytes(u, await requiredAsset(u, what));
     const [bmp, pck, scr] = await Promise.all([
-      fetch('/data/Intro/kufr256.BMP').then((r) => r.arrayBuffer()),
-      fetch('/data/Intro/demo.pck').then((r) => r.arrayBuffer()),
-      fetch('/data/Intro/script.txt').then((r) => r.text()),
+      bytes('/data/Intro/kufr256.BMP'),
+      bytes('/data/Intro/demo.pck'),
+      requiredAsset('/data/Intro/script.txt', what).then((r) => assetText(r.url, r)),
     ]);
-    setCutsceneAssets({ bmp: new Uint8Array(bmp), pck: new Uint8Array(pck), script: scr });
+    setCutsceneAssets({ bmp, pck, script: scr });
     // 5.3 MB of story assets (demo.pck alone is 4.9 MB), fetched once per session: the
     // first launch is easily long enough to leave the room in. Without this the demo's
     // looping 'kufrik' music started AFTER showMap()'s KillSnd (and the cutscene
@@ -126,12 +129,8 @@ export function startShowmode(): void {
   if (engine) engine.swim = null;
   void (async () => {
     try {
-      const res = await fetch('/data/Intro/help.cap');
-      if (!res.ok) {
-        endShowmode();
-        return;
-      }
-      const buf = new Uint8Array(await res.arrayBuffer());
+      const url = '/data/Intro/help.cap';
+      const buf = await assetBytes(url, await requiredAsset(url, 'the KUFRIK demonstration'));
       // The demo may have been cancelled (room change/restart) while fetching.
       if (!showmodeLoading) return;
       setShowmode({ actions: parseHelpCap(buf), idx: 0 });
@@ -404,13 +403,14 @@ export async function ensureAiKufr(): Promise<void> {
   if (aiKufrTried) return;
   aiKufrTried = true;
   try {
-    const res = await fetch('/enhanced-ai/_kufr/ai.json');
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
-    const man = (await res.json()) as { scale: number; region: AiKufr['region']; order: string[]; original?: string[] };
-    const bres = await fetch('/enhanced-ai/_kufr/base.webp');
-    if (!bres.ok || !(bres.headers.get('content-type') ?? '').startsWith('image/')) return;
+    const what = 'the AI briefcase cutscene';
+    const manUrl = '/enhanced-ai/_kufr/ai.json';
+    type Manifest = { scale: number; region: AiKufr['region']; order: string[]; original?: string[] };
+    const man = await assetJson<Manifest>(manUrl, await requiredAsset(manUrl, what, { expect: 'json' }));
+    const baseUrl = '/enhanced-ai/_kufr/base.webp';
+    const bres = await requiredAsset(baseUrl, what, { expect: 'image' });
     aiKufr = {
-      base: await createImageBitmap(await bres.blob()),
+      base: await createImageBitmap(await assetBlob(baseUrl, bres)),
       scale: Number(man.scale) || AI_ROOM_SCALE,
       region: man.region,
       order: man.order ?? [],
@@ -429,9 +429,9 @@ export function loadAiKufrFrame(name: string): void {
   aiKufrLoading.add(name);
   void (async () => {
     try {
-      const res = await fetch(`/enhanced-ai/_kufr/frames/${name}`);
-      if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
-      const bmp = await createImageBitmap(await res.blob());
+      const url = `/enhanced-ai/_kufr/frames/${name}`;
+      const res = await requiredAsset(url, 'an AI briefcase frame', { expect: 'image' });
+      const bmp = await createImageBitmap(await assetBlob(url, res));
       aiKufrFrames.set(name, bmp);
       while (aiKufrFrames.size > AI_KUFR_CACHE_MAX) {
         const oldest = aiKufrFrames.keys().next().value as string | undefined;

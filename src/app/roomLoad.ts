@@ -13,7 +13,7 @@
 import { MLUVI_PRIOR } from './keyTables.js';
 import { ROOMS } from '../data/roomTable.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
-import { assetBytes, fetchAsset, requireAsset } from '../render/assetFetch.js';
+import { assetBytes, requiredAsset } from '../render/assetFetch.js';
 import { audio } from './audioEngine.js';
 import { beginRoomArt, curNum, ensureAiRoom, ensureEnhancedArt } from './art.js';
 import { booted } from './stageState.js';
@@ -66,21 +66,22 @@ export async function loadRoom(num: number): Promise<void> {
     // Only the two assets the room cannot be BUILT without are on this path. The
     // .ffs voice package and the room music used to ride along here; see below.
     //
-    // Both go through `fetchAsset`, so both are RETRIED on a transport failure and both
+    // Both go through `requiredAsset`, so both are RETRIED on a transport failure and both
     // are classified (src/render/assetFetch.ts). They used to be bare `fetch` calls, and
     // that is the whole of the bug this replaces: offline, the FFR fetch rejected, the
     // launch caught it and handed the player the PREVIOUS room, silently, still accepting
     // input for it. Nothing here can be allowed to fail quietly.
     const ffrUrl = host.ffrUrl(num);
     const fftUrl = `/data/Title/${nnn}.fft`;
-    const [ffrRes, fftRes] = await Promise.all([fetchAsset(ffrUrl), fetchAsset(fftUrl)]);
-    requireAsset(ffrRes, ffrUrl, `room ${num}`);
     // The subtitle index is no longer tolerated when it fails. It used to fall back to an
     // empty table, which loses every line the room speaks — a room that plays through in
     // silence with no indication anything went wrong. All 72 rooms ship a .fft (plus the
     // four x0n packages), so there is no legitimate absence to protect here: a missing one
     // is a broken deploy and a failed one is the network, and the player is told either way.
-    requireAsset(fftRes, fftUrl, `the subtitles for room ${num}`);
+    const [ffrRes, fftRes] = await Promise.all([
+      requiredAsset(ffrUrl, `room ${num}`),
+      requiredAsset(fftUrl, `the subtitles for room ${num}`),
+    ]);
     const parsed = parseFfr(await assetBytes(ffrUrl, ffrRes));
     // WIN "Favorites" palette gag (URoom.pas:1312-1355): swap the pink placeholder colours
     // for the Windows system theme, so the fake windows look like a real desktop.
@@ -216,9 +217,10 @@ export async function fetchSoundPkg(
   // it must not compete with the room art or the next room's voices. `priority` is an
   // optional RequestInit field — browsers that lack it ignore it.
   const init = deferred ? ({ priority: 'low' } as RequestInit) : undefined;
-  const [fftRes, ffsRes] = await Promise.all([fetchAsset(fftUrl, init), fetchAsset(ffsUrl, init)]);
-  requireAsset(fftRes, fftUrl, 'sound package index');
-  requireAsset(ffsRes, ffsUrl, 'sound package');
+  const [fftRes, ffsRes] = await Promise.all([
+    requiredAsset(fftUrl, 'sound package index', { init }),
+    requiredAsset(ffsUrl, 'sound package', { init }),
+  ]);
   const [fft, ffs] = await Promise.all([assetBytes(fftUrl, fftRes), assetBytes(ffsUrl, ffsRes)]);
   return { fft, ffs };
 }
@@ -390,10 +392,7 @@ export async function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Ar
   let pending = voiceLoads.get(nnn);
   if (pending === undefined) {
     const url = `/data/Sound/${nnn}.ffs`;
-    pending = fetchAsset(url).then(async (r) => {
-      requireAsset(r, url, `the voices for room ${num}`);
-      return assetBytes(url, r);
-    });
+    pending = requiredAsset(url, `the voices for room ${num}`).then(async (r) => assetBytes(url, r));
     voiceLoads.set(nnn, pending);
     // Dropped whatever happens, so a failure is not what the next entry joins. Kept
     // keyed on the PROMISE so two entries to the same room do not put two fetches of one
@@ -445,8 +444,7 @@ export async function startRoomMusic(num: number): Promise<void> {
     // KANKAN does exactly that on its first tick — `if (!s.playing(MUSIC_PRIOR))
     // s.musiccyc(...)` — and paid for its 1.24 MB track twice.
     const load = (async () => {
-      const res = await fetchAsset(url, { priority: 'low' } as RequestInit);
-      requireAsset(res, url, `the music for room ${num}`);
+      const res = await requiredAsset(url, `the music for room ${num}`, { init: { priority: 'low' } as RequestInit });
       await audio.decodeMusic(music.name, await assetBytes(url, res));
     })();
     audio.beginMusicLoad(music.name, load);

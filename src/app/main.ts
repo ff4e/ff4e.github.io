@@ -37,6 +37,7 @@ import { SubtitleSystem } from '../render/subtitles.js';
 import { type FishSprites } from '../render/enhancedArtSource.js';
 import { MAP_W, MAP_H } from '../render/worldMap.js';
 import { hitInfoButton } from '../render/mapInfo.js';
+import { assetJson, requiredAsset } from '../render/assetFetch.js';
 import { framesIdle, wake } from './frameClock.js';
 import { depthOfRoom, branchOfRoom } from '../data/world.js';
 import { hitTest as panelHitTest, sliderIndex, PANEL_W, PANEL_H } from '../render/hud.js';
@@ -227,7 +228,6 @@ import {
   enhancedObjects,
   enhancedPending,
   initArt,
-  isPngResponse,
   mapArtHolding,
   mapArtPending,
   mapPresented,
@@ -535,15 +535,15 @@ initRoomLaunch({
 let fishSprites: FishSprites | null = null;
 async function loadFishSprites(): Promise<void> {
   try {
-    const res = await fetch('/enhanced/_fish/manifest.json');
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
-    const m = (await res.json()) as Record<'small' | 'big', Record<'left' | 'right', string[]>>;
+    const manUrl = '/enhanced/_fish/manifest.json';
+    const res = await requiredAsset(manUrl, 'the enhanced fish sprites', { expect: 'json' });
+    const m = await assetJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(manUrl, res);
     const build = async (size: 'small' | 'big', facing: 'left' | 'right') => {
       const map = new Map<string, { w: number; h: number; rgba: Uint8Array }>();
       await Promise.all(
         (m[size]?.[facing] ?? []).map(async (f) => {
-          const r = await fetch(`/enhanced/_fish/${size}/${facing}/${f}`);
-          if (!isPngResponse(r)) return;
+          const url = `/enhanced/_fish/${size}/${facing}/${f}`;
+          const r = await requiredAsset(url, 'an enhanced fish sprite', { expect: 'image' });
           const d = await decodePngResponse(r);
           map.set(f, { w: d.w, h: d.h, rgba: d.rgba });
         }),

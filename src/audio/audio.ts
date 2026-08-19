@@ -10,6 +10,7 @@
  * resumed on the first play triggered by input.
  */
 import { indexFft, parseFft, type FftEntry } from '../data/fft.js';
+import { assetBytes, requiredAsset } from '../render/assetFetch.js';
 import { decodeSound, FFS_SAMPLE_RATE } from './ffs.js';
 import type { VolumeBus } from '../core/settings.js';
 
@@ -434,8 +435,8 @@ export class AudioEngine {
         // starting music only after the room's art (see loadRoom); this is the backstop
         // for every other caller — notably the menu music, which competes with the
         // world map's own assets.
-        const bytes = await fetch(url, { priority: 'low' } as RequestInit).then((r) => r.arrayBuffer());
-        buf = await ctx.decodeAudioData(bytes.slice(0));
+        const bytes = await assetBytes(url, await requiredAsset(url, 'the music', { init: { priority: 'low' } as RequestInit }));
+        buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
       } catch {
         this.release(prior, claim);
         return; // track not present / decode failed — stay silent
@@ -636,10 +637,10 @@ export class AudioEngine {
         }
       }
       if (!buf) {
-        const bytes = await fetch(url, { priority: 'low' } as RequestInit).then((r) => r.arrayBuffer());
+        const bytes = await assetBytes(url, await requiredAsset(url, 'the music', { init: { priority: 'low' } as RequestInit }));
         // WAV loop point is in samples at the file's native rate (header @ offset 24).
-        const nativeRate = new DataView(bytes).getUint32(24, true) || 22050;
-        buf = await ctx.decodeAudioData(bytes.slice(0));
+        const nativeRate = new DataView(bytes.buffer as ArrayBuffer).getUint32(24, true) || 22050;
+        buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
         (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
         this.musicBufs.set(name, buf);
       }

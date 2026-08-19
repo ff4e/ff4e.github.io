@@ -17,6 +17,7 @@
  * the rule forbids. See AGENTS.md, "the module-evaluation trap".
  */
 import { IntroPlayer } from './intro.js';
+import { optionalAsset } from '../render/assetFetch.js';
 import { graphics } from './renderSettings.js';
 
 /** The intro/logo movie player. Constructed in initIntro(), never at import time. */
@@ -40,11 +41,10 @@ export const aiMovieAvailable: Record<string, boolean> = {};
 export async function probeAiMovies(): Promise<void> {
   await Promise.all(
     [LOGO_MOVIE_AI, INTRO_MOVIE_AI].map(async (u) => {
-      try {
-        aiMovieAvailable[u] = (await fetch(u, { method: 'HEAD' })).ok;
-      } catch {
-        aiMovieAvailable[u] = false;
-      }
+      // `optionalAsset`, and one of the three places it is legitimate: the whole point
+      // of this request is to ASK whether the file exists. A deploy without the AI
+      // movies is a supported deploy — the tier falls back to the faithful encode.
+      aiMovieAvailable[u] = (await optionalAsset(u, { init: { method: 'HEAD' } })) !== null;
     }),
   );
 }

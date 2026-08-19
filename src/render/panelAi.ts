@@ -22,6 +22,7 @@ import {
   type PanelState, type OptionsState,
 } from './hud.js';
 import { PANEL_IMAGES, CUDL_SIZE } from '../data/ffp.js';
+import { assetBlob, assetJson, requiredAsset } from './assetFetch.js';
 
 /** Upscale factor of the shipped panel art when its manifest doesn't say. */
 export const AI_PANEL_SCALE = 4;
@@ -64,14 +65,14 @@ interface AiPanelManifest { scale?: number; files?: string[] }
 export async function loadAiPanel(base: string): Promise<AiPanel | null> {
   try {
     const dir = `${base}enhanced-ai/_panel/`;
-    const res = await fetch(`${dir}ai.json`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
-    const man = (await res.json()) as AiPanelManifest;
+    const manUrl = `${dir}ai.json`;
+    const res = await requiredAsset(manUrl, 'the AI control panel', { expect: 'json' });
+    const man = await assetJson<AiPanelManifest>(manUrl, res);
     const scale = Number(man.scale) || AI_PANEL_SCALE;
     const bmp = async (name: string): Promise<ImageBitmap> => {
-      const r = await fetch(dir + name);
-      if (!r.ok || !(r.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${name}: ${r.status}`);
-      return createImageBitmap(await r.blob());
+      const url = dir + name;
+      const r = await requiredAsset(url, 'the AI control panel', { expect: 'image' });
+      return createImageBitmap(await assetBlob(url, r));
     };
     const images = await Promise.all(
       Array.from({ length: PANEL_IMAGES }, (_, i) => bmp(`img${String(i).padStart(2, '0')}.webp`)),

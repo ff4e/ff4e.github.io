@@ -20,6 +20,7 @@
  * The faithful tier keeps its per-pixel palette compositor: it is only 640x480, and it
  * must stay index-exact.
  */
+import { assetBlob, assetJson, decodeAsset, requiredAsset } from './assetFetch.js';
 
 /** Upscale factor of the shipped credits art when its manifest doesn't say. */
 export const AI_CREDITS_SCALE = 4;
@@ -46,12 +47,27 @@ export function creditsTranslate(nativeH: number, delka: number, posun: number, 
 
 interface AiCreditsManifest { scale?: number; files?: string[] }
 
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((res, rej) => {
+/**
+ * Load one credits layer as an <img>, through the asset door.
+ *
+ * `new Image()` + `src` is a SECOND network door: it retries nothing, it applies no
+ * deadline, and its `error` event cannot tell a 404 from a dropped connection — the one
+ * distinction the whole failure policy rests on. So the bytes come through
+ * `requiredAsset` like everything else and the element is fed from a blob URL, which is
+ * also what makes a missing credits layer reach the failure screen rather than a
+ * console line. The two elements live for the session, so the URLs are not revoked.
+ */
+async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
+  const res = await requiredAsset(url, what, { expect: 'image' });
+  const blob = await assetBlob(url, res);
+  return decodeAsset(url, async () => {
     const img = new Image();
-    img.onload = () => res(img);
-    img.onerror = () => rej(new Error(`cannot load ${url}`));
-    img.src = url;
+    await new Promise<void>((ok, fail) => {
+      img.onload = () => ok();
+      img.onerror = () => fail(new Error(`cannot decode ${url}`));
+      img.src = URL.createObjectURL(blob);
+    });
+    return img;
   });
 }
 
@@ -62,11 +78,14 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 export async function loadAiCredits(base: string): Promise<AiCredits | null> {
   try {
     const dir = `${base}enhanced-ai/_credits/`;
-    const res = await fetch(`${dir}ai.json`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
-    const man = (await res.json()) as AiCreditsManifest;
+    const manUrl = `${dir}ai.json`;
+    const res = await requiredAsset(manUrl, 'the AI credits', { expect: 'json' });
+    const man = await assetJson<AiCreditsManifest>(manUrl, res);
     const scale = Number(man.scale) || AI_CREDITS_SCALE;
-    const [stat, mov] = await Promise.all([loadImage(`${dir}stat.webp`), loadImage(`${dir}mov.webp`)]);
+    const [stat, mov] = await Promise.all([
+      loadImage(`${dir}stat.webp`, 'the AI credits'),
+      loadImage(`${dir}mov.webp`, 'the AI credits'),
+    ]);
     if (!stat.naturalWidth || !mov.naturalWidth) return null;
     return new AiCredits(stat, mov, scale);
   } catch (e) {

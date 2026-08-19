@@ -46,6 +46,7 @@ import { StepEngine } from '../core/stepEngine.js';
 import { TetrisGame, parseShapes } from '../core/tetris.js';
 import type { HiscoreStore, TetrisShapes } from '../core/tetris.js';
 import { parseBmp } from '../data/bmp.js';
+import { assetBytes, assetText, requiredAsset } from '../render/assetFetch.js';
 import type { FfrBitmap, FfrRoom } from '../data/ffr.js';
 import type { EnhancedSprite, FishSprites } from '../render/enhancedArtSource.js';
 import {
@@ -546,15 +547,18 @@ async function ensureTetrisArt(): Promise<TetrisArt | null> {
   if (tetrisArt || tetrisLoading) return tetrisArt;
   tetrisLoading = true;
   try {
+    const what = 'the minigame';
+    const bytes = async (url: string): Promise<Uint8Array> => assetBytes(url, await requiredAsset(url, what));
+    const txtUrl = '/data/Intro/all.txt';
     const [all, hole, txt] = await Promise.all([
-      fetch('/data/Intro/all.BMP').then((r) => r.arrayBuffer()),
-      fetch('/data/Intro/dira.BMP').then((r) => r.arrayBuffer()),
-      fetch('/data/Intro/all.txt').then((r) => r.text()),
+      bytes('/data/Intro/all.BMP'),
+      bytes('/data/Intro/dira.BMP'),
+      requiredAsset(txtUrl, what).then((r) => assetText(txtUrl, r)),
     ]);
     const shapes = parseShapes(txt);
     tetrisArt = {
-      all: parseBmp(new Uint8Array(all)),
-      hole: parseBmp(new Uint8Array(hole)),
+      all: parseBmp(all),
+      hole: parseBmp(hole),
       xfont: shapes.xfont,
       yfont: shapes.yfont,
     };

@@ -28,10 +28,11 @@ import { loadRoom, loadSoundPkg } from './roomLoad.js';
 import { ui } from './screenState.js';
 import { setBooted, setSubFontReady } from './stageState.js';
 import { lengthOfRecord } from '../core/record.js';
-import { parseBmp } from '../data/bmp.js';
+import { parseBmp, type Bmp } from '../data/bmp.js';
 import { parseFfp } from '../data/ffp.js';
 import { roomByNumber } from '../data/roomTable.js';
 import { initAnalytics } from '../platform/analytics.js';
+import { assetBytes, requiredAsset } from '../render/assetFetch.js';
 import { FontData } from '../render/font.js';
 import { webgl2Available } from '../render/glScreen.js';
 import { WorldMap } from '../render/worldMap.js';
@@ -45,6 +46,11 @@ export interface BootHost {
 }
 
 let host!: BootHost;
+
+/** Fetch + parse one of boot's 1998 bitmaps. Every one of them is required. */
+async function bootBmp(url: string, what: string): Promise<Bmp> {
+  return parseBmp(await assetBytes(url, await requiredAsset(url, what)));
+}
 
 /** Hand this module its view of the game. Called once, from `main.ts`, during boot. */
 export function initBoot(h: BootHost): void {
@@ -86,17 +92,15 @@ export async function runBoot(): Promise<void> {
   // Control-panel overlay graphic (TOvl / panel.ffp).
   setLoadingMsg('Loading graphics…');
   try {
-    const pf = await fetch('/data/Menu/panel.ffp').then((r) => r.arrayBuffer());
-    ui.panel = parseFfp(new Uint8Array(pf));
+    const url = '/data/Menu/panel.ffp';
+    ui.panel = parseFfp(await assetBytes(url, await requiredAsset(url, 'the control panel')));
   } catch {
     /* panel optional */
   }
   // World map assets (mapa-0/mapa-1/maska + node sprites n0..n4).
   try {
     const files = ['mapa-0.BMP', 'mapa-1.BMP', 'maska.BMP', 'n0.BMP', 'n1.BMP', 'n2.BMP', 'n3.BMP', 'n4.BMP'];
-    const bmps = await Promise.all(
-      files.map((f) => fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b)))),
-    );
+    const bmps = await Promise.all(files.map((f) => bootBmp(`/data/Menu/${f}`, 'the world map')));
     ui.worldMap = new WorldMap(bmps[0]!, bmps[1]!, bmps[2]!, bmps.slice(3));
     // The AI-upscaled map (Phase B) is NOT loaded here: it is fetched lazily the first
     // time the map is about to be shown in the `ai` tier (beginMapArt), so other tiers
@@ -109,9 +113,7 @@ export async function runBoot(): Promise<void> {
   // glyphs) + the level name-plaque data for the current language (UMain.pas:341).
   try {
     const [krokomer, ikonky, cisla] = await Promise.all(
-      ['krokomer.BMP', 'ikonky.BMP', 'cisla.BMP'].map((f) =>
-        fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b))),
-      ),
+      ['krokomer.BMP', 'ikonky.BMP', 'cisla.BMP'].map((f) => bootBmp(`/data/Menu/${f}`, 'the world map info panel')),
     );
     ui.infoPanelAssets = { krokomer: krokomer!, ikonky: ikonky!, cisla: cisla! };
   } catch {

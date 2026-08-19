@@ -34,9 +34,9 @@ import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js
 import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
 import { isTransient } from '../render/assetFetch.js';
 import { failAssets, fatalShown } from './loadingUi.js';
-// Re-exported so the one other consumer of the decode helpers (main.ts's leg-story art)
-// keeps its existing import. They live in enhancedLoad.ts now, with the loaders.
-export { decodePngResponse, isPngResponse } from './enhancedLoad.js';
+// Re-exported so the one other consumer of the decode helper (main.ts's fish sprites)
+// keeps its existing import. It lives in enhancedLoad.ts now, with the loaders.
+export { decodePngResponse } from './enhancedLoad.js';
 import { ui } from './screenState.js';
 import { loadAiPanel } from '../render/panelAi.js';
 import type { AiPanel } from '../render/panelAi.js';

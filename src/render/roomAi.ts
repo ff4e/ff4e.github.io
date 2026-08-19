@@ -53,7 +53,7 @@ import { darkestIndex } from './renderRoom.js';
 import { walkRoom, FSIZE, type RoomWalkSink, type FishFrame } from './roomWalk.js';
 import { FISH_BODY_FILE, FISH_HEAD_FILE, frameIndex } from './enhancedArtSource.js';
 import { withLoadSlot } from './loadSlot.js';
-import { assetBlob, assetJson, decodeAsset, fetchAsset, isTransient, reportMissingAsset } from './assetFetch.js';
+import { assetBlob, assetJson, decodeAsset, isTransient, optionalAsset, reportMissingAsset, requiredAsset } from './assetFetch.js';
 import { wreckDamage, type WreckDamage } from './artSource.js';
 import { forEachWreckPixel, wreckFrame } from '../core/room.js';
 import type { Room, Item, WreckSwap } from '../core/room.js';
@@ -385,10 +385,10 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
     // scale is read rather than assumed so re-enabling it needs no runtime change — and
     // the filenames must be read regardless, since the tier ships WebP, not PNG.
     const manUrl = `${dir}ai.json`;
-    const res = await fetchAsset(manUrl);
     // No manifest ⇒ this room has no AI art. A real state, not a fault: SCORE ships
     // that way (it has no FFNG level at all), so this stays silent and cacheable.
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
+    const res = await optionalAsset(manUrl, { expect: 'json' });
+    if (!res) return null;
     const man = await assetJson<AiManifest>(manUrl, res);
     const scale = Number(man.scale) || AI_ROOM_SCALE;
     if (!man.bg?.length || !man.wall?.length) return null;
@@ -444,11 +444,11 @@ async function closeDecoded(decoded: Map<string, Promise<ImageBitmap>>): Promise
  *  set), which therefore must not be owned — or disposed — by any single AiRoom. */
 async function bmpShared(url: string): Promise<ImageBitmap> {
   return withLoadSlot(async () => {
-    const res = await fetchAsset(url);
-    // An answer that is not an image: the file is not there (or the dev server served
-    // its SPA fallback for it). Deterministic — a plain Error, so the room is cached
-    // as "no AI art" rather than retried forever.
-    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${url}: ${res.status}`);
+    // REQUIRED: every one of these was named by a manifest that has already loaded, so
+    // an answer of "not there" is a broken build rather than a tier with a hole in it.
+    // (`expect` also screens out the dev server's SPA fallback, which answers 200 with
+    // index.html for a missing file.)
+    const res = await requiredAsset(url, 'the AI artwork', { expect: 'image' });
     const blob = await assetBlob(url, res);
     // `premultiplyAlpha: 'none'` is load-bearing, not a default spelled out. With the
     // browser's own choice ('default') Chrome hands back PREMULTIPLIED pixels, and
@@ -501,11 +501,10 @@ function sharedAiFish(base: string, scale: number, bmp: (u: string) => Promise<I
 
 async function loadAiFish(dir: string, bmp: (u: string) => Promise<ImageBitmap>): Promise<AiFish> {
   const url = `${dir}manifest.json`;
-  // Through fetchAsset so a blip on the shared set is labelled transient too: this load
-  // is awaited inside loadAiRoom, and a room must not be cached as "no AI art" because
-  // the fish manifest hiccuped.
-  const res = await fetchAsset(url);
-  if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) throw new Error(`${url}: ${res.status}`);
+  // REQUIRED, and through the door so a blip on the shared set is labelled transient
+  // too: this load is awaited inside loadAiRoom, and a room must not be cached as "no
+  // AI art" because the fish manifest hiccuped.
+  const res = await requiredAsset(url, 'the AI fish sprites', { expect: 'json' });
   const m = await assetJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(url, res);
   const side = async (size: 'small' | 'big', facing: 'left' | 'right'): Promise<AiFishSide> => {
     const map: AiFishSide = new Map();

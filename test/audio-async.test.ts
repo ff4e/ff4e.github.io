@@ -82,7 +82,6 @@ interface Gate {
   fail: (n?: number) => Promise<void>;
   readonly calls: number;
 }
-
 /** Let every queued microtask (the fetch chain, the decode, the install) run. */
 const drain = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
@@ -100,11 +99,19 @@ beforeEach(() => {
       return pending.length;
     },
     async settle(n) {
-      at(n)?.res({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) });
+      at(n)?.res(new Response(new ArrayBuffer(64), { status: 200 }));
       await drain();
     },
+    /**
+     * A 404 rather than a rejected promise, and the distinction is not cosmetic: the
+     * music now goes through `requiredAsset`, which RETRIES a request that got no answer
+     * (twice, ~1.25 s) and answers a 404 immediately. A rejection here would therefore
+     * queue two more attempts this gate knows nothing about, and spend a second of real
+     * time doing it. What these tests are about is what the ENGINE does when a track does
+     * not arrive; which failures are retried is `assetFetch.test.ts`'s subject.
+     */
     async fail(n) {
-      at(n)?.rej(new Error('offline'));
+      at(n)?.res(new Response('', { status: 404 }));
       await drain();
     },
   };

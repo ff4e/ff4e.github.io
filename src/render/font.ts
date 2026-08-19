@@ -9,6 +9,7 @@
  * character. Charcol.dat maps colour-code chars to RGB (single ramp for letters,
  * two-tone for digits).
  */
+import { assetBytes, requiredAsset } from './assetFetch.js';
 const cp1250 = new TextDecoder('windows-1250');
 
 export interface Glyph {
@@ -85,16 +86,14 @@ export class FontData {
 
   static async load(base: string): Promise<FontData> {
     const [chars, chartab, charcol] = await Promise.all([
-      fetchBytes(`${base}/Chars.dat`),
-      fetchBytes(`${base}/Chartab.dat`),
-      fetchBytes(`${base}/Charcol.dat`),
+      fetchBytes(`${base}/Chars.dat`, 'the game font'),
+      fetchBytes(`${base}/Chartab.dat`, 'the game font'),
+      fetchBytes(`${base}/Charcol.dat`, 'the game font'),
     ]);
     return new FontData(chars, chartab, charcol);
   }
 }
 
-async function fetchBytes(url: string): Promise<Uint8Array> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`font load failed: ${url} (${res.status})`);
-  return new Uint8Array(await res.arrayBuffer());
+async function fetchBytes(url: string, what: string): Promise<Uint8Array> {
+  return assetBytes(url, await requiredAsset(url, what));
 }

@@ -9,6 +9,7 @@
  * right now.
  */
 import { AI_MAP_H, AI_MAP_SCALE, AI_MAP_W } from '../render/worldMapAi.js';
+import { assetBlob, assetBytes, assetJson, requiredAsset } from '../render/assetFetch.js';
 import { DESKA_X_OFFSET, DESKA_Y_OFFSET, blitDeska, parseDesky } from '../data/desky.js';
 import { INFO_SETTLE_FAZE, drawInfoDigits, drawInfoPanel, drawInfoPanelArtAi } from '../render/mapInfo.js';
 import { MAP_H, MAP_W } from '../render/worldMap.js';
@@ -46,11 +47,13 @@ export async function ensureDeskyData(): Promise<void> {
   if (ui.deskyLang === lang && ui.deskyData) return;
   const n = lang === 'cz' ? '1' : '2';
   try {
+    const popdeskUrl = `/data/Menu/popdesk${n}.dat`;
+    const atlasUrl = `/data/Menu/desky${n}.dat`;
     const [popdesk, atlas] = await Promise.all([
-      fetch(`/data/Menu/popdesk${n}.dat`).then((r) => r.arrayBuffer()),
-      fetch(`/data/Menu/desky${n}.dat`).then((r) => r.arrayBuffer()),
+      requiredAsset(popdeskUrl, 'the map name plaques').then((r) => assetBytes(popdeskUrl, r)),
+      requiredAsset(atlasUrl, 'the map name plaques').then((r) => assetBytes(atlasUrl, r)),
     ]);
-    ui.deskyData = parseDesky(new Uint8Array(popdesk), new Uint8Array(atlas));
+    ui.deskyData = parseDesky(popdesk, atlas);
     ui.deskyLang = lang;
   } catch {
     /* plaques optional */
@@ -227,9 +230,9 @@ export async function ensureAiDeskyGeom(): Promise<void> {
   if (aiDeskyTried) return;
   aiDeskyTried = true;
   try {
-    const res = await fetch('/enhanced-ai/_desky/plaques.json');
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
-    aiDeskyGeom = ((await res.json()) as { plaques: typeof aiDeskyGeom }).plaques ?? null;
+    const url = '/enhanced-ai/_desky/plaques.json';
+    const res = await requiredAsset(url, 'the AI map name plaques', { expect: 'json' });
+    aiDeskyGeom = (await assetJson<{ plaques: typeof aiDeskyGeom }>(url, res)).plaques ?? null;
     ui.mapSig = null; // repaint now that plaques can be drawn hi-res
   } catch (e) {
     console.warn('AI name plaques unavailable:', e);
@@ -253,9 +256,9 @@ export async function loadAiPlaque(key: string): Promise<void> {
   if (aiPlaqueLoading.has(key)) return;
   aiPlaqueLoading.add(key);
   try {
-    const res = await fetch(`/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
-    const bmp = await createImageBitmap(await res.blob());
+    const url = `/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`;
+    const res = await requiredAsset(url, 'an AI map name plaque', { expect: 'image' });
+    const bmp = await createImageBitmap(await assetBlob(url, res));
     aiDeskyCache.set(key, bmp);
     while (aiDeskyCache.size > AI_DESKY_CACHE_MAX) {
       const oldest = aiDeskyCache.keys().next().value as string | undefined;

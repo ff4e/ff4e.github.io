@@ -7,7 +7,7 @@
  * exception, and a room that rendered.
  */
 import { withLoadSlot } from './loadSlot.js';
-import { assetJson, fetchAsset, isPngResponse, reportMissingAsset } from './assetFetch.js';
+import { assetJson, isMissing, optionalAsset, reportMissingAsset, requiredAsset } from './assetFetch.js';
 import type { EnhancedObject, EnhancedSprite } from './enhancedArtSource.js';
 
 export interface ObjManifestEntry {
@@ -65,10 +65,10 @@ export async function loadEnhancedObjects(
 ): Promise<EnhancedObject[]> {
   const dir = `${base}enhanced/${jmeno}/`;
   const url = `${dir}objects.json`;
-  const res = await fetchAsset(url);
-  // The dev server serves index.html (200) for a missing manifest, so verify it
-  // is actually JSON before parsing.
-  if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return [];
+  // Optional: a room with no staged object sprites ships no manifest, and that is the
+  // design. (`expect` also screens out the dev server's index.html-with-200 fallback.)
+  const res = await optionalAsset(url, { expect: 'json' });
+  if (!res) return [];
   const manifest = await assetJson<{ objects?: ObjManifestEntry[] }>(url, res);
   const entries = manifest.objects ?? [];
   // One entry at a time was a per-object round trip: with the AI loads parallelised
@@ -82,12 +82,17 @@ export async function loadEnhancedObjects(
         e.frames.map(async (f) =>
           withLoadSlot(async () => {
             const url = `${dir}obj/${f}`;
-            const r = await fetchAsset(url);
-            if (!isPngResponse(r)) {
+            // REQUIRED, even though the tier around it is optional: the manifest just
+            // promised this file. A sprite the manifest never mentions is a gap by
+            // design and is never fetched at all; one it lists and the server does not
+            // have is a broken build, and the difference is the whole point of the split.
+            try {
+              return await decodePng(await requiredAsset(url, `an enhanced sprite for ${jmeno}`, { expect: 'image' }));
+            } catch (err) {
+              if (!isMissing(err)) throw err;
               reportMissingAsset(`enhanced tier, ${jmeno} item ${e.item}`, url);
               return null;
             }
-            return await decodePng(r);
           }),
         ),
       );
