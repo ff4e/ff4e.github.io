@@ -387,9 +387,9 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
     const manUrl = `${dir}ai.json`;
     // No manifest ⇒ this room has no AI art. A real state, not a fault: SCORE ships
     // that way (it has no FFNG level at all), so this stays silent and cacheable.
-    const res = await optionalAsset(manUrl, { expect: 'json' });
+    const res = await optionalAsset(manUrl, 'mustHave', { expect: 'json' });
     if (!res) return null;
-    const man = await assetJson<AiManifest>(manUrl, res);
+    const man = await assetJson<AiManifest>(manUrl, res, 'mustHave');
     const scale = Number(man.scale) || AI_ROOM_SCALE;
     if (!man.bg?.length || !man.wall?.length) return null;
     const bgLoad = Promise.all(man.bg.map((f) => bmp(dir + f)));
@@ -449,7 +449,7 @@ async function bmpShared(url: string): Promise<ImageBitmap> {
     // an answer of "not there" is a broken build rather than a tier with a hole in it.
     // (`expect` also screens out the dev server's SPA fallback, which answers 200 with
     // index.html for a missing file.)
-    const blob = await requiredBlob(url, 'the AI artwork');
+    const blob = await requiredBlob(url, 'the AI artwork', 'mustHave');
     // `premultiplyAlpha: 'none'` is load-bearing, not a default spelled out. With the
     // browser's own choice ('default') Chrome hands back PREMULTIPLIED pixels, and
     // texImage2D from an ImageBitmap takes the bitmap's own alpha mode — the GPU
@@ -457,7 +457,7 @@ async function bmpShared(url: string): Promise<ImageBitmap> {
     // edge came out darkened toward the background (measured: a 160,95,44 edge pixel
     // rendering as 105,61,32). canvas-2D is unaffected either way, so nothing else in
     // the tier could have caught it.
-    return decodeAsset(url, () => createImageBitmap(blob, { premultiplyAlpha: 'none' }));
+    return decodeAsset(url, 'mustHave', () => createImageBitmap(blob, { premultiplyAlpha: 'none' }));
   });
 }
 
@@ -504,7 +504,7 @@ async function loadAiFish(dir: string, bmp: (u: string) => Promise<ImageBitmap>)
   // REQUIRED, and through the door so a blip on the shared set is labelled transient
   // too: this load is awaited inside loadAiRoom, and a room must not be cached as "no
   // AI art" because the fish manifest hiccuped.
-  const m = await requiredJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(url, 'the AI fish sprites');
+  const m = await requiredJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(url, 'the AI fish sprites', 'mustHave');
   const side = async (size: 'small' | 'big', facing: 'left' | 'right'): Promise<AiFishSide> => {
     const map: AiFishSide = new Map();
     await Promise.all((m[size]?.[facing] ?? []).map(async (f) =>

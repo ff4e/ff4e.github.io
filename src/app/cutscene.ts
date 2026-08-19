@@ -29,7 +29,7 @@ import type { CapAction } from '../intro/helpCap.js';
 import { KufrDemo } from '../intro/kufrDemo.js';
 import type { AiKufr } from '../intro/kufrDemo.js';
 import { IndexedScreen } from '../render/framebuffer.js';
-import { requiredBlob, requiredBytes, requiredJson, requiredText } from '../render/assetFetch.js';
+import { isTransient, requiredBlob, requiredBytes, requiredJson, requiredText } from '../render/assetFetch.js';
 import { drawIndexedRegion } from '../render/indexedRegion.js';
 import { AI_ROOM_SCALE } from '../render/roomAi.js';
 import { SubtitleSystem } from '../render/subtitles.js';
@@ -77,11 +77,11 @@ export async function startCutscene(): Promise<void> {
   clearHeldKey(); // the briefcase cutscene takes over
   if (!cutsceneAssets) {
     const what = 'the briefcase demonstration';
-    const bytes = (u: string): Promise<Uint8Array> => requiredBytes(u, what);
+    const bytes = (u: string): Promise<Uint8Array> => requiredBytes(u, what, 'mustHave');
     const [bmp, pck, scr] = await Promise.all([
       bytes('/data/Intro/kufr256.BMP'),
       bytes('/data/Intro/demo.pck'),
-      requiredText('/data/Intro/script.txt', what),
+      requiredText('/data/Intro/script.txt', what, 'mustHave'),
     ]);
     setCutsceneAssets({ bmp, pck, script: scr });
     // 5.3 MB of story assets (demo.pck alone is 4.9 MB), fetched once per session: the
@@ -130,7 +130,7 @@ export function startShowmode(): void {
   void (async () => {
     try {
       const url = '/data/Intro/help.cap';
-      const buf = await requiredBytes(url, 'the KUFRIK demonstration');
+      const buf = await requiredBytes(url, 'the KUFRIK demonstration', 'mustHave');
       // The demo may have been cancelled (room change/restart) while fetching.
       if (!showmodeLoading) return;
       setShowmode({ actions: parseHelpCap(buf), idx: 0 });
@@ -406,14 +406,21 @@ export async function ensureAiKufr(): Promise<void> {
   const what = 'the AI briefcase cutscene';
   const manUrl = '/enhanced-ai/_kufr/ai.json';
   type Manifest = { scale: number; region: AiKufr['region']; order: string[]; original?: string[] };
-  const man = await requiredJson<Manifest>(manUrl, what);
-  aiKufr = {
-    base: await createImageBitmap(await requiredBlob('/enhanced-ai/_kufr/base.webp', what)),
-    scale: Number(man.scale) || AI_ROOM_SCALE,
-    region: man.region,
-    order: man.order ?? [],
-    original: new Set(man.original ?? []),
-  };
+  try {
+    const man = await requiredJson<Manifest>(manUrl, what, 'niceToHave');
+    aiKufr = {
+      base: await createImageBitmap(await requiredBlob('/enhanced-ai/_kufr/base.webp', what, 'niceToHave')),
+      scale: Number(man.scale) || AI_ROOM_SCALE,
+      region: man.region,
+      order: man.order ?? [],
+      original: new Set(man.original ?? []),
+    };
+  } catch (e) {
+    // A FAILED load is not remembered (#66), so the next frame asks again and the
+    // per-URL cooldown in assetFetch.ts keeps that from becoming a request per frame.
+    if (isTransient(e)) aiKufrTried = false;
+    throw e;
+  }
 }
 
 /** Fetch a cutscene frame (and prefetch the next few, since playback is linear). */
@@ -425,7 +432,7 @@ export function loadAiKufrFrame(name: string): void {
   void (async () => {
     try {
       const url = `/enhanced-ai/_kufr/frames/${name}`;
-      const bmp = await createImageBitmap(await requiredBlob(url, 'an AI briefcase frame'));
+      const bmp = await createImageBitmap(await requiredBlob(url, 'an AI briefcase frame', 'niceToHave'));
       aiKufrFrames.set(name, bmp);
       while (aiKufrFrames.size > AI_KUFR_CACHE_MAX) {
         const oldest = aiKufrFrames.keys().next().value as string | undefined;

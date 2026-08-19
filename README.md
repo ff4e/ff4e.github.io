@@ -597,7 +597,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
-| `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and the game's one failure screen: any asset that did not arrive ends the session and names itself — including one nobody caught, which is what makes forgetting loud rather than silent. Only absence BY DESIGN still falls back quietly. |
+| `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and where an asset failure nobody caught is turned into a surface — the fatal screen, the note or nothing, chosen by the asset's TIER. Only absence BY DESIGN still falls back quietly. |
+| `loadNote.ts` | 1.2 k | The `shouldHave` tier's surface: a non-blocking note in the `#notes` rail with Try again and Dismiss, for a load the game can continue without but the player would otherwise be misled about. |
 | `subtitleDom.ts` | 5.0 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |

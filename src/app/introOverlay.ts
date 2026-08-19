@@ -44,7 +44,12 @@ export async function probeAiMovies(): Promise<void> {
       // `optionalAsset`, and one of the three places it is legitimate: the whole point
       // of this request is to ASK whether the file exists. A deploy without the AI
       // movies is a supported deploy — the tier falls back to the faithful encode.
-      aiMovieAvailable[u] = (await optionalAsset(u, { init: { method: 'HEAD' } })) !== null;
+      //
+      // `niceToHave` for the same reason: an unanswered probe leaves the entry unset,
+      // which reads as false, which IS the fallback. There is nothing to tell anyone —
+      // the player who never had the AI encode sees the faithful one either way, and the
+      // intro is skippable besides.
+      aiMovieAvailable[u] = (await optionalAsset(u, 'niceToHave', { init: { method: 'HEAD' } })) !== null;
     }),
   );
 }

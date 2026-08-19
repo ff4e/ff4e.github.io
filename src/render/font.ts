@@ -95,5 +95,5 @@ export class FontData {
 }
 
 async function fetchBytes(url: string, what: string): Promise<Uint8Array> {
-  return requiredBytes(url, what);
+  return requiredBytes(url, what, 'mustHave');
 }

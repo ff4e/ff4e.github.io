@@ -166,7 +166,7 @@ export async function showLegImage(leg: number, pending?: { room: number; replay
   // silently meant a player crossing a leg boundary simply never saw that chapter of
   // the story — the same failure the rest of this sweep is deleting.
   const url = `/data/Menu/00${leg}.$dv`;
-  const bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`));
+  const bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`, 'shouldHave'));
   ui.legImagePending = pending ?? null;
   ui.legImage = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
   ui.legImageNum = leg;
@@ -250,7 +250,7 @@ export function drawLegImage(): void {
 export async function ensureLegImageAi(leg: number): Promise<void> {
   if (graphics !== 'ai') return;
   const url = `/enhanced-ai/_story/leg${leg}.webp`;
-  const bmp = await createImageBitmap(await requiredBlob(url, `the AI story page for leg ${leg}`));
+  const bmp = await createImageBitmap(await requiredBlob(url, `the AI story page for leg ${leg}`, 'shouldHave'));
   if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
   ui.legImageAi?.close();
   ui.legImageAi = bmp;
@@ -336,7 +336,7 @@ export async function openCredits(): Promise<void> {
   if (!ui.credits) {
     const bmp = async (f: string, what: string): Promise<Bmp> => {
       const url = `/data/Menu/${f}`;
-      return parseBmp(await requiredBytes(url, what));
+      return parseBmp(await requiredBytes(url, what, 'shouldHave'));
     };
     {
       // CredMov_port is the shipped strip with the web-port card prepended
@@ -349,8 +349,8 @@ export async function openCredits(): Promise<void> {
       // legitimate build, and this is how the code asks which one it is running on. The
       // fallback itself is required — one of the two must exist.
       const portUrl = '/data/Menu/CredMov_port.BMP';
-      const port = await optionalAsset(portUrl);
-      const mov = port ? parseBmp(await assetBytes(portUrl, port, 'the credits')) : await bmp('CredMov.BMP', 'the credits');
+      const port = await optionalAsset(portUrl, 'shouldHave');
+      const mov = port ? parseBmp(await assetBytes(portUrl, port, 'shouldHave', 'the credits')) : await bmp('CredMov.BMP', 'the credits');
       ui.credits = new Credits(await bmp('CredStat1.BMP', 'the credits'), mov);
     }
   }

@@ -537,14 +537,15 @@ async function loadFishSprites(): Promise<void> {
   const m = await requiredJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(
     '/enhanced/_fish/manifest.json',
     'the enhanced fish sprites',
+    'mustHave',
   );
   const build = async (size: 'small' | 'big', facing: 'left' | 'right') => {
     const map = new Map<string, { w: number; h: number; rgba: Uint8Array }>();
     await Promise.all(
       (m[size]?.[facing] ?? []).map(async (f) => {
         const url = `/enhanced/_fish/${size}/${facing}/${f}`;
-        const r = await requiredAsset(url, 'an enhanced fish sprite', { expect: 'image' });
-        const d = await decodePngResponse(r);
+        const r = await requiredAsset(url, 'an enhanced fish sprite', 'mustHave', { expect: 'image' });
+        const d = await decodePngResponse(r, 'mustHave');
         map.set(f, { w: d.w, h: d.h, rgba: d.rgba });
       }),
     );

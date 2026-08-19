@@ -32,7 +32,9 @@ import { ui } from './screenState.js';
 import { computeStageLayout } from './layout.js';
 import { setStage, stage } from './stageGeometry.js';
 import { ROOMS } from '../data/roomTable.js';
+import type { MissingAssetError, TransientAssetError } from '../render/assetFetch.js';
 import { isAssetError, isTransient } from '../render/assetFetch.js';
+import { showLoadNote } from './loadNote.js';
 import { webgl2Available } from '../render/glScreen.js';
 
 export function setLoadingMsg(msg: string): void {
@@ -249,28 +251,24 @@ export function initLoadingUi(): void {
   // Any unhandled failure DURING boot means the game never became playable → fatal.
   //
   // After boot the rule NARROWS rather than stopping, and this is the layer that makes
-  // "every asset failure ends the session" true for code nobody has touched — and for
-  // code not yet written. An unhandled ASSET error is fatal at any time; everything else
-  // is still ignored once the game is up, because a mid-game exception in the renderer or
-  // a room script should not nuke play.
+  // the tiers true for code nobody has touched — and for code not yet written. An
+  // unhandled ASSET error is routed by its tier at any time; everything else is still
+  // ignored once the game is up, because a mid-game exception in the renderer or a room
+  // script should not nuke play.
   //
-  // The asymmetry is the whole point. Before this, forgetting to handle a load was
+  // The asymmetry is the whole point. Before any of this, forgetting to handle a load was
   // SILENT: the loader rejected, nothing caught it, and the player got a game quietly
   // missing its music or its death lines. Fourteen kinds of asset ended up that way and
-  // nobody ever decided it — it was what the default did. Now forgetting is the loud
-  // case, so the mistake announces itself instead of degrading the game in silence.
+  // nobody ever decided it — it was what the default did. Then everything became fatal,
+  // which fixed the silence and broke the map: a plaque fetched on hover could end the
+  // session. Now forgetting is as loud as the asset deserves and no louder, and WHICH is
+  // a decision someone had to type at the call site.
   //
   // It is typed, not string-matched (`isAssetError`), so rewording an error message
   // cannot quietly disarm it.
   window.addEventListener('unhandledrejection', (ev) => {
-    if (isAssetError(ev.reason)) {
-      // Boot or not: an asset that did not arrive gets the sentence written for it,
-      // rather than boot's generic "something went wrong". Boot's loaders no longer
-      // catch their own failures — there is nothing useful for them to do — so this is
-      // now the ONLY thing between a missing panel.ffp and a blank page.
-      console.error('asset failed:', ev.reason);
-      failAssets(ev.reason.what ?? 'A game file', isTransient(ev.reason));
-    } else if (!booted) {
+    if (isAssetError(ev.reason)) reportAssetError(ev.reason);
+    else if (!booted) {
       console.error('boot failed:', ev.reason);
       showFatal();
     }
@@ -281,12 +279,61 @@ export function initLoadingUi(): void {
   // catch their own failures, so every boot failure looked alike and one generic sentence
   // was all there was to say; now that they do not, this is where most of them arrive.
   window.addEventListener('error', (ev) => {
-    if (isAssetError(ev.error)) {
-      console.error('asset failed:', ev.error);
-      failAssets(ev.error.what ?? 'A game file', isTransient(ev.error));
-    } else if (!booted) {
+    if (isAssetError(ev.error)) reportAssetError(ev.error);
+    else if (!booted) {
       console.error('boot failed:', ev.error ?? ev.message);
       showFatal();
     }
   });
+}
+
+/**
+ * Report an asset failure, as loudly as its tier allows — and no louder.
+ *
+ * The single place the three tiers become three surfaces, so "what does a `shouldHave`
+ * failure look like" has one answer and a reviewer has one place to check it.
+ *
+ * Called from two directions, and it matters that they are the SAME function:
+ *
+ *  - the `unhandledrejection` / `error` traps below, for a failure nobody handled. That
+ *    is the BACKSTOP, and it is what makes a floating rejection safe again;
+ *  - a call site that caught its own failure in order to carry on, which passes a `retry`
+ *    so the note can offer Try again (see `loadHelpPages`, `openTetris`).
+ *
+ * The second used to call `showLoadNote` directly, which quietly made the tier a lie: a
+ * loader re-declared `niceToHave` still raised a note, because the note was the call
+ * site's decision rather than the tier's. Routing both through here means re-tiering an
+ * asset actually changes what the player sees — which is the whole point of declaring a
+ * tier, and is now provable by the probe.
+ *
+ * What this cannot do is make the caller carry on: by the time an error is here, the
+ * function that was loading has already been abandoned. So this is the floor, not the
+ * whole contract — a `shouldHave` or `niceToHave` load that is AWAITED on a path the game
+ * needs to finish still has to catch its own failure and fall back (see `loadParchment`).
+ * This guarantees the player is never told MORE than the tier warrants; it cannot
+ * guarantee they were told the right thing about what happens next.
+ *
+ * Everything is logged first, at every tier. A `niceToHave` failure is silent to the
+ * PLAYER, never to the console — a tier that left no trace would be indistinguishable
+ * from a loader that was never called, which is how a broken enhanced tier hid before.
+ */
+export function reportAssetError(e: TransientAssetError | MissingAssetError, retry?: () => void): void {
+  console.error(`asset failed (${e.tier}):`, e);
+  switch (e.tier) {
+    case 'mustHave':
+      // An asset that did not arrive gets the sentence written for it, rather than boot's
+      // generic "something went wrong". Boot's loaders do not catch their own failures —
+      // there is nothing useful for them to do — so this is still the only thing between
+      // a missing panel.ffp and a blank page.
+      failAssets(e.what ?? 'A game file', isTransient(e));
+      return;
+    case 'shouldHave':
+      // No `retry` from the backstop path: it is reached precisely because nobody handled
+      // the failure, so there is nothing there that knows how to re-run it. `loadNote`
+      // hides the button rather than offering one that does nothing.
+      showLoadNote({ subject: e.what ?? 'a game file', transient: isTransient(e), retry });
+      return;
+    case 'niceToHave':
+      return;
+  }
 }

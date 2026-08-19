@@ -46,7 +46,8 @@ import { StepEngine } from '../core/stepEngine.js';
 import { TetrisGame, parseShapes } from '../core/tetris.js';
 import type { HiscoreStore, TetrisShapes } from '../core/tetris.js';
 import { parseBmp } from '../data/bmp.js';
-import { requiredBytes, requiredText } from '../render/assetFetch.js';
+import { isAssetError, requiredBytes, requiredText } from '../render/assetFetch.js';
+import { reportAssetError } from './loadingUi.js';
 import type { FfrBitmap, FfrRoom } from '../data/ffr.js';
 import type { EnhancedSprite, FishSprites } from '../render/enhancedArtSource.js';
 import {
@@ -548,12 +549,12 @@ async function ensureTetrisArt(): Promise<TetrisArt | null> {
   tetrisLoading = true;
   try {
     const what = 'the minigame';
-    const bytes = (url: string): Promise<Uint8Array> => requiredBytes(url, what);
+    const bytes = (url: string): Promise<Uint8Array> => requiredBytes(url, what, 'shouldHave');
     const txtUrl = '/data/Intro/all.txt';
     const [all, hole, txt] = await Promise.all([
       bytes('/data/Intro/all.BMP'),
       bytes('/data/Intro/dira.BMP'),
-      requiredText(txtUrl, what),
+      requiredText(txtUrl, what, 'shouldHave'),
     ]);
     const shapes = parseShapes(txt);
     tetrisArt = {
@@ -582,15 +583,27 @@ function openTetris(): void {
   const screenAtLaunch = host.screen;
   tetrisPending = true;
   host.wake();
-  void ensureTetrisArt().then(() => {
-    if (!tetrisPending) return; // cancelled (Escape) while the art was loading
-    tetrisPending = false;
-    if (!tetrisArt || !tetrisShapes || tetris || host.screen !== screenAtLaunch) return;
-    tetris = new TetrisGame(tetrisShapes, (n) => Math.floor(Math.random() * n), tetrisHiscores);
-    tetrisAcc = 0;
-    host.forceRoomRedraw = true;
-    host.wake();
-  });
+  void ensureTetrisArt()
+    .then(() => {
+      if (!tetrisPending) return; // cancelled (Escape) while the art was loading
+      tetrisPending = false;
+      if (!tetrisArt || !tetrisShapes || tetris || host.screen !== screenAtLaunch) return;
+      tetris = new TetrisGame(tetrisShapes, (n) => Math.floor(Math.random() * n), tetrisHiscores);
+      tetrisAcc = 0;
+      host.forceRoomRedraw = true;
+      host.wake();
+    })
+    .catch((e: unknown) => {
+      if (!isAssetError(e)) throw e;
+      // `tetrisPending` makes the game MODAL from the instant the code fires, and the
+      // only thing that clears it is the `then` above. A failed load therefore used to
+      // be harmless only because it ended the session; at `shouldHave` it would leave
+      // the player in a modal with no minigame in it and no way out. The flag has to
+      // come down here.
+      tetrisPending = false;
+      host.wake();
+      reportAssetError(e, () => openTetris());
+    });
 }
 
 /** Close it (modalresult := mrCancel): the room resumes with no key held

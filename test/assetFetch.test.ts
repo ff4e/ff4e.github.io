@@ -16,6 +16,8 @@ import {
   isTransient,
   optionalAsset,
   requiredAsset,
+  requiredBlob,
+  resetAssetCooldowns,
   retryDelayMs,
 } from '../src/render/assetFetch.js';
 import { pinRandomHighest, pinRandomLowest } from './rng.js';
@@ -31,12 +33,16 @@ const json = (body: unknown, status = 200) =>
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  // The cooldown is module state, and a `niceToHave` failure in one test would otherwise
+  // silently refuse the next test's first request. Cleared here rather than per test so
+  // the leak cannot be reintroduced by forgetting.
+  resetAssetCooldowns();
 });
 
 describe('the two doors', () => {
   it.each([
-    ['requiredAsset', () => requiredAsset(URL_, 'the AI artwork', { retry: NO_RETRY })],
-    ['optionalAsset', () => optionalAsset(URL_, { retry: NO_RETRY })],
+    ['requiredAsset', () => requiredAsset(URL_, 'the AI artwork', 'mustHave', { retry: NO_RETRY })],
+    ['optionalAsset', () => optionalAsset(URL_, 'mustHave', { retry: NO_RETRY })],
   ])('%s treats a transport failure as transient — nothing was learned about the asset', async (_n, call) => {
     vi.stubGlobal('fetch', async () => {
       throw new TypeError('Failed to fetch');
@@ -48,10 +54,10 @@ describe('the two doors', () => {
     vi.stubGlobal('fetch', async () => new Response('', { status }));
     // The policy argument says what an ANSWER means. It never says a failure is fine:
     // "optional" is about absence by design, and a 5xx is not an absence.
-    await expect(requiredAsset(URL_, 'the AI artwork', { retry: NO_RETRY })).rejects.toBeInstanceOf(
+    await expect(requiredAsset(URL_, 'the AI artwork', 'mustHave', { retry: NO_RETRY })).rejects.toBeInstanceOf(
       TransientAssetError,
     );
-    await expect(optionalAsset(URL_, { retry: NO_RETRY })).rejects.toBeInstanceOf(TransientAssetError);
+    await expect(optionalAsset(URL_, 'mustHave', { retry: NO_RETRY })).rejects.toBeInstanceOf(TransientAssetError);
   });
 
   it.each([404, 403, 410])('treats HTTP %i as an ANSWER, and lets the CALL SITE decide', async (status) => {
@@ -59,39 +65,39 @@ describe('the two doors', () => {
     // "Not there" is exactly the thing a cache should remember — and the two doors are
     // the two things it can mean. The enhanced tiers are full of holes by design, so a
     // 404 there is not a fault; anywhere else it is a broken build.
-    expect(await optionalAsset(URL_)).toBeNull();
-    await expect(requiredAsset(URL_, 'the AI artwork')).rejects.toBeInstanceOf(MissingAssetError);
+    expect(await optionalAsset(URL_, 'mustHave')).toBeNull();
+    await expect(requiredAsset(URL_, 'the AI artwork', 'mustHave')).rejects.toBeInstanceOf(MissingAssetError);
   });
 
   it('names the url it failed on', async () => {
     vi.stubGlobal('fetch', async () => new Response('', { status: 503 }));
-    await expect(requiredAsset(URL_, 'the AI artwork', { retry: NO_RETRY })).rejects.toMatchObject({ url: URL_ });
+    await expect(requiredAsset(URL_, 'the AI artwork', 'mustHave', { retry: NO_RETRY })).rejects.toMatchObject({ url: URL_ });
   });
 
   it('carries the player-facing name on a missing required asset', async () => {
     vi.stubGlobal('fetch', async () => new Response('', { status: 404 }));
     // The failure screen prints `what`, so it is part of the error rather than something
     // the catch site has to remember to supply a second time.
-    await expect(requiredAsset(URL_, 'the world map')).rejects.toMatchObject({ what: 'the world map', url: URL_ });
+    await expect(requiredAsset(URL_, 'the world map', 'mustHave')).rejects.toMatchObject({ what: 'the world map', url: URL_ });
   });
 
   it('rejects the dev server SPA fallback, which answers 200 with HTML', async () => {
     // The trap `expect` exists for: a missing file in dev is index.html with HTTP 200,
     // so a status check alone would hand markup to JSON.parse or to the image decoder.
     vi.stubGlobal('fetch', async () => new Response('<html>', { headers: { 'content-type': 'text/html' } }));
-    expect(await optionalAsset(URL_, { expect: 'json' })).toBeNull();
-    expect(await optionalAsset(URL_, { expect: 'image' })).toBeNull();
-    await expect(requiredAsset(URL_, 'the AI artwork', { expect: 'json' })).rejects.toBeInstanceOf(MissingAssetError);
+    expect(await optionalAsset(URL_, 'mustHave', { expect: 'json' })).toBeNull();
+    expect(await optionalAsset(URL_, 'mustHave', { expect: 'image' })).toBeNull();
+    await expect(requiredAsset(URL_, 'the AI artwork', 'mustHave', { expect: 'json' })).rejects.toBeInstanceOf(MissingAssetError);
     // ...and a 200 that IS the asset passes both.
     vi.stubGlobal('fetch', async () => new Response('{}', { headers: { 'content-type': 'application/json' } }));
-    expect(await optionalAsset(URL_, { expect: 'json' })).not.toBeNull();
+    expect(await optionalAsset(URL_, 'mustHave', { expect: 'json' })).not.toBeNull();
   });
 
   it('does not confuse the two kinds of failure', async () => {
     // `isTransient` is what every cache in the app branches on, and `isMissing` is what
     // the failure screen branches on. Neither may answer true for the other's error.
     vi.stubGlobal('fetch', async () => new Response('', { status: 404 }));
-    const missing = await requiredAsset(URL_, 'the AI artwork').catch((e: unknown) => e);
+    const missing = await requiredAsset(URL_, 'the AI artwork', 'mustHave').catch((e: unknown) => e);
     expect(missing).toBeInstanceOf(MissingAssetError);
     expect(isTransient(missing)).toBe(false);
   });
@@ -106,7 +112,7 @@ describe('assetJson', () => {
     // The headers can land and the body not — res.json() is I/O, not just parsing, and
     // it rejects with a bare TypeError. Filed as an absence, this would be cached.
     const res = { json: async () => { throw new TypeError('Failed to fetch'); } } as unknown as Response;
-    await expect(assetJson(URL_, res)).rejects.toBeInstanceOf(TransientAssetError);
+    await expect(assetJson(URL_, res, 'mustHave')).rejects.toBeInstanceOf(TransientAssetError);
   });
 
   it('reports a body that arrived and was not JSON as MISSING, not transient', async () => {
@@ -116,7 +122,7 @@ describe('assetJson', () => {
     // as garbage was cached as "this room has no art" and the room quietly rendered a
     // tier down. The `what` is carried through so the screen can name it.
     const res = new Response('<html>', { headers: { 'content-type': 'application/json' } });
-    const err = await assetJson(URL_, res, 'the AI artwork').catch((e) => e);
+    const err = await assetJson(URL_, res, 'mustHave', 'the AI artwork').catch((e) => e);
     expect(isTransient(err)).toBe(false);
     expect(err).toBeInstanceOf(MissingAssetError);
     expect(err).toMatchObject({ what: 'the AI artwork', url: URL_ });
@@ -126,13 +132,13 @@ describe('assetJson', () => {
 describe('assetBlob / decodeAsset', () => {
   it('is transient when the body read fails', async () => {
     const res = { blob: async () => { throw new TypeError('Failed to fetch'); } } as unknown as Response;
-    await expect(assetBlob(URL_, res)).rejects.toBeInstanceOf(TransientAssetError);
+    await expect(assetBlob(URL_, res, 'mustHave')).rejects.toBeInstanceOf(TransientAssetError);
   });
 
   it('is transient when the decode fails', async () => {
     // A truncated download and a corrupt file are indistinguishable here. Transient is
     // the cheaper mistake: one wasted refetch, versus losing the tier for the session.
-    await expect(decodeAsset(URL_, async () => { throw new Error('bad image'); })).rejects.toBeInstanceOf(
+    await expect(decodeAsset(URL_, 'mustHave', async () => { throw new Error('bad image'); })).rejects.toBeInstanceOf(
       TransientAssetError,
     );
   });
@@ -163,7 +169,7 @@ describe('retry', () => {
       return new Response('', { status: 404 });
     });
     const clock = fakeClock();
-    expect(await optionalAsset(URL_, { retry: { sleep: clock.sleep } })).toBeNull();
+    expect(await optionalAsset(URL_, 'mustHave', { retry: { sleep: clock.sleep } })).toBeNull();
     expect(calls).toBe(1);
     expect(clock.waits).toEqual([]);
   });
@@ -176,7 +182,7 @@ describe('retry', () => {
       return json({ scale: 4 });
     });
     const clock = fakeClock();
-    const res = await requiredAsset(URL_, 'the AI artwork', { retry: { sleep: clock.sleep } });
+    const res = await requiredAsset(URL_, 'the AI artwork', 'mustHave', { retry: { sleep: clock.sleep } });
     expect(res.ok).toBe(true);
     expect(calls).toBe(2);
     expect(clock.waits).toHaveLength(1); // one blip, one wait
@@ -189,7 +195,7 @@ describe('retry', () => {
       throw new TypeError('Failed to fetch');
     });
     const clock = fakeClock();
-    await expect(requiredAsset(URL_, 'the AI artwork', { retry: { sleep: clock.sleep } })).rejects.toBeInstanceOf(
+    await expect(requiredAsset(URL_, 'the AI artwork', 'mustHave', { retry: { sleep: clock.sleep } })).rejects.toBeInstanceOf(
       TransientAssetError,
     );
     expect(calls).toBe(3); // the first, plus two retries
@@ -246,7 +252,7 @@ describe('retry', () => {
     });
     const clock = fakeClock();
     await expect(
-      requiredAsset(URL_, 'the AI artwork', { retry: { sleep: clock.sleep, headersMs: 5 } }),
+      requiredAsset(URL_, 'the AI artwork', 'mustHave', { retry: { sleep: clock.sleep, headersMs: 5 } }),
     ).rejects.toBeInstanceOf(TransientAssetError);
     expect(calls).toBe(3); // the stall is a failure like any other: first attempt + two retries
     expect(aborted).toBe(3); // ...and every attempt was actually torn down, not left hanging
@@ -262,7 +268,7 @@ describe('retry', () => {
       signal = init?.signal;
       return new Response('{}', { headers: { 'content-type': 'application/json' } });
     });
-    const res = await requiredAsset(URL_, 'the AI artwork', { retry: { headersMs: 5 } });
+    const res = await requiredAsset(URL_, 'the AI artwork', 'mustHave', { retry: { headersMs: 5 } });
     expect(res.ok).toBe(true);
     // The timer is cleared once the headers are in; if it were still armed it would abort
     // the body mid-download a few milliseconds from now.
@@ -280,9 +286,161 @@ describe('retry', () => {
     ac.abort();
     const clock = fakeClock();
     await expect(
-      requiredAsset(URL_, 'the AI artwork', { init: { signal: ac.signal }, retry: { sleep: clock.sleep } }),
+      requiredAsset(URL_, 'the AI artwork', 'mustHave', { init: { signal: ac.signal }, retry: { sleep: clock.sleep } }),
     ).rejects.toBeInstanceOf(TransientAssetError);
     expect(calls).toBe(1);
     expect(clock.waits).toEqual([]);
+  });
+});
+
+/**
+ * The tier, which is the answer to a different question from the rest of this file.
+ *
+ * Everything above is about WHAT HAPPENED — an answer, or no answer. The tier is about
+ * what it COSTS the player, and the two are independent: a room's FFR and a name plaque
+ * fetched on hover fail in exactly the same way and must be reported completely
+ * differently. Conflating them is what made moving the mouse across the world map able to
+ * end the session.
+ */
+describe('the tier', () => {
+  it('rides on the error, so the one handler can route without string-matching', async () => {
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    for (const tier of ['mustHave', 'shouldHave', 'niceToHave'] as const) {
+      const e = await requiredAsset(URL_, 'the AI artwork', tier, { retry: NO_RETRY }).catch((x: unknown) => x);
+      expect(e).toBeInstanceOf(TransientAssetError);
+      expect((e as TransientAssetError).tier).toBe(tier);
+    }
+  });
+
+  it('rides on a MISSING error too — a 404 on a should-have is still only a note', async () => {
+    vi.stubGlobal('fetch', async () => new Response('', { status: 404 }));
+    const e = await requiredAsset(URL_, 'the help pages', 'shouldHave').catch((x: unknown) => x);
+    expect(e).toBeInstanceOf(MissingAssetError);
+    expect((e as MissingAssetError).tier).toBe('shouldHave');
+  });
+
+  it('survives the body read, which is the second place a name was once lost', async () => {
+    // The same gap `what` had: the fetch classifies, the body read re-throws, and a tier
+    // dropped here would send a hover-driven failure to the fatal screen.
+    vi.stubGlobal('fetch', async () => new Response(new Blob(['not json']), { headers: { 'content-type': 'application/json' } }));
+    const e = await assetJson(URL_, await requiredAsset(URL_, 'a plaque', 'niceToHave'), 'niceToHave', 'a plaque').catch(
+      (x: unknown) => x,
+    );
+    expect((e as MissingAssetError).tier).toBe('niceToHave');
+  });
+
+  it('survives a decode failure', async () => {
+    const e = await decodeAsset(URL_, 'niceToHave', async () => {
+      throw new Error('bad image');
+    }).catch((x: unknown) => x);
+    expect((e as TransientAssetError).tier).toBe('niceToHave');
+  });
+});
+
+/**
+ * The cooldown: the floor under how often an INCIDENTAL fetch may be re-issued.
+ *
+ * "Retry on the next natural occasion" is free — a failed load is not remembered, so the
+ * next hover asks again. That is right for a deliberate act and a hazard for a gesture:
+ * the map's plaques are fetched on hover and the cutscene's frames from the draw path, so
+ * against a dead server "ask again next time" is a request per mouse move.
+ *
+ * Tested here rather than in a browser probe for the usual reason — the clock is an
+ * argument, so the whole behaviour is provable in a millisecond instead of five seconds.
+ */
+describe('the nice-to-have cooldown', () => {
+  /** A clock that only moves when a test moves it. */
+  function fakeNow() {
+    let t = 1000;
+    return { now: () => t, advance: (ms: number) => (t += ms) };
+  }
+
+  it('refuses a second attempt at a URL that just failed, without touching the network', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls++;
+      throw new TypeError('Failed to fetch');
+    });
+    const clock = fakeNow();
+    const opts = { retry: { delayMs: () => null, now: clock.now, cooldownMs: 5000 } };
+    resetAssetCooldowns();
+
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeInstanceOf(TransientAssetError);
+    expect(calls).toBe(1);
+    // The gesture repeats — a pointer crossing the same node again half a second later.
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeInstanceOf(TransientAssetError);
+    expect(calls, 'the second hover issued no request at all').toBe(1);
+  });
+
+  it('lets the URL go again once the cooldown is spent — a failure is still not remembered', async () => {
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls++;
+      throw new TypeError('Failed to fetch');
+    });
+    const clock = fakeNow();
+    const opts = { retry: { delayMs: () => null, now: clock.now, cooldownMs: 5000 } };
+    resetAssetCooldowns();
+
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeInstanceOf(TransientAssetError);
+    clock.advance(5001);
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeInstanceOf(TransientAssetError);
+    expect(calls, 'the cooldown is a rate limit, not a memory').toBe(2);
+  });
+
+  it('is per URL: one dead plaque does not lock out the next one', async () => {
+    const asked: string[] = [];
+    vi.stubGlobal('fetch', async (u: string) => {
+      asked.push(u);
+      throw new TypeError('Failed to fetch');
+    });
+    const clock = fakeNow();
+    const opts = { retry: { delayMs: () => null, now: clock.now, cooldownMs: 5000 } };
+    resetAssetCooldowns();
+
+    await expect(requiredBlob('/a.webp', 'a plaque', 'niceToHave', opts)).rejects.toBeTruthy();
+    await expect(requiredBlob('/b.webp', 'a plaque', 'niceToHave', opts)).rejects.toBeTruthy();
+    expect(asked).toEqual(['/a.webp', '/b.webp']);
+  });
+
+  it('does not apply to the other tiers — the player asked, and is waiting', async () => {
+    // A `mustHave` retry is on a path the player took deliberately and a `shouldHave` one
+    // happens when they press Try again. Refusing either would be the game ignoring a
+    // direct instruction because of something that happened three seconds ago.
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls++;
+      throw new TypeError('Failed to fetch');
+    });
+    const clock = fakeNow();
+    const opts = { retry: { delayMs: () => null, now: clock.now, cooldownMs: 5000 } };
+    resetAssetCooldowns();
+
+    for (const tier of ['mustHave', 'shouldHave'] as const) {
+      await expect(requiredBlob(URL_, 'the help pages', tier, opts)).rejects.toBeTruthy();
+      await expect(requiredBlob(URL_, 'the help pages', tier, opts)).rejects.toBeTruthy();
+    }
+    expect(calls).toBe(4);
+  });
+
+  it('is not armed by a load the app itself cancelled', async () => {
+    // Leaving a room aborts its loads. Locking those URLs out for five seconds would make
+    // the next entry draw without art it could have had, over a failure that never was.
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls++;
+      throw new DOMException('aborted', 'AbortError');
+    });
+    const clock = fakeNow();
+    const ac = new AbortController();
+    ac.abort();
+    const opts = { init: { signal: ac.signal }, retry: { delayMs: () => null, now: clock.now, cooldownMs: 5000 } };
+    resetAssetCooldowns();
+
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeTruthy();
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeTruthy();
+    expect(calls, 'a cancelled load learned nothing, so it bars nothing').toBe(2);
   });
 });

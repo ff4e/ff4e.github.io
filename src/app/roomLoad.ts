@@ -79,10 +79,10 @@ export async function loadRoom(num: number): Promise<void> {
     // four x0n packages), so there is no legitimate absence to protect here: a missing one
     // is a broken deploy and a failed one is the network, and the player is told either way.
     const [ffrRes, fftRes] = await Promise.all([
-      requiredAsset(ffrUrl, `room ${num}`),
-      requiredAsset(fftUrl, `the subtitles for room ${num}`),
+      requiredAsset(ffrUrl, `room ${num}`, 'mustHave'),
+      requiredAsset(fftUrl, `the subtitles for room ${num}`, 'mustHave'),
     ]);
-    const parsed = parseFfr(await assetBytes(ffrUrl, ffrRes));
+    const parsed = parseFfr(await assetBytes(ffrUrl, ffrRes, 'mustHave'));
     // WIN "Favorites" palette gag (URoom.pas:1312-1355): swap the pink placeholder colours
     // for the Windows system theme, so the fake windows look like a real desktop.
     setFfr(
@@ -90,7 +90,7 @@ export async function loadRoom(num: number): Promise<void> {
         ? { ...parsed, palette: applyWinDesktopPalette(parsed.palette) }
         : parsed,
     );
-    const fftBytes = await assetBytes(fftUrl, fftRes);
+    const fftBytes = await assetBytes(fftUrl, fftRes, 'mustHave');
     setFftEntries(parseFft(fftBytes));
     // The outgoing room's samples must not be audible under the new room while its
     // own package is still in flight (see loadRoomVoices) — a lookup that misses now
@@ -222,10 +222,10 @@ export async function fetchSoundPkg(
   // bodies is an implementation detail of the 1998 format, and "the sound package index
   // for the death lines is missing" is a sentence written for a developer.
   const [fftRes, ffsRes] = await Promise.all([
-    requiredAsset(fftUrl, what, { init }),
-    requiredAsset(ffsUrl, what, { init }),
+    requiredAsset(fftUrl, what, 'mustHave', { init }),
+    requiredAsset(ffsUrl, what, 'mustHave', { init }),
   ]);
-  const [fft, ffs] = await Promise.all([assetBytes(fftUrl, fftRes), assetBytes(ffsUrl, ffsRes)]);
+  const [fft, ffs] = await Promise.all([assetBytes(fftUrl, fftRes, 'mustHave'), assetBytes(ffsUrl, ffsRes, 'mustHave')]);
   return { fft, ffs };
 }
 
@@ -374,7 +374,7 @@ export async function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Ar
   let pending = voiceLoads.get(nnn);
   if (pending === undefined) {
     const url = `/data/Sound/${nnn}.ffs`;
-    pending = requiredBytes(url, `the voices for room ${num}`);
+    pending = requiredBytes(url, `the voices for room ${num}`, 'mustHave');
     voiceLoads.set(nnn, pending);
     // Dropped whatever happens, so a failure is not what the next entry joins. Kept
     // keyed on the PROMISE so two entries to the same room do not put two fetches of one
@@ -426,8 +426,8 @@ export async function startRoomMusic(num: number): Promise<void> {
     // KANKAN does exactly that on its first tick — `if (!s.playing(MUSIC_PRIOR))
     // s.musiccyc(...)` — and paid for its 1.24 MB track twice.
     const load = (async () => {
-      const res = await requiredAsset(url, `the music for room ${num}`, { init: { priority: 'low' } as RequestInit });
-      await audio.decodeMusic(music.name, await assetBytes(url, res));
+      const res = await requiredAsset(url, `the music for room ${num}`, 'mustHave', { init: { priority: 'low' } as RequestInit });
+      await audio.decodeMusic(music.name, await assetBytes(url, res, 'mustHave'));
     })();
     audio.beginMusicLoad(music.name, load);
     await load;

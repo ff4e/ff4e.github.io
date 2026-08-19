@@ -70,10 +70,10 @@ interface AiPanelManifest { scale?: number; files?: string[] }
 export async function loadAiPanel(base: string): Promise<AiPanel> {
   {
     const dir = `${base}enhanced-ai/_panel/`;
-    const man = await requiredJson<AiPanelManifest>(`${dir}ai.json`, 'the AI control panel');
+    const man = await requiredJson<AiPanelManifest>(`${dir}ai.json`, 'the AI control panel', 'mustHave');
     const scale = Number(man.scale) || AI_PANEL_SCALE;
     const bmp = async (name: string): Promise<ImageBitmap> =>
-      createImageBitmap(await requiredBlob(dir + name, 'the AI control panel'));
+      createImageBitmap(await requiredBlob(dir + name, 'the AI control panel', 'mustHave'));
     const images = await Promise.all(
       Array.from({ length: PANEL_IMAGES }, (_, i) => bmp(`img${String(i).padStart(2, '0')}.webp`)),
     );

@@ -103,6 +103,7 @@ import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
 import { fatalShown, fatalText } from './loadingUi.js';
+import { loadNoteShown, loadNoteText } from './loadNote.js';
 import { roomAudioPending } from './roomLoad.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
@@ -413,6 +414,10 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     roomAudioPending: () => roomAudioPending(),
     fatalShown: () => fatalShown(),
     fatalText: () => fatalText(),
+    // The SHOULD-HAVE surface (src/app/loadNote.ts). Two hooks for the same reason the
+    // fatal screen has two: the wording is chosen from the absent/failed taxonomy.
+    loadNoteShown: () => loadNoteShown(),
+    loadNoteText: () => loadNoteText(),
     artFailTitle: () => document.getElementById('art-fail-title')?.textContent ?? '',
     enhancedActive: () =>
       host.enhancedArtActive() &&

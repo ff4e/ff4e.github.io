@@ -35,12 +35,12 @@ export class HelpScreens {
     const cached = this.byLang.get(lang);
     if (cached) return cached;
     const indexUrl = `/data/Help/${lang === 'cz' ? 'helpy.txt' : 'helps.txt'}`;
-    const text = await requiredText(indexUrl, 'the help pages');
+    const text = await requiredText(indexUrl, 'the help pages', 'shouldHave');
     const files = HelpScreens.parseIndex(text);
     const pages = await Promise.all(
       files.map(async (f) => {
         const url = `/data/Help/${f}`;
-        const bmp = parseBmp(await requiredBytes(url, 'the help pages'));
+        const bmp = parseBmp(await requiredBytes(url, 'the help pages', 'shouldHave'));
         return { rgba: bmpToRgba(bmp), w: bmp.w, h: bmp.h };
       }),
     );
