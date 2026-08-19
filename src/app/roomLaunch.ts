@@ -39,7 +39,7 @@ import { MAP_W } from '../render/worldMap.js';
 import { AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { curNum } from './art.js';
 import { ROOMS } from '../data/roomTable.js';
-import { assetBytes, isTransient, requiredAsset } from '../render/assetFetch.js';
+import { isTransient, requiredBytes } from '../render/assetFetch.js';
 import { failAssets } from './loadingUi.js';
 import { roomAudioPending } from './roomLoad.js';
 import type { AiWorldMap } from '../render/worldMapAi.js';
@@ -83,16 +83,20 @@ let parchment: { w: number; h: number; rgba: Uint8ClampedArray } | null = null;
 let parchmentCanvas: HTMLCanvasElement | null = null;
 
 /**
- * Decode the parchment art. Awaited by boot, but never fatal.
+ * Decode the parchment art. Awaited by boot.
  *
- * Its own fetch rather than a member of the map's Promise.all: the map is a CRITICAL
- * asset, and folding this 32 kB indicator in would turn a missing parchment into a fatal
- * boot. Without it, enterRoom simply falls back to the full-screen overlay — see
- * canLaunchFromMap().
+ * Its own fetch rather than a member of the map's Promise.all, which used to be the
+ * difference between critical and optional: folding this 32 kB indicator into the map's
+ * load would have turned a missing parchment into a fatal boot. It is fatal now anyway,
+ * so what the separate fetch still buys is only a better sentence on the screen — this
+ * one names the parchment instead of the world map.
+ *
+ * `parchmentReady()` and canLaunchFromMap()'s overlay fallback stay: the parchment is
+ * null until boot decodes it, and a launch during that window still has to do something.
  */
 export async function loadParchment(): Promise<void> {
   const url = '/data/Menu/loading.BMP';
-  const bmp = parseBmp(await assetBytes(url, await requiredAsset(url, 'the room-entry parchment')));
+  const bmp = parseBmp(await requiredBytes(url, 'the room-entry parchment'));
   parchment = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
 }
 

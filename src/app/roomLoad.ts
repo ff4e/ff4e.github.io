@@ -13,7 +13,7 @@
 import { MLUVI_PRIOR } from './keyTables.js';
 import { ROOMS } from '../data/roomTable.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
-import { assetBytes, requiredAsset } from '../render/assetFetch.js';
+import { assetBytes, isTransient, requiredAsset, requiredBytes } from '../render/assetFetch.js';
 import { audio } from './audioEngine.js';
 import { beginRoomArt, curNum, ensureAiRoom, ensureEnhancedArt } from './art.js';
 import { booted } from './stageState.js';
@@ -374,7 +374,7 @@ export async function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Ar
   let pending = voiceLoads.get(nnn);
   if (pending === undefined) {
     const url = `/data/Sound/${nnn}.ffs`;
-    pending = requiredAsset(url, `the voices for room ${num}`).then(async (r) => assetBytes(url, r));
+    pending = requiredBytes(url, `the voices for room ${num}`);
     voiceLoads.set(nnn, pending);
     // Dropped whatever happens, so a failure is not what the next entry joins. Kept
     // keyed on the PROMISE so two entries to the same room do not put two fetches of one

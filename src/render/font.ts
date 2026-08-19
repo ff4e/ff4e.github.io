@@ -9,7 +9,7 @@
  * character. Charcol.dat maps colour-code chars to RGB (single ramp for letters,
  * two-tone for digits).
  */
-import { assetBytes, requiredAsset } from './assetFetch.js';
+import { requiredBytes } from './assetFetch.js';
 const cp1250 = new TextDecoder('windows-1250');
 
 export interface Glyph {
@@ -95,5 +95,5 @@ export class FontData {
 }
 
 async function fetchBytes(url: string, what: string): Promise<Uint8Array> {
-  return assetBytes(url, await requiredAsset(url, what));
+  return requiredBytes(url, what);
 }

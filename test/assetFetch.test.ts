@@ -109,12 +109,17 @@ describe('assetJson', () => {
     await expect(assetJson(URL_, res)).rejects.toBeInstanceOf(TransientAssetError);
   });
 
-  it('is NOT transient when the body arrived and was not JSON', async () => {
-    // A broken build. Deterministic, so retrying it forever would be pure waste.
+  it('reports a body that arrived and was not JSON as MISSING, not transient', async () => {
+    // A broken build: deterministic, so retrying it forever would be pure waste — but it
+    // is still an ASSET failure, and that is the part that used to be wrong. It threw a
+    // bare SyntaxError, which the failure screen does not recognise, so a manifest served
+    // as garbage was cached as "this room has no art" and the room quietly rendered a
+    // tier down. The `what` is carried through so the screen can name it.
     const res = new Response('<html>', { headers: { 'content-type': 'application/json' } });
-    const err = await assetJson(URL_, res).catch((e) => e);
+    const err = await assetJson(URL_, res, 'the AI artwork').catch((e) => e);
     expect(isTransient(err)).toBe(false);
-    expect(err).toBeInstanceOf(SyntaxError);
+    expect(err).toBeInstanceOf(MissingAssetError);
+    expect(err).toMatchObject({ what: 'the AI artwork', url: URL_ });
   });
 });
 
@@ -209,6 +214,60 @@ describe('retry', () => {
     // ±25% around 250ms, and never zero or negative however the draw lands.
     expect(low).toBeGreaterThanOrEqual(Math.round(250 * 0.75));
     expect(high).toBeLessThanOrEqual(Math.round(250 * 1.25));
+  });
+
+  /**
+   * The stall, which is the failure the retry above cannot see.
+   *
+   * A connection that DIES rejects and is retried; a connection that merely STOPS — a
+   * radio going to sleep, a proxy holding the socket — never rejects at all, and every
+   * recovery in this codebase is built on a rejection. Unbounded, that means no failure,
+   * so no failure screen, so a parchment with no way out but the browser's own reload:
+   * the one outcome worse than the silence this whole branch replaces.
+   *
+   * Asserted with an injected `headersMs` and a fetch that never settles, so the test
+   * costs milliseconds rather than the 20 s the real deadline is set to. There was no
+   * test for this at all until now — the deadline shipped in #102 on the strength of the
+   * comment next to it.
+   */
+  it('treats a request that never produces headers as a failure, and retries it', async () => {
+    let calls = 0;
+    let aborted = 0;
+    vi.stubGlobal('fetch', (_url, init) => {
+      calls++;
+      return new Promise((_resolve, reject) => {
+        // A real stalled fetch settles only when its signal aborts, which is exactly what
+        // the deadline is for. Without honouring the signal here the test would hang.
+        init?.signal?.addEventListener('abort', () => {
+          aborted++;
+          reject(new DOMException('aborted', 'AbortError'));
+        });
+      });
+    });
+    const clock = fakeClock();
+    await expect(
+      requiredAsset(URL_, 'the AI artwork', { retry: { sleep: clock.sleep, headersMs: 5 } }),
+    ).rejects.toBeInstanceOf(TransientAssetError);
+    expect(calls).toBe(3); // the stall is a failure like any other: first attempt + two retries
+    expect(aborted).toBe(3); // ...and every attempt was actually torn down, not left hanging
+    expect(clock.waits).toHaveLength(2);
+  });
+
+  it('does not arm the deadline against the BODY — a slow but healthy download must survive', async () => {
+    // Bounded at the headers deliberately: these assets run to 9 MB, which is 48 s of
+    // honest downloading on the 1.5 Mbps link the game is measured against, so a deadline
+    // that covered the whole transfer would kill connections that are working perfectly.
+    let signal;
+    vi.stubGlobal('fetch', async (_url, init) => {
+      signal = init?.signal;
+      return new Response('{}', { headers: { 'content-type': 'application/json' } });
+    });
+    const res = await requiredAsset(URL_, 'the AI artwork', { retry: { headersMs: 5 } });
+    expect(res.ok).toBe(true);
+    // The timer is cleared once the headers are in; if it were still armed it would abort
+    // the body mid-download a few milliseconds from now.
+    await new Promise((r) => setTimeout(r, 25));
+    expect(signal?.aborted).toBe(false);
   });
 
   it('does not retry a request the app itself aborted — that is not a failure to recover from', async () => {

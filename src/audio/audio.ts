@@ -10,7 +10,7 @@
  * resumed on the first play triggered by input.
  */
 import { indexFft, parseFft, type FftEntry } from '../data/fft.js';
-import { assetBytes, requiredAsset } from '../render/assetFetch.js';
+import { requiredBytes } from '../render/assetFetch.js';
 import { decodeSound, FFS_SAMPLE_RATE } from './ffs.js';
 import type { VolumeBus } from '../core/settings.js';
 
@@ -441,13 +441,23 @@ export class AudioEngine {
         // starting music only after the room's art (see loadRoom); this is the backstop
         // for every other caller — notably the menu music, which competes with the
         // world map's own assets.
-        const bytes = await assetBytes(url, await requiredAsset(url, 'the music', { init: { priority: 'low' } as RequestInit }));
+        const bytes = await requiredBytes(url, 'the music', { init: { priority: 'low' } as RequestInit });
         buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
       } catch (e) {
-        // The reservation goes back, and then the failure LEAVES. This used to return
-        // ("stay silent"), which is how a dropped track became a room playing in silence
-        // with nothing said; the engine's own invariant is still honoured on the way out.
+        // Is this start still the one that should sound? Asked BEFORE the release, which
+        // is what makes the answer meaningful — `release` clears the claim either way.
+        const current = this.holds(prior, claim);
         this.release(prior, claim);
+        // A start the app itself cancelled — a room change, a script's own KSnd — does
+        // not get to end the session when its abandoned download fails a minute later.
+        // Nothing cancels the request itself, so a 5-7 MB track can outlive the room that
+        // asked for it by the whole retry budget plus the 20 s headers deadline, and the
+        // player would be told "the music didn't finish loading" over a room whose music
+        // is playing fine. Every other loader in the codebase already draws this line —
+        // `roomLoad`, `art.ts`'s `curNum === num`, `ensureAiWorldMap`'s `screen === 'map'`.
+        if (!current) return;
+        // Still wanted, so the failure LEAVES. This used to return ("stay silent"), which
+        // is how a dropped track became a room playing in silence with nothing said.
         throw e;
       }
       this.musicBufs.set(name, buf);
@@ -583,10 +593,11 @@ export class AudioEngine {
   /**
    * Decode a music track into the cache, so `playMusic` can start it without a fetch.
    *
-   * Split out of `playMusic` so the room entry can OWN the download: inside `playMusic`
-   * a failure is swallowed ("stay silent"), which is right for the menu and the KUFRIK
-   * demo and wrong for a room, where a track that never arrives used to mean a room
-   * played through with no music and nothing said. Here it throws, and the entry fails.
+   * Split out of `playMusic` so the room ENTRY can own the download, and fail on it: a
+   * track that never arrives used to mean a room played through with no music and nothing
+   * said. `playMusic` now fails too — silence is not an outcome any more — but it fails a
+   * beat later and out of band, where the entry fails before the room is ever presented,
+   * which is the difference the split is for.
    *
    * The native sample rate comes out of the WAV header (offset 24) exactly as it does in
    * `playMusic`, and is stashed on the buffer the same way — `loopStart` is computed from
@@ -646,7 +657,7 @@ export class AudioEngine {
         }
       }
       if (!buf) {
-        const bytes = await assetBytes(url, await requiredAsset(url, 'the music', { init: { priority: 'low' } as RequestInit }));
+        const bytes = await requiredBytes(url, 'the music', { init: { priority: 'low' } as RequestInit });
         // WAV loop point is in samples at the file's native rate (header @ offset 24).
         const nativeRate = new DataView(bytes.buffer as ArrayBuffer).getUint32(24, true) || 22050;
         buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
@@ -683,10 +694,14 @@ export class AudioEngine {
       //
       // ...and then it leaves. The menu music was the one track allowed to vanish
       // quietly; it is 2.6 MB of the game's first impression.
-      if (this.musicGen === gen) {
-        this.musicName = '';
-        this.release(MUSIC_PRIOR, claim);
-      }
+      //
+      // A SUPERSEDED start returns instead. `stopMusic()` bumps the generation but cannot
+      // cancel the request, so the menu track abandoned when the player entered a room can
+      // still fail minutes later — and it must not raise a screen naming music nobody is
+      // waiting for over a room that is playing perfectly.
+      if (this.musicGen !== gen) return;
+      this.musicName = '';
+      this.release(MUSIC_PRIOR, claim);
       throw e;
     } finally {
       // Only the start that is still current may release the flag; a superseded one

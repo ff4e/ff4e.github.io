@@ -21,7 +21,7 @@
  * it, one blip on one sprite cost a room its background masters for the session.
  */
 import type { EnhancedArt, EnhancedObject, EnhancedSprite } from '../render/enhancedArtSource.js';
-import { assetBlob, decodeAsset, optionalAsset } from '../render/assetFetch.js';
+import { TransientAssetError, assetBlob, decodeAsset, optionalAsset } from '../render/assetFetch.js';
 import { loadEnhancedObjects } from '../render/enhancedObjects.js';
 
 /** One room's enhanced art: background masters (null = none staged) and object sprites. */

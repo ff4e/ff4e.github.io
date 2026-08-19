@@ -53,7 +53,7 @@ import { darkestIndex } from './renderRoom.js';
 import { walkRoom, FSIZE, type RoomWalkSink, type FishFrame } from './roomWalk.js';
 import { FISH_BODY_FILE, FISH_HEAD_FILE, frameIndex } from './enhancedArtSource.js';
 import { withLoadSlot } from './loadSlot.js';
-import { assetBlob, assetJson, decodeAsset, isTransient, optionalAsset, reportMissingAsset, requiredAsset } from './assetFetch.js';
+import { TransientAssetError, assetJson, decodeAsset, isTransient, optionalAsset, requiredBlob, requiredJson } from './assetFetch.js';
 import { wreckDamage, type WreckDamage } from './artSource.js';
 import { forEachWreckPixel, wreckFrame } from '../core/room.js';
 import type { Room, Item, WreckSwap } from '../core/room.js';
@@ -449,8 +449,7 @@ async function bmpShared(url: string): Promise<ImageBitmap> {
     // an answer of "not there" is a broken build rather than a tier with a hole in it.
     // (`expect` also screens out the dev server's SPA fallback, which answers 200 with
     // index.html for a missing file.)
-    const res = await requiredAsset(url, 'the AI artwork', { expect: 'image' });
-    const blob = await assetBlob(url, res);
+    const blob = await requiredBlob(url, 'the AI artwork');
     // `premultiplyAlpha: 'none'` is load-bearing, not a default spelled out. With the
     // browser's own choice ('default') Chrome hands back PREMULTIPLIED pixels, and
     // texImage2D from an ImageBitmap takes the bitmap's own alpha mode — the GPU
@@ -505,8 +504,7 @@ async function loadAiFish(dir: string, bmp: (u: string) => Promise<ImageBitmap>)
   // REQUIRED, and through the door so a blip on the shared set is labelled transient
   // too: this load is awaited inside loadAiRoom, and a room must not be cached as "no
   // AI art" because the fish manifest hiccuped.
-  const res = await requiredAsset(url, 'the AI fish sprites', { expect: 'json' });
-  const m = await assetJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(url, res);
+  const m = await requiredJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(url, 'the AI fish sprites');
   const side = async (size: 'small' | 'big', facing: 'left' | 'right'): Promise<AiFishSide> => {
     const map: AiFishSide = new Map();
     await Promise.all((m[size]?.[facing] ?? []).map(async (f) =>

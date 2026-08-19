@@ -37,7 +37,7 @@ import { SubtitleSystem } from '../render/subtitles.js';
 import { type FishSprites } from '../render/enhancedArtSource.js';
 import { MAP_W, MAP_H } from '../render/worldMap.js';
 import { hitInfoButton } from '../render/mapInfo.js';
-import { assetJson, requiredAsset } from '../render/assetFetch.js';
+import { requiredAsset, requiredJson } from '../render/assetFetch.js';
 import { framesIdle, wake } from './frameClock.js';
 import { depthOfRoom, branchOfRoom } from '../data/world.js';
 import { hitTest as panelHitTest, sliderIndex, PANEL_W, PANEL_H } from '../render/hud.js';
@@ -534,9 +534,10 @@ initRoomLaunch({
 });
 let fishSprites: FishSprites | null = null;
 async function loadFishSprites(): Promise<void> {
-  const manUrl = '/enhanced/_fish/manifest.json';
-  const res = await requiredAsset(manUrl, 'the enhanced fish sprites', { expect: 'json' });
-  const m = await assetJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(manUrl, res);
+  const m = await requiredJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(
+    '/enhanced/_fish/manifest.json',
+    'the enhanced fish sprites',
+  );
   const build = async (size: 'small' | 'big', facing: 'left' | 'right') => {
     const map = new Map<string, { w: number; h: number; rgba: Uint8Array }>();
     await Promise.all(

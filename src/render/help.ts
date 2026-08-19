@@ -9,7 +9,7 @@
  * and any key closes the viewer (Help.pas:Image1Click / FormKeyDown).
  */
 import { parseBmp, bmpToRgba } from '../data/bmp.js';
-import { assetBytes, assetText, requiredAsset } from './assetFetch.js';
+import { requiredBytes, requiredText } from './assetFetch.js';
 
 export interface HelpPage {
   rgba: Uint8ClampedArray;
@@ -35,12 +35,12 @@ export class HelpScreens {
     const cached = this.byLang.get(lang);
     if (cached) return cached;
     const indexUrl = `/data/Help/${lang === 'cz' ? 'helpy.txt' : 'helps.txt'}`;
-    const text = await assetText(indexUrl, await requiredAsset(indexUrl, 'the help pages'));
+    const text = await requiredText(indexUrl, 'the help pages');
     const files = HelpScreens.parseIndex(text);
     const pages = await Promise.all(
       files.map(async (f) => {
         const url = `/data/Help/${f}`;
-        const bmp = parseBmp(await assetBytes(url, await requiredAsset(url, 'the help pages')));
+        const bmp = parseBmp(await requiredBytes(url, 'the help pages'));
         return { rgba: bmpToRgba(bmp), w: bmp.w, h: bmp.h };
       }),
     );

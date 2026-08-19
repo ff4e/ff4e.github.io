@@ -26,7 +26,7 @@ import { bmpToRgba, parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
 import { REGISTERED_ROOMS, branchOfRoom, depthOfRoom } from '../data/world.js';
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
-import { assetBlob, assetBytes, optionalAsset, requiredAsset } from '../render/assetFetch.js';
+import { assetBytes, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
 import type { MapAction } from '../render/worldMap.js';
 
 /**
@@ -166,7 +166,7 @@ export async function showLegImage(leg: number, pending?: { room: number; replay
   // silently meant a player crossing a leg boundary simply never saw that chapter of
   // the story — the same failure the rest of this sweep is deleting.
   const url = `/data/Menu/00${leg}.$dv`;
-  const bmp = parseBmp(await assetBytes(url, await requiredAsset(url, `the story page for leg ${leg}`)));
+  const bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`));
   ui.legImagePending = pending ?? null;
   ui.legImage = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
   ui.legImageNum = leg;
@@ -250,8 +250,7 @@ export function drawLegImage(): void {
 export async function ensureLegImageAi(leg: number): Promise<void> {
   if (graphics !== 'ai') return;
   const url = `/enhanced-ai/_story/leg${leg}.webp`;
-  const res = await requiredAsset(url, `the AI story page for leg ${leg}`, { expect: 'image' });
-  const bmp = await createImageBitmap(await assetBlob(url, res));
+  const bmp = await createImageBitmap(await requiredBlob(url, `the AI story page for leg ${leg}`));
   if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
   ui.legImageAi?.close();
   ui.legImageAi = bmp;
@@ -337,7 +336,7 @@ export async function openCredits(): Promise<void> {
   if (!ui.credits) {
     const bmp = async (f: string, what: string): Promise<Bmp> => {
       const url = `/data/Menu/${f}`;
-      return parseBmp(await assetBytes(url, await requiredAsset(url, what)));
+      return parseBmp(await requiredBytes(url, what));
     };
     {
       // CredMov_port is the shipped strip with the web-port card prepended
@@ -351,7 +350,7 @@ export async function openCredits(): Promise<void> {
       // fallback itself is required — one of the two must exist.
       const portUrl = '/data/Menu/CredMov_port.BMP';
       const port = await optionalAsset(portUrl);
-      const mov = port ? parseBmp(await assetBytes(portUrl, port)) : await bmp('CredMov.BMP', 'the credits');
+      const mov = port ? parseBmp(await assetBytes(portUrl, port, 'the credits')) : await bmp('CredMov.BMP', 'the credits');
       ui.credits = new Credits(await bmp('CredStat1.BMP', 'the credits'), mov);
     }
   }

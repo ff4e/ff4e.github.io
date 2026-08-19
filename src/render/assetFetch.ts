@@ -34,12 +34,20 @@
  * is deliberately the short list, and it is enumerable:
  *
  *  - per-room art in either enhanced tier — SCORE ships none at all, CHODBA and WIN draw
- *    a classic background by design, and 21 object sprites are legitimately unstaged;
+ *    a classic background by design, 21 object sprites are legitimately unstaged, and the
+ *    `w1.png`/`p1.png` animation loop DISCOVERS its frame count by 404ing;
  *  - `CredMov_port.BMP`, which is built by a tool and falls back to `CredMov.BMP`;
  *  - the AI intro-movie probe, whose entire purpose is asking whether a file exists.
  *
  * Everything else is required. A 404 on it is a broken build or a broken deploy, and the
  * game says so instead of quietly playing without its music, its death lines or its help.
+ *
+ * One loader is outside this file rather than exempt within it: the intro movie, which is
+ * a `<video src>` in `intro.ts`. A media element streams, and its `error` event cannot
+ * tell a 404 from a dropped connection — the one distinction everything here rests on —
+ * so routing it through this door would buy a label the platform cannot supply. The intro
+ * is skippable by design. `test/asset-fetch-discipline.test.ts` records that in the one
+ * place someone would look before adding a second such loader.
  */
 
 /** A load that failed without learning anything about the asset — safe (and required) to retry. */
@@ -265,11 +273,11 @@ async function fetchAsset(url: string, what?: string, init?: RequestInit, retry?
  * The headers can arrive and the body still not: a connection dropped mid-download
  * rejects here, not at `fetch`. That is a blip, not a missing file.
  */
-export async function assetBlob(url: string, res: Response): Promise<Blob> {
+export async function assetBlob(url: string, res: Response, what?: string): Promise<Blob> {
   try {
     return await res.blob();
   } catch (e) {
-    throw new TransientAssetError(url, 'truncated response', e);
+    throw new TransientAssetError(url, 'truncated response', e, what);
   }
 }
 
@@ -280,11 +288,11 @@ export async function assetBlob(url: string, res: Response): Promise<Blob> {
  * arrived and whose body did not rejects here with a bare `TypeError`, which is I/O and
  * must be retried rather than reported to the player as a broken game.
  */
-export async function assetBytes(url: string, res: Response): Promise<Uint8Array> {
+export async function assetBytes(url: string, res: Response, what?: string): Promise<Uint8Array> {
   try {
     return new Uint8Array(await res.arrayBuffer());
   } catch (e) {
-    throw new TransientAssetError(url, 'truncated response', e);
+    throw new TransientAssetError(url, 'truncated response', e, what);
   }
 }
 
@@ -348,11 +356,11 @@ function notTheAsset(res: Response, expect?: AssetExpect): string | null {
  * Same hazard as `assetBytes`, for the three assets that are plain text: the demo
  * script, the minigame's shape table and the help index.
  */
-export async function assetText(url: string, res: Response): Promise<string> {
+export async function assetText(url: string, res: Response, what?: string): Promise<string> {
   try {
     return await res.text();
   } catch (e) {
-    throw new TransientAssetError(url, 'truncated response', e);
+    throw new TransientAssetError(url, 'truncated response', e, what);
   }
 }
 
@@ -366,17 +374,53 @@ export async function assetText(url: string, res: Response): Promise<string> {
  * art at that tier" and cached — the very mistake this module exists to prevent, one
  * level below where it was first found.
  */
-export async function assetJson<T>(url: string, res: Response): Promise<T> {
+export async function assetJson<T>(url: string, res: Response, what?: string): Promise<T> {
   try {
     return (await res.json()) as T;
   } catch (e) {
-    // A SyntaxError means the body ARRIVED and was not JSON: a broken build, which is
-    // deterministic and worth caching. Anything else — a TypeError from a body that
-    // never finished — is I/O, and must not be remembered. Rethrowing the SyntaxError
-    // unwrapped is what puts it on the deterministic side of every caller's catch.
-    if (e instanceof SyntaxError) throw e;
-    throw new TransientAssetError(url, 'unreadable manifest', e);
+    // A SyntaxError means the body ARRIVED and was not JSON: deterministic, so retrying
+    // is pure waste, and it is reported as MISSING rather than transient — the server
+    // answered with something that is not the asset, which is the same fault as a 404 on
+    // a file the build promised. It used to be rethrown as a bare SyntaxError, which is
+    // not an asset error at all, so the failure screen never saw it and the enhanced tier
+    // cached a broken manifest as "this room has no art": a silent fidelity loss of
+    // exactly the kind the rest of this file exists to remove.
+    //
+    // Anything else — a TypeError from a body that never finished — is I/O, and must not
+    // be remembered.
+    if (e instanceof SyntaxError) throw new MissingAssetError(url, what ?? 'A game file', 'answered with a body that is not JSON');
+    throw new TransientAssetError(url, 'unreadable manifest', e, what);
   }
+}
+
+/**
+ * ── Required, end to end ──────────────────────────────────────────────────────
+ *
+ * A fetch and a body read are two calls, and until these existed every required asset
+ * spelled both: `assetBytes(url, await requiredAsset(url, what))`. That works, and it
+ * leaks in exactly one way — the body read is a second chance to forget the name, so a
+ * download that died between its headers and its last byte reached the player as "A game
+ * file didn't finish loading" while the same asset failing a moment earlier named itself.
+ *
+ * So the pair is one call. `what` is passed once and cannot drift from the request it
+ * belongs to, and no caller has to hold a raw `Response` to read a body — which is also
+ * what stops a parser outside this file from turning an asset failure back into an
+ * ordinary error nothing recognises.
+ */
+export async function requiredBytes(url: string, what: string, opts?: AssetOptions): Promise<Uint8Array> {
+  return assetBytes(url, await requiredAsset(url, what, opts), what);
+}
+
+export async function requiredText(url: string, what: string, opts?: AssetOptions): Promise<string> {
+  return assetText(url, await requiredAsset(url, what, opts), what);
+}
+
+export async function requiredJson<T>(url: string, what: string, opts?: AssetOptions): Promise<T> {
+  return assetJson<T>(url, await requiredAsset(url, what, { expect: 'json', ...opts }), what);
+}
+
+export async function requiredBlob(url: string, what: string, opts?: AssetOptions): Promise<Blob> {
+  return assetBlob(url, await requiredAsset(url, what, { expect: 'image', ...opts }), what);
 }
 
 /**
@@ -396,17 +440,3 @@ export async function decodeAsset<T>(url: string, decode: () => Promise<T>): Pro
   }
 }
 
-/**
- * Report an asset that a manifest promised and the server does not have.
- *
- * This is the case the tiers could not previously distinguish from a legitimate gap, and
- * the two want opposite treatment. An item simply ABSENT from a manifest is by design —
- * 21 sprites ship that way and render as 1998 bitmaps inside a truecolor room, silently
- * and correctly. An item LISTED in a manifest that then 404s is a broken build or a
- * broken deployment: nothing at runtime can fix it, so it is cached like any other
- * absence, but it must not be silent, because the only other symptom is art quietly
- * being a bit wrong in one room.
- */
-export function reportMissingAsset(what: string, url: string): void {
-  console.error(`[art] ${what}: manifest lists ${url}, but it did not load — the build or the deploy is incomplete`);
-}

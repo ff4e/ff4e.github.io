@@ -57,6 +57,10 @@ const fatalUp = (p) =>
 const CASES = [
   // ── Boot ────────────────────────────────────────────────────────────────────
   { label: 'game font', url: '**/data/Intro/Chars.dat' },
+  // The four bundled subtitle faces. `FontFace` with a `url()` was a third network door
+  // — no retry, no deadline, and a rejection that cannot tell a 404 from a dropped
+  // connection — so this used to catch per face and fall back to baked bitmaps.
+  { label: 'subtitle fonts', url: '**/fonts/Mulish.ttf' },
   { label: 'control panel', url: '**/data/Menu/panel.ffp' },
   { label: 'world map', url: '**/data/Menu/mapa-0.BMP' },
   { label: 'world map info panel', url: '**/data/Menu/krokomer.BMP' },
@@ -173,9 +177,11 @@ await withApp(async ({ p, expect, allowed }) => {
   await p.unrouteAll({ behavior: 'ignoreErrors' });
 
   // ── 2. Total outage: everything fails, and nothing hangs ────────────────────
-  // The regression test for the headers deadline as much as for the policy: with every
-  // request dead the game must reach its failure screen rather than sitting on a
-  // spinner for ever, which is the one failure mode worse than the bug this replaces.
+  // With every request dead the game must reach its failure screen rather than sitting on
+  // a spinner for ever, which is the one failure mode worse than the bug this replaces.
+  // Requests here are ABORTED, not stalled: a stalled request is the headers deadline's
+  // job and is asserted in `test/assetFetch.test.ts` with an injected deadline, because
+  // waiting out the real 20 s in a browser probe would buy the same fact for 20 s.
   // By RESOURCE TYPE, not by extension: the page and its modules have to load or there
   // is no game to fail, and the document itself has no extension to match on.
   const APP = new Set(['document', 'script', 'stylesheet']);

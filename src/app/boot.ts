@@ -3,9 +3,10 @@
  * packages, room 7, then the first frame. (The save store is opened earlier, in
  * `main.ts`, because `migrateSaves()` has to precede every `ff.*` read.)
  *
- * What is critical and what is optional is documented inline — nearly all of it is
- * optional, and the pattern is the same each time: a failed fetch costs its feature,
- * never the game.
+ * Nothing here is optional any more. Every asset boot fetches is one the 1998 game
+ * shipped, so a failure ends the session on the failure screen and names the file (see
+ * `loadingUi.ts`) rather than costing its feature quietly. That is the whole of the
+ * all-or-nothing rule as it applies to boot, and it is why none of these loaders catch.
  *
  * This is a function rather than module-scope top-level await on purpose. An imported
  * module is evaluated before any statement of its importer, so at module scope this
@@ -32,7 +33,7 @@ import { parseBmp, type Bmp } from '../data/bmp.js';
 import { parseFfp } from '../data/ffp.js';
 import { roomByNumber } from '../data/roomTable.js';
 import { initAnalytics } from '../platform/analytics.js';
-import { assetBytes, requiredAsset } from '../render/assetFetch.js';
+import { decodeAsset, requiredBytes } from '../render/assetFetch.js';
 import { FontData } from '../render/font.js';
 import { webgl2Available } from '../render/glScreen.js';
 import { WorldMap } from '../render/worldMap.js';
@@ -49,7 +50,7 @@ let host!: BootHost;
 
 /** Fetch + parse one of boot's 1998 bitmaps. Every one of them is required. */
 async function bootBmp(url: string, what: string): Promise<Bmp> {
-  return parseBmp(await assetBytes(url, await requiredAsset(url, what)));
+  return parseBmp(await requiredBytes(url, what));
 }
 
 /** Hand this module its view of the game. Called once, from `main.ts`, during boot. */
@@ -61,12 +62,19 @@ export function initBoot(h: BootHost): void {
 export async function runBoot(): Promise<void> {
   setFont(await FontData.load('/data/Intro'));
   setLoadingMsg('Loading fonts…');
-  // Enhanced subtitle font (FreeSans Bold, the FFNG subtitle face). Optional: if it
-  // fails to load, enhanced mode silently falls back to the baked bitmap subtitles.
-  // Enhanced subtitle fonts — all bundled + OFL/GPL so they render identically on
-  // every platform. Mulish/Manrope/Jost are variable (weight axis 100-900);
-  // FFSubtitle is the original FreeSans Bold. If loading fails, enhanced mode
-  // silently falls back to the baked bitmap subtitles.
+  // Enhanced subtitle fonts — all bundled + OFL/GPL so they render identically on every
+  // platform. Mulish/Manrope/Jost are variable (weight axis 100-900); FFSubtitle is the
+  // original FreeSans Bold (the FFNG subtitle face).
+  //
+  // Loaded from BYTES rather than by handing `FontFace` a `url()`. That form is a third
+  // network door: it retries nothing, applies no deadline, and its rejection cannot tell
+  // a 404 from a dropped connection — so this loop used to catch per face and carry on,
+  // and four shipped fonts could quietly become baked bitmap subtitles with nothing said.
+  // Through the door they are required like everything else.
+  //
+  // `subFontReady` stays a live flag rather than becoming a constant: the renderer's
+  // bitmap path is still reachable at runtime (the probes toggle it), and that is a
+  // drawing decision, not a loading one.
   {
     const faces: ReadonlyArray<[string, string, string]> = [
       ['FFSubtitle', '/enhanced/subtitle.ttf', '700'],
@@ -74,25 +82,22 @@ export async function runBoot(): Promise<void> {
       ['Manrope', '/fonts/Manrope.ttf', '100 900'],
       ['Jost', '/fonts/Jost.ttf', '100 900'],
     ];
-    let anyLoaded = false;
     await Promise.all(
       faces.map(async ([family, url, weight]) => {
-        try {
-          const face = new FontFace(family, `url(${url})`, { weight });
-          await face.load();
-          document.fonts.add(face);
-          anyLoaded = true;
-        } catch {
-          /* this face is unavailable; others / bitmap fallback still work */
-        }
+        const bytes = await requiredBytes(url, 'the subtitle fonts');
+        const face = new FontFace(family, bytes.buffer as ArrayBuffer, { weight });
+        // A font that arrived and will not parse is a broken build, but it is
+        // indistinguishable here from a truncated download — the same guess `decodeAsset`
+        // makes for images, and for the same reason.
+        document.fonts.add(await decodeAsset(url, () => face.load()));
       }),
     );
-    setSubFontReady(anyLoaded);
+    setSubFontReady(true);
   }
   // Control-panel overlay graphic (TOvl / panel.ffp).
   setLoadingMsg('Loading graphics…');
   const panelUrl = '/data/Menu/panel.ffp';
-  ui.panel = parseFfp(await assetBytes(panelUrl, await requiredAsset(panelUrl, 'the control panel')));
+  ui.panel = parseFfp(await requiredBytes(panelUrl, 'the control panel'));
   // World map assets (mapa-0/mapa-1/maska + node sprites n0..n4).
   {
     const files = ['mapa-0.BMP', 'mapa-1.BMP', 'maska.BMP', 'n0.BMP', 'n1.BMP', 'n2.BMP', 'n3.BMP', 'n4.BMP'];
@@ -102,7 +107,7 @@ export async function runBoot(): Promise<void> {
     // time the map is about to be shown in the `ai` tier (beginMapArt), so other tiers
     // pay nothing for it.
   }
-  await loadParchment(); // the room-entry parchment; optional, never fatal (roomLaunch.ts)
+  await loadParchment(); // the room-entry parchment (roomLaunch.ts)
   // World-map record info panel assets (krokoměr background, button icons, digit
   // glyphs) + the level name-plaque data for the current language (UMain.pas:341).
   {

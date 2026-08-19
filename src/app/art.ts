@@ -32,7 +32,7 @@ import { loadAiCredits } from '../render/creditsAi.js';
 import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
 import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
-import { isAssetError, isMissing, isTransient } from '../render/assetFetch.js';
+import { assetJson, isAssetError, isMissing, isTransient } from '../render/assetFetch.js';
 import { failAssets, fatalShown } from './loadingUi.js';
 // Re-exported so the one other consumer of the decode helper (main.ts's fish sprites)
 // keeps its existing import. It lives in enhancedLoad.ts now, with the loaders.
@@ -287,11 +287,16 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
     applyEnhanced(num, result);
   } catch (e) {
     if (isMissing(e)) {
-      // The manifest listed a sprite and the server does not have it. Not an absence —
-      // an absence is a room that ships no manifest at all, and never reaches here —
-      // but a broken build or a broken deploy, whose only other symptom is one item
-      // silently rendering as a 1998 bitmap inside a truecolor room. Nothing is cached,
-      // so a later tier switch asks again (and fails again, where it matters).
+      // The server answered, and the answer was not the asset: a sprite the manifest
+      // listed and the server does not have, or a manifest served as something that is
+      // not JSON. Not an absence — an absence is a room that ships no manifest at all,
+      // and never reaches here — but a broken build or a broken deploy, whose only other
+      // symptom is one item silently rendering as a 1998 bitmap inside a truecolor room.
+      //
+      // The malformed-manifest half used to land in the branch below and be REMEMBERED as
+      // "this room has no enhanced art", which is the same silent downgrade with an extra
+      // step. Nothing is cached now, so a later tier switch asks again — and fails again,
+      // where it matters.
       console.error(`[art] enhanced art for ${jmeno} is incomplete`, e);
       // Same two guards as the transient case below, and for the same reason: art that
       // this session never PAINTS is not part of the experience the all-or-nothing rule
@@ -303,16 +308,14 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
       return;
     }
     if (!isTransient(e)) {
-      // NOT transient: the server answered, and the answer was unusable — a manifest
-      // with a JSON content-type and a malformed body reaches here as a bare
-      // SyntaxError (assetJson rethrows it unwrapped, on purpose). That is a broken
-      // build, so it is an ABSENCE: remember it and let the room render classic, which
-      // is exactly what loadAiRoom does one tier up.
-      //
-      // Rethrowing instead — as this did — escaped past both the cache write and the
-      // release below, so `enhancedPending` stayed true for ever. `simPaused` then
-      // stopped the game clock, the spinner sat there, and no screen was offered: a
-      // permanently frozen room, recoverable only by reloading the page.
+      // Neither kind of asset error: something in this file's own decoding threw. Not a
+      // load failure at all, so it is not the failure screen's business — but it must not
+      // escape either. Rethrowing, as this once did, escaped past both the cache write
+      // and the release below, so `enhancedPending` stayed true for ever: `simPaused`
+      // stopped the game clock, the spinner sat there, and no screen was offered — a
+      // permanently frozen room, recoverable only by reloading the page. So it is filed
+      // as an absence and the room renders classic, which is what loadAiRoom does a tier
+      // up. Asset failures no longer reach here; they are answered above.
       console.error(`[art] enhanced art for ${jmeno} is unusable`, e);
       enhancedCache.set(jmeno, { art: null, objects: [] });
       applyEnhanced(num, { art: null, objects: [] });
@@ -364,7 +367,7 @@ export async function ensureAiPanel(): Promise<void> {
   aiPanelPending = true;
   try {
     aiPanel = await loadAiPanel('/');
-    if (aiPanel) ui.panelSig = null;   // force a repaint at the new resolution
+    ui.panelSig = null; // force a repaint at the new resolution
   } finally {
     aiPanelPending = false;
   }
@@ -529,7 +532,7 @@ async function loadAiCreditsOnce(): Promise<void> {
   // its own overlay is up — a hidden element gets no pointer events, so "click anywhere
   // to dismiss" silently stopped working in the ai tier while the keyboard still did.
   // Bind on the overlay itself; listeners survive detach/re-attach, so bind once here.
-  aiCredits?.el.addEventListener('mousedown', (e) => {
+  aiCredits.el.addEventListener('mousedown', (e) => {
     if (e.button !== 0 || ui.mapOverlay !== 'credits') return;
     e.preventDefault();
     host.closeMapOverlay();
@@ -576,10 +579,20 @@ export async function ensureAiRoom(num: number): Promise<void> {
     // exactly as it always has.
     clearAiPending(num);
   } catch (e) {
-    if (!isAssetError(e)) throw e;
-    // Both kinds now: a blip taught us nothing, and a 404 on a file the room's own
-    // manifest listed is a broken build. Neither is the room saying "I have no AI art" —
-    // that is `null`, handled above, and it is the only silent outcome left here.
+    if (!isAssetError(e)) {
+      // Not a load failure at all — this tier's own decoding threw — so the failure
+      // screen is not the answer, but the HOLD still has to come off. `retargetArtForTier`
+      // arms `aiPending` and then voids this call, so a rejection escaping here would
+      // leave `roomArtPending()` true for ever: the room withheld, the spinner sitting,
+      // and no screen offered. That is the frozen room `ensureEnhancedArt` documents for
+      // the sibling tier, reached by the one path that has no `await` to carry it.
+      console.error(`[art] AI art for ${jmeno} is unusable`, e);
+      clearAiPending(num);
+      return;
+    }
+    // Both kinds of asset failure now: a blip taught us nothing, and a 404 on a file the
+    // room's own manifest listed is a broken build. Neither is the room saying "I have no
+    // AI art" — that is `null`, handled above, and it is the only silent outcome left.
     console.warn(`[art] AI art for ${jmeno} did not load`, e);
     // The hold STAYS, and the player is asked. Both the guard and the hold matter:
     // these loads outlive the room that started them, so a stale failure must not

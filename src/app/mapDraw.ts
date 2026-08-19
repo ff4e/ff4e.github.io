@@ -9,7 +9,7 @@
  * right now.
  */
 import { AI_MAP_H, AI_MAP_SCALE, AI_MAP_W } from '../render/worldMapAi.js';
-import { assetBlob, assetBytes, assetJson, requiredAsset } from '../render/assetFetch.js';
+import { requiredBlob, requiredBytes, requiredJson } from '../render/assetFetch.js';
 import { DESKA_X_OFFSET, DESKA_Y_OFFSET, blitDeska, parseDesky } from '../data/desky.js';
 import { INFO_SETTLE_FAZE, drawInfoDigits, drawInfoPanel, drawInfoPanelArtAi } from '../render/mapInfo.js';
 import { MAP_H, MAP_W } from '../render/worldMap.js';
@@ -49,8 +49,8 @@ export async function ensureDeskyData(): Promise<void> {
   const popdeskUrl = `/data/Menu/popdesk${n}.dat`;
   const atlasUrl = `/data/Menu/desky${n}.dat`;
   const [popdesk, atlas] = await Promise.all([
-    requiredAsset(popdeskUrl, 'the map name plaques').then((r) => assetBytes(popdeskUrl, r)),
-    requiredAsset(atlasUrl, 'the map name plaques').then((r) => assetBytes(atlasUrl, r)),
+    requiredBytes(popdeskUrl, 'the map name plaques'),
+    requiredBytes(atlasUrl, 'the map name plaques'),
   ]);
   ui.deskyData = parseDesky(popdesk, atlas);
   ui.deskyLang = lang;
@@ -226,8 +226,7 @@ export async function ensureAiDeskyGeom(): Promise<void> {
   if (aiDeskyTried) return;
   aiDeskyTried = true;
   const url = '/enhanced-ai/_desky/plaques.json';
-  const res = await requiredAsset(url, 'the AI map name plaques', { expect: 'json' });
-  aiDeskyGeom = (await assetJson<{ plaques: typeof aiDeskyGeom }>(url, res)).plaques ?? null;
+  aiDeskyGeom = (await requiredJson<{ plaques: typeof aiDeskyGeom }>(url, 'the AI map name plaques')).plaques ?? null;
   ui.mapSig = null; // repaint now that plaques can be drawn hi-res
 }
 
@@ -249,8 +248,7 @@ export async function loadAiPlaque(key: string): Promise<void> {
   aiPlaqueLoading.add(key);
   try {
     const url = `/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`;
-    const res = await requiredAsset(url, 'an AI map name plaque', { expect: 'image' });
-    const bmp = await createImageBitmap(await assetBlob(url, res));
+    const bmp = await createImageBitmap(await requiredBlob(url, 'an AI map name plaque'));
     aiDeskyCache.set(key, bmp);
     while (aiDeskyCache.size > AI_DESKY_CACHE_MAX) {
       const oldest = aiDeskyCache.keys().next().value as string | undefined;

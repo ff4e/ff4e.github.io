@@ -21,7 +21,7 @@
  * the map falls back to the faithful CPU composite. classic/enhanced never touch it.
  */
 import { MAP_W, MAP_H, type MapAction, type WorldMap } from './worldMap.js';
-import { assetBlob, decodeAsset, isTransient, requiredAsset } from './assetFetch.js';
+import { decodeAsset, requiredBlob } from './assetFetch.js';
 
 /** Upscale factor of the committed AI art (must match tools/build-map-ai.mjs AI_SCALE). */
 export const AI_MAP_SCALE = 4;
@@ -52,8 +52,7 @@ export interface AiMapState {
 export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorldMap> {
   const load = async (file: string): Promise<ImageBitmap> => {
     const url = `${base}Menu/${file}`;
-    const res = await requiredAsset(url, 'the AI world map', { expect: 'image' });
-    const blob = await assetBlob(url, res);
+    const blob = await requiredBlob(url, 'the AI world map');
     return decodeAsset(url, () => createImageBitmap(blob));
   };
   const [mapa0, mapa1, krokomer, ikonky, loading, ...nodes] = await Promise.all([

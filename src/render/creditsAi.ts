@@ -20,7 +20,7 @@
  * The faithful tier keeps its per-pixel palette compositor: it is only 640x480, and it
  * must stay index-exact.
  */
-import { assetBlob, assetJson, decodeAsset, requiredAsset } from './assetFetch.js';
+import { decodeAsset, requiredAsset, requiredBlob, requiredJson } from './assetFetch.js';
 
 /** Upscale factor of the shipped credits art when its manifest doesn't say. */
 export const AI_CREDITS_SCALE = 4;
@@ -58,8 +58,7 @@ interface AiCreditsManifest { scale?: number; files?: string[] }
  * console line. The two elements live for the session, so the URLs are not revoked.
  */
 async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
-  const res = await requiredAsset(url, what, { expect: 'image' });
-  const blob = await assetBlob(url, res);
+  const blob = await requiredBlob(url, what);
   return decodeAsset(url, async () => {
     const img = new Image();
     await new Promise<void>((ok, fail) => {
@@ -81,9 +80,7 @@ async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
 export async function loadAiCredits(base: string): Promise<AiCredits> {
   {
     const dir = `${base}enhanced-ai/_credits/`;
-    const manUrl = `${dir}ai.json`;
-    const res = await requiredAsset(manUrl, 'the AI credits', { expect: 'json' });
-    const man = await assetJson<AiCreditsManifest>(manUrl, res);
+    const man = await requiredJson<AiCreditsManifest>(`${dir}ai.json`, 'the AI credits');
     const scale = Number(man.scale) || AI_CREDITS_SCALE;
     const [stat, mov] = await Promise.all([
       loadImage(`${dir}stat.webp`, 'the AI credits'),
