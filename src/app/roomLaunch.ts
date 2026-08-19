@@ -386,8 +386,10 @@ function abortMapLaunch(l: MapLaunch, err: unknown): void {
   try {
     host.wake();
     // An answer ("not there") and no answer at all want opposite sentences — see
-    // src/render/assetFetch.ts.
-    failAssets(roomLabel(l.room), isTransient(err));
+    // src/render/assetFetch.ts. WHICH room is logged rather than shown: the screen is
+    // generic now, because its one action is the same whichever file broke.
+    if (isAssetError(err)) console.error(`asset failed: ${roomLabel(l.room)}`, err);
+    failAssets(isTransient(err));
     // The picker names the room actually on screen, which is the one the player came
     // from: `startRoom` pointed it at the room it was about to load, and that load is
     // what just failed. `curNum` only advances once a load succeeds.
@@ -412,10 +414,11 @@ export function failRoomEntry(num: number, err: unknown): void {
     abortMapLaunch(l, err);
     return;
   }
-  failAssets(roomLabel(num), isTransient(err));
+  if (isAssetError(err)) console.error(`asset failed: ${roomLabel(num)}`, err);
+  failAssets(isTransient(err));
 }
 
-/** The room's own name (PRVNI, KOSTE…), for the failure screen's sentence. */
+/** The room's own name (PRVNI, KOSTE…), for the log line above. */
 function roomLabel(num: number): string {
   const jmeno = ROOMS[num - 1]?.jmeno;
   return jmeno === undefined ? `Room ${num}` : `The room ${jmeno}`;

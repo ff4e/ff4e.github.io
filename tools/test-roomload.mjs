@@ -128,5 +128,6 @@ await withApp(
     );
     await p.unroute(ffrGlob(40));
   },
-  { cpu: true },
+  // The room-entry failure path logs which room failed, now that the screen does not.
+  { cpu: true, allowErrors: /asset failed|Failed to fetch|net::ERR|ERR_FAILED|404/ },
 );

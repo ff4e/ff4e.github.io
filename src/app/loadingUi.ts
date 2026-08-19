@@ -150,20 +150,31 @@ export function syncLoadingUi(now: number): void {
  * that FAILED — no answer at all, or a file a manifest promised and the server does not
  * have — belongs on this screen.
  */
-export function failAssets(what: string, transient: boolean): void {
+export function failAssets(transient: boolean): void {
   // The two cases want opposite sentences. A request that got no answer is the player's
   // connection and is worth trying again; a 404 is an answer, and telling that player to
   // check their connection sends them to debug their own wifi over a broken deploy.
   //
-  // The label is capitalised HERE rather than at the call sites. Half of them are
-  // sentence fragments written for an error message ("the music for room 7"), half are
-  // written for this screen ("The room SCHODY"), and every new asset would otherwise be
-  // one more chance to ship a screen that opens in lower case.
-  const label = what.charAt(0).toUpperCase() + what.slice(1);
+  // ── Why this no longer names the asset ──────────────────────────────────────
+  // It used to say "The music for room 7 didn't finish loading", and that is more
+  // precision than the sentence can spend. The screen has exactly one action on it, and
+  // it is the same action whichever file broke: reload. Naming the file changes nothing
+  // the player can do, and it invites a sentence that is wrong in some other way —
+  // "The help pages IS missing" — for every asset whose name happens to be plural.
+  //
+  // What the name is genuinely useful for is diagnosis, and that has a better home: every
+  // asset failure is logged with its name and its tier by `reportAssetError`, at every
+  // tier, so a bug report still says exactly which file it was. The probe asserts the LOG
+  // names it, rather than the screen.
+  //
+  // The middle tier keeps its name, and the asymmetry is deliberate: a note says one
+  // specific thing is missing while the rest of the game carries on, so "which thing" is
+  // the entire content of the message. Here the answer is "the game", and saying so is
+  // the whole truth.
   showFatal(
     transient
-      ? `${label} didn't finish loading. Check your connection and reload.`
-      : `${label} is missing from the game files. This is a problem with the game, not with your connection.`,
+      ? `The game didn't finish loading. Check your connection and reload.`
+      : `Some of the game's files are missing. This is a problem with the game, not with your connection.`,
   );
 }
 
@@ -318,14 +329,17 @@ export function initLoadingUi(): void {
  * from a loader that was never called, which is how a broken enhanced tier hid before.
  */
 export function reportAssetError(e: TransientAssetError | MissingAssetError, retry?: () => void): void {
-  console.error(`asset failed (${e.tier}):`, e);
+  // The name goes in the LOG line rather than being left inside the error's own message,
+  // because this is now the only place it is written down: the failure screen is generic,
+  // so a bug report's "which file was it" comes from here. `test-asset-tiers.mjs` asserts
+  // this line names the asset for every must-have row it breaks.
+  console.error(`asset failed (${e.tier}): ${e.what ?? 'an unnamed asset'}`, e);
   switch (e.tier) {
     case 'mustHave':
-      // An asset that did not arrive gets the sentence written for it, rather than boot's
-      // generic "something went wrong". Boot's loaders do not catch their own failures —
-      // there is nothing useful for them to do — so this is still the only thing between
-      // a missing panel.ffp and a blank page.
-      failAssets(e.what ?? 'A game file', isTransient(e));
+      // Boot's loaders do not catch their own failures — there is nothing useful for them
+      // to do — so this is still the only thing between a missing panel.ffp and a blank
+      // page.
+      failAssets(isTransient(e));
       return;
     case 'shouldHave':
       // No `retry` from the backstop path: it is reached precisely because nobody handled

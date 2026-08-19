@@ -68,4 +68,10 @@ await withApp(async ({ p, expect }) => {
   );
 
   console.log('cas_hry OK: per-room banking, map time excluded, cross-session total');
-});
+},
+  // A load still in flight when this probe navigates rejects as a truncated body, and
+  // the name of the asset is now logged (the failure screen is generic — see
+  // failAssets). The behaviour is unchanged; only the log line is new, so it is
+  // tolerated narrowly rather than by allowing asset failures in general.
+  { allowErrors: /asset failed: The artwork for (this room|the world map) TransientAssetError.*truncated response/ },
+);

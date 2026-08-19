@@ -280,9 +280,12 @@ await withApp(
       failed.widths.length === 0,
       `nothing was presented in the wrong tier (${JSON.stringify(failed.widths)})`,
     );
-    expect(failed.note.toLowerCase().includes('world map'), `the message names the map (“${failed.note}”)`);
+    // The screen no longer NAMES the asset — its one action is Reload whichever file
+    // broke, so the name went to the console instead (see failAssets). Which asset was
+    // named is asserted in test-asset-tiers.mjs, on the log. What still matters here is
+    // that the two KINDS of failure are told apart.
     expect(
-      /missing from the game files/i.test(failed.note),
+      /problem with the game, not with your connection/i.test(failed.note),
       `a 404 is reported as a problem with the game, not the connection: “${failed.note}”`,
     );
     expect(!failed.spinner, 'the loading spinner stands down — the screen has taken over the wait');
@@ -329,7 +332,6 @@ await withApp(
       pending: window.__ff.mapArtPending(),
       spinner: window.__ff.loadingVisible(),
     }));
-    expect(mapHeld.title.toLowerCase().includes('world map'), `the message names the map (“${mapHeld.title}”)`);
     expect(mapHeld.pending, 'the map is held rather than presented in the wrong tier');
     expect(!mapHeld.spinner, 'the loading spinner stands down — the screen has taken over the wait');
 
@@ -375,5 +377,5 @@ await withApp(
   // reloads (see the header note on the memory cache). The sampler's init script
   // overrides this to `ai` for every navigation after that one.
   // The 404s in §5 are served on purpose; §5b's garbage 200 logs a decode failure.
-  { graphics: 'enhanced', allowErrors: /Failed to load resource|404/ },
+  { graphics: 'enhanced', allowErrors: /asset failed|Failed to load resource|404/ },
 );

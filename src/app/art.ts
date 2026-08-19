@@ -619,7 +619,10 @@ export async function ensureAiRoom(num: number): Promise<void> {
  * in the DOM) and swallow the click on the screen's own button. Found exactly that way.
  */
 function raiseArtFailure(what: string, err?: unknown): void {
-  failAssets(what, err === undefined ? true : isTransient(err));
+  // `what` no longer reaches the player — the screen is generic (see `failAssets`) — but
+  // it is still the only record of WHICH art failed, so it is logged rather than dropped.
+  console.error(`asset failed: ${what}`, err);
+  failAssets(err === undefined ? true : isTransient(err));
   host.forceRoomRedraw = true;
   host.wake();
 }

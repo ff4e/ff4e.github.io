@@ -58,9 +58,11 @@ const noteUp = (p) => p.waitForFunction(() => window.__ff.loadNoteShown(), null,
  * The table. `reach` is what has to happen for the asset to be wanted; rows without one
  * are fetched by boot itself, so a reload is enough.
  *
- * `label` is matched against the surface case-insensitively — the screen and the note are
- * the only places a player learns which file broke, so an asset that stops (or quietly
- * degrades) the game without saying which one is still a bug.
+ * `label` is matched case-insensitively against whatever is supposed to name the asset,
+ * and that differs by tier ON PURPOSE: the note names it, the failure SCREEN does not.
+ * The screen's one action is Reload whichever file broke, so the name buys the player
+ * nothing there — but it still has to exist for a bug report, so it moved to the console
+ * and the must-have rows assert it there instead.
  */
 const CASES = [
   // ── must have: boot, and nothing is playable until these land ───────────────
@@ -192,6 +194,13 @@ await withApp(async ({ p, expect, allowed }) => {
     if (tier === 'mustHave') {
       await fatalUp(p);
       said = await fatalText(p);
+      // The screen is GENERIC — its one action is Reload whichever file broke, so naming
+      // the file buys the player nothing (see `failAssets`). The name still has to exist
+      // somewhere or a bug report cannot say which deploy is broken, so it moved to the
+      // log, and this is the assertion that it is really there. Without it the rows below
+      // would only be checking that *something* broke.
+      const named = allowed.some((t) => t.toLowerCase().includes(label.toLowerCase()));
+      expect(named, `${label}: the log names it, even though the screen does not`);
     } else {
       // Named rather than left as a bare `waitForFunction` timeout: the interesting way
       // for this to fail is an asset that was re-tiered DOWN, and "Timeout exceeded" does
@@ -200,15 +209,20 @@ await withApp(async ({ p, expect, allowed }) => {
         throw new Error(`${label}: should-have, but no note ever appeared — was it re-tiered to niceToHave?`);
       });
       said = await p.evaluate(() => window.__ff.loadNoteText());
+      // The middle tier DOES name the thing, and that is the whole content of the
+      // message: one specific thing is missing while the rest of the game carries on.
+      expect(said.toLowerCase().includes(label.toLowerCase()), `${label}: the note names it (“${said}”)`);
       // The whole claim of the middle tier, and the reason it is not just a quieter
       // failure screen: the session is still alive behind the note.
       expect(!(await p.evaluate(() => window.__ff.fatalShown())), `${label}: the session did not end`);
     }
-    expect(said.toLowerCase().includes(label.toLowerCase()), `${label}: the surface names it (“${said}”)`);
+    // Both surfaces still have to tell the two KINDS of failure apart. A 404 that told the
+    // player to check their connection would send them to debug their own wifi over a
+    // broken deploy, and that is true whether it is said on a screen or in a note.
     expect(
       how === absent
-        ? /missing from the game files/i.test(said)
-        : /didn't finish loading|check your connection/i.test(said),
+        ? /problem with the game, not with your connection/i.test(said)
+        : /check your connection/i.test(said),
       `${label}: the wording matches the kind of failure (“${said}”)`,
     );
   }
@@ -254,6 +268,10 @@ await withApp(async ({ p, expect, allowed }) => {
   // the slowest in the suite. And a log line is the honest condition anyway: every tier
   // logs, `niceToHave` included, so waiting for it proves the loader really ran and
   // really failed instead of assuming it from a timer.
+  // The tier is deliberately NOT pinned in these patterns (`\w+`): if a loader is
+  // re-tiered this still has to settle, so the assertion that reports it is the one about
+  // BEHAVIOUR — "a plaque that will not load does not end the session" — rather than a
+  // timeout on a condition that stopped matching.
   const settled = async (re, n) => {
     const before = allowed.filter((t) => re.test(t)).length;
     await p.waitForFunction(() => true); // yield to the page once before polling
@@ -268,9 +286,16 @@ await withApp(async ({ p, expect, allowed }) => {
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
   await p.evaluate(() => window.__ff.setGraphics('ai'));
 
-  /** Open four different rooms' record panels, which is what asks for four plaques. */
+  /**
+   * Open six rooms' record panels, which is what asks for their plaques.
+   *
+   * Six and not four for headroom: the first room opened never fetches an image (see
+   * below), and under a loaded full-suite run the geometry can take a second room to
+   * arrive as well. Four left exactly two plaques in the worst case and made this
+   * section fail on timing rather than on behaviour.
+   */
   const hoverRooms = async (re, n) => {
-    for (const num of [3, 5, 7, 9]) {
+    for (const num of [3, 5, 7, 9, 11, 13]) {
       await p.evaluate((r) => window.__ff.openMapInfo(r), num);
       await waitFrames(p, 2);
     }
@@ -294,14 +319,14 @@ await withApp(async ({ p, expect, allowed }) => {
   p.on('request', countPlaques);
   await failing(p, '**/enhanced-ai/_desky/*.webp');
   // Three plaque images, not four: the first room opened has no geometry yet.
-  const images = await hoverRooms(/_desky\/\w+\.webp/, 3);
+  const images = await hoverRooms(/asset failed \(\w+\): an AI map name plaque/, 3);
   p.off('request', countPlaques);
   expect(!images.fatal, 'a plaque that will not load does not end the session — THE bug this file guards');
   expect(!images.note, 'and does not interrupt with a note either: it is nice-to-have, not should-have');
   expect(images.screen === 'map' && images.presented, 'and the map is still there, and still the map');
   // The FIRST room opened never fetches an image: `aiPlaqueFor` returns as soon as it
-  // finds no geometry, having kicked `plaques.json` off. So three of the four is the whole
-  // of it, and asserting four would be asserting a bug. This is here so the section above
+  // finds no geometry, having kicked `plaques.json` off. So the count is always short of
+  // the rooms opened, and asserting one per room would be asserting a bug. This is here so the section above
   // cannot pass by never asking for a plaque at all — which is exactly how an earlier
   // version of it passed with `loadAiPlaque` marked `mustHave`.
   expect(plaqueHits.size >= 3, `the plaques really were asked for (${[...plaqueHits.keys()].join(', ') || 'none'})`);
@@ -320,7 +345,7 @@ await withApp(async ({ p, expect, allowed }) => {
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
   await failing(p, '**/enhanced-ai/_desky/plaques.json');
   await p.evaluate(() => window.__ff.setGraphics('ai'));
-  const geom = await hoverRooms(/_desky\/plaques\.json/, 1);
+  const geom = await hoverRooms(/asset failed \(\w+\): the AI map name plaques/, 1);
   expect(!geom.fatal, 'nor does the plaque GEOMETRY failing, which is the same gesture one step earlier');
   expect(!geom.note && geom.screen === 'map' && geom.presented, 'and it too passes without a word');
   await p.evaluate(() => window.__ff.closeMapInfo());
@@ -384,6 +409,6 @@ await withApp(async ({ p, expect, allowed }) => {
   {
     graphics: 'ai',
     allowErrors:
-      /asset failed|\[art\]|Failed to load resource|net::ERR|ERR_FAILED|404|Failed to fetch|boot failed|network error|returned HTTP|PE:|parchment/,
+      /asset failed|art failed|room entry failed|\[art\]|Failed to load resource|net::ERR|ERR_FAILED|404|Failed to fetch|boot failed|network error|returned HTTP|PE:|parchment/,
   },
 );

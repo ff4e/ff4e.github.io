@@ -537,5 +537,5 @@ await withApp(
   // picker (abortMapLaunch points it back at the room still on screen): the second log is
   // the guard around that reporting doing its job, which is the property that keeps a DOM
   // failure from costing the frame loop. Every other console error still fails.
-  { cpu: true, graphics: 'enhanced', allowErrors: /^(room launch failed:|failed to report a failed room launch:)/ },
+  { cpu: true, graphics: 'enhanced', allowErrors: /^(asset failed:|room launch failed:|failed to report a failed room launch:)/ },
 );

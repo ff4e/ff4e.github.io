@@ -35,9 +35,11 @@
  * cannot help, and telling that player to check their connection sends them off to debug
  * their own wifi over a broken deploy.
  *
- * The sentences deliberately match the fatal screen's, word for word, because they are
- * describing the same two events and only the severity differs. That is also what lets
- * one probe assert the wording for all three tiers.
+ * The note NAMES the thing; the fatal screen deliberately does not. That asymmetry is
+ * the point of the middle tier rather than an inconsistency: a note says one specific
+ * thing is missing while the rest of the game carries on, so "which thing" is the entire
+ * content of the message. On the fatal screen the answer is "the game", the only action
+ * is Reload whichever file broke, and naming it would buy nothing — see `failAssets`.
  *
  * ── No init(), deliberately ───────────────────────────────────────────────────
  * The elements are looked up on first use rather than in a boot-time `init*()`. Module
@@ -96,11 +98,6 @@ function bind(): void {
   document.getElementById('load-note-x')?.addEventListener('click', () => hideLoadNote());
 }
 
-/** "the help pages" → "The help pages", so the sentence can start with it. */
-function opening(what: string): string {
-  return what.charAt(0).toUpperCase() + what.slice(1);
-}
-
 /**
  * Raise the note for a load that did not arrive.
  *
@@ -109,6 +106,13 @@ function opening(what: string): string {
  * the deliberately simple choice — a rail of stacked complaints is a worse thing to hand
  * a player than the most recent one, and two should-have failures at once means the
  * connection is gone, which the next one will say just as well.
+ *
+ * ── Why both sentences open with "Couldn't load" ──────────────────────────────
+ * Because the subject is a fragment the CALL SITE wrote, and half of them are plural:
+ * "the help pages", "the credits". Any sentence built as `${subject} is …` ships
+ * "The help pages is missing", and the earlier version of this file did exactly that.
+ * Leading with the verb puts the subject in object position, where number does not
+ * matter, so one template is correct for every name anyone adds later.
  */
 export function showLoadNote(f: LoadFailure): void {
   bind();
@@ -116,8 +120,8 @@ export function showLoadNote(f: LoadFailure): void {
   retry = f.retry ?? null;
   if (msgEl) {
     msgEl.textContent = f.transient
-      ? `${opening(f.subject)} didn't finish loading — check your connection and try again.`
-      : `${opening(f.subject)} is missing from the game files. This is a problem with the game, not with your connection.`;
+      ? `Couldn't load ${f.subject} — check your connection and try again.`
+      : `Couldn't load ${f.subject} — missing from the game files. This is a problem with the game, not with your connection.`;
   }
   // A permanent failure has nothing to retry: the server answered, and it will answer
   // the same way next time. Offering the button anyway would be a lie the player pays

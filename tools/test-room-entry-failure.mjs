@@ -53,7 +53,7 @@ const settled = (p) =>
   });
 
 await withApp(
-  async ({ p, expect }) => {
+  async ({ p, expect, allowed }) => {
     // Installed before a RELOAD rather than before the first boot, because withApp boots
     // the page itself: reloading with the listener attached is what makes §1's "room 1
     // was never asked for" a measurement instead of an assumption.
@@ -109,7 +109,13 @@ await withApp(
     expect(after.launching === null, 'the launch is disarmed, so the map is not frozen behind a parchment');
     expect(after.loading === false, 'the room-loading guard is not left stuck on');
     expect(/check your connection/i.test(after.note), `the screen blames the connection: "${after.note}"`);
-    expect(/PRVNI/.test(after.note), 'the screen names the room that failed');
+    // The SCREEN no longer names the room — its one action is Reload whichever file
+    // broke (see failAssets) — so the name moved to the console, where a bug report can
+    // still find it. Asserted there instead of dropped.
+    expect(
+      allowed.some((t) => /PRVNI/.test(t)),
+      'the log names the room that failed, even though the screen does not',
+    );
 
     // The frame loop is what the old code's `screen = 'room'` was protecting: letting the
     // exception unwind out of tickMapLaunch stopped it dead (3 iterations in 1.5s against
@@ -173,7 +179,7 @@ await withApp(
       !/check your connection/i.test(gone.note),
       `a 404 does not send the player to debug their wifi: "${gone.note}"`,
     );
-    expect(/missing from the game files/i.test(gone.note), 'a 404 is reported as a problem with the game');
+    expect(/problem with the game, not with your connection/i.test(gone.note), 'a 404 is reported as a problem with the game');
     await p.unroute('**/data/Graphic/003.ffr');
     await reloadApp(p);
     await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
@@ -304,5 +310,5 @@ await withApp(
   // The launch logs the failure it is recovering from, which is diagnostics worth keeping:
   // the note tells the player, the console tells whoever reads the bug report. The fetch
   // errors are the provocation itself, surfacing through the browser.
-  { graphics: 'classic', allowErrors: /room launch failed|Failed to fetch|net::ERR|ERR_FAILED|404 \(Not Found\)/ },
+  { graphics: 'classic', allowErrors: /asset failed|room launch failed|Failed to fetch|net::ERR|ERR_FAILED|404 \(Not Found\)/ },
 );

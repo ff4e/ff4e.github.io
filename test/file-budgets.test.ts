@@ -130,7 +130,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // tier's loader now rethrows everything, so the one caller that arms a hold and voids
   // the call needs an arm that releases it: a rejection escaping there is a room withheld
   // for ever, which is the frozen room the enhanced tier already documents.
-  ['src/app/art.ts', 672],
+  ['src/app/art.ts', 675],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak
