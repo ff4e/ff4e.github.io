@@ -72,11 +72,14 @@ async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
 }
 
 /**
- * Load the AI credits art from `${base}enhanced-ai/_credits/`. Resolves to an AiCredits
- * when both layers decoded, else null (⇒ caller uses the faithful path). Never throws.
+ * Load the AI credits art from `${base}enhanced-ai/_credits/` — the static frame and the
+ * scroll strip, both of which ship.
+ *
+ * Same change as `loadAiPanel`: the quiet fallback to the faithful roll is gone, because
+ * a fallback nobody can see is indistinguishable from the tier working.
  */
-export async function loadAiCredits(base: string): Promise<AiCredits | null> {
-  try {
+export async function loadAiCredits(base: string): Promise<AiCredits> {
+  {
     const dir = `${base}enhanced-ai/_credits/`;
     const manUrl = `${dir}ai.json`;
     const res = await requiredAsset(manUrl, 'the AI credits', { expect: 'json' });
@@ -86,12 +89,10 @@ export async function loadAiCredits(base: string): Promise<AiCredits | null> {
       loadImage(`${dir}stat.webp`, 'the AI credits'),
       loadImage(`${dir}mov.webp`, 'the AI credits'),
     ]);
-    if (!stat.naturalWidth || !mov.naturalWidth) return null;
+    // A decoded image with no intrinsic size is a corrupt file, not an absent one: the
+    // decoder is the only thing that can tell, and it did.
+    if (!stat.naturalWidth || !mov.naturalWidth) throw new Error(`${dir}: credits art decoded to nothing`);
     return new AiCredits(stat, mov, scale);
-  } catch (e) {
-    // A partial download should fall back quietly, but a broken BUILD should not hide.
-    console.warn('AI credits unavailable:', e);
-    return null;
   }
 }
 

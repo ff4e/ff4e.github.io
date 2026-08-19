@@ -32,7 +32,7 @@ import { loadAiCredits } from '../render/creditsAi.js';
 import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
 import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
-import { isTransient } from '../render/assetFetch.js';
+import { isAssetError, isMissing, isTransient } from '../render/assetFetch.js';
 import { failAssets, fatalShown } from './loadingUi.js';
 // Re-exported so the one other consumer of the decode helper (main.ts's fish sprites)
 // keeps its existing import. It lives in enhancedLoad.ts now, with the loaders.
@@ -286,6 +286,22 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
     enhancedLoads.delete(jmeno);
     applyEnhanced(num, result);
   } catch (e) {
+    if (isMissing(e)) {
+      // The manifest listed a sprite and the server does not have it. Not an absence —
+      // an absence is a room that ships no manifest at all, and never reaches here —
+      // but a broken build or a broken deploy, whose only other symptom is one item
+      // silently rendering as a 1998 bitmap inside a truecolor room. Nothing is cached,
+      // so a later tier switch asks again (and fails again, where it matters).
+      console.error(`[art] enhanced art for ${jmeno} is incomplete`, e);
+      // Same two guards as the transient case below, and for the same reason: art that
+      // this session never PAINTS is not part of the experience the all-or-nothing rule
+      // is protecting. The `classic` tier prefetches this purely to warm the cache for a
+      // switch that may never happen, and ending a session that is rendering perfectly
+      // from the bundled 1998 data would be the rule firing on nothing the player can
+      // see. The switch itself refetches, and fails then.
+      if (curNum === num && host.graphics !== 'classic') raiseArtFailure(e.what, e);
+      return;
+    }
     if (!isTransient(e)) {
       // NOT transient: the server answered, and the answer was unusable — a manifest
       // with a JSON content-type and a malformed body reaches here as a bare
@@ -451,8 +467,8 @@ export function beginMapArt(): void {
  * Deliberately lazy, unlike the eager call this replaced: that one ran at boot in EVERY
  * tier, so a player on `classic` still downloaded 2.36 MB of *_ai art and retained
  * ~43 MB of decoded bitmaps plus two 2560×1920 canvases, concurrently with the intro's
- * own media. It self-cancels to null on any missing/undecodable asset, so the `ai` level
- * cleanly falls back to the faithful CPU composite.
+ * own media. Every one of the eight files ships, so it no longer falls back to the
+ * faithful composite for anything: both ways of not arriving are asked about.
  */
 async function ensureAiWorldMap(): Promise<void> {
   // `held` rather than an early return out of the try: a `finally` runs even after a
@@ -464,9 +480,12 @@ async function ensureAiWorldMap(): Promise<void> {
     if (!ui.worldMap) return;
     aiWorldMap = await loadAiWorldMap('/data/', ui.worldMap);
   } catch (e) {
-    if (!isTransient(e)) throw e;
-    // Nothing was learned, so the hold STAYS and the player is asked. The retry has to
-    // re-arm the one-shot latch too, or beginMapArt would refuse to start a second load.
+    if (!isAssetError(e)) throw e;
+    // Nothing was learned (a failure), or the deploy is broken (a 404) — and the map is
+    // held either way. The two get different sentences downstream, from `isTransient`
+    // inside `raiseArtFailure`; what they share is that the player is asked rather than
+    // handed the 1998 map with `ai` still selected. The retry has to re-arm the one-shot
+    // latch too, or beginMapArt would refuse to start a second load.
     console.warn('[art] AI world map did not load', e);
     // Only while the player is actually looking at the map. This load starts on the map
     // but OUTLIVES it — Escape launches a room straight out of the 2.36 MB fetch — and a
@@ -476,19 +495,16 @@ async function ensureAiWorldMap(): Promise<void> {
     // released instead and the map is simply the faithful one next time they open it.
     if (ui.screen === 'map') {
       held = true;
-      raiseArtFailure('The artwork for the world map');
+      raiseArtFailure('The artwork for the world map', e);
     } else {
       // Re-armed so returning to the map tries again rather than showing the 1998 map
       // for the rest of the session on the strength of one blip.
       aiMapTried = false;
     }
   } finally {
-    // Released on every exit EXCEPT a transient failure, which is what `held` marks.
-    // An ordinary absence still releases here and falls back to the faithful composite:
-    // loadAiWorldMap resolves null for anything the server actually answered, so a
-    // missing or undecodable asset returns normally and the map is simply the 1998 one.
-    // The guard above (no worldMap yet) releases too, or the map would be withheld for
-    // the rest of the session.
+    // Released on every exit EXCEPT a failure the player is being asked about, which is
+    // what `held` marks. The guard above (no worldMap yet) releases too, or the map would
+    // be withheld for the rest of the session.
     if (!held) {
       aiMapPending = false;
       ui.mapSig = null; // force a repaint so the map switches to the AI art once ready
@@ -560,7 +576,10 @@ export async function ensureAiRoom(num: number): Promise<void> {
     // exactly as it always has.
     clearAiPending(num);
   } catch (e) {
-    if (!isTransient(e)) throw e;
+    if (!isAssetError(e)) throw e;
+    // Both kinds now: a blip taught us nothing, and a 404 on a file the room's own
+    // manifest listed is a broken build. Neither is the room saying "I have no AI art" —
+    // that is `null`, handled above, and it is the only silent outcome left here.
     console.warn(`[art] AI art for ${jmeno} did not load`, e);
     // The hold STAYS, and the player is asked. Both the guard and the hold matter:
     // these loads outlive the room that started them, so a stale failure must not

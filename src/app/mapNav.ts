@@ -53,9 +53,12 @@ export function initMapNav(h: MapNavHost): void {
 }
 
 export function startMenuMusic(): void {
-  // Swallow load/decode failures here: menu music is non-critical, and during boot
-  // an unhandled rejection would otherwise trip the boot-fatal handler.
-  audio.playMusic('menu', '/data/Music/menu.wav', 419772).catch(() => {});
+  // Unhandled on purpose. This used to swallow the failure — "menu music is non-critical,
+  // and during boot an unhandled rejection would otherwise trip the boot-fatal handler" —
+  // which is 2.6 MB of the game's first impression disappearing without a word. Tripping
+  // the handler is now the intended outcome, and the trap in `loadingUi.ts` names the
+  // asset instead of showing boot's generic sentence.
+  void audio.playMusic('menu', '/data/Music/menu.wav', 419772);
 }
 
 /**
@@ -159,16 +162,11 @@ export function returnFromRoom(): void {
  * if the image can't be loaded.
  */
 export async function showLegImage(leg: number, pending?: { room: number; replay?: string }): Promise<void> {
-  let bmp: Bmp;
-  try {
-    const url = `/data/Menu/00${leg}.$dv`;
-    bmp = parseBmp(await assetBytes(url, await requiredAsset(url, `the story page for leg ${leg}`)));
-  } catch {
-    // Image unavailable: skip straight to the pending launch, or back to the map.
-    if (pending) void host.enterRoom(pending.room, pending.replay);
-    else showMap();
-    return;
-  }
+  // No catch: the story pages are nine 640x480 BMPs that all ship, and skipping one
+  // silently meant a player crossing a leg boundary simply never saw that chapter of
+  // the story — the same failure the rest of this sweep is deleting.
+  const url = `/data/Menu/00${leg}.$dv`;
+  const bmp = parseBmp(await assetBytes(url, await requiredAsset(url, `the story page for leg ${leg}`)));
   ui.legImagePending = pending ?? null;
   ui.legImage = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
   ui.legImageNum = leg;
@@ -251,18 +249,14 @@ export function drawLegImage(): void {
  */
 export async function ensureLegImageAi(leg: number): Promise<void> {
   if (graphics !== 'ai') return;
-  try {
-    const url = `/enhanced-ai/_story/leg${leg}.webp`;
-    const res = await requiredAsset(url, `the AI story page for leg ${leg}`, { expect: 'image' });
-    const bmp = await createImageBitmap(await assetBlob(url, res));
-    if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
-    ui.legImageAi?.close();
-    ui.legImageAi = bmp;
-    ui.legImageDrawn = false; // repaint at the new resolution
-    wake();
-  } catch (e) {
-    console.warn(`AI story page unavailable for leg ${leg}:`, e);
-  }
+  const url = `/enhanced-ai/_story/leg${leg}.webp`;
+  const res = await requiredAsset(url, `the AI story page for leg ${leg}`, { expect: 'image' });
+  const bmp = await createImageBitmap(await assetBlob(url, res));
+  if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
+  ui.legImageAi?.close();
+  ui.legImageAi = bmp;
+  ui.legImageDrawn = false; // repaint at the new resolution
+  wake();
 }
 
 /**
@@ -345,7 +339,7 @@ export async function openCredits(): Promise<void> {
       const url = `/data/Menu/${f}`;
       return parseBmp(await assetBytes(url, await requiredAsset(url, what)));
     };
-    try {
+    {
       // CredMov_port is the shipped strip with the web-port card prepended
       // (tools/build-credits-port.py). It is a drop-in in the same palette, and since
       // the strip's height defines `delka`, the roll extends to cover it by itself.
@@ -359,8 +353,6 @@ export async function openCredits(): Promise<void> {
       const port = await optionalAsset(portUrl);
       const mov = port ? parseBmp(await assetBytes(portUrl, port)) : await bmp('CredMov.BMP', 'the credits');
       ui.credits = new Credits(await bmp('CredStat1.BMP', 'the credits'), mov);
-    } catch {
-      return; // credits assets missing — leave the map as-is
     }
   }
   ui.mapOverlay = 'credits';

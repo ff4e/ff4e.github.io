@@ -427,9 +427,10 @@ export async function loadAiRoom(base: string, jmeno: string): Promise<AiRoom | 
     }
     // The manifest promised files the server does not have. That is a broken build or a
     // broken deploy, and its only other symptom is this room quietly rendering one tier
-    // down — so it is cached (retrying cannot help) but never silent.
-    reportMissingAsset(`AI tier for ${jmeno}`, String((e as Error)?.message ?? e));
-    return null;
+    // down — which is why it no longer resolves null with a console line. Rethrown like
+    // the transient case, and fatal upstream; nothing at runtime can fix it, and the
+    // player is the last person able to notice the room is a tier below its setting.
+    throw e;
   }
 }
 

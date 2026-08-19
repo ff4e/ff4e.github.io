@@ -597,7 +597,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
-| `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and the game's one failure screen: any load that FAILED ends the session and says so. Art that is genuinely ABSENT never reaches it and still falls back silently. |
+| `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and the game's one failure screen: any asset that did not arrive ends the session and names itself — including one nobody caught, which is what makes forgetting loud rather than silent. Only absence BY DESIGN still falls back quietly. |
 | `subtitleDom.ts` | 5.0 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
@@ -627,7 +627,7 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | File | tok | What it is |
 | --- | --- | --- |
 | **The two seams everything else hangs off** | | |
-| `assetFetch.ts` | 1.4 k | What "this asset did not load" MEANS: absent (an answer, cache it) vs failed (no answer, never cache it). Every caching decision in the art path consults it. |
+| `assetFetch.ts` | 1.4 k | The one door to the network, and what "this asset did not load" MEANS: absent (an answer, cache it) vs failed (no answer, never cache it). `requiredAsset` / `optionalAsset` make the policy an argument at every call site; `test/asset-fetch-discipline.test.ts` fails the build for a bare `fetch(` anywhere else. |
 | `enhancedObjects.ts` | 1.1 k | One room's enhanced object sprites, whole-object-or-nothing — the frame list is indexed by animation phase, so a gap is the wrong picture, not a missing one. |
 | `zxBands.ts` | 0.9 k | The gspec=42 ZX loading stripes: the band height per frame and the colour per native row. Shared by the faithful and `ai` renderers, because generating the sequence ADVANCES it. |
 | `roomWalk.ts` | 2.0 k | ONE traversal deciding what is drawn, in what order, at what coordinates — a port of `TRoom.Priprav`. Replayed by both the faithful and the `ai` renderers, so a rule fixed here is fixed for both. |

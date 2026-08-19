@@ -7,7 +7,7 @@
  * exception, and a room that rendered.
  */
 import { withLoadSlot } from './loadSlot.js';
-import { assetJson, isMissing, optionalAsset, reportMissingAsset, requiredAsset } from './assetFetch.js';
+import { assetJson, optionalAsset, requiredAsset } from './assetFetch.js';
 import type { EnhancedObject, EnhancedSprite } from './enhancedArtSource.js';
 
 export interface ObjManifestEntry {
@@ -86,18 +86,14 @@ export async function loadEnhancedObjects(
             // promised this file. A sprite the manifest never mentions is a gap by
             // design and is never fetched at all; one it lists and the server does not
             // have is a broken build, and the difference is the whole point of the split.
-            try {
-              return await decodePng(await requiredAsset(url, `an enhanced sprite for ${jmeno}`, { expect: 'image' }));
-            } catch (err) {
-              if (!isMissing(err)) throw err;
-              reportMissingAsset(`enhanced tier, ${jmeno} item ${e.item}`, url);
-              return null;
-            }
+            return decodePng(await requiredAsset(url, `an enhanced sprite for ${jmeno}`, { expect: 'image' }));
           }),
         ),
       );
-      if (frames.some((f) => f === null)) return null;
-      return { item: e.item, frames: frames as EnhancedSprite[] };
+      // No null frames to filter any more: a frame the manifest lists either decodes or
+      // ends the session. Dropping the whole OBJECT for one missing frame is what used
+      // to make a broken build render as a room with an invisible item.
+      return { item: e.item, frames };
     }),
   );
   return loaded.filter((o): o is EnhancedObject => o !== null);

@@ -134,9 +134,10 @@ export function startShowmode(): void {
       // The demo may have been cancelled (room change/restart) while fetching.
       if (!showmodeLoading) return;
       setShowmode({ actions: parseHelpCap(buf), idx: 0 });
-    } catch {
-      endShowmode();
     } finally {
+      // `endShowmode()` on failure is gone with the catch: it put the room back and
+      // said nothing, so a player who reached the tutorial spot simply never got the
+      // tutorial. The flag still has to be cleared either way.
       setShowmodeLoading(false);
     }
   })();
@@ -402,23 +403,19 @@ let aiKufrRangeWarned = false;
 export async function ensureAiKufr(): Promise<void> {
   if (aiKufrTried) return;
   aiKufrTried = true;
-  try {
-    const what = 'the AI briefcase cutscene';
-    const manUrl = '/enhanced-ai/_kufr/ai.json';
-    type Manifest = { scale: number; region: AiKufr['region']; order: string[]; original?: string[] };
-    const man = await assetJson<Manifest>(manUrl, await requiredAsset(manUrl, what, { expect: 'json' }));
-    const baseUrl = '/enhanced-ai/_kufr/base.webp';
-    const bres = await requiredAsset(baseUrl, what, { expect: 'image' });
-    aiKufr = {
-      base: await createImageBitmap(await assetBlob(baseUrl, bres)),
-      scale: Number(man.scale) || AI_ROOM_SCALE,
-      region: man.region,
-      order: man.order ?? [],
-      original: new Set(man.original ?? []),
-    };
-  } catch (e) {
-    console.warn('AI briefcase cutscene unavailable:', e);
-  }
+  const what = 'the AI briefcase cutscene';
+  const manUrl = '/enhanced-ai/_kufr/ai.json';
+  type Manifest = { scale: number; region: AiKufr['region']; order: string[]; original?: string[] };
+  const man = await assetJson<Manifest>(manUrl, await requiredAsset(manUrl, what, { expect: 'json' }));
+  const baseUrl = '/enhanced-ai/_kufr/base.webp';
+  const bres = await requiredAsset(baseUrl, what, { expect: 'image' });
+  aiKufr = {
+    base: await createImageBitmap(await assetBlob(baseUrl, bres)),
+    scale: Number(man.scale) || AI_ROOM_SCALE,
+    region: man.region,
+    order: man.order ?? [],
+    original: new Set(man.original ?? []),
+  };
 }
 
 /** Fetch a cutscene frame (and prefetch the next few, since playback is linear). */
@@ -439,9 +436,9 @@ export function loadAiKufrFrame(name: string): void {
         aiKufrFrames.get(oldest)?.close();
         aiKufrFrames.delete(oldest);
       }
-    } catch {
-      /* this frame stays on the faithful path */
     } finally {
+      // The in-flight set is cleaned up however this ends; "this frame stays on the
+      // faithful path" is not one of the endings any more.
       aiKufrLoading.delete(name);
     }
   })();

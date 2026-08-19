@@ -91,13 +91,9 @@ let parchmentCanvas: HTMLCanvasElement | null = null;
  * canLaunchFromMap().
  */
 export async function loadParchment(): Promise<void> {
-  try {
-    const url = '/data/Menu/loading.BMP';
-    const bmp = parseBmp(await assetBytes(url, await requiredAsset(url, 'the room-entry parchment')));
-    parchment = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
-  } catch {
-    /* parchment optional — room entry keeps the overlay */
-  }
+  const url = '/data/Menu/loading.BMP';
+  const bmp = parseBmp(await assetBytes(url, await requiredAsset(url, 'the room-entry parchment')));
+  parchment = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
 }
 
 /** Is the parchment art available at all? (For the `__ff` hook and canLaunchFromMap.) */

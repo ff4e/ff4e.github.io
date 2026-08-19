@@ -263,16 +263,28 @@ export function initLoadingUi(): void {
   // It is typed, not string-matched (`isAssetError`), so rewording an error message
   // cannot quietly disarm it.
   window.addEventListener('unhandledrejection', (ev) => {
-    if (!booted) {
-      console.error('boot failed:', ev.reason);
-      showFatal();
-    } else if (isAssetError(ev.reason)) {
+    if (isAssetError(ev.reason)) {
+      // Boot or not: an asset that did not arrive gets the sentence written for it,
+      // rather than boot's generic "something went wrong". Boot's loaders no longer
+      // catch their own failures — there is nothing useful for them to do — so this is
+      // now the ONLY thing between a missing panel.ffp and a blank page.
       console.error('asset failed:', ev.reason);
       failAssets(ev.reason.what ?? 'A game file', isTransient(ev.reason));
+    } else if (!booted) {
+      console.error('boot failed:', ev.reason);
+      showFatal();
     }
   });
+  // The same triage for a thrown error, which is not the same channel: `runBoot()` is
+  // awaited at module scope in `main.ts`, so a loader that rejects during boot surfaces
+  // as an uncaught module error rather than an unhandled rejection. Boot's assets used to
+  // catch their own failures, so every boot failure looked alike and one generic sentence
+  // was all there was to say; now that they do not, this is where most of them arrive.
   window.addEventListener('error', (ev) => {
-    if (!booted) {
+    if (isAssetError(ev.error)) {
+      console.error('asset failed:', ev.error);
+      failAssets(ev.error.what ?? 'A game file', isTransient(ev.error));
+    } else if (!booted) {
       console.error('boot failed:', ev.error ?? ev.message);
       showFatal();
     }

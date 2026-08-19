@@ -18,13 +18,13 @@ import { loadingEl } from './dom.js';
 import { initFeedback } from './feedback.js';
 import { startFrames } from './frameClock.js';
 import { engine, setFont } from './gameState.js';
-import { maybeShowWebglNote, setLoadingMsg, showFatal } from './loadingUi.js';
+import { maybeShowWebglNote, setLoadingMsg } from './loadingUi.js';
 import { ensureDeskyData } from './mapDraw.js';
 import { playFirstRunIntro, startMenuMusic } from './mapNav.js';
 import { graphics, renderer } from './renderSettings.js';
 import { settings } from './playerSettings.js';
 import { loadParchment } from './roomLaunch.js';
-import { loadRoom, loadSoundPkg } from './roomLoad.js';
+import { loadRoom, requireSoundPkg } from './roomLoad.js';
 import { ui } from './screenState.js';
 import { setBooted, setSubFontReady } from './stageState.js';
 import { lengthOfRecord } from '../core/record.js';
@@ -91,54 +91,46 @@ export async function runBoot(): Promise<void> {
   }
   // Control-panel overlay graphic (TOvl / panel.ffp).
   setLoadingMsg('Loading graphics…');
-  try {
-    const url = '/data/Menu/panel.ffp';
-    ui.panel = parseFfp(await assetBytes(url, await requiredAsset(url, 'the control panel')));
-  } catch {
-    /* panel optional */
-  }
+  const panelUrl = '/data/Menu/panel.ffp';
+  ui.panel = parseFfp(await assetBytes(panelUrl, await requiredAsset(panelUrl, 'the control panel')));
   // World map assets (mapa-0/mapa-1/maska + node sprites n0..n4).
-  try {
+  {
     const files = ['mapa-0.BMP', 'mapa-1.BMP', 'maska.BMP', 'n0.BMP', 'n1.BMP', 'n2.BMP', 'n3.BMP', 'n4.BMP'];
     const bmps = await Promise.all(files.map((f) => bootBmp(`/data/Menu/${f}`, 'the world map')));
     ui.worldMap = new WorldMap(bmps[0]!, bmps[1]!, bmps[2]!, bmps.slice(3));
     // The AI-upscaled map (Phase B) is NOT loaded here: it is fetched lazily the first
     // time the map is about to be shown in the `ai` tier (beginMapArt), so other tiers
     // pay nothing for it.
-  } catch {
-    /* map optional */
   }
   await loadParchment(); // the room-entry parchment; optional, never fatal (roomLaunch.ts)
   // World-map record info panel assets (krokoměr background, button icons, digit
   // glyphs) + the level name-plaque data for the current language (UMain.pas:341).
-  try {
+  {
     const [krokomer, ikonky, cisla] = await Promise.all(
       ['krokomer.BMP', 'ikonky.BMP', 'cisla.BMP'].map((f) => bootBmp(`/data/Menu/${f}`, 'the world map info panel')),
     );
     ui.infoPanelAssets = { krokomer: krokomer!, ikonky: ikonky!, cisla: cisla! };
-  } catch {
-    /* info panel optional */
   }
   await ensureDeskyData();
 
   setLoadingMsg('Loading sound…');
   // The persistent global packages, in the order the original loads them: x00 effects,
   // x03 ambient chatter (the "ob-*" idle lines, StdKecej / vyber_hlasku) and x02 death
-  // commentary (the "smrt-*" lines, StdSmrt). Each is optional — a missing one costs
-  // its lines, never the game. Kept sequential, as before: they are large, and the boot
-  // path is what the UI probes' 5 s budget is measured against.
-  for (const id of ['x00', 'x03', 'x02']) {
-    await loadSoundPkg(id, `/data/Title/${id}.fft`, `/data/Sound/${id}.ffs`);
+  // commentary (the "smrt-*" lines, StdSmrt). 8.3 MB, and boot no longer tolerates
+  // losing any of it: a game with no death commentary is a quieter game than the one
+  // ALTAR shipped, and the player is the last person able to notice that. Kept
+  // sequential, as before: they are large, and the boot path is what the UI probes'
+  // 5 s budget is measured against.
+  const GLOBAL_PKGS: ReadonlyArray<[string, string]> = [
+    ['x00', 'the sound effects'],
+    ['x03', 'the fish chatter'],
+    ['x02', 'the death commentary'],
+  ];
+  for (const [id, what] of GLOBAL_PKGS) {
+    await requireSoundPkg(id, `/data/Title/${id}.fft`, `/data/Sound/${id}.ffs`, what);
   }
   setLoadingMsg('Loading the world…');
   await loadRoom(7);
-  // Critical assets: without the control panel or the world map the game is
-  // unplayable, so a missing/broken deploy of these is a fatal error (rather than
-  // the silent graceful-degradation the optional audio packages get).
-  if (!ui.panel || !ui.worldMap) {
-    showFatal('Some core game files are missing. Please try again, or check the installation.');
-    throw new Error('missing critical assets: ' + (!ui.panel ? 'panel ' : '') + (!ui.worldMap ? 'worldMap' : ''));
-  }
   // The two lines the 1998 release referenced but shipped without (public/restored/,
   // built by tools/build-restored-sounds.ts) — `pyr-m-nudi` and `jes-v-potvora2`. A
   // package of its own rather than a patched 025/063, so the committed 1998 data stays
@@ -146,14 +138,12 @@ export async function runBoot(): Promise<void> {
   //
   // Fetched AFTER boot and off the critical path: each awaited package above is another
   // serialized round trip before the game can start, and loading this one inline was
-  // measured pushing UI probes past their 5 s boot budget. The cost of that choice is
-  // real but small — if a player reaches room 25 or 63 before it lands, that one line
-  // keeps the 1998 silence, so the failure mode is the status quo ante, not a break.
-  void loadSoundPkg('restored', '/restored/restored.fft', '/restored/restored.ffs', true).then(
-    (ok) => {
-      if (!ok) console.warn('[audio] restored package unavailable — PYRAMIDA/JESKYNE keep the 1998 silence');
-    },
-  );
+  // measured pushing UI probes past their 5 s boot budget. Off the critical path is not
+  // the same as optional, though — it used to warn to the console and leave the two
+  // rooms silent, and a console warning is not a thing a player reads. Unhandled on
+  // purpose: the post-boot trap in `loadingUi.ts` turns an asset failure into the
+  // failure screen wherever it happens, so this needs no catch of its own.
+  void requireSoundPkg('restored', '/restored/restored.fft', '/restored/restored.ffs', 'the restored 1998 lines', true);
 
   // Boot: on first run, auto-play the intro (logo → intro) before the map, then
   // flip the persisted flag so later runs go straight to the map (the original's

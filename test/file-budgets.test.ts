@@ -148,10 +148,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // engine is invisible to `musicBufs`/`musicStarting` and KANKAN re-cues its track on the
   // first idle tick — fetching and decoding the same 1.24 MB file twice.
   //
-  // 710 -> 711 for the import of the asset door: the two music fetches here were the last
-  // bare `fetch` calls in the audio layer, and "stay silent" is no longer one of the
-  // answers this file is allowed to give (test/asset-fetch-discipline.test.ts).
-  ['src/audio/audio.ts', 711],
+  // 710 -> 724 for the asset door: the two music fetches here were the last bare `fetch`
+  // calls in the audio layer, and "stay silent" is no longer one of the answers this file
+  // is allowed to give (test/asset-fetch-discipline.test.ts). Both catches now hand the
+  // reservation back and RETHROW, and `musicSnd` returns its download instead of voiding
+  // it so the rejection has an owner — the same code, plus the sentences explaining why a
+  // track that does not arrive is no longer allowed to be silence.
+  ['src/audio/audio.ts', 724],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

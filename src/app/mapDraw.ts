@@ -46,18 +46,14 @@ export async function ensureDeskyData(): Promise<void> {
   const lang = subLang();
   if (ui.deskyLang === lang && ui.deskyData) return;
   const n = lang === 'cz' ? '1' : '2';
-  try {
-    const popdeskUrl = `/data/Menu/popdesk${n}.dat`;
-    const atlasUrl = `/data/Menu/desky${n}.dat`;
-    const [popdesk, atlas] = await Promise.all([
-      requiredAsset(popdeskUrl, 'the map name plaques').then((r) => assetBytes(popdeskUrl, r)),
-      requiredAsset(atlasUrl, 'the map name plaques').then((r) => assetBytes(atlasUrl, r)),
-    ]);
-    ui.deskyData = parseDesky(popdesk, atlas);
-    ui.deskyLang = lang;
-  } catch {
-    /* plaques optional */
-  }
+  const popdeskUrl = `/data/Menu/popdesk${n}.dat`;
+  const atlasUrl = `/data/Menu/desky${n}.dat`;
+  const [popdesk, atlas] = await Promise.all([
+    requiredAsset(popdeskUrl, 'the map name plaques').then((r) => assetBytes(popdeskUrl, r)),
+    requiredAsset(atlasUrl, 'the map name plaques').then((r) => assetBytes(atlasUrl, r)),
+  ]);
+  ui.deskyData = parseDesky(popdesk, atlas);
+  ui.deskyLang = lang;
 }
 
 /** Open the record info panel for a solved/cheated room (daInfo, UMain.pas:1008). */
@@ -229,14 +225,10 @@ const AI_DESKY_CACHE_MAX = 12;
 export async function ensureAiDeskyGeom(): Promise<void> {
   if (aiDeskyTried) return;
   aiDeskyTried = true;
-  try {
-    const url = '/enhanced-ai/_desky/plaques.json';
-    const res = await requiredAsset(url, 'the AI map name plaques', { expect: 'json' });
-    aiDeskyGeom = (await assetJson<{ plaques: typeof aiDeskyGeom }>(url, res)).plaques ?? null;
-    ui.mapSig = null; // repaint now that plaques can be drawn hi-res
-  } catch (e) {
-    console.warn('AI name plaques unavailable:', e);
-  }
+  const url = '/enhanced-ai/_desky/plaques.json';
+  const res = await requiredAsset(url, 'the AI map name plaques', { expect: 'json' });
+  aiDeskyGeom = (await assetJson<{ plaques: typeof aiDeskyGeom }>(url, res)).plaques ?? null;
+  ui.mapSig = null; // repaint now that plaques can be drawn hi-res
 }
 
 /** The upscaled plaque for `room` in the current subtitle language, if decoded. */
@@ -268,9 +260,10 @@ export async function loadAiPlaque(key: string): Promise<void> {
     }
     ui.mapSig = null; // the plaque can now be drawn hi-res
     wake();
-  } catch {
-    /* leave the native plaque in place */
   } finally {
+    // The `finally` stays and the `catch` goes: the in-flight set must be cleaned up
+    // however this ends, but "leave the native plaque in place" is exactly the quiet
+    // half-upscaled map the all-or-nothing rule exists to stop.
     aiPlaqueLoading.delete(key);
   }
 }

@@ -534,30 +534,26 @@ initRoomLaunch({
 });
 let fishSprites: FishSprites | null = null;
 async function loadFishSprites(): Promise<void> {
-  try {
-    const manUrl = '/enhanced/_fish/manifest.json';
-    const res = await requiredAsset(manUrl, 'the enhanced fish sprites', { expect: 'json' });
-    const m = await assetJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(manUrl, res);
-    const build = async (size: 'small' | 'big', facing: 'left' | 'right') => {
-      const map = new Map<string, { w: number; h: number; rgba: Uint8Array }>();
-      await Promise.all(
-        (m[size]?.[facing] ?? []).map(async (f) => {
-          const url = `/enhanced/_fish/${size}/${facing}/${f}`;
-          const r = await requiredAsset(url, 'an enhanced fish sprite', { expect: 'image' });
-          const d = await decodePngResponse(r);
-          map.set(f, { w: d.w, h: d.h, rgba: d.rgba });
-        }),
-      );
-      return map;
-    };
-    fishSprites = {
-      small: { left: await build('small', 'left'), right: await build('small', 'right') },
-      big: { left: await build('big', 'left'), right: await build('big', 'right') },
-    };
-    applySpriteCheats(); // a sprite cheat typed before the art landed still applies
-  } catch {
-    fishSprites = null;
-  }
+  const manUrl = '/enhanced/_fish/manifest.json';
+  const res = await requiredAsset(manUrl, 'the enhanced fish sprites', { expect: 'json' });
+  const m = await assetJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(manUrl, res);
+  const build = async (size: 'small' | 'big', facing: 'left' | 'right') => {
+    const map = new Map<string, { w: number; h: number; rgba: Uint8Array }>();
+    await Promise.all(
+      (m[size]?.[facing] ?? []).map(async (f) => {
+        const url = `/enhanced/_fish/${size}/${facing}/${f}`;
+        const r = await requiredAsset(url, 'an enhanced fish sprite', { expect: 'image' });
+        const d = await decodePngResponse(r);
+        map.set(f, { w: d.w, h: d.h, rgba: d.rgba });
+      }),
+    );
+    return map;
+  };
+  fishSprites = {
+    small: { left: await build('small', 'left'), right: await build('small', 'right') },
+    big: { left: await build('big', 'left'), right: await build('big', 'right') },
+  };
+  applySpriteCheats(); // a sprite cheat typed before the art landed still applies
 }
 void loadFishSprites();
 //#region Audio & fish selection | anchors: initAudio, hooks, peekAtPlayer, swapActive, selectFish | Builds the AudioEngine (owned by `audioEngine.ts`), the fishing-hook easter egg, and switching which fish is active. The key/constant tables are in `keyTables.ts`.
@@ -722,7 +718,7 @@ function buildRoom(carryPole = false): void {
         sndcyc: (name, prior) => audio.snd(name, prior, true, EFFECT_VOL),
         sndvol: (name, prior, vol) => audio.snd(name, prior, false, Math.max(0, Math.min(1, vol / 64))),
         ksnd: (prior) => audio.killVoice(prior),
-        music: (name, prior) => audio.musicSnd(name, prior, `/data/Music/${name}.wav`),
+        music: (name, prior) => void audio.musicSnd(name, prior, `/data/Music/${name}.wav`),
         musiccyc: (name, prior) => {
           // prior -999 = the room-music channel: re-cue the room's own track
           // (MusicCycle(MusName,-999,MusCycle)) rather than a separate effect source.
@@ -731,7 +727,7 @@ function buildRoom(carryPole = false): void {
               void audio.playMusic(roomMusic.name, `/data/Music/${roomMusic.name}.wav`, roomMusic.loopSample);
             }
           } else {
-            audio.musicSnd(name, prior, `/data/Music/${name}.wav`, 0.45, true);
+            void audio.musicSnd(name, prior, `/data/Music/${name}.wav`, 0.45, true);
           }
         },
         talkNow: (name, prior) => scriptTalk(name, prior),

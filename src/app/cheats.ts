@@ -563,8 +563,6 @@ async function ensureTetrisArt(): Promise<TetrisArt | null> {
       yfont: shapes.yfont,
     };
     tetrisShapes = shapes;
-  } catch {
-    tetrisArt = null; // the data is missing: the cheat just does nothing
   } finally {
     tetrisLoading = false;
   }

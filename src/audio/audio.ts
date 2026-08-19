@@ -401,13 +401,19 @@ export class AudioEngine {
    * priority. Mirrors the original's resolution order — a packaged sound (e.g. the
    * band's `d1-z-*` tracks) plays from the room package; otherwise it falls back to a
    * `Music/<name>.wav` file (e.g. the `rybky04` intro), which lives outside the package.
+   *
+   * Returns the download rather than voiding it. Nothing in the game awaits this — a
+   * room script cues a track and carries on, which is the original's behaviour — so in
+   * play the rejection of a track that did not arrive is unhandled ON PURPOSE, and the
+   * trap in `loadingUi.ts` turns it into the failure screen. Handing the promise back
+   * costs the callers a `void` and gives a test something to hold.
    */
-  musicSnd(name: string, prior: number, url: string, volume = 0.45, loop = false): void {
+  musicSnd(name: string, prior: number, url: string, volume = 0.45, loop = false): Promise<void> {
     if (this.hasPackaged(name)) {
       this.snd(name, prior, loop, volume, 'music');
-      return;
+      return Promise.resolve();
     }
-    void this.playMusicFile(name, prior, url, volume, loop);
+    return this.playMusicFile(name, prior, url, volume, loop);
   }
 
   private async playMusicFile(
@@ -437,9 +443,12 @@ export class AudioEngine {
         // world map's own assets.
         const bytes = await assetBytes(url, await requiredAsset(url, 'the music', { init: { priority: 'low' } as RequestInit }));
         buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
-      } catch {
+      } catch (e) {
+        // The reservation goes back, and then the failure LEAVES. This used to return
+        // ("stay silent"), which is how a dropped track became a room playing in silence
+        // with nothing said; the engine's own invariant is still honoured on the way out.
         this.release(prior, claim);
-        return; // track not present / decode failed — stay silent
+        throw e;
       }
       this.musicBufs.set(name, buf);
     }
@@ -665,16 +674,20 @@ export class AudioEngine {
       this.musicSrc = src;
       this.musicGain = g;
       this.activeUntil.set(MUSIC_PRIOR, Infinity); // MusicCycle(-999): playing(-999) true
-    } catch {
+    } catch (e) {
       // The track could not be fetched or decoded, so nothing will ever sound on this
       // channel — hand the reservation back rather than leaving playing(-999) stuck
       // true. `Sound()` does the same by never claiming a channel for a file it cannot
       // open: it exits with `flen` still 0 (RSound.pas:709/722). Only the start that is
       // still current may do this.
+      //
+      // ...and then it leaves. The menu music was the one track allowed to vanish
+      // quietly; it is 2.6 MB of the game's first impression.
       if (this.musicGen === gen) {
         this.musicName = '';
         this.release(MUSIC_PRIOR, claim);
       }
+      throw e;
     } finally {
       // Only the start that is still current may release the flag; a superseded one
       // must leave it to whoever replaced it.

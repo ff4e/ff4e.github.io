@@ -58,12 +58,17 @@ const HANDLE_Y = { effect: 85, voice: 134, music: 183 } as const;
 interface AiPanelManifest { scale?: number; files?: string[] }
 
 /**
- * Load the AI panel art from `${base}enhanced-ai/_panel/`. Resolves to an AiPanel when
- * all 16 variants and the handle decoded, else null (⇒ caller uses the faithful path).
- * Never throws.
+ * Load the AI panel art from `${base}enhanced-ai/_panel/`: all 16 colour variants plus
+ * the slider handle, every one of which ships.
+ *
+ * It used to resolve null on any failure and let the caller keep the faithful panel —
+ * "a partial download should fall back quietly". That is the shape the all-or-nothing
+ * decision removed: the fallback is invisible, so an `ai` deploy missing its panel art
+ * played as a subtly wrong game for the whole session with one console line to show for
+ * it. Now it throws, and every one of these is a `requiredAsset`.
  */
-export async function loadAiPanel(base: string): Promise<AiPanel | null> {
-  try {
+export async function loadAiPanel(base: string): Promise<AiPanel> {
+  {
     const dir = `${base}enhanced-ai/_panel/`;
     const manUrl = `${dir}ai.json`;
     const res = await requiredAsset(manUrl, 'the AI control panel', { expect: 'json' });
@@ -79,10 +84,6 @@ export async function loadAiPanel(base: string): Promise<AiPanel | null> {
     );
     const cudl = await bmp('cudl.webp');
     return new AiPanel(images, cudl, scale);
-  } catch (e) {
-    // A partial download should fall back quietly, but a broken BUILD should not hide.
-    console.warn('AI panel unavailable:', e);
-    return null;
   }
 }
 

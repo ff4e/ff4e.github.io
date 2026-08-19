@@ -210,6 +210,7 @@ export async function loadRoom(num: number): Promise<void> {
 export async function fetchSoundPkg(
   fftUrl: string,
   ffsUrl: string,
+  what: string,
   deferred = false,
 ): Promise<{ fft: Uint8Array; ffs: Uint8Array }> {
   // A `deferred` package holds chatter, never anything the player is waiting on, so it
@@ -217,45 +218,26 @@ export async function fetchSoundPkg(
   // it must not compete with the room art or the next room's voices. `priority` is an
   // optional RequestInit field — browsers that lack it ignore it.
   const init = deferred ? ({ priority: 'low' } as RequestInit) : undefined;
+  // Both halves carry the SAME player-facing name. The split between an index and its
+  // bodies is an implementation detail of the 1998 format, and "the sound package index
+  // for the death lines is missing" is a sentence written for a developer.
   const [fftRes, ffsRes] = await Promise.all([
-    requiredAsset(fftUrl, 'sound package index', { init }),
-    requiredAsset(ffsUrl, 'sound package', { init }),
+    requiredAsset(fftUrl, what, { init }),
+    requiredAsset(ffsUrl, what, { init }),
   ]);
   const [fft, ffs] = await Promise.all([assetBytes(fftUrl, fftRes), assetBytes(ffsUrl, ffsRes)]);
   return { fft, ffs };
 }
 
-/**
- * Fetch a package and keep it for the whole session, TOLERATING a failure.
- *
- * This is boot's path (x00/x03/x02, and `restored`), and those really are optional in
- * the way the room's own audio is not: they hold effects and idle chatter, the original
- * loads them the same way, and boot has always treated a missing one as costing its
- * lines rather than the game. `requireSoundPkg` is the strict counterpart, for the
- * packages a room cannot be entered without.
- */
-export async function loadSoundPkg(
-  id: string,
-  fftUrl: string,
-  ffsUrl: string,
-  deferred = false,
-): Promise<boolean> {
-  try {
-    await requireSoundPkg(id, fftUrl, ffsUrl, deferred);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Fetch a package and keep it, failing loudly. The room-entry path. */
+/** Fetch a package and keep it, failing loudly. The only kind there is now. */
 export async function requireSoundPkg(
   id: string,
   fftUrl: string,
   ffsUrl: string,
+  what: string,
   deferred = false,
 ): Promise<void> {
-  const pkg = await fetchSoundPkg(fftUrl, ffsUrl, deferred);
+  const pkg = await fetchSoundPkg(fftUrl, ffsUrl, what, deferred);
   audio.loadGlobal(id, pkg.fft, pkg.ffs);
 }
 
@@ -290,7 +272,7 @@ async function loadBorderLines(num: number): Promise<void> {
   // That is a transient error, so without this the second entry would end the session over
   // a package the first was already fetching successfully.
   if (borderLinesLoad === null) {
-    borderLinesLoad = requireSoundPkg('x01', '/data/Title/x01.fft', '/data/Sound/x01.ffs', true);
+    borderLinesLoad = requireSoundPkg('x01', '/data/Title/x01.fft', '/data/Sound/x01.ffs', 'the fish remarks', true);
     // Retracted on failure so the next leg-final room retries rather than joining a
     // rejected promise for the rest of the session.
     void borderLinesLoad.then(
