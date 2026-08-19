@@ -13,13 +13,14 @@
 import { MLUVI_PRIOR } from './keyTables.js';
 import { ROOMS } from '../data/roomTable.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
+import { assetBytes, fetchAsset, requireAsset } from '../render/assetFetch.js';
 import { audio } from './audioEngine.js';
 import { beginRoomArt, curNum, ensureAiRoom, ensureEnhancedArt } from './art.js';
 import { booted } from './stageState.js';
 import { count, fftEntries, setFfr, setFftEntries, setPokus, subs, talkIdx } from './gameState.js';
 import { depthOfRoom } from '../data/world.js';
 import { enhancedArtActive, graphics } from './renderSettings.js';
-import { mapLaunching } from './roomLaunch.js';
+import { failRoomEntry, mapLaunching } from './roomLaunch.js';
 import { musicForCHud } from '../audio/music.js';
 import { parseFfr } from '../data/ffr.js';
 import { parseFft } from '../data/fft.js';
@@ -64,12 +65,23 @@ export async function loadRoom(num: number): Promise<void> {
     const nnn = String(num).padStart(3, '0');
     // Only the two assets the room cannot be BUILT without are on this path. The
     // .ffs voice package and the room music used to ride along here; see below.
-    const [ffrRes, fftRes] = await Promise.all([
-      fetch(host.ffrUrl(num)),
-      fetch(`/data/Title/${nnn}.fft`),
-    ]);
-    if (!ffrRes.ok) throw new Error(`failed to load room ${num}: ${ffrRes.status}`);
-    const parsed = parseFfr(new Uint8Array(await ffrRes.arrayBuffer()));
+    //
+    // Both go through `fetchAsset`, so both are RETRIED on a transport failure and both
+    // are classified (src/render/assetFetch.ts). They used to be bare `fetch` calls, and
+    // that is the whole of the bug this replaces: offline, the FFR fetch rejected, the
+    // launch caught it and handed the player the PREVIOUS room, silently, still accepting
+    // input for it. Nothing here can be allowed to fail quietly.
+    const ffrUrl = host.ffrUrl(num);
+    const fftUrl = `/data/Title/${nnn}.fft`;
+    const [ffrRes, fftRes] = await Promise.all([fetchAsset(ffrUrl), fetchAsset(fftUrl)]);
+    requireAsset(ffrRes, ffrUrl, `room ${num}`);
+    // The subtitle index is no longer tolerated when it fails. It used to fall back to an
+    // empty table, which loses every line the room speaks — a room that plays through in
+    // silence with no indication anything went wrong. All 72 rooms ship a .fft (plus the
+    // four x0n packages), so there is no legitimate absence to protect here: a missing one
+    // is a broken deploy and a failed one is the network, and the player is told either way.
+    requireAsset(fftRes, fftUrl, `the subtitles for room ${num}`);
+    const parsed = parseFfr(await assetBytes(ffrUrl, ffrRes));
     // WIN "Favorites" palette gag (URoom.pas:1312-1355): swap the pink placeholder colours
     // for the Windows system theme, so the fake windows look like a real desktop.
     setFfr(
@@ -77,8 +89,8 @@ export async function loadRoom(num: number): Promise<void> {
         ? { ...parsed, palette: applyWinDesktopPalette(parsed.palette) }
         : parsed,
     );
-    const fftBytes = fftRes.ok ? new Uint8Array(await fftRes.arrayBuffer()) : new Uint8Array(4);
-    setFftEntries(fftRes.ok ? parseFft(fftBytes) : []);
+    const fftBytes = await assetBytes(fftUrl, fftRes);
+    setFftEntries(parseFft(fftBytes));
     // The outgoing room's samples must not be audible under the new room while its
     // own package is still in flight (see loadRoomVoices) — a lookup that misses now
     // falls back to the global packages, i.e. silence for a room-specific line.
@@ -111,29 +123,74 @@ export async function loadRoom(num: number): Promise<void> {
     const art =
       graphics === 'ai' ? ensureAiRoom(num) : graphics === 'enhanced' ? ensureEnhancedArt(num) : Promise.resolve();
     // Audio is the bulk of a room entry's bytes and none of it is needed to DRAW the
-    // room: 4.30 MB of .ffs voices plus a 5.75 MB music track for PRVNI, against
+    // room: 2.43 MB of .ffs voices (8.94 MB worst) plus up to 6.75 MB of music, against
     // ~2.14 MB of room-specific core+art bytes. On a capped link they simply crowd the
-    // art out, so both wait for it — a low-priority hint was measured and is not enough
-    // (KOSTE's first frame: 35.5s with the hint, 27.4s with the wait).
+    // art out, so audio still waits BEHIND the art — a low-priority hint was measured and
+    // is not enough (KOSTE's first frame: 35.5s with the hint, 27.4s with the wait).
     //
-    // The cost is a short window after the room appears in which a room-specific line
-    // is silent (subtitles still show; audio.clearRoom() keeps it silent rather than
-    // wrong). That is a much better trade than the black stage it replaces, and it
-    // closes as soon as the package lands.
-    const afterArt = (): void => {
-      if (bootLoad) return;
-      loadRoomVoices(num, nnn, fftBytes);
-      startRoomMusic(num);
-    };
-    // Both arms: nothing in `art` rejects today, but if a future edit made it throw,
-    // a fulfilment-only handler would leave the room permanently silent AND strand the
-    // loading overlay over a playable game.
-    void art.then(afterArt, afterArt);
+    // What changed: the room no longer APPEARS while its audio is still coming. It used
+    // to, and the window was silent-but-playable; the cost of that was that a voice
+    // package which never arrived was never mentioned either, so a room could be played
+    // through mute with nothing said. Now the entry holds until every sound the room
+    // needs is in, and fails — the game stops and says so — if any of it does not arrive. The hold is `roomAudioPending()`, separate from `roomLoading` so that the
+    // room is still BUILT at the same moment it always was.
+    //
+    // The wait is real and lands on slow links: ~6.2 MB typical, ~33 s at 1.5 Mbps. It is
+    // almost entirely uncompressed PCM (22 kHz mono, 352.8 kbps) — see the
+    // fish_fillets_audio_compression task, which takes it to ~0.9 MB.
+    setRoomAudioPending(bootLoad ? 0 : num);
+    const audioDone = bootLoad ? Promise.resolve() : art.then(() => loadRoomAudio(num, nnn, fftBytes));
+    // Both arms release the hold — a hold that outlives its load is a room that never
+    // appears — and both release it BY ROOM, so a late outcome cannot free a hold a later
+    // entry has since armed.
+    void audioDone.then(
+      () => {
+        clearRoomAudioPending(num);
+        wake();
+      },
+      (e: unknown) => {
+        clearRoomAudioPending(num);
+        // `enteringRoom`, not `curNum`. `curNum` is not a liveness token: it keeps naming
+        // the last room BUILT, so it still equals `num` after the player has gone back to
+        // the map, and it still equals the OLD room while a superseding entry is in flight
+        // (it only advances at `beginRoomArt`). Deciding on it would end the session over a
+        // download for a room nobody is waiting for — observed as a failure screen raised
+        // on the world map, minutes after the room it names was left.
+        if (!enteringRoom(num)) return;
+        // `warn`, matching art.ts's transient path: the player has been TOLD (the screen
+        // is the report), and this is the breadcrumb beside it. It is also the difference
+        // between a breadcrumb and noise — a page torn down mid-download truncates a
+        // 2.43 MB package, which is not a fault to shout about.
+        console.warn(`[audio] room ${num} could not be given its sound:`, e);
+        failRoomEntry(num, e);
+        wake();
+      },
+    );
+  } catch (e) {
+    // EVERY route into a room comes through here, which is why the report belongs here
+    // and not in the launch. The map route had its own recovery (`abortMapLaunch`, via the
+    // rejection this rethrows); the DIRECT route — the dev room picker, the story-page
+    // chain, SCORE/ZAVER, an Escape restart, and the launch's own "the map was taken away"
+    // fallback — had none at all, and after boot nothing hijacks unhandled rejections
+    // (loadingUi.ts). So an FFR or FFT that failed on those routes left the player on a
+    // room screen showing the room they came from, silently: the very bug this branch
+    // exists to fix, reachable by a different door.
+    //
+    // Rethrown, because the callers that await an entry still have to see it fail.
+    failRoomEntry(num, e);
+    throw e;
   } finally {
-    // Always drop the guard, even if a fetch/parse threw: on error we fall back to
-    // the pre-existing behaviour (the previous room stays shown) rather than leaving
-    // the stage wedged black with no recovery. On success it runs once the room is
-    // built, so the next frame paints the new room.
+    // Always drop the guard, even if a fetch/parse threw. On success it runs once the
+    // room is built, so the next frame paints the new room.
+    //
+    // On FAILURE this used to be the whole recovery, and the comment here used to say so:
+    // the guard came off, the launch flipped the screen to `room`, and the player was
+    // handed the PREVIOUS room — built, live, accepting input, with nothing said. That is
+    // no longer what happens; the catch above reports it and the game stops. What the drop
+    // still does, and why it stays unconditional, is let
+    // the next frame PAINT: `roomLoading` suppresses the room draw, and the map's own
+    // repaint path runs through the same wake(). Leaving it set on the failure path would
+    // strand a frozen frame over a game that is otherwise fine.
     setRoomLoading(false);
     setRoomLoadSeq(roomLoadSeq + 1);
     setForceRoomRedraw(true);
@@ -142,34 +199,38 @@ export async function loadRoom(num: number): Promise<void> {
 }
 
 /**
- * Fetch one sound package: its .fft index and its .ffs bodies. Null if either is
- * missing — every package is optional, and losing one costs its lines, never the game.
+ * Fetch one sound package: its .fft index and its .ffs bodies.
+ *
+ * Throws rather than returning null, so the caller decides what an absent package
+ * means. Both requests go through `fetchAsset`, so both are retried on a transport
+ * failure and both are classified — `isTransient` is what tells "the connection dropped"
+ * from "this package is not on the server", and the two want different words.
  */
 export async function fetchSoundPkg(
   fftUrl: string,
   ffsUrl: string,
   deferred = false,
-): Promise<{ fft: Uint8Array; ffs: Uint8Array } | null> {
+): Promise<{ fft: Uint8Array; ffs: Uint8Array }> {
   // A `deferred` package holds chatter, never anything the player is waiting on, so it
   // asks the browser to schedule it behind everything else: x01 alone is 0.74 MB, and
   // it must not compete with the room art or the next room's voices. `priority` is an
   // optional RequestInit field — browsers that lack it ignore it.
   const init = deferred ? ({ priority: 'low' } as RequestInit) : undefined;
-  try {
-    const [fft, ffs] = await Promise.all([
-      fetch(fftUrl, init).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(fftUrl)))),
-      fetch(ffsUrl, init).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(ffsUrl)))),
-    ]);
-    return { fft: new Uint8Array(fft), ffs: new Uint8Array(ffs) };
-  } catch {
-    return null;
-  }
+  const [fftRes, ffsRes] = await Promise.all([fetchAsset(fftUrl, init), fetchAsset(ffsUrl, init)]);
+  requireAsset(fftRes, fftUrl, 'sound package index');
+  requireAsset(ffsRes, ffsUrl, 'sound package');
+  const [fft, ffs] = await Promise.all([assetBytes(fftUrl, fftRes), assetBytes(ffsUrl, ffsRes)]);
+  return { fft, ffs };
 }
 
 /**
- * Fetch a package and keep it for the whole session (x00/x02/x03, x01, restored). The
- * audio engine then holds the only parsed copy: an FFT record carries both the sample
- * and its subtitle, so nothing else needs to index it to render a line.
+ * Fetch a package and keep it for the whole session, TOLERATING a failure.
+ *
+ * This is boot's path (x00/x03/x02, and `restored`), and those really are optional in
+ * the way the room's own audio is not: they hold effects and idle chatter, the original
+ * loads them the same way, and boot has always treated a missing one as costing its
+ * lines rather than the game. `requireSoundPkg` is the strict counterpart, for the
+ * packages a room cannot be entered without.
  */
 export async function loadSoundPkg(
   id: string,
@@ -177,10 +238,23 @@ export async function loadSoundPkg(
   ffsUrl: string,
   deferred = false,
 ): Promise<boolean> {
+  try {
+    await requireSoundPkg(id, fftUrl, ffsUrl, deferred);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Fetch a package and keep it, failing loudly. The room-entry path. */
+export async function requireSoundPkg(
+  id: string,
+  fftUrl: string,
+  ffsUrl: string,
+  deferred = false,
+): Promise<void> {
   const pkg = await fetchSoundPkg(fftUrl, ffsUrl, deferred);
-  if (!pkg) return false;
   audio.loadGlobal(id, pkg.fft, pkg.ffs);
-  return true;
 }
 
 /**
@@ -198,15 +272,35 @@ export async function loadSoundPkg(
  * Until this landed the port never fetched x01 at all, so all eight names resolved to
  * nothing and the border remark was silent, subtitles included, in every leg-final room.
  */
-let borderLinesLoading = false;
-function loadBorderLines(num: number): void {
-  if (borderLinesLoading || depthOfRoom(num) !== 15) return;
-  borderLinesLoading = true;
-  void loadSoundPkg('x01', '/data/Title/x01.fft', '/data/Sound/x01.ffs', true).then((ok) => {
-    if (ok) return;
-    borderLinesLoading = false; // let the next leg-final room try again
-    console.warn('[audio] x01 unavailable — the leg-final border remarks stay silent');
-  });
+let borderLinesLoaded = false;
+let borderLinesLoad: Promise<void> | null = null;
+async function loadBorderLines(num: number): Promise<void> {
+  if (borderLinesLoaded || depthOfRoom(num) !== 15) return;
+  // Awaited now, and no longer swallowed: it used to warn to the console and leave the
+  // eight border remarks silent, which is a room quietly missing lines it is supposed to
+  // speak. The flag is set only on SUCCESS, so a failed entry re-fetches on the retry
+  // rather than remembering the failure — the same rule as every other loader here.
+  //
+  // Single-flight, for the same reason the .ffs path is (see `voiceLoads`): two entries to
+  // depth-15 rooms can overlap before the flag latches — a die-and-restart inside one is
+  // enough, since the room is live and interactive while its audio is still coming — and
+  // two concurrent writes of one 0.74 MB cache entry fail with ERR_CACHE_WRITE_FAILURE.
+  // That is a transient error, so without this the second entry would end the session over
+  // a package the first was already fetching successfully.
+  if (borderLinesLoad === null) {
+    borderLinesLoad = requireSoundPkg('x01', '/data/Title/x01.fft', '/data/Sound/x01.ffs', true);
+    // Retracted on failure so the next leg-final room retries rather than joining a
+    // rejected promise for the rest of the session.
+    void borderLinesLoad.then(
+      () => {
+        borderLinesLoaded = true;
+      },
+      () => {
+        borderLinesLoad = null;
+      },
+    );
+  }
+  await borderLinesLoad;
 }
 
 /**
@@ -223,7 +317,7 @@ function loadBorderLines(num: number): void {
  * cache entry fail with net::ERR_CACHE_WRITE_FAILURE. The entry is dropped once the
  * fetch settles, so nothing retains these buffers between entries.
  */
-const voiceLoads = new Map<string, Promise<ArrayBuffer | null>>();
+const voiceLoads = new Map<string, Promise<Uint8Array>>();
 /**
  * False from room entry until the room's .ffs has SETTLED — arrived, or failed/absent.
  * Gates the dialogue queue (see SoundFns.voicesReady) so an opening conversation is not
@@ -231,6 +325,32 @@ const voiceLoads = new Map<string, Promise<ArrayBuffer | null>>();
  * "loaded" on purpose: a room with no voice package, or a failed fetch, must let the
  * queue run rather than stall it forever.
  */
+/**
+ * Is the room still waiting for its SOUND?
+ *
+ * A hold of its own, alongside `roomArtPending()`, rather than an extension of
+ * `roomLoading`. The distinction is load-bearing: the room is BUILT at exactly the
+ * moment it always was (`roomLoading` drops there, and a dozen probes anchor on that),
+ * but it is not handed the stage until it can be heard as well as seen. Cleared on both
+ * arms of the audio load — a hold that outlives its load is a room that never appears.
+ */
+let audioPendingNum = 0;
+export const roomAudioPending = (): boolean => audioPendingNum !== 0;
+/**
+ * Arm or release the hold, scoped to the room that owns it.
+ *
+ * Scoped for the same reason `clearAiPending` is (art.ts): these loads outlive the entry
+ * that started them, so an outcome arriving for room A must not release a hold that room
+ * B has since armed — which would present B before its sound was in, silently, and only
+ * when the player happened to move fast enough.
+ */
+function setRoomAudioPending(num: number): void {
+  audioPendingNum = num;
+}
+function clearRoomAudioPending(num: number): void {
+  if (audioPendingNum === num) audioPendingNum = 0;
+}
+
 export let roomVoicesSettled = true;
 /** Resolves when `roomVoicesSettled` next becomes true — for callers that can await. */
 export let roomVoicesReady: Promise<void> = Promise.resolve();
@@ -265,32 +385,99 @@ function enteringRoom(num: number): boolean {
   return ui.screen === 'room' || mapLaunching() === num;
 }
 
-export function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): void {
+export async function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Array): Promise<void> {
   if (!enteringRoom(num)) return;
-  loadBorderLines(num);
   let pending = voiceLoads.get(nnn);
   if (pending === undefined) {
-    pending = fetch(`/data/Sound/${nnn}.ffs`)
-      .then((r) => (r.ok ? r.arrayBuffer() : null))
-      .catch(() => null);
+    const url = `/data/Sound/${nnn}.ffs`;
+    pending = fetchAsset(url).then(async (r) => {
+      requireAsset(r, url, `the voices for room ${num}`);
+      return assetBytes(url, r);
+    });
     voiceLoads.set(nnn, pending);
-    void pending.then(() => voiceLoads.delete(nnn));
+    // Dropped whatever happens, so a failure is not what the next entry joins. Kept
+    // keyed on the PROMISE so two entries to the same room do not put two fetches of one
+    // (up to 8.94 MB) cache entry in flight — concurrent writes fail with
+    // net::ERR_CACHE_WRITE_FAILURE.
+    void pending.catch(() => {}).then(() => voiceLoads.delete(nnn));
   }
-  void pending.then((buf) => {
-    if (curNum !== num) return;
-    if (buf) audio.setRoom(nnn, fftBytes, new Uint8Array(buf));
-    roomVoicesSettled = true;
-    markVoicesSettled();
-    wake(); // the dialogue queue was held on this; let it run on the next frame
-  });
+  const buf = await pending;
+  if (curNum !== num) return;
+  audio.setRoom(nnn, fftBytes, buf);
+  roomVoicesSettled = true;
+  markVoicesSettled();
+  wake(); // the dialogue queue was held on this; let it run on the next frame
 }
 
-/** Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it. */
-export function startRoomMusic(num: number): void {
+/**
+ * Room music (MusicCycle, URoom.pas:1568): loop the room's track, or silence it.
+ *
+ * The track is fetched and DECODED here rather than inside `playMusic`, so that a track
+ * which does not arrive fails the room entry instead of leaving the room quietly silent.
+ * `playMusic` then finds it in the engine's cache and starts it without a request of its
+ * own; every other caller (the menu, the KUFRIK demo) keeps the tolerant path, where
+ * silence really is the right answer.
+ *
+ * A room whose cHud has no track is not a failure — it is a room that is meant to be
+ * quiet, and there is nothing to fetch.
+ */
+export async function startRoomMusic(num: number): Promise<void> {
   if (!enteringRoom(num)) return;
   const music = musicForCHud(ROOMS[num - 1]?.cHud ?? -1);
-  if (music) void audio.playMusic(music.name, `/data/Music/${music.name}.wav`, music.loopSample);
-  else audio.stopMusic();
+  if (!music) {
+    audio.stopMusic();
+    return;
+  }
+  // 17 tracks serve 72 rooms, so this is usually a cache hit and costs nothing; it is
+  // paid once per leg. Uncompressed, the miss is up to 6.75 MB (see the
+  // fish_fillets_audio_compression task).
+  const url = `/data/Music/${music.name}.wav`;
+  if (!audio.hasMusic(music.name)) {
+    // What the channel was claimed for when this entry asked for its music. `playMusic`
+    // takes the channel at CALL time, and the call now happens after the download rather
+    // than before it — so without this, anything that legitimately claims music DURING
+    // the download would be overridden when it finished. KUFRIK is exactly that case: its
+    // demonstration starts `kufrik` the moment the room is entered, and an unguarded room
+    // track landing a second later silenced it (caught by test-kufrikdemo).
+    const claimed = audio.currentMusic;
+    // Registered with the engine BEFORE the first await, so a script that re-cues the same
+    // track while it is still coming joins this download instead of opening a second one.
+    // KANKAN does exactly that on its first tick — `if (!s.playing(MUSIC_PRIOR))
+    // s.musiccyc(...)` — and paid for its 1.24 MB track twice.
+    const load = (async () => {
+      const res = await fetchAsset(url, { priority: 'low' } as RequestInit);
+      requireAsset(res, url, `the music for room ${num}`);
+      await audio.decodeMusic(music.name, await assetBytes(url, res));
+    })();
+    audio.beginMusicLoad(music.name, load);
+    await load;
+    if (audio.currentMusic !== claimed) return; // something else owns the channel now
+  }
+  if (!enteringRoom(num)) return; // they left while it downloaded
+  void audio.playMusic(music.name, url, music.loopSample);
+}
+
+/**
+ * Everything a room needs to SOUND right: its voices, the leg-final remarks if it is a
+ * leg-final room, and its music. Awaited by the room entry, which does not complete
+ * until this does — and fails if it does not.
+ *
+ * Fetched in parallel; the reasoning is in the comment on the call itself, which is where
+ * the trade actually lives.
+ */
+async function loadRoomAudio(num: number, nnn: string, fftBytes: Uint8Array): Promise<void> {
+  // In PARALLEL, and the reason is a change of metric. While the room appeared before its
+  // audio, serializing kept a 6.75 MB track from crowding out the 2.43 MB the opening
+  // conversation needs — first-sound was what mattered. Now the room does not appear until
+  // all of it is in, so the only figure that matters is when the LAST byte lands, and for
+  // that a serial chain simply wastes the link. It also keeps each load starting at the
+  // moment it always did, which the music depends on (see startRoomMusic).
+  //
+  // `Promise.all` rejects on the first failure, which is what the entry wants — but the
+  // others keep downloading rather than being cancelled. That is deliberate: they are
+  // already in flight, the retry will want them, and aborting them would only guarantee
+  // the retry starts from nothing.
+  await Promise.all([loadBorderLines(num), loadRoomVoices(num, nnn, fftBytes), startRoomMusic(num)]);
 }
 
 /** Make a fish "talk": show the next subtitle of its colour code (M/V) and play its voice. */

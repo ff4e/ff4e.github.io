@@ -33,7 +33,7 @@ import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
 import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
 import { isTransient } from '../render/assetFetch.js';
-import { artFailureShown, hideArtFailure, showArtFailure } from './artFailure.js';
+import { failAssets, fatalShown } from './loadingUi.js';
 // Re-exported so the one other consumer of the decode helpers (main.ts's leg-story art)
 // keeps its existing import. They live in enhancedLoad.ts now, with the loaders.
 export { decodePngResponse, isPngResponse } from './enhancedLoad.js';
@@ -101,10 +101,6 @@ let aiPendingNum = 0; // room aiPending refers to (the tier can change under it)
  * and the same tier.
  */
 export function beginRoomArt(num: number): void {
-  // Any failure screen still up belongs to the room being LEFT, and its retry would
-  // reload art nobody is waiting for. Entering a room supersedes it; if this room's art
-  // fails too, its own loader raises a fresh one a moment later.
-  hideArtFailure();
   // Enhanced background art for this room (async; draw() holds the previous
   // frame until it lands, so the room never flashes classic first).
   curNum = num;
@@ -144,10 +140,6 @@ export function retargetArtForTier(): void {
   } else {
     enhancedPending = false;
   }
-  // A tier switch answers the question the screen was asking: whatever failed, the
-  // player is now asking for something else, and the load below will raise it again if
-  // the new tier fails too.
-  hideArtFailure();
   // Selecting `ai` is the discrete event the one-shot UI assets retry on.
   if (host.graphics === 'ai') retryAiUiAssets();
   if (host.graphics === 'ai' && curNum) {
@@ -215,7 +207,7 @@ export function roomArtPending(): boolean {
  */
 export function ensureEnhancedFallback(): void {
   if (host.graphics !== 'ai' || !curNum) return;
-  if (artFailureShown()) return;
+  if (fatalShown()) return;
   void ensureEnhancedArt(curNum);
 }
 /**
@@ -315,16 +307,15 @@ export async function ensureEnhancedArt(num: number): Promise<void> {
     //
     // The hold is deliberately NOT released. Releasing it would paint the room in 1998
     // bitmaps — a downgrade the player did not ask for and cannot see — so the game
-    // stops and offers the retry instead (see artFailure.ts). An outcome for a room
+    // stops and says so (see failAssets, loadingUi.ts). An outcome for a room
     // that is no longer on screen is dropped: the player has already moved on.
     console.warn(`[art] enhanced art for ${jmeno} did not load`, e);
     // ...and an outcome for a tier that does not PAINT this art is dropped too. The
     // `classic` tier prefetches the enhanced art purely to warm the cache for a later
-    // switch (roomLoad.ts) and holds nothing for it, so raising a modal there would
-    // obstruct a game that is rendering perfectly from the bundled FFR data — with a
-    // Try again button as its only control, which offline never succeeds.
+    // switch (roomLoad.ts) and holds nothing for it, so failing there would end a session
+    // that is rendering perfectly from the bundled FFR data.
     if (curNum === num && host.graphics !== 'classic') {
-      raiseArtFailure('room', () => void ensureEnhancedArt(num));
+      raiseArtFailure('The artwork for this room');
     }
   }
 }
@@ -335,11 +326,6 @@ function applyEnhanced(num: number, r: RoomEnhanced): void {
   enhancedArt = r.art;
   enhancedObjects = r.objects;
   enhancedPending = false;
-  // The art arrived, so whatever the screen was asking has been answered — including
-  // when the answer came from a retry the player did not press (a later room entry, a
-  // tier switch back). Leaving it up would strand a working game behind it. Scoped to
-  // 'room': this says nothing about a map failure the player is still looking at.
-  hideArtFailure('room');
 }
 
 /**
@@ -490,10 +476,7 @@ async function ensureAiWorldMap(): Promise<void> {
     // released instead and the map is simply the faithful one next time they open it.
     if (ui.screen === 'map') {
       held = true;
-      raiseArtFailure('map', () => {
-        aiMapTried = false;
-        beginMapArt();
-      });
+      raiseArtFailure('The artwork for the world map');
     } else {
       // Re-armed so returning to the map tries again rather than showing the 1998 map
       // for the rest of the session on the strength of one blip.
@@ -570,7 +553,6 @@ export async function ensureAiRoom(num: number): Promise<void> {
     if (curNum === num) {
       aiRoom = loaded;
       aiRoomNum = num;
-      hideArtFailure('room'); // answered — see applyEnhanced
     }
     // `null` is not a failure: it is the room saying, authoritatively, that it has no
     // AI art. That is permanent, there is nothing to retry, and the fallback below it
@@ -583,8 +565,9 @@ export async function ensureAiRoom(num: number): Promise<void> {
     // The hold STAYS, and the player is asked. Both the guard and the hold matter:
     // these loads outlive the room that started them, so a stale failure must not
     // raise a screen over the room the player has since walked into. (The mirror of
-    // that was measured on the note this replaces — a stale SUCCESS cleared it.)
-    if (curNum === num) raiseArtFailure('room', () => void ensureAiRoom(num));
+    // that was measured on an earlier, dismissable form of this — a stale SUCCESS
+    // cleared it.)
+    if (curNum === num) raiseArtFailure('The artwork for this room', e);
     else clearAiPending(num);
   }
   // AFTER the hold is released, and not awaited: evictAiRooms awaits an older room's
@@ -601,10 +584,10 @@ export async function ensureAiRoom(num: number): Promise<void> {
  * wakes on the way out; the failure path holds instead, so without this the loop can
  * still be asleep — and `syncLoadingUi` only runs from the loop, so the loading spinner
  * it is supposed to stand down would stay up ON TOP of this screen (same z-index, later
- * in the DOM) and swallow the click on Try again. Found exactly that way.
+ * in the DOM) and swallow the click on the screen's own button. Found exactly that way.
  */
-function raiseArtFailure(what: 'room' | 'map', again: () => void): void {
-  showArtFailure(what, again);
+function raiseArtFailure(what: string, err?: unknown): void {
+  failAssets(what, err === undefined ? true : isTransient(err));
   host.forceRoomRedraw = true;
   host.wake();
 }

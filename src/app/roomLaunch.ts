@@ -37,6 +37,11 @@
 import { parseBmp, bmpToRgba } from '../data/bmp.js';
 import { MAP_W } from '../render/worldMap.js';
 import { AI_MAP_SCALE } from '../render/worldMapAi.js';
+import { curNum } from './art.js';
+import { ROOMS } from '../data/roomTable.js';
+import { isTransient } from '../render/assetFetch.js';
+import { failAssets } from './loadingUi.js';
+import { roomAudioPending } from './roomLoad.js';
 import type { AiWorldMap } from '../render/worldMapAi.js';
 
 /** What this module needs to see of the running game. */
@@ -289,17 +294,20 @@ export function tickMapLaunch(): void {
     if (!l.started) {
       l.started = true;
       const load = host.startRoom(l.room, l.replay, false);
-      // A load that THREW has no room to hand over to, and the condition below can only
-      // release once whatever `roomArtPending()` is still watching settles — which for a
-      // failed entry is the PREVIOUS room's art, since loadRoom throws before it re-arms
-      // either flag. Take the stage instead: that is exactly what this entry did before
-      // the launch route existed, and it is what stops a failure from leaving the player
-      // behind a parchment with the input swallowed.
-      void load.catch(() => finishMapLaunch(l));
+      // A load that FAILED has no room to hand over to. It used to call
+      // finishMapLaunch() anyway — "take the stage" — and that is the bug this replaces:
+      // the stage it took was the PREVIOUS room, still built and still live, so the
+      // player who clicked an unreachable room was handed a different one, with no
+      // message and with the input live. Offline on the world map, that is what every
+      // click did. Go back to the map instead, and say so.
+      void load.catch((e: unknown) => abortMapLaunch(l, e));
       l.settle(load);
       return;
     }
-    if (host.roomLoading || host.roomArtPending()) return;
+    // The room takes the stage when it can be both SEEN and HEARD. `roomAudioPending`
+    // is read straight from its owning module rather than through the host: it is state
+    // roomLoad.ts owns, and an accessor would be one more thing to mis-wire.
+    if (host.roomLoading || host.roomArtPending() || roomAudioPending()) return;
     finishMapLaunch(l);
   } catch (e) {
     // This is the one thing in loop() that STARTS a room, and loop() reschedules itself
@@ -310,22 +318,93 @@ export function tickMapLaunch(): void {
     // dismissed. Everywhere else this path is reached from an event handler, where a
     // throw costs that handler's turn and nothing more.
     //
-    // Catching is what saves the clock. The three stores then make the recovery immediate
-    // and independent of state the failed entry may have left behind, rather than relying
-    // on the next frame's `roomLoading || roomArtPending()` happening to be false — and
-    // unlike finishMapLaunch() they cannot themselves throw (no DOM, no call).
+    // Catching is what saves the clock. `abortMapLaunch` then makes the recovery
+    // immediate and independent of state the failed entry may have left behind, rather
+    // than relying on the next frame's `roomLoading || roomArtPending()` happening to be
+    // false. Its stores are the same throw-free ones this catch used to make inline, and
+    // the reporting it adds on top is guarded there for exactly this reason — see the
+    // note in that function.
     //
     // The promise is settled with the failure as well, because a caller that awaited
     // enterRoom() would otherwise wait forever: `settle` is normally handed the load, and
     // on this path the load never got as far as existing. That matches the direct route,
     // where loadRoom() rejects and the same callers see it.
     console.error('room launch failed:', e);
-    mapLaunch = null;
-    host.screen = 'room';
-    host.forceRoomRedraw = true;
-    host.mapSig = null;
+    abortMapLaunch(l, e);
     l.settle(Promise.reject(e instanceof Error ? e : new Error(String(e))));
   }
+}
+
+/**
+ * A launch that could not produce a room: put the player back on the map, and say so.
+ *
+ * ── Why this is not finishMapLaunch ───────────────────────────────────────────
+ * Both failure paths used to end there, which flips `screen` to `room` — and on a failed
+ * entry there IS no new room, so what appeared was the previous one, fully built and
+ * accepting input. That is the defect: offline on the world map, every click on an
+ * unvisited room opened whichever room had last loaded, silently.
+ *
+ * The fix is not to let the exception unwind instead. This runs (on one path) inside
+ * `tickMapLaunch`'s catch, which exists because loop() reschedules itself on its last
+ * statement: an escaping throw takes the game's clock with it — measured at 3 iterations
+ * in 1.5 s against 20, with the launch still armed and the player stuck behind a
+ * parchment. So the return to the map is DELIBERATE, and made of the same throw-free
+ * stores that argument produced.
+ *
+ * `screen` is simply left alone: the launch route never took the stage in the first place
+ * (`startRoom(..., takeStage: false)`), so the map is already what is up. Clearing
+ * `mapLaunch` is what un-freezes it — every input guard and the map's own cache
+ * signature read `mapLaunching()`, so the map goes back to lit, clickable and
+ * parchment-free on the next frame, and the room the player wanted can simply be
+ * clicked again.
+ */
+function abortMapLaunch(l: MapLaunch, err: unknown): void {
+  if (mapLaunch !== l) return; // superseded: a later launch owns the screen now
+  mapLaunch = null;
+  host.forceRoomRedraw = true;
+  host.mapSig = null; // drop the parchment frame: this launch is over
+  // Everything below either touches the DOM or calls out, so it cannot carry the
+  // guarantee the stores above do. It is guarded because ONE of this function's two
+  // callers is the catch that keeps the frame loop alive, and a throw escaping there
+  // would cost the game its clock to report that a room did not load. `wake()` goes
+  // first: the async caller runs outside loop(), which may have parked the clock while
+  // the room was loading, and nothing else here matters if the next frame never comes.
+  try {
+    host.wake();
+    // An answer ("not there") and no answer at all want opposite sentences — see
+    // src/render/assetFetch.ts.
+    failAssets(roomLabel(l.room), isTransient(err));
+    // The picker names the room actually on screen, which is the one the player came
+    // from: `startRoom` pointed it at the room it was about to load, and that load is
+    // what just failed. `curNum` only advances once a load succeeds.
+    host.setRoomPicker(curNum);
+  } catch (e2) {
+    console.error('failed to report a failed room launch:', e2);
+  }
+}
+
+/**
+ * An entry that cannot be completed, from wherever the failure was noticed.
+ *
+ * `abortMapLaunch` needs the launch object, which only this module has — so the loaders
+ * that fail LATE (the audio, which lands after the room is built) call this instead. If
+ * the launch is still armed it is abandoned exactly as an early failure would be, and
+ * the player is taken off it. Either way the failure screen goes up: it is the same
+ * screen wherever the entry was noticed to have failed.
+ */
+export function failRoomEntry(num: number, err: unknown): void {
+  const l = mapLaunch;
+  if (l && l.room === num) {
+    abortMapLaunch(l, err);
+    return;
+  }
+  failAssets(roomLabel(num), isTransient(err));
+}
+
+/** The room's own name (PRVNI, KOSTE…), for the failure screen's sentence. */
+function roomLabel(num: number): string {
+  const jmeno = ROOMS[num - 1]?.jmeno;
+  return jmeno === undefined ? `Room ${num}` : `The room ${jmeno}`;
 }
 
 /** Hand the stage from the map to the room the launch `l` loaded, and end the launch. */

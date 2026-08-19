@@ -426,7 +426,15 @@
         A fan port of ALTAR's 1998 <em>Fish Fillets</em>. Not affiliated with ALTAR interactive.
       </div>
     </div>
-    <!-- Fatal boot error (missing/broken assets). Shown by the app on failure. -->
+    <!-- The one player-facing failure screen. Raised for a boot failure AND, since the
+         art tiers and the room's own assets stopped recovering in place, for any load
+         that FAILED at any point: no answer at all, or a file a manifest promised and
+         the server does not have. Its only exit is a reload, deliberately — a partial
+         game is a game that lies about its own state.
+         Art that is genuinely ABSENT never reaches here and still falls back silently
+         (SCORE has no enhanced art, CHODBA and WIN draw a classic background by design,
+         21 sprites are unstaged): those are 404s on a correctly deployed game, and
+         routing them here would make it unplayable in rooms that are working. -->
     <div id="fatal" class="overlay" hidden>
       <!-- Decorative, and marked so: a screen reader gets the heading and the
            message, which carry everything the parrot is there to soften. -->
@@ -434,19 +442,6 @@
       <h1>Couldn't load the game</h1>
       <p id="fatal-msg">Some game files failed to load. Check your connection and try again.</p>
       <button id="fatal-reload" class="btn" type="button">Reload</button>
-    </div>
-    <!-- The selected art tier FAILED to load (no answer — a network error, a 5xx, an
-         aborted request), as opposed to a room that legitimately has no art at that
-         tier. The game deliberately does NOT quietly drop to the tier below and carry
-         on: that is a downgrade the player cannot see and did not ask for, and the
-         setting would go on claiming they were getting something they were not. So it
-         stops and offers the retry instead. Art that is genuinely ABSENT still falls
-         back silently, as it always has — nothing there can be retried. -->
-    <div id="art-fail" class="overlay" hidden>
-      <div class="creature" role="presentation" aria-hidden="true"><i></i><i></i></div>
-      <h1 id="art-fail-title">Couldn't load the graphics</h1>
-      <p id="art-fail-msg">The game could not download the artwork for this room. Check your connection and try again.</p>
-      <button id="art-fail-retry" class="btn" type="button">Try again</button>
     </div>
     <!-- Phone refusal. The game has no touch controls and phone-sized targets are
          unusable, so it does not boot on a touch-only, phone-sized screen. Tablets are

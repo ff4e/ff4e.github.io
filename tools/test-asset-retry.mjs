@@ -63,7 +63,7 @@ await withApp(
     );
     // ...and because it was covered, the player was never told anything was wrong.
     expect(
-      (await p.evaluate(() => window.__ff.artFailShown())) === false,
+      (await p.evaluate(() => window.__ff.fatalShown())) === false,
       'one blip: the player is never shown a failure screen, because nothing failed',
     );
 
@@ -89,7 +89,7 @@ await withApp(
     // 21 sprites are unstaged — so a failure screen here would appear permanently, in
     // rooms that are working exactly as intended, with a retry that could never help.
     expect(
-      (await p.evaluate(() => window.__ff.artFailShown())) === false,
+      (await p.evaluate(() => window.__ff.fatalShown())) === false,
       'absent art: NO failure screen — it falls back silently, as it always has',
     );
     expect(
@@ -113,7 +113,7 @@ await withApp(
     // build, and is worth more than the seconds it costs.
     await p.waitForTimeout(3000);
     expect(
-      (await p.evaluate(() => window.__ff.artFailShown())) === false,
+      (await p.evaluate(() => window.__ff.fatalShown())) === false,
       'classic tier: a failed enhanced prefetch shows NO screen — that art is never drawn',
     );
     expect(

@@ -72,6 +72,8 @@ export class AudioEngine {
   private musicSrc: AudioBufferSourceNode | null = null;
   private musicGain: GainNode | null = null;
   private musicName = '';
+  /** Track downloads started OUTSIDE this engine (room entry), so starts can join them. */
+  private musicLoads = new Map<string, Promise<void>>();
   /** Name of the track whose async decode/start is currently in flight, if any.
    *  Guards against a second concurrent start for the same track spawning a second
    *  overlapping loop that stopMusic() can't fully cancel (see playMusic). */
@@ -541,6 +543,55 @@ export class AudioEngine {
    * (MusCycle/2), so the intro plays once and only the body repeats. No-op if the
    * same track is already playing (so it survives death-restarts within a room).
    */
+  /** Is this track already decoded and cached? (Room entry asks before fetching.) */
+  hasMusic(name: string): boolean {
+    return this.musicBufs.has(name);
+  }
+
+  /**
+   * Tell the engine a track is already on its way, so `playMusic` joins it rather than
+   * starting a second download of the same file.
+   *
+   * Room entry owns its music download (see startRoomMusic — it has to, because only the
+   * entry can fail on it), which puts that download outside everything `playMusic` uses to
+   * deduplicate: `musicBufs` is empty until the decode finishes and `musicStarting` only
+   * knows about starts `playMusic` itself began. KANKAN then re-cues its track on the
+   * first tick it sees the channel idle (`if (!s.playing(MUSIC_PRIOR)) s.musiccyc(...)`,
+   * kankan.ts:216) and the 1.24 MB file is fetched and decoded TWICE on a cold entry.
+   */
+  beginMusicLoad(name: string, load: Promise<unknown>): void {
+    const done = load.then(
+      () => {},
+      () => {},
+    );
+    this.musicLoads.set(name, done);
+    void done.then(() => {
+      if (this.musicLoads.get(name) === done) this.musicLoads.delete(name);
+    });
+  }
+
+  /**
+   * Decode a music track into the cache, so `playMusic` can start it without a fetch.
+   *
+   * Split out of `playMusic` so the room entry can OWN the download: inside `playMusic`
+   * a failure is swallowed ("stay silent"), which is right for the menu and the KUFRIK
+   * demo and wrong for a room, where a track that never arrives used to mean a room
+   * played through with no music and nothing said. Here it throws, and the entry fails.
+   *
+   * The native sample rate comes out of the WAV header (offset 24) exactly as it does in
+   * `playMusic`, and is stashed on the buffer the same way — `loopStart` is computed from
+   * it, so getting it wrong makes the track's intro repeat instead of only its body.
+   */
+  async decodeMusic(name: string, bytes: Uint8Array): Promise<void> {
+    if (this.musicBufs.has(name)) return;
+    const ctx = this.ensureCtx();
+    const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    const nativeRate = new DataView(ab).getUint32(24, true) || 22050;
+    const buf = await ctx.decodeAudioData(ab.slice(0));
+    (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
+    this.musicBufs.set(name, buf);
+  }
+
   async playMusic(name: string, url: string, loopSample: number): Promise<void> {
     if (this.musicName === name && this.musicSrc) {
       this.activeUntil.set(MUSIC_PRIOR, Infinity); // ensure playing(-999) reflects it
@@ -575,6 +626,15 @@ export class AudioEngine {
     try {
       const ctx = this.ensureCtx();
       let buf = this.musicBufs.get(name);
+      if (!buf) {
+        // Join a download the room entry already started rather than opening a second one
+        // for the same file (see beginMusicLoad).
+        const inflight = this.musicLoads.get(name);
+        if (inflight) {
+          await inflight;
+          buf = this.musicBufs.get(name);
+        }
+      }
       if (!buf) {
         const bytes = await fetch(url, { priority: 'low' } as RequestInit).then((r) => r.arrayBuffer());
         // WAV loop point is in samples at the file's native rate (header @ offset 24).

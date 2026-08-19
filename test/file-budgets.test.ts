@@ -97,7 +97,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // this hook is how every probe changes the mode, so without it they would all measure a
   // stale box. It mirrors what the dev bar's own handler does; the alternative was routing
   // it through the host, which costs more lines here and widens the hook surface.
-  ['src/app/debugHooks.ts', 1646],
+  // 1 646 -> 1 653 for the three hooks that make a failed room entry observable:
+  // `fatalShown` and `fatalText` — two rather than one because the screen's WORDING is the
+  // thing under test, picked from the absent/failed taxonomy, and a probe that only asked
+  // whether it was up would pass just as happily on the sentence that blames the player's
+  // connection for a 404 — plus `roomAudioPending`, the third hold a room entry can be
+  // waiting on, which a probe otherwise cannot tell from the art hold.
+  ['src/app/debugHooks.ts', 1653],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
@@ -134,7 +140,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // masked by the wall's alpha, plus the `paint`/`paintBg` split that lets it reuse the
   // wobbled-background half rather than copy it.
   ['src/render/aiTarget.ts', 780],
-  ['src/audio/audio.ts', 680],
+  // 680 -> 710 for the two things a room's music needs now that ROOM ENTRY owns its
+  // download (it has to: only the entry can fail on it). `decodeMusic` is the fetch-free
+  // half of `playMusic`, split out so a track that does not arrive fails the entry instead
+  // of being swallowed by the "stay silent" path that is right for the menu; and
+  // `beginMusicLoad` lets a start JOIN that download, because a download outside the
+  // engine is invisible to `musicBufs`/`musicStarting` and KANKAN re-cues its track on the
+  // first idle tick — fetching and decoding the same 1.24 MB file twice.
+  ['src/audio/audio.ts', 710],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */
