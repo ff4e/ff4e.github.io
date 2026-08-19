@@ -12,7 +12,7 @@
 import { audio } from './audioEngine.js';
 import { canvas, ctx, glCanvas } from './dom.js';
 import { perfPaint, roomLoadSeq, roomLoading, setPerfPaint } from './framePacing.js';
-import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneAssets, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
+import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneAssets, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeHold, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeHold, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
 import { glCompositor, glFailed, markGlFailed } from './glPlumbing.js';
 import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
 import { clearHeldKey, restore, tryStep } from './movement.js';
@@ -31,6 +31,7 @@ import type { AiKufr } from '../intro/kufrDemo.js';
 import { IndexedScreen } from '../render/framebuffer.js';
 import { AI_ROOM_SCALE } from '../render/roomAi.js';
 import { SubtitleSystem } from '../render/subtitles.js';
+import { SHOWMODE_HOLDS } from './showmodeHolds.js';
 
 /**
  * The five names this module needs from `main.ts` — all of them things a cutscene DOES
@@ -117,6 +118,7 @@ export function startShowmode(): void {
   setShowmodeLoading(true);
   setShowmodeHelptext(0);
   setShowmodeRestarted(false);
+  setShowmodeHold(0);
   setShowmodeSave(null);
   if (activeScript) activeScript.s.showmode = true;
   room.facingRight.big = false; // natoceni[velka] := smer_vlevo
@@ -145,6 +147,7 @@ export function endShowmode(): void {
   setShowmode(null);
   setShowmodeLoading(false);
   setShowmodeRestarted(false);
+  setShowmodeHold(0);
   setShowmodeSave(null);
   setLoadmode(null);
   setReplaymode(null); // a room change / exit also ends a best-solution replay
@@ -198,9 +201,21 @@ export function advanceShowmode(): void {
     endShowmode();
     return;
   }
+  // A held tick is still the demo being active. Every replayed action calls `hracNespi`,
+  // and that is the only thing keeping the idle-chatter clock quiet during the demo
+  // (logicTick.ts:207), so a hold must call it too or the fish chat over the pause.
+  if (showmodeHold > 0) {
+    setShowmodeHold(showmodeHold - 1);
+    host.hracNespi();
+    return;
+  }
   const at = showmode.idx;
   const a = showmode.actions[showmode.idx++]!;
   applyCapAction(a);
+  // Armed AFTER the action, keyed on the index just consumed: arming before would re-arm
+  // on every held tick (`idx` has not moved yet) and the replay would never advance.
+  const hold = SHOWMODE_HOLDS.get(at);
+  if (hold) setShowmodeHold(hold);
   host.hracNespi(); // DalsiPrikaz calls hrac_nespi after each replayed action (URoom.pas:26985)
   // Debug trace (enabled via __ff.showmodeTraceOn): one row per consumed action, with
   // the resulting fish cells / phase / alive, so a headless run can be replayed and

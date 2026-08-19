@@ -593,7 +593,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. |
-| `cutscene.ts` | 5.8 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
+| `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
@@ -610,6 +610,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `layout.ts` | 2.2 k | Display layout and scaling. |
 | `stageGeometry.ts` | 2.2 k | How big the game is drawn, and the constants the simulation is timed by. |
 | `cheats.ts` | 6.2 k | The typed codes, the effects they switch on, and the Tetris minigame. |
+| `showmodeHolds.ts` | 1.1 k | Pauses lengthened by hand in the KUFRIK demonstration — its only deviation from the 1998 recording. |
 | **Development** | | |
 | `debugHooks.ts` | 18.6 k | `window.__ff`, the debug/test interface the UI probes drive the game through. |
 | `devBar.ts` | 1.4 k | The developer bar, and the relayout watchers. |
