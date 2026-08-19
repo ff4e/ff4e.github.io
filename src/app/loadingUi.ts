@@ -32,6 +32,7 @@ import { ui } from './screenState.js';
 import { computeStageLayout } from './layout.js';
 import { setStage, stage } from './stageGeometry.js';
 import { ROOMS } from '../data/roomTable.js';
+import { isAssetError, isTransient } from '../render/assetFetch.js';
 import { webgl2Available } from '../render/glScreen.js';
 
 export function setLoadingMsg(msg: string): void {
@@ -151,10 +152,16 @@ export function failAssets(what: string, transient: boolean): void {
   // The two cases want opposite sentences. A request that got no answer is the player's
   // connection and is worth trying again; a 404 is an answer, and telling that player to
   // check their connection sends them to debug their own wifi over a broken deploy.
+  //
+  // The label is capitalised HERE rather than at the call sites. Half of them are
+  // sentence fragments written for an error message ("the music for room 7"), half are
+  // written for this screen ("The room SCHODY"), and every new asset would otherwise be
+  // one more chance to ship a screen that opens in lower case.
+  const label = what.charAt(0).toUpperCase() + what.slice(1);
   showFatal(
     transient
-      ? `${what} didn't finish loading. Check your connection and reload.`
-      : `${what} is missing from the game files. This is a problem with the game, not with your connection.`,
+      ? `${label} didn't finish loading. Check your connection and reload.`
+      : `${label} is missing from the game files. This is a problem with the game, not with your connection.`,
   );
 }
 
@@ -240,11 +247,28 @@ export function relayout(): void {
 export function initLoadingUi(): void {
   document.getElementById('fatal-reload')?.addEventListener('click', () => location.reload());
   // Any unhandled failure DURING boot means the game never became playable → fatal.
-  // After boot we stop hijacking errors (a mid-game exception shouldn't nuke play).
+  //
+  // After boot the rule NARROWS rather than stopping, and this is the layer that makes
+  // "every asset failure ends the session" true for code nobody has touched — and for
+  // code not yet written. An unhandled ASSET error is fatal at any time; everything else
+  // is still ignored once the game is up, because a mid-game exception in the renderer or
+  // a room script should not nuke play.
+  //
+  // The asymmetry is the whole point. Before this, forgetting to handle a load was
+  // SILENT: the loader rejected, nothing caught it, and the player got a game quietly
+  // missing its music or its death lines. Fourteen kinds of asset ended up that way and
+  // nobody ever decided it — it was what the default did. Now forgetting is the loud
+  // case, so the mistake announces itself instead of degrading the game in silence.
+  //
+  // It is typed, not string-matched (`isAssetError`), so rewording an error message
+  // cannot quietly disarm it.
   window.addEventListener('unhandledrejection', (ev) => {
     if (!booted) {
       console.error('boot failed:', ev.reason);
       showFatal();
+    } else if (isAssetError(ev.reason)) {
+      console.error('asset failed:', ev.reason);
+      failAssets(ev.reason.what ?? 'A game file', isTransient(ev.reason));
     }
   });
   window.addEventListener('error', (ev) => {
