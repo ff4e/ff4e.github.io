@@ -97,7 +97,12 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // this hook is how every probe changes the mode, so without it they would all measure a
   // stale box. It mirrors what the dev bar's own handler does; the alternative was routing
   // it through the host, which costs more lines here and widens the hook surface.
-  ['src/app/debugHooks.ts', 1646],
+  // 1 646 -> 1 653 for the two hooks that make a failed room entry observable:
+  // `loadNoteShown` and `loadNoteText`. Two rather than one because the note's WORDING is
+  // the thing under test — it is picked from the absent/failed taxonomy, and a probe that
+  // only asked whether a note was up would pass just as happily on the sentence that
+  // blames the player's connection for a 404.
+  ['src/app/debugHooks.ts', 1653],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is

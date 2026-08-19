@@ -159,6 +159,36 @@ export async function assetBlob(url: string, res: Response): Promise<Blob> {
 }
 
 /**
+ * Read a response body as bytes, treating a failure as transient.
+ *
+ * Same hazard as assetBlob, and the one the CORE room assets hit: an FFR whose headers
+ * arrived and whose body did not rejects here with a bare `TypeError`, which is I/O and
+ * must be retried rather than reported to the player as a broken game.
+ */
+export async function assetBytes(url: string, res: Response): Promise<Uint8Array> {
+  try {
+    return new Uint8Array(await res.arrayBuffer());
+  } catch (e) {
+    throw new TransientAssetError(url, 'truncated response', e);
+  }
+}
+
+/**
+ * Demand an answer that is actually the asset, or throw.
+ *
+ * The counterpart to `fetchAsset` for assets that are NOT optional. `fetchAsset` returns
+ * every answer it got, including 404 — because for the art tiers a 404 is usually
+ * correct (no `ai.json` means the room has no AI art, by design). For a room's own FFR
+ * or FFT there is no such case: all 72 rooms ship both, so an answer of "not there" is a
+ * broken build or a broken deploy. It is still PERMANENT rather than transient — nothing
+ * is gained by asking again — and `isTransient` is what tells the two apart downstream,
+ * so this throws a plain Error deliberately.
+ */
+export function requireAsset(res: Response, url: string, what: string): void {
+  if (!res.ok) throw new Error(`${what}: ${url} returned HTTP ${res.status}`);
+}
+
+/**
  * Read a response body as JSON, treating a failure as transient.
  *
  * Same reason as assetBlob, and easier to forget because `res.json()` reads like parsing

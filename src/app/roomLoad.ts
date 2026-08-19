@@ -13,7 +13,9 @@
 import { MLUVI_PRIOR } from './keyTables.js';
 import { ROOMS } from '../data/roomTable.js';
 import { applyWinDesktopPalette } from '../data/winPalette.js';
+import { assetBytes, fetchAsset, requireAsset } from '../render/assetFetch.js';
 import { audio } from './audioEngine.js';
+import { hideLoadNote } from './loadNote.js';
 import { beginRoomArt, curNum, ensureAiRoom, ensureEnhancedArt } from './art.js';
 import { booted } from './stageState.js';
 import { count, fftEntries, setFfr, setFftEntries, setPokus, subs, talkIdx } from './gameState.js';
@@ -64,12 +66,23 @@ export async function loadRoom(num: number): Promise<void> {
     const nnn = String(num).padStart(3, '0');
     // Only the two assets the room cannot be BUILT without are on this path. The
     // .ffs voice package and the room music used to ride along here; see below.
-    const [ffrRes, fftRes] = await Promise.all([
-      fetch(host.ffrUrl(num)),
-      fetch(`/data/Title/${nnn}.fft`),
-    ]);
-    if (!ffrRes.ok) throw new Error(`failed to load room ${num}: ${ffrRes.status}`);
-    const parsed = parseFfr(new Uint8Array(await ffrRes.arrayBuffer()));
+    //
+    // Both go through `fetchAsset`, so both are RETRIED on a transport failure and both
+    // are classified (src/render/assetFetch.ts). They used to be bare `fetch` calls, and
+    // that is the whole of the bug this replaces: offline, the FFR fetch rejected, the
+    // launch caught it and handed the player the PREVIOUS room, silently, still accepting
+    // input for it. Nothing here can be allowed to fail quietly.
+    const ffrUrl = host.ffrUrl(num);
+    const fftUrl = `/data/Title/${nnn}.fft`;
+    const [ffrRes, fftRes] = await Promise.all([fetchAsset(ffrUrl), fetchAsset(fftUrl)]);
+    requireAsset(ffrRes, ffrUrl, `room ${num}`);
+    // The subtitle index is no longer tolerated when it fails. It used to fall back to an
+    // empty table, which loses every line the room speaks — a room that plays through in
+    // silence with no indication anything went wrong. All 72 rooms ship a .fft (plus the
+    // four x0n packages), so there is no legitimate absence to protect here: a missing one
+    // is a broken deploy and a failed one is the network, and the player is told either way.
+    requireAsset(fftRes, fftUrl, `the subtitles for room ${num}`);
+    const parsed = parseFfr(await assetBytes(ffrUrl, ffrRes));
     // WIN "Favorites" palette gag (URoom.pas:1312-1355): swap the pink placeholder colours
     // for the Windows system theme, so the fake windows look like a real desktop.
     setFfr(
@@ -77,8 +90,8 @@ export async function loadRoom(num: number): Promise<void> {
         ? { ...parsed, palette: applyWinDesktopPalette(parsed.palette) }
         : parsed,
     );
-    const fftBytes = fftRes.ok ? new Uint8Array(await fftRes.arrayBuffer()) : new Uint8Array(4);
-    setFftEntries(fftRes.ok ? parseFft(fftBytes) : []);
+    const fftBytes = await assetBytes(fftUrl, fftRes);
+    setFftEntries(parseFft(fftBytes));
     // The outgoing room's samples must not be audible under the new room while its
     // own package is still in flight (see loadRoomVoices) — a lookup that misses now
     // falls back to the global packages, i.e. silence for a room-specific line.
@@ -87,6 +100,10 @@ export async function loadRoom(num: number): Promise<void> {
     armRoomVoices(bootLoad);
     setPokus(1); // fresh attempt on entering a room
     host.buildRoom();
+    // A room that loaded answers whatever the last one that did not left on screen.
+    // Placed here, after the build, so it is the ROOM being live that clears it and not
+    // merely the fetches coming back.
+    hideLoadNote();
     // Point the art layer at this room: clear the previous room's decoded art and arm
     // the two "hold the frame until it lands" flags (see beginRoomArt).
     beginRoomArt(num);
@@ -130,10 +147,17 @@ export async function loadRoom(num: number): Promise<void> {
     // loading overlay over a playable game.
     void art.then(afterArt, afterArt);
   } finally {
-    // Always drop the guard, even if a fetch/parse threw: on error we fall back to
-    // the pre-existing behaviour (the previous room stays shown) rather than leaving
-    // the stage wedged black with no recovery. On success it runs once the room is
-    // built, so the next frame paints the new room.
+    // Always drop the guard, even if a fetch/parse threw. On success it runs once the
+    // room is built, so the next frame paints the new room.
+    //
+    // On FAILURE this used to be the whole recovery, and the comment here used to say so:
+    // the guard came off, the launch flipped the screen to `room`, and the player was
+    // handed the PREVIOUS room — built, live, accepting input, with nothing said. That is
+    // no longer what happens; `abortMapLaunch` (roomLaunch.ts) returns them to the map and
+    // raises the note. What the drop still does, and why it stays unconditional, is let
+    // the next frame PAINT: `roomLoading` suppresses the room draw, and the map's own
+    // repaint path runs through the same wake(). Leaving it set on the failure path would
+    // strand a frozen frame over a game that is otherwise fine.
     setRoomLoading(false);
     setRoomLoadSeq(roomLoadSeq + 1);
     setForceRoomRedraw(true);

@@ -467,6 +467,16 @@
         <span>Running on the software renderer (WebGL unavailable) — the game may run slower, and in the AI-upscaled tier the water is drawn at the original resolution.</span>
         <button id="webgl-note-x" type="button">Dismiss</button>
       </div>
+      <!-- A room that could not be loaded. Deliberately a note and not a screen: the
+           player stays on the world map, which stays lit and clickable underneath, so
+           clicking the room again is the natural retry and this button is a shortcut.
+           The wording is chosen from the absent/failed taxonomy (src/app/loadNote.ts) —
+           a 404 must not tell anyone to check their connection. -->
+      <div id="load-note" class="note" hidden>
+        <span id="load-note-msg"></span>
+        <button id="load-note-retry" type="button">Try again</button>
+        <button id="load-note-x" type="button">Dismiss</button>
+      </div>
     </div>
     <div id="intro-layer" hidden>
       <video id="intro-video" playsinline></video>

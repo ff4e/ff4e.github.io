@@ -1514,7 +1514,7 @@ window.addEventListener('keydown', (e) => {
     if (ui.screen === 'map') {
       if (ui.mapInfoRoom !== null) closeMapInfo(); // close the record panel first (daCancel)
       else if (ui.mapOverlay !== 'none') closeMapOverlay(); // close an open menu overlay
-      else if (room) enterRoom(Number(select.value));
+      else if (room && select.value !== 'map') enterRoom(Number(select.value)); // Number('map') is NaN: not a room
     } else showMap();
     return;
   }

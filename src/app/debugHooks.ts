@@ -103,6 +103,7 @@ import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
 import { artFailureShown } from './artFailure.js';
+import { loadNoteShown, loadNoteText } from './loadNote.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
 import { sum } from '../render/filmEffects.js';
@@ -407,6 +408,12 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // Is the "artwork would not load" screen up? Read off the DOM rather than from a
     // state flag: what matters to a probe is that the player was actually shown it.
     artFailShown: () => artFailureShown(),
+    // The post-boot "that room did not load" note (src/app/loadNote.ts). Two hooks, not
+    // one: the wording is chosen from the absent/failed taxonomy, so a probe that only
+    // asserted something was up would pass on the sentence blaming the player's wifi for
+    // a 404.
+    loadNoteShown: () => loadNoteShown(),
+    loadNoteText: () => loadNoteText(),
     artFailTitle: () => document.getElementById('art-fail-title')?.textContent ?? '',
     enhancedActive: () =>
       host.enhancedArtActive() &&
