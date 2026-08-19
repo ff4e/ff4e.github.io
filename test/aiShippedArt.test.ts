@@ -281,7 +281,7 @@ describe('shipped _story / _desky / _kufr', () => {
   it.runIf(have('_kufr'))('ships the cutscene base and every frame the playback order names', () => {
     const man = JSON.parse(readFileSync(join(dir('_kufr'), 'ai.json'), 'utf8')) as {
       scale: number; region: { x: number; y: number; w: number; h: number };
-      base: { w: number; h: number }; order: string[]; frames: string[];
+      base: { w: number; h: number }; order: string[]; frames: string[]; original?: string[];
     };
     expect(man.scale).toBe(S);
     // The region must match the constants the DEMO decoder writes into (kufrDemo.ts).
@@ -295,11 +295,29 @@ describe('shipped _story / _desky / _kufr', () => {
 
     // Every entry in the playback order must resolve — the runtime indexes this array
     // by KufrDemo.framesDrawn, so a hole is a frame that silently falls back.
+    //
+    // "Resolve" now has two legal answers. A frame listed in `original` ships NO upscale
+    // on purpose (kufr-models.json, `"model": "original"`) and the runtime paints the
+    // 1998 pixels into the region instead. So the invariant is that every ordered frame
+    // is EITHER shipped or declared original — never neither, which is the silent
+    // fallback this guards, and never both, which would mean the build shipped art it
+    // had been told to leave out.
     expect(man.order.length, 'the animation has frames').toBeGreaterThan(200);
-    const missing = [...new Set(man.order)].filter((f) => !existsSync(join(dir('_kufr'), 'frames', f)));
-    expect(missing.slice(0, 5), 'every ordered frame is shipped').toEqual([]);
-    // ...and each is the region at ×4.
-    const fi = webpInfo(join(dir('_kufr'), 'frames', man.order[0]!));
+    const original = new Set(man.original ?? []);
+    const missing = [...new Set(man.order)].filter(
+      (f) => !original.has(f) && !existsSync(join(dir('_kufr'), 'frames', f)),
+    );
+    expect(missing.slice(0, 5), 'every ordered frame is shipped or declared original').toEqual([]);
+    const shippedAnyway = [...original].filter((f) => existsSync(join(dir('_kufr'), 'frames', f)));
+    expect(shippedAnyway.slice(0, 5), 'a frame kept original ships no upscale').toEqual([]);
+    // `frames` lists what was written, so it and `original` must not overlap either.
+    expect(man.frames.filter((f) => original.has(f)), 'frames and original are disjoint').toEqual([]);
+    // ...and each shipped frame is the region at ×4. Asserted separately rather than
+    // indexed straight into: if EVERY frame were declared original the find returns
+    // undefined, and webpInfo would throw a path error instead of saying what is wrong.
+    const first = man.order.find((f) => !original.has(f));
+    expect(first, 'at least one frame is still upscaled').toBeDefined();
+    const fi = webpInfo(join(dir('_kufr'), 'frames', first!));
     expect([fi.w, fi.h]).toEqual([380 * S, 285 * S]);
   });
 });

@@ -637,6 +637,7 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `framebuffer.ts` | 4.7 k | The 8-bit palette-indexed screen and the Delphi blitters (`Kresli`/`KresliRev`/`Kresli2`/`KresliR`). |
 | `rgbaScreen.ts` | 3.4 k | The same compositing, but keeping a live RGBA plane beside the index plane — the CPU target for the truecolor tiers. |
 | `renderRoom.ts` | 4.2 k | The faithful room renderer: entry points, fish frames, the resting-pose compositor. |
+| `indexedRegion.ts` | 0.5 k | Blits a rectangle of indexed art onto a 2D context, nearest-neighbour, at an arbitrary scale — how the briefcase cutscene's `"model": "original"` frames play inside the upscaled scene. |
 | `classicArtSource.ts` | 0.4 k | The 256-colour palette look. |
 | `enhancedArtSource.ts` | 3.0 k | The FFNG truecolor look. |
 | **The `ai` tier** | | |

@@ -230,4 +230,10 @@ export interface AiKufr {
   scale: number;
   region: { x: number; y: number; w: number; h: number };
   order: string[];
+  /**
+   * Frames deliberately shipped WITHOUT an upscale, because the original art reads
+   * better there than any model's version of it (tools/studio/kufr-models.json,
+   * `"model": "original"`). They play as the 1998 pixels inside the upscaled scene.
+   */
+  original: Set<string>;
 }

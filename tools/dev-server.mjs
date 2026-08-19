@@ -17,7 +17,24 @@
  *   npm run dev -- --port 5199   # or name one; --strictPort still applies
  */
 import { spawn } from 'node:child_process';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { HOST, freePort, isUp, root, urlFor } from './preview-server.mjs';
+
+/**
+ * The dev-only pages under `tools/`, listed by reading the directory rather than by
+ * keeping a hand-written list that would rot the first time one is added or renamed.
+ */
+const devPages = () => {
+  try {
+    return readdirSync(join(root, 'tools'))
+      .filter((f) => f.endsWith('.html'))
+      .sort()
+      .map((f) => `/tools/${f}`);
+  } catch {
+    return [];
+  }
+};
 
 const argv = process.argv.slice(2);
 const at = argv.indexOf('--port');
@@ -35,6 +52,11 @@ if (await isUp(port)) {
 console.log(`[dev] serving ${root}`);
 console.log(`[dev] ${urlFor(port)}`);
 console.log(`[dev] probes and harnesses: FF_UI_PORT=${port}`);
+// The dev-only pages under tools/ are worth naming: several worktrees serve at once, and
+// vite falls back to index.html for any path it cannot resolve — so a stale port or a
+// mistyped path silently opens the GAME instead, which reads as "the tool is gone"
+// rather than as a wrong URL.
+for (const path of devPages()) console.log(`[dev] tool: ${urlFor(port)}${path.slice(1)}`);
 
 const child = spawn(
   'npx',
