@@ -63,6 +63,7 @@ export const rendererSelect = document.getElementById('renderer') as HTMLSelectE
 export const graphicsSelect = document.getElementById('graphics') as HTMLSelectElement | null;
 export const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;
 export const solveRoomBtn = document.getElementById('solveroom') as HTMLButtonElement | null;
+export const solveSpeedSelect = document.getElementById('solvespeed') as HTMLSelectElement | null;
 export const perfHud = document.getElementById('perfhud') as HTMLElement | null;
 export const info = document.getElementById('info') as HTMLDivElement;
 export const stageRow = document.querySelector('.stage') as HTMLElement;
