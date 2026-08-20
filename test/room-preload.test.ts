@@ -118,7 +118,7 @@ describe('the finale warm', () => {
     expect(asked).toEqual([
       '/data/Graphic/071.ffr',
       '/data/Title/071.fft',
-      '/data/Sound/071.ffs',
+      '/data/Sound/071.ffs2',
       '/data/Music/rybky04.m4a',
     ]);
   });

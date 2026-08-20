@@ -21,17 +21,25 @@ const PUBLIC = 'public';
 const DATA_EXCLUDE = new Set(['Program', 'Writes', '256col']);
 
 /**
- * ...nor the music ORIGINALS. The site fetches `Music/<name>.m4a` (see tools/stage-music.ts);
- * the 17 `.wav` they were encoded from are a repo artefact, kept so that `--check`,
- * `--verify` and `test/musicStaging.test.ts` have something to encode from and measure
- * against, and so anyone can listen to what was given up. Nothing downloads them.
+ * ...nor the ORIGINALS of anything that ships compressed. Two tiers, one rule:
  *
- * Worth the two lines because the budget here is real and shared: GitHub Pages publishes at
- * most 1 GB, and `public/` is already ~621 MB. Staging both tiers would spend 64 MB of the
- * remaining headroom on bytes no player ever asks for — and the whole point of compressing
- * the music was to make the site smaller.
+ *   - `Music/*.wav` — the site fetches `Music/<name>.m4a` (tools/stage-music.ts).
+ *   - `Sound/*.ffs` — the site fetches `Sound/<id>.ffs2` (tools/stage-voices.ts), EXCEPT
+ *     `x00`, the effects package, which is not staged and is the one `.ffs` that must
+ *     still be published. `isRawPkg` in `src/audio/ffs2.ts` is the rule; this reproduces
+ *     it by name because a build script cannot import a browser module.
+ *
+ * The originals are a repo artefact, kept so that `--check`, `--verify` and the staging
+ * drift tests have something to encode from and measure against, and so anyone can listen
+ * to (or decode) what was given up. Nothing downloads them.
+ *
+ * Worth the lines because the budget here is real and shared: GitHub Pages publishes at
+ * most 1 GB, and `public/` was ~621 MB before the voices were staged. Publishing both
+ * tiers would spend 248 MB of the remaining headroom on bytes no player ever asks for —
+ * and the whole point of compressing them was to make the site smaller.
  */
 const isMusicOriginal = (rest) => rest.startsWith(`Music${sep}`) && rest.endsWith('.wav');
+const isVoiceOriginal = (rest) => rest.startsWith(`Sound${sep}`) && rest.endsWith('.ffs') && rest !== `Sound${sep}x00.ffs`;
 
 if (!existsSync(DIST)) {
   console.error(`${DIST}/ is missing — run \`npm run build\` first.`);
@@ -54,9 +62,12 @@ for (const entry of readdirSync(PUBLIC)) {
       const rest = src.startsWith(prefix) ? src.slice(prefix.length) : '';
       const seg = rest.split(sep)[0];
       if (seg && DATA_EXCLUDE.has(seg)) return false;
-      return !isMusicOriginal(rest);
+      return !isMusicOriginal(rest) && !isVoiceOriginal(rest);
     };
   }
+  // The restored package is a sound package like any other and is staged like one, so
+  // its `.ffs` original is dropped for the same reason the room packages' are.
+  if (entry === 'restored') opts.filter = (src) => !src.endsWith('.ffs');
   cpSync(from, to, opts);
   console.log(`staged ${from} -> ${to}`);
 }

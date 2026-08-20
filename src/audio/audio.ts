@@ -2,9 +2,16 @@
  * Web Audio playback of decoded FFS sounds.
  *
  * Mirrors the original's model (RSound.pas Sound/Search): sounds live in a set
- * of loaded packages (the room's NNN.ffs plus the global x00 effects), each
- * addressed by name via its FFT records. A sound is decoded on first use
- * (decodeSound) into an AudioBuffer at 22050 Hz and cached.
+ * of loaded packages (the room's NNN package plus the global x00 effects), each
+ * addressed by name via its FFT records.
+ *
+ * A package arrives in one of two forms, and the engine tells them apart by looking
+ * (`isFfs2`) rather than by being told:
+ *
+ *   - a staged `.ffs2` of AAC segments (every speech package) — decoded ENTIRELY when the
+ *     package is installed, into `Pkg.buffers`. See `decodeFfs2` (ffs2Decode.ts) for why
+ *     all of it, up front, rather than on first play.
+ *   - the 1998 `.ffs` (`x00`, the effects) — `decodeSound` on first use, into `cache`.
  *
  * Browsers gate audio behind a user gesture; the context is created lazily and
  * resumed on the first play triggered by input.
@@ -12,6 +19,8 @@
 import { indexFft, parseFft, type FftEntry } from '../data/fft.js';
 import { requiredBytes } from '../render/assetFetch.js';
 import { decodeSound, FFS_SAMPLE_RATE } from './ffs.js';
+import { isFfs2 } from './ffs2.js';
+import { decodeFfs2 } from './ffs2Decode.js';
 import { musicByName, musicSeconds } from './music.js';
 import type { VolumeBus } from '../core/settings.js';
 
@@ -31,7 +40,10 @@ interface Pkg {
   /** Package id, as the original names its files: '025', 'x01', 'restored'. */
   id: string;
   entries: Map<string, FftEntry>;
-  ffs: Uint8Array;
+  /** The 1998 delta-coded bodies, for a package that still ships as `.ffs` (x00). */
+  ffs: Uint8Array | null;
+  /** Decoded segments by sound name, for a staged `.ffs2`. See `decodeFfs2`. */
+  buffers: Map<string, AudioBuffer>;
 }
 
 export class AudioEngine {
@@ -46,6 +58,13 @@ export class AudioEngine {
   private globals: Pkg[] = [];
   /** The current room's own 0NN package. */
   private roomPkg: Pkg | null = null;
+  /**
+   * First-use decodes of the RAW `.ffs` path only (x00). A staged package holds its
+   * decoded segments in `Pkg.buffers` and never comes through here — which is also what
+   * lets `clearRoom` keep clearing this: the globals' buffers travel with their package
+   * and survive a room change, where a shared cache would drop them for good (nothing
+   * could decode them again synchronously).
+   */
   private cache = new Map<string, AudioBuffer>();
   /** Active voices by priority, with the wall-clock time they finish. */
   private activeUntil = new Map<number, number>();
@@ -100,14 +119,49 @@ export class AudioEngine {
   }
 
   /** A persistent global package (e.g. x00 effects). */
-  loadGlobal(id: string, fftBytes: Uint8Array, ffsBytes: Uint8Array): void {
-    this.globals.push({ id, entries: indexFft(parseFft(fftBytes)), ffs: ffsBytes });
+  async loadGlobal(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<void> {
+    this.globals.push(await this.prepare(id, fftBytes, body));
   }
 
-  /** The current room's sound package; replaces the previous room's. */
-  setRoom(id: string, fftBytes: Uint8Array, ffsBytes: Uint8Array): void {
-    this.roomPkg = { id, entries: indexFft(parseFft(fftBytes)), ffs: ffsBytes };
+  /**
+   * Decode a package WITHOUT installing it.
+   *
+   * The seam exists because installing used to be synchronous and no longer is: a staged
+   * package is decoded on the way in, and the caller's "is this still the room the player
+   * is in?" test has to be the last thing that happens before the install, not something
+   * separated from it by 50-100 ms of `decodeAudioData`. Otherwise a slow room A can
+   * finish decoding after room B has installed its own package, and quietly replace it —
+   * leaving the player in a room whose every line resolves to nothing.
+   *
+   * So `roomLoad` awaits this, re-checks, and then calls `installRoom`, which cannot yield.
+   */
+  prepare(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<Pkg> {
+    return this.makePkg(id, fftBytes, body);
+  }
+
+  /** Install a prepared package as the current room's. Synchronous, deliberately. */
+  installRoom(pkg: Pkg): void {
+    this.roomPkg = pkg;
     this.cache.clear();
+  }
+
+  /** Prepare and install in one step — for callers with no room to race against. */
+  async setRoom(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<void> {
+    this.installRoom(await this.prepare(id, fftBytes, body));
+  }
+
+  /**
+   * Build a package from its `.fft` index and its bodies, decoding a staged one in full.
+   *
+   * The two forms are told apart by the bytes (`isFfs2`), not by the caller. That keeps
+   * the rule about which packages are staged in exactly one place — `isRawPkg` in
+   * `ffs2.ts`, next to the URL builder that acts on it — so the engine cannot disagree
+   * with what was fetched.
+   */
+  private async makePkg(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<Pkg> {
+    const entries = indexFft(parseFft(fftBytes));
+    if (!isFfs2(body)) return { id, entries, ffs: body, buffers: new Map() };
+    return { id, entries, ffs: null, buffers: await decodeFfs2(this.ensureCtx(), entries, body) };
   }
 
   /**
@@ -131,11 +185,17 @@ export class AudioEngine {
   /**
    * Drop the current room's sound package (the global packages stay).
    *
-   * Entering a room no longer waits for its .ffs body before the room is built —
-   * the voice package is a large non-visual asset (4.30 MB for PRVNI) and nothing
+   * Entering a room no longer waits for its sound bodies before the room is built —
+   * the voice package is a non-visual asset (1.73 MB for KUFRIK, the largest) and nothing
    * that is drawn depends on it. Clearing here keeps the gap honest:
    * until the new package lands, a lookup misses and falls back to the globals
    * rather than playing the PREVIOUS room's sample under the new room.
+   *
+   * Dropping the package drops its decoded segments with it, which is how the 13-52 MB a
+   * staged room decodes to (the AudioBuffers are float32 at the context's rate, not
+   * int16 at 22050; KUFRIK is the 52) stays a per-room cost rather than an accumulating
+   * one. See `ffs2Decode.ts` for the full accounting, including what the GLOBAL packages
+   * retain for the session — that part is new, and it is the larger half.
    */
   clearRoom(): void {
     this.roomPkg = null;
@@ -239,8 +299,13 @@ export class AudioEngine {
   private buffer(name: string): AudioBuffer | null {
     const cached = this.cache.get(name);
     if (cached) return cached;
-    const pkgs = this.pkgs;
-    for (const pkg of pkgs) {
+    for (const pkg of this.pkgs) {
+      // A staged package decoded everything when it was installed, so this is a hit or
+      // the name is not in it. Nothing here can decode one: `decodeAudioData` is async
+      // and every caller of this is a synchronous voice start (see `decodeFfs2`).
+      const ready = pkg.buffers.get(name);
+      if (ready) return ready;
+      if (!pkg.ffs) continue;
       const e = pkg.entries.get(name);
       if (e && e.delka > 0) {
         const pcm = decodeSound(pkg.ffs, e.zvuk, e.delka);

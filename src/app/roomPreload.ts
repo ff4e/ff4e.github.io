@@ -38,7 +38,7 @@
  * this for the leg-final fish remarks since #103.
  *
  * ── Exception 1: ZAVER is warmed, not held for ────────────────────────────────
- * A ~4.8 MB download (FFR 451 kB + voices 3.22 MB + `rybky04` 1.11 MB) started when the
+ * A ~2.2 MB download (FFR 451 kB + voices 0.66 MB + `rybky04` 1.11 MB) started when the
  * player enters the last leg-final room left unsolved: unawaited, `niceToHave`, and only
  * once that entry has settled so it never competes with the room being waited for.
  *
@@ -75,6 +75,7 @@ import { ZAVER_ROOM, finaleFollows, storyPageOfRoom } from '../data/world.js';
 import { cutsceneAssets, setCutsceneAssets } from './gameState.js';
 import { graphics } from './renderSettings.js';
 import { musicForCHud, musicUrl } from '../audio/music.js';
+import { voiceUrl } from '../audio/ffs2.js';
 import { parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
 import { parseHelpCap } from '../intro/helpCap.js';
@@ -220,7 +221,7 @@ export async function preloadLegPage(leg: number): Promise<void> {
   await legPageLoad.done;
 }
 
-/** Once per session: a warm that failed is not worth a second 4.8 MB attempt. */
+/** Once per session: a warm that failed is not worth a second 2.2 MB attempt. */
 let finaleWarmed = false;
 
 /**
@@ -240,13 +241,13 @@ export function warmFinaleRoom(num: number, ffrUrl: (n: number) => string, solve
   const urls = [
     ffrUrl(ZAVER_ROOM),
     `/data/Title/${nnn}.fft`,
-    `/data/Sound/${nnn}.ffs`,
+    voiceUrl(nnn),
     ...(music ? [musicUrl(music.name)] : []),
   ];
   for (const url of urls) {
     // The bytes are read and dropped: nothing here decodes or installs anything, because
     // the point is only to have the response in the browser's cache by the time ZAVER's
-    // own entry asks for it. Holding the buffers instead would be ~4.8 MB retained for a
+    // own entry asks for it. Holding the buffers instead would be ~2.2 MB retained for a
     // room the player may never reach, to save a cache read that costs milliseconds.
     void requiredBytes(url, 'the ending', 'niceToHave', { init: { priority: 'low' } as RequestInit }).catch(
       () => {},
