@@ -9,6 +9,7 @@
  * right now.
  */
 import { AI_MAP_H, AI_MAP_SCALE, AI_MAP_W } from '../render/worldMapAi.js';
+import { requiredBlob, requiredBytes, requiredJson } from '../render/assetFetch.js';
 import { DESKA_X_OFFSET, DESKA_Y_OFFSET, blitDeska, parseDesky } from '../data/desky.js';
 import { INFO_SETTLE_FAZE, drawInfoDigits, drawInfoPanel, drawInfoPanelArtAi } from '../render/mapInfo.js';
 import { MAP_H, MAP_W } from '../render/worldMap.js';
@@ -45,16 +46,14 @@ export async function ensureDeskyData(): Promise<void> {
   const lang = subLang();
   if (ui.deskyLang === lang && ui.deskyData) return;
   const n = lang === 'cz' ? '1' : '2';
-  try {
-    const [popdesk, atlas] = await Promise.all([
-      fetch(`/data/Menu/popdesk${n}.dat`).then((r) => r.arrayBuffer()),
-      fetch(`/data/Menu/desky${n}.dat`).then((r) => r.arrayBuffer()),
-    ]);
-    ui.deskyData = parseDesky(new Uint8Array(popdesk), new Uint8Array(atlas));
-    ui.deskyLang = lang;
-  } catch {
-    /* plaques optional */
-  }
+  const popdeskUrl = `/data/Menu/popdesk${n}.dat`;
+  const atlasUrl = `/data/Menu/desky${n}.dat`;
+  const [popdesk, atlas] = await Promise.all([
+    requiredBytes(popdeskUrl, 'the map name plaques'),
+    requiredBytes(atlasUrl, 'the map name plaques'),
+  ]);
+  ui.deskyData = parseDesky(popdesk, atlas);
+  ui.deskyLang = lang;
 }
 
 /** Open the record info panel for a solved/cheated room (daInfo, UMain.pas:1008). */
@@ -226,14 +225,9 @@ const AI_DESKY_CACHE_MAX = 12;
 export async function ensureAiDeskyGeom(): Promise<void> {
   if (aiDeskyTried) return;
   aiDeskyTried = true;
-  try {
-    const res = await fetch('/enhanced-ai/_desky/plaques.json');
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
-    aiDeskyGeom = ((await res.json()) as { plaques: typeof aiDeskyGeom }).plaques ?? null;
-    ui.mapSig = null; // repaint now that plaques can be drawn hi-res
-  } catch (e) {
-    console.warn('AI name plaques unavailable:', e);
-  }
+  const url = '/enhanced-ai/_desky/plaques.json';
+  aiDeskyGeom = (await requiredJson<{ plaques: typeof aiDeskyGeom }>(url, 'the AI map name plaques')).plaques ?? null;
+  ui.mapSig = null; // repaint now that plaques can be drawn hi-res
 }
 
 /** The upscaled plaque for `room` in the current subtitle language, if decoded. */
@@ -253,9 +247,8 @@ export async function loadAiPlaque(key: string): Promise<void> {
   if (aiPlaqueLoading.has(key)) return;
   aiPlaqueLoading.add(key);
   try {
-    const res = await fetch(`/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').startsWith('image/')) return;
-    const bmp = await createImageBitmap(await res.blob());
+    const url = `/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`;
+    const bmp = await createImageBitmap(await requiredBlob(url, 'an AI map name plaque'));
     aiDeskyCache.set(key, bmp);
     while (aiDeskyCache.size > AI_DESKY_CACHE_MAX) {
       const oldest = aiDeskyCache.keys().next().value as string | undefined;
@@ -265,9 +258,10 @@ export async function loadAiPlaque(key: string): Promise<void> {
     }
     ui.mapSig = null; // the plaque can now be drawn hi-res
     wake();
-  } catch {
-    /* leave the native plaque in place */
   } finally {
+    // The `finally` stays and the `catch` goes: the in-flight set must be cleaned up
+    // however this ends, but "leave the native plaque in place" is exactly the quiet
+    // half-upscaled map the all-or-nothing rule exists to stop.
     aiPlaqueLoading.delete(key);
   }
 }

@@ -37,6 +37,7 @@ import { SubtitleSystem } from '../render/subtitles.js';
 import { type FishSprites } from '../render/enhancedArtSource.js';
 import { MAP_W, MAP_H } from '../render/worldMap.js';
 import { hitInfoButton } from '../render/mapInfo.js';
+import { requiredAsset, requiredJson } from '../render/assetFetch.js';
 import { framesIdle, wake } from './frameClock.js';
 import { depthOfRoom, branchOfRoom } from '../data/world.js';
 import { hitTest as panelHitTest, sliderIndex, PANEL_W, PANEL_H } from '../render/hud.js';
@@ -227,7 +228,6 @@ import {
   enhancedObjects,
   enhancedPending,
   initArt,
-  isPngResponse,
   mapArtHolding,
   mapArtPending,
   mapPresented,
@@ -534,30 +534,27 @@ initRoomLaunch({
 });
 let fishSprites: FishSprites | null = null;
 async function loadFishSprites(): Promise<void> {
-  try {
-    const res = await fetch('/enhanced/_fish/manifest.json');
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return;
-    const m = (await res.json()) as Record<'small' | 'big', Record<'left' | 'right', string[]>>;
-    const build = async (size: 'small' | 'big', facing: 'left' | 'right') => {
-      const map = new Map<string, { w: number; h: number; rgba: Uint8Array }>();
-      await Promise.all(
-        (m[size]?.[facing] ?? []).map(async (f) => {
-          const r = await fetch(`/enhanced/_fish/${size}/${facing}/${f}`);
-          if (!isPngResponse(r)) return;
-          const d = await decodePngResponse(r);
-          map.set(f, { w: d.w, h: d.h, rgba: d.rgba });
-        }),
-      );
-      return map;
-    };
-    fishSprites = {
-      small: { left: await build('small', 'left'), right: await build('small', 'right') },
-      big: { left: await build('big', 'left'), right: await build('big', 'right') },
-    };
-    applySpriteCheats(); // a sprite cheat typed before the art landed still applies
-  } catch {
-    fishSprites = null;
-  }
+  const m = await requiredJson<Record<'small' | 'big', Record<'left' | 'right', string[]>>>(
+    '/enhanced/_fish/manifest.json',
+    'the enhanced fish sprites',
+  );
+  const build = async (size: 'small' | 'big', facing: 'left' | 'right') => {
+    const map = new Map<string, { w: number; h: number; rgba: Uint8Array }>();
+    await Promise.all(
+      (m[size]?.[facing] ?? []).map(async (f) => {
+        const url = `/enhanced/_fish/${size}/${facing}/${f}`;
+        const r = await requiredAsset(url, 'an enhanced fish sprite', { expect: 'image' });
+        const d = await decodePngResponse(r);
+        map.set(f, { w: d.w, h: d.h, rgba: d.rgba });
+      }),
+    );
+    return map;
+  };
+  fishSprites = {
+    small: { left: await build('small', 'left'), right: await build('small', 'right') },
+    big: { left: await build('big', 'left'), right: await build('big', 'right') },
+  };
+  applySpriteCheats(); // a sprite cheat typed before the art landed still applies
 }
 void loadFishSprites();
 //#region Audio & fish selection | anchors: initAudio, hooks, peekAtPlayer, swapActive, selectFish | Builds the AudioEngine (owned by `audioEngine.ts`), the fishing-hook easter egg, and switching which fish is active. The key/constant tables are in `keyTables.ts`.
@@ -722,7 +719,7 @@ function buildRoom(carryPole = false): void {
         sndcyc: (name, prior) => audio.snd(name, prior, true, EFFECT_VOL),
         sndvol: (name, prior, vol) => audio.snd(name, prior, false, Math.max(0, Math.min(1, vol / 64))),
         ksnd: (prior) => audio.killVoice(prior),
-        music: (name, prior) => audio.musicSnd(name, prior, `/data/Music/${name}.wav`),
+        music: (name, prior) => void audio.musicSnd(name, prior, `/data/Music/${name}.wav`),
         musiccyc: (name, prior) => {
           // prior -999 = the room-music channel: re-cue the room's own track
           // (MusicCycle(MusName,-999,MusCycle)) rather than a separate effect source.
@@ -731,7 +728,7 @@ function buildRoom(carryPole = false): void {
               void audio.playMusic(roomMusic.name, `/data/Music/${roomMusic.name}.wav`, roomMusic.loopSample);
             }
           } else {
-            audio.musicSnd(name, prior, `/data/Music/${name}.wav`, 0.45, true);
+            void audio.musicSnd(name, prior, `/data/Music/${name}.wav`, 0.45, true);
           }
         },
         talkNow: (name, prior) => scriptTalk(name, prior),

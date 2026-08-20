@@ -7,7 +7,7 @@
  * exception, and a room that rendered.
  */
 import { withLoadSlot } from './loadSlot.js';
-import { assetJson, fetchAsset, isPngResponse, reportMissingAsset } from './assetFetch.js';
+import { assetJson, optionalAsset, requiredAsset } from './assetFetch.js';
 import type { EnhancedObject, EnhancedSprite } from './enhancedArtSource.js';
 
 export interface ObjManifestEntry {
@@ -42,21 +42,22 @@ export type DecodePng = (res: Response) => Promise<EnhancedSprite>;
  * fallback the renderer has always had and the player has already seen: one item in 1998
  * bitmaps inside a truecolor room.
  *
- * Whole-ROOM atomicity — what the AI tier does, dropping the room to the tier below on
- * any missing asset — would be the other self-consistent answer, and it is the wrong one
- * here. The two tiers are not in the same position: an AI set is generated complete, so a
- * hole in it means the set is broken, while the enhanced tier is deliberately incomplete
- * and already has a per-object fallback. Making one bad file cost a whole room its art
- * would be a much bigger regression than the one being fixed.
- *
  * ── Loud or quiet ─────────────────────────────────────────────────────────────
- * The two cases the old code could not tell apart get different volumes. An item absent
- * from the manifest is by design and stays silent. An item LISTED in the manifest and
- * then not delivered is a broken build or a broken deploy — nothing at runtime can fix
- * it, so it is treated as an absence, but it says so (see reportMissingAsset).
+ * The two cases the old code could not tell apart get opposite treatment, and telling
+ * them apart is the whole job of this function.
  *
- * A TRANSIENT failure (network error, abort, 5xx) is neither: it rejects out of here so
- * the caller declines to cache the room at all, and the next entry retries.
+ * An item ABSENT from the manifest is by design — 21 sprites ship that way and render as
+ * 1998 bitmaps inside a truecolor room — and it is never fetched at all, so it cannot
+ * fail. A room with no manifest is the same statement about every item, and reaches the
+ * `optionalAsset` below.
+ *
+ * An item LISTED in the manifest and then not delivered is a broken build or a broken
+ * deploy. That used to be reported to the console and treated as an absence, which is
+ * indistinguishable from the design gap above — precisely how a broken build could ship
+ * unnoticed. It now ends the session (see loadingUi.ts).
+ *
+ * A TRANSIENT failure (network error, abort, 5xx) says nothing about whether the file
+ * exists, so it rejects out of here too and the caller declines to cache the room at all.
  */
 export async function loadEnhancedObjects(
   base: string,
@@ -65,10 +66,10 @@ export async function loadEnhancedObjects(
 ): Promise<EnhancedObject[]> {
   const dir = `${base}enhanced/${jmeno}/`;
   const url = `${dir}objects.json`;
-  const res = await fetchAsset(url);
-  // The dev server serves index.html (200) for a missing manifest, so verify it
-  // is actually JSON before parsing.
-  if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return [];
+  // Optional: a room with no staged object sprites ships no manifest, and that is the
+  // design. (`expect` also screens out the dev server's index.html-with-200 fallback.)
+  const res = await optionalAsset(url, { expect: 'json' });
+  if (!res) return [];
   const manifest = await assetJson<{ objects?: ObjManifestEntry[] }>(url, res);
   const entries = manifest.objects ?? [];
   // One entry at a time was a per-object round trip: with the AI loads parallelised
@@ -82,17 +83,18 @@ export async function loadEnhancedObjects(
         e.frames.map(async (f) =>
           withLoadSlot(async () => {
             const url = `${dir}obj/${f}`;
-            const r = await fetchAsset(url);
-            if (!isPngResponse(r)) {
-              reportMissingAsset(`enhanced tier, ${jmeno} item ${e.item}`, url);
-              return null;
-            }
-            return await decodePng(r);
+            // REQUIRED, even though the tier around it is optional: the manifest just
+            // promised this file. A sprite the manifest never mentions is a gap by
+            // design and is never fetched at all; one it lists and the server does not
+            // have is a broken build, and the difference is the whole point of the split.
+            return decodePng(await requiredAsset(url, `an enhanced sprite for ${jmeno}`, { expect: 'image' }));
           }),
         ),
       );
-      if (frames.some((f) => f === null)) return null;
-      return { item: e.item, frames: frames as EnhancedSprite[] };
+      // No null frames to filter any more: a frame the manifest lists either decodes or
+      // ends the session. Dropping the whole OBJECT for one missing frame is what used
+      // to make a broken build render as a room with an invisible item.
+      return { item: e.item, frames };
     }),
   );
   return loaded.filter((o): o is EnhancedObject => o !== null);

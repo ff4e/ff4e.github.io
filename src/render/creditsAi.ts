@@ -20,6 +20,7 @@
  * The faithful tier keeps its per-pixel palette compositor: it is only 640x480, and it
  * must stay index-exact.
  */
+import { decodeAsset, requiredAsset, requiredBlob, requiredJson } from './assetFetch.js';
 
 /** Upscale factor of the shipped credits art when its manifest doesn't say. */
 export const AI_CREDITS_SCALE = 4;
@@ -46,33 +47,49 @@ export function creditsTranslate(nativeH: number, delka: number, posun: number, 
 
 interface AiCreditsManifest { scale?: number; files?: string[] }
 
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((res, rej) => {
+/**
+ * Load one credits layer as an <img>, through the asset door.
+ *
+ * `new Image()` + `src` is a SECOND network door: it retries nothing, it applies no
+ * deadline, and its `error` event cannot tell a 404 from a dropped connection — the one
+ * distinction the whole failure policy rests on. So the bytes come through
+ * `requiredAsset` like everything else and the element is fed from a blob URL, which is
+ * also what makes a missing credits layer reach the failure screen rather than a
+ * console line. The two elements live for the session, so the URLs are not revoked.
+ */
+async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
+  const blob = await requiredBlob(url, what);
+  return decodeAsset(url, async () => {
     const img = new Image();
-    img.onload = () => res(img);
-    img.onerror = () => rej(new Error(`cannot load ${url}`));
-    img.src = url;
+    await new Promise<void>((ok, fail) => {
+      img.onload = () => ok();
+      img.onerror = () => fail(new Error(`cannot decode ${url}`));
+      img.src = URL.createObjectURL(blob);
+    });
+    return img;
   });
 }
 
 /**
- * Load the AI credits art from `${base}enhanced-ai/_credits/`. Resolves to an AiCredits
- * when both layers decoded, else null (⇒ caller uses the faithful path). Never throws.
+ * Load the AI credits art from `${base}enhanced-ai/_credits/` — the static frame and the
+ * scroll strip, both of which ship.
+ *
+ * Same change as `loadAiPanel`: the quiet fallback to the faithful roll is gone, because
+ * a fallback nobody can see is indistinguishable from the tier working.
  */
-export async function loadAiCredits(base: string): Promise<AiCredits | null> {
-  try {
+export async function loadAiCredits(base: string): Promise<AiCredits> {
+  {
     const dir = `${base}enhanced-ai/_credits/`;
-    const res = await fetch(`${dir}ai.json`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
-    const man = (await res.json()) as AiCreditsManifest;
+    const man = await requiredJson<AiCreditsManifest>(`${dir}ai.json`, 'the AI credits');
     const scale = Number(man.scale) || AI_CREDITS_SCALE;
-    const [stat, mov] = await Promise.all([loadImage(`${dir}stat.webp`), loadImage(`${dir}mov.webp`)]);
-    if (!stat.naturalWidth || !mov.naturalWidth) return null;
+    const [stat, mov] = await Promise.all([
+      loadImage(`${dir}stat.webp`, 'the AI credits'),
+      loadImage(`${dir}mov.webp`, 'the AI credits'),
+    ]);
+    // A decoded image with no intrinsic size is a corrupt file, not an absent one: the
+    // decoder is the only thing that can tell, and it did.
+    if (!stat.naturalWidth || !mov.naturalWidth) throw new Error(`${dir}: credits art decoded to nothing`);
     return new AiCredits(stat, mov, scale);
-  } catch (e) {
-    // A partial download should fall back quietly, but a broken BUILD should not hide.
-    console.warn('AI credits unavailable:', e);
-    return null;
   }
 }
 

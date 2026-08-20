@@ -249,36 +249,47 @@ await withApp(
       `each presentation is in the tier that was chosen for it (${JSON.stringify(after)})`,
     );
 
-    // === 5. An ABSENT AI map falls back to the faithful composite rather than holding
-    //        forever. That fallback is the `ai` tier's safety net for an unbuilt or
-    //        half-deployed asset set, and a hold that only released on success would
-    //        withhold the map for the whole session.
+    // === 5. An AI map that 404s is a BROKEN DEPLOY, and stops the game.
     //
-    //        404, i.e. the server ANSWERING "not there". That distinction is the whole
-    //        rule now: an answer is a fact about the deploy, which the player cannot
-    //        act on and a retry cannot fix, so it degrades quietly. §5b is the other
-    //        half. ===
+    //        This used to fall back to the faithful composite and carry on, on the
+    //        reasoning that an answer is a fact the player cannot act on. The fact is
+    //        real; the silence was the mistake. Every one of the eight `_ai` files ships
+    //        — there is no build in which this 404 is correct — so the fallback could
+    //        only ever mean the player was looking at the 1998 map with `ai` selected,
+    //        with no way to tell. The absences that ARE by design are per-ROOM — SCORE
+    //        ships no enhanced art at all — and those still fall back silently.
+    //
+    //        §5b is the other half: the same asset, FAILING rather than absent, which
+    //        gets the other sentence. ===
     await p.unroute(GATED).catch(() => {});
     await p.route(GATED, (route) => route.fulfill({ status: 404, body: '' }));
     await p.reload({ waitUntil: 'domcontentloaded' });
     await p.waitForFunction(() => window.__ff !== undefined);
-    await p.waitForFunction(() => window.__ff.screen() === 'map' && !window.__ff.mapArtPending());
-    await p.waitForFunction(() => !window.__ff.loadingVisible());
+    await p.waitForFunction(() => window.__ff.fatalShown());
     await waitFrames(p, 4);
     const failed = await p.evaluate(() => ({
       widths: [...window.__map.widths],
       loaded: window.__ff.aiMapLoaded(),
-      presented: window.__ff.mapPresented(),
-      failScreen: window.__ff.fatalShown(),
+      pending: window.__ff.mapArtPending(),
+      note: window.__ff.fatalText(),
+      spinner: window.__ff.loadingVisible(),
     }));
     expect(!failed.loaded, 'the AI map really did fail to load');
-    expect(failed.presented, 'an absent AI map still gets the player a map — the hold released');
-    expect(!failed.failScreen, 'and no failure screen: an ABSENT asset is not a failure');
+    expect(failed.pending, 'the map is HELD rather than quietly presented in the faithful tier');
     expect(
-      failed.widths.length === 1 && failed.widths[0] === 640,
-      `it falls back to the faithful composite, once (${JSON.stringify(failed.widths)})`,
+      failed.widths.length === 0,
+      `nothing was presented in the wrong tier (${JSON.stringify(failed.widths)})`,
     );
+    expect(failed.note.toLowerCase().includes('world map'), `the message names the map (“${failed.note}”)`);
+    expect(
+      /missing from the game files/i.test(failed.note),
+      `a 404 is reported as a problem with the game, not the connection: “${failed.note}”`,
+    );
+    expect(!failed.spinner, 'the loading spinner stands down — the screen has taken over the wait');
     await p.unroute(GATED).catch(() => {});
+    await p.reload({ waitUntil: 'domcontentloaded' });
+    await p.waitForFunction(() => window.__ff !== undefined);
+    await p.waitForFunction(() => window.__ff.aiMapLoaded() && !window.__ff.fatalShown());
 
     // === 5b. A map load that FAILED is the opposite case: the art exists, the player
     //         asked for it, and quietly presenting the 1998 map under an `ai` setting is

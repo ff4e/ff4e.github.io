@@ -99,9 +99,10 @@ beforeEach(() => {
   prevFetch = globalThis.fetch;
   (globalThis as { AudioContext?: unknown }).AudioContext = FakeAudioContext;
   // playMusic fetches Music/<name>.wav and reads the sample rate from the header
-  // (offset 24); a zeroed buffer makes it fall back to 22050.
+  // (offset 24); a zeroed buffer makes it fall back to 22050. A real Response, because
+  // the fetch now goes through `requiredAsset`, which reads the status before the body.
   (globalThis as { fetch?: unknown }).fetch = () =>
-    Promise.resolve({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) });
+    Promise.resolve(new Response(new ArrayBuffer(64), { status: 200 }));
 });
 
 afterEach(() => {

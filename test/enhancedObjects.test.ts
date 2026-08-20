@@ -23,7 +23,7 @@
  */
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { loadEnhancedObjects } from '../src/render/enhancedObjects.js';
-import { TransientAssetError } from '../src/render/assetFetch.js';
+import { MissingAssetError, TransientAssetError } from '../src/render/assetFetch.js';
 import { EnhancedArtSource, type EnhancedSprite } from '../src/render/enhancedArtSource.js';
 import { RgbaScreen } from '../src/render/rgbaScreen.js';
 import { ClassicArtSource } from '../src/render/classicArtSource.js';
@@ -105,21 +105,26 @@ describe('loadEnhancedObjects', () => {
   it('never draws a LATER frame in place of one that did not arrive', async () => {
     // The bug, stated as the player would see it: with frame 10 of 44 gone, phase 11 used
     // to draw frame 12 — and 12 drew 13, and so on to the end of the animation.
+    //
+    // It is now impossible one step earlier: there is no partial result to index into,
+    // because a frame the manifest listed and the server does not have rejects the whole
+    // load. The array that could be short is never built.
     vi.stubGlobal('fetch', serve([10]));
-    const objects = await load();
-    expect(drawnFrame(objects, 11)).not.toBe(12);
-    expect(drawnFrame(objects, 12)).not.toBe(13);
-    expect(drawnFrame(objects, 43)).not.toBe(43); // the compacted array ends at 43 too
+    await expect(load()).rejects.toBeInstanceOf(MissingAssetError);
   });
 
-  it('drops the whole object, so the item falls back to classic art', async () => {
+  it('ends the session on a manifest-listed sprite that is not there', async () => {
+    // It used to drop the object and let the item render as a 1998 bitmap inside a
+    // truecolor room — the same outcome as an item ABSENT from the manifest, which is a
+    // design gap and correct. Conflating the two is what let a broken build ship: the
+    // 21 legitimately-unstaged sprites look exactly like a deploy that lost a file.
+    //
+    // A manifest entry is a promise the build made. Breaking it is not a gap, so it is
+    // not silent (see loadingUi.ts, and the all-or-nothing rule).
     vi.stubGlobal('fetch', serve([10]));
-    const objects = await load();
-    // No entry for the item ⇒ EnhancedArtSource.drawItem falls through to classicItem,
-    // which is the same, already-shipping outcome as an item absent from the manifest
-    // (21 sprites render that way today).
-    expect(objects).toHaveLength(0);
-    expect(drawnFrame(objects, 11)).toBeNull();
+    const err = await load().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MissingAssetError);
+    expect((err as MissingAssetError).url).toContain(frameFile(10));
   });
 
   it('is what makes the shift impossible — a short list would still be indexed directly', async () => {
@@ -130,11 +135,10 @@ describe('loadEnhancedObjects', () => {
     expect(drawnFrame(compacted, 30)).toBe(31);
   });
 
-  it('reports a manifest-listed sprite that did not arrive (a build defect, not a design gap)', async () => {
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('names the room, so the failure screen can say which art is incomplete', async () => {
     vi.stubGlobal('fetch', serve([10]));
-    await load();
-    expect(err.mock.calls.flat().join(' ')).toContain(frameFile(10));
+    const err = await load().catch((e: unknown) => e);
+    expect((err as MissingAssetError).what).toContain('SCHODY');
   });
 
   it('rejects rather than dropping the object when the failure was only transient', async () => {
@@ -145,7 +149,7 @@ describe('loadEnhancedObjects', () => {
     await expect(load()).rejects.toBeInstanceOf(TransientAssetError);
   });
 
-  it('keeps an object whose frames all arrive when a DIFFERENT object is broken', async () => {
+  it('does not let an intact object mask a broken one', async () => {
     vi.stubGlobal('fetch', vi.fn(async (url: string): Promise<Response> => {
       if (url === `${DIR}objects.json`) {
         return new Response(
@@ -156,9 +160,9 @@ describe('loadEnhancedObjects', () => {
       if (url.endsWith('a.png')) return new Response('no', { status: 404, headers: { 'content-type': 'text/plain' } });
       return new Response(String(Number(/snek_(\d+)/.exec(url)![1])), { headers: { 'content-type': 'image/png' } });
     }));
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    const objects = await load();
-    expect(objects.map((o) => o.item)).toEqual([ITEM]);
-    expect(objects[0]!.frames).toHaveLength(2);
+    // The old loader returned the good object and dropped the broken one, so a room with
+    // one lost sprite still rendered — plausibly, and wrongly. `Promise.all` over the
+    // manifest is what makes that impossible now.
+    await expect(load()).rejects.toBeInstanceOf(MissingAssetError);
   });
 });

@@ -25,6 +25,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AudioEngine, MUSIC_PRIOR } from '../src/audio/audio.js';
+import { MissingAssetError } from '../src/render/assetFetch.js';
 import { Script } from '../src/core/script.js';
 import { KORALY } from '../src/rooms/koraly.js';
 import { makeRoom, type ItemSpec } from './roomBuilder.js';
@@ -82,9 +83,21 @@ interface Gate {
   fail: (n?: number) => Promise<void>;
   readonly calls: number;
 }
-
 /** Let every queued microtask (the fetch chain, the decode, the install) run. */
 const drain = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
+
+/**
+ * Start a track and take ownership of its rejection.
+ *
+ * A track that does not arrive now REJECTS out of the engine instead of returning
+ * quietly — that rejection is what raises the failure screen in the app, via the
+ * post-boot trap in `loadingUi.ts`. In the app nothing catches it on purpose; here it
+ * has to be caught, or vitest reports every deliberately-failed request as an unhandled
+ * error. What these tests are about is the BOOKKEEPING the engine does on the way out
+ * (the reservation, `playing(prior)`, the generation counter); that the failure escapes
+ * at all is asserted once, on its own, below.
+ */
+const started = (p: Promise<unknown>): Promise<unknown> => p.catch(() => undefined);
 
 let gate: Gate;
 let prevCtx: unknown;
@@ -100,11 +113,19 @@ beforeEach(() => {
       return pending.length;
     },
     async settle(n) {
-      at(n)?.res({ arrayBuffer: () => Promise.resolve(new ArrayBuffer(64)) });
+      at(n)?.res(new Response(new ArrayBuffer(64), { status: 200 }));
       await drain();
     },
+    /**
+     * A 404 rather than a rejected promise, and the distinction is not cosmetic: the
+     * music now goes through `requiredAsset`, which RETRIES a request that got no answer
+     * (twice, ~1.25 s) and answers a 404 immediately. A rejection here would therefore
+     * queue two more attempts this gate knows nothing about, and spend a second of real
+     * time doing it. What these tests are about is what the ENGINE does when a track does
+     * not arrive; which failures are retried is `assetFetch.test.ts`'s subject.
+     */
     async fail(n) {
-      at(n)?.rej(new Error('offline'));
+      at(n)?.res(new Response('', { status: 404 }));
       await drain();
     },
   };
@@ -140,7 +161,7 @@ const MUSIC_URL = (name: string): string => `/data/Music/${name}.wav`;
 describe('a requested track is playing() from the tick that asked for it', () => {
   it('reserves the priority before the fetch resolves (Sound, RSound.pas:674)', () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')));
     // The bug: false here, because activeUntil[10] was only written after the decode.
     expect(engine.playing(10)).toBe(true);
     expect(sources).toHaveLength(0); // nothing is sounding YET — but the channel is claimed
@@ -148,7 +169,7 @@ describe('a requested track is playing() from the tick that asked for it', () =>
 
   it('is still playing() once the track actually starts', async () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')));
     await gate.settle();
     expect(sources).toHaveLength(1);
     expect(engine.playing(10)).toBe(true);
@@ -156,7 +177,7 @@ describe('a requested track is playing() from the tick that asked for it', () =>
 
   it('hands the reservation back when the track cannot be loaded', async () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')));
     await gate.fail();
     // `Sound()` claims no channel for a file it cannot open, so playing() must not be
     // left stuck true for a track that will never sound.
@@ -164,16 +185,35 @@ describe('a requested track is playing() from the tick that asked for it', () =>
     expect(sources).toHaveLength(0);
   });
 
+  it('lets the failure ESCAPE, on both channels — silence is no longer an outcome', async () => {
+    // The other half of every "cannot be loaded" test above, and the reason they have to
+    // hold the promise at all. Both paths used to return quietly here: a 5-7 MB track
+    // that did not arrive left the room playing in silence, with a console line at best.
+    // The rejection is what the trap in `loadingUi.ts` turns into the failure screen, so
+    // it has to leave the engine — after the reservation has been handed back, which is
+    // what the two tests above pin.
+    const engine = newEngine();
+    const effect = engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    const rejected = expect(effect).rejects.toBeInstanceOf(MissingAssetError);
+    await gate.fail();
+    await rejected;
+
+    const loop = engine.playMusic('rybky05', MUSIC_URL('rybky05'), 1000);
+    const loopRejected = expect(loop).rejects.toBeInstanceOf(MissingAssetError);
+    await gate.fail();
+    await loopRejected;
+  });
+
   it('does the same on the room-music channel (MusicCycle, -999)', () => {
     const engine = newEngine();
-    void engine.playMusic('rybky05', MUSIC_URL('rybky05'), 1000);
+    void started(engine.playMusic('rybky05', MUSIC_URL('rybky05'), 1000));
     // KANKAN re-cues on `!playing(MUSIC_PRIOR)` (kankan.ts:216) — it must not see a gap.
     expect(engine.playing(MUSIC_PRIOR)).toBe(true);
   });
 
   it('releases the room-music channel when the track cannot be loaded', async () => {
     const engine = newEngine();
-    void engine.playMusic('rybky05', MUSIC_URL('rybky05'), 1000);
+    void started(engine.playMusic('rybky05', MUSIC_URL('rybky05'), 1000));
     await gate.fail();
     expect(engine.playing(MUSIC_PRIOR)).toBe(false);
     expect(engine.currentMusic).toBe('');
@@ -183,7 +223,7 @@ describe('a requested track is playing() from the tick that asked for it', () =>
 describe('a track killed while it is loading never arrives', () => {
   it('KSnd(prior) cancels an in-flight start (RSound.pas:946)', async () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')));
     engine.killVoice(10);
     expect(engine.playing(10)).toBe(false);
 
@@ -195,7 +235,7 @@ describe('a track killed while it is loading never arrives', () => {
 
   it('KillSnd cancels it too — the sound must not follow the player out of the room', async () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')));
     engine.killAll(); // showMap(): KillSnd + stop the music
 
     await gate.settle();
@@ -206,11 +246,11 @@ describe('a track killed while it is loading never arrives', () => {
 
   it('a fresh request after the kill is honoured (the cancel is not sticky)', async () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')));
     engine.killVoice(10);
     await gate.settle();
 
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')));
     await gate.settle();
 
     expect(sources).toHaveLength(1);
@@ -222,7 +262,7 @@ describe('a reservation owns only itself', () => {  it('does not extend a sound 
     const engine = newEngine();
     seed(engine, 'sm-x-tiktak', 0.001); // a 1ms effect, so its end is observable
     engine.snd('sm-x-tiktak', 10);
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')); // a second claim on prior 10
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'))); // a second claim on prior 10
     await gate.fail();
 
     await new Promise((r) => setTimeout(r, 20)); // the effect's 1ms is long past
@@ -234,8 +274,8 @@ describe('a reservation owns only itself', () => {  it('does not extend a sound 
 
   it('one failed request does not cancel another still loading on the same priority', async () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')); // request #0
-    engine.musicSnd('rybky04', 10, MUSIC_URL('rybky04')); // request #1
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'))); // request #0
+    started(engine.musicSnd('rybky04', 10, MUSIC_URL('rybky04'))); // request #1
     expect(gate.calls).toBe(2);
 
     await gate.fail(0);
@@ -250,7 +290,7 @@ describe('a reservation owns only itself', () => {  it('does not extend a sound 
 
   it('talking(prior) follows the reservation too — it gates dialogue advance', async () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'));
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')));
     // talking() is what advances the dialogue queue and drives lip-sync, so it must
     // agree with playing() about a sound that has been asked for (RSound.pas:933 reads
     // the same channels playing() does — a claimed channel counts for both).
@@ -263,8 +303,8 @@ describe('a reservation owns only itself', () => {  it('does not extend a sound 
 
   it('KillSnd cancels effect reservations but spares the room-music channel', async () => {
     const engine = newEngine();
-    engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08')); // an effect-priority request
-    void engine.playMusic('rybky05', MUSIC_URL('rybky05'), 1000); // the -999 loop
+    started(engine.musicSnd('rybky08', 10, MUSIC_URL('rybky08'))); // an effect-priority request
+    void started(engine.playMusic('rybky05', MUSIC_URL('rybky05'), 1000)); // the -999 loop
     expect(engine.playing(10)).toBe(true);
     expect(engine.playing(MUSIC_PRIOR)).toBe(true);
 
@@ -304,7 +344,7 @@ function koralyOnEngine(engine: AudioEngine): Script {
     {
       ksnd: (prior) => engine.killVoice(prior),
       // main.ts's wiring for `s.music` (buildRoom).
-      music: (name, prior) => engine.musicSnd(name, prior, MUSIC_URL(name)),
+      music: (name, prior) => void started(engine.musicSnd(name, prior, MUSIC_URL(name))),
     },
   );
   KORALY.init(s);

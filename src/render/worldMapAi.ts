@@ -21,7 +21,7 @@
  * the map falls back to the faithful CPU composite. classic/enhanced never touch it.
  */
 import { MAP_W, MAP_H, type MapAction, type WorldMap } from './worldMap.js';
-import { assetBlob, decodeAsset, fetchAsset, isTransient } from './assetFetch.js';
+import { decodeAsset, requiredBlob } from './assetFetch.js';
 
 /** Upscale factor of the committed AI art (must match tools/build-map-ai.mjs AI_SCALE). */
 export const AI_MAP_SCALE = 4;
@@ -40,43 +40,30 @@ export interface AiMapState {
 }
 
 /**
- * Try to load the AI world-map art from `${base}Menu/`. Resolves to an AiWorldMap
- * when every asset decoded, or null when any is missing/undecodable (⇒ the caller
- * falls back to the faithful CPU composite). THROWS TransientAssetError when a
- * request got no answer at all — see the catch below.
+ * Load the AI world-map art from `${base}Menu/` — the two map layers, the odometer, the
+ * icons, the parchment and the five node sprites, every one of which ships.
+ *
+ * It used to resolve null when any of them was missing and let the caller present the
+ * 1998 map instead. That fallback was invisible: the `ai` setting stayed on, the map was
+ * simply the wrong one, and the only symptom was art quietly a tier below what the
+ * player asked for. Now it throws for both kinds of failure, and the caller asks the
+ * player.
  */
-export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorldMap | null> {
-  try {
-    const load = async (file: string): Promise<ImageBitmap> => {
-      const url = `${base}Menu/${file}`;
-      const res = await fetchAsset(url);
-      // A status that is an ANSWER ("not there") stays a plain Error and is caught
-      // below as an absence. Only a request that got no answer is transient, and
-      // fetchAsset has already thrown for that.
-      if (!res.ok) throw new Error(`${file}: ${res.status}`);
-      const blob = await assetBlob(url, res);
-      return decodeAsset(url, () => createImageBitmap(blob));
-    };
-    const [mapa0, mapa1, krokomer, ikonky, loading, ...nodes] = await Promise.all([
-      load('mapa-0_ai.webp'),
-      load('mapa-1_ai.webp'),
-      load('krokomer_ai.webp'),
-      load('ikonky_ai.webp'),
-      load('loading_ai.webp'),
-      ...NODE_FILES.map(load),
-    ]);
-    return new AiWorldMap(wm, mapa0!, mapa1!, nodes, krokomer!, ikonky!, loading!);
-  } catch (e) {
-    // Rethrown, not swallowed: a load that got no answer has taught us nothing, and the
-    // caller now asks the player rather than quietly presenting the 1998 map under an
-    // `ai` setting. This used to resolve null for both cases together.
-    if (isTransient(e)) throw e;
-    // A genuine absence: the deploy is missing the AI map art. Nothing at runtime can
-    // fix that, so fall back to the faithful CPU map — but say why, since the only
-    // other symptom is the map quietly being the wrong one.
-    console.warn('AI world map unavailable:', e);
-    return null;
-  }
+export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorldMap> {
+  const load = async (file: string): Promise<ImageBitmap> => {
+    const url = `${base}Menu/${file}`;
+    const blob = await requiredBlob(url, 'the AI world map');
+    return decodeAsset(url, () => createImageBitmap(blob));
+  };
+  const [mapa0, mapa1, krokomer, ikonky, loading, ...nodes] = await Promise.all([
+    load('mapa-0_ai.webp'),
+    load('mapa-1_ai.webp'),
+    load('krokomer_ai.webp'),
+    load('ikonky_ai.webp'),
+    load('loading_ai.webp'),
+    ...NODE_FILES.map(load),
+  ]);
+  return new AiWorldMap(wm, mapa0!, mapa1!, nodes, krokomer!, ikonky!, loading!);
 }
 
 export class AiWorldMap {

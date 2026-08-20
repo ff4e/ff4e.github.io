@@ -22,6 +22,7 @@ import {
   type PanelState, type OptionsState,
 } from './hud.js';
 import { PANEL_IMAGES, CUDL_SIZE } from '../data/ffp.js';
+import { requiredAsset, requiredBlob, requiredJson } from './assetFetch.js';
 
 /** Upscale factor of the shipped panel art when its manifest doesn't say. */
 export const AI_PANEL_SCALE = 4;
@@ -57,31 +58,27 @@ const HANDLE_Y = { effect: 85, voice: 134, music: 183 } as const;
 interface AiPanelManifest { scale?: number; files?: string[] }
 
 /**
- * Load the AI panel art from `${base}enhanced-ai/_panel/`. Resolves to an AiPanel when
- * all 16 variants and the handle decoded, else null (⇒ caller uses the faithful path).
- * Never throws.
+ * Load the AI panel art from `${base}enhanced-ai/_panel/`: all 16 colour variants plus
+ * the slider handle, every one of which ships.
+ *
+ * It used to resolve null on any failure and let the caller keep the faithful panel —
+ * "a partial download should fall back quietly". That is the shape the all-or-nothing
+ * decision removed: the fallback is invisible, so an `ai` deploy missing its panel art
+ * played as a subtly wrong game for the whole session with one console line to show for
+ * it. Now it throws, and every one of these is a `requiredAsset`.
  */
-export async function loadAiPanel(base: string): Promise<AiPanel | null> {
-  try {
+export async function loadAiPanel(base: string): Promise<AiPanel> {
+  {
     const dir = `${base}enhanced-ai/_panel/`;
-    const res = await fetch(`${dir}ai.json`);
-    if (!res.ok || !(res.headers.get('content-type') ?? '').includes('json')) return null;
-    const man = (await res.json()) as AiPanelManifest;
+    const man = await requiredJson<AiPanelManifest>(`${dir}ai.json`, 'the AI control panel');
     const scale = Number(man.scale) || AI_PANEL_SCALE;
-    const bmp = async (name: string): Promise<ImageBitmap> => {
-      const r = await fetch(dir + name);
-      if (!r.ok || !(r.headers.get('content-type') ?? '').startsWith('image/')) throw new Error(`${name}: ${r.status}`);
-      return createImageBitmap(await r.blob());
-    };
+    const bmp = async (name: string): Promise<ImageBitmap> =>
+      createImageBitmap(await requiredBlob(dir + name, 'the AI control panel'));
     const images = await Promise.all(
       Array.from({ length: PANEL_IMAGES }, (_, i) => bmp(`img${String(i).padStart(2, '0')}.webp`)),
     );
     const cudl = await bmp('cudl.webp');
     return new AiPanel(images, cudl, scale);
-  } catch (e) {
-    // A partial download should fall back quietly, but a broken BUILD should not hide.
-    console.warn('AI panel unavailable:', e);
-    return null;
   }
 }
 

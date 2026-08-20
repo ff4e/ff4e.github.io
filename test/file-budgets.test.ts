@@ -122,7 +122,15 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // the room for ever), the `classic` tier's warm-cache prefetch must not raise a modal
   // over a game that needs none of that art, and the map screen must not appear over a
   // room the player has since walked into. Each is a guard plus the comment saying why.
-  ['src/app/art.ts', 660],
+  //
+  // 660 -> 672 for the two branches the all-or-nothing rule needs. An answer that is not
+  // the asset (a manifest-listed sprite that 404s, a manifest served as garbage) is
+  // neither an absence to cache nor a blip to retry, and it used to be filed as the
+  // former — the silent tier downgrade the whole change exists to remove. And the `ai`
+  // tier's loader now rethrows everything, so the one caller that arms a hold and voids
+  // the call needs an arm that releases it: a rejection escaping there is a room withheld
+  // for ever, which is the frozen room the enhanced tier already documents.
+  ['src/app/art.ts', 672],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak
@@ -147,7 +155,16 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `beginMusicLoad` lets a start JOIN that download, because a download outside the
   // engine is invisible to `musicBufs`/`musicStarting` and KANKAN re-cues its track on the
   // first idle tick — fetching and decoding the same 1.24 MB file twice.
-  ['src/audio/audio.ts', 710],
+  //
+  // 710 -> 739 for the asset door: the two music fetches here were the last bare `fetch`
+  // calls in the audio layer, and "stay silent" is no longer one of the answers this file
+  // is allowed to give (test/asset-fetch-discipline.test.ts). Both catches now hand the
+  // reservation back and RETHROW — unless the start was already superseded, which is the
+  // guard every other loader in the codebase has and this one did not: a 5-7 MB track
+  // nothing cancels can outlive the room that asked for it and fail minutes later, over a
+  // room whose own music is playing. `musicSnd` also returns its download instead of
+  // voiding it, so the rejection has an owner and a test can hold it.
+  ['src/audio/audio.ts', 739],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

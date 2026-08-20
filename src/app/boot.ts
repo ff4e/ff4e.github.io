@@ -3,9 +3,10 @@
  * packages, room 7, then the first frame. (The save store is opened earlier, in
  * `main.ts`, because `migrateSaves()` has to precede every `ff.*` read.)
  *
- * What is critical and what is optional is documented inline — nearly all of it is
- * optional, and the pattern is the same each time: a failed fetch costs its feature,
- * never the game.
+ * Nothing here is optional any more. Every asset boot fetches is one the 1998 game
+ * shipped, so a failure ends the session on the failure screen and names the file (see
+ * `loadingUi.ts`) rather than costing its feature quietly. That is the whole of the
+ * all-or-nothing rule as it applies to boot, and it is why none of these loaders catch.
  *
  * This is a function rather than module-scope top-level await on purpose. An imported
  * module is evaluated before any statement of its importer, so at module scope this
@@ -18,20 +19,21 @@ import { loadingEl } from './dom.js';
 import { initFeedback } from './feedback.js';
 import { startFrames } from './frameClock.js';
 import { engine, setFont } from './gameState.js';
-import { maybeShowWebglNote, setLoadingMsg, showFatal } from './loadingUi.js';
+import { maybeShowWebglNote, setLoadingMsg } from './loadingUi.js';
 import { ensureDeskyData } from './mapDraw.js';
 import { playFirstRunIntro, startMenuMusic } from './mapNav.js';
 import { graphics, renderer } from './renderSettings.js';
 import { settings } from './playerSettings.js';
 import { loadParchment } from './roomLaunch.js';
-import { loadRoom, loadSoundPkg } from './roomLoad.js';
+import { loadRoom, requireSoundPkg } from './roomLoad.js';
 import { ui } from './screenState.js';
 import { setBooted, setSubFontReady } from './stageState.js';
 import { lengthOfRecord } from '../core/record.js';
-import { parseBmp } from '../data/bmp.js';
+import { parseBmp, type Bmp } from '../data/bmp.js';
 import { parseFfp } from '../data/ffp.js';
 import { roomByNumber } from '../data/roomTable.js';
 import { initAnalytics } from '../platform/analytics.js';
+import { decodeAsset, requiredBytes } from '../render/assetFetch.js';
 import { FontData } from '../render/font.js';
 import { webgl2Available } from '../render/glScreen.js';
 import { WorldMap } from '../render/worldMap.js';
@@ -46,6 +48,11 @@ export interface BootHost {
 
 let host!: BootHost;
 
+/** Fetch + parse one of boot's 1998 bitmaps. Every one of them is required. */
+async function bootBmp(url: string, what: string): Promise<Bmp> {
+  return parseBmp(await requiredBytes(url, what));
+}
+
 /** Hand this module its view of the game. Called once, from `main.ts`, during boot. */
 export function initBoot(h: BootHost): void {
   host = h;
@@ -55,12 +62,19 @@ export function initBoot(h: BootHost): void {
 export async function runBoot(): Promise<void> {
   setFont(await FontData.load('/data/Intro'));
   setLoadingMsg('Loading fonts…');
-  // Enhanced subtitle font (FreeSans Bold, the FFNG subtitle face). Optional: if it
-  // fails to load, enhanced mode silently falls back to the baked bitmap subtitles.
-  // Enhanced subtitle fonts — all bundled + OFL/GPL so they render identically on
-  // every platform. Mulish/Manrope/Jost are variable (weight axis 100-900);
-  // FFSubtitle is the original FreeSans Bold. If loading fails, enhanced mode
-  // silently falls back to the baked bitmap subtitles.
+  // Enhanced subtitle fonts — all bundled + OFL/GPL so they render identically on every
+  // platform. Mulish/Manrope/Jost are variable (weight axis 100-900); FFSubtitle is the
+  // original FreeSans Bold (the FFNG subtitle face).
+  //
+  // Loaded from BYTES rather than by handing `FontFace` a `url()`. That form is a third
+  // network door: it retries nothing, applies no deadline, and its rejection cannot tell
+  // a 404 from a dropped connection — so this loop used to catch per face and carry on,
+  // and four shipped fonts could quietly become baked bitmap subtitles with nothing said.
+  // Through the door they are required like everything else.
+  //
+  // `subFontReady` stays a live flag rather than becoming a constant: the renderer's
+  // bitmap path is still reachable at runtime (the probes toggle it), and that is a
+  // drawing decision, not a loading one.
   {
     const faces: ReadonlyArray<[string, string, string]> = [
       ['FFSubtitle', '/enhanced/subtitle.ttf', '700'],
@@ -68,75 +82,60 @@ export async function runBoot(): Promise<void> {
       ['Manrope', '/fonts/Manrope.ttf', '100 900'],
       ['Jost', '/fonts/Jost.ttf', '100 900'],
     ];
-    let anyLoaded = false;
     await Promise.all(
       faces.map(async ([family, url, weight]) => {
-        try {
-          const face = new FontFace(family, `url(${url})`, { weight });
-          await face.load();
-          document.fonts.add(face);
-          anyLoaded = true;
-        } catch {
-          /* this face is unavailable; others / bitmap fallback still work */
-        }
+        const bytes = await requiredBytes(url, 'the subtitle fonts');
+        const face = new FontFace(family, bytes.buffer as ArrayBuffer, { weight });
+        // A font that arrived and will not parse is a broken build, but it is
+        // indistinguishable here from a truncated download — the same guess `decodeAsset`
+        // makes for images, and for the same reason.
+        document.fonts.add(await decodeAsset(url, () => face.load()));
       }),
     );
-    setSubFontReady(anyLoaded);
+    setSubFontReady(true);
   }
   // Control-panel overlay graphic (TOvl / panel.ffp).
   setLoadingMsg('Loading graphics…');
-  try {
-    const pf = await fetch('/data/Menu/panel.ffp').then((r) => r.arrayBuffer());
-    ui.panel = parseFfp(new Uint8Array(pf));
-  } catch {
-    /* panel optional */
-  }
+  const panelUrl = '/data/Menu/panel.ffp';
+  ui.panel = parseFfp(await requiredBytes(panelUrl, 'the control panel'));
   // World map assets (mapa-0/mapa-1/maska + node sprites n0..n4).
-  try {
+  {
     const files = ['mapa-0.BMP', 'mapa-1.BMP', 'maska.BMP', 'n0.BMP', 'n1.BMP', 'n2.BMP', 'n3.BMP', 'n4.BMP'];
-    const bmps = await Promise.all(
-      files.map((f) => fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b)))),
-    );
+    const bmps = await Promise.all(files.map((f) => bootBmp(`/data/Menu/${f}`, 'the world map')));
     ui.worldMap = new WorldMap(bmps[0]!, bmps[1]!, bmps[2]!, bmps.slice(3));
     // The AI-upscaled map (Phase B) is NOT loaded here: it is fetched lazily the first
     // time the map is about to be shown in the `ai` tier (beginMapArt), so other tiers
     // pay nothing for it.
-  } catch {
-    /* map optional */
   }
-  await loadParchment(); // the room-entry parchment; optional, never fatal (roomLaunch.ts)
+  await loadParchment(); // the room-entry parchment (roomLaunch.ts)
   // World-map record info panel assets (krokoměr background, button icons, digit
   // glyphs) + the level name-plaque data for the current language (UMain.pas:341).
-  try {
+  {
     const [krokomer, ikonky, cisla] = await Promise.all(
-      ['krokomer.BMP', 'ikonky.BMP', 'cisla.BMP'].map((f) =>
-        fetch(`/data/Menu/${f}`).then((r) => r.arrayBuffer()).then((b) => parseBmp(new Uint8Array(b))),
-      ),
+      ['krokomer.BMP', 'ikonky.BMP', 'cisla.BMP'].map((f) => bootBmp(`/data/Menu/${f}`, 'the world map info panel')),
     );
     ui.infoPanelAssets = { krokomer: krokomer!, ikonky: ikonky!, cisla: cisla! };
-  } catch {
-    /* info panel optional */
   }
   await ensureDeskyData();
 
   setLoadingMsg('Loading sound…');
   // The persistent global packages, in the order the original loads them: x00 effects,
   // x03 ambient chatter (the "ob-*" idle lines, StdKecej / vyber_hlasku) and x02 death
-  // commentary (the "smrt-*" lines, StdSmrt). Each is optional — a missing one costs
-  // its lines, never the game. Kept sequential, as before: they are large, and the boot
-  // path is what the UI probes' 5 s budget is measured against.
-  for (const id of ['x00', 'x03', 'x02']) {
-    await loadSoundPkg(id, `/data/Title/${id}.fft`, `/data/Sound/${id}.ffs`);
+  // commentary (the "smrt-*" lines, StdSmrt). 8.3 MB, and boot no longer tolerates
+  // losing any of it: a game with no death commentary is a quieter game than the one
+  // ALTAR shipped, and the player is the last person able to notice that. Kept
+  // sequential, as before: they are large, and the boot path is what the UI probes'
+  // 5 s budget is measured against.
+  const GLOBAL_PKGS: ReadonlyArray<[string, string]> = [
+    ['x00', 'the sound effects'],
+    ['x03', 'the fish chatter'],
+    ['x02', 'the death commentary'],
+  ];
+  for (const [id, what] of GLOBAL_PKGS) {
+    await requireSoundPkg(id, `/data/Title/${id}.fft`, `/data/Sound/${id}.ffs`, what);
   }
   setLoadingMsg('Loading the world…');
   await loadRoom(7);
-  // Critical assets: without the control panel or the world map the game is
-  // unplayable, so a missing/broken deploy of these is a fatal error (rather than
-  // the silent graceful-degradation the optional audio packages get).
-  if (!ui.panel || !ui.worldMap) {
-    showFatal('Some core game files are missing. Please try again, or check the installation.');
-    throw new Error('missing critical assets: ' + (!ui.panel ? 'panel ' : '') + (!ui.worldMap ? 'worldMap' : ''));
-  }
   // The two lines the 1998 release referenced but shipped without (public/restored/,
   // built by tools/build-restored-sounds.ts) — `pyr-m-nudi` and `jes-v-potvora2`. A
   // package of its own rather than a patched 025/063, so the committed 1998 data stays
@@ -144,14 +143,12 @@ export async function runBoot(): Promise<void> {
   //
   // Fetched AFTER boot and off the critical path: each awaited package above is another
   // serialized round trip before the game can start, and loading this one inline was
-  // measured pushing UI probes past their 5 s boot budget. The cost of that choice is
-  // real but small — if a player reaches room 25 or 63 before it lands, that one line
-  // keeps the 1998 silence, so the failure mode is the status quo ante, not a break.
-  void loadSoundPkg('restored', '/restored/restored.fft', '/restored/restored.ffs', true).then(
-    (ok) => {
-      if (!ok) console.warn('[audio] restored package unavailable — PYRAMIDA/JESKYNE keep the 1998 silence');
-    },
-  );
+  // measured pushing UI probes past their 5 s boot budget. Off the critical path is not
+  // the same as optional, though — it used to warn to the console and leave the two
+  // rooms silent, and a console warning is not a thing a player reads. Unhandled on
+  // purpose: the post-boot trap in `loadingUi.ts` turns an asset failure into the
+  // failure screen wherever it happens, so this needs no catch of its own.
+  void requireSoundPkg('restored', '/restored/restored.fft', '/restored/restored.ffs', 'the restored 1998 lines', true);
 
   // Boot: on first run, auto-play the intro (logo → intro) before the map, then
   // flip the persisted flag so later runs go straight to the map (the original's
