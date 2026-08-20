@@ -24,6 +24,7 @@ import { ensureDeskyData } from './mapDraw.js';
 import { playFirstRunIntro, startMenuMusic } from './mapNav.js';
 import { graphics, renderer } from './renderSettings.js';
 import { settings } from './playerSettings.js';
+import { voiceUrl } from '../audio/ffs2.js';
 import { loadParchment } from './roomLaunch.js';
 import { loadRoom, requireSoundPkg } from './roomLoad.js';
 import { ui } from './screenState.js';
@@ -121,18 +122,21 @@ export async function runBoot(): Promise<void> {
   setLoadingMsg('Loading sound…');
   // The persistent global packages, in the order the original loads them: x00 effects,
   // x03 ambient chatter (the "ob-*" idle lines, StdKecej / vyber_hlasku) and x02 death
-  // commentary (the "smrt-*" lines, StdSmrt). 8.3 MB, and boot no longer tolerates
+  // commentary (the "smrt-*" lines, StdSmrt). 2.4 MB — it was 8.3 before the speech
+  // packages were staged as AAC — and boot no longer tolerates
   // losing any of it: a game with no death commentary is a quieter game than the one
   // ALTAR shipped, and the player is the last person able to notice that. Kept
   // sequential, as before: they are large, and the boot path is what the UI probes'
-  // 5 s budget is measured against.
+  // 5 s budget is measured against. Each is also DECODED here (x00 excepted, which is
+  // still the 1998 `.ffs` and decodes per sound on use) — see AudioEngine.decodeSegments
+  // for why every segment, up front, rather than on first play.
   const GLOBAL_PKGS: ReadonlyArray<[string, string]> = [
     ['x00', 'the sound effects'],
     ['x03', 'the fish chatter'],
     ['x02', 'the death commentary'],
   ];
   for (const [id, what] of GLOBAL_PKGS) {
-    await requireSoundPkg(id, `/data/Title/${id}.fft`, `/data/Sound/${id}.ffs`, what);
+    await requireSoundPkg(id, `/data/Title/${id}.fft`, voiceUrl(id), what);
   }
   setLoadingMsg('Loading the world…');
   await loadRoom(7);
@@ -148,7 +152,7 @@ export async function runBoot(): Promise<void> {
   // rooms silent, and a console warning is not a thing a player reads. Unhandled on
   // purpose: the post-boot trap in `loadingUi.ts` turns an asset failure into the
   // failure screen wherever it happens, so this needs no catch of its own.
-  void requireSoundPkg('restored', '/restored/restored.fft', '/restored/restored.ffs', 'the restored 1998 lines', true);
+  void requireSoundPkg('restored', '/restored/restored.fft', voiceUrl('restored', '/restored'), 'the restored 1998 lines', true);
 
   // Boot: on first run, auto-play the intro (logo → intro) before the map, then
   // flip the persisted flag so later runs go straight to the map (the original's

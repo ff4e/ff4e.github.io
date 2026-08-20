@@ -598,7 +598,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     winCountdown: () => engine?.winCountdown ?? 0,
     clearSubtitles: () => subs?.clear(),
     audioHas: (name: string) => host.audio.has(name),  playSound: (name: string) => host.audio.play(name),
-    // Debug: the room's .ffs voice package now loads AFTER the room's art (it is the
+    // Debug: the room's voice package now loads AFTER the room's art (it is the
     // bulk of an entry's bytes and nothing visual needs it), so a probe that asserts on
     // a room-specific SOUND must wait for this rather than for the room itself.
     roomAudioReady: () => host.audio.roomLoaded,

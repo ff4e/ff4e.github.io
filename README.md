@@ -720,6 +720,53 @@ that silence into the track once per repeat.
 SNR it prints alongside (~18–29 dB) is a regression tripwire, not a transparency proof —
 AAC is not a waveform coder and a perceptually identical encode scores poorly by it.
 
+### Voices
+
+The other 183.9 MB — and the part where the obvious claim is wrong. The voices were
+**never** raw PCM: `.ffs` bodies go through `Decompres` (`src/audio/ffs.ts`,
+`RSound.pas:258-333`), the original's second-order delta codec, so 254.8 MB of samples
+already ship as 183.9 MB. It is 1 818 sounds, 101.0 minutes, and it is speech — median
+line 2.75 s, only 3 % under a second.
+
+The game fetches **`Sound/<id>.ffs2`**: AAC at 48 kbps, **37.4 MB** for all 76 packages
+(4.9×), so a room's voices go from 2.43 MB to 0.50 MB and the worst room from 8.94 MB to
+1.73 MB.
+
+    npx tsx tools/stage-voices.ts            # writes public/**/*.ffs2
+    npx tsx tools/stage-voices.ts --check    # re-encode to a temp dir and byte-compare
+    npx tsx tools/stage-voices.ts --verify   # decode all 1 797 segments and measure them
+
+**`x00` is deliberately not compressed.** It is the only package of *effects* rather than
+speech — short transients like the falling-steel clang, which is what lossy coding smears
+worst — and it is 0.87 MB. `isRawPkg` (`src/audio/ffs2.ts`) is that rule, and both the URL
+builder and the Pages staging read it.
+
+**One file per package, not one per line.** A room speaks ~24 lines, so per-line files
+would be ~24 extra requests per room entry. A `.ffs2` is a header carrying
+`zvuk → (offset, length)` and then the segment bodies, each a complete independently
+decodable MP4 — ~500 bytes of container per sound, against every browser being able to
+decode it. The **`.fft` is not regenerated**: it is where the subtitles live, and its
+`delka` is already a SAMPLE count, so it stays true for encoded audio and `duration()`,
+`TALKING_MEZ_SEC` and the lip-sync need no change. Only the byte offsets moved.
+
+**A package is decoded in full when it is installed**, not lazily on first play
+(`src/audio/ffs2Decode.ts`). `decodeAudioData` is asynchronous and a voice start is
+synchronous — the original's `Sound()` claims its channel and returns, and the *next* tick
+reads `playing(prior)` / `talking(prior)` back. Awaiting inside a voice start would expose
+every room script to the race the `reserve()` machinery already exists for. The decode
+itself is cheap (3–8 ms for a 2.5 s line); it is the asynchrony that cannot be had at play
+time. Each buffer is trimmed to `delka`, because AAC decodes up to 1023 samples long and
+`activeUntil` is taken from `buf.duration`.
+
+`--verify` is explicit about what it can and cannot prove. It gates on **alignment** (no
+shift in ±64 samples fits better than none), on **shape** (short-time RMS envelopes match
+at better than 0.97 — which is what catches a segment decoded from the wrong offset, and
+works on material where a waveform measure cannot) and on **length** (nothing audible
+missing from the end). The **SNR** it prints alongside is a tripwire, not a transparency
+proof: the lowest in the set is 0.9 dB, and that sound is a shush — broadband noise, which
+AAC rebuilds with the right character and different samples. The `.ffs` originals stay in
+the repo to encode from, measure against, and listen to; nothing downloads them.
+
 ### Intro movies
 
 The startup **intro** (ALTAR logo → intro movie) and the map's top-left "watch intro"

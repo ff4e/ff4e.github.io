@@ -75,14 +75,20 @@ const CASES = [
   { tier: 'mustHave', label: 'world map', url: '**/data/Menu/mapa-0.BMP' },
   { tier: 'mustHave', label: 'world map info panel', url: '**/data/Menu/krokomer.BMP' },
   { tier: 'mustHave', label: 'map name plaques', url: '**/data/Menu/desky*.dat' },
-  // 8.3 MB of sound the game used to boot happily without. Each is its own package and
-  // its own sentence, which is the point: "sound package index" told a player nothing.
+  // 2.4 MB of sound the game used to boot happily without (8.3 before the speech packages
+  // were staged as AAC). Each is its own package and its own sentence, which is the point:
+  // "sound package index" told a player nothing.
+  //
+  // `x00` is the one that keeps its 1998 `.ffs` — it is effects rather than speech, and is
+  // deliberately not compressed (`isRawPkg`, src/audio/ffs2.ts). The other two are `.ffs2`,
+  // and getting that extension wrong here does not fail loudly: the route simply never
+  // matches, the game boots fine, and the probe times out waiting for a failure screen.
   { tier: 'mustHave', label: 'sound effects', url: '**/data/Sound/x00.ffs' },
-  { tier: 'mustHave', label: 'fish chatter', url: '**/data/Sound/x03.ffs' },
-  { tier: 'mustHave', label: 'death commentary', url: '**/data/Sound/x02.ffs' },
+  { tier: 'mustHave', label: 'fish chatter', url: '**/data/Sound/x03.ffs2' },
+  { tier: 'mustHave', label: 'death commentary', url: '**/data/Sound/x02.ffs2' },
   // Fetched AFTER boot, deliberately off the critical path — which is exactly why it
   // used to be a `console.warn` nobody would ever read.
-  { tier: 'mustHave', label: 'restored 1998 lines', url: '**/restored/restored.ffs' },
+  { tier: 'mustHave', label: 'restored 1998 lines', url: '**/restored/restored.ffs2' },
   { tier: 'mustHave', label: 'enhanced fish sprites', url: '**/enhanced/_fish/manifest.json' },
   { tier: 'mustHave', label: 'music', url: '**/data/Music/menu.m4a' },
 

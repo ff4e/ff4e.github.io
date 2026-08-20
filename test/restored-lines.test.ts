@@ -364,22 +364,22 @@ describe('AudioEngine package lifetimes', () => {
   const globFft = readFileSync('public/data/Title/x01.fft');
   const globFfs = readFileSync('public/data/Sound/x01.ffs');
 
-  it('resolves a name to its FFT record, room package first', () => {
+  it('resolves a name to its FFT record, room package first', async () => {
     const a = new AudioEngine();
     expect(a.entry('cil-m-hlaska0')).toBeUndefined();
-    a.loadGlobal('x01', globFft, globFfs);
-    a.setRoom('025', roomFft, roomFfs);
+    await a.loadGlobal('x01', globFft, globFfs);
+    await a.setRoom('025', roomFft, roomFfs);
     expect(a.entry('cil-m-hlaska0')?.name).toBe('cil-m-hlaska0');
     expect(a.entry('pyr-m-kam')?.name).toBe('pyr-m-kam');
     expect(a.entryCount('x01')).toBe(8);
   });
 
-  it('drops the room package with the room, and keeps the globals', () => {
+  it('drops the room package with the room, and keeps the globals', async () => {
     // The reason clearRoom exists: a line spoken before the next room's package lands
     // must be silent, never the PREVIOUS room's sample.
     const a = new AudioEngine();
-    a.loadGlobal('x01', globFft, globFfs);
-    a.setRoom('025', roomFft, roomFfs);
+    await a.loadGlobal('x01', globFft, globFfs);
+    await a.setRoom('025', roomFft, roomFfs);
     expect(a.roomLoaded).toBe(true);
     a.clearRoom();
     expect(a.roomLoaded).toBe(false);
@@ -387,10 +387,10 @@ describe('AudioEngine package lifetimes', () => {
     expect(a.entry('cil-m-hlaska0')?.name).toBe('cil-m-hlaska0');
   });
 
-  it('carries the subtitle on the same record as the sample', () => {
+  it('carries the subtitle on the same record as the sample', async () => {
     // Why nothing needs a second parsed copy of an FFT to render a line.
     const a = new AudioEngine();
-    a.setRoom('025', roomFft, roomFfs);
+    await a.setRoom('025', roomFft, roomFfs);
     const e = a.entry('pyr-m-kam');
     expect(e?.cz.text).toBe(' Kam jsme se to dostali?');
     expect(e?.delka).toBeGreaterThan(0);

@@ -194,9 +194,9 @@ await withApp(
     // Each room is chosen COLD and for a distinct track: room 1 cached rybky04 in §3, so a
     // room sharing that track would be a cache hit and would issue no request to fail.
     for (const [label, room, route] of [
-      ['voices', 4, '**/data/Sound/004.ffs'], // VRAK
+      ['voices', 4, '**/data/Sound/004.ffs2'], // VRAK
       ['music', 5, '**/data/Music/rybky03.m4a'], // SCHODY — rybky03, not yet fetched
-      ['leg-final remarks', 19, '**/data/Sound/x01.ffs'], // LODE — depth 15, the only rooms that load x01
+      ['leg-final remarks', 19, '**/data/Sound/x01.ffs2'], // LODE — depth 15, the only rooms that load x01
     ]) {
       await p.route(route, (r) => r.abort('failed'));
       await p.evaluate((n) => {
@@ -275,7 +275,7 @@ await withApp(
       null,
       { timeout: tickBudget(60) },
     );
-    await p.route('**/data/Sound/009.ffs', async (r) => {
+    await p.route('**/data/Sound/009.ffs2', async (r) => {
       await new Promise((done) => setTimeout(done, 1200));
       await r.abort('failed').catch(() => {});
     });
@@ -296,7 +296,7 @@ await withApp(
       !(await p.evaluate(() => window.__ff.fatalShown())),
       'a failure for a room the player has left does not end the session',
     );
-    await p.unroute('**/data/Sound/009.ffs');
+    await p.unroute('**/data/Sound/009.ffs2');
     await p.evaluate(() => {
       void window.__ff.enterRoomAwait(3).catch(() => {});
     });
