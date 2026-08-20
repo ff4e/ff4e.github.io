@@ -423,7 +423,9 @@ export class AudioEngine {
     volume: number,
     loop: boolean,
   ): Promise<void> {
-    const ctx = this.ensureCtx();
+    // The context is opened here, before anything awaits, because `decodeMusic` needs one
+    // and a start that reaches it only after a download would open it late.
+    this.ensureCtx();
     // Claim the priority before the first await, so `playing(prior)` is true from the
     // tick that asked for the track — see reserve(). KORALY is the room that showed
     // why: it cues `music('rybky08', 10)` at score-step 19 (koraly.ts:373) and its own
@@ -436,13 +438,44 @@ export class AudioEngine {
     let buf = this.musicBufs.get(name);
     if (!buf) {
       try {
+        // Join a download that is already in flight for this track rather than opening a
+        // second one — the same rule `playMusic` has followed since room entry took over
+        // the room's own track, and this path did not. DRAKAR1 is the room that needs it:
+        // its script cues `rybky04` (5.75 MB) from `init`, i.e. inside `buildRoom`, and
+        // the room ENTRY now preloads that same track a moment later (see
+        // `extraMusicOfRoom`). Two concurrent writes of one cache entry that size fail
+        // with net::ERR_CACHE_WRITE_FAILURE — a transient error, so without this the
+        // entry would end the session over a file the script was fetching successfully.
+        const inflight = this.musicLoads.get(name);
+        if (inflight) {
+          await inflight;
+          buf = this.musicBufs.get(name);
+        }
+      } catch {
+        // `beginMusicLoad` swallows the outcome, so this cannot actually reject; the guard
+        // is here so a future change to it cannot escape past the reservation below.
+      }
+    }
+    if (!buf) {
+      // Registered BEFORE the first await for the same reason, so the entry's preload
+      // joins THIS load instead of starting its own.
+      const load = (async () => {
         // Low request priority: a 5-7 MB music track is the largest single file the
         // game fetches. Room entry already avoids the contention that matters by
         // starting music only after the room's art (see loadRoom); this is the backstop
         // for every other caller — notably the menu music, which competes with the
         // world map's own assets.
         const bytes = await requiredBytes(url, 'the music', 'mustHave', { init: { priority: 'low' } as RequestInit });
-        buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
+        // Through `decodeMusic` rather than a bare `decodeAudioData`, so the track is
+        // cached with its native rate attached exactly as every other loader caches it.
+        // Without that, a buffer decoded here and later started by `playMusic` looped at
+        // the default 22050 Hz whatever the file said.
+        await this.decodeMusic(name, bytes);
+      })();
+      this.beginMusicLoad(name, load);
+      try {
+        await load;
+        buf = this.musicBufs.get(name);
       } catch (e) {
         // Is this start still the one that should sound? Asked BEFORE the release, which
         // is what makes the answer meaningful — `release` clears the claim either way.
@@ -460,12 +493,11 @@ export class AudioEngine {
         // is how a dropped track became a room playing in silence with nothing said.
         throw e;
       }
-      this.musicBufs.set(name, buf);
     }
     // Killed while it was loading (a room change, or the script's own KSnd(prior)):
     // the request is stale and must not install a source over the silence that was
     // asked for. The reservation went with the kill.
-    if (!this.holds(prior, claim)) return;
+    if (!buf || !this.holds(prior, claim)) return;
     // Hand the reservation over to the real source. Nothing awaits in between, so
     // playing(prior) is never observably false across the handover.
     this.release(prior, claim);
@@ -579,6 +611,11 @@ export class AudioEngine {
    * first tick it sees the channel idle (`if (!s.playing(MUSIC_PRIOR)) s.musiccyc(...)`,
    * kankan.ts:216) and the 1.24 MB file is fetched and decoded TWICE on a cold entry.
    */
+  /** A download already in flight for this track (see beginMusicLoad), or undefined. */
+  musicLoad(name: string): Promise<void> | undefined {
+    return this.musicLoads.get(name);
+  }
+
   beginMusicLoad(name: string, load: Promise<unknown>): void {
     const done = load.then(
       () => {},

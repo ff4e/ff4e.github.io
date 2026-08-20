@@ -24,9 +24,10 @@ import { contentScaleFor, scalingFilterFor } from './stageGeometry.js';
 import { saveSettings } from '../core/settings.js';
 import { bmpToRgba, parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
-import { REGISTERED_ROOMS, branchOfRoom, depthOfRoom } from '../data/world.js';
+import { REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, depthOfRoom } from '../data/world.js';
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
 import { assetBytes, decodeAsset, isAssetError, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
+import { preloadedLegPage } from './roomPreload.js';
 import { reportAssetError } from './loadingUi.js';
 import type { MapAction } from '../render/worldMap.js';
 
@@ -87,15 +88,6 @@ export function showMap(): void {
   startMenuMusic();
   host.setInfo();
 }
-
-/** ZAVER ("At Home", room 71): the endgame finale cutscene, auto-launched on completion. */
-export const ZAVER_ROOM = 71;
-/**
- * The story page ZAVER ends on: 009.$dv, the medals and the congratulation letter from
- * ŠÉF. It is the ninth page, and the only one no leg win can reach — legs 1..8 map to
- * 001..008, and branches 0 and 9 have no depth-15 room at all.
- */
-export const ZAVER_LEG = 9;
 
 /**
  * chybi=0 (USoutez.pas:729): every registered room (1..70) is genuinely solved. Cheat-
@@ -175,21 +167,31 @@ export function returnFromRoom(): void {
  * would have done. The player loses one chapter of story and is told so; they do not
  * lose the win. That is the middle tier's contract — the tier says how loudly it may be
  * reported, and the call site has to say what happens next.
+ *
+ * ── The win no longer fetches: the page was preloaded on entry ────────────────
+ * The cache hit below is the path a win takes (preloadLegPage, roomPreload.ts). The fetch
+ * remains for the route with no entry to have preloaded it — clicking an already-solved
+ * leg-final room on the MAP shows its page BEFORE entering (daClickAndRun, main.ts) — and
+ * keeps `shouldHave` there because that is a gesture, and #104's rule is that a
+ * gesture-driven fetch is never fatal. Both tiers are pinned in
+ * `test/asset-tier-discipline.test.ts`; the tier follows the ACT, not the file.
  */
 export async function showLegImage(leg: number, pending?: { room: number; replay?: string }): Promise<void> {
   const url = `/data/Menu/00${leg}.$dv`;
-  let bmp;
-  try {
-    bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`, 'shouldHave'));
-  } catch (e) {
-    if (!isAssetError(e)) throw e;
-    // Reported with a retry that re-runs the whole transition, `pending` and all, so
-    // Try again is a genuine second attempt at the story page rather than a way back
-    // into a room the player has already left.
-    reportAssetError(e, () => void showLegImage(leg, pending));
-    if (pending) void host.enterRoom(pending.room, pending.replay);
-    else showMap();
-    return;
+  let bmp = preloadedLegPage(leg)?.bmp;
+  if (!bmp) {
+    try {
+      bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`, 'shouldHave'));
+    } catch (e) {
+      if (!isAssetError(e)) throw e;
+      // Reported with a retry that re-runs the whole transition, `pending` and all, so
+      // Try again is a genuine second attempt at the story page rather than a way back
+      // into a room the player has already left.
+      reportAssetError(e, () => void showLegImage(leg, pending));
+      if (pending) void host.enterRoom(pending.room, pending.replay);
+      else showMap();
+      return;
+    }
   }
   ui.legImagePending = pending ?? null;
   ui.legImage = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
@@ -270,11 +272,24 @@ export function drawLegImage(): void {
  * Resolves to nothing on any failure, leaving the original page in place — the same
  * fallback contract as the rest of the tier. `legImageNum` is re-checked after the
  * await so a page dismissed (or replaced) mid-load cannot install itself late.
+ *
+ * The blob is the preloaded one when there is one: entering the room fetched it, so what
+ * is left here is the DECODE, which is not a fetch and may happen when the page is shown.
+ *
+ * TWO routes still reach the fetch, and the second is the reason this is not `mustHave`.
+ * One is the map click on a solved leg-final room (as `showLegImage`). The other is a tier
+ * SWITCH inside the room: `preloadLegPage` reads `graphics` once, at entry, so a player who
+ * enters in `classic` and presses E for `ai` before winning has no preloaded blob, and this
+ * fetches at the win. `retargetArtForTier` deliberately does not re-run the preload — a
+ * tier switch is itself a gesture that fetches (it re-fetches the whole room's art), and
+ * the native page is already on screen here, so the upscale arriving late or not at all is
+ * the degradation this tier exists to describe.
  */
 export async function ensureLegImageAi(leg: number): Promise<void> {
   if (graphics !== 'ai') return;
   const url = `/enhanced-ai/_story/leg${leg}.webp`;
-  const blob = await requiredBlob(url, `the AI story page for leg ${leg}`, 'shouldHave');
+  const blob =
+    preloadedLegPage(leg)?.ai ?? (await requiredBlob(url, `the AI story page for leg ${leg}`, 'shouldHave'));
   const bmp = await decodeAsset(url, 'shouldHave', () => createImageBitmap(blob));
   if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
   ui.legImageAi?.close();

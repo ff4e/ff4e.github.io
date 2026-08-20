@@ -88,27 +88,32 @@ const CASES = [
 
   // ── must have: a room, fetched up front on the deliberate act of entering it ─
   {
-    // 5.3 MB fetched on entering KUFRIK. Fatal means a blip here ends the session rather
-    // than skipping the story — a deliberate call, stated in the PR, because it will be
-    // seen.
+    // 5.32 MB, fetched on ENTERING KUFRIK rather than when the briefcase sequence asks
+    // for it. That is the point of the change and the reason this row simply walks into
+    // the room: an entry is a place a failure can be survived — the player is on the map,
+    // nothing is in progress, Reload costs them nothing — and the middle of a room is not.
+    // §5 asserts the other half, that the cutscene then plays with the network dead.
     tier: 'mustHave',
     label: 'briefcase demonstration',
     url: '**/data/Intro/demo.pck',
-    reach: async (p) => {
-      await p.evaluate(() => window.__ff.enterRoomAwait(2)); // KUFRIK
-      await waitRoom(p, 0);
-      await p.evaluate(() => window.__ff.startCutscene());
-    },
+    reach: (p) => p.evaluate(() => void window.__ff.enterRoomAwait(2).catch(() => {})), // KUFRIK
   },
   {
     tier: 'mustHave',
     label: 'KUFRIK demonstration',
     url: '**/data/Intro/help.cap',
-    reach: async (p) => {
-      await p.evaluate(() => window.__ff.enterRoomAwait(2));
-      await waitRoom(p, 0);
-      await p.evaluate(() => window.__ff.forceShowmode());
-    },
+    reach: (p) => p.evaluate(() => void window.__ff.enterRoomAwait(2).catch(() => {})),
+  },
+  {
+    // The leg story page on the path PLAY takes: entering leg 3's last room preloads it,
+    // so the win that shows it fetches nothing. The `shouldHave` row further down is the
+    // same file reached the other way — the map click on an already-solved leg-final room,
+    // which has no entry to have preloaded it. Two tiers for one file, because the rule is
+    // about the ACT: a room entry is fatal, a gesture is not.
+    tier: 'mustHave',
+    label: 'story page for leg 3',
+    url: '**/data/Menu/003.$dv',
+    reach: (p) => p.evaluate(() => void window.__ff.enterRoomAwait(37).catch(() => {})), // leg 3, depth 15
   },
   {
     // A manifest-listed sprite, and the row that replaces test-enhanced-partial.mjs.
@@ -142,6 +147,10 @@ const CASES = [
     reach: (p) => p.evaluate(() => void window.__ff.openCredits()),
   },
   {
+    // The BACKSTOP path, and the only one left that fetches this file: clicking an
+    // already-solved leg-final room on the map shows its page before entering the room,
+    // so there is no entry to have preloaded it. A gesture, therefore not fatal — the
+    // `mustHave` row above is the same file on the path a WIN takes.
     tier: 'shouldHave',
     label: 'story page for leg 3',
     url: '**/data/Menu/003.$dv',
@@ -478,6 +487,135 @@ await withApp(async ({ p, expect, allowed }) => {
   // rows are logged too: silent to the PLAYER never means silent to the console, because
   // a tier that left no trace would be indistinguishable from a loader nobody called.
   expect(allowed.length >= CASES.length, `every provoked failure was reported (${allowed.length} logged)`);
+
+  // ── 5. The promise itself: a room that is on screen cannot be taken away ────
+  // Every row above tests what happens when an asset does NOT arrive. This tests the
+  // thing the rows are FOR, and it is the one claim nothing else here makes: once a room
+  // has been handed the stage, the connection can drop and the room still plays to the
+  // end. KUFRIK is the hardest case in the game — 5.32 MB of cutscene plus a 1.11 MB
+  // music track it used to fetch when the briefcase opened — so if it holds here it holds
+  // everywhere.
+  //
+  // Deliberately not a route on one glob: EVERYTHING non-app is killed after the entry,
+  // so the assertion is not "the file we thought of is cached" but "no fetch of any kind
+  // is needed". A preload that missed one of the five files fails this and passes §1.
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+  await reloadApp(p);
+  await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+
+  // 5a. The entry WAITS. Stalled, not aborted: a failure would be caught by §1's rows, and
+  // what is under test here is the hold, which only a load that is still in flight can
+  // show. Without it the room is handed over with 4.92 MB outstanding and the player walks
+  // around a live room that the connection can still take away — every other assertion in
+  // this file passes in that state, because the failure is still fatal when it lands.
+  let release = () => {};
+  const stalled = new Promise((r) => {
+    release = () => r(undefined);
+  });
+  await p.route('**/data/Intro/demo.pck', async (r) => {
+    await stalled;
+    return r.continue();
+  });
+  await p.evaluate(() => void window.__ff.enterRoomAwait(2));
+  await p.waitForFunction(() => window.__ff.roomPreloadPending(), null, { timeout: budget(8000) });
+  await waitFrames(p, 3);
+  expect(
+    (await p.evaluate(() => window.__ff.screen())) !== 'room',
+    'the room is NOT handed over while its cutscene is still downloading',
+  );
+  release();
+  await waitRoom(p, 0);
+  await p.waitForFunction(() => window.__ff.screen() === 'room', null, { timeout: budget(15000) });
+  expect(true, '…and is handed over once it lands');
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+
+  // 5b. Now kill everything and play the room out.
+  //
+  // The kill waits for the page to go QUIET first, and that is not politeness. This section
+  // aborts every request there is, so anything still in flight for a reason of its own gets
+  // aborted too — and one of those is `mustHave` from a draw path: the `ai` control panel
+  // (`ensureAiPanel`, 1.87 MB, once a session) is fetched when the panel is first drawn, so
+  // whether it had landed before the kill decided whether this section passed. It failed
+  // roughly one run in two, blaming KUFRIK for somebody else's download. Waiting for zero
+  // outstanding requests makes the claim the one in the sentence: what KUFRIK ITSELF asks
+  // for after this point.
+  const before5b = allowed.length;
+  const APP5 = new Set(['document', 'script', 'stylesheet']);
+  await p.route('**/*', (r) =>
+    // The `ai` control panel is let through, and that exemption is the section's one
+    // caveat. `ensureAiPanel` (1.87 MB) is `mustHave` and fetched LAZILY from the first
+    // draw of the panel in a session, so killing it here ends the session — and blames
+    // KUFRIK for a download that is not KUFRIK's. It is a mid-play `mustHave` of its own,
+    // deliberately so (see the `panelAi.ts` note in the must-have census), and it is
+    // OUTSIDE what this change closed. Waiting for it instead of exempting it was tried
+    // and is not stable: it loads on the map on a fast machine and in the room on a slow
+    // one, so a probe cannot tell "already in" from "not yet started".
+    APP5.has(r.request().resourceType()) || r.request().url().includes('/_panel/') ? r.continue() : r.abort('failed'),
+  );
+  await p.evaluate(() => window.__ff.startCutscene());
+  await p.waitForFunction(() => window.__ff.cutsceneActive(), null, { timeout: budget(8000) }).catch(() => {
+    throw new Error('the briefcase cutscene did not start with the network dead — something is still fetched mid-play');
+  });
+  // The tutorial recording is the second half of KUFRIK's mid-play fetching, and it is
+  // now started synchronously — so `loading` must never be TRUE, not merely become false.
+  // Read in the SAME evaluate as the call for that reason: split across two round-trips,
+  // the microtask that ends an async load has already run by the time the state is read,
+  // and the assertion passes just as happily on the path that fetched.
+  await p.evaluate(() => window.__ff.skipCutscene());
+  const demo = await p.evaluate(() => {
+    window.__ff.forceShowmode();
+    return window.__ff.showmodeState();
+  });
+  expect(demo.active && !demo.loading, 'the tutorial demonstration starts from the recording already in hand');
+  // Only NOW is the absence of a failure screen a claim. A dead request is not a failure
+  // until ~1.25 s of retries have gone by, so asserting a frame after the gesture asserts
+  // nothing — the mistake this suite has already written down once, and which hid
+  // KUFRIK's 1.11 MB music track from an earlier version of this section.
+  await p.waitForTimeout(budget(250));
+  const survived = !(await p.evaluate(() => window.__ff.fatalShown()));
+  // Names the asset when it fails. "The session ended" is not a diagnosis: the whole point
+  // of this section is WHICH file was still being fetched, and the log is where that lives.
+  // Names the asset when it fails. "The session ended" is not a diagnosis: the whole point
+  // of this section is WHICH file was still being fetched, and the log is where that lives.
+  const blame = survived ? '' : ` — ${allowed.slice(before5b).join(' | ')}`;
+  expect(survived, `and neither the cutscene nor the demonstration ended the session — nothing was fetched${blame}`);
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+
+  // ── 6. ZAVER is WARMED, and the warm cannot hurt anybody ────────────────────
+  // The third mid-play fetch, and the one that is deliberately not held for: entering the
+  // last leg-final room left unsolved starts ZAVER's ~3.7 MB in the background, so the
+  // finale does not stall one dismissal after the last story page. See roomPreload.ts for
+  // why a warm and not a hold.
+  //
+  // Both halves are asserted, because either alone would be worth little: that it really
+  // happens (a warm nobody triggers is dead code), and that it is at a tier that CANNOT
+  // end the entry — which is why the globs are broken rather than left to succeed. A warm
+  // wired at `mustHave` would pass the first claim and fail the second.
+  await reloadApp(p);
+  await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  await p.evaluate(() => {
+    for (let n = 1; n <= 70; n++) window.__ff.markSolved(n);
+  });
+  const warmed = new Set();
+  // Its MUSIC as well as its own three files: `rybky04` is 5.75 MB of ZAVER's ~9.6 MB, so
+  // a warm that left it out would leave the finale stalling on the largest file it needs
+  // and still satisfy a count of three.
+  await p.route('**/data/{Sound,Graphic,Title}/071.*', (r) => {
+    warmed.add('room');
+    return r.abort('failed');
+  });
+  await p.route('**/data/Music/rybky04.wav', (r) => {
+    warmed.add('music');
+    return r.abort('failed');
+  });
+  await p.evaluate(() => window.__ff.enterRoomAwait(70)); // leg 8's last room: the win finishes the game
+  await waitRoom(p, 0);
+  for (let i = 0; i < 200 && warmed.size < 2; i++) await p.waitForTimeout(50);
+  expect(warmed.has('room') && warmed.has('music'), `entering the last unsolved leg-final room warms ZAVER (${[...warmed].join(', ') || 'nothing'} asked for)`);
+  const finale = await p.evaluate(() => ({ fatal: window.__ff.fatalShown(), screen: window.__ff.screen() }));
+  expect(!finale.fatal, 'and a warm that fails outright does not end the session — it is nice-to-have');
+  expect(finale.screen === 'room', 'nor does it hold the room it was started from');
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
 },
   // Every row here provokes a load the game is SUPPOSED to complain about: the browser
   // logs the dead request, and the app logs the asset error on its way to its surface.

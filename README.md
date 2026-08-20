@@ -586,7 +586,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | **Playing a room** | | |
 | `movement.ts` | 2.6 k | The held-key state machine, and replaying a saved record back into a room. |
 | `roomGates.ts` | 0.5 k | May the room accept a command at all — `idle`, `atRest`, `fishBusy`. |
-| `roomLoad.ts` | 3.5 k | Fetching a room, arming its voices, starting its music — and the order that keeps audio behind art. |
+| `roomLoad.ts` | 4.2 k | Fetching a room, arming its voices, starting its music — and the order that keeps audio behind art. Owns the two post-art entry holds and their composition, `roomEntryHeld()`. |
+| `roomPreload.ts` | 2.4 k | What a room's PLAY can demand beyond its art and sound — KUFRIK's briefcase cutscene, the leg story page — fetched on entering it, and held for. Plus the unheld `niceToHave` warm of ZAVER, which is the rule's one deliberate exception. |
 | `roomLaunch.ts` | 4.0 k | The room-entry parchment and the launch it belongs to. |
 | `keyTables.ts` | 0.5 k | Which key moves which fish, the minigame's key map, and two constants the room scripts read. |
 | **Screens** | | |

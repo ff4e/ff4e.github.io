@@ -204,3 +204,44 @@ export function branchOfRoom(room: number): number {
   }
   return -1;
 }
+
+/** ZAVER ("At Home", room 71): the endgame finale, auto-launched on completion. */
+export const ZAVER_ROOM = 71;
+/**
+ * The story page ZAVER ends on: 009.$dv, the medals and the congratulation letter from
+ * ŠÉF. It is the ninth page, and the only one no leg win can reach — legs 1..8 map to
+ * 001..008, and branches 0 and 9 have no depth-15 room at all.
+ */
+export const ZAVER_LEG = 9;
+
+/**
+ * Which story page (1..9) this room's PLAY can put on screen, or 0 for the 63 rooms whose
+ * play can put none there.
+ *
+ * Kept here, with the tree it is derived from, and pinned by `test/story-pages.test.ts`.
+ * Two ways in, and the second is the one that is easy to forget: winning a depth-15 room
+ * shows its branch's page, and ENDING ZAVER shows page 9 (`returnFromRoom`, mapNav.ts).
+ */
+export function storyPageOfRoom(room: number): number {
+  if (room === ZAVER_ROOM) return ZAVER_LEG;
+  if (depthOfRoom(room) !== 15) return 0;
+  const leg = branchOfRoom(room);
+  return leg >= 1 && leg <= 8 ? leg : 0;
+}
+
+/**
+ * Would winning `room` finish the game — is it the last leg-final room left?
+ *
+ * `pustitzaver` (USoutez.pas:729) — `hloubka=15 and chybi=0` — evaluated on ENTRY rather
+ * than after the win, i.e. with the room being entered counted as solved, because that is
+ * what winning it would make true. `returnFromRoom` (mapNav.ts) makes the post-win form of
+ * the same test; this is the form the room-entry warm needs (roomPreload.ts).
+ *
+ * Takes the solved set rather than reaching for it, so it is a function of the world tree
+ * and nothing else — which is what lets it live here, beside the tree, instead of pulling
+ * the whole navigation module into the preload's import graph.
+ */
+export function finaleFollows(room: number, solved: ReadonlySet<number>): boolean {
+  if (!REGISTERED_ROOMS.includes(room) || depthOfRoom(room) !== 15) return false;
+  return REGISTERED_ROOMS.every((r) => r === room || solved.has(r));
+}

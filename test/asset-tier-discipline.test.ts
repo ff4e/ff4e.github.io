@@ -85,7 +85,19 @@ const MUST_HAVE_CENSUS: Record<string, number> = {
   'src/app/mapDraw.ts': 2, // the CLASSIC name plaques (popdesk + atlas) — awaited by boot
   'src/app/main.ts': 3, // the enhanced fish sprites: manifest, sprite, decode
   // ── A room, fetched up front on the deliberate act of entering it ───────────
-  'src/app/roomLoad.ts': 11, // FFR, FFT, the sound packages, the voices, the music
+  // FFR, FFT, the sound packages, the voices, the music — and (11 -> 13) the one track a
+  // room's play cues that its own cHud does not cover: KUFRIK's cutscene theme, DRAKAR1's
+  // opening, KORALY's score (`extraMusicOfRoom`). All three were fetched at the moment the
+  // room asked for them, `void`ed at the call site, so a `mustHave` failure landed as an
+  // unhandled rejection in the middle of play. Fatal is not new; the MOMENT is.
+  'src/app/roomLoad.ts': 13,
+  // …and everything the room's PLAY can demand: KUFRIK's briefcase story (kufr256.BMP,
+  // demo.pck, script.txt) + its tutorial recording (help.cap), and the leg-final story
+  // page (+ its `ai` upscale). All five used to be fetched at the moment the room asked
+  // for them, i.e. DURING PLAY, where a dropped connection ended a session that was going
+  // fine; they are now fetched on entry and the entry waits for them. Fatal is the point
+  // of moving them: an entry can fail safely, a room in progress cannot.
+  'src/app/roomPreload.ts': 5,
   'src/audio/audio.ts': 2, // music, both the room's and the menu's
   'src/app/enhancedLoad.ts': 9, // the room's enhanced art and its animation frames
   'src/render/enhancedObjects.ts': 3, // the room's object sprites
@@ -98,8 +110,6 @@ const MUST_HAVE_CENSUS: Record<string, number> = {
   // for the whole game and is latched to a deliberate tier switch, not to a gesture.
   'src/render/panelAi.ts': 3,
   'src/render/worldMapAi.ts': 2, // the AI world map itself
-  // ── A cutscene the player started ───────────────────────────────────────────
-  'src/app/cutscene.ts': 3, // the briefcase demonstration and the KUFRIK demonstration
 };
 
 /**
@@ -133,6 +143,45 @@ const INTERACTION_DRIVEN = [
     fn: 'probeAiMovies',
     why: 'an existence probe whose answer IS the fallback; nothing to tell anyone either way',
   },
+  {
+    file: 'src/app/mapNav.ts',
+    fn: 'showLegImage',
+    why: 'the map CLICK on an already-solved leg-final room shows its page before entering, so there is no entry to have preloaded it',
+  },
+  {
+    file: 'src/app/mapNav.ts',
+    fn: 'ensureLegImageAi',
+    why: 'same click, plus a tier switch inside the room — both gestures, and the native page is already on screen',
+  },
+] as const;
+
+/**
+ * The loaders a ROOM ENTRY runs, and the tier each is required to have.
+ *
+ * The mirror of the list above, and it exists because the mistake it guards is the mirror
+ * too. `INTERACTION_DRIVEN` catches a fetch made fatal that a gesture can start; this
+ * catches a fetch made SURVIVABLE that a room's play depends on — which is the quieter
+ * bug of the two, because it does not end anything. It re-opens the mid-play fetch: a
+ * preload dropped to `shouldHave` still runs, still logs, and lets the entry complete
+ * without the asset, so the player walks into a room that will silently fail to show its
+ * cutscene minutes later. Nothing else here would notice.
+ */
+const ROOM_SCOPED = [
+  {
+    file: 'src/app/roomPreload.ts',
+    fn: 'loadCutsceneAssets',
+    why: "KUFRIK's briefcase story: the room WILL run the cutscene, so the entry is the last place this can fail safely",
+  },
+  {
+    file: 'src/app/roomPreload.ts',
+    fn: 'loadShowmodeCap',
+    why: 'the tutorial recording, demanded by reaching a spot on the floor of the room',
+  },
+  {
+    file: 'src/app/roomPreload.ts',
+    fn: 'preloadLegPage',
+    why: 'the story page a leg-final room shows on the win — the win countdown is not a place to be fetching',
+  },
 ] as const;
 
 /**
@@ -144,7 +193,20 @@ const INTERACTION_DRIVEN = [
 function bodyOf(text: string, fn: string): string | null {
   const header = new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${fn}\\s*[(<]`).exec(text);
   if (!header) return null;
-  let i = text.indexOf('{', header.index);
+  // Step over the PARAMETER list before looking for the body. Taking the first `{` after
+  // the name finds the object type in `showLegImage(leg, pending?: { room: number })` and
+  // returns that type as the function's body — which then contains none of what the
+  // caller came to check, and passes or fails for the wrong reason. Every function pinned
+  // here used to have plain parameters, so this was latent until one did not.
+  let i = header.index + header[0].length - 1;
+  for (let depth = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '(' || c === '<') depth++;
+    else if (c === ')' || c === '>') {
+      if (--depth === 0) break;
+    }
+  }
+  i = text.indexOf('{', i);
   if (i === -1) return null;
   const start = i;
   let depth = 0;
@@ -216,8 +278,60 @@ describe('asset tiers', () => {
     });
   }
 
-  it('keeps a should-have surface to report to, and a silent tier that reports nothing', () => {
-    // The middle tier is worth nothing without somewhere to say it, and the bottom tier
+  /**
+   * The preloads must also be USED. Every one of them can be perfect while its consumer
+   * ignores the cache and fetches anyway — which restores the mid-play fetch exactly, and
+   * is invisible to every other test here (the preload still ran, and was still fatal).
+   * Source-level because the alternative is a browser probe per consumer.
+   */
+  for (const fn of ['showLegImage', 'ensureLegImageAi'] as const) {
+    it(`${fn}() reads the preloaded page before it considers fetching one`, () => {
+      const body = bodyOf(readFileSync(join('src', 'app', 'mapNav.ts'), 'utf8'), fn);
+      expect(body, `${fn}() not found — was it renamed? Update this list.`).not.toBeNull();
+      expect(
+        body?.includes('preloadedLegPage('),
+        `${fn}() no longer consults the page the room entry preloaded, so the win that shows\n` +
+          'it fetches during play again — which is the whole thing the preload exists to stop.',
+      ).toBe(true);
+    });
+  }
+
+  /**
+   * Both post-art holds have to be consulted TOGETHER. Dropping either from either gate
+   * leaves the room presented, or its spinner taken down, while assets are still coming —
+   * and nothing else notices, because the failure is still fatal when it eventually lands.
+   */
+  it('the entry holds are composed once and read as a pair', () => {
+    const load = readFileSync(join('src', 'app', 'roomLoad.ts'), 'utf8');
+    const composed = /roomEntryHeld\s*=\s*\(\)[^;]*roomAudioPending\(\)[^;]*roomPreloadPending\(\)/.test(load);
+    expect(composed, 'roomEntryHeld() must be the OR of both post-art holds (roomLoad.ts)').toBe(true);
+    for (const [file, fn] of [
+      ['src/app/roomLaunch.ts', 'tickMapLaunch'],
+      ['src/app/loadingUi.ts', 'syncLoadingUi'],
+    ] as const) {
+      const body = bodyOf(readFileSync(file, 'utf8'), fn) ?? '';
+      expect(body, `${fn}() not found in ${file}`).not.toBe('');
+      expect(
+        body.includes('roomEntryHeld()') && body.includes('roomArtPending()') && body.includes('roomLoading'),
+        `${fn}() must wait on all of roomLoading, roomArtPending() and roomEntryHeld().`,
+      ).toBe(true);
+    }
+  });
+
+  for (const { file, fn, why } of ROOM_SCOPED) {
+    it(`${fn}() is must-have — ${why}`, () => {
+      const body = bodyOf(readFileSync(file, 'utf8'), fn);
+      expect(body, `${fn}() not found in ${file} — was it renamed? Update this list.`).not.toBeNull();
+      expect(
+        body?.includes("'mustHave'"),
+        `${fn}() no longer asks for mustHave. It is fetched on ROOM ENTRY, and the entry\n` +
+          'waits for it, precisely so that the room cannot lose it later: ' + why + '.\n' +
+          'A lower tier lets the entry finish without it and moves the failure back into play.',
+      ).toBe(true);
+    });
+  }
+
+  it('keeps a should-have surface to report to, and a silent tier that reports nothing', () => {    // The middle tier is worth nothing without somewhere to say it, and the bottom tier
     // is worth nothing if it is really the middle one. Both are asserted at the router
     // rather than at a call site, because that is where a tier becomes a surface.
     const ui = readFileSync(join('src', 'app', 'loadingUi.ts'), 'utf8');

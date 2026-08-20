@@ -21,9 +21,16 @@ import { count, fftEntries, setFfr, setFftEntries, setPokus, subs, talkIdx } fro
 import { depthOfRoom } from '../data/world.js';
 import { enhancedArtActive, graphics } from './renderSettings.js';
 import { failRoomEntry, mapLaunching } from './roomLaunch.js';
-import { musicForCHud } from '../audio/music.js';
+import { extraMusicOfRoom, musicForCHud } from '../audio/music.js';
 import { parseFfr } from '../data/ffr.js';
 import { parseFft } from '../data/fft.js';
+import {
+  clearRoomPreloadPending,
+  preloadRoomPlayAssets,
+  roomPreloadPending,
+  setRoomPreloadPending,
+  warmFinaleRoom,
+} from './roomPreload.js';
 import {
   roomLoadSeq,
   setForceRoomRedraw,
@@ -44,6 +51,8 @@ export interface RoomLoadHost {
   readonly endShowmode: () => void;
   /** Where a room number's FFR lives (the tier's art pack can move it). */
   readonly ffrUrl: (num: number) => string;
+  /** Which rooms the player has genuinely solved — the finale warm's whole trigger. */
+  readonly solved: ReadonlySet<number>;
 }
 
 let host!: RoomLoadHost;
@@ -51,6 +60,41 @@ let host!: RoomLoadHost;
 /** Hand this module its view of the game. Called once, from `main.ts`, during boot. */
 export function initRoomLoad(h: RoomLoadHost): void {
   host = h;
+}
+
+/**
+ * Release `num`'s hold when `p` settles, and END THE ENTRY if it rejected.
+ *
+ * Shared by the two holds a room entry arms after its art (its sound, and what its play
+ * can demand) because the handling is identical and the difference is one word of the
+ * breadcrumb. Both arms release — a hold that outlives its load is a room that never
+ * appears — and both release BY ROOM, so a late outcome cannot free a hold a later entry
+ * has since armed.
+ */
+function hold(p: Promise<void>, release: () => void, num: number, what: string): void {
+  void p.then(
+    () => {
+      release();
+      wake();
+    },
+    (e: unknown) => {
+      release();
+      // `enteringRoom`, not `curNum`. `curNum` is not a liveness token: it keeps naming
+      // the last room BUILT, so it still equals `num` after the player has gone back to
+      // the map, and it still equals the OLD room while a superseding entry is in flight
+      // (it only advances at `beginRoomArt`). Deciding on it would end the session over a
+      // download for a room nobody is waiting for — observed as a failure screen raised
+      // on the world map, minutes after the room it names was left.
+      if (!enteringRoom(num)) return;
+      // `warn`, matching art.ts's transient path: the player has been TOLD (the screen
+      // is the report), and this is the breadcrumb beside it. It is also the difference
+      // between a breadcrumb and noise — a page torn down mid-download truncates a
+      // 2.43 MB package, which is not a fault to shout about.
+      console.warn(`[room] room ${num} could not be given its ${what}:`, e);
+      failRoomEntry(num, e);
+      wake();
+    },
+  );
 }
 
 export async function loadRoom(num: number): Promise<void> {
@@ -141,31 +185,24 @@ export async function loadRoom(num: number): Promise<void> {
     // fish_fillets_audio_compression task, which takes it to ~0.9 MB.
     setRoomAudioPending(bootLoad ? 0 : num);
     const audioDone = bootLoad ? Promise.resolve() : art.then(() => loadRoomAudio(num, nnn, fftBytes));
+    // …and the same treatment for what the room's PLAY can demand: KUFRIK's briefcase
+    // cutscenes and the leg-final story page (roomPreload.ts). Behind the art for the
+    // reason the audio is, alongside the audio rather than after it for the reason the
+    // audio's own halves are parallel, and held for by a hold of its own so that neither
+    // existing one has to start meaning something wider than its name.
+    setRoomPreloadPending(bootLoad ? 0 : num);
+    const preloadDone = bootLoad ? Promise.resolve() : art.then(() => preloadRoomPlayAssets(num));
     // Both arms release the hold — a hold that outlives its load is a room that never
     // appears — and both release it BY ROOM, so a late outcome cannot free a hold a later
     // entry has since armed.
-    void audioDone.then(
-      () => {
-        clearRoomAudioPending(num);
-        wake();
-      },
-      (e: unknown) => {
-        clearRoomAudioPending(num);
-        // `enteringRoom`, not `curNum`. `curNum` is not a liveness token: it keeps naming
-        // the last room BUILT, so it still equals `num` after the player has gone back to
-        // the map, and it still equals the OLD room while a superseding entry is in flight
-        // (it only advances at `beginRoomArt`). Deciding on it would end the session over a
-        // download for a room nobody is waiting for — observed as a failure screen raised
-        // on the world map, minutes after the room it names was left.
-        if (!enteringRoom(num)) return;
-        // `warn`, matching art.ts's transient path: the player has been TOLD (the screen
-        // is the report), and this is the breadcrumb beside it. It is also the difference
-        // between a breadcrumb and noise — a page torn down mid-download truncates a
-        // 2.43 MB package, which is not a fault to shout about.
-        console.warn(`[audio] room ${num} could not be given its sound:`, e);
-        failRoomEntry(num, e);
-        wake();
-      },
+    hold(audioDone, () => clearRoomAudioPending(num), num, 'sound');
+    hold(preloadDone, () => clearRoomPreloadPending(num), num, 'story assets');
+    // Once the entry has settled — and only then, so it is never competing with the room
+    // the player is waiting for — start ZAVER's download if this room's win would finish
+    // the game. Unawaited on purpose; the reasoning is in roomPreload.ts's header.
+    void Promise.all([audioDone, preloadDone]).then(
+      () => warmFinaleRoom(num, host.ffrUrl, host.solved),
+      () => {},
     );
   } catch (e) {
     // EVERY route into a room comes through here, which is why the report belongs here
@@ -335,6 +372,21 @@ function clearRoomAudioPending(num: number): void {
   if (audioPendingNum === num) audioPendingNum = 0;
 }
 
+/**
+ * Is a room entry still waiting on anything it started AFTER its art?
+ *
+ * The two post-art holds are always asked together, so the composition is written down
+ * once instead of at each consumer. Both flags stay separate underneath — each names one
+ * thing, and a probe can tell a stalled voice package from a stalled story page — but a
+ * caller that reads only one of them proceeds while the other is still coming, which is
+ * exactly the mis-wiring the third flag would otherwise have invited.
+ *
+ * NOT the whole of "the entry is done": `roomLoading` and `roomArtPending()` come first
+ * and are the caller's to ask, because they gate different things (the room is BUILT when
+ * `roomLoading` drops; the FRAME waits on the art).
+ */
+export const roomEntryHeld = (): boolean => roomAudioPending() || roomPreloadPending();
+
 export let roomVoicesSettled = true;
 /** Resolves when `roomVoicesSettled` next becomes true — for callers that can await. */
 export let roomVoicesReady: Promise<void> = Promise.resolve();
@@ -438,6 +490,39 @@ export async function startRoomMusic(num: number): Promise<void> {
 }
 
 /**
+ * The one track a room's play cues that `startRoomMusic` does not (see `extraMusicOfRoom`):
+ * KUFRIK's cutscene theme, DRAKAR1's opening, KORALY's score. Three rooms, and all three
+ * used to fetch it at the moment the room asked for it — `void`ed at the call site, so a
+ * `mustHave` failure landed as an unhandled rejection in the middle of play.
+ *
+ * Fetched but NOT started: what plays, when, and on which priority is the script's business
+ * and the original's timing. All this does is make sure the bytes are in the engine's cache
+ * before the room is on screen, so the cue is instant and cannot fail.
+ *
+ * DRAKAR1 needs the join rather than a fresh load: its cue runs inside `buildRoom`, above,
+ * so by the time this runs the script's own 5.75 MB download is already in flight.
+ */
+async function loadExtraMusic(num: number): Promise<void> {
+  const name = extraMusicOfRoom(num);
+  if (name === null || audio.hasMusic(name)) return;
+  const inflight = audio.musicLoad(name);
+  if (inflight) {
+    await inflight; // settles either way — beginMusicLoad swallows the outcome
+    if (audio.hasMusic(name)) return;
+  }
+  const url = `/data/Music/${name}.wav`;
+  const load = (async () => {
+    const res = await requiredAsset(url, `the music for room ${num}`, 'mustHave', {
+      init: { priority: 'low' } as RequestInit,
+    });
+    await audio.decodeMusic(name, await assetBytes(url, res, 'mustHave'));
+  })();
+  // Registered before the await, so a cue that fires while this is coming joins it.
+  audio.beginMusicLoad(name, load);
+  await load;
+}
+
+/**
  * Everything a room needs to SOUND right: its voices, the leg-final remarks if it is a
  * leg-final room, and its music. Awaited by the room entry, which does not complete
  * until this does — and fails if it does not.
@@ -457,7 +542,12 @@ async function loadRoomAudio(num: number, nnn: string, fftBytes: Uint8Array): Pr
   // others keep downloading rather than being cancelled. That is deliberate: they are
   // already in flight, the retry will want them, and aborting them would only guarantee
   // the retry starts from nothing.
-  await Promise.all([loadBorderLines(num), loadRoomVoices(num, nnn, fftBytes), startRoomMusic(num)]);
+  await Promise.all([
+    loadBorderLines(num),
+    loadRoomVoices(num, nnn, fftBytes),
+    startRoomMusic(num),
+    loadExtraMusic(num),
+  ]);
 }
 
 /** Make a fish "talk": show the next subtitle of its colour code (M/V) and play its voice. */

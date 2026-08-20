@@ -41,7 +41,7 @@ import { curNum } from './art.js';
 import { ROOMS } from '../data/roomTable.js';
 import { isAssetError, isTransient, requiredBytes } from '../render/assetFetch.js';
 import { failAssets } from './loadingUi.js';
-import { roomAudioPending } from './roomLoad.js';
+import { roomEntryHeld } from './roomLoad.js';
 import type { AiWorldMap } from '../render/worldMapAi.js';
 
 /** What this module needs to see of the running game. */
@@ -318,10 +318,12 @@ export function tickMapLaunch(): void {
       l.settle(load);
       return;
     }
-    // The room takes the stage when it can be both SEEN and HEARD. `roomAudioPending`
-    // is read straight from its owning module rather than through the host: it is state
-    // roomLoad.ts owns, and an accessor would be one more thing to mis-wire.
-    if (host.roomLoading || host.roomArtPending() || roomAudioPending()) return;
+    // The room takes the stage when it can be both SEEN and HEARD — and when everything
+    // its PLAY can demand is in hand too. `roomEntryHeld` is the composition of the two
+    // post-art holds (roomLoad.ts) and is read straight from its owning module rather than
+    // through the host: it is state that file owns, and an accessor would be one more
+    // thing to mis-wire.
+    if (host.roomLoading || host.roomArtPending() || roomEntryHeld()) return;
     finishMapLaunch(l);
   } catch (e) {
     // This is the one thing in loop() that STARTS a room, and loop() reschedules itself
@@ -393,7 +395,7 @@ function abortMapLaunch(l: MapLaunch, err: unknown): void {
     // serves — raising the generic screen with no record anywhere of which room or what
     // threw. The screen stopped naming the room in the same commit, so that combination
     // was the one path with no diagnosis left at all.
-    console.error(`room entry failed: ${roomLabel(l.room)}`, err);
+    reportEntryFailure(l.room, err);
     failAssets(isTransient(err));
     // The picker names the room actually on screen, which is the one the player came
     // from: `startRoom` pointed it at the room it was about to load, and that load is
@@ -419,8 +421,24 @@ export function failRoomEntry(num: number, err: unknown): void {
     abortMapLaunch(l, err);
     return;
   }
-  console.error(`room entry failed: ${roomLabel(num)}`, err);
+  reportEntryFailure(num, err);
   failAssets(isTransient(err));
+}
+
+/**
+ * The one line a failed room entry leaves behind — and now the only place the ASSET's
+ * name is written down.
+ *
+ * The screen has been generic since #104 (its one action is Reload whichever file broke),
+ * so a bug report's "which file was it" comes from the log. This line had the room but not
+ * the file: it handed the error object to the console, whose message is the URL for a
+ * transient failure, so `the voices for room 4` and `the briefcase demonstration` existed
+ * in the code and appeared nowhere a reader would look. Every asset a room entry can fail
+ * on now comes through here, which is why the name belongs here and not at each loader.
+ */
+function reportEntryFailure(num: number, err: unknown): void {
+  const what = isAssetError(err) ? err.what : undefined;
+  console.error(`room entry failed: ${roomLabel(num)}${what === undefined ? '' : ` — ${what}`}`, err);
 }
 
 /** The room's own name (PRVNI, KOSTE…), for the log line above. */
