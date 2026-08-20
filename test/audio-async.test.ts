@@ -25,6 +25,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AudioEngine, MUSIC_PRIOR } from '../src/audio/audio.js';
+import { musicUrl } from '../src/audio/music.js';
 import { MissingAssetError } from '../src/render/assetFetch.js';
 import { Script } from '../src/core/script.js';
 import { KORALY } from '../src/rooms/koraly.js';
@@ -156,7 +157,7 @@ function seed(engine: AudioEngine, name: string, duration: number): void {
   } as unknown as AudioBuffer);
 }
 
-const MUSIC_URL = (name: string): string => `/data/Music/${name}.wav`;
+const MUSIC_URL = (name: string): string => musicUrl(name);
 
 describe('a requested track is playing() from the tick that asked for it', () => {
   it('reserves the priority before the fetch resolves (Sound, RSound.pas:674)', () => {

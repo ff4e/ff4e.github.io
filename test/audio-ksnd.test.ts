@@ -19,6 +19,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { AudioEngine, MUSIC_PRIOR } from '../src/audio/audio.js';
+import { musicUrl } from '../src/audio/music.js';
 
 interface FakeSource {
   buffer: unknown;
@@ -98,9 +99,10 @@ beforeEach(() => {
   prevCtx = (globalThis as { AudioContext?: unknown }).AudioContext;
   prevFetch = globalThis.fetch;
   (globalThis as { AudioContext?: unknown }).AudioContext = FakeAudioContext;
-  // playMusic fetches Music/<name>.wav and reads the sample rate from the header
-  // (offset 24); a zeroed buffer makes it fall back to 22050. A real Response, because
-  // the fetch now goes through `requiredAsset`, which reads the status before the body.
+  // playMusic fetches the Music/ track and hands the bytes to decodeAudioData; the
+  // sample rate is no longer read out of a header (it is MUSIC_RATE — see music.ts), so
+  // any buffer will do. A real Response, because the fetch goes through `requiredAsset`,
+  // which reads the status before the body.
   (globalThis as { fetch?: unknown }).fetch = () =>
     Promise.resolve(new Response(new ArrayBuffer(64), { status: 200 }));
 });
@@ -214,7 +216,7 @@ describe('bookkeeping stays clean', () => {
   // priorSources, so only the stopMusic() branch of killVoice can reach it.
   it('KSnd(-999) stops the looping MusicCycle source (KANKAN)', async () => {
     const engine = newEngine();
-    await engine.playMusic('rybky05', '/data/Music/rybky05.wav', 1000);
+    await engine.playMusic('rybky05', musicUrl('rybky05'), 1000);
     expect(engine.currentMusic).toBe('rybky05');
     expect(engine.playing(MUSIC_PRIOR)).toBe(true);
     const music = sources[0]!;

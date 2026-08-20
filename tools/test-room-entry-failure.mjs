@@ -195,7 +195,7 @@ await withApp(
     // room sharing that track would be a cache hit and would issue no request to fail.
     for (const [label, room, route] of [
       ['voices', 4, '**/data/Sound/004.ffs'], // VRAK
-      ['music', 5, '**/data/Music/rybky03.wav'], // SCHODY — rybky03, not yet fetched
+      ['music', 5, '**/data/Music/rybky03.m4a'], // SCHODY — rybky03, not yet fetched
       ['leg-final remarks', 19, '**/data/Sound/x01.ffs'], // LODE — depth 15, the only rooms that load x01
     ]) {
       await p.route(route, (r) => r.abort('failed'));

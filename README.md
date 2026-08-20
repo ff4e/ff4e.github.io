@@ -681,6 +681,45 @@ the installer**. Expected at:
 
 Override the location with `FF_DATA_DIR=/path/to/MAINDIR`.
 
+### Music
+
+Every byte of audio the 1998 game shipped is uncompressed 22 050 Hz mono 16-bit PCM —
+352.8 kbps — and the 17 `Music/*.wav` tracks are **63.8 MB** of it. Since a room does not
+appear until all of its audio has arrived, that PCM is time on the loading screen: on a
+1.5 Mbps link a room's track alone was up to 36 s of the wait.
+
+The game fetches **`Music/<name>.m4a`** instead: AAC at 64 kbps, **12.3 MB** for all 17
+(5.2×), so the worst room's music goes from 6.75 MB to 1.3 MB. Stage them with
+
+    npx tsx tools/stage-music.ts            # writes public/data/Music/*.m4a
+    npx tsx tools/stage-music.ts --check    # re-encode to a temp dir and byte-compare
+    npx tsx tools/stage-music.ts --verify   # decode what we ship and measure it
+
+AAC rather than Opus for the same reason the movies are H.264 — it is the one codec that
+decodes in *every* browser, and Safari's `decodeAudioData` still does not reliably handle
+Ogg Opus. Opus was measured (13.0 MB at the same bitrate) and the difference did not pay
+for a Safari-shaped hole in the only audio path the game has.
+
+The `.wav` originals stay in the repo. They are what `tools/stage-music.ts` encodes from,
+what `--verify` measures against, and what `test/musicStaging.test.ts` checks the music
+table's numbers against — nothing downloads them.
+
+**The loop point is the part to be careful with.** A room loops its track from
+`loopSample` (`src/audio/music.ts`, `MusicCycle` in `URoom.pas:1568`) so that the intro
+plays once and only the body repeats. That offset is in samples of the 22 050 Hz original,
+and `loopStart` is seconds — so the rate has to come from somewhere. It used to be read out
+of the WAV header at byte offset 24; an encoded file has no such header, and the table
+carries `MUSIC_RATE` and each track's `frames` instead, drift-guarded against the originals
+by `test/musicStaging.test.ts`. `loopEnd` comes from `frames` and **not** from
+`buf.duration`, because AAC decodes 70–1 000 samples longer than the original (encoder
+padding, reported per track by `--verify`) and looping on the decoded duration would splice
+that silence into the track once per repeat.
+
+`--verify` also reports what the compression can and cannot prove: all 17 tracks decode at
+**lag 0** against their original, which is exact and is what the loop points depend on. The
+SNR it prints alongside (~18–29 dB) is a regression tripwire, not a transparency proof —
+AAC is not a waveform coder and a perceptually identical encode scores poorly by it.
+
 ### Intro movies
 
 The startup **intro** (ALTAR logo → intro movie) and the map's top-left "watch intro"

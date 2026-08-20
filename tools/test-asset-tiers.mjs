@@ -84,7 +84,7 @@ const CASES = [
   // used to be a `console.warn` nobody would ever read.
   { tier: 'mustHave', label: 'restored 1998 lines', url: '**/restored/restored.ffs' },
   { tier: 'mustHave', label: 'enhanced fish sprites', url: '**/enhanced/_fish/manifest.json' },
-  { tier: 'mustHave', label: 'music', url: '**/data/Music/menu.wav' },
+  { tier: 'mustHave', label: 'music', url: '**/data/Music/menu.m4a' },
 
   // ── must have: a room, fetched up front on the deliberate act of entering it ─
   {
@@ -597,14 +597,14 @@ await withApp(async ({ p, expect, allowed }) => {
     for (let n = 1; n <= 70; n++) window.__ff.markSolved(n);
   });
   const warmed = new Set();
-  // Its MUSIC as well as its own three files: `rybky04` is 5.75 MB of ZAVER's ~9.6 MB, so
+  // Its MUSIC as well as its own three files: `rybky04` is 1.11 MB of ZAVER's ~4.8 MB, so
   // a warm that left it out would leave the finale stalling on the largest file it needs
   // and still satisfy a count of three.
   await p.route('**/data/{Sound,Graphic,Title}/071.*', (r) => {
     warmed.add('room');
     return r.abort('failed');
   });
-  await p.route('**/data/Music/rybky04.wav', (r) => {
+  await p.route('**/data/Music/rybky04.m4a', (r) => {
     warmed.add('music');
     return r.abort('failed');
   });

@@ -21,7 +21,7 @@ import { count, fftEntries, setFfr, setFftEntries, setPokus, subs, talkIdx } fro
 import { depthOfRoom } from '../data/world.js';
 import { enhancedArtActive, graphics } from './renderSettings.js';
 import { failRoomEntry, mapLaunching } from './roomLaunch.js';
-import { extraMusicOfRoom, musicForCHud } from '../audio/music.js';
+import { extraMusicOfRoom, musicForCHud, musicUrl } from '../audio/music.js';
 import { parseFfr } from '../data/ffr.js';
 import { parseFft } from '../data/fft.js';
 import {
@@ -168,7 +168,7 @@ export async function loadRoom(num: number): Promise<void> {
     const art =
       graphics === 'ai' ? ensureAiRoom(num) : graphics === 'enhanced' ? ensureEnhancedArt(num) : Promise.resolve();
     // Audio is the bulk of a room entry's bytes and none of it is needed to DRAW the
-    // room: 2.43 MB of .ffs voices (8.94 MB worst) plus up to 6.75 MB of music, against
+    // room: 2.43 MB of .ffs voices (8.94 MB worst) plus up to 1.3 MB of music, against
     // ~2.14 MB of room-specific core+art bytes. On a capped link they simply crowd the
     // art out, so audio still waits BEHIND the art — a low-priority hint was measured and
     // is not enough (KOSTE's first frame: 35.5s with the hint, 27.4s with the wait).
@@ -180,9 +180,10 @@ export async function loadRoom(num: number): Promise<void> {
     // needs is in, and fails — the game stops and says so — if any of it does not arrive. The hold is `roomAudioPending()`, separate from `roomLoading` so that the
     // room is still BUILT at the same moment it always was.
     //
-    // The wait is real and lands on slow links: ~6.2 MB typical, ~33 s at 1.5 Mbps. It is
-    // almost entirely uncompressed PCM (22 kHz mono, 352.8 kbps) — see the
-    // fish_fillets_audio_compression task, which takes it to ~0.9 MB.
+    // The wait is real and lands on slow links: it was ~6.2 MB typical, ~33 s at 1.5 Mbps,
+    // and almost entirely uncompressed PCM (22 kHz mono, 352.8 kbps). The MUSIC half of
+    // that is now AAC (tools/stage-music.ts, ~5x); the voices are still PCM inside their
+    // `.ffs` packages and are the larger half of what is left.
     setRoomAudioPending(bootLoad ? 0 : num);
     const audioDone = bootLoad ? Promise.resolve() : art.then(() => loadRoomAudio(num, nnn, fftBytes));
     // …and the same treatment for what the room's PLAY can demand: KUFRIK's briefcase
@@ -462,9 +463,9 @@ export async function startRoomMusic(num: number): Promise<void> {
     return;
   }
   // 17 tracks serve 72 rooms, so this is usually a cache hit and costs nothing; it is
-  // paid once per leg. Uncompressed, the miss is up to 6.75 MB (see the
-  // fish_fillets_audio_compression task).
-  const url = `/data/Music/${music.name}.wav`;
+  // paid once per leg. The miss is up to 1.3 MB — it was 6.75 MB of uncompressed PCM
+  // before the Music/ tracks were staged as AAC (see tools/stage-music.ts).
+  const url = musicUrl(music.name);
   if (!audio.hasMusic(music.name)) {
     // What the channel was claimed for when this entry asked for its music. `playMusic`
     // takes the channel at CALL time, and the call now happens after the download rather
@@ -510,7 +511,7 @@ async function loadExtraMusic(num: number): Promise<void> {
     await inflight; // settles either way — beginMusicLoad swallows the outcome
     if (audio.hasMusic(name)) return;
   }
-  const url = `/data/Music/${name}.wav`;
+  const url = musicUrl(name);
   const load = (async () => {
     const res = await requiredAsset(url, `the music for room ${num}`, 'mustHave', {
       init: { priority: 'low' } as RequestInit,
