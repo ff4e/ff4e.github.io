@@ -328,4 +328,4 @@ export function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, s
   return drew;
 }
 
-/** The menu/map music (SpustHudbu, UMain.pas:217): menu.wav, looped at sample 419772. */
+/** The menu/map music (SpustHudbu, UMain.pas:217): `menu`, looped at sample 419772. */

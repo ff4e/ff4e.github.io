@@ -467,10 +467,9 @@ export class AudioEngine {
         // for every other caller — notably the menu music, which competes with the
         // world map's own assets.
         const bytes = await requiredBytes(url, 'the music', 'mustHave', { init: { priority: 'low' } as RequestInit });
-        // Through `decodeMusic` rather than a bare `decodeAudioData`, so the track is
-        // cached with its native rate attached exactly as every other loader caches it.
-        // Without that, a buffer decoded here and later started by `playMusic` looped at
-        // the default 22050 Hz whatever the file said.
+        // Through `decodeMusic` rather than a bare `decodeAudioData`, because that is the
+        // one entry point to the `musicBufs` cache: a track decoded here is one `playMusic`
+        // can later start without a second fetch of the same file.
         await this.decodeMusic(name, bytes);
       })();
       this.beginMusicLoad(name, load);

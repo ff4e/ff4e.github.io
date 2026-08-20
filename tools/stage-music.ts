@@ -216,7 +216,10 @@ function main(): void {
     if (check) {
       if (bad === 0) console.log(`all ${names.length} tracks match this tool`);
       else console.log(`${bad} file(s) differ — check your ffmpeg version before assuming the shipped bytes are wrong, then run --verify`);
-      process.exit(bad === 0 ? 0 : 1);
+      // `exitCode` and return, NOT `process.exit()`: exiting here skips the `finally` below
+      // and leaves 12 MB of freshly encoded temp files behind on every run.
+      process.exitCode = bad === 0 ? 0 : 1;
+      return;
     }
     console.log(`wrote ${names.length} tracks to ${DIR}`);
   } finally {
@@ -240,7 +243,7 @@ function runVerify(names: readonly string[], tmp: string): void {
     );
   }
   console.log(bad === 0 ? `all ${names.length} tracks decode in sample-alignment with their original` : `${bad} track(s) misaligned`);
-  process.exit(bad === 0 ? 0 : 1);
+  process.exitCode = bad === 0 ? 0 : 1; // not process.exit() — see the --check path
 }
 
 function mb(bytes: number): string {

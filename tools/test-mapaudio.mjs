@@ -24,10 +24,15 @@ import { withApp } from './ui-lib.mjs';
  *
  * Named from the engine's own sound log, not from `__ff.music()`: that reads
  * `currentMusic`, which is `musicSrc ? musicName : ''`, and `musicSrc` is assigned AFTER
- * `start()` — so at the only moment the node can be inspected it reports ''. `playMusic`
- * logs `<name> (music-loop)` on the line above `createBufferSource`, which makes the last
- * such entry the track being started, and also excludes a looping SndCyc effect from being
- * mistaken for music.
+ * `start()` — so at the only moment the node can be inspected it reports ''.
+ *
+ * The LAST entry, not the last MATCHING one. `playMusic` logs `<name> (music-loop)` on the
+ * line above `createBufferSource()` with nothing logging in between, so the track being
+ * started is always the newest entry. Searching backwards for the newest `(music-loop)`
+ * instead would file a looping SndCyc effect — logged `<name>(loop)`, `audio.ts:311` — under
+ * whichever music track happened to start before it, and then fail the loop assertions with
+ * a message blaming the music. PRVNI cues no looping effect, so that would sit here unseen
+ * until someone pointed this probe at a room that does (steel.ts:40, drakar.ts:552, …).
  */
 const LOOP_SPY = () => {
   window.__loops = {};
@@ -36,8 +41,8 @@ const LOOP_SPY = () => {
   proto.start = function (...args) {
     if (this.loop && this.buffer) {
       const log = window.__ff?.soundLog?.() ?? [];
-      const last = [...log].reverse().find((e) => e.name.endsWith(' (music-loop)'));
-      if (last) {
+      const last = log[log.length - 1];
+      if (last?.name.endsWith(' (music-loop)')) {
         window.__loops[last.name.replace(' (music-loop)', '')] = {
           loopStart: this.loopStart,
           loopEnd: this.loopEnd,
@@ -68,18 +73,33 @@ function checkLoop(expect, name, got) {
     Math.abs(got.loopStart - wantStart) < 1 / RATE,
     `${name}: loops back at ${wantStart.toFixed(6)}s (loopSample ${want.loopSample} @ ${RATE}Hz), got ${got.loopStart.toFixed(6)}s`,
   );
-  // The loop ENDS at the music's end, not at the decoded buffer's. A lossy decode need not
-  // return the sample count it was given — ffmpeg's returns 70-1000 samples of encoder
-  // padding (tools/stage-music.ts --verify), and a browser that did the same would splice
-  // that silence into every repeat. Chromium honours the container's gapless metadata and
-  // hands back the original length, so this passes by agreement rather than by clamping —
-  // which is exactly why it is worth asserting: it is the case that would go unnoticed.
-  const wantEnd = want.frames / RATE;
+  // What the DECODE returned, which is the only browser-dependent number here.
+  //
+  // Asserting on `loopEnd` instead would prove nothing: `playMusic` sets it to
+  // `Math.min(musicSeconds(frames), buf.duration)`, so `loopEnd <= frames/RATE` and
+  // `loopEnd <= duration` are both true of every possible decode — tautologies of the clamp
+  // they claim to check, and exactly the trap AGENTS.md names (a test that reads its
+  // expectation from the code under test). The clamp would still be holding the line while
+  // the thing it defends against had happened.
+  //
+  // So assert the claim the clamp is a backstop FOR: this browser hands back the original's
+  // length. A decoder that returned the encoder's padding instead (ffmpeg's does, +72..+1018
+  // samples — tools/stage-music.ts --verify) fails here, and so does the worse case, an
+  // untrimmed ~1024-sample priming delay, which shifts `loopStart` itself by ~46 ms and is
+  // audible as the track looping back into its own intro.
+  //
+  // 32 samples (1.5 ms) rather than a granule: a granule is 1024, which is LARGER than the
+  // padding it is supposed to catch, so it would wave the +1018 case through. The window has
+  // to sit above the resampler's rounding and below the smallest real padding, and those are
+  // two orders of magnitude apart — the context resamples to its own rate (44100 or 48000,
+  // it varies by machine), costing at most a sample or two of rounding, i.e. ~0.02 ms, while
+  // the smallest padding measured across the 17 tracks is +72 samples, i.e. 3.3 ms.
+  const wantDur = want.frames / RATE;
   expect(
-    got.loopEnd <= wantEnd + 1 / RATE && got.loopEnd > wantStart,
-    `${name}: loop ends at the music's end, not past it (want <= ${wantEnd.toFixed(6)}s, got ${got.loopEnd.toFixed(6)}s)`,
+    Math.abs(got.duration - wantDur) < 32 / RATE,
+    `${name}: decodes to the original's length, within 32 samples (want ${wantDur.toFixed(6)}s, got ${got.duration.toFixed(6)}s)`,
   );
-  expect(got.loopEnd <= got.duration, `${name}: loop end is inside the decoded buffer`);
+  expect(got.loopEnd > wantStart, `${name}: the loop region is not empty (${got.loopStart.toFixed(3)}s -> ${got.loopEnd.toFixed(3)}s)`);
 }
 
 await withApp(async ({ p, expect }) => {

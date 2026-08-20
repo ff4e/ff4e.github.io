@@ -83,7 +83,7 @@ down everything else.
   rooms + global `x00`–`x03` packages decode cleanly. A Web Audio engine (`src/audio/`) decodes on demand
   and plays: **fish voices** on talk (room FFS), **landing thuds** (`sp-zuch`/`sp-ocel`), **death cries**
   (`sp-smrt`), and **exit cheers** (`jo-m`/`jo-v`) from the global effects package. **Room music** loops per
-  room (`src/audio/music.ts`): the room's `cHud` index maps to a `rybky*.wav` track (the `TDirect.Spust`
+  room (`src/audio/music.ts`): the room's `cHud` index maps to a `rybky*` track (the `TDirect.Spust`
   remapping) and loops from its `MusCycle` sample point (intro once, body repeats).
 - **Faithful timing (done):** all game logic advances on a fixed **wall-clock** timestep (~80 ms/step,
   ~12.5 fps) reproducing the original `TRoom.Jedeme` busy-wait loop — not the display refresh and not the
