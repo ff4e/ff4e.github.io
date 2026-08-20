@@ -76,7 +76,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `src/render/indexedRegion.ts`, because it is mechanism and the rest of this file is
   // the cutscene machine. What is left is the decision and its reasoning, which has to
   // sit at the branch it explains.
-  ['src/app/cutscene.ts', 588],
+  //
+  // 572 -> 600 for the demonstration becoming SYNCHRONOUS. help.cap and the briefcase
+  // story are fetched on entering KUFRIK now (`roomPreload.ts`), so `startShowmode` starts
+  // from the recording in hand and both loaders left this file — but the two async paths
+  // stay as backstops for `__ff.startCutscene()`/`forceShowmode()`, which can be fired
+  // from any room, and each needs the sentence saying it is no longer the path.
+  ['src/app/cutscene.ts', 600],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
   // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine

@@ -12,24 +12,25 @@
 import { audio } from './audioEngine.js';
 import { canvas, ctx, glCanvas } from './dom.js';
 import { perfPaint, roomLoadSeq, roomLoading, setPerfPaint } from './framePacing.js';
-import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneAssets, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeHold, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeHold, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
+import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeHold, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeHold, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
 import { glCompositor, glFailed, markGlFailed } from './glPlumbing.js';
 import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
 import { clearHeldKey, restore, tryStep } from './movement.js';
 import { cancelSolve } from './solveMode.js';
 import { subLang, subsOn } from './playerSettings.js';
 import { enhancedArtActive, graphics, renderer } from './renderSettings.js';
+import { preloadCutscene, showmodeRecording } from './roomPreload.js';
 import { roomVoicesReady } from './roomLoad.js';
 import { ui } from './screenState.js';
 import { DEFAULT_LINE_TICKS, LOGIC_SEC, contentScaleFor, scalingFilterFor } from './stageGeometry.js';
 import { subFontFamily, subFontReady, subFontWeight } from './stageState.js';
 import { Dir } from '../core/dir.js';
-import { AKCE, KDO, parseHelpCap } from '../intro/helpCap.js';
+import { AKCE, KDO } from '../intro/helpCap.js';
 import type { CapAction } from '../intro/helpCap.js';
 import { KufrDemo } from '../intro/kufrDemo.js';
 import type { AiKufr } from '../intro/kufrDemo.js';
 import { IndexedScreen } from '../render/framebuffer.js';
-import { assetCoolingDown, decodeAsset, isTransient, requiredBlob, requiredBytes, requiredJson, requiredText } from '../render/assetFetch.js';
+import { assetCoolingDown, decodeAsset, isTransient, requiredBlob, requiredBytes, requiredJson } from '../render/assetFetch.js';
 import { drawIndexedRegion } from '../render/indexedRegion.js';
 import { AI_ROOM_SCALE } from '../render/roomAi.js';
 import { SubtitleSystem } from '../render/subtitles.js';
@@ -76,19 +77,15 @@ export async function startCutscene(): Promise<void> {
   if (stale()) return;
   clearHeldKey(); // the briefcase cutscene takes over
   if (!cutsceneAssets) {
-    const what = 'the briefcase demonstration';
-    const bytes = (u: string): Promise<Uint8Array> => requiredBytes(u, what, 'mustHave');
-    const [bmp, pck, scr] = await Promise.all([
-      bytes('/data/Intro/kufr256.BMP'),
-      bytes('/data/Intro/demo.pck'),
-      requiredText('/data/Intro/script.txt', what, 'mustHave'),
-    ]);
-    setCutsceneAssets({ bmp, pck, script: scr });
-    // 5.3 MB of story assets (demo.pck alone is 4.9 MB), fetched once per session: the
-    // first launch is easily long enough to leave the room in. Without this the demo's
-    // looping 'kufrik' music started AFTER showMap()'s KillSnd (and the cutscene
-    // installed itself over the world map), because nothing in DoneKufrDemo ever stops
-    // that track — it only restores music_volume (URoom.pas:2914).
+    // A BACKSTOP, not the path: entering room 2 preloads all of this and waits for it
+    // (roomPreload.ts), so the briefcase sequence reaching `faze === 8` fetches nothing.
+    // What is left here is the one route that skips the preload — `__ff.startCutscene()`,
+    // which a probe or the dev bar can fire from any room.
+    await preloadCutscene();
+    // 5.3 MB of story assets: long enough to leave the room in. Without this the demo's
+    // looping 'kufrik' music started AFTER showMap()'s KillSnd (and the cutscene installed
+    // itself over the world map), because nothing in DoneKufrDemo ever stops that track —
+    // it only restores music_volume (URoom.pas:2914).
     if (stale()) return;
   }
   // Either the branch above just published them or they were already there; an imported
@@ -110,10 +107,14 @@ export async function startCutscene(): Promise<void> {
 /**
  * Start the KUFRIK automatic demonstration (showmode, URoom.pas:19923). The room's
  * prog fires this once both fish reach the demo spot: help.cap (a recorded input
- * stream) is fetched and then replayed one action per tick, auto-driving the fish
- * and the tutorial subtitles. The big fish is turned to face left first
- * (natoceni[velka]:=smer_vlevo). s.showmode is set immediately so KUFRIK's normal
- * dialogue and the re-trigger both stop while help.cap loads asynchronously.
+ * stream) is replayed one action per tick, auto-driving the fish and the tutorial
+ * subtitles. The big fish is turned to face left first (natoceni[velka]:=smer_vlevo).
+ *
+ * The recording is already in hand — entering room 2 fetched it (roomPreload.ts) — so this
+ * is now SYNCHRONOUS, which is the point: reaching the tutorial spot is a moment of play,
+ * and play does not touch the network. `showmodeLoading` survives for the one route that
+ * skips the preload (`__ff.forceShowmode()` from another room), where it is what keeps
+ * KUFRIK's dialogue and the re-trigger from firing while that fetch runs.
  */
 export function startShowmode(): void {
   if (showmode || showmodeLoading || !room) return;
@@ -127,13 +128,19 @@ export function startShowmode(): void {
   if (activeScript) activeScript.s.showmode = true;
   room.facingRight.big = false; // natoceni[velka] := smer_vlevo
   if (engine) engine.swim = null;
+  const recorded = showmodeRecording();
+  if (recorded !== null) {
+    setShowmode({ actions: recorded, idx: 0 });
+    setShowmodeLoading(false);
+    return;
+  }
   void (async () => {
     try {
-      const url = '/data/Intro/help.cap';
-      const buf = await requiredBytes(url, 'the KUFRIK demonstration', 'mustHave');
+      await preloadCutscene();
+      const late = showmodeRecording();
       // The demo may have been cancelled (room change/restart) while fetching.
-      if (!showmodeLoading) return;
-      setShowmode({ actions: parseHelpCap(buf), idx: 0 });
+      if (!showmodeLoading || late === null) return;
+      setShowmode({ actions: late, idx: 0 });
     } finally {
       // `endShowmode()` on failure is gone with the catch: it put the room back and
       // said nothing, so a player who reached the tutorial spot simply never got the

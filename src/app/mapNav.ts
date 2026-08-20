@@ -24,9 +24,10 @@ import { contentScaleFor, scalingFilterFor } from './stageGeometry.js';
 import { saveSettings } from '../core/settings.js';
 import { bmpToRgba, parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
-import { REGISTERED_ROOMS, branchOfRoom, depthOfRoom } from '../data/world.js';
+import { REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, depthOfRoom } from '../data/world.js';
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
 import { assetBytes, decodeAsset, isAssetError, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
+import { preloadedLegPage } from './roomPreload.js';
 import { reportAssetError } from './loadingUi.js';
 import type { MapAction } from '../render/worldMap.js';
 
@@ -88,15 +89,6 @@ export function showMap(): void {
   host.setInfo();
 }
 
-/** ZAVER ("At Home", room 71): the endgame finale cutscene, auto-launched on completion. */
-export const ZAVER_ROOM = 71;
-/**
- * The story page ZAVER ends on: 009.$dv, the medals and the congratulation letter from
- * ŠÉF. It is the ninth page, and the only one no leg win can reach — legs 1..8 map to
- * 001..008, and branches 0 and 9 have no depth-15 room at all.
- */
-export const ZAVER_LEG = 9;
-
 /**
  * chybi=0 (USoutez.pas:729): every registered room (1..70) is genuinely solved. Cheat-
  * solved rooms live in a separate `cheated` set and do NOT count — the original only
@@ -104,6 +96,20 @@ export const ZAVER_LEG = 9;
  */
 export function allRegisteredSolved(): boolean {
   return REGISTERED_ROOMS.every((r) => host.solved.has(r));
+}
+
+/**
+ * Would winning `num` finish the game? The `pustitzaver` test of `returnFromRoom`,
+ * evaluated on ENTRY instead of after the win — i.e. with the room being entered counted
+ * as solved, because that is what winning it would make true.
+ *
+ * Used by the room-entry preload to decide whether ZAVER is the next thing this room's
+ * play can reach (roomPreload.ts). Kept beside `allRegisteredSolved` so the two tests
+ * cannot drift apart; a copy of this condition anywhere else would be the bug.
+ */
+export function finaleFollows(num: number): boolean {
+  if (!REGISTERED_ROOMS.includes(num) || depthOfRoom(num) !== 15) return false;
+  return REGISTERED_ROOMS.every((r) => r === num || host.solved.has(r));
 }
 
 /**
@@ -175,21 +181,35 @@ export function returnFromRoom(): void {
  * would have done. The player loses one chapter of story and is told so; they do not
  * lose the win. That is the middle tier's contract — the tier says how loudly it may be
  * reported, and the call site has to say what happens next.
+ *
+ * ── Which is now a backstop, because the page is preloaded ────────────────────
+ * Reaching this off a WIN no longer fetches anything: entering the room preloaded its
+ * leg's page and the entry waited for it (see preloadLegPage), so the cache hit below is
+ * the path play takes and the fetch is unreachable from it.
+ *
+ * The fetch stays, at `shouldHave`, because one route still reaches it: clicking an
+ * already-solved leg-final room on the MAP shows its page BEFORE entering the room
+ * (daClickAndRun, main.ts), so there is no entry to have preloaded it. That is a gesture
+ * — the player moved the mouse and clicked — and the tier rule from #104 is that a
+ * gesture-driven fetch is never fatal. Two tiers for one file is not an inconsistency
+ * here; it is the same rule applied to two different acts.
  */
 export async function showLegImage(leg: number, pending?: { room: number; replay?: string }): Promise<void> {
   const url = `/data/Menu/00${leg}.$dv`;
-  let bmp;
-  try {
-    bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`, 'shouldHave'));
-  } catch (e) {
-    if (!isAssetError(e)) throw e;
-    // Reported with a retry that re-runs the whole transition, `pending` and all, so
-    // Try again is a genuine second attempt at the story page rather than a way back
-    // into a room the player has already left.
-    reportAssetError(e, () => void showLegImage(leg, pending));
-    if (pending) void host.enterRoom(pending.room, pending.replay);
-    else showMap();
-    return;
+  let bmp = preloadedLegPage(leg)?.bmp;
+  if (!bmp) {
+    try {
+      bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`, 'shouldHave'));
+    } catch (e) {
+      if (!isAssetError(e)) throw e;
+      // Reported with a retry that re-runs the whole transition, `pending` and all, so
+      // Try again is a genuine second attempt at the story page rather than a way back
+      // into a room the player has already left.
+      reportAssetError(e, () => void showLegImage(leg, pending));
+      if (pending) void host.enterRoom(pending.room, pending.replay);
+      else showMap();
+      return;
+    }
   }
   ui.legImagePending = pending ?? null;
   ui.legImage = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
@@ -270,11 +290,18 @@ export function drawLegImage(): void {
  * Resolves to nothing on any failure, leaving the original page in place — the same
  * fallback contract as the rest of the tier. `legImageNum` is re-checked after the
  * await so a page dismissed (or replaced) mid-load cannot install itself late.
+ *
+ * The blob is the preloaded one when there is one: entering the room fetched it (see
+ * preloadLegPage), so what is left here is the DECODE, which is not a fetch and is
+ * therefore allowed to happen at the moment the page is shown. The fetch below is the
+ * same backstop as `showLegImage`'s and reachable by the same one route — the map click
+ * on a solved leg-final room — which is why it keeps the gesture tier.
  */
 export async function ensureLegImageAi(leg: number): Promise<void> {
   if (graphics !== 'ai') return;
   const url = `/enhanced-ai/_story/leg${leg}.webp`;
-  const blob = await requiredBlob(url, `the AI story page for leg ${leg}`, 'shouldHave');
+  const blob =
+    preloadedLegPage(leg)?.ai ?? (await requiredBlob(url, `the AI story page for leg ${leg}`, 'shouldHave'));
   const bmp = await decodeAsset(url, 'shouldHave', () => createImageBitmap(blob));
   if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
   ui.legImageAi?.close();

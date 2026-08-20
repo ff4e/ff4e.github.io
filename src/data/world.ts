@@ -204,3 +204,30 @@ export function branchOfRoom(room: number): number {
   }
   return -1;
 }
+
+/** ZAVER ("At Home", room 71): the endgame finale, auto-launched on completion. */
+export const ZAVER_ROOM = 71;
+/**
+ * The story page ZAVER ends on: 009.$dv, the medals and the congratulation letter from
+ * ŠÉF. It is the ninth page, and the only one no leg win can reach — legs 1..8 map to
+ * 001..008, and branches 0 and 9 have no depth-15 room at all.
+ */
+export const ZAVER_LEG = 9;
+
+/**
+ * Which story page (1..9) this room's PLAY can put on screen, or 0 for the 63 rooms whose
+ * play can put none there.
+ *
+ * The room-entry preload's whole decision (roomPreload.ts), kept here — with the world it
+ * is derived from — because it is the one place a room's play reaches an asset that is not
+ * the room's own, and getting it wrong re-opens a fetch during play that nothing else would
+ * notice. Two ways in, and the second is the one that is easy to forget: winning a depth-15
+ * room shows its branch's page, and ENDING ZAVER shows page 9 (`returnFromRoom`, mapNav.ts)
+ * — which is a fetch at the very last moment of the game.
+ */
+export function storyPageOfRoom(room: number): number {
+  if (room === ZAVER_ROOM) return ZAVER_LEG;
+  if (depthOfRoom(room) !== 15) return 0;
+  const leg = branchOfRoom(room);
+  return leg >= 1 && leg <= 8 ? leg : 0;
+}

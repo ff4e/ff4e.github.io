@@ -105,6 +105,7 @@ import { setSubFontReady, subFontReady } from './stageState.js';
 import { fatalShown, fatalText } from './loadingUi.js';
 import { loadNoteShown, loadNoteText } from './loadNote.js';
 import { roomAudioPending } from './roomLoad.js';
+import { roomPreloadPending } from './roomPreload.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
 import { sum } from '../render/filmEffects.js';
@@ -393,6 +394,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // absent/failed taxonomy, so a probe that only asked whether it was up would pass
     // just as happily on the sentence blaming the player's wifi for a 404.
     roomAudioPending: () => roomAudioPending(),
+    roomPreloadPending: () => roomPreloadPending(),
     fatalShown: () => fatalShown(),
     fatalText: () => fatalText(),
     // The SHOULD-HAVE surface (src/app/loadNote.ts). Two hooks for the same reason the

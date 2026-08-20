@@ -25,6 +25,12 @@ import { musicForCHud } from '../audio/music.js';
 import { parseFfr } from '../data/ffr.js';
 import { parseFft } from '../data/fft.js';
 import {
+  clearRoomPreloadPending,
+  preloadRoomPlayAssets,
+  setRoomPreloadPending,
+  warmFinaleRoom,
+} from './roomPreload.js';
+import {
   roomLoadSeq,
   setForceRoomRedraw,
   setRoomLoadSeq,
@@ -51,6 +57,41 @@ let host!: RoomLoadHost;
 /** Hand this module its view of the game. Called once, from `main.ts`, during boot. */
 export function initRoomLoad(h: RoomLoadHost): void {
   host = h;
+}
+
+/**
+ * Release `num`'s hold when `p` settles, and END THE ENTRY if it rejected.
+ *
+ * Shared by the two holds a room entry arms after its art (its sound, and what its play
+ * can demand) because the handling is identical and the difference is one word of the
+ * breadcrumb. Both arms release — a hold that outlives its load is a room that never
+ * appears — and both release BY ROOM, so a late outcome cannot free a hold a later entry
+ * has since armed.
+ */
+function hold(p: Promise<void>, release: () => void, num: number, what: string): void {
+  void p.then(
+    () => {
+      release();
+      wake();
+    },
+    (e: unknown) => {
+      release();
+      // `enteringRoom`, not `curNum`. `curNum` is not a liveness token: it keeps naming
+      // the last room BUILT, so it still equals `num` after the player has gone back to
+      // the map, and it still equals the OLD room while a superseding entry is in flight
+      // (it only advances at `beginRoomArt`). Deciding on it would end the session over a
+      // download for a room nobody is waiting for — observed as a failure screen raised
+      // on the world map, minutes after the room it names was left.
+      if (!enteringRoom(num)) return;
+      // `warn`, matching art.ts's transient path: the player has been TOLD (the screen
+      // is the report), and this is the breadcrumb beside it. It is also the difference
+      // between a breadcrumb and noise — a page torn down mid-download truncates a
+      // 2.43 MB package, which is not a fault to shout about.
+      console.warn(`[room] room ${num} could not be given its ${what}:`, e);
+      failRoomEntry(num, e);
+      wake();
+    },
+  );
 }
 
 export async function loadRoom(num: number): Promise<void> {
@@ -141,31 +182,24 @@ export async function loadRoom(num: number): Promise<void> {
     // fish_fillets_audio_compression task, which takes it to ~0.9 MB.
     setRoomAudioPending(bootLoad ? 0 : num);
     const audioDone = bootLoad ? Promise.resolve() : art.then(() => loadRoomAudio(num, nnn, fftBytes));
+    // …and the same treatment for what the room's PLAY can demand: KUFRIK's briefcase
+    // cutscenes and the leg-final story page (roomPreload.ts). Behind the art for the
+    // reason the audio is, alongside the audio rather than after it for the reason the
+    // audio's own halves are parallel, and held for by a hold of its own so that neither
+    // existing one has to start meaning something wider than its name.
+    setRoomPreloadPending(bootLoad ? 0 : num);
+    const preloadDone = bootLoad ? Promise.resolve() : art.then(() => preloadRoomPlayAssets(num));
     // Both arms release the hold — a hold that outlives its load is a room that never
     // appears — and both release it BY ROOM, so a late outcome cannot free a hold a later
     // entry has since armed.
-    void audioDone.then(
-      () => {
-        clearRoomAudioPending(num);
-        wake();
-      },
-      (e: unknown) => {
-        clearRoomAudioPending(num);
-        // `enteringRoom`, not `curNum`. `curNum` is not a liveness token: it keeps naming
-        // the last room BUILT, so it still equals `num` after the player has gone back to
-        // the map, and it still equals the OLD room while a superseding entry is in flight
-        // (it only advances at `beginRoomArt`). Deciding on it would end the session over a
-        // download for a room nobody is waiting for — observed as a failure screen raised
-        // on the world map, minutes after the room it names was left.
-        if (!enteringRoom(num)) return;
-        // `warn`, matching art.ts's transient path: the player has been TOLD (the screen
-        // is the report), and this is the breadcrumb beside it. It is also the difference
-        // between a breadcrumb and noise — a page torn down mid-download truncates a
-        // 2.43 MB package, which is not a fault to shout about.
-        console.warn(`[audio] room ${num} could not be given its sound:`, e);
-        failRoomEntry(num, e);
-        wake();
-      },
+    hold(audioDone, () => clearRoomAudioPending(num), num, 'sound');
+    hold(preloadDone, () => clearRoomPreloadPending(num), num, 'story assets');
+    // Once the entry has settled — and only then, so it is never competing with the room
+    // the player is waiting for — start ZAVER's download if this room's win would finish
+    // the game. Unawaited on purpose; the reasoning is in roomPreload.ts's header.
+    void Promise.all([audioDone, preloadDone]).then(
+      () => warmFinaleRoom(num, host.ffrUrl),
+      () => {},
     );
   } catch (e) {
     // EVERY route into a room comes through here, which is why the report belongs here
