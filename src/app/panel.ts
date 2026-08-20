@@ -31,6 +31,8 @@ import { wake } from './frameClock.js';
 import { engine, room } from './gameState.js';
 import { settings, subLang } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
+import { isAssetError } from '../render/assetFetch.js';
+import { reportAssetError } from './loadingUi.js';
 import { contentScaleFor, scalingFilterFor, stage } from './stageGeometry.js';
 import type { VolumeBus } from '../core/settings.js';
 import { ui, O_NORMAL, O_OPTIONS, O_SC_DOWN, O_SC_UP, PANEL_SCROLL_MS, SCMAX, SCMIN, helpScreens } from './screenState.js';
@@ -160,7 +162,31 @@ export function openHelp(): void {
   // with it (renderLoop) — see the note there for why the port deviates from the
   // original's non-modal FHelp.Show here.
   audio.setModalPause(true);
-  void helpScreens.load(subLang());
+  loadHelpPages();
+}
+
+/**
+ * Fetch the help pages, and say so if they do not arrive.
+ *
+ * `shouldHave` (src/render/assetFetch.ts): the player deliberately opened the help, so
+ * they are owed an answer — but the game behind the overlay is untouched and closing it
+ * puts them back exactly where they were, so ending the session over it would be absurd.
+ * Without the note the overlay simply opens EMPTY, which is the misleading-failure shape
+ * the middle tier exists for: the game would be showing a blank help screen and letting
+ * the player conclude that is what the help looks like.
+ *
+ * Its own function, rather than a `.catch` inline above, only so the retry closure can
+ * name the thing it re-runs. Nothing is cached on failure (`byLang` is written after the
+ * pages resolve), so Try again is a real refetch.
+ */
+function loadHelpPages(): void {
+  void helpScreens.load(subLang()).catch((e: unknown) => {
+    if (!isAssetError(e)) throw e;
+    // Through the tier router, not straight to the note: what the player is shown has to
+    // follow the tier declared at the call site, or re-tiering the help pages would
+    // change nothing and the declaration would be decoration.
+    reportAssetError(e, () => loadHelpPages());
+  });
 }
 
 /** Close the help overlay (any key, Help.pas:FormKeyDown). */

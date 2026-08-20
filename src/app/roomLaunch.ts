@@ -39,7 +39,7 @@ import { MAP_W } from '../render/worldMap.js';
 import { AI_MAP_SCALE } from '../render/worldMapAi.js';
 import { curNum } from './art.js';
 import { ROOMS } from '../data/roomTable.js';
-import { isTransient, requiredBytes } from '../render/assetFetch.js';
+import { isAssetError, isTransient, requiredBytes } from '../render/assetFetch.js';
 import { failAssets } from './loadingUi.js';
 import { roomAudioPending } from './roomLoad.js';
 import type { AiWorldMap } from '../render/worldMapAi.js';
@@ -87,17 +87,31 @@ let parchmentCanvas: HTMLCanvasElement | null = null;
  *
  * Its own fetch rather than a member of the map's Promise.all, which used to be the
  * difference between critical and optional: folding this 32 kB indicator into the map's
- * load would have turned a missing parchment into a fatal boot. It is fatal now anyway,
- * so what the separate fetch still buys is only a better sentence on the screen — this
- * one names the parchment instead of the world map.
+ * load would have turned a missing parchment into a fatal boot.
  *
- * `parchmentReady()` and canLaunchFromMap()'s overlay fallback stay: the parchment is
- * null until boot decodes it, and a launch during that window still has to do something.
+ * `niceToHave`, and it is the clearest case of the tier in the codebase: the fallback is
+ * not a degradation someone tolerated, it is a path that already exists and already runs.
+ * `parchment` is null until boot decodes it, so a launch during that window ALREADY has
+ * to do something, and `parchmentReady()` / `canLaunchFromMap()`'s overlay is what it
+ * does. A player who never gets the parchment gets the overlay instead, which is the same
+ * thing the first seconds of every session look like. Ending the session over that — or
+ * even interrupting to mention it — would cost more than the loss.
+ *
+ * So this swallows its own failure rather than relying on the backstop in `loadingUi.ts`:
+ * boot AWAITS it, and a throw here would take boot down however quietly it was reported.
+ * The tier says how loud; the call site has to say what happens next.
  */
 export async function loadParchment(): Promise<void> {
   const url = '/data/Menu/loading.BMP';
-  const bmp = parseBmp(await requiredBytes(url, 'the room-entry parchment'));
-  parchment = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
+  try {
+    const bmp = parseBmp(await requiredBytes(url, 'the room-entry parchment', 'niceToHave'));
+    parchment = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
+  } catch (e) {
+    if (!isAssetError(e)) throw e;
+    // Left null, which every reader already handles. Not remembered as "tried", either:
+    // nothing re-runs this, so there is nothing to re-remember.
+    console.warn('the room-entry parchment did not load; launches will use the overlay', e);
+  }
 }
 
 /** Is the parchment art available at all? (For the `__ff` hook and canLaunchFromMap.) */
@@ -372,8 +386,15 @@ function abortMapLaunch(l: MapLaunch, err: unknown): void {
   try {
     host.wake();
     // An answer ("not there") and no answer at all want opposite sentences — see
-    // src/render/assetFetch.ts.
-    failAssets(roomLabel(l.room), isTransient(err));
+    // src/render/assetFetch.ts. WHICH room is logged rather than shown: the screen is
+    // generic now, because its one action is the same whichever file broke.
+    // Unconditional. Guarding this on `isAssetError` left a NON-asset failure — a room
+    // whose FFR arrives as a 200 full of garbage, which is what tools/test-roomload.mjs
+    // serves — raising the generic screen with no record anywhere of which room or what
+    // threw. The screen stopped naming the room in the same commit, so that combination
+    // was the one path with no diagnosis left at all.
+    console.error(`room entry failed: ${roomLabel(l.room)}`, err);
+    failAssets(isTransient(err));
     // The picker names the room actually on screen, which is the one the player came
     // from: `startRoom` pointed it at the room it was about to load, and that load is
     // what just failed. `curNum` only advances once a load succeeds.
@@ -398,10 +419,11 @@ export function failRoomEntry(num: number, err: unknown): void {
     abortMapLaunch(l, err);
     return;
   }
-  failAssets(roomLabel(num), isTransient(err));
+  console.error(`room entry failed: ${roomLabel(num)}`, err);
+  failAssets(isTransient(err));
 }
 
-/** The room's own name (PRVNI, KOSTE…), for the failure screen's sentence. */
+/** The room's own name (PRVNI, KOSTE…), for the log line above. */
 function roomLabel(num: number): string {
   const jmeno = ROOMS[num - 1]?.jmeno;
   return jmeno === undefined ? `Room ${num}` : `The room ${jmeno}`;

@@ -20,14 +20,18 @@
  *
  * ── The two doors ─────────────────────────────────────────────────────────────
  *
- * Every network request in `src/` comes through this file — `test/asset-fetch-discipline.test.ts`
+ * Every request for a GAME ASSET comes through this file — `test/asset-fetch-discipline.test.ts`
  * fails the build for a bare `fetch(` anywhere else — and there are exactly two ways in:
  *
- *  - **`requiredAsset(url, what)`** — the file must be there. An answer of "not there" is
- *    a `MissingAssetError`; no answer at all is a `TransientAssetError`. Either ends the
- *    session on the failure screen.
- *  - **`optionalAsset(url)`** — absence is the DESIGN. Returns null when the server says
- *    "not there"; a failure still throws.
+ *  - **`requiredAsset(url, what, tier)`** — the file must be there. An answer of "not
+ *    there" is a `MissingAssetError`; no answer at all is a `TransientAssetError`.
+ *  - **`optionalAsset(url, tier)`** — absence is the DESIGN. Returns null when the server
+ *    says "not there"; a failure still throws.
+ *
+ * That door is about ABSENCE. What happens when the asset does not arrive is the second,
+ * independent question, and it is the `tier` — see the block below. The two used to be
+ * one, and conflating them is what produced a game where moving the mouse across the
+ * world map could end the session.
  *
  * The policy is an argument, not a default, so a new asset cannot be added without
  * someone answering the question — and so a reviewer can grep for the answer. `optional`
@@ -42,13 +46,92 @@
  * Everything else is required. A 404 on it is a broken build or a broken deploy, and the
  * game says so instead of quietly playing without its music, its death lines or its help.
  *
- * One loader is outside this file rather than exempt within it: the intro movie, which is
+ * "Game asset" is doing real work in that sentence, and the two things it excludes are
+ * worth knowing before someone reads it as "no request escapes". `src/platform/analytics.ts`
+ * appends a third-party `<script>`, and `index.html` pulls a cover image from CSS; neither
+ * is an asset the game plays with, neither can be tiered (nothing about the game changes
+ * if they fail), and neither goes near `fetch`, so the discipline test does not see them
+ * either. Anything the GAME needs belongs here.
+ *
+ * One loader is a genuine exemption rather than an omission: the intro movie, which is
  * a `<video src>` in `intro.ts`. A media element streams, and its `error` event cannot
  * tell a 404 from a dropped connection — the one distinction everything here rests on —
  * so routing it through this door would buy a label the platform cannot supply. The intro
  * is skippable by design. `test/asset-fetch-discipline.test.ts` records that in the one
  * place someone would look before adding a second such loader.
+ *
+ * ── The three tiers ───────────────────────────────────────────────────────────
+ *
+ * The doors above answer "may this be absent?". The `tier` answers the other question,
+ * and it is the one the player experiences:
+ *
+ * | tier | on failure | the test for membership |
+ * | --- | --- | --- |
+ * | `mustHave`   | fatal — the one failure screen, Reload | the game cannot run, or cannot be played correctly, without it |
+ * | `shouldHave` | keep playing, show a visible note, offer a retry | the game runs, but the player is getting materially less than they asked for AND would not otherwise know |
+ * | `niceToHave` | silent; retry on the next natural occasion | cosmetic or incidental; interrupting anyone would cost more than the loss |
+ *
+ * The middle tier's test is the important one, and it is deliberately about being
+ * MISLED, not about being annoyed: the game is playable and is telling the player
+ * something untrue, so it says so. The clearest examples are the help pages and the
+ * minigame — open them with the network down and, without the note, an EMPTY overlay is
+ * all the player gets and they conclude that is what the help looks like.
+ *
+ * A word on the archetype this tier is often explained with, because it is NOT one of
+ * these: the v1.0.18 bug, where the setting said "AI upscaled" while the room drew
+ * enhanced art. A room's art at any tier is `mustHave` here (everything a room will use
+ * is preloaded on the deliberate act of entering it), so that case never reaches the
+ * note. A note is also the wrong shape for it — it is dismissible, and the setting goes
+ * on lying afterwards. That one wants the effective tier shown, not a transient message,
+ * and that is a separate change.
+ *
+ * The retry is offered when a call site supplies one. The backstop below cannot: it is
+ * reached precisely because nobody handled the failure, so there is nothing there that
+ * knows how to re-run it, and the note hides the button rather than offering one that
+ * does nothing.
+ *
+ * ── The rule that makes the tier necessary ────────────────────────────────────
+ *
+ *   **No interaction-driven fetch may be `mustHave`.**
+ *
+ * If an asset can be requested as a side effect of moving the mouse, hovering, or a draw
+ * frame, it is `shouldHave` at most. This is not a preference. Every version of this file
+ * before it made every asset fatal, and the world map fetches a room's name plaque WHEN
+ * YOU HOVER IT (mapDraw.ts — 140 of them at ×4 would be ~30 MB to hold, so they are
+ * fetched and evicted on demand). Moving the mouse across the map could therefore end the
+ * session. `test/asset-tier-discipline.test.ts` enumerates the loaders reachable from a
+ * draw or pointer path and fails the build if one of them asks for `mustHave`.
+ *
+ * Deliberate, player-initiated actions — entering a room, opening the help, starting a
+ * cutscene — are NOT interaction-driven in this sense. The distinction is whether the
+ * player asked for the thing that is now failing. Everything a room will use is fetched
+ * up front, on the deliberate act of entering it, and is `mustHave`.
+ *
+ * ── What the tier does, and what it does NOT do ───────────────────────────────
+ *
+ * The tier is carried on the error, and `loadingUi.ts` routes on it: the failure screen
+ * for `mustHave`, the note (`loadNote.ts`) for `shouldHave`, nothing for `niceToHave`.
+ * That is a BACKSTOP — it guarantees a forgotten failure is never reported more loudly
+ * than its tier, which is what makes an unhandled rejection safe again.
+ *
+ * It cannot, however, make the caller carry on: a throw abandons the rest of the
+ * function, so "keep playing" is something the call site has to implement. A `shouldHave`
+ * or `niceToHave` load that is AWAITED on a path the game needs to finish (boot, opening
+ * the help) must catch its own asset error and fall back, or it will take that path down
+ * regardless of how quietly the failure is reported. The tier says how loud; the call
+ * site says what happens next.
  */
+
+/**
+ * How much it costs the player when this asset does not arrive.
+ *
+ * Required at every call site and with no default, deliberately: the previous design
+ * defaulted to fatal so that FORGETTING failed closed, which was right when there were
+ * two outcomes. With three, "forgetting" has to be a type error instead, because the safe
+ * default is different for a room's FFR and for a plaque fetched on hover, and no single
+ * choice is safe for both.
+ */
+export type AssetTier = 'mustHave' | 'shouldHave' | 'niceToHave';
 
 /** A load that failed without learning anything about the asset — safe (and required) to retry. */
 export class TransientAssetError extends Error {
@@ -62,11 +145,14 @@ export class TransientAssetError extends Error {
    * the naming and must not depend on it.
    */
   readonly what: string | undefined;
-  constructor(url: string, why: string, cause?: unknown, what?: string) {
+  /** How loudly this failure may be reported. See `AssetTier`. */
+  readonly tier: AssetTier;
+  constructor(url: string, why: string, tier: AssetTier, cause?: unknown, what?: string) {
     super(`${url}: ${why}`, cause === undefined ? undefined : { cause });
     this.name = 'TransientAssetError';
     this.url = url;
     this.what = what;
+    this.tier = tier;
   }
 }
 
@@ -85,11 +171,14 @@ export class MissingAssetError extends Error {
   readonly url: string;
   /** The player-facing name of the thing, e.g. "the world map". */
   readonly what: string;
-  constructor(url: string, what: string, why: string) {
+  /** How loudly this failure may be reported. See `AssetTier`. */
+  readonly tier: AssetTier;
+  constructor(url: string, what: string, tier: AssetTier, why: string) {
     super(`${what}: ${url} ${why}`);
     this.name = 'MissingAssetError';
     this.url = url;
     this.what = what;
+    this.tier = tier;
   }
 }
 
@@ -165,6 +254,89 @@ const JITTER = 0.25;
 const HEADERS_TIMEOUT_MS = 20000;
 
 /**
+ * ── The cooldown, and why only `niceToHave` has one ───────────────────────────
+ *
+ * "Retry on the next natural occasion" falls out of a rule that is already here: since
+ * #66 a FAILED load is not remembered, so the next hover, the next frame, the next open
+ * simply asks again. For a deliberate act that is exactly right — the player did
+ * something, and the game tries again.
+ *
+ * For an INCIDENTAL one it needs a floor. The map's plaques are fetched on hover and the
+ * cutscene's frames from the draw path, so against a dead server "ask again next time" is
+ * bounded only by how fast the gestures come.
+ *
+ * ── What it is actually worth, measured ───────────────────────────────────────
+ * Less than it first appears, and the honest number belongs here rather than in a PR
+ * nobody will re-read. Both of today's incidental loaders already hold an IN-FLIGHT set
+ * (`aiPlaqueLoading`, `aiKufrLoading`), and with a 1.25 s retry budget that set is
+ * occupied almost all of the time — so the gestures coalesce on their own. Measured on
+ * the world map with the cooldown disabled: twenty alternating room-panel opens over
+ * about a second produced TWO plaque requests, not twenty.
+ *
+ * So this is not what stops a request per mouse move; the in-flight guards are. What it
+ * adds is a bound that does not depend on every future call site remembering to have one,
+ * and a ~4x cut in the sustained rate against a server that is down (three attempts per
+ * five seconds per URL, rather than three per 1.25 s). That is worth twelve lines. It is
+ * NOT worth a browser probe — the effect is too small to separate from the in-flight
+ * guard there, and `test/assetFetch.test.ts` proves the mechanism exactly, on an injected
+ * clock, for a millisecond.
+ *
+ * The entry is only ever written on a failure, so a working asset never touches it, and
+ * it expires on its own rather than needing anyone to clear it.
+ *
+ * It is deliberately NOT applied to the other two tiers. A `mustHave` retry happens on a
+ * path the player asked for and is waiting on, and a `shouldHave` one happens when they
+ * press Try again — refusing either would be the game ignoring a direct instruction
+ * because of something that happened three seconds ago.
+ */
+const NICE_COOLDOWN_MS = 5000;
+const niceFailedAt = new Map<string, number>();
+
+/** For tests, and for the `__ff` hook a probe uses to stop waiting out a real cooldown. */
+export function resetAssetCooldowns(): void {
+  niceFailedAt.clear();
+}
+
+/**
+ * Record that a `niceToHave` URL just failed, so the draw path stops asking for a while.
+ *
+ * Shared by the two places a failure is decided — `fetchAsset`'s catch (no answer) and
+ * `requiredAsset`'s check (an answer that is not the asset). Both have to arm it or the
+ * bound is only half there; see the note in `requiredAsset`.
+ */
+function noteNiceFailure(url: string, tier: AssetTier, retry?: RetryPolicy): void {
+  if (tier !== 'niceToHave') return;
+  niceFailedAt.set(url, (retry?.now ?? Date.now)());
+}
+
+/** Is this `niceToHave` URL still inside its refusal window? */
+function coolingDown(url: string, tier: AssetTier, retry?: RetryPolicy): boolean {
+  if (tier !== 'niceToHave') return false;
+  const failed = niceFailedAt.get(url);
+  if (failed === undefined) return false;
+  return (retry?.now ?? Date.now)() - failed < (retry?.cooldownMs ?? NICE_COOLDOWN_MS);
+}
+
+/**
+ * Would asking for this URL right now be refused? For callers on a DRAW path.
+ *
+ * The cooldown bounds requests on its own, but a draw-path loader that re-arms its
+ * "tried" latch on every failure re-enters every frame — and inside the window each
+ * re-entry still allocates an error, rejects a promise and logs. Requests were bounded;
+ * work, garbage and console noise were not, which at 60 fps in a cutscene is hundreds of
+ * logged failures the tier promised would be silent.
+ *
+ * So the three incidental loaders ask FIRST and return quietly, instead of asking and
+ * being refused. That also gives the latch a correct shape: it is cleared on failure (a
+ * failed load is not remembered, #66) and this is what stops the clearing turning into a
+ * spin — the next attempt happens on the first repaint after the window, not the next
+ * frame.
+ */
+export function assetCoolingDown(url: string): boolean {
+  return coolingDown(url, 'niceToHave');
+}
+
+/**
  * How long to wait before attempt `n + 1` (0-based), or null when the budget is spent.
  *
  * Jittered so a burst of assets failing together — which is what a dropped connection
@@ -192,6 +364,10 @@ export interface RetryPolicy {
   sleep?: (ms: number) => Promise<void>;
   /** How long to wait for response HEADERS before calling it a stall. For tests. */
   headersMs?: number;
+  /** The clock the `niceToHave` cooldown is measured on. For tests. */
+  now?: () => number;
+  /** How long a failed `niceToHave` URL is refused for. For tests. */
+  cooldownMs?: number;
 }
 
 const realSleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -231,9 +407,18 @@ export interface AssetOptions {
  * holding a raw Response is a caller that has not chosen a policy — which is how 14 kinds
  * of asset came to fail silently. Reach it through `requiredAsset` or `optionalAsset`.
  */
-async function fetchAsset(url: string, what?: string, init?: RequestInit, retry?: RetryPolicy): Promise<Response> {
+async function fetchAsset(url: string, tier: AssetTier, what?: string, init?: RequestInit, retry?: RetryPolicy): Promise<Response> {
   const nextDelay = retry?.delayMs ?? retryDelayMs;
   const sleep = retry?.sleep ?? realSleep;
+  const now = retry?.now ?? Date.now;
+  const cooldown = retry?.cooldownMs ?? NICE_COOLDOWN_MS;
+  // Refused before the first attempt rather than after it, so a failing server sees no
+  // request at all. The caller is told the same thing it would have been told by a real
+  // failure — a transient error at its own tier — because "we did not ask" and "we asked
+  // and got nothing" leave the caller in exactly the same position, and giving the two
+  // different shapes would only be a second path for a call site to get wrong.
+  if (coolingDown(url, tier, retry))
+    throw new TransientAssetError(url, 'not retried yet — cooling down after a recent failure', tier, undefined, what);
   for (let attempt = 0; ; attempt++) {
     // One controller per attempt: aborting a stalled attempt must not poison the retry.
     const stall = new AbortController();
@@ -243,17 +428,24 @@ async function fetchAsset(url: string, what?: string, init?: RequestInit, retry?
       // cancels its loads — so the two are combined rather than one replacing the other.
       const signal = init?.signal ? AbortSignal.any([init.signal, stall.signal]) : stall.signal;
       const res = await fetch(url, { ...init, signal });
-      if (retryableStatus(res.status)) throw new TransientAssetError(url, `HTTP ${res.status}`, undefined, what);
+      if (retryableStatus(res.status)) throw new TransientAssetError(url, `HTTP ${res.status}`, tier, undefined, what);
       return res;
     } catch (e) {
       // Only OUR classification is retried. A caller-thrown error, or anything the
       // labelling below decided was an answer, leaves immediately.
-      const err = e instanceof TransientAssetError ? e : new TransientAssetError(url, 'network error', e, what);
+      const err = e instanceof TransientAssetError ? e : new TransientAssetError(url, 'network error', tier, e, what);
       // An abort the CALLER asked for is not a failure to recover from — it is the app
       // saying it no longer wants this. Retrying it would fight the page that navigated
       // away, and would keep a load alive after the room that wanted it is gone.
-      const delay = init?.signal?.aborted === true ? null : nextDelay(attempt);
-      if (delay === null) throw err;
+      const cancelled = init?.signal?.aborted === true;
+      const delay = cancelled ? null : nextDelay(attempt);
+      if (delay === null) {
+        // Only a genuine failure arms the cooldown. A cancelled load learned nothing
+        // about the server, and locking the URL out for five seconds because the player
+        // left a room would make the next entry draw without art it could have had.
+        if (!cancelled) noteNiceFailure(url, tier, retry);
+        throw err;
+      }
       // The wait happens while HOLDING the caller's load slot, where it has one. That is
       // deliberate: acquiring a second slot from inside one can deadlock the pool, and
       // holding it also stops a failing room from spending its whole budget re-queuing.
@@ -273,11 +465,11 @@ async function fetchAsset(url: string, what?: string, init?: RequestInit, retry?
  * The headers can arrive and the body still not: a connection dropped mid-download
  * rejects here, not at `fetch`. That is a blip, not a missing file.
  */
-export async function assetBlob(url: string, res: Response, what?: string): Promise<Blob> {
+export async function assetBlob(url: string, res: Response, tier: AssetTier, what?: string): Promise<Blob> {
   try {
     return await res.blob();
   } catch (e) {
-    throw new TransientAssetError(url, 'truncated response', e, what);
+    throw new TransientAssetError(url, 'truncated response', tier, e, what);
   }
 }
 
@@ -288,11 +480,11 @@ export async function assetBlob(url: string, res: Response, what?: string): Prom
  * arrived and whose body did not rejects here with a bare `TypeError`, which is I/O and
  * must be retried rather than reported to the player as a broken game.
  */
-export async function assetBytes(url: string, res: Response, what?: string): Promise<Uint8Array> {
+export async function assetBytes(url: string, res: Response, tier: AssetTier, what?: string): Promise<Uint8Array> {
   try {
     return new Uint8Array(await res.arrayBuffer());
   } catch (e) {
-    throw new TransientAssetError(url, 'truncated response', e, what);
+    throw new TransientAssetError(url, 'truncated response', tier, e, what);
   }
 }
 
@@ -304,13 +496,25 @@ export async function assetBytes(url: string, res: Response, what?: string): Pro
  * `MissingAssetError` — permanent, unretried, and fatal upstream — because on a correctly
  * built and correctly deployed game there is no case where this file is not there.
  *
- * `what` is the sentence fragment the player will read on the failure screen ("the world
- * map", "the music for room 7"), so it is written for them, not for a log.
+ * `what` is the sentence fragment the player will read on the failure screen or the note
+ * ("the world map", "the music for room 7"), so it is written for them, not for a log.
+ * `tier` is how loudly this one may fail — see `AssetTier`, and read the rule about
+ * interaction-driven fetches before reaching for `mustHave`.
  */
-export async function requiredAsset(url: string, what: string, opts?: AssetOptions): Promise<Response> {
-  const res = await fetchAsset(url, what, opts?.init, opts?.retry);
+export async function requiredAsset(url: string, what: string, tier: AssetTier, opts?: AssetOptions): Promise<Response> {
+  const res = await fetchAsset(url, tier, what, opts?.init, opts?.retry);
   const why = notTheAsset(res, opts?.expect);
-  if (why !== null) throw new MissingAssetError(url, what, why);
+  if (why !== null) {
+    // A permanent answer arms the cooldown too, and it is the case that needs it MORE.
+    // `fetchAsset` can only arm on a transient failure, because a 404 is not an error
+    // down there — it returns normally and the judgement happens here. That left the
+    // worst combination unbounded: a `niceToHave` asset a manifest promises and the
+    // deploy does not have gets no cooldown (nothing armed it) and no memory (a failed
+    // load is deliberately not remembered), so the draw path re-requests it on every
+    // repaint that wants it, for ever, silently. A hovered plaque repaints ~7x/s.
+    noteNiceFailure(url, tier, opts?.retry);
+    throw new MissingAssetError(url, what, tier, why);
+  }
   return res;
 }
 
@@ -325,11 +529,11 @@ export async function requiredAsset(url: string, what: string, opts?: AssetOptio
  * permanently unplayable in the tiers that are behaving exactly as intended.
  *
  * A FAILURE is still a failure: no answer means nothing was learned, and that throws
- * `TransientAssetError` here exactly as it does everywhere else. Only an ANSWER of "not
- * there" becomes null.
+ * `TransientAssetError` here exactly as it does everywhere else — at the `tier` given,
+ * which is why one is required even though absence itself is free.
  */
-export async function optionalAsset(url: string, opts?: AssetOptions): Promise<Response | null> {
-  const res = await fetchAsset(url, undefined, opts?.init, opts?.retry);
+export async function optionalAsset(url: string, tier: AssetTier, opts?: AssetOptions): Promise<Response | null> {
+  const res = await fetchAsset(url, tier, undefined, opts?.init, opts?.retry);
   return notTheAsset(res, opts?.expect) === null ? res : null;
 }
 
@@ -356,11 +560,11 @@ function notTheAsset(res: Response, expect?: AssetExpect): string | null {
  * Same hazard as `assetBytes`, for the three assets that are plain text: the demo
  * script, the minigame's shape table and the help index.
  */
-export async function assetText(url: string, res: Response, what?: string): Promise<string> {
+export async function assetText(url: string, res: Response, tier: AssetTier, what?: string): Promise<string> {
   try {
     return await res.text();
   } catch (e) {
-    throw new TransientAssetError(url, 'truncated response', e, what);
+    throw new TransientAssetError(url, 'truncated response', tier, e, what);
   }
 }
 
@@ -374,7 +578,7 @@ export async function assetText(url: string, res: Response, what?: string): Prom
  * art at that tier" and cached — the very mistake this module exists to prevent, one
  * level below where it was first found.
  */
-export async function assetJson<T>(url: string, res: Response, what?: string): Promise<T> {
+export async function assetJson<T>(url: string, res: Response, tier: AssetTier, what?: string): Promise<T> {
   try {
     return (await res.json()) as T;
   } catch (e) {
@@ -388,8 +592,8 @@ export async function assetJson<T>(url: string, res: Response, what?: string): P
     //
     // Anything else — a TypeError from a body that never finished — is I/O, and must not
     // be remembered.
-    if (e instanceof SyntaxError) throw new MissingAssetError(url, what ?? 'A game file', 'answered with a body that is not JSON');
-    throw new TransientAssetError(url, 'unreadable manifest', e, what);
+    if (e instanceof SyntaxError) throw new MissingAssetError(url, what ?? 'A game file', tier, 'answered with a body that is not JSON');
+    throw new TransientAssetError(url, 'unreadable manifest', tier, e, what);
   }
 }
 
@@ -407,20 +611,20 @@ export async function assetJson<T>(url: string, res: Response, what?: string): P
  * what stops a parser outside this file from turning an asset failure back into an
  * ordinary error nothing recognises.
  */
-export async function requiredBytes(url: string, what: string, opts?: AssetOptions): Promise<Uint8Array> {
-  return assetBytes(url, await requiredAsset(url, what, opts), what);
+export async function requiredBytes(url: string, what: string, tier: AssetTier, opts?: AssetOptions): Promise<Uint8Array> {
+  return assetBytes(url, await requiredAsset(url, what, tier, opts), tier, what);
 }
 
-export async function requiredText(url: string, what: string, opts?: AssetOptions): Promise<string> {
-  return assetText(url, await requiredAsset(url, what, opts), what);
+export async function requiredText(url: string, what: string, tier: AssetTier, opts?: AssetOptions): Promise<string> {
+  return assetText(url, await requiredAsset(url, what, tier, opts), tier, what);
 }
 
-export async function requiredJson<T>(url: string, what: string, opts?: AssetOptions): Promise<T> {
-  return assetJson<T>(url, await requiredAsset(url, what, { expect: 'json', ...opts }), what);
+export async function requiredJson<T>(url: string, what: string, tier: AssetTier, opts?: AssetOptions): Promise<T> {
+  return assetJson<T>(url, await requiredAsset(url, what, tier, { expect: 'json', ...opts }), tier, what);
 }
 
-export async function requiredBlob(url: string, what: string, opts?: AssetOptions): Promise<Blob> {
-  return assetBlob(url, await requiredAsset(url, what, { expect: 'image', ...opts }), what);
+export async function requiredBlob(url: string, what: string, tier: AssetTier, opts?: AssetOptions): Promise<Blob> {
+  return assetBlob(url, await requiredAsset(url, what, tier, { expect: 'image', ...opts }), tier, what);
 }
 
 /**
@@ -432,11 +636,11 @@ export async function requiredBlob(url: string, what: string, opts?: AssetOption
  * time the room is entered, while guessing absent on a truncated one costs the player the
  * tier for the rest of the session — which is the bug this whole file exists for.
  */
-export async function decodeAsset<T>(url: string, decode: () => Promise<T>): Promise<T> {
+export async function decodeAsset<T>(url: string, tier: AssetTier, decode: () => Promise<T>): Promise<T> {
   try {
     return await decode();
   } catch (e) {
-    throw new TransientAssetError(url, 'decode failed', e);
+    throw new TransientAssetError(url, 'decode failed', tier, e);
   }
 }
 

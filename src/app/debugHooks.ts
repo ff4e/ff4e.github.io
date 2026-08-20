@@ -103,6 +103,7 @@ import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
 import { fatalShown, fatalText } from './loadingUi.js';
+import { loadNoteShown, loadNoteText } from './loadNote.js';
 import { roomAudioPending } from './roomLoad.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
@@ -131,26 +132,7 @@ import type { AiRoomFrame } from '../render/roomAi.js';
 import { renderTetris, tetrisRgba } from '../render/tetrisRender.js';
 import { MapAction, WorldMap } from '../render/worldMap.js';
 import { AiWorldMap } from '../render/worldMapAi.js';
-import {
-  applyFrameEffects,
-  applyMapCheat,
-  applyRoomCheat,
-  cheatFishSprites,
-  cheatSolveRoom,
-  closeTetris,
-  devSolveRoom,
-  devWinRoom,
-  interlacedFaze,
-  mapCheats,
-  megabombFlash,
-  roomCheats,
-  setMegabombFlash,
-  silentFilm,
-  tetris,
-  tetrisArt,
-  tetrisTick,
-  ultraviolence,
-} from './cheats.js';
+import { applyFrameEffects, applyMapCheat, applyRoomCheat, cheatFishSprites, cheatSolveRoom, closeTetris, devSolveRoom, devWinRoom, interlacedFaze, mapCheats, megabombFlash, roomCheats, setMegabombFlash, silentFilm, tetris, tetrisArt, tetrisModal, tetrisTick, ultraviolence } from './cheats.js';
 import { canvas, ctx, glCanvas, loadingEl } from './dom.js';
 import type { FeedbackUi } from './feedback.js';
 import { IntroPlayer } from './intro.js';
@@ -413,6 +395,13 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     roomAudioPending: () => roomAudioPending(),
     fatalShown: () => fatalShown(),
     fatalText: () => fatalText(),
+    // The SHOULD-HAVE surface (src/app/loadNote.ts). Two hooks for the same reason the
+    // fatal screen has two: the wording is chosen from the absent/failed taxonomy.
+    loadNoteShown: () => loadNoteShown(),
+    loadNoteText: () => loadNoteText(),
+    // `tetrisPending` makes the minigame modal from the instant the cheat fires; a
+    // failed load that did not clear it would strand the player in an empty modal.
+    tetrisModal: () => tetrisModal(),
     artFailTitle: () => document.getElementById('art-fail-title')?.textContent ?? '',
     enhancedActive: () =>
       host.enhancedArtActive() &&

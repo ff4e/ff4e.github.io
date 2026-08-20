@@ -33,7 +33,7 @@ import type { AiCredits } from '../render/creditsAi.js';
 import type { EnhancedArt, EnhancedObject } from '../render/enhancedArtSource.js';
 import { loadEnhancedRoom, type RoomEnhanced } from './enhancedLoad.js';
 import { assetJson, isAssetError, isMissing, isTransient } from '../render/assetFetch.js';
-import { failAssets, fatalShown } from './loadingUi.js';
+import { failAssets, fatalShown, reportAssetError } from './loadingUi.js';
 // Re-exported so the one other consumer of the decode helper (main.ts's fish sprites)
 // keeps its existing import. It lives in enhancedLoad.ts now, with the loaders.
 export { decodePngResponse } from './enhancedLoad.js';
@@ -619,7 +619,21 @@ export async function ensureAiRoom(num: number): Promise<void> {
  * in the DOM) and swallow the click on the screen's own button. Found exactly that way.
  */
 function raiseArtFailure(what: string, err?: unknown): void {
-  failAssets(what, err === undefined ? true : isTransient(err));
+  // Routed by TIER, not straight to the failure screen. This is the third place the
+  // same mistake was made: a call site that caught its own asset error and then chose
+  // the surface itself, which quietly made the tier declared at the loader decoration —
+  // re-tier `roomAi.ts` or `worldMapAi.ts` and the session would still have ended. It is
+  // also the largest group by far (the room's enhanced art, its AI art, its object
+  // sprites, the AI world map), so it is the one where "the tier is inert" mattered most.
+  //
+  // `err === undefined` is the one case that cannot be routed: it is this file's own
+  // "the manifest and the shipped art disagree" path, which has no asset error to carry
+  // a tier. It stays fatal, and says so.
+  if (isAssetError(err)) reportAssetError(err, undefined, what);
+  else {
+    console.error(`asset failed: ${what}`, err);
+    failAssets(err === undefined ? true : isTransient(err));
+  }
   host.forceRoomRedraw = true;
   host.wake();
 }

@@ -76,7 +76,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `src/render/indexedRegion.ts`, because it is mechanism and the rest of this file is
   // the cutscene machine. What is left is the decision and its reasoning, which has to
   // sit at the branch it explains.
-  ['src/app/cutscene.ts', 572],
+  ['src/app/cutscene.ts', 588],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
   // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine
@@ -103,13 +103,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // whether it was up would pass just as happily on the sentence that blames the player's
   // connection for a 404 — plus `roomAudioPending`, the third hold a room entry can be
   // waiting on, which a probe otherwise cannot tell from the art hold.
-  ['src/app/debugHooks.ts', 1653],
+  ['src/app/debugHooks.ts', 1657],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
   // precisely the gap the tripwire exists to close. Low churn today (1 of the last 200
   // commits), so this is a ceiling rather than a concern.
-  ['src/app/cheats.ts', 700],
+  ['src/app/cheats.ts', 706],
   // 564. Which room's art is loaded, what has been REMEMBERED about it, and whether the
   // frame is still holding for it. Budgeted on arrival rather than after growth: it
   // crossed the 520 tripwire taking on the absent/failed distinction, and two pieces
@@ -130,7 +130,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // tier's loader now rethrows everything, so the one caller that arms a hold and voids
   // the call needs an arm that releases it: a rejection escaping there is a room withheld
   // for ever, which is the frozen room the enhanced tier already documents.
-  ['src/app/art.ts', 672],
+  ['src/app/art.ts', 686],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak

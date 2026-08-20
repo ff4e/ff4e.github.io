@@ -9,7 +9,7 @@
  * right now.
  */
 import { AI_MAP_H, AI_MAP_SCALE, AI_MAP_W } from '../render/worldMapAi.js';
-import { requiredBlob, requiredBytes, requiredJson } from '../render/assetFetch.js';
+import { assetCoolingDown, decodeAsset, isTransient, requiredBlob, requiredBytes, requiredJson } from '../render/assetFetch.js';
 import { DESKA_X_OFFSET, DESKA_Y_OFFSET, blitDeska, parseDesky } from '../data/desky.js';
 import { INFO_SETTLE_FAZE, drawInfoDigits, drawInfoPanel, drawInfoPanelArtAi } from '../render/mapInfo.js';
 import { MAP_H, MAP_W } from '../render/worldMap.js';
@@ -49,8 +49,8 @@ export async function ensureDeskyData(): Promise<void> {
   const popdeskUrl = `/data/Menu/popdesk${n}.dat`;
   const atlasUrl = `/data/Menu/desky${n}.dat`;
   const [popdesk, atlas] = await Promise.all([
-    requiredBytes(popdeskUrl, 'the map name plaques'),
-    requiredBytes(atlasUrl, 'the map name plaques'),
+    requiredBytes(popdeskUrl, 'the map name plaques', 'mustHave'),
+    requiredBytes(atlasUrl, 'the map name plaques', 'mustHave'),
   ]);
   ui.deskyData = parseDesky(popdesk, atlas);
   ui.deskyLang = lang;
@@ -222,11 +222,28 @@ let aiDeskyTried = false;
 const aiDeskyCache = new Map<string, ImageBitmap>();
 const AI_DESKY_CACHE_MAX = 12;
 
+const AI_DESKY_GEOM_URL = '/enhanced-ai/_desky/plaques.json';
+
 export async function ensureAiDeskyGeom(): Promise<void> {
-  if (aiDeskyTried) return;
+  // Asked before entering rather than after being refused: this runs from the map's
+  // draw, and the catch below clears the latch, so without this the repaint after a
+  // failure would re-enter, be refused by the cooldown, and log — every repaint, for the
+  // whole window. See `assetCoolingDown`.
+  if (aiDeskyTried || assetCoolingDown(AI_DESKY_GEOM_URL)) return;
   aiDeskyTried = true;
-  const url = '/enhanced-ai/_desky/plaques.json';
-  aiDeskyGeom = (await requiredJson<{ plaques: typeof aiDeskyGeom }>(url, 'the AI map name plaques')).plaques ?? null;
+  const url = AI_DESKY_GEOM_URL;
+  try {
+    aiDeskyGeom = (await requiredJson<{ plaques: typeof aiDeskyGeom }>(url, 'the AI map name plaques', 'niceToHave')).plaques ?? null;
+  } catch (e) {
+    // A FAILED load is not remembered — the rule from #66, and the reason the flag is
+    // cleared here rather than only set above. `aiDeskyTried` exists to stop the draw
+    // path asking again on every frame, which is right for an ANSWER; leaving it set
+    // after a blip would lock the map out of its upscaled plaques for the whole session
+    // with the setting still saying `ai`. The next hover asks again, and the per-URL
+    // cooldown in assetFetch.ts is what stops that becoming a request per mouse move.
+    if (isTransient(e)) aiDeskyTried = false;
+    throw e;
+  }
   ui.mapSig = null; // repaint now that plaques can be drawn hi-res
 }
 
@@ -244,11 +261,15 @@ export function aiPlaqueFor(room: number): { bmp: ImageBitmap; x: number; y: num
 
 const aiPlaqueLoading = new Set<string>();
 export async function loadAiPlaque(key: string): Promise<void> {
-  if (aiPlaqueLoading.has(key)) return;
+  const url = `/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`;
+  // Same reason as `ensureAiDeskyGeom`: nothing remembers a failed plaque, so the next
+  // repaint asks again, and the cooldown is what makes that safe — but only if it is
+  // CONSULTED rather than thrown from. A hovered plaque repaints ~7x/s.
+  if (aiPlaqueLoading.has(key) || assetCoolingDown(url)) return;
   aiPlaqueLoading.add(key);
   try {
-    const url = `/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`;
-    const bmp = await createImageBitmap(await requiredBlob(url, 'an AI map name plaque'));
+    const blob = await requiredBlob(url, 'an AI map name plaque', 'niceToHave');
+    const bmp = await decodeAsset(url, 'niceToHave', () => createImageBitmap(blob));
     aiDeskyCache.set(key, bmp);
     while (aiDeskyCache.size > AI_DESKY_CACHE_MAX) {
       const oldest = aiDeskyCache.keys().next().value as string | undefined;
@@ -259,9 +280,19 @@ export async function loadAiPlaque(key: string): Promise<void> {
     ui.mapSig = null; // the plaque can now be drawn hi-res
     wake();
   } finally {
-    // The `finally` stays and the `catch` goes: the in-flight set must be cleaned up
-    // however this ends, but "leave the native plaque in place" is exactly the quiet
-    // half-upscaled map the all-or-nothing rule exists to stop.
+    // The `finally` and no `catch`: the in-flight set must be cleaned up however this
+    // ends, and a failure is left to fall out as an unhandled rejection ON PURPOSE —
+    // `niceToHave`, so `loadingUi.ts` swallows it after logging. That is the whole
+    // difference from the all-or-nothing version of this function, which had the same
+    // shape and ended the session.
+    //
+    // It has to be this tier and nothing higher. This runs from `aiPlaqueFor`, which
+    // runs from the map's DRAW: hovering a room node starts a fetch, and 140 rooms at ×4
+    // would be ~30 MB to hold, so plaques are deliberately fetched and evicted on demand.
+    // Make this fatal and moving the mouse across the world map can end the session —
+    // which it did. The native plaque stays on screen meanwhile, which is a visible loss
+    // of tier and exactly the thing `shouldHave` is for, but a note that appears because
+    // the pointer passed over a room is not information, it is an interruption.
     aiPlaqueLoading.delete(key);
   }
 }

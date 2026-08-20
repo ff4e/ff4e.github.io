@@ -145,9 +145,11 @@ await withApp(
       (await p.evaluate(() => window.__ff.fatalShown())) === true,
       'the game stops and says the artwork would not load',
     );
+    // The screen is generic now (see failAssets); the NAME is in the log, which is
+    // where a bug report reads it from.
     expect(
-      /artwork/i.test(await p.evaluate(() => window.__ff.fatalText())),
-      `the message names what failed: "${await p.evaluate(() => window.__ff.fatalText())}"`,
+      allowed.some((t) => /artwork/i.test(t)),
+      'the log names what failed, even though the screen does not',
     );
     // ...and it does NOT paint the room underneath in the meantime: the hold stays on, so
     // there is never a frame of the tier below on screen.
@@ -257,6 +259,6 @@ await withApp(
   {
     graphics: 'ai',
     // The aborted fetches Chromium reports for the requests this probe kills on purpose.
-    allowErrors: /ERR_CONNECTION_FAILED|Failed to load resource/,
+    allowErrors: /asset failed|room entry failed|ERR_CONNECTION_FAILED|Failed to load resource/,
   },
 );

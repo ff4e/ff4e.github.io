@@ -441,7 +441,7 @@ export class AudioEngine {
         // starting music only after the room's art (see loadRoom); this is the backstop
         // for every other caller — notably the menu music, which competes with the
         // world map's own assets.
-        const bytes = await requiredBytes(url, 'the music', { init: { priority: 'low' } as RequestInit });
+        const bytes = await requiredBytes(url, 'the music', 'mustHave', { init: { priority: 'low' } as RequestInit });
         buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
       } catch (e) {
         // Is this start still the one that should sound? Asked BEFORE the release, which
@@ -657,7 +657,7 @@ export class AudioEngine {
         }
       }
       if (!buf) {
-        const bytes = await requiredBytes(url, 'the music', { init: { priority: 'low' } as RequestInit });
+        const bytes = await requiredBytes(url, 'the music', 'mustHave', { init: { priority: 'low' } as RequestInit });
         // WAV loop point is in samples at the file's native rate (header @ offset 24).
         const nativeRate = new DataView(bytes.buffer as ArrayBuffer).getUint32(24, true) || 22050;
         buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);

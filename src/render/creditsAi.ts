@@ -58,8 +58,8 @@ interface AiCreditsManifest { scale?: number; files?: string[] }
  * console line. The two elements live for the session, so the URLs are not revoked.
  */
 async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
-  const blob = await requiredBlob(url, what);
-  return decodeAsset(url, async () => {
+  const blob = await requiredBlob(url, what, 'shouldHave');
+  return decodeAsset(url, 'shouldHave', async () => {
     const img = new Image();
     await new Promise<void>((ok, fail) => {
       img.onload = () => ok();
@@ -80,7 +80,7 @@ async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
 export async function loadAiCredits(base: string): Promise<AiCredits> {
   {
     const dir = `${base}enhanced-ai/_credits/`;
-    const man = await requiredJson<AiCreditsManifest>(`${dir}ai.json`, 'the AI credits');
+    const man = await requiredJson<AiCreditsManifest>(`${dir}ai.json`, 'the AI credits', 'shouldHave');
     const scale = Number(man.scale) || AI_CREDITS_SCALE;
     const [stat, mov] = await Promise.all([
       loadImage(`${dir}stat.webp`, 'the AI credits'),

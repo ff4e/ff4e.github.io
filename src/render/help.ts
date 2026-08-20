@@ -10,6 +10,7 @@
  */
 import { parseBmp, bmpToRgba } from '../data/bmp.js';
 import { requiredBytes, requiredText } from './assetFetch.js';
+import { hideLoadNote } from '../app/loadNote.js';
 
 export interface HelpPage {
   rgba: Uint8ClampedArray;
@@ -35,16 +36,21 @@ export class HelpScreens {
     const cached = this.byLang.get(lang);
     if (cached) return cached;
     const indexUrl = `/data/Help/${lang === 'cz' ? 'helpy.txt' : 'helps.txt'}`;
-    const text = await requiredText(indexUrl, 'the help pages');
+    const text = await requiredText(indexUrl, 'the help pages', 'shouldHave');
     const files = HelpScreens.parseIndex(text);
     const pages = await Promise.all(
       files.map(async (f) => {
         const url = `/data/Help/${f}`;
-        const bmp = parseBmp(await requiredBytes(url, 'the help pages'));
+        const bmp = parseBmp(await requiredBytes(url, 'the help pages', 'shouldHave'));
         return { rgba: bmpToRgba(bmp), w: bmp.w, h: bmp.h };
       }),
     );
     this.byLang.set(lang, pages);
+    // The note is scoped by the same player-facing name it was raised with, so a
+    // natural retry — closing the help and opening it again — takes it down. Without
+    // this the scoping in `hideLoadNote` was unreachable: nothing ever called it with a
+    // subject, so a stale complaint outlived the thing it was complaining about.
+    hideLoadNote('the help pages');
     return pages;
   }
 

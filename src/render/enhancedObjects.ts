@@ -68,9 +68,9 @@ export async function loadEnhancedObjects(
   const url = `${dir}objects.json`;
   // Optional: a room with no staged object sprites ships no manifest, and that is the
   // design. (`expect` also screens out the dev server's index.html-with-200 fallback.)
-  const res = await optionalAsset(url, { expect: 'json' });
+  const res = await optionalAsset(url, 'mustHave', { expect: 'json' });
   if (!res) return [];
-  const manifest = await assetJson<{ objects?: ObjManifestEntry[] }>(url, res);
+  const manifest = await assetJson<{ objects?: ObjManifestEntry[] }>(url, res, 'mustHave');
   const entries = manifest.objects ?? [];
   // One entry at a time was a per-object round trip: with the AI loads parallelised
   // this waterfall became the thing the first frame waits on (2.2s at a 150ms RTT
@@ -87,7 +87,7 @@ export async function loadEnhancedObjects(
             // promised this file. A sprite the manifest never mentions is a gap by
             // design and is never fetched at all; one it lists and the server does not
             // have is a broken build, and the difference is the whole point of the split.
-            return decodePng(await requiredAsset(url, `an enhanced sprite for ${jmeno}`, { expect: 'image' }));
+            return decodePng(await requiredAsset(url, `an enhanced sprite for ${jmeno}`, 'mustHave', { expect: 'image' }));
           }),
         ),
       );

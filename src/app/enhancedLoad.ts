@@ -21,6 +21,7 @@
  * it, one blip on one sprite cost a room its background masters for the session.
  */
 import type { EnhancedArt, EnhancedObject, EnhancedSprite } from '../render/enhancedArtSource.js';
+import type { AssetTier } from '../render/assetFetch.js';
 import { TransientAssetError, assetBlob, decodeAsset, optionalAsset } from '../render/assetFetch.js';
 import { loadEnhancedObjects } from '../render/enhancedObjects.js';
 
@@ -38,9 +39,9 @@ export interface RoomEnhanced {
  * file are indistinguishable to a decoder, and the two mistakes do not cost the same —
  * see `decodeAsset`.
  */
-export async function decodePngResponse(res: Response): Promise<EnhancedSprite> {
-  return decodeAsset(res.url, async () => {
-    const bmp = await createImageBitmap(await assetBlob(res.url, res));
+export async function decodePngResponse(res: Response, tier: AssetTier): Promise<EnhancedSprite> {
+  return decodeAsset(res.url, tier, async () => {
+    const bmp = await createImageBitmap(await assetBlob(res.url, res, tier));
     const w = bmp.width;
     const h = bmp.height;
     const off = document.createElement('canvas');
@@ -69,25 +70,25 @@ export async function loadEnhancedRoom(jmeno: string): Promise<RoomEnhanced> {
   // ship no enhanced background at all, so a 404 here is the design answering, not a
   // fault. It also screens out the dev server's SPA fallback (index.html, HTTP 200).
   const [w, p] = await Promise.all([
-    optionalAsset(`${dir}w.png`, { expect: 'image' }),
-    optionalAsset(`${dir}p.png`, { expect: 'image' }),
+    optionalAsset(`${dir}w.png`, 'mustHave', { expect: 'image' }),
+    optionalAsset(`${dir}p.png`, 'mustHave', { expect: 'image' }),
   ]);
   let art: EnhancedArt | null = null;
   if (w && p) {
-    const [wall0, bg0] = await Promise.all([decodePngResponse(w), decodePngResponse(p)]);
+    const [wall0, bg0] = await Promise.all([decodePngResponse(w, 'mustHave'), decodePngResponse(p, 'mustHave')]);
     if (wall0.w === bg0.w && wall0.h === bg0.h) {
       // Additional animation frames (STEEL red-alert): w1.png/p1.png, w2.png/p2.png…
       const walls = [wall0.rgba];
       const bgs = [bg0.rgba];
       for (let f = 1; ; f++) {
         const [wf, pf] = await Promise.all([
-          optionalAsset(`${dir}w${f}.png`, { expect: 'image' }),
-          optionalAsset(`${dir}p${f}.png`, { expect: 'image' }),
+          optionalAsset(`${dir}w${f}.png`, 'mustHave', { expect: 'image' }),
+          optionalAsset(`${dir}p${f}.png`, 'mustHave', { expect: 'image' }),
         ]);
         // The end of the sequence is a 404 BY DESIGN — that is how the frame count is
         // discovered — so this loop is the one place a missing file means "done".
         if (!wf || !pf) break;
-        const [wd, pd] = await Promise.all([decodePngResponse(wf), decodePngResponse(pf)]);
+        const [wd, pd] = await Promise.all([decodePngResponse(wf, 'mustHave'), decodePngResponse(pf, 'mustHave')]);
         if (wd.w !== wall0.w || wd.h !== wall0.h || pd.w !== wall0.w || pd.h !== wall0.h) break;
         walls.push(wd.rgba);
         bgs.push(pd.rgba);
@@ -95,5 +96,5 @@ export async function loadEnhancedRoom(jmeno: string): Promise<RoomEnhanced> {
       art = { w: wall0.w, h: wall0.h, wall: walls, bg: bgs };
     }
   }
-  return { art, objects: await loadEnhancedObjects('/', jmeno, decodePngResponse) };
+  return { art, objects: await loadEnhancedObjects('/', jmeno, (r) => decodePngResponse(r, 'mustHave')) };
 }

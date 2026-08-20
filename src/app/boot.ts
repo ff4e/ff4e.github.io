@@ -50,7 +50,7 @@ let host!: BootHost;
 
 /** Fetch + parse one of boot's 1998 bitmaps. Every one of them is required. */
 async function bootBmp(url: string, what: string): Promise<Bmp> {
-  return parseBmp(await requiredBytes(url, what));
+  return parseBmp(await requiredBytes(url, what, 'mustHave'));
 }
 
 /** Hand this module its view of the game. Called once, from `main.ts`, during boot. */
@@ -84,12 +84,12 @@ export async function runBoot(): Promise<void> {
     ];
     await Promise.all(
       faces.map(async ([family, url, weight]) => {
-        const bytes = await requiredBytes(url, 'the subtitle fonts');
+        const bytes = await requiredBytes(url, 'the subtitle fonts', 'mustHave');
         const face = new FontFace(family, bytes.buffer as ArrayBuffer, { weight });
         // A font that arrived and will not parse is a broken build, but it is
         // indistinguishable here from a truncated download — the same guess `decodeAsset`
         // makes for images, and for the same reason.
-        document.fonts.add(await decodeAsset(url, () => face.load()));
+        document.fonts.add(await decodeAsset(url, 'mustHave', () => face.load()));
       }),
     );
     setSubFontReady(true);
@@ -97,7 +97,7 @@ export async function runBoot(): Promise<void> {
   // Control-panel overlay graphic (TOvl / panel.ffp).
   setLoadingMsg('Loading graphics…');
   const panelUrl = '/data/Menu/panel.ffp';
-  ui.panel = parseFfp(await requiredBytes(panelUrl, 'the control panel'));
+  ui.panel = parseFfp(await requiredBytes(panelUrl, 'the control panel', 'mustHave'));
   // World map assets (mapa-0/mapa-1/maska + node sprites n0..n4).
   {
     const files = ['mapa-0.BMP', 'mapa-1.BMP', 'maska.BMP', 'n0.BMP', 'n1.BMP', 'n2.BMP', 'n3.BMP', 'n4.BMP'];
