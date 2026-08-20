@@ -758,6 +758,15 @@ itself is cheap (3–8 ms for a 2.5 s line); it is the asynchrony that cannot be
 time. Each buffer is trimmed to `delka`, because AAC decodes up to 1023 samples long and
 `activeUntil` is taken from `buf.duration`.
 
+**What it costs in memory.** `decodeAudioData` returns float32 at the context's rate, where
+the old path built int16-derived buffers at 22050 — so decoded speech is ~4× the samples.
+A room holds its own package while it is open (12.4 MiB median, **52.4 MiB** for KUFRIK,
+dropped on exit), and the global packages are held for the whole session: x03 27.9 + x02
+16.6 + restored 1.0 MiB from boot, plus x01 4.1 MiB after the first leg-final room. Peak
+**~102 MiB**, in KUFRIK. That is a 10× change in steady-state audio residency and it is the
+price of a synchronous voice start; `src/audio/ffs2Decode.ts` carries the full accounting
+and the one lever that was deliberately not pulled.
+
 `--verify` is explicit about what it can and cannot prove. It gates on **alignment** (no
 shift in ±64 samples fits better than none), on **shape** (short-time RMS envelopes match
 at better than 0.97 — which is what catches a segment decoded from the wrong offset, and

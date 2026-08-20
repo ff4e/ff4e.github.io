@@ -196,7 +196,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // this file's job: `Pkg` gains its decoded buffers, so dropping a room's package drops
   // its ~13 MB of speech with it, and `cache` narrows to the one package that still ships
   // as the 1998 `.ffs`.
-  ['src/audio/audio.ts', 830],
+  //
+  // 830 -> 850 for the prepare/install seam, which is a correctness fix rather than a
+  // feature: installing a package used to be synchronous, so the caller's "is this still
+  // the room the player is in?" check was the last word. Decoding on the way in put
+  // 50-100 ms between that check and the install, in which a slow room A could replace
+  // the package room B had already installed. `prepare` returns a decoded package and
+  // `installRoom` puts it in place without yielding, so the check is the last word again.
+  ['src/audio/audio.ts', 850],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

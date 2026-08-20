@@ -16,12 +16,46 @@
  * 1998 `.ffs` path does. It is the ASYNCHRONY that cannot be had at play time, so it is
  * paid where the package is installed — a room entry that already waits for the download.
  *
- * ── What it costs ─────────────────────────────────────────────────────────────
+ * ── What it costs, at the peak rather than the median ─────────────────────────
  * A decoded buffer is float32 at the CONTEXT's rate (44100 or 48000, it varies by
- * machine), where the `.ffs` path builds int16-derived buffers at 22050. So a room holds
- * ~13 MB of decoded speech while it is open, against ~7 MB if every line in it had been
- * played on the old path. It does not accumulate: the buffers live on the package, and
- * `setRoom` / `clearRoom` drop the room's package.
+ * machine), where the `.ffs` path builds int16-derived buffers at 22050. So the memory is
+ * ~4x the samples — the identical audio in the old form is ~25 MiB, not ~100 — and the
+ * honest numbers are the worst ones, not the typical. Measured from the committed `.fft`
+ * `delka` sums at 48 kHz:
+ *
+ *   - a ROOM holds its whole package while it is open: **12.4 MiB** for the median room,
+ *     but **52.4 MiB** for KUFRIK (49 sounds, 286 s), then 46.7 / 44.2 / 36.8 for
+ *     019 / 017 / 021. This does not accumulate — the buffers live on the package, and
+ *     `installRoom`/`clearRoom` drop the room's.
+ *   - the GLOBAL packages never come back, and this is the part that is genuinely new:
+ *
+ *         x03  fish chatter (ob-*)        27.9 MiB   from boot
+ *         x02  death commentary (smrt-*)  16.6 MiB   from boot
+ *         restored (2 lines)               1.0 MiB   from boot
+ *         x01  leg-final remarks (cil-*)   4.1 MiB   from the first depth-15 room
+ *
+ *     45.4 MiB once boot finishes, 49.5 MiB after a leg-final room, and never less again:
+ *     `AudioEngine.globals` is only ever pushed to and has no removal path. Before this
+ *     change they decoded lazily into a shared cache that `setRoom` CLEARED on every room
+ *     change, so steady state was near zero and a line was re-decoded (~1 ms, from the
+ *     delta codec, synchronously) the next time it played.
+ *
+ * Peak decoded speech is therefore **~102 MiB**, in KUFRIK, against a few MB transient
+ * before — a 10x change in steady-state audio residency.
+ *
+ * ── The lever that was NOT pulled ─────────────────────────────────────────────
+ * That cheap re-decode is exactly what AAC took away: `decodeAudioData` is async, so it
+ * cannot happen at play time, so the buffers have to be kept. The 4x, though, is format
+ * and not content — decoding the GLOBALS on a context pinned to 22050 Hz would take 49.5
+ * to ~25 MiB and the peak to ~75, without touching the room path or the synchronous-start
+ * guarantee.
+ *
+ * It is deliberately not done here. It buys memory nobody has reported wanting, at the
+ * cost of a second AudioContext at a non-native rate and of trusting `decodeAudioData`'s
+ * resampling — one more browser behaviour to verify, on the one path in this game that
+ * has no fallback. The measurement above is written down so the trade can be re-opened
+ * with numbers rather than re-derived; `tools/test-voices.mjs` is where it would be
+ * proved.
  */
 import { FFS_SAMPLE_RATE } from './ffs.js';
 import { parseFfs2 } from './ffs2.js';
@@ -45,9 +79,10 @@ import type { FftEntry } from '../data/fft.js';
  * reason the probe measures it rather than trusting it.
  *
  * The count is in the 1998 data's rate, the buffer is at the context's, hence the ratio.
- * A decode is never SHORTER than its `delka` — `--verify` asserts that over all 1 797
- * sounds, because trimming a short decode would splice silence into the end of a spoken
- * line — but this clamps anyway rather than reading past the end.
+ * The `Math.min` is not decoration: exactly one of the 1 797 shipped sounds decodes SHORT
+ * through ffmpeg (`011/deu-m-bojovat`, by 10 samples of -51 dBFS silence, which `--verify`
+ * gate 3 allows on purpose). Without the clamp that would be a read past the end; with it,
+ * the buffer is simply as long as the decode really was.
  */
 export function trimToSamples(ctx: BaseAudioContext, buf: AudioBuffer, samples: number): AudioBuffer {
   const want = Math.min(buf.length, Math.round((samples * ctx.sampleRate) / FFS_SAMPLE_RATE));
@@ -74,8 +109,16 @@ export async function decodeFfs2(
   // gain, inside a room entry the player is waiting on.
   await Promise.all(
     [...entries.values()].map(async (e) => {
+      // An empty record is legitimate; a record with no segment is not. The two used to
+      // share one `return`, which fails OPEN in the worst way this codebase knows: `has()`,
+      // `hasPackaged()`, `entry()` and `duration()` all read `entries`, so the sound still
+      // reports as present and the right length, and only `buffer()` comes back null — the
+      // line plays silently, the subtitle shows, and the dialogue advances over it. That is
+      // "a room played through mute with nothing said", which the asset tiers exist to make
+      // impossible. `parseFfs2` throws on every other structural disagreement; so does this.
+      if (e.delka <= 0) return;
       const seg = index.segments.get(e.zvuk);
-      if (!seg || e.delka <= 0) return;
+      if (!seg) throw new Error(`sound package has no segment for ${e.name} (zvuk=${e.zvuk})`);
       // `slice`, not `subarray`: `decodeAudioData` DETACHES the ArrayBuffer it is given,
       // which for a view onto the package would take every other segment with it.
       const ab = body.buffer.slice(

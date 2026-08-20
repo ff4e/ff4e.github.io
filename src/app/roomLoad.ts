@@ -186,7 +186,7 @@ export async function loadRoom(num: number): Promise<void> {
     // AAC (tools/stage-music.ts, ~5x) and the voices as AAC segments inside their `.ffs2`
     // packages (tools/stage-voices.ts, 4.9x) — which puts a typical entry near 1.6 MB.
     // The voices' decode is paid here too: installing the package decodes all of it, for
-    // the reason `AudioEngine.decodeSegments` gives.
+    // the reason `decodeFfs2` (src/audio/ffs2Decode.ts) gives.
     setRoomAudioPending(bootLoad ? 0 : num);
     const audioDone = bootLoad ? Promise.resolve() : art.then(() => loadRoomAudio(num, nnn, fftBytes));
     // …and the same treatment for what the room's PLAY can demand: KUFRIK's briefcase
@@ -449,15 +449,15 @@ export async function loadRoomVoices(num: number, nnn: string, fftBytes: Uint8Ar
   }
   const buf = await pending;
   if (curNum !== num) return;
-  // Installing the package decodes all of it (AudioEngine.decodeSegments), so this
-  // awaits — and the room test is asked AGAIN afterwards, because the decode is another
-  // window in which the player can leave and a stale package must not be announced as
-  // this room's. `setRoom` has already replaced `roomPkg` by then; that is the same
-  // "applied to the wrong room" window the fetch above always had, and it self-corrects
-  // on the next entry. What must not happen is `roomVoicesSettled` releasing the
-  // dialogue queue for a room nobody is in.
-  await audio.setRoom(nnn, fftBytes, buf);
+  // Decoded first, installed second, with the room test in between — because installing a
+  // staged package decodes all of it (AudioEngine.prepare) and that is 50-100 ms in which
+  // the player can enter a DIFFERENT room. Before the voices were compressed the install
+  // was synchronous, so the check above was the last word; it is not any more. A late
+  // arrival for room A landing on top of room B's package would leave B's every line
+  // resolving to nothing, silently, and only for a player who moved quickly.
+  const pkg = await audio.prepare(nnn, fftBytes, buf);
   if (curNum !== num) return;
+  audio.installRoom(pkg); // synchronous: nothing can get between this and the check
   roomVoicesSettled = true;
   markVoicesSettled();
   wake(); // the dialogue queue was held on this; let it run on the next frame

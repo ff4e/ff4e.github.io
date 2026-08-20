@@ -120,16 +120,34 @@ export class AudioEngine {
 
   /** A persistent global package (e.g. x00 effects). */
   async loadGlobal(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<void> {
-    this.globals.push(await this.makePkg(id, fftBytes, body));
+    this.globals.push(await this.prepare(id, fftBytes, body));
   }
 
-  /** The current room's sound package; replaces the previous room's. */
-  async setRoom(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<void> {
-    // Decoded BEFORE the old package is dropped, so a failure leaves the room with the
-    // sound it had rather than with none: `roomPkg` is only replaced once there is
-    // something to replace it with.
-    this.roomPkg = await this.makePkg(id, fftBytes, body);
+  /**
+   * Decode a package WITHOUT installing it.
+   *
+   * The seam exists because installing used to be synchronous and no longer is: a staged
+   * package is decoded on the way in, and the caller's "is this still the room the player
+   * is in?" test has to be the last thing that happens before the install, not something
+   * separated from it by 50-100 ms of `decodeAudioData`. Otherwise a slow room A can
+   * finish decoding after room B has installed its own package, and quietly replace it —
+   * leaving the player in a room whose every line resolves to nothing.
+   *
+   * So `roomLoad` awaits this, re-checks, and then calls `installRoom`, which cannot yield.
+   */
+  prepare(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<Pkg> {
+    return this.makePkg(id, fftBytes, body);
+  }
+
+  /** Install a prepared package as the current room's. Synchronous, deliberately. */
+  installRoom(pkg: Pkg): void {
+    this.roomPkg = pkg;
     this.cache.clear();
+  }
+
+  /** Prepare and install in one step — for callers with no room to race against. */
+  async setRoom(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<void> {
+    this.installRoom(await this.prepare(id, fftBytes, body));
   }
 
   /**
@@ -173,9 +191,11 @@ export class AudioEngine {
    * until the new package lands, a lookup misses and falls back to the globals
    * rather than playing the PREVIOUS room's sample under the new room.
    *
-   * Dropping the package drops its decoded segments with it, which is how the ~13 MB a
+   * Dropping the package drops its decoded segments with it, which is how the 13-52 MB a
    * staged room decodes to (the AudioBuffers are float32 at the context's rate, not
-   * int16 at 22050) stays a per-room cost rather than an accumulating one.
+   * int16 at 22050; KUFRIK is the 52) stays a per-room cost rather than an accumulating
+   * one. See `ffs2Decode.ts` for the full accounting, including what the GLOBAL packages
+   * retain for the session — that part is new, and it is the larger half.
    */
   clearRoom(): void {
     this.roomPkg = null;

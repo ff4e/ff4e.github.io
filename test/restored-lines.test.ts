@@ -387,6 +387,23 @@ describe('AudioEngine package lifetimes', () => {
     expect(a.entry('cil-m-hlaska0')?.name).toBe('cil-m-hlaska0');
   });
 
+  it('prepares a package without installing it — the seam a room entry needs', async () => {
+    // The property the prepare/install split exists for. Installing a staged package
+    // DECODES it, which yields, so a room entry has to be able to make its final
+    // "is the player still coming here?" check with nothing left to yield afterwards.
+    // If `prepare` ever installed as a side effect, a slow room A would land on top of
+    // room B's package and B would go silent — invisibly, and only for a fast player.
+    const a = new AudioEngine();
+    await a.setRoom('025', roomFft, roomFfs);
+    const other = await a.prepare('x01', globFft, globFfs);
+    expect(a.roomLoaded).toBe(true);
+    expect(a.entry('pyr-m-kam')?.name).toBe('pyr-m-kam'); // still 025's
+    expect(a.entry('cil-m-hlaska0')).toBeUndefined(); // prepare installed nothing
+    a.installRoom(other);
+    expect(a.entry('cil-m-hlaska0')?.name).toBe('cil-m-hlaska0');
+    expect(a.entry('pyr-m-kam')).toBeUndefined();
+  });
+
   it('carries the subtitle on the same record as the sample', async () => {
     // Why nothing needs a second parsed copy of an FFT to render a line.
     const a = new AudioEngine();

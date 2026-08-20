@@ -128,8 +128,9 @@ export async function runBoot(): Promise<void> {
   // ALTAR shipped, and the player is the last person able to notice that. Kept
   // sequential, as before: they are large, and the boot path is what the UI probes'
   // 5 s budget is measured against. Each is also DECODED here (x00 excepted, which is
-  // still the 1998 `.ffs` and decodes per sound on use) — see AudioEngine.decodeSegments
-  // for why every segment, up front, rather than on first play.
+  // still the 1998 `.ffs` and decodes per sound on use) — see `decodeFfs2`
+  // (src/audio/ffs2Decode.ts) for why every segment, up front, rather than on first play,
+  // and for what it retains: x03 + x02 are ~45 MB of AudioBuffers held for the session.
   const GLOBAL_PKGS: ReadonlyArray<[string, string]> = [
     ['x00', 'the sound effects'],
     ['x03', 'the fish chatter'],
