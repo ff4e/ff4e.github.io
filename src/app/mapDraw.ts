@@ -9,7 +9,7 @@
  * right now.
  */
 import { AI_MAP_H, AI_MAP_SCALE, AI_MAP_W } from '../render/worldMapAi.js';
-import { isTransient, requiredBlob, requiredBytes, requiredJson } from '../render/assetFetch.js';
+import { assetCoolingDown, decodeAsset, isTransient, requiredBlob, requiredBytes, requiredJson } from '../render/assetFetch.js';
 import { DESKA_X_OFFSET, DESKA_Y_OFFSET, blitDeska, parseDesky } from '../data/desky.js';
 import { INFO_SETTLE_FAZE, drawInfoDigits, drawInfoPanel, drawInfoPanelArtAi } from '../render/mapInfo.js';
 import { MAP_H, MAP_W } from '../render/worldMap.js';
@@ -222,10 +222,16 @@ let aiDeskyTried = false;
 const aiDeskyCache = new Map<string, ImageBitmap>();
 const AI_DESKY_CACHE_MAX = 12;
 
+const AI_DESKY_GEOM_URL = '/enhanced-ai/_desky/plaques.json';
+
 export async function ensureAiDeskyGeom(): Promise<void> {
-  if (aiDeskyTried) return;
+  // Asked before entering rather than after being refused: this runs from the map's
+  // draw, and the catch below clears the latch, so without this the repaint after a
+  // failure would re-enter, be refused by the cooldown, and log — every repaint, for the
+  // whole window. See `assetCoolingDown`.
+  if (aiDeskyTried || assetCoolingDown(AI_DESKY_GEOM_URL)) return;
   aiDeskyTried = true;
-  const url = '/enhanced-ai/_desky/plaques.json';
+  const url = AI_DESKY_GEOM_URL;
   try {
     aiDeskyGeom = (await requiredJson<{ plaques: typeof aiDeskyGeom }>(url, 'the AI map name plaques', 'niceToHave')).plaques ?? null;
   } catch (e) {
@@ -255,11 +261,15 @@ export function aiPlaqueFor(room: number): { bmp: ImageBitmap; x: number; y: num
 
 const aiPlaqueLoading = new Set<string>();
 export async function loadAiPlaque(key: string): Promise<void> {
-  if (aiPlaqueLoading.has(key)) return;
+  const url = `/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`;
+  // Same reason as `ensureAiDeskyGeom`: nothing remembers a failed plaque, so the next
+  // repaint asks again, and the cooldown is what makes that safe — but only if it is
+  // CONSULTED rather than thrown from. A hovered plaque repaints ~7x/s.
+  if (aiPlaqueLoading.has(key) || assetCoolingDown(url)) return;
   aiPlaqueLoading.add(key);
   try {
-    const url = `/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`;
-    const bmp = await createImageBitmap(await requiredBlob(url, 'an AI map name plaque', 'niceToHave'));
+    const blob = await requiredBlob(url, 'an AI map name plaque', 'niceToHave');
+    const bmp = await decodeAsset(url, 'niceToHave', () => createImageBitmap(blob));
     aiDeskyCache.set(key, bmp);
     while (aiDeskyCache.size > AI_DESKY_CACHE_MAX) {
       const oldest = aiDeskyCache.keys().next().value as string | undefined;

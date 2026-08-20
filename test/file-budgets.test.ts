@@ -76,7 +76,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `src/render/indexedRegion.ts`, because it is mechanism and the rest of this file is
   // the cutscene machine. What is left is the decision and its reasoning, which has to
   // sit at the branch it explains.
-  ['src/app/cutscene.ts', 573],
+  ['src/app/cutscene.ts', 588],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
   // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine
@@ -130,7 +130,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // tier's loader now rethrows everything, so the one caller that arms a hold and voids
   // the call needs an arm that releases it: a rejection escaping there is a room withheld
   // for ever, which is the frozen room the enhanced tier already documents.
-  ['src/app/art.ts', 675],
+  ['src/app/art.ts', 686],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak

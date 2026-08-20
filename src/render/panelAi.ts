@@ -22,7 +22,7 @@ import {
   type PanelState, type OptionsState,
 } from './hud.js';
 import { PANEL_IMAGES, CUDL_SIZE } from '../data/ffp.js';
-import { requiredAsset, requiredBlob, requiredJson } from './assetFetch.js';
+import { decodeAsset, requiredAsset, requiredBlob, requiredJson } from './assetFetch.js';
 
 /** Upscale factor of the shipped panel art when its manifest doesn't say. */
 export const AI_PANEL_SCALE = 4;
@@ -73,7 +73,8 @@ export async function loadAiPanel(base: string): Promise<AiPanel> {
     const man = await requiredJson<AiPanelManifest>(`${dir}ai.json`, 'the AI control panel', 'mustHave');
     const scale = Number(man.scale) || AI_PANEL_SCALE;
     const bmp = async (name: string): Promise<ImageBitmap> =>
-      createImageBitmap(await requiredBlob(dir + name, 'the AI control panel', 'mustHave'));
+      decodeAsset(dir + name, 'mustHave', async () =>
+        createImageBitmap(await requiredBlob(dir + name, 'the AI control panel', 'mustHave')));
     const images = await Promise.all(
       Array.from({ length: PANEL_IMAGES }, (_, i) => bmp(`img${String(i).padStart(2, '0')}.webp`)),
     );

@@ -259,6 +259,6 @@ await withApp(
   {
     graphics: 'ai',
     // The aborted fetches Chromium reports for the requests this probe kills on purpose.
-    allowErrors: /asset failed|ERR_CONNECTION_FAILED|Failed to load resource/,
+    allowErrors: /asset failed|room entry failed|ERR_CONNECTION_FAILED|Failed to load resource/,
   },
 );

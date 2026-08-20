@@ -91,7 +91,12 @@ const MUST_HAVE_CENSUS: Record<string, number> = {
   'src/render/enhancedObjects.ts': 3, // the room's object sprites
   'src/render/roomAi.ts': 5, // the room's AI art, its manifest and the AI fish
   // ── Always on screen, or the thing the player is looking at ─────────────────
-  'src/render/panelAi.ts': 2, // the AI control panel
+  // The AI control panel: manifest, image, decode. Fatal is a DELIBERATE choice and the
+  // weakest must-have in this list — nothing holds a frame for it, so a failure would
+  // otherwise draw the faithful panel while the setting still said "AI upscaled", which
+  // is the middle tier's own description. It stays fatal because the panel is on screen
+  // for the whole game and is latched to a deliberate tier switch, not to a gesture.
+  'src/render/panelAi.ts': 3,
   'src/render/worldMapAi.ts': 2, // the AI world map itself
   // ── A cutscene the player started ───────────────────────────────────────────
   'src/app/cutscene.ts': 3, // the briefcase demonstration and the KUFRIK demonstration

@@ -158,6 +158,29 @@ const CASES = [
     reach: async (p) => {
       for (const ch of 'xtetris') await p.keyboard.press(ch);
     },
+    // The note is not the whole claim here. `tetrisPending` makes the game modal from the
+    // instant the cheat fires — it freezes the loop and swallows input — and only the
+    // SUCCESS path used to clear it, so a failed load left the player in an empty modal
+    // with no way out. Asserting the note alone passed happily while that was true.
+    also: async (p, expect) =>
+      expect(!(await p.evaluate(() => window.__ff.tetrisModal())), 'minigame: the modal came down, so the player is not stranded'),
+  },
+  {
+    // The same asset ABSENT rather than failing, which is the other half of every note:
+    // the wording must not blame the connection, and Try again must NOT be offered for a
+    // permanent answer, because asking again cannot help.
+    tier: 'shouldHave',
+    label: 'minigame',
+    url: '**/data/Intro/all.BMP',
+    how: absent,
+    reach: async (p) => {
+      for (const ch of 'xtetris') await p.keyboard.press(ch);
+    },
+    also: async (p, expect) =>
+      expect(
+        await p.evaluate(() => document.getElementById('load-note-retry')?.hidden === true),
+        'minigame (404): Try again is hidden — a permanent answer cannot be retried away',
+      ),
   },
 ];
 
@@ -177,7 +200,7 @@ await withApp(async ({ p, expect, allowed }) => {
   await p.unroute('**/data/Menu/panel.ffp');
 
   // ── 1. Every asset class, one row at a time ─────────────────────────────────
-  for (const { tier, label, url, reach, how = failing } of CASES) {
+  for (const { tier, label, url, reach, also, how = failing } of CASES) {
     await p.unrouteAll({ behavior: 'ignoreErrors' });
     await how(p, url);
     if (reach) {
@@ -225,8 +248,61 @@ await withApp(async ({ p, expect, allowed }) => {
         : /check your connection/i.test(said),
       `${label}: the wording matches the kind of failure (“${said}”)`,
     );
+    if (also) await also(p, expect);
   }
   await p.unrouteAll({ behavior: 'ignoreErrors' });
+
+  // ── 1b. The retry the middle tier promises actually retries ────────────────
+  // Every row above proved a note APPEARS. None of them pressed the button on it, and a
+  // note whose Try again does nothing is worse than no button: it is the game claiming
+  // a recovery it does not have. Mutation-checked — dropping the retry closure passed
+  // the whole probe before this section existed.
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+  await reloadApp(p);
+  await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  let helpTries = 0;
+  await p.route('**/data/Help/help*.txt', (r) => {
+    helpTries++;
+    return r.abort('failed');
+  });
+  await p.evaluate(() => window.__ff.openHelp());
+  await noteUp(p);
+  expect(
+    await p.evaluate(() => document.getElementById('load-note-retry')?.hidden === false),
+    'a transient should-have offers Try again',
+  );
+  const triesBeforeClick = helpTries;
+  // Repair the route first, so the click has something to succeed at: the strong claim
+  // is not "it issued a request" but "the game recovered without a reload".
+  await p.unroute('**/data/Help/help*.txt');
+  await p.route('**/data/Help/help*.txt', (r) => {
+    helpTries++;
+    return r.continue();
+  });
+  await p.click('#load-note-retry');
+  await p.waitForFunction(() => !window.__ff.loadNoteShown(), null, { timeout: budget(8000) });
+  expect(helpTries > triesBeforeClick, `Try again really re-issues the load (${triesBeforeClick} → ${helpTries})`);
+  expect(!(await p.evaluate(() => window.__ff.loadNoteShown())), 'and the note goes when the load succeeds');
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+
+  // 1c. A note must also come down on a NATURAL retry — the player closing the help and
+  // opening it again — not only via its own button. `hideLoadNote` is scoped by subject
+  // for this, and nothing called the scoped form until the loader did.
+  //
+  // Reloaded first, and that is not tidiness: §1b leaves the help pages CACHED, so
+  // without this the reopen below is answered from `byLang` without a fetch and the
+  // section would be testing the cache rather than the retry.
+  await reloadApp(p);
+  await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  await p.route('**/data/Help/help*.txt', (r) => r.abort('failed'));
+  await p.evaluate(() => window.__ff.openHelp());
+  await noteUp(p);
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+  await p.evaluate(() => window.__ff.closeHelp());
+  await p.evaluate(() => window.__ff.openHelp());
+  await p.waitForFunction(() => !window.__ff.loadNoteShown(), null, { timeout: budget(8000) });
+  expect(true, 'reopening the help after it succeeds clears its own stale note');
+  await p.evaluate(() => window.__ff.closeHelp());
 
   // ── 2. Total outage: everything fails, and nothing hangs ────────────────────
   // With every request dead the game must reach its failure screen rather than sitting on

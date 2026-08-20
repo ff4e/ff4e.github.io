@@ -29,7 +29,7 @@ import type { CapAction } from '../intro/helpCap.js';
 import { KufrDemo } from '../intro/kufrDemo.js';
 import type { AiKufr } from '../intro/kufrDemo.js';
 import { IndexedScreen } from '../render/framebuffer.js';
-import { isTransient, requiredBlob, requiredBytes, requiredJson, requiredText } from '../render/assetFetch.js';
+import { assetCoolingDown, decodeAsset, isTransient, requiredBlob, requiredBytes, requiredJson, requiredText } from '../render/assetFetch.js';
 import { drawIndexedRegion } from '../render/indexedRegion.js';
 import { AI_ROOM_SCALE } from '../render/roomAi.js';
 import { SubtitleSystem } from '../render/subtitles.js';
@@ -400,16 +400,29 @@ const AI_KUFR_CACHE_MAX = 24;
 const aiKufrLoading = new Set<string>();
 let aiKufrRangeWarned = false;
 
+const AI_KUFR_MANIFEST_URL = '/enhanced-ai/_kufr/ai.json';
+const AI_KUFR_BASE_URL = '/enhanced-ai/_kufr/base.webp';
+
+/** Fetch + decode the cutscene's base frame, with the decode classified too. */
+async function decodeKufrBase(what: string): Promise<ImageBitmap> {
+  const blob = await requiredBlob(AI_KUFR_BASE_URL, what, 'niceToHave');
+  return decodeAsset(AI_KUFR_BASE_URL, 'niceToHave', () => createImageBitmap(blob));
+}
+
 export async function ensureAiKufr(): Promise<void> {
-  if (aiKufrTried) return;
+  // Consulted, not thrown from: this is kicked from `drawCutscene`, which runs EVERY
+  // frame, and the catch below clears the latch. Without this the cooldown would bound
+  // the requests and nothing else — ~60 allocated errors, rejections and log lines a
+  // second for the length of the cutscene. See `assetCoolingDown`.
+  if (aiKufrTried || assetCoolingDown(AI_KUFR_MANIFEST_URL)) return;
   aiKufrTried = true;
   const what = 'the AI briefcase cutscene';
-  const manUrl = '/enhanced-ai/_kufr/ai.json';
+  const manUrl = AI_KUFR_MANIFEST_URL;
   type Manifest = { scale: number; region: AiKufr['region']; order: string[]; original?: string[] };
   try {
     const man = await requiredJson<Manifest>(manUrl, what, 'niceToHave');
     aiKufr = {
-      base: await createImageBitmap(await requiredBlob('/enhanced-ai/_kufr/base.webp', what, 'niceToHave')),
+      base: await decodeKufrBase(what),
       scale: Number(man.scale) || AI_ROOM_SCALE,
       region: man.region,
       order: man.order ?? [],
@@ -428,11 +441,13 @@ export function loadAiKufrFrame(name: string): void {
   if (!name || aiKufrFrames.has(name) || aiKufrLoading.has(name)) return;
   // A `"model": "original"` frame ships no upscale, so asking for one is a certain 404.
   if (aiKufr?.original.has(name)) return;
+  const url = `/enhanced-ai/_kufr/frames/${name}`;
+  if (assetCoolingDown(url)) return; // the draw path prefetches five frames per frame
   aiKufrLoading.add(name);
   void (async () => {
     try {
-      const url = `/enhanced-ai/_kufr/frames/${name}`;
-      const bmp = await createImageBitmap(await requiredBlob(url, 'an AI briefcase frame', 'niceToHave'));
+      const blob = await requiredBlob(url, 'an AI briefcase frame', 'niceToHave');
+      const bmp = await decodeAsset(url, 'niceToHave', () => createImageBitmap(blob));
       aiKufrFrames.set(name, bmp);
       while (aiKufrFrames.size > AI_KUFR_CACHE_MAX) {
         const oldest = aiKufrFrames.keys().next().value as string | undefined;

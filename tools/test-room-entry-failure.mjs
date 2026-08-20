@@ -310,5 +310,5 @@ await withApp(
   // The launch logs the failure it is recovering from, which is diagnostics worth keeping:
   // the note tells the player, the console tells whoever reads the bug report. The fetch
   // errors are the provocation itself, surfacing through the browser.
-  { graphics: 'classic', allowErrors: /asset failed|room launch failed|Failed to fetch|net::ERR|ERR_FAILED|404 \(Not Found\)/ },
+  { graphics: 'classic', allowErrors: /asset failed|room entry failed|room launch failed|Failed to fetch|net::ERR|ERR_FAILED|404 \(Not Found\)/ },
 );

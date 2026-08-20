@@ -20,7 +20,7 @@
  *
  * ── The two doors ─────────────────────────────────────────────────────────────
  *
- * Every network request in `src/` comes through this file — `test/asset-fetch-discipline.test.ts`
+ * Every request for a GAME ASSET comes through this file — `test/asset-fetch-discipline.test.ts`
  * fails the build for a bare `fetch(` anywhere else — and there are exactly two ways in:
  *
  *  - **`requiredAsset(url, what, tier)`** — the file must be there. An answer of "not
@@ -46,7 +46,14 @@
  * Everything else is required. A 404 on it is a broken build or a broken deploy, and the
  * game says so instead of quietly playing without its music, its death lines or its help.
  *
- * One loader is outside this file rather than exempt within it: the intro movie, which is
+ * "Game asset" is doing real work in that sentence, and the two things it excludes are
+ * worth knowing before someone reads it as "no request escapes". `src/platform/analytics.ts`
+ * appends a third-party `<script>`, and `index.html` pulls a cover image from CSS; neither
+ * is an asset the game plays with, neither can be tiered (nothing about the game changes
+ * if they fail), and neither goes near `fetch`, so the discipline test does not see them
+ * either. Anything the GAME needs belongs here.
+ *
+ * One loader is a genuine exemption rather than an omission: the intro movie, which is
  * a `<video src>` in `intro.ts`. A media element streams, and its `error` event cannot
  * tell a 404 from a dropped connection — the one distinction everything here rests on —
  * so routing it through this door would buy a label the platform cannot supply. The intro
@@ -65,9 +72,23 @@
  * | `niceToHave` | silent; retry on the next natural occasion | cosmetic or incidental; interrupting anyone would cost more than the loss |
  *
  * The middle tier's test is the important one, and it is deliberately about being
- * MISLED, not about being annoyed. The archetype is the v1.0.18 bug: the setting said
- * "AI upscaled" while the room was drawn in enhanced art, and the player had no way to
- * tell. The game was playable and it was lying, so it says so and offers the retry.
+ * MISLED, not about being annoyed: the game is playable and is telling the player
+ * something untrue, so it says so. The clearest examples are the help pages and the
+ * minigame — open them with the network down and, without the note, an EMPTY overlay is
+ * all the player gets and they conclude that is what the help looks like.
+ *
+ * A word on the archetype this tier is often explained with, because it is NOT one of
+ * these: the v1.0.18 bug, where the setting said "AI upscaled" while the room drew
+ * enhanced art. A room's art at any tier is `mustHave` here (everything a room will use
+ * is preloaded on the deliberate act of entering it), so that case never reaches the
+ * note. A note is also the wrong shape for it — it is dismissible, and the setting goes
+ * on lying afterwards. That one wants the effective tier shown, not a transient message,
+ * and that is a separate change.
+ *
+ * The retry is offered when a call site supplies one. The backstop below cannot: it is
+ * reached precisely because nobody handled the failure, so there is nothing there that
+ * knows how to re-run it, and the note hides the button rather than offering one that
+ * does nothing.
  *
  * ── The rule that makes the tier necessary ────────────────────────────────────
  *
@@ -277,6 +298,45 @@ export function resetAssetCooldowns(): void {
 }
 
 /**
+ * Record that a `niceToHave` URL just failed, so the draw path stops asking for a while.
+ *
+ * Shared by the two places a failure is decided — `fetchAsset`'s catch (no answer) and
+ * `requiredAsset`'s check (an answer that is not the asset). Both have to arm it or the
+ * bound is only half there; see the note in `requiredAsset`.
+ */
+function noteNiceFailure(url: string, tier: AssetTier, retry?: RetryPolicy): void {
+  if (tier !== 'niceToHave') return;
+  niceFailedAt.set(url, (retry?.now ?? Date.now)());
+}
+
+/** Is this `niceToHave` URL still inside its refusal window? */
+function coolingDown(url: string, tier: AssetTier, retry?: RetryPolicy): boolean {
+  if (tier !== 'niceToHave') return false;
+  const failed = niceFailedAt.get(url);
+  if (failed === undefined) return false;
+  return (retry?.now ?? Date.now)() - failed < (retry?.cooldownMs ?? NICE_COOLDOWN_MS);
+}
+
+/**
+ * Would asking for this URL right now be refused? For callers on a DRAW path.
+ *
+ * The cooldown bounds requests on its own, but a draw-path loader that re-arms its
+ * "tried" latch on every failure re-enters every frame — and inside the window each
+ * re-entry still allocates an error, rejects a promise and logs. Requests were bounded;
+ * work, garbage and console noise were not, which at 60 fps in a cutscene is hundreds of
+ * logged failures the tier promised would be silent.
+ *
+ * So the three incidental loaders ask FIRST and return quietly, instead of asking and
+ * being refused. That also gives the latch a correct shape: it is cleared on failure (a
+ * failed load is not remembered, #66) and this is what stops the clearing turning into a
+ * spin — the next attempt happens on the first repaint after the window, not the next
+ * frame.
+ */
+export function assetCoolingDown(url: string): boolean {
+  return coolingDown(url, 'niceToHave');
+}
+
+/**
  * How long to wait before attempt `n + 1` (0-based), or null when the budget is spent.
  *
  * Jittered so a burst of assets failing together — which is what a dropped connection
@@ -357,11 +417,8 @@ async function fetchAsset(url: string, tier: AssetTier, what?: string, init?: Re
   // failure — a transient error at its own tier — because "we did not ask" and "we asked
   // and got nothing" leave the caller in exactly the same position, and giving the two
   // different shapes would only be a second path for a call site to get wrong.
-  if (tier === 'niceToHave') {
-    const failed = niceFailedAt.get(url);
-    if (failed !== undefined && now() - failed < cooldown)
-      throw new TransientAssetError(url, 'not retried yet — cooling down after a recent failure', tier, undefined, what);
-  }
+  if (coolingDown(url, tier, retry))
+    throw new TransientAssetError(url, 'not retried yet — cooling down after a recent failure', tier, undefined, what);
   for (let attempt = 0; ; attempt++) {
     // One controller per attempt: aborting a stalled attempt must not poison the retry.
     const stall = new AbortController();
@@ -386,7 +443,7 @@ async function fetchAsset(url: string, tier: AssetTier, what?: string, init?: Re
         // Only a genuine failure arms the cooldown. A cancelled load learned nothing
         // about the server, and locking the URL out for five seconds because the player
         // left a room would make the next entry draw without art it could have had.
-        if (tier === 'niceToHave' && !cancelled) niceFailedAt.set(url, now());
+        if (!cancelled) noteNiceFailure(url, tier, retry);
         throw err;
       }
       // The wait happens while HOLDING the caller's load slot, where it has one. That is
@@ -447,7 +504,17 @@ export async function assetBytes(url: string, res: Response, tier: AssetTier, wh
 export async function requiredAsset(url: string, what: string, tier: AssetTier, opts?: AssetOptions): Promise<Response> {
   const res = await fetchAsset(url, tier, what, opts?.init, opts?.retry);
   const why = notTheAsset(res, opts?.expect);
-  if (why !== null) throw new MissingAssetError(url, what, tier, why);
+  if (why !== null) {
+    // A permanent answer arms the cooldown too, and it is the case that needs it MORE.
+    // `fetchAsset` can only arm on a transient failure, because a 404 is not an error
+    // down there — it returns normally and the judgement happens here. That left the
+    // worst combination unbounded: a `niceToHave` asset a manifest promises and the
+    // deploy does not have gets no cooldown (nothing armed it) and no memory (a failed
+    // load is deliberately not remembered), so the draw path re-requests it on every
+    // repaint that wants it, for ever, silently. A hovered plaque repaints ~7x/s.
+    noteNiceFailure(url, tier, opts?.retry);
+    throw new MissingAssetError(url, what, tier, why);
+  }
   return res;
 }
 

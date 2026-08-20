@@ -144,5 +144,5 @@ await withApp(async ({ p, expect }) => {
   // the name of the asset is now logged (the failure screen is generic — see
   // failAssets). The behaviour is unchanged; only the log line is new, so it is
   // tolerated narrowly rather than by allowing asset failures in general.
-  { firstRun: true, allowErrors: /asset failed: The artwork for (this room|the world map) TransientAssetError.*truncated response/ },
+  { firstRun: true, allowErrors: /asset failed \(\w+\): .*truncated response/ },
 );

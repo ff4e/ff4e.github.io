@@ -75,10 +75,12 @@ function code(src: string): string {
 }
 
 const HOWTO =
-  'Every network request goes through src/render/assetFetch.ts. Use requiredAsset(url, what) when the ' +
-  'file must exist (a 404 or a failure ends the session on the failure screen), or optionalAsset(url) ' +
-  'when its ABSENCE is the design — the enhanced tiers, the credits port strip, the AI movie probe. ' +
-  'There is no third answer: a loader that does not choose is how 14 kinds of asset came to fail silently.';
+  'Every request for a game asset goes through src/render/assetFetch.ts. Pick a DOOR: requiredAsset(url, ' +
+  'what, tier) when the file must exist, or optionalAsset(url, tier) when its ABSENCE is the design — the ' +
+  'enhanced tiers, the credits port strip, the AI movie probe. Then pick a TIER, which is a different ' +
+  'question and has no default: mustHave (a failure ends the session), shouldHave (a note, and play goes ' +
+  'on) or niceToHave (silent). If a gesture — a hover, a draw frame — can start your fetch, it is ' +
+  'shouldHave at most; see test/asset-tier-discipline.test.ts.';
 
 describe('asset fetch discipline', () => {
   const files = sourceFiles(srcDir);

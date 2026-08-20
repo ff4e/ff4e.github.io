@@ -11,6 +11,7 @@ import {
   MissingAssetError,
   TransientAssetError,
   assetBlob,
+  assetCoolingDown,
   assetJson,
   decodeAsset,
   isTransient,
@@ -423,6 +424,60 @@ describe('the nice-to-have cooldown', () => {
       await expect(requiredBlob(URL_, 'the help pages', tier, opts)).rejects.toBeTruthy();
     }
     expect(calls).toBe(4);
+  });
+
+  it('uses a real default window, not just whatever a test injects', async () => {
+    // Every other test here passes `cooldownMs`, so the shipped constant was covered by
+    // nothing: setting it to 0 kept them all green. Only the clock is injected here.
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls++;
+      throw new TypeError('Failed to fetch');
+    });
+    const clock = fakeNow();
+    const opts = { retry: { delayMs: () => null, now: clock.now } };
+    resetAssetCooldowns();
+
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeTruthy();
+    clock.advance(4000); // still inside the default window
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeTruthy();
+    expect(calls, 'four seconds later the URL is still refused').toBe(1);
+    clock.advance(2000); // now past it
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeTruthy();
+    expect(calls, 'six seconds later it is asked again').toBe(2);
+  });
+
+  it('is armed by a permanent answer too, not only by a failure', async () => {
+    // The gap that made the cooldown half a bound: a 404 is not an error inside
+    // `fetchAsset` — it returns normally and `requiredAsset` judges it — so nothing armed
+    // the window for the case that needs it most. A manifest-listed asset the deploy does
+    // not have is permanent, is never remembered (a failed load must not be), and is asked
+    // for again by the draw path on every repaint that wants it.
+    let calls = 0;
+    vi.stubGlobal('fetch', async () => {
+      calls++;
+      return new Response('', { status: 404 });
+    });
+    const clock = fakeNow();
+    const opts = { retry: { delayMs: () => null, now: clock.now, cooldownMs: 5000 } };
+    resetAssetCooldowns();
+
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeInstanceOf(MissingAssetError);
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', opts)).rejects.toBeInstanceOf(TransientAssetError);
+    expect(calls, 'the second ask never reached the network').toBe(1);
+  });
+
+  it('reports whether a URL is refused, so a draw path can ask before it asks', async () => {
+    // The cooldown bounded REQUESTS and nothing else: a draw-path loader that clears its
+    // "tried" latch on failure re-entered every frame, and each refusal still allocated an
+    // error, rejected a promise and logged. The loaders consult this instead.
+    vi.stubGlobal('fetch', async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    resetAssetCooldowns();
+    expect(assetCoolingDown(URL_)).toBe(false);
+    await expect(requiredBlob(URL_, 'a plaque', 'niceToHave', { retry: { delayMs: () => null } })).rejects.toBeTruthy();
+    expect(assetCoolingDown(URL_), 'and it says so straight after a failure').toBe(true);
   });
 
   it('is not armed by a load the app itself cancelled', async () => {

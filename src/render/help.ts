@@ -10,6 +10,7 @@
  */
 import { parseBmp, bmpToRgba } from '../data/bmp.js';
 import { requiredBytes, requiredText } from './assetFetch.js';
+import { hideLoadNote } from '../app/loadNote.js';
 
 export interface HelpPage {
   rgba: Uint8ClampedArray;
@@ -45,6 +46,11 @@ export class HelpScreens {
       }),
     );
     this.byLang.set(lang, pages);
+    // The note is scoped by the same player-facing name it was raised with, so a
+    // natural retry — closing the help and opening it again — takes it down. Without
+    // this the scoping in `hideLoadNote` was unreachable: nothing ever called it with a
+    // subject, so a stale complaint outlived the thing it was complaining about.
+    hideLoadNote('the help pages');
     return pages;
   }
 

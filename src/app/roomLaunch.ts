@@ -388,7 +388,12 @@ function abortMapLaunch(l: MapLaunch, err: unknown): void {
     // An answer ("not there") and no answer at all want opposite sentences — see
     // src/render/assetFetch.ts. WHICH room is logged rather than shown: the screen is
     // generic now, because its one action is the same whichever file broke.
-    if (isAssetError(err)) console.error(`asset failed: ${roomLabel(l.room)}`, err);
+    // Unconditional. Guarding this on `isAssetError` left a NON-asset failure — a room
+    // whose FFR arrives as a 200 full of garbage, which is what tools/test-roomload.mjs
+    // serves — raising the generic screen with no record anywhere of which room or what
+    // threw. The screen stopped naming the room in the same commit, so that combination
+    // was the one path with no diagnosis left at all.
+    console.error(`room entry failed: ${roomLabel(l.room)}`, err);
     failAssets(isTransient(err));
     // The picker names the room actually on screen, which is the one the player came
     // from: `startRoom` pointed it at the room it was about to load, and that load is
@@ -414,7 +419,7 @@ export function failRoomEntry(num: number, err: unknown): void {
     abortMapLaunch(l, err);
     return;
   }
-  if (isAssetError(err)) console.error(`asset failed: ${roomLabel(num)}`, err);
+  console.error(`room entry failed: ${roomLabel(num)}`, err);
   failAssets(isTransient(err));
 }
 

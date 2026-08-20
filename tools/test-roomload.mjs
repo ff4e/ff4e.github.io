@@ -128,6 +128,9 @@ await withApp(
     );
     await p.unroute(ffrGlob(40));
   },
-  // The room-entry failure path logs which room failed, now that the screen does not.
-  { cpu: true, allowErrors: /asset failed|Failed to fetch|net::ERR|ERR_FAILED|404/ },
+  // §4 serves a room's FFR as a 200 full of garbage, so `parseFfr` throws inside the
+  // entry. That is not an asset error, and the failure screen no longer names the room,
+  // so the entry path logs it — this is that one line and nothing else. Kept exact: this
+  // probe had a zero-tolerance console net and widening it would give that up for free.
+  { cpu: true, allowErrors: /^room entry failed:/ },
 );

@@ -26,7 +26,8 @@ import { bmpToRgba, parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
 import { REGISTERED_ROOMS, branchOfRoom, depthOfRoom } from '../data/world.js';
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
-import { assetBytes, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
+import { assetBytes, decodeAsset, isAssetError, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
+import { reportAssetError } from './loadingUi.js';
 import type { MapAction } from '../render/worldMap.js';
 
 /**
@@ -158,15 +159,38 @@ export function returnFromRoom(): void {
 /**
  * zobraz_obrazek (UMain.pas:831): show a leg's full-screen story page over a frozen
  * map, with the rybky11 theme. The page is a plain 640×480 8-bit BMP (Menu/00N.$dv);
- * a click or key dismisses it (zrus_obrazek) back to the map. Falls back to the map
- * if the image can't be loaded.
+ * a click or key dismisses it (zrus_obrazek) back to the map.
+ *
+ * ── The catch is load-bearing, and it is not about the picture ────────────────
+ * This is the ONLY thing that runs when the win countdown lapses (`returnFromRoom`,
+ * logicTick.ts), and the transition off the won room happens INSIDE it — `ui.screen`
+ * is not reassigned until after the page has loaded. While every asset failure was
+ * fatal that was safe by accident: the session ended, so there was nowhere to be
+ * stranded. At `shouldHave` a failed page would abandon the function before the
+ * transition, leaving the player standing in a room they have already won with no
+ * automatic way out, and dropping the `pending` chain into ZAVER — so finishing the
+ * whole game would silently not play the ending.
+ *
+ * So the failure completes the transition WITHOUT the page: exactly what dismissing it
+ * would have done. The player loses one chapter of story and is told so; they do not
+ * lose the win. That is the middle tier's contract — the tier says how loudly it may be
+ * reported, and the call site has to say what happens next.
  */
 export async function showLegImage(leg: number, pending?: { room: number; replay?: string }): Promise<void> {
-  // No catch: the story pages are nine 640x480 BMPs that all ship, and skipping one
-  // silently meant a player crossing a leg boundary simply never saw that chapter of
-  // the story — the same failure the rest of this sweep is deleting.
   const url = `/data/Menu/00${leg}.$dv`;
-  const bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`, 'shouldHave'));
+  let bmp;
+  try {
+    bmp = parseBmp(await requiredBytes(url, `the story page for leg ${leg}`, 'shouldHave'));
+  } catch (e) {
+    if (!isAssetError(e)) throw e;
+    // Reported with a retry that re-runs the whole transition, `pending` and all, so
+    // Try again is a genuine second attempt at the story page rather than a way back
+    // into a room the player has already left.
+    reportAssetError(e, () => void showLegImage(leg, pending));
+    if (pending) void host.enterRoom(pending.room, pending.replay);
+    else showMap();
+    return;
+  }
   ui.legImagePending = pending ?? null;
   ui.legImage = { w: bmp.w, h: bmp.h, rgba: bmpToRgba(bmp) };
   ui.legImageNum = leg;
@@ -250,7 +274,8 @@ export function drawLegImage(): void {
 export async function ensureLegImageAi(leg: number): Promise<void> {
   if (graphics !== 'ai') return;
   const url = `/enhanced-ai/_story/leg${leg}.webp`;
-  const bmp = await createImageBitmap(await requiredBlob(url, `the AI story page for leg ${leg}`, 'shouldHave'));
+  const blob = await requiredBlob(url, `the AI story page for leg ${leg}`, 'shouldHave');
+  const bmp = await decodeAsset(url, 'shouldHave', () => createImageBitmap(blob));
   if (ui.legImageNum !== leg || ui.screen !== 'legimage') { bmp.close(); return; }
   ui.legImageAi?.close();
   ui.legImageAi = bmp;
@@ -348,9 +373,23 @@ export async function openCredits(): Promise<void> {
       // one place `optionalAsset` appears here: a build without the tool's output is a
       // legitimate build, and this is how the code asks which one it is running on. The
       // fallback itself is required — one of the two must exist.
+      //
+      // A FAILURE is treated as an absence here, which is the one place in the codebase
+      // that is right. Everywhere else the distinction is the whole point: not knowing
+      // must not be recorded as knowing. Here the question being asked is only "which
+      // build is this?", and both answers are already handled — so an unanswered probe
+      // costs nothing but the port card, while letting it throw would abandon
+      // `openCredits` entirely and the player would get no credits at all rather than
+      // the untouched original. `niceToHave` says the same thing to the reporter.
       const portUrl = '/data/Menu/CredMov_port.BMP';
-      const port = await optionalAsset(portUrl, 'shouldHave');
-      const mov = port ? parseBmp(await assetBytes(portUrl, port, 'shouldHave', 'the credits')) : await bmp('CredMov.BMP', 'the credits');
+      const port = await optionalAsset(portUrl, 'niceToHave').catch(() => null);
+      // The body read gets the same treatment as the request: a strip that started
+      // arriving and stopped is still just "no port card", and must not cost the player
+      // the credits roll itself.
+      const portBmp = port
+        ? await assetBytes(portUrl, port, 'niceToHave', 'the credits').then(parseBmp).catch(() => null)
+        : null;
+      const mov = portBmp ?? (await bmp('CredMov.BMP', 'the credits'));
       ui.credits = new Credits(await bmp('CredStat1.BMP', 'the credits'), mov);
     }
   }

@@ -128,18 +128,21 @@ export function syncLoadingUi(now: number): void {
 /**
  * An asset the game needed did not arrive: stop, and say so.
  *
- * ── One mechanism, deliberately ───────────────────────────────────────────────
- * This replaces two earlier player-facing failure surfaces — a modal that held the room
- * and offered to refetch just its artwork, and a non-blocking note that left the player
- * on the world map to click the room again. Both tried to keep the game alive around a
- * failure. The rule now is simpler and is the one to keep in mind when adding a loader:
- * **a load that FAILED ends the session.** The page says what happened and reloads.
+ * ── The heaviest of three surfaces ────────────────────────────────────────────
+ * This is where a `mustHave` failure lands. The other two are the note (`loadNote.ts`)
+ * and silence; which one an asset gets is declared at its call site as a tier and routed
+ * in `reportAssetError` below.
  *
- * The simplicity is the point. A partial game is a game that lies about its own state —
- * a room quietly missing its voices, a tier quietly one level below the setting that
- * claims it — and every attempt to recover in place needed its own retry closure, its own
- * scoping rules for which success answers which failure, and its own probe. A reload has
- * none of that and cannot be wrong.
+ * It briefly WAS the only surface. That version deleted a modal (which held the room to
+ * refetch its artwork) and a note, on the argument that a partial game lies about its own
+ * state and that every recover-in-place needed its own retry closure, scoping rules and
+ * probe. Half of that argument survives and is why the bottom two tiers are kept as small
+ * as they are. The other half did not: a large class of assets is fetched as a side
+ * effect of a GESTURE — the world map fetches a room's name plaque from the draw path —
+ * so "every failure ends the session" meant moving the mouse could end it. The note came
+ * back for the middle tier only, and the cost that argument warned about is real: see the
+ * catches in `showLegImage` and `openTetris`, which exist because a tier alone cannot make
+ * a caller carry on.
  *
  * ── What must NOT come here ───────────────────────────────────────────────────
  * ABSENT assets. The absent/failed split in `src/render/assetFetch.ts` is what makes this
@@ -328,12 +331,27 @@ export function initLoadingUi(): void {
  * PLAYER, never to the console — a tier that left no trace would be indistinguishable
  * from a loader that was never called, which is how a broken enhanced tier hid before.
  */
-export function reportAssetError(e: TransientAssetError | MissingAssetError, retry?: () => void): void {
+export function reportAssetError(
+  e: TransientAssetError | MissingAssetError,
+  retry?: () => void,
+  /**
+   * What to call this when the error cannot name itself.
+   *
+   * `optionalAsset` has no `what` by construction — it is the door for assets whose
+   * absence is the design, and there is nothing to say to a player about a file that is
+   * legitimately not there. But its FAILURE still has to be reported, and routing those
+   * through here without this turned "the artwork for this room" into "an unnamed asset"
+   * in the log — the one place the name still lives now that the screen is generic.
+   * `decodeAsset` has the same gap for the same reason.
+   */
+  fallbackWhat?: string,
+): void {
   // The name goes in the LOG line rather than being left inside the error's own message,
   // because this is now the only place it is written down: the failure screen is generic,
   // so a bug report's "which file was it" comes from here. `test-asset-tiers.mjs` asserts
   // this line names the asset for every must-have row it breaks.
-  console.error(`asset failed (${e.tier}): ${e.what ?? 'an unnamed asset'}`, e);
+  const named = e.what ?? fallbackWhat;
+  console.error(`asset failed (${e.tier}): ${named ?? 'an unnamed asset'}`, e);
   switch (e.tier) {
     case 'mustHave':
       // Boot's loaders do not catch their own failures — there is nothing useful for them
@@ -345,7 +363,7 @@ export function reportAssetError(e: TransientAssetError | MissingAssetError, ret
       // No `retry` from the backstop path: it is reached precisely because nobody handled
       // the failure, so there is nothing there that knows how to re-run it. `loadNote`
       // hides the button rather than offering one that does nothing.
-      showLoadNote({ subject: e.what ?? 'a game file', transient: isTransient(e), retry });
+      showLoadNote({ subject: named ?? 'a game file', transient: isTransient(e), retry });
       return;
     case 'niceToHave':
       return;
