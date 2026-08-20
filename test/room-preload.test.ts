@@ -113,13 +113,13 @@ describe('the entry hold is scoped to the room that armed it', () => {
 describe('the finale warm', () => {
   it('asks for every file ZAVER entry will need, including its music', () => {
     warmFinaleRoom(70, ffrUrl, solvedExcept(70));
-    // Four, and the fourth is the point: `rybky04` is 5.75 MB of ZAVER's ~9.6 MB, so a
+    // Four, and the fourth is the point: `rybky04` is 1.11 MB of ZAVER's ~4.8 MB, so a
     // warm without it leaves the finale stalling on the largest file it needs.
     expect(asked).toEqual([
       '/data/Graphic/071.ffr',
       '/data/Title/071.fft',
       '/data/Sound/071.ffs',
-      '/data/Music/rybky04.wav',
+      '/data/Music/rybky04.m4a',
     ]);
   });
 

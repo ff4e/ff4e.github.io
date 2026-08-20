@@ -20,7 +20,7 @@ await withApp(async ({ p, expect }) => {
   await check(7, 'rybky05'); // back to UTES (track swaps)
 
   // DRAKAR1 (13): the band-room intro `music('rybky04',-998)` is NOT a packaged
-  // sound, so it must fall back to Music/rybky04.wav via the priority-tracked path
+  // sound, so it must fall back to Music/rybky04.m4a via the priority-tracked path
   // (musicSnd), not the looping musicSrc. Regression guard: without the fallback the
   // intro is silent and the band "sings" with no backing.
   await selectRoom(p, 13);

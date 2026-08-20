@@ -21,6 +21,7 @@ import { settings } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
 import { O_NORMAL, O_OPTIONS, SCMAX, ui } from './screenState.js';
 import { contentScaleFor, scalingFilterFor } from './stageGeometry.js';
+import { musicUrl } from '../audio/music.js';
 import { saveSettings } from '../core/settings.js';
 import { bmpToRgba, parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
@@ -57,10 +58,10 @@ export function initMapNav(h: MapNavHost): void {
 export function startMenuMusic(): void {
   // Unhandled on purpose. This used to swallow the failure — "menu music is non-critical,
   // and during boot an unhandled rejection would otherwise trip the boot-fatal handler" —
-  // which is 2.6 MB of the game's first impression disappearing without a word. Tripping
+  // which is the game's first impression disappearing without a word. Tripping
   // the handler is now the intended outcome, and the trap in `loadingUi.ts` names the
   // asset instead of showing boot's generic sentence.
-  void audio.playMusic('menu', '/data/Music/menu.wav', 419772);
+  void audio.playMusic('menu', musicUrl('menu'), 419772);
 }
 
 /**
@@ -211,7 +212,7 @@ export async function showLegImage(leg: number, pending?: { room: number; replay
   activeScript?.s.clearDialog(); // zrus_dialogy: drop any pending speech
   subs?.clear(); // ZrusTitulky: clear any on-screen subtitle
   audio.killAll(); // Killsnd
-  void audio.playMusic('rybky11', '/data/Music/rybky11.wav', 0); // Music('rybky11')
+  void audio.playMusic('rybky11', musicUrl('rybky11'), 0); // Music('rybky11')
   wake();
 }
 

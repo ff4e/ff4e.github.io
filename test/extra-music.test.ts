@@ -7,7 +7,7 @@
  *
  * The rule it encodes: a `music()` / `musiccyc()` call with a literal name resolves to a
  * PACKAGED sound if the room's `.ffs` has one (`musicSnd` checks `hasPackaged` first), and
- * otherwise falls through to `Music/<name>.wav`. So "is there a file of that name in
+ * otherwise falls through to `Music/<name>`. So "is there a file of that name in
  * `public/data/Music/`?" is exactly "will this cue hit the network?" — and if it will, the
  * room entry has to have fetched it. That is why the check is a file-existence test and not
  * a second list: a list would need the same maintenance as the table it is checking.
@@ -21,7 +21,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { ROOMS } from '../src/data/roomTable.js';
-import { extraMusicOfRoom, musicForCHud } from '../src/audio/music.js';
+import { MUSIC_EXT, extraMusicOfRoom, musicForCHud } from '../src/audio/music.js';
 
 /** `s.music('name', …)` / `s.musiccyc('name', …)` with a LITERAL name, per room file. */
 function cuedNames(text: string): string[] {
@@ -42,7 +42,7 @@ describe('music a room cues but does not enter with', () => {
     for (const name of cuedNames(readFileSync(join('src', 'rooms', file), 'utf8'))) {
       // A name with no file of its own is packaged with the room, and the room's `.ffs`
       // is already a must-have of the entry. Nothing to do.
-      if (!existsSync(join('public', 'data', 'Music', `${name}.wav`))) continue;
+      if (!existsSync(join('public', 'data', 'Music', `${name}.${MUSIC_EXT}`))) continue;
       cues.push({ room, name });
     }
   }

@@ -12,6 +12,7 @@
 import { indexFft, parseFft, type FftEntry } from '../data/fft.js';
 import { requiredBytes } from '../render/assetFetch.js';
 import { decodeSound, FFS_SAMPLE_RATE } from './ffs.js';
+import { musicByName, musicSeconds } from './music.js';
 import type { VolumeBus } from '../core/settings.js';
 
 /**
@@ -400,7 +401,7 @@ export class AudioEngine {
    * Music (RSound.pas `Sound(...,-3)`): play a music-channel track once, tracked by
    * priority. Mirrors the original's resolution order — a packaged sound (e.g. the
    * band's `d1-z-*` tracks) plays from the room package; otherwise it falls back to a
-   * `Music/<name>.wav` file (e.g. the `rybky04` intro), which lives outside the package.
+   * `Music/<name>` track (e.g. the `rybky04` intro), which lives outside the package.
    *
    * Returns the download rather than voiding it. Nothing in the game awaits this — a
    * room script cues a track and carries on, which is the original's behaviour — so in
@@ -466,10 +467,9 @@ export class AudioEngine {
         // for every other caller — notably the menu music, which competes with the
         // world map's own assets.
         const bytes = await requiredBytes(url, 'the music', 'mustHave', { init: { priority: 'low' } as RequestInit });
-        // Through `decodeMusic` rather than a bare `decodeAudioData`, so the track is
-        // cached with its native rate attached exactly as every other loader caches it.
-        // Without that, a buffer decoded here and later started by `playMusic` looped at
-        // the default 22050 Hz whatever the file said.
+        // Through `decodeMusic` rather than a bare `decodeAudioData`, because that is the
+        // one entry point to the `musicBufs` cache: a track decoded here is one `playMusic`
+        // can later start without a second fetch of the same file.
         await this.decodeMusic(name, bytes);
       })();
       this.beginMusicLoad(name, load);
@@ -590,10 +590,11 @@ export class AudioEngine {
   }
 
   /**
-   * Start looping room music (MusicCycle, URoom.pas:1568). `url` is a WAV in the
-   * Music/ folder; `loopSample` is the sample offset the track loops back to
-   * (MusCycle/2), so the intro plays once and only the body repeats. No-op if the
-   * same track is already playing (so it survives death-restarts within a room).
+   * Start looping room music (MusicCycle, URoom.pas:1568). `url` is a track in the
+   * Music/ folder (`musicUrl`); `loopSample` is the sample offset the track loops back
+   * to (MusCycle/2), counted in the 22050 Hz original's samples, so the intro plays once
+   * and only the body repeats. No-op if the same track is already playing (so it
+   * survives death-restarts within a room).
    */
   /** Is this track already decoded and cached? (Room entry asks before fetching.) */
   hasMusic(name: string): boolean {
@@ -636,18 +637,16 @@ export class AudioEngine {
    * beat later and out of band, where the entry fails before the room is ever presented,
    * which is the difference the split is for.
    *
-   * The native sample rate comes out of the WAV header (offset 24) exactly as it does in
-   * `playMusic`, and is stashed on the buffer the same way — `loopStart` is computed from
-   * it, so getting it wrong makes the track's intro repeat instead of only its body.
+   * It used to read the WAV header (offset 24) here and stash the native rate on the
+   * buffer for `playMusic` to compute `loopStart` from. The shipped tracks are AAC in MP4
+   * and have no such header, and the rate was never variable anyway — it is `MUSIC_RATE`,
+   * stated once in `music.ts` and checked against the originals by `test/musicStaging.test.ts`.
    */
   async decodeMusic(name: string, bytes: Uint8Array): Promise<void> {
     if (this.musicBufs.has(name)) return;
     const ctx = this.ensureCtx();
     const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    const nativeRate = new DataView(ab).getUint32(24, true) || 22050;
-    const buf = await ctx.decodeAudioData(ab.slice(0));
-    (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
-    this.musicBufs.set(name, buf);
+    this.musicBufs.set(name, await ctx.decodeAudioData(ab));
   }
 
   async playMusic(name: string, url: string, loopSample: number): Promise<void> {
@@ -695,10 +694,7 @@ export class AudioEngine {
       }
       if (!buf) {
         const bytes = await requiredBytes(url, 'the music', 'mustHave', { init: { priority: 'low' } as RequestInit });
-        // WAV loop point is in samples at the file's native rate (header @ offset 24).
-        const nativeRate = new DataView(bytes.buffer as ArrayBuffer).getUint32(24, true) || 22050;
         buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
-        (buf as AudioBuffer & { _rate?: number })._rate = nativeRate;
         this.musicBufs.set(name, buf);
       }
       // Superseded while decoding (room changed, music stopped, or a newer start for
@@ -708,12 +704,23 @@ export class AudioEngine {
       if (this.musicGen !== gen) return;
       this.release(MUSIC_PRIOR, claim); // handed over to the source started below
       this.logSound(name + ' (music-loop)', 1);
-      const nativeRate = (buf as AudioBuffer & { _rate?: number })._rate ?? 22050;
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;
-      src.loopStart = loopSample > 0 ? loopSample / nativeRate : 0;
-      src.loopEnd = buf.duration;
+      src.loopStart = loopSample > 0 ? musicSeconds(loopSample) : 0;
+      // The END of the loop, in the original's samples — NOT `buf.duration`.
+      //
+      // A lossy codec does not decode to exactly the sample count it was given: AAC codes
+      // in 1024-sample frames, so the shipped tracks decode ~600 samples (~27 ms) LONGER
+      // than the 22050 Hz original, that tail being encoder padding rather than music.
+      // Looping on `buf.duration` would play the padding every time round — a short gap
+      // inserted into a track that is meant to be seamless, once per loop, forever.
+      //
+      // `frames` is the original's own sample count (music.ts, checked against the WAVs by
+      // test/musicStaging.test.ts), so this ends the loop where the music ends. Falling
+      // back to `buf.duration` keeps a name the table does not know playable.
+      const frames = musicByName(name)?.frames;
+      src.loopEnd = frames !== undefined ? Math.min(musicSeconds(frames), buf.duration) : buf.duration;
       const g = ctx.createGain();
       g.gain.value = 0.45; // music sits under the voices/effects
       src.connect(g);
@@ -730,7 +737,7 @@ export class AudioEngine {
       // still current may do this.
       //
       // ...and then it leaves. The menu music was the one track allowed to vanish
-      // quietly; it is 2.6 MB of the game's first impression.
+      // quietly; it is the game's first impression.
       //
       // A SUPERSEDED start returns instead. `stopMusic()` bumps the generation but cannot
       // cancel the request, so the menu track abandoned when the player entered a room can

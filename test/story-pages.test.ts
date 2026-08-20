@@ -67,7 +67,7 @@ describe('would winning this room finish the game', () => {
 
   it('is true only for the last leg-final room left unsolved', () => {
     // The finale warm's entire trigger. Too loose and every leg-final entry starts a
-    // ~9.6 MB download the player will not use; too tight and the finale stalls.
+    // ~4.8 MB download the player will not use; too tight and the finale stalls.
     expect(finaleFollows(70, allBut(70))).toBe(true);
     expect(finaleFollows(19, allBut(19))).toBe(true);
   });

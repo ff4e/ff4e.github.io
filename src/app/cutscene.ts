@@ -24,6 +24,7 @@ import { roomVoicesReady } from './roomLoad.js';
 import { ui } from './screenState.js';
 import { DEFAULT_LINE_TICKS, LOGIC_SEC, contentScaleFor, scalingFilterFor } from './stageGeometry.js';
 import { subFontFamily, subFontReady, subFontWeight } from './stageState.js';
+import { musicUrl } from '../audio/music.js';
 import { Dir } from '../core/dir.js';
 import { AKCE, KDO } from '../intro/helpCap.js';
 import type { CapAction } from '../intro/helpCap.js';
@@ -99,7 +100,7 @@ export async function startCutscene(): Promise<void> {
   // demo. The original loops at cycle 78660*2 *bytes*; playMusic wants the loop
   // point in *samples* (bytes/2 for 16-bit audio), i.e. 78660. It persists after
   // the demo — DoneKufrDemo never stops it — so it keeps playing in the room.
-  void audio.playMusic('kufrik', '/data/Music/kufrik.wav', 78660);
+  void audio.playMusic('kufrik', musicUrl('kufrik'), 78660);
   cancelSolve(); // `step()` gives the tick to the cutscene: a run left armed here freezes
   setCutscene(demo);
 }

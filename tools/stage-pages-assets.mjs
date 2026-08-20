@@ -20,6 +20,19 @@ const PUBLIC = 'public';
 // player-private save games are not part of the GPL game assets the site loads.
 const DATA_EXCLUDE = new Set(['Program', 'Writes', '256col']);
 
+/**
+ * ...nor the music ORIGINALS. The site fetches `Music/<name>.m4a` (see tools/stage-music.ts);
+ * the 17 `.wav` they were encoded from are a repo artefact, kept so that `--check`,
+ * `--verify` and `test/musicStaging.test.ts` have something to encode from and measure
+ * against, and so anyone can listen to what was given up. Nothing downloads them.
+ *
+ * Worth the two lines because the budget here is real and shared: GitHub Pages publishes at
+ * most 1 GB, and `public/` is already ~621 MB. Staging both tiers would spend 64 MB of the
+ * remaining headroom on bytes no player ever asks for — and the whole point of compressing
+ * the music was to make the site smaller.
+ */
+const isMusicOriginal = (rest) => rest.startsWith(`Music${sep}`) && rest.endsWith('.wav');
+
 if (!existsSync(DIST)) {
   console.error(`${DIST}/ is missing — run \`npm run build\` first.`);
   process.exit(1);
@@ -40,7 +53,8 @@ for (const entry of readdirSync(PUBLIC)) {
     opts.filter = (src) => {
       const rest = src.startsWith(prefix) ? src.slice(prefix.length) : '';
       const seg = rest.split(sep)[0];
-      return !(seg && DATA_EXCLUDE.has(seg));
+      if (seg && DATA_EXCLUDE.has(seg)) return false;
+      return !isMusicOriginal(rest);
     };
   }
   cpSync(from, to, opts);

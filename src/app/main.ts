@@ -42,7 +42,7 @@ import { framesIdle, wake } from './frameClock.js';
 import { depthOfRoom, branchOfRoom } from '../data/world.js';
 import { hitTest as panelHitTest, sliderIndex, PANEL_W, PANEL_H } from '../render/hud.js';
 import { TALKING_MEZ_SEC, MUSIC_PRIOR } from '../audio/audio.js';
-import { musicForCHud } from '../audio/music.js';
+import { musicForCHud, musicUrl } from '../audio/music.js';
 import { Script, type ScriptSnapshot } from '../core/script.js';
 import { StepEngine, TURN_FRAMES } from '../core/stepEngine.js';
 import { newChatter } from '../core/chatter.js';
@@ -720,16 +720,16 @@ function buildRoom(carryPole = false): void {
         sndcyc: (name, prior) => audio.snd(name, prior, true, EFFECT_VOL),
         sndvol: (name, prior, vol) => audio.snd(name, prior, false, Math.max(0, Math.min(1, vol / 64))),
         ksnd: (prior) => audio.killVoice(prior),
-        music: (name, prior) => void audio.musicSnd(name, prior, `/data/Music/${name}.wav`),
+        music: (name, prior) => void audio.musicSnd(name, prior, musicUrl(name)),
         musiccyc: (name, prior) => {
           // prior -999 = the room-music channel: re-cue the room's own track
           // (MusicCycle(MusName,-999,MusCycle)) rather than a separate effect source.
           if (prior === MUSIC_PRIOR) {
             if (roomMusic) {
-              void audio.playMusic(roomMusic.name, `/data/Music/${roomMusic.name}.wav`, roomMusic.loopSample);
+              void audio.playMusic(roomMusic.name, musicUrl(roomMusic.name), roomMusic.loopSample);
             }
           } else {
-            void audio.musicSnd(name, prior, `/data/Music/${name}.wav`, 0.45, true);
+            void audio.musicSnd(name, prior, musicUrl(name), 0.45, true);
           }
         },
         talkNow: (name, prior) => scriptTalk(name, prior),
