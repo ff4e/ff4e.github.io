@@ -852,6 +852,9 @@ initRoomLoad({
   get ffrUrl() {
     return ffrUrl;
   },
+  get solved() {
+    return solved;
+  },
 });
 
 //#region Movement wiring | anchors: initMovement | Hands `movement.ts` the four names it needs. The held-key state machine, the record replay and the room restart are in that module.

@@ -85,7 +85,12 @@ const MUST_HAVE_CENSUS: Record<string, number> = {
   'src/app/mapDraw.ts': 2, // the CLASSIC name plaques (popdesk + atlas) — awaited by boot
   'src/app/main.ts': 3, // the enhanced fish sprites: manifest, sprite, decode
   // ── A room, fetched up front on the deliberate act of entering it ───────────
-  'src/app/roomLoad.ts': 11, // FFR, FFT, the sound packages, the voices, the music
+  // FFR, FFT, the sound packages, the voices, the music — and (11 -> 13) the one track a
+  // room's play cues that its own cHud does not cover: KUFRIK's cutscene theme, DRAKAR1's
+  // opening, KORALY's score (`extraMusicOfRoom`). All three were fetched at the moment the
+  // room asked for them, `void`ed at the call site, so a `mustHave` failure landed as an
+  // unhandled rejection in the middle of play. Fatal is not new; the MOMENT is.
+  'src/app/roomLoad.ts': 13,
   // …and everything the room's PLAY can demand: KUFRIK's briefcase story (kufr256.BMP,
   // demo.pck, script.txt) + its tutorial recording (help.cap), and the leg-final story
   // page (+ its `ai` upscale). All five used to be fetched at the moment the room asked
@@ -138,6 +143,16 @@ const INTERACTION_DRIVEN = [
     fn: 'probeAiMovies',
     why: 'an existence probe whose answer IS the fallback; nothing to tell anyone either way',
   },
+  {
+    file: 'src/app/mapNav.ts',
+    fn: 'showLegImage',
+    why: 'the map CLICK on an already-solved leg-final room shows its page before entering, so there is no entry to have preloaded it',
+  },
+  {
+    file: 'src/app/mapNav.ts',
+    fn: 'ensureLegImageAi',
+    why: 'same click, plus a tier switch inside the room — both gestures, and the native page is already on screen',
+  },
 ] as const;
 
 /**
@@ -178,7 +193,20 @@ const ROOM_SCOPED = [
 function bodyOf(text: string, fn: string): string | null {
   const header = new RegExp(`(?:export\\s+)?(?:async\\s+)?function\\s+${fn}\\s*[(<]`).exec(text);
   if (!header) return null;
-  let i = text.indexOf('{', header.index);
+  // Step over the PARAMETER list before looking for the body. Taking the first `{` after
+  // the name finds the object type in `showLegImage(leg, pending?: { room: number })` and
+  // returns that type as the function's body — which then contains none of what the
+  // caller came to check, and passes or fails for the wrong reason. Every function pinned
+  // here used to have plain parameters, so this was latent until one did not.
+  let i = header.index + header[0].length - 1;
+  for (let depth = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '(' || c === '<') depth++;
+    else if (c === ')' || c === '>') {
+      if (--depth === 0) break;
+    }
+  }
+  i = text.indexOf('{', i);
   if (i === -1) return null;
   const start = i;
   let depth = 0;
@@ -249,6 +277,46 @@ describe('asset tiers', () => {
       ).toBe(false);
     });
   }
+
+  /**
+   * The preloads must also be USED. Every one of them can be perfect while its consumer
+   * ignores the cache and fetches anyway — which restores the mid-play fetch exactly, and
+   * is invisible to every other test here (the preload still ran, and was still fatal).
+   * Source-level because the alternative is a browser probe per consumer.
+   */
+  for (const fn of ['showLegImage', 'ensureLegImageAi'] as const) {
+    it(`${fn}() reads the preloaded page before it considers fetching one`, () => {
+      const body = bodyOf(readFileSync(join('src', 'app', 'mapNav.ts'), 'utf8'), fn);
+      expect(body, `${fn}() not found — was it renamed? Update this list.`).not.toBeNull();
+      expect(
+        body?.includes('preloadedLegPage('),
+        `${fn}() no longer consults the page the room entry preloaded, so the win that shows\n` +
+          'it fetches during play again — which is the whole thing the preload exists to stop.',
+      ).toBe(true);
+    });
+  }
+
+  /**
+   * Both post-art holds have to be consulted TOGETHER. Dropping either from either gate
+   * leaves the room presented, or its spinner taken down, while assets are still coming —
+   * and nothing else notices, because the failure is still fatal when it eventually lands.
+   */
+  it('the entry holds are composed once and read as a pair', () => {
+    const load = readFileSync(join('src', 'app', 'roomLoad.ts'), 'utf8');
+    const composed = /roomEntryHeld\s*=\s*\(\)[^;]*roomAudioPending\(\)[^;]*roomPreloadPending\(\)/.test(load);
+    expect(composed, 'roomEntryHeld() must be the OR of both post-art holds (roomLoad.ts)').toBe(true);
+    for (const [file, fn] of [
+      ['src/app/roomLaunch.ts', 'tickMapLaunch'],
+      ['src/app/loadingUi.ts', 'syncLoadingUi'],
+    ] as const) {
+      const body = bodyOf(readFileSync(file, 'utf8'), fn) ?? '';
+      expect(body, `${fn}() not found in ${file}`).not.toBe('');
+      expect(
+        body.includes('roomEntryHeld()') && body.includes('roomArtPending()') && body.includes('roomLoading'),
+        `${fn}() must wait on all of roomLoading, roomArtPending() and roomEntryHeld().`,
+      ).toBe(true);
+    }
+  });
 
   for (const { file, fn, why } of ROOM_SCOPED) {
     it(`${fn}() is must-have — ${why}`, () => {

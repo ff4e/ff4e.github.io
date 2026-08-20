@@ -99,20 +99,6 @@ export function allRegisteredSolved(): boolean {
 }
 
 /**
- * Would winning `num` finish the game? The `pustitzaver` test of `returnFromRoom`,
- * evaluated on ENTRY instead of after the win — i.e. with the room being entered counted
- * as solved, because that is what winning it would make true.
- *
- * Used by the room-entry preload to decide whether ZAVER is the next thing this room's
- * play can reach (roomPreload.ts). Kept beside `allRegisteredSolved` so the two tests
- * cannot drift apart; a copy of this condition anywhere else would be the bug.
- */
-export function finaleFollows(num: number): boolean {
-  if (!REGISTERED_ROOMS.includes(num) || depthOfRoom(num) !== 15) return false;
-  return REGISTERED_ROOMS.every((r) => r === num || host.solved.has(r));
-}
-
-/**
  * Return to the world map after a room is won. Winning the last room of a leg (a
  * depth-15 room, one per branch 1..8) first shows that leg's story "case file" page
  * (zobraz_obrazek, UMain.pas:958/991/1030); every other room returns straight to the
@@ -182,17 +168,13 @@ export function returnFromRoom(): void {
  * lose the win. That is the middle tier's contract — the tier says how loudly it may be
  * reported, and the call site has to say what happens next.
  *
- * ── Which is now a backstop, because the page is preloaded ────────────────────
- * Reaching this off a WIN no longer fetches anything: entering the room preloaded its
- * leg's page and the entry waited for it (see preloadLegPage), so the cache hit below is
- * the path play takes and the fetch is unreachable from it.
- *
- * The fetch stays, at `shouldHave`, because one route still reaches it: clicking an
- * already-solved leg-final room on the MAP shows its page BEFORE entering the room
- * (daClickAndRun, main.ts), so there is no entry to have preloaded it. That is a gesture
- * — the player moved the mouse and clicked — and the tier rule from #104 is that a
- * gesture-driven fetch is never fatal. Two tiers for one file is not an inconsistency
- * here; it is the same rule applied to two different acts.
+ * ── The win no longer fetches: the page was preloaded on entry ────────────────
+ * The cache hit below is the path a win takes (preloadLegPage, roomPreload.ts). The fetch
+ * remains for the route with no entry to have preloaded it — clicking an already-solved
+ * leg-final room on the MAP shows its page BEFORE entering (daClickAndRun, main.ts) — and
+ * keeps `shouldHave` there because that is a gesture, and #104's rule is that a
+ * gesture-driven fetch is never fatal. Both tiers are pinned in
+ * `test/asset-tier-discipline.test.ts`; the tier follows the ACT, not the file.
  */
 export async function showLegImage(leg: number, pending?: { room: number; replay?: string }): Promise<void> {
   const url = `/data/Menu/00${leg}.$dv`;
@@ -291,11 +273,17 @@ export function drawLegImage(): void {
  * fallback contract as the rest of the tier. `legImageNum` is re-checked after the
  * await so a page dismissed (or replaced) mid-load cannot install itself late.
  *
- * The blob is the preloaded one when there is one: entering the room fetched it (see
- * preloadLegPage), so what is left here is the DECODE, which is not a fetch and is
- * therefore allowed to happen at the moment the page is shown. The fetch below is the
- * same backstop as `showLegImage`'s and reachable by the same one route — the map click
- * on a solved leg-final room — which is why it keeps the gesture tier.
+ * The blob is the preloaded one when there is one: entering the room fetched it, so what
+ * is left here is the DECODE, which is not a fetch and may happen when the page is shown.
+ *
+ * TWO routes still reach the fetch, and the second is the reason this is not `mustHave`.
+ * One is the map click on a solved leg-final room (as `showLegImage`). The other is a tier
+ * SWITCH inside the room: `preloadLegPage` reads `graphics` once, at entry, so a player who
+ * enters in `classic` and presses E for `ai` before winning has no preloaded blob, and this
+ * fetches at the win. `retargetArtForTier` deliberately does not re-run the preload — a
+ * tier switch is itself a gesture that fetches (it re-fetches the whole room's art), and
+ * the native page is already on screen here, so the upscale arriving late or not at all is
+ * the degradation this tier exists to describe.
  */
 export async function ensureLegImageAi(leg: number): Promise<void> {
   if (graphics !== 'ai') return;

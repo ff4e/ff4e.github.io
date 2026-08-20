@@ -137,6 +137,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // the call needs an arm that releases it: a rejection escaping there is a room withheld
   // for ever, which is the frozen room the enhanced tier already documents.
   ['src/app/art.ts', 686],
+  // 567. Getting a room on screen and giving it a voice. Budgeted on arrival rather than
+  // after growth: it crossed the 520 tripwire taking on the two post-art entry holds and
+  // `loadExtraMusic`. The preload POLICY is deliberately not here — that is
+  // `roomPreload.ts` — and what stayed is the ordering, which is this file's whole
+  // subject: art first, then everything the room will need to sound and to play, each
+  // held for by a flag this file owns.
+  ['src/app/roomLoad.ts', 600],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak
@@ -170,7 +177,17 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // nothing cancels can outlive the room that asked for it and fail minutes later, over a
   // room whose own music is playing. `musicSnd` also returns its download instead of
   // voiding it, so the rejection has an owner and a test can hold it.
-  ['src/audio/audio.ts', 739],
+  //
+  // 739 -> 790 for the in-flight JOIN on the `music()` path. `playMusic` has joined
+  // `musicLoads` since room entry took over the room's own track; `playMusicFile` — the
+  // path a room SCRIPT cues — had not, and DRAKAR1 cues `rybky04` (5.75 MB) from its own
+  // `init`, i.e. inside `buildRoom`, which the entry's preload of that same track then
+  // raced. Two concurrent writes of one cache entry that size fail with
+  // net::ERR_CACHE_WRITE_FAILURE, so the entry would have ended the session over a file
+  // the script was fetching successfully. The load also goes through `decodeMusic` now,
+  // which is what attaches the file's native rate — a buffer decoded here and later
+  // started by `playMusic` used to loop at the default 22 050 Hz whatever the file said.
+  ['src/audio/audio.ts', 790],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

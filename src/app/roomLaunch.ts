@@ -41,8 +41,7 @@ import { curNum } from './art.js';
 import { ROOMS } from '../data/roomTable.js';
 import { isAssetError, isTransient, requiredBytes } from '../render/assetFetch.js';
 import { failAssets } from './loadingUi.js';
-import { roomAudioPending } from './roomLoad.js';
-import { roomPreloadPending } from './roomPreload.js';
+import { roomEntryHeld } from './roomLoad.js';
 import type { AiWorldMap } from '../render/worldMapAi.js';
 
 /** What this module needs to see of the running game. */
@@ -320,10 +319,11 @@ export function tickMapLaunch(): void {
       return;
     }
     // The room takes the stage when it can be both SEEN and HEARD — and when everything
-    // its PLAY can demand is in hand too (`roomPreloadPending`, roomPreload.ts). All three
-    // are read straight from their owning modules rather than through the host: it is
-    // state those files own, and an accessor would be one more thing to mis-wire.
-    if (host.roomLoading || host.roomArtPending() || roomAudioPending() || roomPreloadPending()) return;
+    // its PLAY can demand is in hand too. `roomEntryHeld` is the composition of the two
+    // post-art holds (roomLoad.ts) and is read straight from its owning module rather than
+    // through the host: it is state that file owns, and an accessor would be one more
+    // thing to mis-wire.
+    if (host.roomLoading || host.roomArtPending() || roomEntryHeld()) return;
     finishMapLaunch(l);
   } catch (e) {
     // This is the one thing in loop() that STARTS a room, and loop() reschedules itself

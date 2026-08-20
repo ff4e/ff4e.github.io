@@ -18,6 +18,7 @@ import {
   ZAVER_ROOM,
   branchOfRoom,
   depthOfRoom,
+  finaleFollows,
   storyPageOfRoom,
 } from '../src/data/world.js';
 
@@ -46,8 +47,39 @@ describe('story pages a room can reach', () => {
     // SCORE (72) is the other unregistered room, and it is deliberately never chained to
     // anything — asserted by name because "not in the list" is easy to satisfy by accident.
     expect(storyPageOfRoom(72)).toBe(0);
-    // The first room of a leg is not its last: a depth check that had drifted to `>= 15`
-    // or to the branch's first room would pass every assertion above but this one.
+    // The first room of a leg is not its last: a depth check that had drifted to the
+    // branch's first room would pass every assertion above but this one.
     expect(storyPageOfRoom(REGISTERED_ROOMS[0]!)).toBe(0);
+  });
+
+  it('is the DEEPEST rooms, which is the assumption `=== 15` rests on', () => {
+    // `storyPageOfRoom` tests `depthOfRoom(room) === 15`, and `>= 15` is indistinguishable
+    // from it — a mutation pass found exactly that, surviving every test here. It survives
+    // because nothing in the tree is deeper than 15. That is the fact to pin: if a future
+    // branch ever went deeper, `=== 15` would be the bug and this is what would say so.
+    expect(Math.max(...REGISTERED_ROOMS.map(depthOfRoom))).toBe(15);
+  });
+});
+
+describe('would winning this room finish the game', () => {
+  const ALL = new Set(REGISTERED_ROOMS);
+  const allBut = (n: number): ReadonlySet<number> => new Set([...ALL].filter((r) => r !== n));
+
+  it('is true only for the last leg-final room left unsolved', () => {
+    // The finale warm's entire trigger. Too loose and every leg-final entry starts a
+    // ~9.6 MB download the player will not use; too tight and the finale stalls.
+    expect(finaleFollows(70, allBut(70))).toBe(true);
+    expect(finaleFollows(19, allBut(19))).toBe(true);
+  });
+
+  it('is false while any other room is still unsolved', () => {
+    const twoLeft = new Set([...allBut(70)].filter((r) => r !== 37));
+    expect(finaleFollows(70, twoLeft)).toBe(false);
+  });
+
+  it('is false for a room that is not leg-final, and for the unregistered rooms', () => {
+    expect(finaleFollows(REGISTERED_ROOMS[0]!, ALL)).toBe(false);
+    expect(finaleFollows(ZAVER_ROOM, ALL)).toBe(false); // the finale cannot re-trigger itself
+    expect(finaleFollows(72, ALL)).toBe(false); // SCORE is never chained to
   });
 });

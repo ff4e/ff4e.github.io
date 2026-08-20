@@ -37,3 +37,35 @@ const MUSIC: Record<number, MusicDesc> = {
 export function musicForCHud(cHud: number): MusicDesc | null {
   return MUSIC[cHud] ?? null;
 }
+
+/**
+ * Music a room's PLAY cues that its own `cHud` track does not cover.
+ *
+ * The rest of a room's sound is packaged with it: the voices are in `0NN.ffs` and the
+ * `cHud` track is fetched by the room entry (`startRoomMusic`). These three are neither.
+ * They are cued mid-room, from a `Music/<name>.wav` that is in no sound package —
+ * `musicSnd` resolves a packaged name first and only falls through to a file for these
+ * (audio.ts) — and all three rooms have `cHud: -1`, so nothing else ever asks for them:
+ *
+ *   KUFRIK  `kufrik`   1.11 MB — started with the briefcase cutscene (cutscene.ts).
+ *   DRAKAR1 `rybky04`  5.75 MB — cued by the room script's own `init` (drakar1.ts:52).
+ *   KORALY  `rybky08`  0.74 MB — cued at score-step 19 (koraly.ts:373), well into the room.
+ *
+ * Every one was a `mustHave` fetch issued while the room was being played, `void`ed at the
+ * call site, so a connection that dropped during the room ended the session. They are
+ * fetched by the room entry now, like every other sound the room will make.
+ *
+ * `test/extra-music.test.ts` derives this same set from the room scripts and fails if a
+ * script cues a track that is not here — the table is small enough to state, and too easy
+ * to forget to grow.
+ */
+const EXTRA_MUSIC: Readonly<Record<number, string>> = {
+  2: 'kufrik',
+  13: 'rybky04',
+  34: 'rybky08',
+};
+
+/** The non-packaged track this room's play will cue beyond its `cHud` one, or null. */
+export function extraMusicOfRoom(room: number): string | null {
+  return EXTRA_MUSIC[room] ?? null;
+}

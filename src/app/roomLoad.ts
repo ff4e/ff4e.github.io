@@ -21,12 +21,13 @@ import { count, fftEntries, setFfr, setFftEntries, setPokus, subs, talkIdx } fro
 import { depthOfRoom } from '../data/world.js';
 import { enhancedArtActive, graphics } from './renderSettings.js';
 import { failRoomEntry, mapLaunching } from './roomLaunch.js';
-import { musicForCHud } from '../audio/music.js';
+import { extraMusicOfRoom, musicForCHud } from '../audio/music.js';
 import { parseFfr } from '../data/ffr.js';
 import { parseFft } from '../data/fft.js';
 import {
   clearRoomPreloadPending,
   preloadRoomPlayAssets,
+  roomPreloadPending,
   setRoomPreloadPending,
   warmFinaleRoom,
 } from './roomPreload.js';
@@ -50,6 +51,8 @@ export interface RoomLoadHost {
   readonly endShowmode: () => void;
   /** Where a room number's FFR lives (the tier's art pack can move it). */
   readonly ffrUrl: (num: number) => string;
+  /** Which rooms the player has genuinely solved — the finale warm's whole trigger. */
+  readonly solved: ReadonlySet<number>;
 }
 
 let host!: RoomLoadHost;
@@ -198,7 +201,7 @@ export async function loadRoom(num: number): Promise<void> {
     // the player is waiting for — start ZAVER's download if this room's win would finish
     // the game. Unawaited on purpose; the reasoning is in roomPreload.ts's header.
     void Promise.all([audioDone, preloadDone]).then(
-      () => warmFinaleRoom(num, host.ffrUrl),
+      () => warmFinaleRoom(num, host.ffrUrl, host.solved),
       () => {},
     );
   } catch (e) {
@@ -369,6 +372,21 @@ function clearRoomAudioPending(num: number): void {
   if (audioPendingNum === num) audioPendingNum = 0;
 }
 
+/**
+ * Is a room entry still waiting on anything it started AFTER its art?
+ *
+ * The two post-art holds are always asked together, so the composition is written down
+ * once instead of at each consumer. Both flags stay separate underneath — each names one
+ * thing, and a probe can tell a stalled voice package from a stalled story page — but a
+ * caller that reads only one of them proceeds while the other is still coming, which is
+ * exactly the mis-wiring the third flag would otherwise have invited.
+ *
+ * NOT the whole of "the entry is done": `roomLoading` and `roomArtPending()` come first
+ * and are the caller's to ask, because they gate different things (the room is BUILT when
+ * `roomLoading` drops; the FRAME waits on the art).
+ */
+export const roomEntryHeld = (): boolean => roomAudioPending() || roomPreloadPending();
+
 export let roomVoicesSettled = true;
 /** Resolves when `roomVoicesSettled` next becomes true — for callers that can await. */
 export let roomVoicesReady: Promise<void> = Promise.resolve();
@@ -472,6 +490,39 @@ export async function startRoomMusic(num: number): Promise<void> {
 }
 
 /**
+ * The one track a room's play cues that `startRoomMusic` does not (see `extraMusicOfRoom`):
+ * KUFRIK's cutscene theme, DRAKAR1's opening, KORALY's score. Three rooms, and all three
+ * used to fetch it at the moment the room asked for it — `void`ed at the call site, so a
+ * `mustHave` failure landed as an unhandled rejection in the middle of play.
+ *
+ * Fetched but NOT started: what plays, when, and on which priority is the script's business
+ * and the original's timing. All this does is make sure the bytes are in the engine's cache
+ * before the room is on screen, so the cue is instant and cannot fail.
+ *
+ * DRAKAR1 needs the join rather than a fresh load: its cue runs inside `buildRoom`, above,
+ * so by the time this runs the script's own 5.75 MB download is already in flight.
+ */
+async function loadExtraMusic(num: number): Promise<void> {
+  const name = extraMusicOfRoom(num);
+  if (name === null || audio.hasMusic(name)) return;
+  const inflight = audio.musicLoad(name);
+  if (inflight) {
+    await inflight; // settles either way — beginMusicLoad swallows the outcome
+    if (audio.hasMusic(name)) return;
+  }
+  const url = `/data/Music/${name}.wav`;
+  const load = (async () => {
+    const res = await requiredAsset(url, `the music for room ${num}`, 'mustHave', {
+      init: { priority: 'low' } as RequestInit,
+    });
+    await audio.decodeMusic(name, await assetBytes(url, res, 'mustHave'));
+  })();
+  // Registered before the await, so a cue that fires while this is coming joins it.
+  audio.beginMusicLoad(name, load);
+  await load;
+}
+
+/**
  * Everything a room needs to SOUND right: its voices, the leg-final remarks if it is a
  * leg-final room, and its music. Awaited by the room entry, which does not complete
  * until this does — and fails if it does not.
@@ -491,7 +542,12 @@ async function loadRoomAudio(num: number, nnn: string, fftBytes: Uint8Array): Pr
   // others keep downloading rather than being cancelled. That is deliberate: they are
   // already in flight, the retry will want them, and aborting them would only guarantee
   // the retry starts from nothing.
-  await Promise.all([loadBorderLines(num), loadRoomVoices(num, nnn, fftBytes), startRoomMusic(num)]);
+  await Promise.all([
+    loadBorderLines(num),
+    loadRoomVoices(num, nnn, fftBytes),
+    startRoomMusic(num),
+    loadExtraMusic(num),
+  ]);
 }
 
 /** Make a fish "talk": show the next subtitle of its colour code (M/V) and play its voice. */
