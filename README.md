@@ -683,10 +683,11 @@ Override the location with `FF_DATA_DIR=/path/to/MAINDIR`.
 
 ### Music
 
-Every byte of audio the 1998 game shipped is uncompressed 22 050 Hz mono 16-bit PCM —
-352.8 kbps — and the 17 `Music/*.wav` tracks are **63.8 MB** of it. Since a room does not
-appear until all of its audio has arrived, that PCM is time on the loading screen: on a
-1.5 Mbps link a room's track alone was up to 36 s of the wait.
+The 17 `Music/*.wav` tracks are uncompressed 22 050 Hz mono 16-bit PCM — 352.8 kbps,
+**63.8 MB**. (The *voices* are not: `0NN.ffs` bodies go through the original's `Decompres`
+delta codec, `src/audio/ffs.ts`, which already buys about 1.39×. Music was the uncompressed
+half.) Since a room does not appear until all of its audio has arrived, that PCM is time on
+the loading screen: on a 1.5 Mbps link a room's track alone was up to 36 s of the wait.
 
 The game fetches **`Music/<name>.m4a`** instead: AAC at 64 kbps, **12.3 MB** for all 17
 (5.2×), so the worst room's music goes from 6.75 MB to 1.3 MB. Stage them with

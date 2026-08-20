@@ -2,11 +2,16 @@
  * Stage the 17 `Music/` tracks the game ships: 22050 Hz mono PCM in, AAC in MP4 out.
  *
  * ── What this is for ──────────────────────────────────────────────────────────
- * Every byte of audio this game shipped was uncompressed 22050 Hz mono 16-bit PCM —
- * 352.8 kbps, for music and speech alike. Music alone was **63.8 MB** across 17 `.wav`
- * files (mean 3.75 MB, max 6.75 MB for `rybky06`), and since a room does not appear until
- * its audio is in, that PCM is time the player spends looking at a loading screen.
- * Measured on a 1.5 Mbps link, a room's music was up to 36 s of the wait on its own.
+ * The 17 music tracks shipped as uncompressed 22050 Hz mono 16-bit PCM — 352.8 kbps,
+ * **63.8 MB** across 17 `.wav` files (mean 3.75 MB, max 6.75 MB for `rybky06`) — and since a
+ * room does not appear until its audio is in, that PCM is time the player spends looking at
+ * a loading screen. Measured on a 1.5 Mbps link, a room's music was up to 36 s of the wait
+ * on its own.
+ *
+ * Music was the UNCOMPRESSED half. The voices are not raw: the `.ffs` bodies go through the
+ * original's `Decompres` delta codec (`src/audio/ffs.ts`, RSound.pas:258-333), which already
+ * buys ~1.39x — 183.9 MB shipped for 254.8 MB of PCM. They are a separate job, and a smaller
+ * multiple than this one.
  *
  * At 64 kbps the same 17 tracks are **12.7 MB** — 5.0x smaller, and the whole music
  * download of a room entry drops from up to 6.75 MB to under 1.4 MB.

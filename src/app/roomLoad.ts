@@ -181,9 +181,9 @@ export async function loadRoom(num: number): Promise<void> {
     // room is still BUILT at the same moment it always was.
     //
     // The wait is real and lands on slow links: it was ~6.2 MB typical, ~33 s at 1.5 Mbps,
-    // and almost entirely uncompressed PCM (22 kHz mono, 352.8 kbps). The MUSIC half of
-    // that is now AAC (tools/stage-music.ts, ~5x); the voices are still PCM inside their
-    // `.ffs` packages and are the larger half of what is left.
+    // and almost all of it audio. The MUSIC half is AAC now (tools/stage-music.ts, ~5x);
+    // the voices are the larger half of what is left — not raw PCM, but the original's
+    // `Decompres` delta codec (ffs.ts), which only buys ~1.39x against 22 kHz 16-bit.
     setRoomAudioPending(bootLoad ? 0 : num);
     const audioDone = bootLoad ? Promise.resolve() : art.then(() => loadRoomAudio(num, nnn, fftBytes));
     // …and the same treatment for what the room's PLAY can demand: KUFRIK's briefcase
