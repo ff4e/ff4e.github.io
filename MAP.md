@@ -6,89 +6,51 @@ you can trust them enough to open one file instead of reading a directory, so
 `test/readme-map.test.ts` makes it a failing test: nothing listed that is gone, nothing present that
 is unlisted.
 
-Moved out of `README.md` unedited.
+The two directory tables are moved out of `README.md` unedited; the layout above was rewritten,
+because the version in the README had drifted (see the commit that moved it).
 
 ## Layout
 
-- `src/app/main.ts` — the browser host: boot, the frame loop, every screen and all input.
-  ~5 890 lines — **see the map below before you open it**.
-- `src/app/dom.ts` — the element handles and 2D contexts everything else draws into.
-- `src/app/frameClock.ts` — when the next frame happens: the rAF handle, the idle timer and
-  the paint-rate cap. The MECHANISM only, so a keypress handler can say `wake()` without
-  reaching into it.
-- `src/app/framePacing.ts` — the pacing POLICY that feeds it: which screens may idle
-  (`loopThrottleOk`), how fast the things that still move on an idle screen must move
-  (`idleDelayMs`), the render-on-dirty bookkeeping, and the perf HUD. Every rate here is a
-  measured trade and the comments carry the measurements.
-- `src/app/screenState.ts` — `ui`: which screen is showing and the state of everything
-  layered over it (panel, options, credits, map info, help, leg image). A deliberately plain
-  mutable bag — its value is that other modules can **import** it, so nothing needs a getter
-  per name to see it.
-- `src/app/stageGeometry.ts` — how big the game is drawn (the stage box, the fit-mode scale,
-  a room's geometry) and the constants the simulation is timed by (`LOGIC_MS` and friends).
-  Needs exactly one name from `main.ts`; the device gate deliberately stays behind, because
-  it must be the first side effect the app performs.
-- `src/app/mapDraw.ts` — drawing the world map: the branch map, the room-name plaques and the
-  record panel (krokoměr). Only the drawing — deciding to go somewhere is `main.ts`'s map
-  navigation, which is why this needs four names and all four are the player's record.
-- `src/app/panel.ts` — the side panel the original game is played through, the options
-  sub-panel that scrolls up over it, and the help overlay. Faithful to `Uovl.pas`, so most
-  of it is frame and hit-region matching rather than drawing.
-- `src/app/loadingUi.ts` — the loading overlay, the fatal-error screen and `relayout()`: the
-  chrome shown when the game is not yet showing the game, and the only code that writes to
-  the page outside the canvases.
-- `src/app/mapDraw.ts` — drawing the world map: the branch map, the room-name plaques and the
-  record panel (krokoměr). Only the drawing — deciding to go somewhere is `main.ts`'s map
-  navigation, which is why this needs four names and all four are the player's record.
-- `src/app/panel.ts` — the side panel the original game is played through, the options
-  sub-panel that scrolls up over it, and the help overlay. Faithful to `Uovl.pas`, so most
-  of it is frame and hit-region matching rather than drawing.
-- `src/app/loadingUi.ts` — the loading overlay, the fatal-error screen and `relayout()`: the
-  chrome shown when the game is not yet showing the game, and the only code that writes to
-  the page outside the canvases.
-- `src/app/playerSettings.ts` — the player's own options: subtitle language and the three
-  volume buses. Tiny, but read from nearly everywhere and depending on almost nothing, which
-  is the shape that costs most while it sits inside `main.ts`.
-- `src/app/renderSettings.ts` — what the game is drawn WITH: art tier, render backend, the
-  idle-FPS saver, the dev pane. All four are persisted, so they are read in an `init` rather
-  than at module scope — `migrateSaves()` has to run first.
-- `src/app/gameState.ts` — the live room and how it is being played: `room`, `engine`,
-  `activeScript`, `count`, the three playback modes. Exported bindings rather than a bag,
-  because these are read 1 237 times and written 74: live bindings make the reads free and
-  only the writes go through a `setX`.
-- `src/app/persist.ts` — the localStorage save store (solved rooms, scores, records, play time).
-- `src/app/cheats.ts` — the typed cheat codes, the sprite/film effects, and the Tetris minigame.
-- `src/app/debugHooks.ts` — the `window.__ff` test interface every UI probe reads.
-- `src/app/glPlumbing.ts` — the per-tier art sources, the WebGL compositors, and the parity probes.
-- `src/app/art.ts` — enhanced/`ai` art loading, the room art cache, and the anti-flash hold predicates.
-- `src/data/binReader.ts` — little-endian sequential reader modelling Pascal `blockread`.
-- `src/data/ffr.ts` — FFR parser (faithful port of `TRoom.Init`, incl. `ReadBitMap`/`ReadBitMapExtra`).
-- `src/data/roomTable.ts` — the 72-room `Desc[]` table, auto-generated from `zaklad.pas`.
-- `src/render/framebuffer.ts` — indexed 8-bit screen + blitters (`Kresli`/`KresliRev`/`Kresli2`/`KresliR`).
-- `src/render/renderRoom.ts` — static room compositor (faithful `TRoom.Priprav` resting frame).
-- `src/render/png.ts` — dependency-free RGBA PNG encoder.
-- `src/platform/feedback.ts` — what a player's report contains and the three links out (pure).
-- `src/app/feedback.ts` — the feedback strip under the Options panel + the form, and why it sits there.
-- `tools/gen-room-table.py` — regenerates `roomTable.ts` from the original Pascal.
-- `tools/dump-ffr.ts` — M0 verification CLI (parse + size-check a room or all rooms).
-- `tools/render-room.ts` — M1 verification CLI (render a room / all rooms to PNG).
-- `tools/preview-server.mjs` — the shared `vite build` + `vite preview`-on-a-free-port machinery.
-- `tools/dev-server.mjs` — `npm run dev`: the dev server on a free port, printing what it serves.
-- `tools/link-node-modules.mjs` — share one `node_modules` between worktrees (opt-in, lockfile-checked).
-- `tools/strip-unused.mjs` — deletes the imports a file no longer uses, compiler-driven.
-- `tools/region-graph.mjs` — reads the `//#region` markers in `main.ts`, measures which regions reference
-  which, and reports the largest
-  cycle among them: the number that says whether `main.ts` could be split into files at all. `--edges`
-  lists every edge inside the cycle with the symbols carrying it. Guarded by `test/region-cycle.test.ts`.
-- `tools/capture-digest.mjs` — byte-exact behavioural fingerprint, comparable across git revisions.
-  The safety net for the `main.ts` split; read its header for what it does and does not cover.
+Where things are, one line per directory. The two dense ones have their own tables below; the
+others are small enough to read.
+
+- **`src/app/`** — the app shell: everything between the browser and the game — boot, the frame
+  loop, every screen, all input. 44 modules, **[mapped below](#map-of-srcapp)**. `main.ts` is the
+  composition root and no longer the place to start.
+- **`src/render/`** — the renderer, along two axes at once (art tier × backend).
+  **[Mapped below](#map-of-srcrender)**.
+- **`src/core/`** — the game itself, as pure logic with no browser in it: `room.ts` (push physics,
+  gravity, pathfinding — the port of `posun_objekt`/`padani`/`najdi_smer`), `stepEngine.ts` (one
+  step, shared by the app and the solvability net), `script.ts` (the room-script runtime),
+  `record.ts`, `tetris.ts`, `chatter.ts`, `deathlines.ts`.
+- **`src/data/`** — the original file formats, ported reader by reader: `binReader.ts` (a
+  little-endian sequential reader modelling Pascal `blockread`), `ffr.ts` (rooms — a faithful port
+  of `TRoom.Init`, incl. `ReadBitMap`/`ReadBitMapExtra`), `fft.ts` (subtitles), `ffp.ts` (the
+  panel), `bmp.ts`, `winPalette.ts`, `world.ts`, and `roomTable.ts` — the 72-room `Desc[]` table,
+  generated from `zaklad.pas`.
+- **`src/rooms/`** — 74 independent room scripts, one file per room. Large in total; a change
+  touches one file.
+- **`src/audio/`**, **`src/intro/`** — sound packages and playback; the intro and briefcase
+  cutscene players.
+- **`src/platform/`** — the two things that talk to the outside world: `feedback.ts` (what a
+  player's report may contain, and the three links out — pure) and `analytics.ts`.
+- **`tools/`** — the CLIs and harnesses. `dump-ffr.ts` / `render-room.ts` are the M0/M1
+  verification CLIs; `gen-room-table.py` regenerates `roomTable.ts` from the original Pascal;
+  `dev-server.mjs` and `preview-server.mjs` are the free-port dev and build servers;
+  `link-node-modules.mjs` shares one `node_modules` between worktrees (opt-in, lockfile-checked);
+  `strip-unused.mjs` deletes the imports a file no longer uses; `region-graph.mjs` measures which
+  `//#region`s of `main.ts` reference which; `capture-digest.mjs` is the byte-exact behavioural
+  fingerprint, comparable across git revisions — read its header for what it does and does not
+  cover; `mutate-*.mjs` are the mutation harnesses ([`TESTING.md`](TESTING.md)).
+- **`test/`** — the unit and integration suites; **`test/ui/`** the browser probes. See
+  [`TESTING.md`](TESTING.md).
 
 ### Map of `src/app/`
 
 The app shell: everything between the browser and the game. It used to be one file — `main.ts`
 was 5 897 lines and ~64 k tokens, and this section held a table of its line ranges, because
 that was the only way to open a part of it without reading the whole. That table is gone: the
-file is 37, and you find code by name now.
+file is 44, and you find code by name now.
 
 `main.ts` is still the biggest thing here, and it is deliberately what is left over — the
 composition root. It declares the state that has no better owner yet, wires each module its
@@ -159,7 +121,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 
 ### Map of `src/render/`
 
-The renderer is 28 files and ~84 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
+The renderer is 32 files and ~102 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
 two axes at once (which **art tier**: classic / enhanced / `ai`; and which **backend**: CPU or WebGL), which
 is what makes it hard to guess where something lives. This table is the shortcut.
 

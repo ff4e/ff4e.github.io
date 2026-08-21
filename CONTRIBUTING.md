@@ -32,7 +32,7 @@ present that is unlisted — so a forgotten row fails `npm test` rather than rot
 
 **There used to be a third kind: a line-range map of `src/app/main.ts`**, generated from `//#region`
 markers by `tools/gen-map.mjs`. It existed because the app was one 5 897-line file and there was no other
-way to open a part of it. The app is 37 files now, so the map is a directory listing and the generator is
+way to open a part of it. The app is 44 files now, so the map is a directory listing and the generator is
 gone. The `//#region` markers stayed — `tools/region-graph.mjs` measures the dependencies between them,
 and they are useful to grep — but nothing derives line numbers from them any more. The test rejects a new
 line-range map: if a file is big enough to want one, split it instead.

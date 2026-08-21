@@ -246,7 +246,7 @@ load-bearing:
 
 ## Finding your way around
 
-- **`src/app/`** is 37 files and [`MAP.md`](MAP.md) maps them. `main.ts` is the composition root — the leftover
+- **`src/app/`** is 44 files and [`MAP.md`](MAP.md) maps them. `main.ts` is the composition root — the leftover
   state, the boot-time wiring, and the keyboard and pointer routers — and at ~2 200 lines it is no longer
   the place to start. Find the thing by name: `logicTick.ts` is one game step, `renderLoop.ts` is one
   frame, `roomLoad.ts` gets a room on screen.
