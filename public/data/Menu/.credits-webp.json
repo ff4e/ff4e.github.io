@@ -1,0 +1,20 @@
+{
+  "CredMov": {
+    "bmp": "95cb92330fdfab8c821597318f7a35482555f087fbb634230186b426389fcc01",
+    "h": 2921,
+    "w": 640,
+    "webp": "be40b731e80f8217e028f3083a4d83d7bbda3edaf007eefb5a339d8425ff583d"
+  },
+  "CredMov_port": {
+    "bmp": "37219d447a9bf4402a10760293d8e558c286dbe44a00f398443064a04d9958d2",
+    "h": 3285,
+    "w": 640,
+    "webp": "0e35c56d32b061d0a278d0761fde5b619d9d367e262db0d35d3eb19f229fef83"
+  },
+  "CredStat1": {
+    "bmp": "37955ef43ac025e3ef5d4880e3fe52374d86e4dcca25749425183f719b2f45b5",
+    "h": 480,
+    "w": 640,
+    "webp": "21ded986bba4c223822573a2fc891a1c5510d3c9a109bdce002a815301cd49bc"
+  }
+}

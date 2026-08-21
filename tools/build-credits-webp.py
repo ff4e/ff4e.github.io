@@ -47,6 +47,8 @@ Usage:
 """
 import os
 import sys
+import hashlib
+import json
 
 try:
     from PIL import Image
@@ -56,6 +58,9 @@ except ImportError:
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MENU = os.path.join(ROOT, 'public', 'data', 'Menu')
 PALETTE_TS = os.path.join(ROOT, 'src', 'data', 'creditsPalette.ts')
+# Ties each shipped .webp to the .BMP it was made from, so the unit suite can catch a
+# regenerated bitmap whose WebP was never rebuilt. See `stamp()`.
+STAMP = os.path.join(MENU, '.credits-webp.json')
 
 # The static frame first: it is the one whose palette the renderer uses for both images.
 SOURCES = ['CredStat1', 'CredMov', 'CredMov_port']
@@ -104,6 +109,32 @@ def recovered_indices(name, palette):
             sys.exit(f'{name}.webp: pixel {p} decoded to {c}, which is not in the palette')
         out[p] = i
     return bytes(out)
+
+
+def stamp(loaded):
+    """Tie each shipped `.webp` to the `.BMP` it was encoded from.
+
+    `--check` proves index-identity, but it needs Pillow and so cannot run in the unit
+    suite (or in CI, which is node-only by design — see .github/workflows/checks.yml).
+    That left the one invariant this change rests on with no guard that runs on a push,
+    and a concrete way to drift: `tools/build-credits-port.py` regenerates
+    `CredMov_port.BMP`, nothing regenerates `CredMov_port.webp`, and the faithful tier
+    now reads only the latter — so the two tiers would quietly roll DIFFERENT credits.
+
+    Two hashes per asset close that for milliseconds: the BMP's index plane (not the
+    file, so a palette-only rewrite is still caught while padding is not mistaken for
+    content) and the WebP's bytes. `test/creditsAsset.test.ts` recomputes both in Node,
+    with no image decoder, and fails asking for a regenerate.
+    """
+    return {
+        name: {
+            'bmp': hashlib.sha256(idx).hexdigest(),
+            'webp': hashlib.sha256(open(os.path.join(MENU, f'{name}.webp'), 'rb').read()).hexdigest(),
+            'w': im.size[0],
+            'h': im.size[1],
+        }
+        for name, (im, idx, _) in loaded.items()
+    }
 
 
 def palette_module(palette):
@@ -194,6 +225,13 @@ def main():
             bad += 1
         else:
             print(f'ok   {os.path.relpath(PALETTE_TS, ROOT)} matches the bitmaps')
+        if not bad:
+            recorded = json.load(open(STAMP)) if os.path.exists(STAMP) else None
+            if recorded != stamp(loaded):
+                print(f'FAIL {os.path.relpath(STAMP, ROOT)} is stale — regenerate it')
+                bad += 1
+            else:
+                print(f'ok   {os.path.relpath(STAMP, ROOT)} matches the shipped pairs')
         sys.exit(1 if bad else 0)
 
     total_bmp = total_webp = 0
@@ -215,6 +253,10 @@ def main():
     with open(PALETTE_TS, 'w') as f:
         f.write(palette_module(palette))
     print(f'wrote {os.path.relpath(PALETTE_TS, ROOT)}')
+    with open(STAMP, 'w') as f:
+        json.dump(stamp(loaded), f, indent=2, sort_keys=True)
+        f.write('\n')
+    print(f'wrote {os.path.relpath(STAMP, ROOT)}')
     print(f'total {total_bmp:9d} -> {total_webp:8d} B  ({total_bmp / total_webp:5.1f}x)')
 
 

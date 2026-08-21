@@ -23,7 +23,8 @@
  * `test-intro.mjs` and `test-map-loading.mjs` already walk into.
  */
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { bmpToRgba, parseBmp, rgbaToIndexed, type Bmp } from '../src/data/bmp.js';
 import { CREDITS_PALETTE } from '../src/data/creditsPalette.js';
@@ -91,18 +92,47 @@ describe('rebuilding the index plane from colour', () => {
 });
 
 describe('what the site actually fetches', () => {
+  // The invariant the whole change rests on is that the shipped `.webp` decodes to the
+  // SAME index plane as the `.BMP`. Proving that pixel by pixel needs a WebP decoder,
+  // which Node has not got — `tools/build-credits-webp.py --check` does it with Pillow,
+  // but CI is node-only by design, so on its own that guard runs nowhere automatic.
+  //
+  // The stamp closes it for milliseconds: the tool records a hash of each BMP's index
+  // plane and of each WebP's bytes at the moment it verified them, and these recompute
+  // both. Any drift on either side fails here.
+  //
+  // Not hypothetical. `tools/build-credits-port.py` regenerates `CredMov_port.BMP` and
+  // nothing regenerates `CredMov_port.webp`; since the faithful tier now reads only the
+  // latter, that would leave it rolling the STALE card while the `ai` tier — staged from
+  // the BMP by `tools/studio/stage-ui.mjs` — rolls the new one. Two tiers, different
+  // credits, and no rendering test would show it.
+  const stamp = JSON.parse(readFileSync(join(MENU, '.credits-webp.json'), 'utf8')) as Record<
+    string,
+    { bmp: string; webp: string; w: number; h: number }
+  >;
+  const sha = (b: Buffer | Uint8Array): string => createHash('sha256').update(b).digest('hex');
+  const REGEN = 'run `python3 tools/build-credits-webp.py --force`';
+
+  it('records every asset it ships', () => {
+    expect(Object.keys(stamp).sort()).toEqual([...ASSETS].sort());
+  });
+
   for (const name of ASSETS) {
-    it(`${name} ships as WebP, and far smaller than the bitmap`, () => {
+    it(`${name}.webp is the one built from today's ${name}.BMP`, () => {
       const webp = join(MENU, `${name}.webp`);
-      const bmp = join(MENU, `${name}.BMP`);
-      expect(existsSync(webp), `${webp} is missing — run tools/build-credits-webp.py`).toBe(true);
+      expect(existsSync(webp), `${webp} is missing — ${REGEN}`).toBe(true);
       // The original stays in the repo: it is what `--check` decodes back against, and
       // what this file reads its expectations from. Only the SITE stops carrying it
       // (tools/stage-pages-assets.mjs).
-      expect(existsSync(bmp)).toBe(true);
-      // A loose bound on purpose — it is a staleness guard, not a pin on the encoder.
-      // Anything remotely near the BMP's size means the re-encode did not happen.
-      expect(statSync(webp).size).toBeLessThan(statSync(bmp).size / 5);
+      const bmp = bmpOf(name);
+      expect(bmp.w).toBe(stamp[name]!.w);
+      expect(bmp.h).toBe(stamp[name]!.h);
+      // Hashed as the INDEX PLANE, not the file: that is what the WebP has to reproduce,
+      // and it ignores the BMP's row padding while still catching a one-pixel edit.
+      expect(sha(bmp.pixels), `${name}.BMP changed since its WebP was built — ${REGEN}`).toBe(stamp[name]!.bmp);
+      expect(sha(readFileSync(webp)), `${name}.webp is not the file that was verified — ${REGEN}`).toBe(
+        stamp[name]!.webp,
+      );
     });
   }
 
