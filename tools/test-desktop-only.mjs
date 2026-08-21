@@ -52,7 +52,7 @@ function isPayload(u) {
   }
   if (path.startsWith('/src/') || path.startsWith('/node_modules/')) return false; // TS modules
   if (path.startsWith('/assets/')) return false; // the production bundle
-  if (path === '/favicon.ico') return false;
+  if (path === '/favicon.ico' || path === '/apple-touch-icon.png') return false;
   return true;
 }
 
