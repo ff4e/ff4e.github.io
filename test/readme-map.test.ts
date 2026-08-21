@@ -1,7 +1,7 @@
 /**
- * The README maps must describe the code as it is now.
+ * The source maps must describe the code as it is now.
  *
- * `README.md` carries navigation maps — a file table for `src/app/` and one for
+ * `MAP.md` carries navigation maps — a file table for `src/app/` and one for
  * `src/render/` — and their whole value is that a reader can trust them enough to open
  * one file instead of reading a directory. A map that has drifted is worse than no map:
  * it sends people confidently to the wrong place.
@@ -31,14 +31,14 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dirname, '..');
-const readme = readFileSync(join(root, 'README.md'), 'utf8');
+const readme = readFileSync(join(root, 'MAP.md'), 'utf8');
 
 interface MapSection {
   path: string;
   rows: string[][];
 }
 
-/** Every `### Map of \`path\`` section in the README, with its table rows. */
+/** Every `### Map of \`path\`` section in MAP.md, with its table rows. */
 function mapSections(): MapSection[] {
   const out: MapSection[] = [];
   const lines = readme.split('\n');
@@ -65,8 +65,8 @@ function mapSections(): MapSection[] {
 
 const sections = mapSections();
 
-describe('README maps', () => {
-  it('the README actually contains maps (a silent zero would pass every check below)', () => {
+describe('source maps', () => {
+  it('MAP.md actually contains maps (a silent zero would pass every check below)', () => {
     expect(sections.length).toBeGreaterThan(0);
   });
 
@@ -93,7 +93,7 @@ describe('README maps', () => {
           const stale = listed.filter((f) => !onDisk.includes(f));
           expect(
             { missing, stale },
-            `README's map of ${path} is out of date.\n` +
+            `MAP.md's map of ${path} is out of date.\n` +
               (missing.length ? `  not listed: ${missing.join(', ')}\n` : '') +
               (stale.length ? `  listed but gone: ${stale.join(', ')}\n` : '') +
               '  Add or remove the rows, then re-run.',
@@ -103,7 +103,7 @@ describe('README maps', () => {
         it('is a directory map — line-range maps are not kept any more', () => {
           expect(
             path,
-            `README has a line-range map of ${path}. Those were dropped when src/app/ ` +
+            `MAP.md has a line-range map of ${path}. Those were dropped when src/app/ ` +
               'became a directory of named files: a range table has to be re-derived on ' +
               'every edit that moves a line, and nothing re-derives it now. Map the ' +
               'directory instead, or split the file so its parts have names.',

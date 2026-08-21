@@ -18,9 +18,9 @@ there is no separate private repo. Keep it clean and public-safe.
   or task-hub artifacts (briefings, progress logs, `.copilot/` / `.claude/` session state).
   These are also blocked by `.gitignore` as a backstop.
 
-## Keeping the README maps honest
+## Keeping the maps honest
 
-`README.md` carries navigation maps — one for `src/app/`, one for `src/render/`. Their whole value is that
+[`MAP.md`](MAP.md) carries navigation maps — one for `src/app/`, one for `src/render/`. Their whole value is that
 a reader trusts them enough to open one file instead of reading a directory, so a map that has drifted is
 worse than no map: it sends people confidently to the wrong place.
 
@@ -32,12 +32,12 @@ present that is unlisted — so a forgotten row fails `npm test` rather than rot
 
 **There used to be a third kind: a line-range map of `src/app/main.ts`**, generated from `//#region`
 markers by `tools/gen-map.mjs`. It existed because the app was one 5 897-line file and there was no other
-way to open a part of it. The app is 37 files now, so the map is a directory listing and the generator is
+way to open a part of it. The app is 44 files now, so the map is a directory listing and the generator is
 gone. The `//#region` markers stayed — `tools/region-graph.mjs` measures the dependencies between them,
 and they are useful to grep — but nothing derives line numbers from them any more. The test rejects a new
 line-range map: if a file is big enough to want one, split it instead.
 
-## Assets & licensing## Assets & licensing
+## Assets & licensing
 
 - Everything shipped under `public/data/` descends from ALTAR's original 1998 Fish Fillets data,
   **GPL-released in 2002** — the same basis the fillets-ng project stands on. The whole repo is
@@ -50,3 +50,12 @@ line-range map: if a file is big enough to want one, split it instead.
 
 - Pushing a `v*` tag triggers the GitHub Actions Pages build (see `.github/workflows/`).
   The live site is https://ff4e.github.io/.
+
+The web build is published to **GitHub Pages** via `.github/workflows/deploy.yml` (build on
+a pushed version tag `v*`, then Pages deploy — or run it manually via *workflow_dispatch*). Because `copyPublicDir` is disabled (see `vite.config.ts`),
+`tools/stage-pages-assets.mjs` copies `public/*` into `dist/` (dereferencing the `public/data`
+symlink) and writes `.nojekyll` before the Pages artifact is uploaded. Optional
+**Cloudflare Web Analytics** is injected at build time only when the `CF_BEACON_TOKEN`
+secret (→ `VITE_CF_BEACON_TOKEN`) is set; otherwise analytics is a no-op (see
+`src/platform/analytics.ts`). The build stamps `__APP_VERSION__` / `__BUILD_HASH__` /
+`__BUILD_DATE__` (logged to the console at boot).

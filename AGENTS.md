@@ -32,6 +32,17 @@ This repo is normally checked out as **many git worktrees**, one per branch. Two
 
 Node is pinned to 22. `export PATH="$HOME/.nvm/versions/node/v22.12.0/bin:/usr/local/bin:$PATH"`.
 
+The commands worth knowing, beyond the test ones below:
+
+    npm install
+    npm run dev                     # browser host on a FREE port (it prints the URL), with sound
+    npm run dump-ffr -- --all       # M0: validate all 72 FFR (byte-exact, DFFR sizes)
+    npm run render-room -- UTES     # M1: render a room's resting frame -> out/UTES.png
+    npm run test-move -- UTES       # headless movement/push probe + render (exploratory)
+    npm run test-path -- UTES little  # BFS-drive a fish to a target + render (exploratory)
+    npm run dump-fft -- UTES        # list a room's subtitles (CZ + EN)
+    npm run typecheck
+
 ## How much checking a change needs
 
 The full gate is ~6 minutes, and paying it for a typo is why people stop checking things. Match the gate to
@@ -69,13 +80,13 @@ table nobody opens is free; a large file everyone edits is the expensive thing.
 1. **New code starts in a new module.** `main.ts` reached 7 798 lines by accretion — every step was a
    reasonable "this is related, put it here". Default to a new file in the right directory and import it. Put
    code in an existing large file only when splitting it would genuinely duplicate state, and say so in the PR.
-2. **Do not read a big file to change a small part of it.** `README.md` maps `src/app/` and `src/render/`
+2. **Do not read a big file to change a small part of it.** `MAP.md` maps `src/app/` and `src/render/`
    file by file, drift-guarded by `test/readme-map.test.ts`. Open the file, not the directory. If a map
    sends you to the wrong place, fixing the map is part of your change.
 3. **A hot file needs internal structure.** Any file over ~600 lines that changes often should carry
    `//#region` markers with `anchors:` you can grep for. `tools/region-graph.mjs` measures the
    dependencies BETWEEN those regions, but only for `src/app/main.ts` — it is pointed at that one file.
-   README maps are per-file now; there is no line-range table to regenerate.
+   The maps in `MAP.md` are per-file now; there is no line-range table to regenerate.
 4. **Do not grow the hot files.** `test/file-budgets.test.ts` holds a line budget per hot file and fails when
    one is exceeded. The budgets only ever ratchet **down**: if your change genuinely belongs there and the
    budget must rise, raise it in the same PR and justify it in the description. The test exists to force that
@@ -235,11 +246,11 @@ load-bearing:
 
 ## Finding your way around
 
-- **`src/app/`** is 37 files and the README maps them. `main.ts` is the composition root — the leftover
+- **`src/app/`** is 44 files and [`MAP.md`](MAP.md) maps them. `main.ts` is the composition root — the leftover
   state, the boot-time wiring, and the keyboard and pointer routers — and at ~2 200 lines it is no longer
   the place to start. Find the thing by name: `logicTick.ts` is one game step, `renderLoop.ts` is one
   frame, `roomLoad.ts` gets a room on screen.
-- **`src/render/`** has its own map in the README. Start at `roomWalk.ts` (what is drawn, in what order) and
+- **`src/render/`** has its own map in [`MAP.md`](MAP.md). Start at `roomWalk.ts` (what is drawn, in what order) and
   `artSource.ts` (what colour) — nearly everything else implements one side of those two.
 - **`src/rooms/`** is 74 independent room scripts. Large in total, but a change touches one file.
 
