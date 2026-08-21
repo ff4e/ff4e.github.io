@@ -74,15 +74,24 @@ async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
  *
  * Same change as `loadAiPanel`: the quiet fallback to the faithful roll is gone, because
  * a fallback nobody can see is indistinguishable from the tier working.
+ *
+ * The subject is `'the credits'`, NOT "the AI credits", and that is load-bearing rather
+ * than cosmetic: `hideLoadNote(what)` matches the subject EXACTLY (loadNote.ts), and
+ * `openCredits` takes the note down with `'the credits'` after a load succeeds. While the
+ * `ai` tier also loaded the faithful roll the two always agreed; now each tier loads only
+ * its own, a second subject here would mean the note that this loader raised could never
+ * be cleared by the reopen that fixed it — on the DEFAULT tier. It is also the better
+ * player-facing name, which is what `LoadSubject` is defined to be: nobody reading
+ * "couldn't load the credits" wants to know which art tier asked.
  */
 export async function loadAiCredits(base: string): Promise<AiCredits> {
   {
     const dir = `${base}enhanced-ai/_credits/`;
-    const man = await requiredJson<AiCreditsManifest>(`${dir}ai.json`, 'the AI credits', 'shouldHave');
+    const man = await requiredJson<AiCreditsManifest>(`${dir}ai.json`, 'the credits', 'shouldHave');
     const scale = Number(man.scale) || AI_CREDITS_SCALE;
     const [stat, mov] = await Promise.all([
-      loadImage(`${dir}stat.webp`, 'the AI credits'),
-      loadImage(`${dir}mov.webp`, 'the AI credits'),
+      loadImage(`${dir}stat.webp`, 'the credits'),
+      loadImage(`${dir}mov.webp`, 'the credits'),
     ]);
     // A decoded image with no intrinsic size is a corrupt file, not an absent one: the
     // decoder is the only thing that can tell, and it did.

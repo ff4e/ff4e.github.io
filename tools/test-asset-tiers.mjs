@@ -373,6 +373,64 @@ await withApp(async ({ p, expect, allowed }) => {
   await p.waitForFunction(() => !window.__ff.loadNoteShown(), null, { timeout: budget(8000) });
   expect(true, 'reopening the credits after they succeed clears their own stale note');
   await p.evaluate(() => window.__ff.closeMapOverlay());
+
+  // 1c'. The same guarantee on `ai`, which is the SHIPPED DEFAULT and the one tier where
+  // it can break independently: the note is raised by whichever loader ran, and
+  // `hideLoadNote` matches its subject EXACTLY. While `ai` also loaded the faithful roll
+  // the subjects could not disagree; now each tier loads only its own, so a second
+  // subject in the AI loader would leave a stale note sitting on top of a working roll
+  // for the rest of the session. Pinning §1c to `enhanced` (which the tier split forced)
+  // moved this guarantee off the default tier, so it is asserted here rather than lost.
+  await reloadApp(p);
+  await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  await failing(p, '**/enhanced-ai/_credits/**');
+  await p.evaluate(() => void window.__ff.openCredits());
+  await noteUp(p);
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+  await p.evaluate(() => void window.__ff.openCredits());
+  await p.waitForFunction(() => window.__ff.mapOverlay() === 'credits', null, { timeout: budget(8000) });
+  expect(
+    !(await p.evaluate(() => window.__ff.loadNoteShown())),
+    'the ai credits clear their own stale note too — same subject as the faithful roll',
+  );
+  await p.evaluate(() => window.__ff.closeMapOverlay());
+
+  // 1d. A second click DURING the load must not start a second load.
+  //
+  // The overlay is deliberately not armed until the art is in (that hold is what stops
+  // the `ai` tier flashing the low-res roll), so `openCredits`'s `mapOverlay` guard is
+  // open for the whole wait and every click gets through it. Measured before the guard
+  // that fixes it: three clicks, three full fetches — 1.2 MB each on `ai`.
+  //
+  // It is also the half of the deleted `ui.aiCreditsTried` latch that was not about the
+  // draw path: that flag was set synchronously, so it deduplicated concurrent opens too.
+  await reloadApp(p);
+  await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  await p.evaluate(() => window.__ff.setGraphics('enhanced')); // the reload re-pins `ai`
+  let credLoads = 0;
+  // The first request is HELD until the extra clicks have been issued, rather than delayed
+  // by a guessed interval: the clicks must land while the load is genuinely in flight, and
+  // a timing race would either stop testing that (load finishes first) or trip the app's
+  // own ~20s stall deadline and fail for the wrong reason. `budget()` is for waits, not
+  // for injected delays — it multiplies by 12, which is how that deadline got hit.
+  let releaseRoll = () => {};
+  const heldRoll = new Promise((k) => { releaseRoll = k; });
+  await p.route('**/data/Menu/CredStat1.webp', async (r) => {
+    credLoads++;
+    await heldRoll;
+    return r.continue();
+  });
+  await p.evaluate(() => void window.__ff.openCredits());
+  // Wait for the request to be intercepted, so the clicks below are certainly concurrent.
+  for (let i = 0; credLoads === 0 && i < 100; i++) await p.waitForTimeout(50);
+  expect(credLoads === 1, 'the held roll request was intercepted');
+  await p.evaluate(() => void window.__ff.openCredits());
+  await p.evaluate(() => void window.__ff.openCredits());
+  releaseRoll();
+  await p.waitForFunction(() => window.__ff.mapOverlay() === 'credits', null, { timeout: budget(8000) });
+  expect(credLoads === 1, `three opens during one load fetch the roll once (${credLoads} requests)`);
+  await p.evaluate(() => window.__ff.closeMapOverlay());
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
   await p.evaluate(() => window.__ff.setGraphics('ai')); // back to this probe's default
 
   // ── 2. Total outage: everything fails, and nothing hangs ────────────────────

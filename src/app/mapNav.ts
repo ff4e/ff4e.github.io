@@ -401,6 +401,18 @@ export function closeMapOverlay(): void {
  */
 export async function openCredits(): Promise<void> {
   if (ui.screen !== 'map' || ui.mapOverlay !== 'none') return;
+  // A load is already in flight, so this click is a no-op: the parchment is up and the
+  // roll opens when the art lands. The guard above cannot cover this — `mapOverlay` is
+  // deliberately not armed until the art is in, which is the whole point of the hold, so
+  // every click during the wait passes it. Without this, three clicks fetch the `ai`
+  // strip three times (1.2 MB each, measured).
+  //
+  // It is also what the deleted `ui.aiCreditsTried` latch was quietly doing: that flag
+  // was set synchronously in the draw branch, so it throttled the per-frame re-request
+  // AND deduplicated concurrent opens. Only the first job moved to the gesture; this is
+  // the second, and it belongs here rather than in `ensureAiCredits` because the faithful
+  // path had the same hole (three opens, three fetches) before any of this.
+  if (ui.creditsLoading) return;
   // ── One tier's art, fetched before anything is shown ─────────────────────────
   // The `ai` tier used to load the faithful bitmaps here and kick its own art off from
   // the DRAW, so the low-res roll went up first and visibly swapped a beat later. That is
@@ -492,7 +504,14 @@ export function drawCredits(): void {
   // overlay is not armed until it is in. The draw no longer starts any load: the hold is
   // the thing the draw suppresses, so it must not also be the thing that triggers it
   // (the same rule `beginMapArt` states for the world map).
-  const ai = graphics === 'ai' ? aiCredits : null;
+  //
+  // The second term is the tier changing WHILE the roll is up, which only the dev pane's
+  // E can do (the options panel and the credits are both `mapOverlay`, so a player cannot
+  // hold one open and reach the other). Since each tier now loads only its own art, the
+  // new tier's roll may simply not exist — and returning here would freeze the roll on
+  // screen and skip the auto-close below with no way out but a click. So the roll that IS
+  // loaded keeps drawing, which is what happened before the tiers were split apart.
+  const ai = graphics === 'ai' ? aiCredits : ui.credits ? null : aiCredits;
   const roll = ai ?? ui.credits;
   if (!roll) return;
   const nativeW = ai ? ai.nativeW : ui.credits!.w;
