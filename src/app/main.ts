@@ -117,6 +117,7 @@ import {
 } from './stageState.js';
 import { initDevBar, syncSolveBtn } from './devBar.js';
 import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
+import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
@@ -1358,7 +1359,7 @@ window.addEventListener('keydown', (e) => {
   // closes the viewer (Help.pas:Image1Click / FormKeyDown).
   if (ui.helpOpen) {
     e.preventDefault();
-    const count = helpScreens.pages(subLang()).length;
+    const count = helpPageCount(subLang());
     if (e.code === 'ArrowRight') helpScreens.next(count);
     else if (e.code === 'ArrowLeft') helpScreens.prev(count);
     else closeHelp();
@@ -1632,7 +1633,7 @@ canvas.addEventListener('mousedown', (e) => {
   if (ui.helpOpen) {
     e.preventDefault();
     if (e.button === 2) closeHelp();
-    else helpScreens.next(helpScreens.pages(subLang()).length);
+    else helpScreens.next(helpPageCount(subLang()));
     return;
   }
   // A click skips the briefcase demo (zrus_kufr).
@@ -2038,9 +2039,6 @@ await runBoot();
   },
   get heldState() {
     return heldKeyState();
-  },
-  get helpScreens() {
-    return helpScreens;
   },
   get hooks() {
     return hooks;

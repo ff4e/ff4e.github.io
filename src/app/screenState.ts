@@ -26,14 +26,11 @@
  * Module scope must stay side-effect-free: `main.ts` refuses to run on a phone before any
  * other side effect, and an imported module is evaluated before any statement of its
  * importer (AGENTS.md, "the module-evaluation trap"). Everything below is a plain value.
- * `new HelpScreens()` allocates an empty cache and touches nothing — no DOM, no
- * `localStorage`, no network until `load()` is called.
  */
 import type { DeskyData } from '../data/desky.js';
 import type { FfpPanel } from '../data/ffp.js';
 import type { InfoButton, InfoPanelAssets } from '../render/mapInfo.js';
 import type { Credits } from '../render/credits.js';
-import { HelpScreens } from '../render/help.js';
 import type { MapAction, WorldMap } from '../render/worldMap.js';
 import type { VolumeBus } from '../core/settings.js';
 import type { FeedbackUi } from './feedback.js';
@@ -49,8 +46,23 @@ export const SCMIN = 6; // scroll frame indices (Uovl.pas:27-29)
 export const SCMAX = 15;
 export const PANEL_SCROLL_MS = 100; // the original panel Timer interval (UMain.dfm)
 
-/** The control-help pages (Help.pas), lazily loaded. */
-export const helpScreens = new HelpScreens();
+/**
+ * Where the player is in the control-help pages (Help.pas).
+ *
+ * Only the position: the pages themselves are text now (`src/data/helpText.ts`) and are
+ * built by `helpDom.ts`, so there is nothing left here to load or cache.
+ */
+export const helpScreens = {
+  page: 0,
+  /** Advance to the next page, wrapping (Image1Click, Help.pas). */
+  next(count: number): void {
+    if (count > 0) this.page = (this.page + 1) % count;
+  },
+  /** Go to the previous page, wrapping. A port addition — the original only goes forward. */
+  prev(count: number): void {
+    if (count > 0) this.page = (this.page - 1 + count) % count;
+  },
+};
 
 export const ui = {
   panel: null as FfpPanel | null, // the parsed control-panel graphic (panel.ffp)
