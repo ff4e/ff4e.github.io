@@ -149,7 +149,13 @@ const CASES = [
     tier: 'shouldHave',
     label: 'credits',
     url: '**/data/Menu/CredStat1.webp',
-    reach: (p) => p.evaluate(() => void window.__ff.openCredits()),
+    // Pinned to a non-`ai` tier, because each tier now fetches ONLY its own roll: on
+    // `ai` the faithful pair is never requested (the hi-res art is the whole roll), so
+    // this row's route would never fire and it would pass having proved nothing.
+    reach: async (p) => {
+      await p.evaluate(() => window.__ff.setGraphics('enhanced'));
+      await p.evaluate(() => void window.__ff.openCredits());
+    },
   },
   {
     // The BACKSTOP path, and the only one left that fetches this file: clicking an
@@ -279,6 +285,13 @@ await withApp(async ({ p, expect, allowed }) => {
   // map's corner, loaded exactly once, and reopenable without a reload. The help pages
   // used to be the vehicle and are no longer fetched at all — they are text in the bundle
   // now (`src/data/helpText.ts`).
+  //
+  // On the `enhanced` tier throughout this section: each tier now fetches ONLY its own
+  // roll, so the faithful bitmaps this section blocks are simply not requested on `ai`.
+  // The note-and-retry surface under test is tier-independent — it is the same
+  // `openCredits` catch either way — so the vehicle is pinned rather than the assertion
+  // changed. Restored to `ai` at the end, for the sections that follow.
+  await p.evaluate(() => window.__ff.setGraphics('enhanced'));
   let credTries = 0;
   await p.route('**/data/Menu/CredStat1.webp', (r) => {
     credTries++;
@@ -319,6 +332,7 @@ await withApp(async ({ p, expect, allowed }) => {
   // path; it is the rule `showLegImage`'s retry already states in its own comment.
   await reloadApp(p);
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  await p.evaluate(() => window.__ff.setGraphics('enhanced')); // the reload re-pins `ai`
   let credRetries = 0;
   await p.route('**/data/Menu/CredStat1.webp', (r) => r.abort('failed'));
   await p.evaluate(() => void window.__ff.openCredits());
@@ -350,6 +364,7 @@ await withApp(async ({ p, expect, allowed }) => {
   // section would be testing the cache rather than the retry.
   await reloadApp(p);
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  await p.evaluate(() => window.__ff.setGraphics('enhanced')); // the reload re-pins `ai`
   await p.route('**/data/Menu/CredStat1.webp', (r) => r.abort('failed'));
   await p.evaluate(() => void window.__ff.openCredits());
   await noteUp(p);
@@ -358,6 +373,7 @@ await withApp(async ({ p, expect, allowed }) => {
   await p.waitForFunction(() => !window.__ff.loadNoteShown(), null, { timeout: budget(8000) });
   expect(true, 'reopening the credits after they succeed clears their own stale note');
   await p.evaluate(() => window.__ff.closeMapOverlay());
+  await p.evaluate(() => window.__ff.setGraphics('ai')); // back to this probe's default
 
   // ── 2. Total outage: everything fails, and nothing hangs ────────────────────
   // With every request dead the game must reach its failure screen rather than sitting on
@@ -500,6 +516,9 @@ await withApp(async ({ p, expect, allowed }) => {
 
   // 4a. The credits ask for a strip a build tool may not have produced, and fall back to
   //     the one that always ships. This 404 is the code ASKING which build it is on.
+  //     On `enhanced`, because the port card belongs to the FAITHFUL roll and each tier
+  //     now fetches only its own — on `ai` this 404 never happens.
+  await p.evaluate(() => window.__ff.setGraphics('enhanced'));
   await absent(p, '**/data/Menu/CredMov_port.webp');
   await p.evaluate(() => void window.__ff.openCredits());
   await p.waitForFunction(() => window.__ff.creditLength() > 0, null, { timeout: budget(6000) });
@@ -517,6 +536,7 @@ await withApp(async ({ p, expect, allowed }) => {
     'the credits roll on the fallback strip, at its own full length',
   );
   await p.evaluate(() => window.__ff.closeMapOverlay());
+  await p.evaluate(() => window.__ff.setGraphics('ai')); // back to this probe's default
   await p.unrouteAll({ behavior: 'ignoreErrors' });
 
   // 4b. A room with no AI art at all still plays, one tier down, silently. This is the

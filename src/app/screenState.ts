@@ -79,8 +79,12 @@ export const ui = {
   // Options panel or the scrolling credits, shown over the world map.
   mapOverlay: 'none' as 'none' | 'options' | 'credits',
   credits: null as Credits | null, // the parsed credits assets (lazily loaded)
+  // Whether openCredits() is fetching the roll RIGHT NOW, for either tier. Live state,
+  // read by syncLoadingUi to put the room-entry parchment over the wait — the credits
+  // are the last screen that used to paint whatever was ready and swap it a beat later
+  // (see the hold on the world map in art.ts).
+  creditsLoading: false,
   aiPanelTried: false,
-  aiCreditsTried: false,
   // Last display box the AI credit layers were sized for, so layout() runs on resize
   // rather than every frame.
   creditsLayoutW: 0,

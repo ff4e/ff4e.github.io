@@ -19,8 +19,8 @@ import type { Bmp } from '../data/bmp.js';
 
 export const CREDIT_SPEED = 4; // posun step per timer tick (UMain.pas:29)
 export const CREDIT_TICK_MS = 100; // Timer1.Interval (UMain.dfm)
-const PRESAH = 150; // trailing scroll past the strip before it settles (presahCredits)
-const CLOSE_EXTRA = 600; // extra hold after settling before auto-close (UMain.pas:868)
+export const PRESAH = 150; // trailing scroll past the strip before it settles (presahCredits)
+export const CLOSE_EXTRA = 600; // extra hold after settling before auto-close (UMain.pas:868)
 
 export class Credits {
   readonly w: number;

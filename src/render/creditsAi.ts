@@ -21,12 +21,10 @@
  * must stay index-exact.
  */
 import { decodeAsset, requiredAsset, requiredBlob, requiredJson } from './assetFetch.js';
+import { CLOSE_EXTRA, PRESAH } from './credits.js';
 
 /** Upscale factor of the shipped credits art when its manifest doesn't say. */
 export const AI_CREDITS_SCALE = 4;
-
-/** Trailing scroll past the strip before it settles — must match credits.ts PRESAH. */
-const PRESAH = 150;
 
 /**
  * Offset at which the roll settles (faithful `maxScroll`). Both tiers must agree, or
@@ -143,6 +141,17 @@ export class AiCredits {
   /** Offset at which the roll settles and stops advancing (faithful `maxScroll`). */
   get maxScroll(): number {
     return creditsMaxScroll(this.delka);
+  }
+
+  /**
+   * Offset past which the roll auto-closes (faithful `closeAt`, UMain.pas:868).
+   *
+   * Needed because this tier no longer loads the faithful bitmaps alongside its own art
+   * — it is the whole roll now, not an overlay on one — so the auto-close has to be
+   * derivable from here. Same two constants, imported rather than restated.
+   */
+  get closeAt(): number {
+    return this.delka + PRESAH + CLOSE_EXTRA;
   }
 
   /** Size the layers for a display box of `cssW`×`cssH`. Call on open and on resize. */
