@@ -38,6 +38,61 @@ export function parseBmp(data: Uint8Array): Bmp {
   return { w, h, pixels, palette };
 }
 
+/**
+ * The inverse of `bmpToRgba`: rebuild an indexed image from RGBA and a known palette.
+ *
+ * Needed because a compressed image format is colour, not indices, while the renderers
+ * that read these bitmaps composite on INDICES — the credits pick their transparent and
+ * background colours as the static frame's corner PIXELS and compare index to index
+ * (render/credits.ts, UMain.pas:1171,1179-1181). Re-encoding an 8-bit BMP as WebP
+ * therefore has to be undone here, or the compositing rule would have to change.
+ *
+ * Exact only if the palette is INJECTIVE, which is a property of the asset and not
+ * something this function can assume: two indices sharing an RGB triple would make the
+ * recovery ambiguous. The caller owns that check (`tools/build-credits-webp.py` asserts
+ * it at build time, `test/creditsAsset.test.ts` pins it), and this function reports the
+ * collision rather than silently picking one.
+ *
+ * A colour that is not in the palette THROWS. That is the whole safety argument for
+ * shipping these as WebP: the decoder is the browser's now, not ours, so if one ever
+ * hands back a shifted colour — colour management, a codec bug — the result is a loud
+ * failure through the asset door, never a credits roll quietly rendered in wrong
+ * colours. Not knowing must not be recorded as knowing.
+ */
+export function rgbaToIndexed(
+  rgba: Uint8ClampedArray | Uint8Array,
+  w: number,
+  h: number,
+  palette: { r: number; g: number; b: number }[],
+): Bmp {
+  if (rgba.length < w * h * 4) {
+    throw new Error(`rgbaToIndexed: ${rgba.length} bytes is short of ${w}x${h} RGBA`);
+  }
+  // Packed RGB -> index. A Map of 256 entries, not a 16 MB direct-addressed table: this
+  // runs once per asset, and the lookup is not what costs.
+  const index = new Map<number, number>();
+  for (let i = 0; i < palette.length; i++) {
+    const c = palette[i]!;
+    const key = (c.r << 16) | (c.g << 8) | c.b;
+    const seen = index.get(key);
+    if (seen !== undefined) {
+      throw new Error(`rgbaToIndexed: palette is not injective (${seen} and ${i} are both #${key.toString(16).padStart(6, '0')})`);
+    }
+    index.set(key, i);
+  }
+  const pixels = new Uint8Array(w * h);
+  for (let p = 0; p < pixels.length; p++) {
+    const o = p * 4;
+    const key = (rgba[o]! << 16) | (rgba[o + 1]! << 8) | rgba[o + 2]!;
+    const idx = index.get(key);
+    if (idx === undefined) {
+      throw new Error(`rgbaToIndexed: pixel ${p} is #${key.toString(16).padStart(6, '0')}, which is not in the palette`);
+    }
+    pixels[p] = idx;
+  }
+  return { w, h, pixels, palette };
+}
+
 /** Flatten an indexed image to RGBA using its palette (row-major, top-down). */
 export function bmpToRgba(bmp: Bmp): Uint8ClampedArray {
   const rgba = new Uint8ClampedArray(bmp.w * bmp.h * 4);

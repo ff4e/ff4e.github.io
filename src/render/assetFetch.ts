@@ -40,7 +40,7 @@
  *  - per-room art in either enhanced tier — SCORE ships none at all, CHODBA and WIN draw
  *    a classic background by design, 21 object sprites are legitimately unstaged, and the
  *    `w1.png`/`p1.png` animation loop DISCOVERS its frame count by 404ing;
- *  - `CredMov_port.BMP`, which is built by a tool and falls back to `CredMov.BMP`;
+ *  - `CredMov_port.webp`, which is built by a tool and falls back to `CredMov.webp`;
  *  - the AI intro-movie probe, whose entire purpose is asking whether a file exists.
  *
  * Everything else is required. A 404 on it is a broken build or a broken deploy, and the

@@ -107,6 +107,10 @@ import { fatalShown, fatalText } from './loadingUi.js';
 import { loadNoteShown, loadNoteText } from './loadNote.js';
 import { roomAudioPending } from './roomLoad.js';
 import { roomPreloadPending } from './roomPreload.js';
+// Imported rather than reached through `host`: `aiCredits` has an owning module, and
+// AGENTS.md's rule for that is to read it directly — cheaper (no accessor to write in
+// two files) and safer (no same-typed neighbour to mis-wire).
+import { aiCredits } from './art.js';
 import { EnhancedArtSource, classicOnlyBackground } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, FishSprites } from '../render/enhancedArtSource.js';
 import { sum } from '../render/filmEffects.js';
@@ -574,7 +578,9 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     creditMode: () => ui.creditMode,
     // Debug/test only: jump the roll to a scroll offset by back-dating its start.
     creditSeek: (posun: number) => { ui.creditsStart = performance.now() - (posun / CREDIT_SPEED) * CREDIT_TICK_MS; },
-    creditLength: () => (ui.credits ? ui.credits.delka : 0),
+    // The roll this tier actually loaded: `ai` no longer fetches the faithful bitmaps
+    // alongside its own art, so the length has to come from whichever one is in.
+    creditLength: () => (ui.credits ? ui.credits.delka : aiCredits ? aiCredits.delka : 0),
     closeMapOverlay: () => host.closeMapOverlay(),
     solvedRooms: () => [...host.solved],
     scores: () => Object.fromEntries(host.scores),

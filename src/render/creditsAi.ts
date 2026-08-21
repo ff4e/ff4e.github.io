@@ -21,12 +21,10 @@
  * must stay index-exact.
  */
 import { decodeAsset, requiredAsset, requiredBlob, requiredJson } from './assetFetch.js';
+import { CLOSE_EXTRA, PRESAH } from './credits.js';
 
 /** Upscale factor of the shipped credits art when its manifest doesn't say. */
 export const AI_CREDITS_SCALE = 4;
-
-/** Trailing scroll past the strip before it settles — must match credits.ts PRESAH. */
-const PRESAH = 150;
 
 /**
  * Offset at which the roll settles (faithful `maxScroll`). Both tiers must agree, or
@@ -76,15 +74,24 @@ async function loadImage(url: string, what: string): Promise<HTMLImageElement> {
  *
  * Same change as `loadAiPanel`: the quiet fallback to the faithful roll is gone, because
  * a fallback nobody can see is indistinguishable from the tier working.
+ *
+ * The subject is `'the credits'`, NOT "the AI credits", and that is load-bearing rather
+ * than cosmetic: `hideLoadNote(what)` matches the subject EXACTLY (loadNote.ts), and
+ * `openCredits` takes the note down with `'the credits'` after a load succeeds. While the
+ * `ai` tier also loaded the faithful roll the two always agreed; now each tier loads only
+ * its own, a second subject here would mean the note that this loader raised could never
+ * be cleared by the reopen that fixed it — on the DEFAULT tier. It is also the better
+ * player-facing name, which is what `LoadSubject` is defined to be: nobody reading
+ * "couldn't load the credits" wants to know which art tier asked.
  */
 export async function loadAiCredits(base: string): Promise<AiCredits> {
   {
     const dir = `${base}enhanced-ai/_credits/`;
-    const man = await requiredJson<AiCreditsManifest>(`${dir}ai.json`, 'the AI credits', 'shouldHave');
+    const man = await requiredJson<AiCreditsManifest>(`${dir}ai.json`, 'the credits', 'shouldHave');
     const scale = Number(man.scale) || AI_CREDITS_SCALE;
     const [stat, mov] = await Promise.all([
-      loadImage(`${dir}stat.webp`, 'the AI credits'),
-      loadImage(`${dir}mov.webp`, 'the AI credits'),
+      loadImage(`${dir}stat.webp`, 'the credits'),
+      loadImage(`${dir}mov.webp`, 'the credits'),
     ]);
     // A decoded image with no intrinsic size is a corrupt file, not an absent one: the
     // decoder is the only thing that can tell, and it did.
@@ -143,6 +150,17 @@ export class AiCredits {
   /** Offset at which the roll settles and stops advancing (faithful `maxScroll`). */
   get maxScroll(): number {
     return creditsMaxScroll(this.delka);
+  }
+
+  /**
+   * Offset past which the roll auto-closes (faithful `closeAt`, UMain.pas:868).
+   *
+   * Needed because this tier no longer loads the faithful bitmaps alongside its own art
+   * — it is the whole roll now, not an overlay on one — so the auto-close has to be
+   * derivable from here. Same two constants, imported rather than restated.
+   */
+  get closeAt(): number {
+    return this.delka + PRESAH + CLOSE_EXTRA;
   }
 
   /** Size the layers for a display box of `cssW`×`cssH`. Call on open and on resize. */

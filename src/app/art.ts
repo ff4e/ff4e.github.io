@@ -386,13 +386,12 @@ export async function ensureAiPanel(): Promise<void> {
  */
 let aiMapTried = false; // one-shot: the load is started at most once per session
 let aiMapPending = false; // that load is in flight (independent of the tier on screen)
-// The same "in flight" flags for the panel and the credits, so retryAiUiAssets() can
-// tell an asset that FAILED from one that simply has not finished yet.
+// The same "in flight" flag for the panel, so retryAiUiAssets() can tell an asset that
+// FAILED from one that has not finished yet. The credits need none — see that function.
 let aiPanelPending = false;
-let aiCreditsPending = false;
 
 /**
- * Give the three one-shot `ai` UI assets (world map, panel, credits) another go.
+ * Give the latched one-shot `ai` UI assets (world map, panel) another go.
  *
  * Each is latched by a `…Tried` flag that is set BEFORE its load resolves, so a load
  * that failed got no second attempt for the whole session — and the world map is the
@@ -404,12 +403,13 @@ let aiCreditsPending = false;
  * bounds it at one retry per switch. An asset still in flight is left alone; an asset
  * that legitimately resolved null is retried, because at this level "absent" and
  * "failed" are not distinguished and one wasted request per deliberate tier switch is
- * a price worth paying to make the hub screen recoverable.
+ * a price worth paying to make the hub screen recoverable. The credits are not here:
+ * their load hangs on `openCredits`, a gesture rather than a draw branch, so clicking
+ * the corner again IS the retry and there is no latch to clear.
  */
 export function retryAiUiAssets(): void {
   if (!aiWorldMap && !aiMapPending) aiMapTried = false;
   if (!aiPanel && !aiPanelPending) ui.aiPanelTried = false;
-  if (!aiCredits && !aiCreditsPending) ui.aiCreditsTried = false;
 }
 /**
  * Is a map frame the thing currently on screen?
@@ -516,14 +516,14 @@ async function ensureAiWorldMap(): Promise<void> {
   }
 }
 
-/** Load the hi-res credits art once (see creditsAi.ts). */
+/**
+ * Load the hi-res credits art once (see creditsAi.ts). Awaited by `openCredits` rather
+ * than kicked off from the draw, so a failure reaches that gesture's catch; already
+ * loaded is a no-op, since the roll is reopenable.
+ */
 export async function ensureAiCredits(): Promise<void> {
-  aiCreditsPending = true;
-  try {
-    await loadAiCreditsOnce();
-  } finally {
-    aiCreditsPending = false;
-  }
+  if (aiCredits) return;
+  await loadAiCreditsOnce();
 }
 
 async function loadAiCreditsOnce(): Promise<void> {

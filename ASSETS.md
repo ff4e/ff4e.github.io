@@ -116,6 +116,45 @@ proof: the lowest in the set is 0.9 dB, and that sound is a shush — broadband 
 AAC rebuilds with the right character and different samples. The `.ffs` originals stay in
 the repo to encode from, measure against, and listen to; nothing downloads them.
 
+### End credits
+
+The credits were the last uncompressed art the site fetched. `Menu/CredStat1.BMP` (a
+640×480 static frame with a transparent window) and the strip that scrolls through it —
+`Menu/CredMov.BMP` at 640×2921, or `Menu/CredMov_port.BMP` at 640×3285 once the web-port
+card is built — are **8-bit palette BMPs with no compression at all**, so one click on the
+map's credits corner cost **2.41 MB** of what is mostly black behind white and cyan text.
+
+The game fetches **`Menu/*.webp`**: lossless WebP, **0.12 MB** for the pair a session
+actually loads (19.7×).
+
+| | BMP | WebP | |
+| --- | ---: | ---: | ---: |
+| `CredStat1` | 308 280 | 20 522 | 15.0× |
+| `CredMov` | 1 870 520 | 99 428 | 18.8× |
+| `CredMov_port` | 2 103 478 | 101 838 | 20.7× |
+
+**Lossless, and not out of caution — it is the smaller file.** Lossy WebP measures *larger*
+here (213 kB at q90 against 122 kB lossless): a photographic codec has nothing to discard
+in flat colour and spends its bits fighting the hard edges of text. So unlike the audio
+above there was no quality knob to pick and nothing traded away; these are the 1998 pixels.
+
+    python3 tools/build-credits-webp.py            # writes public/data/Menu/*.webp
+    python3 tools/build-credits-webp.py --check    # decode what we ship, index-compare
+
+The renderer composites on palette INDICES — `transp` and `black` are the static frame's
+corner pixels (`UMain.pas:1171,1179-1181`) — and WebP has no indexed mode, so the index
+plane is rebuilt from the decoded colour in `src/render/creditsAsset.ts`. That is exact
+because the palette is **injective**: all three bitmaps carry a byte-identical 256-entry
+palette and no two entries share an RGB triple. A colour outside it throws rather than
+being mis-indexed, so a browser that ever decoded these differently fails loudly instead
+of rolling the credits in quietly wrong colours. The palette itself is the one thing WebP
+cannot carry, so it is compiled in (`src/data/creditsPalette.ts`, generated).
+
+The `.BMP` originals stay in the repo for the reason the `.wav` and `.ffs` originals do:
+`--check` decodes the WebP back against them, and `test/creditsAsset.test.ts` pins both
+the palette and a hash of each pair. `tools/stage-pages-assets.mjs` simply stops
+publishing them.
+
 ### Intro movies
 
 The startup **intro** (ALTAR logo → intro movie) and the map's top-left "watch intro"

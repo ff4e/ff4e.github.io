@@ -10,13 +10,17 @@
  *
  * `transp`/`black` mirror the original: transp = the static image's bottom-right
  * pixel, black = its top-left pixel (UMain.pas:1179-1181).
+ *
+ * Both images now arrive as lossless WebP and are turned back into indexed bitmaps by
+ * `creditsAsset.ts` before they get here, byte-identical to `parseBmp` of the BMPs — so
+ * this file is index-exact exactly as it always was, and did not change for it.
  */
 import type { Bmp } from '../data/bmp.js';
 
 export const CREDIT_SPEED = 4; // posun step per timer tick (UMain.pas:29)
 export const CREDIT_TICK_MS = 100; // Timer1.Interval (UMain.dfm)
-const PRESAH = 150; // trailing scroll past the strip before it settles (presahCredits)
-const CLOSE_EXTRA = 600; // extra hold after settling before auto-close (UMain.pas:868)
+export const PRESAH = 150; // trailing scroll past the strip before it settles (presahCredits)
+export const CLOSE_EXTRA = 600; // extra hold after settling before auto-close (UMain.pas:868)
 
 export class Credits {
   readonly w: number;

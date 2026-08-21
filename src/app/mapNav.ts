@@ -27,7 +27,8 @@ import { bmpToRgba, parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
 import { REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, depthOfRoom } from '../data/world.js';
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
-import { assetBytes, decodeAsset, isAssetError, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
+import { assetBlob, decodeAsset, isAssetError, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
+import { decodeCreditsImage } from '../render/creditsAsset.js';
 import { preloadedLegPage } from './roomPreload.js';
 import { hideLoadNote } from './loadNote.js';
 import { reportAssetError } from './loadingUi.js';
@@ -400,59 +401,121 @@ export function closeMapOverlay(): void {
  */
 export async function openCredits(): Promise<void> {
   if (ui.screen !== 'map' || ui.mapOverlay !== 'none') return;
-  if (!ui.credits) {
-    const bmp = async (f: string, what: string): Promise<Bmp> => {
-      const url = `/data/Menu/${f}`;
-      return parseBmp(await requiredBytes(url, what, 'shouldHave'));
-    };
+  // A load is already in flight, so this click is a no-op: the parchment is up and the
+  // roll opens when the art lands. The guard above cannot cover this — `mapOverlay` is
+  // deliberately not armed until the art is in, which is the whole point of the hold, so
+  // every click during the wait passes it. Without this, three clicks fetch the `ai`
+  // strip three times (1.2 MB each, measured).
+  //
+  // It is also what the deleted `ui.aiCreditsTried` latch was quietly doing: that flag
+  // was set synchronously in the draw branch, so it throttled the per-frame re-request
+  // AND deduplicated concurrent opens. Only the first job moved to the gesture; this is
+  // the second, and it belongs here rather than in `ensureAiCredits` because the faithful
+  // path had the same hole (three opens, three fetches) before any of this.
+  if (ui.creditsLoading) return;
+  // ── One tier's art, fetched before anything is shown ─────────────────────────
+  // The `ai` tier used to load the faithful bitmaps here and kick its own art off from
+  // the DRAW, so the low-res roll went up first and visibly swapped a beat later. That is
+  // the defect rooms had before `roomArtPending()` and the world map had before
+  // `mapArtHolding()`, and it gets the same three pieces here: the load starts from this
+  // gesture (never from the draw), nothing is shown until the art this tier will actually
+  // paint is in, and `syncLoadingUi` puts the room-entry parchment over the wait.
+  //
+  // So each tier fetches ONLY its own roll. On `ai` that means the faithful pair is not
+  // fetched at all, and there is deliberately no quiet fallback to it — `creditsAi.ts`
+  // already made that call for this asset, on the grounds that a fallback nobody can see
+  // is indistinguishable from the tier working. A failure lands on the note with a Try
+  // again, like any other `shouldHave`.
+  const wantAi = graphics === 'ai';
+  if (wantAi ? !aiCredits : !ui.credits) {
+    ui.creditsLoading = true;
     try {
-      // CredMov_port is the shipped strip with the web-port card prepended
-      // (tools/build-credits-port.py). It is a drop-in in the same palette, and since
-      // the strip's height defines `delka`, the roll extends to cover it by itself.
-      // Falls back to the untouched original when the port variant isn't built.
-      //
-      // The ONE place a 404 is asked for on purpose outside the art tiers, so it is the
-      // one place `optionalAsset` appears here: a build without the tool's output is a
-      // legitimate build, and this is how the code asks which one it is running on. The
-      // fallback itself is required — one of the two must exist.
-      //
-      // A FAILURE is treated as an absence here, which is the one place in the codebase
-      // that is right. Everywhere else the distinction is the whole point: not knowing
-      // must not be recorded as knowing. Here the question being asked is only "which
-      // build is this?", and both answers are already handled — so an unanswered probe
-      // costs nothing but the port card, while letting it throw would abandon
-      // `openCredits` entirely and the player would get no credits at all rather than
-      // the untouched original. `niceToHave` says the same thing to the reporter.
-      const portUrl = '/data/Menu/CredMov_port.BMP';
-      const port = await optionalAsset(portUrl, 'niceToHave').catch(() => null);
-      // The body read gets the same treatment as the request: a strip that started
-      // arriving and stopped is still just "no port card", and must not cost the player
-      // the credits roll itself.
-      const portBmp = port
-        ? await assetBytes(portUrl, port, 'niceToHave', 'the credits').then(parseBmp).catch(() => null)
-        : null;
-      const mov = portBmp ?? (await bmp('CredMov.BMP', 'the credits'));
-      ui.credits = new Credits(await bmp('CredStat1.BMP', 'the credits'), mov);
-      // Both arrived: any note still up about the credits is now stale. Scoped to this
-      // subject so a note about something else is left alone.
+      if (wantAi) {
+        await ensureAiCredits();
+      } else {
+        await loadFaithfulCredits();
+      }
+      // Whatever arrived, any note still up about the credits is now stale. Scoped to
+      // this subject so a note about something else is left alone.
       hideLoadNote('the credits');
     } catch (e) {
       if (!isAssetError(e)) throw e;
       reportAssetError(e, () => void openCredits());
       return; // the map is untouched behind it; the corner button still works
+    } finally {
+      // Released on every exit, including the failure above: the flag only says a fetch
+      // is in flight, and the parchment must not outlive one that has stopped.
+      ui.creditsLoading = false;
     }
   }
   // Re-checked after the load: the guard at the top ran before an await, and the player
-  // may have left the map while the bitmaps were arriving. See the header.
+  // may have left the map while the art was arriving. See the header.
   if (ui.screen !== 'map' || ui.mapOverlay !== 'none') return;
   ui.mapOverlay = 'credits';
   ui.creditMode = 0;
   ui.creditsStart = performance.now();
 }
 
+/** The faithful roll: the static frame plus a scroll strip, as indexed bitmaps. */
+async function loadFaithfulCredits(): Promise<void> {
+  const bmp = async (f: string, what: string): Promise<Bmp> => {
+    const url = `/data/Menu/${f}`;
+    return decodeCreditsImage(url, await requiredBlob(url, what, 'shouldHave'), 'shouldHave');
+  };
+  // CredMov_port is the shipped strip with the web-port card prepended
+  // (tools/build-credits-port.py). It is a drop-in in the same palette, and since
+  // the strip's height defines `delka`, the roll extends to cover it by itself.
+  // Falls back to the untouched original when the port variant isn't built.
+  //
+  // Both are lossless WebP re-encodings of the 8-bit BMPs (2.41 MB -> 0.12 MB,
+  // tools/build-credits-webp.py) and decode back to the identical index plane, so
+  // everything below this line — and all of credits.ts — is unchanged by that.
+  //
+  // The ONE place a 404 is asked for on purpose outside the art tiers, so it is the
+  // one place `optionalAsset` appears here: a build without the tool's output is a
+  // legitimate build, and this is how the code asks which one it is running on. The
+  // fallback itself is required — one of the two must exist.
+  //
+  // A FAILURE is treated as an absence here, which is the one place in the codebase
+  // that is right. Everywhere else the distinction is the whole point: not knowing
+  // must not be recorded as knowing. Here the question being asked is only "which
+  // build is this?", and both answers are already handled — so an unanswered probe
+  // costs nothing but the port card, while letting it throw would abandon
+  // `openCredits` entirely and the player would get no credits at all rather than
+  // the untouched original. `niceToHave` says the same thing to the reporter.
+  const portUrl = '/data/Menu/CredMov_port.webp';
+  const port = await optionalAsset(portUrl, 'niceToHave', { expect: 'image' }).catch(() => null);
+  // The body read and the DECODE get the same treatment as the request: a strip that
+  // started arriving and stopped — or one whose colours the palette does not contain,
+  // which is how a re-encode would announce itself — is still just "no port card",
+  // and must not cost the player the credits roll itself.
+  const portBmp = port
+    ? await assetBlob(portUrl, port, 'niceToHave', 'the credits')
+        .then((b) => decodeCreditsImage(portUrl, b, 'niceToHave'))
+        .catch(() => null)
+    : null;
+  const mov = portBmp ?? (await bmp('CredMov.webp', 'the credits'));
+  ui.credits = new Credits(await bmp('CredStat1.webp', 'the credits'), mov);
+}
+
 /** Render the scrolling credits full-screen on the main canvas (PaintBox1Paint, UMain.pas:1420). */
 export function drawCredits(): void {
-  if (!ui.credits) return;
+  // Whichever roll this tier loaded — `openCredits` fetches one, never both, and the
+  // overlay is not armed until it is in. The draw no longer starts any load: the hold is
+  // the thing the draw suppresses, so it must not also be the thing that triggers it
+  // (the same rule `beginMapArt` states for the world map).
+  //
+  // The second term is the tier changing WHILE the roll is up, which only the dev pane's
+  // E can do (the options panel and the credits are both `mapOverlay`, so a player cannot
+  // hold one open and reach the other). Since each tier now loads only its own art, the
+  // new tier's roll may simply not exist — and returning here would freeze the roll on
+  // screen and skip the auto-close below with no way out but a click. So the roll that IS
+  // loaded keeps drawing, which is what happened before the tiers were split apart.
+  const ai = graphics === 'ai' ? aiCredits : ui.credits ? null : aiCredits;
+  const roll = ai ?? ui.credits;
+  if (!roll) return;
+  const nativeW = ai ? ai.nativeW : ui.credits!.w;
+  const nativeH = ai ? ai.nativeH : ui.credits!.h;
   ui.mapSig = null; // credits paint #screen — invalidate the map cache
   // Advance the scroll off wall-clock (CreditMode += CreditSpeed every 100ms);
   // auto-close once it has settled and held (UMain.pas:867-869).
@@ -464,19 +527,17 @@ export function drawCredits(): void {
   const creditElapsed = (performance.now() - ui.creditsStart) / CREDIT_TICK_MS;
   ui.creditMode = Math.floor(creditElapsed) * CREDIT_SPEED;
   const creditScroll = creditElapsed * CREDIT_SPEED;
-  if (ui.creditMode > ui.credits.closeAt) {
+  if (ui.creditMode > roll.closeAt) {
     closeMapOverlay();
     return;
   }
-  if (graphics === 'ai' && !ui.aiCreditsTried) { ui.aiCreditsTried = true; void ensureAiCredits(); }
-  const ai = graphics === 'ai' ? aiCredits : null;
   // Display size follows the SAME fit rule as the map and the story pages
   // (contentScaleFor on the NATIVE size). It used to be pinned at 640x480 CSS px, so
   // the credits stayed a small window in the middle of a large viewport while every
   // other screen filled it.
-  const cs = contentScaleFor(ui.credits.w, ui.credits.h);
-  const dispW = Math.round(ui.credits.w * cs);
-  const dispH = Math.round(ui.credits.h * cs);
+  const cs = contentScaleFor(nativeW, nativeH);
+  const dispW = Math.round(nativeW * cs);
+  const dispH = Math.round(nativeH * cs);
 
   if (ai) {
     // GPU path: two stacked <img> layers replace the canvas, and the roll is a CSS
@@ -497,14 +558,15 @@ export function drawCredits(): void {
   }
 
   host.hideAiCredits();
-  if (canvas.width !== ui.credits.w || canvas.height !== ui.credits.h) {
-    canvas.width = ui.credits.w;
-    canvas.height = ui.credits.h;
+  const faithful = ui.credits!;
+  if (canvas.width !== faithful.w || canvas.height !== faithful.h) {
+    canvas.width = faithful.w;
+    canvas.height = faithful.h;
   }
   const cssW = `${dispW}px`;
   const cssH = `${dispH}px`;
   if (canvas.style.width !== cssW) canvas.style.width = cssW;
   if (canvas.style.height !== cssH) canvas.style.height = cssH;
-  const rgba = ui.credits.render(ui.creditMode);
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), ui.credits.w, ui.credits.h), 0, 0);
+  const rgba = faithful.render(ui.creditMode);
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), faithful.w, faithful.h), 0, 0);
 }

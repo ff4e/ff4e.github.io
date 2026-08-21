@@ -181,14 +181,21 @@ describe.skipIf(!existsSync(join(AI, '_credits/ai.json')))('shipped credits art'
   });
 
   it('ships a scroll strip matching the source the faithful tier rolls', () => {
-    // Both tiers pick CredMov_port.BMP when present and fall back to CredMov.BMP
-    // independently (main.ts openCredits / tools/studio/stage-ui.mjs). If they ever
+    // Both tiers pick the port card when present and fall back to the plain strip
+    // independently (mapNav.ts openCredits / tools/studio/stage-ui.mjs). If they ever
     // disagree the two tiers roll DIFFERENT credits, which no rendering test would show.
+    //
+    // Read from the WEBP, not the BMP: the faithful tier stopped fetching the bitmaps
+    // when the credits were re-encoded (tools/build-credits-webp.py), so the `.webp` is
+    // now "the source the faithful tier rolls". Against the BMP this check would pass
+    // while a regenerated card left the faithful tier on a stale strip — the exact
+    // divergence the comment above says nothing else would catch. The BMP stays pinned
+    // to its WebP by `test/creditsAsset.test.ts`, so the chain is complete.
     const menu = join(process.cwd(), 'public/data/Menu');
-    const src = existsSync(join(menu, 'CredMov_port.BMP'))
-      ? join(menu, 'CredMov_port.BMP')
-      : join(menu, 'CredMov.BMP');
-    const nativeH = readFileSync(src).readInt32LE(22); // BMP DIB height
+    const src = existsSync(join(menu, 'CredMov_port.webp'))
+      ? join(menu, 'CredMov_port.webp')
+      : join(menu, 'CredMov.webp');
+    const nativeH = webpInfo(src).h;
     const mov = webpInfo(join(AI, '_credits/mov.webp'));
     expect(mov.w).toBe(640 * S);
     expect(mov.h, `${src} is ${nativeH} rows`).toBe(nativeH * S);

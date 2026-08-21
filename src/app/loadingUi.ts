@@ -58,6 +58,8 @@ const LOADING_DELAY_MS = 200;
 let roomLoadingSince = 0;
 /** When the map's overlay becomes visible, or 0 while the map is not waiting. */
 let mapLoadingDueAt = 0;
+/** When the credits' overlay becomes visible, or 0 while the credits are not loading. */
+let creditsLoadingDueAt = 0;
 
 /** Arm the overlay for a room entry (the loop reveals it if the wait is real). */
 export function beginRoomLoadingUi(num: number): void {
@@ -96,6 +98,7 @@ export function syncLoadingUi(now: number): void {
     if (!loadingEl.hidden) loadingEl.hidden = true;
     roomLoadingSince = 0;
     mapLoadingDueAt = 0;
+    creditsLoadingDueAt = 0;
     return;
   }
   // The post-art entry holds count as waiting: since a room is not handed the stage until
@@ -103,6 +106,12 @@ export function syncLoadingUi(now: number): void {
   // either still coming would otherwise sit there explaining nothing.
   const roomWaiting = ui.screen === 'room' && (roomLoading || roomArtPending() || roomEntryHeld());
   const mapWaiting = mapArtHolding();
+  // The credits are the third wait on this screen, and the last one that used to have no
+  // overlay: `openCredits` fetches the roll for whichever tier is selected and nothing is
+  // shown until it is in, so without this the player clicks the corner and the map simply
+  // sits there. Live state like the other two — `openCredits` owns the flag and clears it
+  // in a `finally`, so a failed or abandoned load releases the overlay by itself.
+  const creditsWaiting = ui.screen === 'map' && ui.creditsLoading;
   if (!roomWaiting) roomLoadingSince = 0;
   if (!mapWaiting) mapLoadingDueAt = 0;
   else if (mapLoadingDueAt === 0) {
@@ -119,9 +128,19 @@ export function syncLoadingUi(now: number): void {
     // where the splash would read as a restart, exactly as a room entry's does.
     if (loadingEl.hidden) loadingEl.classList.add('inroom');
   }
+  if (!creditsWaiting) creditsLoadingDueAt = 0;
+  else if (creditsLoadingDueAt === 0) {
+    // Delayed like the map's, and for the same reason: the player is looking at a
+    // perfectly good map, and a cached or local load is ready in a few ms — flashing the
+    // parchment at them would be worse than the wait it explains.
+    creditsLoadingDueAt = now + LOADING_DELAY_MS;
+    setLoadingMsg('Loading the credits…');
+    if (loadingEl.hidden) loadingEl.classList.add('inroom');
+  }
   const show =
     (roomWaiting && roomLoadingSince !== 0 && now - roomLoadingSince >= LOADING_DELAY_MS) ||
-    (mapWaiting && now >= mapLoadingDueAt);
+    (mapWaiting && now >= mapLoadingDueAt) ||
+    (creditsWaiting && now >= creditsLoadingDueAt);
   if (loadingEl.hidden === show) loadingEl.hidden = !show;
 }
 

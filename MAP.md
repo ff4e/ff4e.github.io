@@ -158,6 +158,7 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `mapInfo.ts` | 2.1 k | The map's record info panel (krokoměr). |
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |
+| `creditsAsset.ts` | 0.9 k | Loads a credits image (lossless WebP, 19.7x smaller than the BMP) and rebuilds its palette indices, so `credits.ts` stays index-exact and unchanged. Throws on a colour outside the palette rather than mis-indexing it. |
 | `subtitleGeom.ts` | 3.8 k | The geometry a vector subtitle line is built from — fit-to-room size (one per message, not per row), wave phase and curve, baseline and amplitude, stroke and bevel, the split that lets the text be scaled from the stage while the room is scaled to fit, and the readable band the font size is held inside. Pure and import-free, so the renderer and the tick logic both measure from it and it is unit-tested. |
 | `subtitles.ts` | 3.4 k | Colour mapping, glyph rendering, and the scrolling line. |
 | `font.ts` | 0.9 k | The bitmap font from the original `Chars.dat`/`Chartab.dat`/`Charcol.dat`. |

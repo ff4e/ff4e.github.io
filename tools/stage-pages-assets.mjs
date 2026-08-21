@@ -59,6 +59,27 @@ const isVoiceOriginal = (rest) => rest.startsWith(`Sound${sep}`) && rest.endsWit
  */
 const isHelpPage = (rest) => rest.startsWith(`Help${sep}`) && /\.(bmp|txt)$/i.test(rest);
 
+/**
+ * ...nor the three end-credits bitmaps. `CredStat1.BMP` and the scroll strip are 8-bit
+ * palette BMPs with NO compression, so one click on the credits corner fetched 2.41 MB
+ * of mostly-black text. The site fetches the lossless WebP re-encodings beside them now
+ * (`tools/build-credits-webp.py`, 0.12 MB — 19.7x), which decode back to the identical
+ * palette indices, so this drops the bytes without touching a pixel.
+ *
+ * Named one by one on purpose: `Menu/` is full of BMPs the game still fetches
+ * (`cisla`, `ikonky`, `krokomer`, `loading`, `mapa-*`, `maska`), so a pattern over the
+ * directory would take the map down with the credits.
+ *
+ * They stay in the repo for the reason the `.wav`, `.ffs` and help originals do: they
+ * are what `build-credits-webp.py --check` decodes the WebP back against, and what
+ * `test/creditsAsset.test.ts` pins the compiled palette to. `public/restored/README.md`
+ * is the standing promise that `public/data/` is the ALTAR release byte for byte; this
+ * is a decision about what the SITE serves, which is the only place that promise allows
+ * it to be made.
+ */
+const CREDITS_ORIGINALS = new Set([`Menu${sep}CredStat1.BMP`, `Menu${sep}CredMov.BMP`, `Menu${sep}CredMov_port.BMP`]);
+const isCreditsOriginal = (rest) => CREDITS_ORIGINALS.has(rest);
+
 if (!existsSync(DIST)) {
   console.error(`${DIST}/ is missing — run \`npm run build\` first.`);
   process.exit(1);
@@ -80,7 +101,7 @@ for (const entry of readdirSync(PUBLIC)) {
       const rest = src.startsWith(prefix) ? src.slice(prefix.length) : '';
       const seg = rest.split(sep)[0];
       if (seg && DATA_EXCLUDE.has(seg)) return false;
-      return !isMusicOriginal(rest) && !isVoiceOriginal(rest) && !isHelpPage(rest);
+      return !isMusicOriginal(rest) && !isVoiceOriginal(rest) && !isHelpPage(rest) && !isCreditsOriginal(rest);
     };
   }
   // The restored package is a sound package like any other and is staged like one, so

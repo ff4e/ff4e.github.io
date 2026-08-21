@@ -144,6 +144,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // subject: art first, then everything the room will need to sound and to play, each
   // held for by a flag this file owns.
   ['src/app/roomLoad.ts', 600],
+  // 554. The map screen's navigation and the two things shown OVER it: the story pages
+  // and the credits. Budgeted on arrival, having crossed the 520 tripwire when the
+  // credits stopped painting whatever was ready: each tier now loads only its own roll,
+  // behind a hold, so `openCredits` carries the tier choice and the faithful loader moved
+  // out of it into a named function. That is the whole of the growth — `drawCredits` got
+  // shorter, not longer. If this file takes on a third overlay, the credits are the
+  // coherent piece to lift out (load + hold + a draw branch per tier), not the map.
+  ['src/app/mapNav.ts', 580],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak
