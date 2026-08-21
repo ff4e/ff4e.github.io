@@ -10,10 +10,11 @@ points `og:image` at the card and `<link rel=icon>` at the icons.
 
 Sources, both already in the repo and both descending from the GPL-released ALTAR data:
 
-  * docs/screenshots/room-pyramida.jpg — Mr. Cheops' House with the side panel, 1100x594.
-    Its aspect (1.852) is within 3% of the 1.91:1 the scrapers want, so it fits the card
-    by trimming 16 rows. That is the whole reason this screenshot is the background and a
-    bare room render is not: a 4:3 room letterboxed into 1.91:1 looks like a mistake.
+  * docs/screenshots/room-ncp.jpg — "Imprisoned" (NCP, room 32), 1440x969. The room is
+    chosen for ONE reason: both fish sit together in the middle of it, shut inside the pink
+    coral, against flat navy. The first version of this card used Mr. Cheops' House and the
+    fish vanished into the gold brick — at the size of a Discord embed a room is only worth
+    showing if the two fish read instantly, which is what the link is about.
   * public/cover.webp — the title-splash wordmark (fish-in-circle emblem + "FILLETS"),
     built by tools/build-cover.py from the credits logo and already committed with alpha.
     Reusing it keeps the card and the game's own splash the same mark.
@@ -35,7 +36,7 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
-SHOT = ROOT / "docs" / "screenshots" / "room-pyramida.jpg"
+SHOT = ROOT / "docs" / "screenshots" / "room-ncp.jpg"
 COVER = ROOT / "public" / "cover.webp"
 FONT_TEXT = ROOT / "public" / "fonts" / "Mulish.ttf"
 FONT_CTA = ROOT / "public" / "fonts" / "Jost.ttf"
@@ -63,18 +64,20 @@ def load_font(path: Path, size: int, weight: int) -> ImageFont.FreeTypeFont:
 
 def build_card() -> None:
     shot = Image.open(SHOT).convert("RGB")
-    # Cover-fit: scale so the short side reaches the card, then centre-crop the surplus.
-    scale = max(CARD_W / shot.width, CARD_H / shot.height)
-    shot = shot.resize((round(shot.width * scale), round(shot.height * scale)), Image.LANCZOS)
-    left = (shot.width - CARD_W) // 2
-    top = (shot.height - CARD_H) // 2
-    card = shot.crop((left, top, left + CARD_W, top + CARD_H))
+    # Fit the width and take the height off the BOTTOM, not off both edges. The room is
+    # 1.487:1 and the card is 1.91:1, so ~22% of the height has to go; the fish are in the
+    # upper-middle and the bottom is coral floor, so a centred crop would eat the top coral
+    # and push the fish down under the caption band. Anchoring at the top keeps them clear.
+    scale = CARD_W / shot.width
+    shot = shot.resize((CARD_W, round(shot.height * scale)), Image.LANCZOS)
+    card = shot.crop((0, 0, CARD_W, CARD_H))
 
     # A bottom-up black band, so the wordmark and the call to action sit on something dark
     # whatever the screenshot happens to be doing underneath them. It has to reach nearly
     # opaque, not merely dark: the wordmark is feathered into black rather than cut out, so
-    # over bright art any transparency here shows up as a rectangle around it.
-    band_top, band_full, band_max = 300, 392, 0.94
+    # over bright art any transparency here shows up as a rectangle around it. It starts
+    # below the fish on purpose — see the crop above.
+    band_top, band_full, band_max = 348, 424, 0.94
     shade = Image.new("L", (1, CARD_H), 0)
     for y in range(band_top, CARD_H):
         t = min(1.0, (y - band_top) / (band_full - band_top))
@@ -84,7 +87,7 @@ def build_card() -> None:
     # ...and pasted with a lighten, which is the same trick #intro-cover uses on its black
     # backdrop: black source pixels leave the card alone, so nothing boxes the mark in.
     cover = Image.open(COVER).convert("RGBA")
-    mark_w = 500
+    mark_w = 440
     mark_h = round(cover.height * mark_w / cover.width)
     small = cover.resize((mark_w, mark_h), Image.LANCZOS)
     mark = Image.new("RGB", (mark_w, mark_h), (0, 0, 0))
@@ -92,14 +95,14 @@ def build_card() -> None:
     # Lifted, because the wordmark was drawn to glow out of a pure-black splash screen and
     # the band behind it here is not pure black. Without this the darkest letters sink.
     mark = mark.point(lambda v: min(255, round(v * 1.45)))
-    box = (56, 396, 56 + mark_w, 396 + mark_h)
+    box = (56, 428, 56 + mark_w, 428 + mark_h)
     card.paste(ImageChops.lighter(card.crop(box), mark), box)
 
     draw = ImageDraw.Draw(card)
-    draw.text((60, 528), "A faithful web port of ALTAR's 1998 puzzle game",
-              font=load_font(FONT_TEXT, 31, 500), fill=(205, 227, 236))
-    draw.text((60, 570), "Play in your browser — ff4e.github.io",
-              font=load_font(FONT_CTA, 32, 600), fill=(126, 214, 236))
+    draw.text((60, 546), "A faithful web port of ALTAR's 1998 puzzle game",
+              font=load_font(FONT_TEXT, 28, 500), fill=(205, 227, 236))
+    draw.text((60, 584), "Play in your browser — ff4e.github.io",
+              font=load_font(FONT_CTA, 29, 600), fill=(126, 214, 236))
 
     card.save(CARD, "JPEG", quality=88, optimize=True, progressive=True)
     print(f"wrote {CARD.relative_to(ROOT)} ({CARD_W}x{CARD_H}, {CARD.stat().st_size // 1024} kB)")
