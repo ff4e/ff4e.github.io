@@ -38,7 +38,8 @@
     "build-fish-outline": "node tools/build-fish-outline.mjs",
     "build-room-algo": "node tools/build-room-algo.mjs",
     "build-room-contest": "node tools/build-room-contest.mjs",
-    "studio": "node tools/studio/server.mjs"
+    "studio": "node tools/studio/server.mjs",
+    "crop-help": "tsx tools/crop-help-diagrams.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.0",
