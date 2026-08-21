@@ -55,6 +55,33 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # CONTRIBUTING.md forbids absolute personal paths and session-id trailers in this
+      # public repo, and .gitignore blocks the *files* that carry them (BRIEFING.md,
+      # .copilot/, …). Nothing checked file *contents* — which is exactly how the two
+      # that got in got in: both arrived inside GENERATED output (the Studio's
+      # index.json, a generated type annotation in debugHooks.ts), where a reviewer
+      # reading a diff stops looking. This is the missing half of that rule.
+      #
+      # The three docs that quote the forbidden shapes in order to forbid them are
+      # excluded, as is this file.
+      - name: No personal paths or session trailers
+        run: |
+          # `cut` keeps a minified generated file from dumping a megabyte-long line
+          # into the log — the file:line reference is the useful part.
+          hits=$(git grep -nIE '/(Users|home)/[a-z][a-z0-9._-]*/|Copilot-Session:' -- \
+                   ':(exclude).gitignore' \
+                   ':(exclude)CONTRIBUTING.md' \
+                   ':(exclude)AGENTS.md' \
+                   ':(exclude).github/workflows/checks.yml' | cut -c1-200) || true
+          if [ -n "$hits" ]; then
+            echo "$hits"
+            echo "::error::A personal absolute path or a session-id trailer is committed. See CONTRIBUTING.md, 'Commit hygiene'."
+            exit 1
+          fi
+          if git log -1 --format='%B' | grep -qiE '^[[:space:]]*Copilot-Session:'; then
+            echo "::error::This commit carries a Copilot-Session trailer. See CONTRIBUTING.md, 'Commit hygiene'."
+            exit 1
+          fi
       # The unit suite seeds Math.random per file and per test (test/rng.setup.ts), so
       # this is deterministic without pinning a seed here.
       - run: npm run test

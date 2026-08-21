@@ -51,7 +51,7 @@ function classify(relPath) {
 
 /**
  * Build the full index. `root` = repo root. Returns:
- *  { builtAt, enhancedDir, pictures:{hash:{hash,kind,w,h,alpha,sample,uses:[{room,file,object,frame}]}},
+ *  { builtAt, pictures:{hash:{hash,kind,w,h,alpha,sample,uses:[{room,file,object,frame}]}},
  *    rooms:{ROOM:{bg,wall,objects:[{name,item,x,y,frames:[hash]}]}}, sharedObjects:[hash], fish:[hash],
  *    menu:[hash], panel:[hash], credits:[hash] }
  */
@@ -181,7 +181,7 @@ export function buildIndex(root) {
     .filter((p) => p.kind === 'object' && new Set(p.uses.map((u) => u.room)).size > 1)
     .map((p) => p.hash);
 
-  return { builtAt: new Date().toISOString(), enhancedDir, pictures, rooms, sharedObjects, fish, menu, panel, credits, story, kufr, desky };
+  return { builtAt: new Date().toISOString(), pictures, rooms, sharedObjects, fish, menu, panel, credits, story, kufr, desky };
 }
 
 /**
