@@ -55,7 +55,7 @@ const REL = 'src/app/main.ts';
  * Parse the `//#region` markers out of a file and turn them into ranges.
  *
  * This used to live in `tools/gen-map.mjs`, which generated a line-range table into
- * README.md. That table is gone — the app is 37 files now, so the README carries a
+ * README.md. That table is gone — the app is 37 files now, so `MAP.md` carries a
  * DIRECTORY map instead and nobody has to keep line numbers honest. The markers
  * themselves stayed, because they are what this measurement is built on and they are
  * useful to grep. This is the one parse of them in the repo.
@@ -98,7 +98,7 @@ export function analyse() {
   // ── Regions come from the markers, never from hard-coded line numbers ────────
   // An earlier version of this script carried its own table of line ranges and was
   // silently wrong after the first edit that moved a line — which is precisely the
-  // failure the generated README map exists to avoid. Same source, one truth.
+  // failure the generated map exists to avoid. Same source, one truth.
   const regions = readRegions(fs.readFileSync(path.join(root, REL), 'utf8'));
   const regionAt = (line) => regions.find((r) => line >= r.start && line <= r.end)?.name ?? '(none)';
 
