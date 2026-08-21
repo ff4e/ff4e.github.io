@@ -100,7 +100,8 @@ import { solutionFor } from '../rooms/index.js';
 import { ROOMS } from '../data/roomTable.js';
 import { renderer, setRendererValue } from './renderSettings.js';
 import { relayout } from './loadingUi.js';
-import { ui } from './screenState.js';
+import { helpPageCount } from './helpDom.js';
+import { helpScreens, ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
 import { fatalShown, fatalText } from './loadingUi.js';
 import { loadNoteShown, loadNoteText } from './loadNote.js';
@@ -112,7 +113,6 @@ import { sum } from '../render/filmEffects.js';
 import { IndexedScreen } from '../render/framebuffer.js';
 import { GlAiScreen } from '../render/glRoomAi.js';
 import { GlScreen } from '../render/glScreen.js';
-import { HelpScreens } from '../render/help.js';
 import { hitTest as panelHitTest } from '../render/hud.js';
 import type { PanelState } from '../render/hud.js';
 import type { InfoButton } from '../render/mapInfo.js';
@@ -194,7 +194,6 @@ export interface DebugHost {
   readonly glParityCompare: (art: ArtSource) => Record<string, unknown> | null;
   readonly graphics: GraphicsLevel;
   readonly heldState: number;
-  readonly helpScreens: HelpScreens;
   readonly hooks: HookSystem;
   readonly idle: () => boolean;
   /**
@@ -459,8 +458,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     feedbackNote: () => ui.feedback?.note() ?? '',
     openHelp: () => host.openHelp(),
     closeHelp: () => host.closeHelp(),
-    helpPage: () => host.helpScreens.page,
-    helpPageCount: () => host.helpScreens.pages(host.subLang()).length,
+    helpPage: () => helpScreens.page,
+    helpPageCount: () => helpPageCount(host.subLang()),
     hasMap: () => ui.worldMap !== null,
     screen: () => ui.screen,
     // Debug: true while a room's assets are still loading (loadRoom). Until this

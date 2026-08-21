@@ -62,6 +62,63 @@ await withApp(async ({ p, expect }) => {
   await p.keyboard.press('ArrowLeft');
   expect((await p.evaluate(() => window.__ff.helpPage())) === 0, 'ArrowLeft goes back');
 
+  // The pages are TEXT now (src/data/helpText.ts rendered by src/app/helpDom.ts), not the
+  // twenty bitmaps the original blitted. Two things that used to be guaranteed by the
+  // medium have to be asserted instead:
+  //
+  //  - **It fits.** The page box is the original's fixed 640x480, but the line breaks
+  //    inside it are the browser's, so a font-metric difference — a platform without the
+  //    bundled Mulish, a future edit to the transcription — could push the last paragraph
+  //    out of a page that has `overflow: hidden`. Nothing else would notice.
+  //  - **The diagrams arrive.** Twelve cropped PNGs under `public/help/`, shared by both
+  //    languages. A renamed or unstaged file shows as nothing at all, since a broken <img>
+  //    in a pointer-transparent overlay is silent.
+  //
+  // Swept here rather than in a probe of its own: this one already has the help open, and
+  // a new probe would pay the browser launch again (AGENTS.md).
+  for (const lang of ['cz', 'en']) {
+    await p.evaluate((l) => window.__ff.setLang(l), lang);
+    for (let i = 0; i < 10; i++) {
+      // The game clock is frozen behind the help, so `tickSleep` cannot be the wait here.
+      // The rendered page announces itself instead: helpDom sets `aria-label` to
+      // "<tab> (n/10)" as it builds. Matched on the LANGUAGE too, via the `lang` attribute
+      // helpDom sets beside it — the page NUMBER is the same in both languages, so a
+      // predicate that only checked "(1/10)" was already true against the previous
+      // language's page and resolved before the render loop had rebuilt anything.
+      // The images have to be waited for separately: they are fetched when the page is
+      // built, so on a cold cache the first pass through the diagram pages arrives first.
+      const tag = lang === 'cz' ? 'cs' : 'en';
+      await p.waitForFunction(
+        ({ n, tag }) => {
+          const el = document.getElementById('help-page');
+          if (el?.lang !== tag) return false;
+          if (!(el.getAttribute('aria-label') ?? '').includes(`(${n}/10)`)) return false;
+          return [...el.querySelectorAll('img')].every((i) => i.complete);
+        },
+        { n: i + 1, tag },
+      );
+      const m = await p.evaluate(() => {
+        const el = document.getElementById('help-page');
+        const doc = el.firstElementChild;
+        const imgs = [...el.querySelectorAll('img')];
+        return {
+          page: window.__ff.helpPage(),
+          box: el.clientHeight,
+          content: doc ? doc.offsetHeight : -1,
+          imgs: imgs.length,
+          broken: imgs.filter((i) => !i.complete || i.naturalWidth === 0).length,
+          empty: (doc?.textContent ?? '').trim().length < 20,
+        };
+      });
+      expect(m.content > 0 && m.content <= m.box, `${lang} help page ${m.page} fits its box (${m.content}/${m.box})`);
+      expect(!m.empty, `${lang} help page ${m.page} has text`);
+      expect(m.broken === 0, `${lang} help page ${m.page}: ${m.broken} of ${m.imgs} diagrams failed to load`);
+      await p.keyboard.press('ArrowRight');
+    }
+    expect((await p.evaluate(() => window.__ff.helpPage())) === 0, `${lang} paging wraps back to page 0`);
+  }
+  await p.evaluate(() => window.__ff.panelAction(21)); // back to EN for the assertions below
+
   // The panel is hidden while help is up, and the close button is the way back.
   //
   // The help page is drawn at its own unscaled size and the stage box hugs its content

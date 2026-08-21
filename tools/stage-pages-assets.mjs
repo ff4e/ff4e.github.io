@@ -41,6 +41,24 @@ const DATA_EXCLUDE = new Set(['Program', 'Writes', '256col']);
 const isMusicOriginal = (rest) => rest.startsWith(`Music${sep}`) && rest.endsWith('.wav');
 const isVoiceOriginal = (rest) => rest.startsWith(`Sound${sep}`) && rest.endsWith('.ffs') && rest !== `Sound${sep}x00.ffs`;
 
+/**
+ * ...nor the help bitmaps. The twenty 640x480 pages of `data/Help/` are 5.9 MB, and the
+ * site does not fetch them any more: the help is text (`src/data/helpText.ts`) plus the
+ * twelve cropped diagrams in `public/help/`, which is 205 kB and IS published.
+ *
+ * They stay in the repo for the same reason the `.wav` and `.ffs` originals do — the
+ * transcription was made from them and `tools/crop-help-diagrams.ts` still crops from
+ * them, so they are the thing both are checked against. `public/restored/README.md` is
+ * the standing promise that `public/data/` is the ALTAR release byte for byte; this is a
+ * decision about what the SITE serves, which is the only place that promise allows it to
+ * be made.
+ *
+ * The index files (`helpy.txt`/`helps.txt`) go with them: the page order and the tab names
+ * they carry are compiled into `helpText.ts` and pinned against these files by
+ * `test/helpText.test.ts`, so nothing downloads them either.
+ */
+const isHelpPage = (rest) => rest.startsWith(`Help${sep}`) && /\.(bmp|txt)$/i.test(rest);
+
 if (!existsSync(DIST)) {
   console.error(`${DIST}/ is missing — run \`npm run build\` first.`);
   process.exit(1);
@@ -62,7 +80,7 @@ for (const entry of readdirSync(PUBLIC)) {
       const rest = src.startsWith(prefix) ? src.slice(prefix.length) : '';
       const seg = rest.split(sep)[0];
       if (seg && DATA_EXCLUDE.has(seg)) return false;
-      return !isMusicOriginal(rest) && !isVoiceOriginal(rest);
+      return !isMusicOriginal(rest) && !isVoiceOriginal(rest) && !isHelpPage(rest);
     };
   }
   // The restored package is a sound package like any other and is staged like one, so

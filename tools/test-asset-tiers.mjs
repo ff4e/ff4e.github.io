@@ -138,14 +138,13 @@ const CASES = [
   // ── should have: the player asked for this, and would not otherwise know ────
   // Every one is deliberate (a panel opened, a leg finished, a cheat typed) and none is
   // load-bearing for play, so the game keeps running behind the note. Without the note
-  // each of these degrades INVISIBLY — an empty help screen reads as what the help looks
-  // like — which is the exact shape the middle tier exists for.
-  {
-    tier: 'shouldHave',
-    label: 'help pages',
-    url: '**/data/Help/help*.txt',
-    reach: (p) => p.evaluate(() => window.__ff.openHelp()),
-  },
+  // each of these degrades INVISIBLY — an empty credits roll reads as the end of the
+  // credits — which is the exact shape the middle tier exists for.
+  //
+  // The help pages used to head this list, as twenty fetched bitmaps. They are text
+  // compiled into the bundle now (`src/data/helpText.ts`), so there is no fetch left to
+  // tier: the help cannot arrive late or not at all. Its diagrams are <img> elements and
+  // `tools/test-options.mjs` asserts they load.
   {
     tier: 'shouldHave',
     label: 'credits',
@@ -275,49 +274,90 @@ await withApp(async ({ p, expect, allowed }) => {
   await p.unrouteAll({ behavior: 'ignoreErrors' });
   await reloadApp(p);
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
-  let helpTries = 0;
-  await p.route('**/data/Help/help*.txt', (r) => {
-    helpTries++;
+  //
+  // Carried by the CREDITS, which have the shape this needs: opened deliberately from the
+  // map's corner, loaded exactly once, and reopenable without a reload. The help pages
+  // used to be the vehicle and are no longer fetched at all — they are text in the bundle
+  // now (`src/data/helpText.ts`).
+  let credTries = 0;
+  await p.route('**/data/Menu/CredStat1.BMP', (r) => {
+    credTries++;
     return r.abort('failed');
   });
-  await p.evaluate(() => window.__ff.openHelp());
+  await p.evaluate(() => void window.__ff.openCredits());
   await noteUp(p);
   expect(
     await p.evaluate(() => document.getElementById('load-note-retry')?.hidden === false),
     'a transient should-have offers Try again',
   );
-  const triesBeforeClick = helpTries;
+  const triesBeforeClick = credTries;
   // Repair the route first, so the click has something to succeed at: the strong claim
   // is not "it issued a request" but "the game recovered without a reload".
-  await p.unroute('**/data/Help/help*.txt');
-  await p.route('**/data/Help/help*.txt', (r) => {
-    helpTries++;
+  await p.unroute('**/data/Menu/CredStat1.BMP');
+  await p.route('**/data/Menu/CredStat1.BMP', (r) => {
+    credTries++;
     return r.continue();
   });
   await p.click('#load-note-retry');
-  await p.waitForFunction(() => !window.__ff.loadNoteShown(), null, { timeout: budget(8000) });
-  expect(helpTries > triesBeforeClick, `Try again really re-issues the load (${triesBeforeClick} → ${helpTries})`);
+  // Waited on the credits actually OPENING, not on the note going away. The button hides
+  // the note itself before it re-runs the load, and `openCredits` fetches the scroll strip
+  // before it gets to CredStat1 — so "the note is gone" is true several fetches early and
+  // says nothing. The overlay is the recovery being claimed.
+  await p.waitForFunction(() => window.__ff.mapOverlay() === 'credits', null, { timeout: budget(8000) });
+  expect(credTries > triesBeforeClick, `Try again really re-issues the load (${triesBeforeClick} → ${credTries})`);
   expect(!(await p.evaluate(() => window.__ff.loadNoteShown())), 'and the note goes when the load succeeds');
+  await p.evaluate(() => window.__ff.closeMapOverlay());
   await p.unrouteAll({ behavior: 'ignoreErrors' });
 
-  // 1c. A note must also come down on a NATURAL retry — the player closing the help and
-  // opening it again — not only via its own button. `hideLoadNote` is scoped by subject
-  // for this, and nothing called the scoped form until the loader did.
+  // 1b'. ...and a retry pressed from somewhere the credits cannot GO must do nothing.
   //
-  // Reloaded first, and that is not tidiness: §1b leaves the help pages CACHED, so
-  // without this the reopen below is answered from `byLang` without a fetch and the
+  // The note is a page-level element and outlives the map: the player can give up, walk
+  // into a room, and only then press Try again. `openCredits` commits `mapOverlay =
+  // 'credits'` and nothing clears that on a screen change, so without its map guard the
+  // roll ambushes the player mid-scroll on their next visit to the map — and blocks a room
+  // launch while it is up (`mapWillDraw`, roomLaunch.ts). Found by review, on this exact
+  // path; it is the rule `showLegImage`'s retry already states in its own comment.
+  await reloadApp(p);
+  await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  let credRetries = 0;
+  await p.route('**/data/Menu/CredStat1.BMP', (r) => r.abort('failed'));
+  await p.evaluate(() => void window.__ff.openCredits());
+  await noteUp(p);
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+  await p.route('**/data/Menu/CredStat1.BMP', (r) => {
+    credRetries++;
+    return r.continue();
+  });
+  await p.evaluate(() => void window.__ff.enterRoomAwait(7).catch(() => {})); // UTES
+  await p.waitForFunction(() => window.__ff.screen() === 'room');
+  await p.click('#load-note-retry');
+  // A non-event, so it is given time to happen. The request counter is the sharp half:
+  // the guard refuses BEFORE fetching, so a retry from a room issues nothing at all.
+  await p.waitForTimeout(budget(1200));
+  expect(credRetries === 0, `a retry from a room does not re-fetch the credits (${credRetries} requests)`);
+  expect(
+    (await p.evaluate(() => window.__ff.mapOverlay())) !== 'credits',
+    'and it does not leave the credits armed over the map',
+  );
+  await p.unrouteAll({ behavior: 'ignoreErrors' });
+
+  // 1c. A note must also come down on a NATURAL retry — the player closing the credits and
+  // opening them again — not only via its own button. `hideLoadNote` is scoped by subject
+  // for this, and nothing calls the scoped form except the loader that succeeded.
+  //
+  // Reloaded first, and that is not tidiness: §1b leaves the credits CACHED in `ui.credits`,
+  // so without this the reopen below is answered from that cache without a fetch and the
   // section would be testing the cache rather than the retry.
   await reloadApp(p);
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
-  await p.route('**/data/Help/help*.txt', (r) => r.abort('failed'));
-  await p.evaluate(() => window.__ff.openHelp());
+  await p.route('**/data/Menu/CredStat1.BMP', (r) => r.abort('failed'));
+  await p.evaluate(() => void window.__ff.openCredits());
   await noteUp(p);
   await p.unrouteAll({ behavior: 'ignoreErrors' });
-  await p.evaluate(() => window.__ff.closeHelp());
-  await p.evaluate(() => window.__ff.openHelp());
+  await p.evaluate(() => void window.__ff.openCredits());
   await p.waitForFunction(() => !window.__ff.loadNoteShown(), null, { timeout: budget(8000) });
-  expect(true, 'reopening the help after it succeeds clears its own stale note');
-  await p.evaluate(() => window.__ff.closeHelp());
+  expect(true, 'reopening the credits after they succeed clears their own stale note');
+  await p.evaluate(() => window.__ff.closeMapOverlay());
 
   // ── 2. Total outage: everything fails, and nothing hangs ────────────────────
   // With every request dead the game must reach its failure screen rather than sitting on

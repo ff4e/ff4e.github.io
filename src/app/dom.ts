@@ -36,6 +36,17 @@ export const stageBox = document.createElement('div');
 stageBox.id = 'stagebox';
 export const wrap = document.createElement('div');
 /**
+ * The help pages (helpDom.ts). A document stacked over #screen while help is open.
+ *
+ * It takes NO pointer events, deliberately: a click anywhere on the help advances to the
+ * next page (Help.pas:Image1Click) and that listener is on #screen underneath, so the page
+ * must not be in the way of it. Same reason the GL overlay above is transparent to clicks.
+ */
+export const helpPageEl = document.createElement('div');
+helpPageEl.id = 'help-page';
+helpPageEl.hidden = true;
+helpPageEl.setAttribute('role', 'document');
+/**
  * Close button for the help overlay, top-left of the help page.
  *
  * Help.pas closes on any key or a right-click and shows no button; this is a deliberate
@@ -104,6 +115,9 @@ export function buildStage(): void {
   glCanvas.style.display = 'none';
   glCanvas.style.pointerEvents = 'none';
   wrap.appendChild(glCanvas);
+  // The help document, over both canvases and under the close button. Pointer-transparent
+  // (see its declaration) so the paging listener on #screen still sees every click.
+  wrap.appendChild(helpPageEl);
   // Above both canvases, and the one overlay in here that DOES take clicks — the
   // mousedown listener that pages through help lives on #screen underneath, so a click
   // that lands on this button never reaches it.

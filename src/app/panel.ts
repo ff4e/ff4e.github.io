@@ -26,14 +26,13 @@ import {
 } from '../render/hud.js';
 import { aiPanel, ensureAiPanel } from './art.js';
 import { audio } from './audioEngine.js';
-import { canvas, ctx, feedbar, helpClose, panelCanvas, panelCol, panelCtx } from './dom.js';
+import { feedbar, helpClose, panelCanvas, panelCol, panelCtx } from './dom.js';
 import { wake } from './frameClock.js';
+import { renderHelp, showHelp } from './helpDom.js';
 import { engine, room } from './gameState.js';
 import { settings, subLang } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
-import { isAssetError } from '../render/assetFetch.js';
-import { reportAssetError } from './loadingUi.js';
-import { contentScaleFor, scalingFilterFor, stage } from './stageGeometry.js';
+import { scalingFilterFor, stage } from './stageGeometry.js';
 import type { VolumeBus } from '../core/settings.js';
 import { ui, O_NORMAL, O_OPTIONS, O_SC_DOWN, O_SC_UP, PANEL_SCROLL_MS, SCMAX, SCMIN, helpScreens } from './screenState.js';
 
@@ -162,70 +161,26 @@ export function openHelp(): void {
   // with it (renderLoop) — see the note there for why the port deviates from the
   // original's non-modal FHelp.Show here.
   audio.setModalPause(true);
-  loadHelpPages();
-}
-
-/**
- * Fetch the help pages, and say so if they do not arrive.
- *
- * `shouldHave` (src/render/assetFetch.ts): the player deliberately opened the help, so
- * they are owed an answer — but the game behind the overlay is untouched and closing it
- * puts them back exactly where they were, so ending the session over it would be absurd.
- * Without the note the overlay simply opens EMPTY, which is the misleading-failure shape
- * the middle tier exists for: the game would be showing a blank help screen and letting
- * the player conclude that is what the help looks like.
- *
- * Its own function, rather than a `.catch` inline above, only so the retry closure can
- * name the thing it re-runs. Nothing is cached on failure (`byLang` is written after the
- * pages resolve), so Try again is a real refetch.
- */
-function loadHelpPages(): void {
-  void helpScreens.load(subLang()).catch((e: unknown) => {
-    if (!isAssetError(e)) throw e;
-    // Through the tier router, not straight to the note: what the player is shown has to
-    // follow the tier declared at the call site, or re-tiering the help pages would
-    // change nothing and the declaration would be decoration.
-    reportAssetError(e, () => loadHelpPages());
-  });
 }
 
 /** Close the help overlay (any key, Help.pas:FormKeyDown). */
 export function closeHelp(): void {
   ui.helpOpen = false;
+  showHelp(false);
   audio.setModalPause(false);
 }
 
-/** Draw the current help page full-screen on the main canvas (Help.pas:TabControl1Change). */
+/**
+ * Put the current help page on screen (Help.pas:TabControl1Change).
+ *
+ * The pages used to be twenty fetched bitmaps; they are text now (`src/data/helpText.ts`),
+ * so there is nothing to load, nothing to fail and no asset note to raise — the help is
+ * part of the app. What is left is a DOM document over #screen, built by `helpDom.ts`.
+ */
 export function drawHelp(): void {
-  const pages = helpScreens.pages(subLang());
-  const pg = pages[helpScreens.page];
-  if (!pg) return; // still loading
-  ui.mapSig = null; // help paints #screen — invalidate the map cache
-  if (canvas.width !== pg.w || canvas.height !== pg.h) {
-    canvas.width = pg.w;
-    canvas.height = pg.h;
-  }
-  // Shrink to fit the stage box, but never enlarge past 1:1.
-  //
-  // The page is a fixed-resolution bitmap the original blitted at its own size, so
-  // scaling it UP would only blur art the player is meant to read — 1:1 is the faithful
-  // ceiling and the size on any ordinary window. But the page is 642x482 and the box is
-  // 800x600 NATIVE, so on a small window the box is the smaller of the two in CSS px and
-  // `overflow: hidden` simply cut the page off: measured at 700x620 the box was 580px
-  // against a 642px page, and at 900x420 it was 420px tall against 482. That took the
-  // close button (top-left, inside the page) off screen with it — the one affordance
-  // that exists BECAUSE the panel is hidden here. Found by review.
-  const cs = Math.min(1, contentScaleFor(pg.w, pg.h));
-  const cssW = `${Math.floor(pg.w * cs)}px`; // floor, so it can never round OVER the box
-  const cssH = `${Math.floor(pg.h * cs)}px`;
-  if (canvas.style.width !== cssW) canvas.style.width = cssW;
-  if (canvas.style.height !== cssH) canvas.style.height = cssH;
-  // Nearest-neighbour is right for art shown at 1:1; a fractional shrink of a photographic
-  // page aliases badly, so let the browser filter that case (the same trade scalingFilterFor
-  // makes for the AI tier's upscaled store).
-  const want = cs < 1 ? 'auto' : '';
-  if (canvas.style.imageRendering !== want) canvas.style.imageRendering = want;
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(pg.rgba), pg.w, pg.h), 0, 0);
+  ui.mapSig = null; // help covers #screen — invalidate the map cache
+  showHelp(true);
+  renderHelp(subLang(), helpScreens.page);
 }
 
 /** Composite and blit the control panel next to the play area (or as a map overlay). */

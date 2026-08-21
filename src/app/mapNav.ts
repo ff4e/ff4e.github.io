@@ -29,6 +29,7 @@ import { REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, depthOfRoom } fr
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
 import { assetBytes, decodeAsset, isAssetError, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
 import { preloadedLegPage } from './roomPreload.js';
+import { hideLoadNote } from './loadNote.js';
 import { reportAssetError } from './loadingUi.js';
 import type { MapAction } from '../render/worldMap.js';
 
@@ -371,15 +372,40 @@ export function closeMapOverlay(): void {
  * Open the scrolling credits over the map (daCredits → InitCredits, UMain.pas:
  * 1114-1119,761). Lazily loads CredStat1 (static frame) + CredMov (scroll strip)
  * once; the roll then advances off wall-clock and auto-closes at the end.
+ *
+ * ── Failing to load them is not failing to run the game ──────────────────────
+ * `shouldHave`: the player asked for the credits from the map's corner, and without a
+ * note they would simply get nothing and conclude the button is broken. The game behind
+ * the map is untouched, so the note carries a Try again that re-runs this function —
+ * nothing is cached until both bitmaps resolve, so it is a real second attempt.
+ *
+ * The success path takes the note down BY SUBJECT, which matters for the retry the player
+ * improvises rather than the one on the button: closing the corner menu and clicking
+ * Credits again is the obvious thing to do, and without this a note about a load that has
+ * since succeeded would sit there until it was dismissed by hand. Scoped, because an
+ * answer about the credits says nothing about a story page that also failed.
+ *
+ * ── Why the map is checked twice ─────────────────────────────────────────────
+ * The note OUTLIVES the map: it is a page-level element, so its Try again is still there
+ * after the player has given up and walked into a room. Both checks exist because of that
+ * one button — the first refuses a retry pressed from a room outright, and the second
+ * catches the player leaving DURING the refetch, which is reachable because the commit
+ * below happens after an await (roomLaunch.ts says the same thing about this function).
+ * Without them a retry pressed anywhere would set `mapOverlay = 'credits'`, nothing
+ * clears that on a screen change, and the roll would ambush the player mid-scroll on their
+ * next visit to the map — and block a room launch while it was up (mapWillDraw).
+ *
+ * This is `showLegImage`'s rule in a second place: a retry must be a genuine second
+ * attempt at the thing that failed, never a way back onto a screen that has been left.
  */
 export async function openCredits(): Promise<void> {
-  if (ui.mapOverlay !== 'none') return;
+  if (ui.screen !== 'map' || ui.mapOverlay !== 'none') return;
   if (!ui.credits) {
     const bmp = async (f: string, what: string): Promise<Bmp> => {
       const url = `/data/Menu/${f}`;
       return parseBmp(await requiredBytes(url, what, 'shouldHave'));
     };
-    {
+    try {
       // CredMov_port is the shipped strip with the web-port card prepended
       // (tools/build-credits-port.py). It is a drop-in in the same palette, and since
       // the strip's height defines `delka`, the roll extends to cover it by itself.
@@ -407,8 +433,18 @@ export async function openCredits(): Promise<void> {
         : null;
       const mov = portBmp ?? (await bmp('CredMov.BMP', 'the credits'));
       ui.credits = new Credits(await bmp('CredStat1.BMP', 'the credits'), mov);
+      // Both arrived: any note still up about the credits is now stale. Scoped to this
+      // subject so a note about something else is left alone.
+      hideLoadNote('the credits');
+    } catch (e) {
+      if (!isAssetError(e)) throw e;
+      reportAssetError(e, () => void openCredits());
+      return; // the map is untouched behind it; the corner button still works
     }
   }
+  // Re-checked after the load: the guard at the top ran before an await, and the player
+  // may have left the map while the bitmaps were arriving. See the header.
+  if (ui.screen !== 'map' || ui.mapOverlay !== 'none') return;
   ui.mapOverlay = 'credits';
   ui.creditMode = 0;
   ui.creditsStart = performance.now();

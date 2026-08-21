@@ -572,6 +572,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `boot.ts` | 2.5 k | The boot sequence in load order — fonts, panel and map graphics, sound packages, room 7, first frame. |
 | `deviceGate.ts` | 1.4 k | Refusing to run on a phone. Runs before every side effect. |
 | `dom.ts` | 1.3 k | The element handles and their 2D contexts. |
+| `helpDom.ts` | 2.4 k | The control-help pages (`Help.pas`) as a document: builds `src/data/helpText.ts` into DOM over #screen and scales it to the stage box. |
 | `gameState.ts` | 2.6 k | The live room and how it is currently being played. Live bindings plus setters, because of the 1 237 references only 74 are writes. |
 | `screenState.ts` | 1.9 k | Which screen is showing, and everything layered over it. A mutable bag — the reads are many and the shape is flat. |
 | `stageState.ts` | 0.8 k | The subtitle font in use and whether it loaded, plus `booted`. |
@@ -656,7 +657,6 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `mapInfo.ts` | 2.1 k | The map's record info panel (krokoměr). |
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |
-| `help.ts` | 0.6 k | The control-help screens (`Help.pas`). |
 | `subtitleGeom.ts` | 3.8 k | The geometry a vector subtitle line is built from — fit-to-room size (one per message, not per row), wave phase and curve, baseline and amplitude, stroke and bevel, the split that lets the text be scaled from the stage while the room is scaled to fit, and the readable band the font size is held inside. Pure and import-free, so the renderer and the tick logic both measure from it and it is unit-tested. |
 | `subtitles.ts` | 3.4 k | Colour mapping, glyph rendering, and the scrolling line. |
 | `font.ts` | 0.9 k | The bitmap font from the original `Chars.dat`/`Chartab.dat`/`Charcol.dat`. |
