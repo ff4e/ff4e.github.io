@@ -26,10 +26,9 @@ That is also why FFNG, the well-known remake, was not the starting point. FFNG i
 other way — outward from ALTAR's own code, keeping the original's names, its quirks and its bugs.
 
 **The one thing deliberately changed is how it looks.** The art was drawn for a 640×480 screen, and on
-a modern display that is a small soft rectangle. So the port ships an AI-upscaled art tier: the same
-pictures, the same layout, the same everything the game does — just enough resolution to be worth
-looking at today. The 1998 256-colour look and FFNG's truecolor art are both still there, one switch
-away in Options.
+a modern display that is a small soft rectangle. So the port ships AI-upscaled art: the same pictures,
+the same layout, the same everything the game does — just enough resolution to be worth looking at
+today.
 
 **Done** means all 72 rooms playable end to end, the dialogue and voices in place, and every known
 deviation from the original either fixed or written down in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
