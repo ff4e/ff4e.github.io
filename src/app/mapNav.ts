@@ -27,7 +27,8 @@ import { bmpToRgba, parseBmp } from '../data/bmp.js';
 import type { Bmp } from '../data/bmp.js';
 import { REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, depthOfRoom } from '../data/world.js';
 import { CREDIT_SPEED, CREDIT_TICK_MS, Credits } from '../render/credits.js';
-import { assetBytes, decodeAsset, isAssetError, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
+import { assetBlob, decodeAsset, isAssetError, optionalAsset, requiredBlob, requiredBytes } from '../render/assetFetch.js';
+import { decodeCreditsImage } from '../render/creditsAsset.js';
 import { preloadedLegPage } from './roomPreload.js';
 import { hideLoadNote } from './loadNote.js';
 import { reportAssetError } from './loadingUi.js';
@@ -403,13 +404,17 @@ export async function openCredits(): Promise<void> {
   if (!ui.credits) {
     const bmp = async (f: string, what: string): Promise<Bmp> => {
       const url = `/data/Menu/${f}`;
-      return parseBmp(await requiredBytes(url, what, 'shouldHave'));
+      return decodeCreditsImage(url, await requiredBlob(url, what, 'shouldHave'), 'shouldHave');
     };
     try {
       // CredMov_port is the shipped strip with the web-port card prepended
       // (tools/build-credits-port.py). It is a drop-in in the same palette, and since
       // the strip's height defines `delka`, the roll extends to cover it by itself.
       // Falls back to the untouched original when the port variant isn't built.
+      //
+      // Both are lossless WebP re-encodings of the 8-bit BMPs (2.41 MB -> 0.12 MB,
+      // tools/build-credits-webp.py) and decode back to the identical index plane, so
+      // everything below this line — and all of credits.ts — is unchanged by that.
       //
       // The ONE place a 404 is asked for on purpose outside the art tiers, so it is the
       // one place `optionalAsset` appears here: a build without the tool's output is a
@@ -423,16 +428,19 @@ export async function openCredits(): Promise<void> {
       // costs nothing but the port card, while letting it throw would abandon
       // `openCredits` entirely and the player would get no credits at all rather than
       // the untouched original. `niceToHave` says the same thing to the reporter.
-      const portUrl = '/data/Menu/CredMov_port.BMP';
-      const port = await optionalAsset(portUrl, 'niceToHave').catch(() => null);
-      // The body read gets the same treatment as the request: a strip that started
-      // arriving and stopped is still just "no port card", and must not cost the player
-      // the credits roll itself.
+      const portUrl = '/data/Menu/CredMov_port.webp';
+      const port = await optionalAsset(portUrl, 'niceToHave', { expect: 'image' }).catch(() => null);
+      // The body read and the DECODE get the same treatment as the request: a strip that
+      // started arriving and stopped — or one whose colours the palette does not contain,
+      // which is how a re-encode would announce itself — is still just "no port card",
+      // and must not cost the player the credits roll itself.
       const portBmp = port
-        ? await assetBytes(portUrl, port, 'niceToHave', 'the credits').then(parseBmp).catch(() => null)
+        ? await assetBlob(portUrl, port, 'niceToHave', 'the credits')
+            .then((b) => decodeCreditsImage(portUrl, b, 'niceToHave'))
+            .catch(() => null)
         : null;
-      const mov = portBmp ?? (await bmp('CredMov.BMP', 'the credits'));
-      ui.credits = new Credits(await bmp('CredStat1.BMP', 'the credits'), mov);
+      const mov = portBmp ?? (await bmp('CredMov.webp', 'the credits'));
+      ui.credits = new Credits(await bmp('CredStat1.webp', 'the credits'), mov);
       // Both arrived: any note still up about the credits is now stale. Scoped to this
       // subject so a note about something else is left alone.
       hideLoadNote('the credits');

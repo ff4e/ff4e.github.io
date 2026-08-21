@@ -148,7 +148,7 @@ const CASES = [
   {
     tier: 'shouldHave',
     label: 'credits',
-    url: '**/data/Menu/CredStat1.BMP',
+    url: '**/data/Menu/CredStat1.webp',
     reach: (p) => p.evaluate(() => void window.__ff.openCredits()),
   },
   {
@@ -280,7 +280,7 @@ await withApp(async ({ p, expect, allowed }) => {
   // used to be the vehicle and are no longer fetched at all — they are text in the bundle
   // now (`src/data/helpText.ts`).
   let credTries = 0;
-  await p.route('**/data/Menu/CredStat1.BMP', (r) => {
+  await p.route('**/data/Menu/CredStat1.webp', (r) => {
     credTries++;
     return r.abort('failed');
   });
@@ -293,8 +293,8 @@ await withApp(async ({ p, expect, allowed }) => {
   const triesBeforeClick = credTries;
   // Repair the route first, so the click has something to succeed at: the strong claim
   // is not "it issued a request" but "the game recovered without a reload".
-  await p.unroute('**/data/Menu/CredStat1.BMP');
-  await p.route('**/data/Menu/CredStat1.BMP', (r) => {
+  await p.unroute('**/data/Menu/CredStat1.webp');
+  await p.route('**/data/Menu/CredStat1.webp', (r) => {
     credTries++;
     return r.continue();
   });
@@ -320,11 +320,11 @@ await withApp(async ({ p, expect, allowed }) => {
   await reloadApp(p);
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
   let credRetries = 0;
-  await p.route('**/data/Menu/CredStat1.BMP', (r) => r.abort('failed'));
+  await p.route('**/data/Menu/CredStat1.webp', (r) => r.abort('failed'));
   await p.evaluate(() => void window.__ff.openCredits());
   await noteUp(p);
   await p.unrouteAll({ behavior: 'ignoreErrors' });
-  await p.route('**/data/Menu/CredStat1.BMP', (r) => {
+  await p.route('**/data/Menu/CredStat1.webp', (r) => {
     credRetries++;
     return r.continue();
   });
@@ -350,7 +350,7 @@ await withApp(async ({ p, expect, allowed }) => {
   // section would be testing the cache rather than the retry.
   await reloadApp(p);
   await p.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
-  await p.route('**/data/Menu/CredStat1.BMP', (r) => r.abort('failed'));
+  await p.route('**/data/Menu/CredStat1.webp', (r) => r.abort('failed'));
   await p.evaluate(() => void window.__ff.openCredits());
   await noteUp(p);
   await p.unrouteAll({ behavior: 'ignoreErrors' });
@@ -500,12 +500,22 @@ await withApp(async ({ p, expect, allowed }) => {
 
   // 4a. The credits ask for a strip a build tool may not have produced, and fall back to
   //     the one that always ships. This 404 is the code ASKING which build it is on.
-  await absent(p, '**/data/Menu/CredMov_port.BMP');
+  await absent(p, '**/data/Menu/CredMov_port.webp');
   await p.evaluate(() => void window.__ff.openCredits());
   await p.waitForFunction(() => window.__ff.creditLength() > 0, null, { timeout: budget(6000) });
   expect(!(await p.evaluate(() => window.__ff.fatalShown())), 'a 404 on the port credits strip is not a failure');
   expect(!(await p.evaluate(() => window.__ff.loadNoteShown())), 'and is not worth a note either');
-  expect((await p.evaluate(() => window.__ff.creditLength())) > 0, 'the credits roll on the fallback strip');
+  // The EXACT height of `CredMov.BMP`, not just "more than nothing". Both strips ship as
+  // lossless WebP now (tools/build-credits-webp.py) and the roll's settle point and
+  // auto-close are derived from `delka`, so a strip that decoded to the wrong size — or
+  // the port card silently answering here — would still pass a `> 0` check while rolling
+  // the wrong length. This is also the cheapest place the WebP decode is proved at all:
+  // `creditsAsset.ts` throws on any colour outside the palette, so a browser that decoded
+  // these differently would fail the fetch above rather than reach this line.
+  expect(
+    (await p.evaluate(() => window.__ff.creditLength())) === 2921,
+    'the credits roll on the fallback strip, at its own full length',
+  );
   await p.evaluate(() => window.__ff.closeMapOverlay());
   await p.unrouteAll({ behavior: 'ignoreErrors' });
 
