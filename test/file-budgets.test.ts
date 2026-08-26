@@ -47,7 +47,15 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // drawMap()'s unlit/plaque/parchment frame, loop()'s dispatch of the launch, the three
   // input guards, the enterRoom/startRoom split, and the new module's wiring block
   // (~48 lines of the ~171).
-  ['src/app/main.ts', 2220],
+  //
+  // Raised 2 220 -> 2 228 for the touch buttons, and this is the whole of what they cost
+  // here: one import and a seven-line wiring block handing `touchButtons.ts` a single
+  // name, `panelAction`. Nothing about the bar — which regions the five buttons send,
+  // when it is up, how it reserves its space — is in this file. That one name is also
+  // the point: the touch buttons dispatch through the SAME table as the mouse rather
+  // than calling saveGame()/showMap() themselves, so the alternative to these seven
+  // lines was not fewer lines, it was a second copy of what a panel press means.
+  ['src/app/main.ts', 2228],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

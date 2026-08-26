@@ -119,6 +119,7 @@ import { initDevBar, syncSolveBtn } from './devBar.js';
 import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
 import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
+import { initTouchButtons } from './touchButtons.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
   applyVolumeSettings,
@@ -966,6 +967,13 @@ initPanel({
   },
   get saveExists() {
     return saveExists;
+  },
+});
+
+//#region Touch controls wiring | anchors: initTouchButtons | Hands `touchButtons.ts` the panel's dispatch table. The in-room touch buttons — which regions they send, when the bar is up — are in that module.
+initTouchButtons({
+  get panelAction() {
+    return panelAction;
   },
 });
 

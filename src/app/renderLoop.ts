@@ -22,6 +22,7 @@ import { drawCutscene } from './cutscene.js';
 import { drawCredits, drawLegImage } from './mapNav.js';
 import { syncLoadingUi } from './loadingUi.js';
 import { syncRotatePrompt } from './rotatePrompt.js';
+import { syncTouchButtons } from './touchButtons.js';
 import { drawMap } from './mapDraw.js';
 import { drawHelp, drawPanel, tickPanelScroll } from './panel.js';
 import { enhancedArtActive, graphics, renderOnDirty, renderer } from './renderSettings.js';
@@ -303,9 +304,10 @@ export function loop(now: number): void {
   // After every draw branch: the overlay is a view of "is this screen still loading",
   // and hiding it here means the frame underneath has already been painted this tick.
   syncLoadingUi(now);
-  // Same contract, same reason it is here and not pushed from the room/orientation
-  // changes it depends on (rotatePrompt.ts). A no-op on anything that is not a phone.
+  // Same contract, same reason they are here and not pushed from the room/orientation
+  // changes they depend on. Both leave immediately on anything that is not touch.
   syncRotatePrompt();
+  syncTouchButtons();
   updatePerfHud(now);
   scheduleNextFrame();
 }
