@@ -86,23 +86,47 @@ export type GateWindow = Pick<Window, 'matchMedia'> & {
 };
 
 /**
+ * The three device classes the game distinguishes.
+ *
+ * `'phone'` is the refused one; `'tablet'` means "touch-capable and big enough", which
+ * includes anything touch-capable whose size cannot be read.
+ */
+export type DeviceClass = 'desktop' | 'phone' | 'tablet';
+
+/**
+ * What KIND of device this is — the one place the two signals are read.
+ *
+ * The gate below is a question about this ("is it a phone?"), and so is everything the
+ * touch UI needs to know, so they share the rule rather than each re-deriving it from
+ * `matchMedia`. Two signals, exactly as described in the file comment above; the whole
+ * classification is these three lines.
+ *
+ * `'tablet'` doubles as "touch-capable, and not a phone", which is why an unknown screen
+ * size lands there: it is the answer that keeps `isUnsupportedDevice` failing open.
+ */
+export function deviceClass(win: GateWindow): DeviceClass {
+  let touch: boolean;
+  try {
+    touch = win.matchMedia('(any-pointer: coarse)').matches;
+  } catch {
+    return 'desktop'; // no matchMedia at all -> fail open, see the file comment
+  }
+  // Not touch-capable (or the browser cannot say) -> a desktop, or fail open.
+  if (!touch) return 'desktop';
+  // Touch-capable. Only phone-SIZED screens are refused; a tablet has room for the
+  // panel, and a touchscreen laptop is nowhere near this small. A size that cannot be
+  // read is NOT a phone — the same fail-open lean, spelled as a class.
+  const short = Math.min(win.screen?.width ?? 0, win.screen?.height ?? 0);
+  return short > 0 && short <= PHONE_MAX_SHORT_SIDE ? 'phone' : 'tablet';
+}
+
+/**
  * Is this a phone — touch-capable, on a phone-sized screen?
  *
  * Takes its window so the unit tests can hand it a stub; the app passes the real one.
  */
 export function isUnsupportedDevice(win: GateWindow): boolean {
-  let touch: boolean;
-  try {
-    touch = win.matchMedia('(any-pointer: coarse)').matches;
-  } catch {
-    return false; // no matchMedia at all -> fail open, see the file comment
-  }
-  // Not touch-capable (or the browser cannot say) -> a desktop, or fail open.
-  if (!touch) return false;
-  // Touch-capable. Only phone-SIZED screens are refused; a tablet has room for the
-  // panel, and a touchscreen laptop is nowhere near this small.
-  const short = Math.min(win.screen?.width ?? 0, win.screen?.height ?? 0);
-  return short > 0 && short <= PHONE_MAX_SHORT_SIDE;
+  return deviceClass(win) === 'phone';
 }
 
 /** The "Continue anyway" button inside that overlay. Markup lives in index.html. */
