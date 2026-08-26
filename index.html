@@ -32,6 +32,13 @@
     <style>
       :root { color-scheme: dark; }
       html, body { height: 100%; }
+      /* No double-tap zoom. It is reachable on any touch device from the moment a phone
+         can get past the gate, and it is close to unrecoverable here: `body` has
+         `overflow: hidden`, so a zoomed page cannot be panned back and the player is left
+         looking at a clipped corner of a game they cannot reach. `manipulation` removes
+         the double-tap gesture and keeps pinch-zoom, which is a real accessibility need
+         and is not the one causing the trouble. */
+      html, body { touch-action: manipulation; }
       body {
         margin: 0;
         background: #101018;
@@ -354,6 +361,13 @@
       html[data-unsupported] #devbar,
       html[data-unsupported] #info,
       html[data-unsupported] #perfhud { display: none; }
+      /* This is the one overlay a PHONE sees, and it is the tallest: heading, two
+         paragraphs, a button and the fine print, in a landscape viewport that can be
+         393px tall. Centred content that overflows a column flexbox is clipped at the
+         TOP, where the heading is, and cannot be scrolled back to — so this overlay
+         scrolls, and centres only while there is room to (`safe`). Scoped to the notice:
+         the loading and fatal overlays are short and are not worth the risk. */
+      #unsupported { overflow-y: auto; justify-content: safe center; }
       /* Feedback strip: the player's only way to reach the author, and the only piece
          of modern chrome anywhere near the game. It hangs directly under the control
          panel and is shown ONLY while the Options face is open — which is where a
@@ -473,6 +487,9 @@
       #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
       .overlay h1 { margin: 0; font: 600 26px/1.2 system-ui, sans-serif; letter-spacing: 0.5px; }
       .overlay p { margin: 0; max-width: 34em; opacity: 0.85; }
+      /* The consequences of "Continue anyway", kept quieter than the refusal itself:
+         it is what the player needs AFTER deciding, not another reason to decide. */
+      .overlay .fineprint { font: 12px/1.5 system-ui, sans-serif; opacity: 0.55; max-width: 26em; }
       .spinner {
         width: 44px; height: 44px; border-radius: 50%;
         border: 4px solid #2a2a3a; border-top-color: #6cc; animation: spin 0.9s linear infinite;
@@ -542,18 +559,24 @@
       <p id="fatal-msg">Some game files failed to load. Check your connection and try again.</p>
       <button id="fatal-reload" class="btn" type="button">Reload</button>
     </div>
-    <!-- Phone refusal. The game has no touch controls and phone-sized targets are
-         unusable, so it does not boot on a touch-only, phone-sized screen. Tablets are
-         deliberately allowed (src/app/deviceGate.ts). -->
+    <!-- Phone refusal. The game's touch controls are still being built, so a phone-sized
+         touch-only screen is refused by default — but the player can override it from
+         here, which reloads with the flag set (src/app/deviceGate.ts). Tablets are
+         deliberately allowed and never see this. -->
     <div id="unsupported" class="overlay" hidden>
-      <h1>Fish Fillets 4ever doesn't fit on a phone</h1>
+      <h1>Fish Fillets 4ever doesn't fit on a phone yet</h1>
       <p>
         The game is played with a mouse and a keyboard — you click a fish to pick it, click
-        the water to swim there, right-click to shove, and the keys do the rest. There is
-        no touch control scheme, and on a phone-sized screen the controls are too small to
-        hit.
+        the water to swim there, right-click to shove, and the keys do the rest. Touch
+        controls are being built, but they are not here yet, and on a phone-sized screen
+        the current controls are too small to hit.
       </p>
       <p>Come back on a computer — or a tablet, which is just big enough — and it will be waiting.</p>
+      <button id="unsupported-continue" class="btn" type="button">Continue anyway</button>
+      <p class="fineprint">
+        It will load about 600&nbsp;MB of artwork and the controls will be hard to use. Your
+        choice is remembered; clear the site data to be asked again.
+      </p>
     </div>
     <div id="notes">
       <!-- Non-blocking note when WebGL2 is unavailable (CPU renderer active). -->
