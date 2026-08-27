@@ -33,6 +33,8 @@ import { engine, room } from './gameState.js';
 import { settings, subLang } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
 import { scalingFilterFor, stage } from './stageGeometry.js';
+import { toggleTouchOptions } from './touchOptions.js';
+import { touchUi } from './touchButtons.js';
 import type { VolumeBus } from '../core/settings.js';
 import { ui, O_NORMAL, O_OPTIONS, O_SC_DOWN, O_SC_UP, PANEL_SCROLL_MS, SCMAX, SCMIN, helpScreens } from './screenState.js';
 
@@ -135,8 +137,17 @@ export function tickPanelScroll(dtMs: number): void {
 /**
  * Toggle the options sub-panel (the corner button oblroh, or a right-click on the
  * panel; Uovl.pas:636-639,709-712): normal -> scroll up -> options -> scroll down.
+ *
+ * In touch mode the plain-HTML Options stands in for this face, and this is one of the
+ * two doors into it (`openMapOptions` is the other), so the hand-over is here rather
+ * than at each caller — the corner button, the panel's right-click and the keyboard
+ * shortcut must not each remember to check.
  */
 export function togglePanelOptions(): void {
+  if (touchUi()) {
+    toggleTouchOptions();
+    return;
+  }
   if (ui.ostav === O_NORMAL) ui.ostav = O_SC_UP;
   else if (ui.ostav === O_OPTIONS) ui.ostav = O_SC_DOWN;
 }

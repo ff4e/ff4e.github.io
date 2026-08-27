@@ -100,6 +100,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. |
 | `touchButtons.ts` | 1.3 k | The in-room touch bar: five buttons, every one dispatched through the panel's own `panelAction` table. |
+| `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |

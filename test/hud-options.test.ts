@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { hitTest, sliderIndex, OBLMYSI, OBLROH, NOBLMYSI } from '../src/render/hud.js';
+import { hitTest, sliderIndex, sliderX, OBLMYSI, OBLROH, NOBLMYSI } from '../src/render/hud.js';
 
 describe('control-panel hit-testing (oblmysi, Uovl.pas)', () => {
   it('resolves the normal-panel regions 1..16', () => {
@@ -43,5 +43,16 @@ describe('control-panel hit-testing (oblmysi, Uovl.pas)', () => {
     expect(sliderIndex(22)).toBe(1);
     expect(sliderIndex(141)).toBe(12);
     expect(sliderIndex(999)).toBe(12); // clamps above
+  });
+
+  it('sliderX is the exact inverse of sliderIndex over the whole track', () => {
+    // The touch Options has an index and needs a panel x to dispatch through
+    // panelAction (src/app/touchOptions.ts). If this round trip ever slipped, a slider
+    // there would set a neighbouring volume and nothing would say so.
+    for (let i = 0; i <= 12; i++) expect(sliderIndex(sliderX(i))).toBe(i);
+    expect(sliderX(0)).toBe(12); // the left end of the track
+    expect(sliderX(12)).toBe(132); // inside it: the track runs to 141
+    expect(sliderX(-3)).toBe(12); // clamps, like sliderIndex
+    expect(sliderX(99)).toBe(132);
   });
 });

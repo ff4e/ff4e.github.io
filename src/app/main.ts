@@ -120,6 +120,7 @@ import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDr
 import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { initTouchButtons } from './touchButtons.js';
+import { initTouchOptions } from './touchOptions.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
   applyVolumeSettings,
@@ -970,12 +971,16 @@ initPanel({
   },
 });
 
-//#region Touch controls wiring | anchors: initTouchButtons | Hands `touchButtons.ts` the panel's dispatch table. The in-room touch buttons — which regions they send, when the bar is up — are in that module.
-initTouchButtons({
+//#region Touch controls wiring | anchors: initTouchButtons, initTouchOptions | Hands the two touch modules the panel's dispatch table. What the bar sends, when it is up, and what the plain-HTML Options looks like are in those modules.
+// One host for both: they need the same single name, and `touchOptions.ts` sends its
+// volume sliders through the same table as its buttons (see the note there).
+const touchHost = {
   get panelAction() {
     return panelAction;
   },
-});
+};
+initTouchButtons(touchHost);
+initTouchOptions(touchHost);
 
 //#region Map drawing wiring | anchors: initMapDraw | Hands `mapDraw.ts` the four names it needs, all of them the persisted record the map is a view of. The drawing is in that module.
 initMapDraw({

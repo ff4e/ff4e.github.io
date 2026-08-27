@@ -55,7 +55,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // the point: the touch buttons dispatch through the SAME table as the mouse rather
   // than calling saveGame()/showMap() themselves, so the alternative to these seven
   // lines was not fewer lines, it was a second copy of what a panel press means.
-  ['src/app/main.ts', 2228],
+  //
+  // Raised 2 228 -> 2 233 for the touch Options, and it is the same seven lines plus
+  // two: one import, and a second `init*` call against the SAME host object, which is
+  // why the wiring block became a named const rather than a second literal. The touch
+  // Options needs exactly the name the buttons already needed — `panelAction` — because
+  // its sliders dispatch through regions 17-19 like everything else. Nothing about the
+  // screen itself is in this file.
+  ['src/app/main.ts', 2233],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
@@ -159,7 +166,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // out of it into a named function. That is the whole of the growth — `drawCredits` got
   // shorter, not longer. If this file takes on a third overlay, the credits are the
   // coherent piece to lift out (load + hold + a draw branch per tier), not the map.
-  ['src/app/mapNav.ts', 580],
+  //
+  // 580 -> 583 for the touch Options hand-over: the map corner is one of the two doors
+  // into the Options face, so a touch device has to be turned away here as well as in
+  // `panel.ts`. The guard is three lines; the rest is the note on what deliberately is
+  // NOT set with it (no `mapOverlay`, so the panel column never floats over the map),
+  // which is the part a later reader would otherwise have to reconstruct.
+  ['src/app/mapNav.ts', 583],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak
