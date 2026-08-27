@@ -11,6 +11,9 @@
  * ── The migration invariant. migrateSaves() must run "before any ff.* key is read".
  *    Module-scope consts would have read first and migrated second — harmless at
  *    schema v1, which only stamps, and a silent data bug at the first real migration.
+ *    ONE key is a deliberate exception: `ff.phoneOverride` is read by the device gate,
+ *    which by contract runs before everything including this. See deviceGate.ts, which
+ *    carries the note explaining why that key can therefore never change shape.
  *
  * main.ts destructures the returned object, so every call site there is unchanged.
  */

@@ -14,8 +14,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   isUnsupportedDevice,
+  phoneOverrideActive,
+  rememberPhoneOverride,
   PHONE_MAX_SHORT_SIDE,
+  PHONE_OVERRIDE_KEY,
   type GateWindow,
+  type OverrideWindow,
 } from '../src/app/deviceGate.js';
 
 const FINE = '(any-pointer: fine)';
@@ -105,7 +109,8 @@ describe('isUnsupportedDevice — the size boundary', () => {
 describe('isUnsupportedDevice — fails open', () => {
   it('allows when the browser answers no pointer query', () => {
     // An old browser without `any-pointer` support matches neither query. Refusing a
-    // desktop is unrecoverable (there is no override), so lean towards admitting.
+    // desktop is unrecoverable — the "continue anyway" override is on the phone notice,
+    // which a desktop player would have no reason to trust — so lean towards admitting.
     expect(isUnsupportedDevice(win([], SCREEN.iPhoneSE))).toBe(false);
   });
 
@@ -125,5 +130,87 @@ describe('isUnsupportedDevice — fails open', () => {
     expect(isUnsupportedDevice(win([COARSE]))).toBe(false);
     expect(isUnsupportedDevice(win([COARSE], {}))).toBe(false);
     expect(isUnsupportedDevice(win([COARSE], { width: 0, height: 0 }))).toBe(false);
+  });
+});
+
+/**
+ * The player's "continue anyway" override.
+ *
+ * Deliberately a separate rule from the detection above, and the pairing is the point:
+ * `isUnsupportedDevice` fails OPEN (an unreadable device is admitted) while this fails
+ * CLOSED (an unreadable store is not consent). Both lean the same way in effect — leave
+ * the player where they were — which is why they read as opposites.
+ */
+
+/** A storage stub: a plain map, or one that throws the way Safari private mode does. */
+function store(initial?: Record<string, string>, throws?: 'get' | 'set'): OverrideWindow['localStorage'] {
+  const map = new Map(Object.entries(initial ?? {}));
+  return {
+    getItem(k: string) {
+      if (throws === 'get') throw new Error('storage disabled');
+      return map.get(k) ?? null;
+    },
+    setItem(k: string, v: string) {
+      if (throws === 'set') throw new Error('storage disabled');
+      map.set(k, v);
+    },
+  };
+}
+
+describe('phoneOverrideActive', () => {
+  it('is off by default — a phone with a clean profile is still refused', () => {
+    expect(phoneOverrideActive({ localStorage: store(), location: { search: '' } })).toBe(false);
+    expect(phoneOverrideActive({})).toBe(false);
+  });
+
+  it('honours the remembered choice', () => {
+    const win: OverrideWindow = { localStorage: store({ [PHONE_OVERRIDE_KEY]: '1' }) };
+    expect(phoneOverrideActive(win)).toBe(true);
+  });
+
+  it('honours ?phone=1 even with no storage at all', () => {
+    // The case the parameter exists for: the button could not persist anything, so the
+    // URL is the only carrier of the choice.
+    expect(phoneOverrideActive({ location: { search: '?phone=1' } })).toBe(true);
+    expect(phoneOverrideActive({ location: { search: '?graphics=ai&phone=1' } })).toBe(true);
+  });
+
+  it('is not fooled by a merely present parameter', () => {
+    // `?phone` or `?phone=0` is not consent — only the explicit value is.
+    expect(phoneOverrideActive({ location: { search: '?phone' } })).toBe(false);
+    expect(phoneOverrideActive({ location: { search: '?phone=0' } })).toBe(false);
+    expect(phoneOverrideActive({ location: { search: '?phones=1' } })).toBe(false);
+  });
+
+  it('is not fooled by a stray value in storage', () => {
+    expect(phoneOverrideActive({ localStorage: store({ [PHONE_OVERRIDE_KEY]: '0' }) })).toBe(false);
+    expect(phoneOverrideActive({ localStorage: store({ [PHONE_OVERRIDE_KEY]: 'yes' }) })).toBe(false);
+  });
+
+  it('fails CLOSED when storage throws — an unreadable store is not consent', () => {
+    expect(phoneOverrideActive({ localStorage: store({}, 'get'), location: { search: '' } })).toBe(
+      false,
+    );
+  });
+
+  it('still admits via the parameter when storage throws', () => {
+    // The two signals are independent: a broken store must not swallow an explicit URL.
+    const win: OverrideWindow = { localStorage: store({}, 'get'), location: { search: '?phone=1' } };
+    expect(phoneOverrideActive(win)).toBe(true);
+  });
+});
+
+describe('rememberPhoneOverride', () => {
+  it('records the choice so the next visit is not blocked', () => {
+    const ls = store();
+    rememberPhoneOverride({ localStorage: ls });
+    expect(phoneOverrideActive({ localStorage: ls })).toBe(true);
+  });
+
+  it('does not throw when storage refuses the write', () => {
+    // Best-effort: the caller proceeds via `?phone=1` regardless, so this must never be
+    // the thing that breaks the button.
+    expect(() => rememberPhoneOverride({ localStorage: store({}, 'set') })).not.toThrow();
+    expect(() => rememberPhoneOverride({})).not.toThrow();
   });
 });

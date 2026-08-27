@@ -50,7 +50,7 @@ import { newDeathState } from '../core/deathlines.js';
 import { movesOf, lengthOfRecord } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
 import { ROOMS } from '../data/roomTable.js';
-import { isUnsupportedDevice, showUnsupportedNotice } from './deviceGate.js';
+import { isUnsupportedDevice, phoneOverrideActive, showUnsupportedNotice } from './deviceGate.js';
 import { canvas, info, panelCanvas, select } from './dom.js';
 import { ARROWS, KEYS, MLUVI_PRIOR, NOOP_SCRIPT, TETRIS_KEYS } from './keyTables.js';
 import { audio, initAudio } from './audioEngine.js';
@@ -256,20 +256,23 @@ import {
   mapLaunching,
   parchmentReady,
 } from './roomLaunch.js';
-//#region Device gate | anchors: isUnsupportedDevice, showUnsupportedNotice | Phones are refused here, before any art is fetched — and before every other side effect in the file. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`.
+//#region Device gate | anchors: isUnsupportedDevice, phoneOverrideActive, showUnsupportedNotice | Phones are refused here, before any art is fetched — and before every other side effect in the file. The player can override the refusal from the notice itself, which reloads with the flag set. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`.
 
 // Phones are refused here, before a single byte of game ART is fetched. (The engine
 // bundle itself has already been downloaded — this statement is inside it — so the claim
-// is about the ~600 MB of art, not about every byte.) The game has no touch scheme (see
-// deviceGate.ts), and the block is absolute — there is deliberately no override, so this
-// must come before every other side effect in the module.
+// is about the ~600 MB of art, not about every byte.) The touch scheme is still being
+// built (deviceGate.ts), so this must come before every other side effect in the module.
+//
+// `phoneOverrideActive` is the player's own "continue anyway", checked at the CALL SITE:
+// `isUnsupportedDevice` answers what the device is, this answers what the player asked
+// for, and only the second may be talked out of the refusal.
 //
 // The never-settling await is what stops the rest of this file: it is a top-level-await
 // module, so there is no function to return from, and throwing would surface a scary
 // console error (and trip the probes' pageerror capture) for what is a normal,
 // intentional refusal.
-if (typeof window !== 'undefined' && isUnsupportedDevice(window)) {
-  showUnsupportedNotice(document);
+if (typeof window !== 'undefined' && isUnsupportedDevice(window) && !phoneOverrideActive(window)) {
+  showUnsupportedNotice(document, window);
   await new Promise<never>(() => {});
 }
 

@@ -6,17 +6,23 @@
  * happening BEFORE the game boots — which is the whole point, because a phone must not
  * spend a download on art it can never use.
  *
+ * It is also the only check of the "Continue anyway" override end to end, and for the
+ * same reason: the unit tests cover whether the override is ACTIVE, but only a browser
+ * can show the button being clicked, the reload happening and the game booting on the
+ * far side of it. The button is DOM the node suite has no environment for.
+ *
  * Playwright's emulation is what makes it real rather than a stub: `hasTouch`/`isMobile`
  * and the emulated screen make Chromium answer the same `any-pointer` queries and report
  * the same `screen` dimensions the corresponding device would, so the page runs the rule
  * against device-shaped inputs rather than against a mock.
  *
- * Three contexts run here: phone (refused), tablet (allowed — the deliberate carve-out),
- * desktop (allowed). A touchscreen LAPTOP is deliberately absent: Chromium's `hasTouch`
- * REPLACES the emulated pointer rather than adding to it, so such a context still reports
- * `(any-pointer: coarse)` with no fine pointer — indistinguishable from a tablet — and
- * asserting on it would only be asserting on the emulator. That row is covered where it
- * can be covered honestly, against the media queries themselves, in the unit test.
+ * Four contexts run here: phone (refused), phone that continues anyway (allowed), tablet
+ * (allowed — the deliberate carve-out), desktop (allowed). A touchscreen LAPTOP is
+ * deliberately absent: Chromium's `hasTouch` REPLACES the emulated pointer rather than
+ * adding to it, so such a context still reports `(any-pointer: coarse)` with no fine
+ * pointer — indistinguishable from a tablet — and asserting on it would only be asserting
+ * on the emulator. That row is covered where it can be covered honestly, against the
+ * media queries themselves, in the unit test.
  *
  * It does not use `withApp`, which boots one desktop page and hands back a fixture; this
  * probe needs several differently-emulated contexts and must tolerate a page that never
@@ -65,7 +71,7 @@ function isPayload(u) {
  * genuine boot failure would burn the full backstop and be reported as "timed out"
  * instead of "the app failed to boot".
  */
-async function visit(contextOpts) {
+async function visit(contextOpts, opts = {}) {
   const b = await chromium.launch();
   const ctx = await b.newContext(contextOpts);
   const p = await ctx.newPage();
@@ -82,6 +88,22 @@ async function visit(contextOpts) {
         document.documentElement.dataset.unsupported === '1' ||
         document.getElementById('fatal')?.hidden === false,
     );
+    // The override, taken the way a player takes it: click the button, ride the reload
+    // it performs, and wait for the SECOND load to reach a terminal state. Everything
+    // reported below is then about the continued page, not the refused one.
+    if (opts.continueAnyway) {
+      await p.click('#unsupported-continue');
+      await p.waitForFunction(
+        () =>
+          window.__ff !== undefined ||
+          document.getElementById('fatal')?.hidden === false ||
+          // Still refused after the reload: a terminal state too, and the failure this
+          // case exists to catch. Without it the probe would time out instead of saying
+          // what went wrong.
+          (document.documentElement.dataset.unsupported === '1' &&
+            location.search.includes('phone=1')),
+      );
+    }
     const dom = await p.evaluate(() => ({
       blocked: document.documentElement.dataset.unsupported === '1',
       booted: window.__ff !== undefined,
@@ -104,6 +126,17 @@ async function visit(contextOpts) {
       fine: matchMedia('(any-pointer: fine)').matches,
       coarse: matchMedia('(any-pointer: coarse)').matches,
       shortSide: Math.min(screen.width, screen.height),
+      // The override's two carriers, read back: the URL parameter that got this load
+      // admitted, and the stored flag that will admit the next one without it.
+      search: location.search,
+      stored: (() => {
+        try {
+          return localStorage.getItem('ff.phoneOverride');
+        } catch {
+          return null;
+        }
+      })(),
+      continueShown: document.getElementById('unsupported-continue') !== null,
     }));
     return { ...dom, errs, payload: reqs.filter(isPayload) };
   } finally {
@@ -117,16 +150,19 @@ const expect = (cond, msg) => {
   console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${msg}`);
 };
 
+/** One phone, used twice: refused, then continuing anyway. Identical inputs both times. */
+const PHONE = {
+  viewport: { width: 390, height: 844 },
+  screen: { width: 390, height: 844 },
+  hasTouch: true,
+  isMobile: true,
+  userAgent:
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+};
+
 try {
   // ── A phone: touch-only, phone-sized. The one case that must be refused.
-  const phone = await visit({
-    viewport: { width: 390, height: 844 },
-    screen: { width: 390, height: 844 },
-    hasTouch: true,
-    isMobile: true,
-    userAgent:
-      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-  });
+  const phone = await visit(PHONE);
   expect(
     !phone.fine && phone.coarse && phone.shortSide <= 430,
     `phone: emulated as a real phone would report (fine=${phone.fine} coarse=${phone.coarse} short=${phone.shortSide})`,
@@ -144,6 +180,33 @@ try {
   // A refusal is a normal outcome, not a crash: the never-settling await in main.ts
   // exists precisely so that stopping the module raises nothing.
   expect(phone.errs.length === 0, `phone: no page errors (${phone.errs.join('; ')})`);
+  expect(phone.continueShown, 'phone: the refusal offers a way to continue anyway');
+
+  // ── The same phone, taking the override. The refusal is no longer absolute: the touch
+  // scheme is being built, and this is what makes it testable on real hardware. Asserted
+  // as a full boot, because a button that leaves the player on the notice — or on a
+  // half-started page — would be worse than no button.
+  const continued = await visit(PHONE, { continueAnyway: true });
+  expect(
+    continued.coarse && continued.shortSide <= 430,
+    `continue: still emulated as a phone (coarse=${continued.coarse} short=${continued.shortSide})`,
+  );
+  expect(!continued.blocked, 'continue: the document is no longer marked unsupported');
+  expect(!continued.noticeShown, 'continue: the refusal notice is gone');
+  expect(
+    continued.booted && !continued.fatal,
+    `continue: the game booted on a phone (fatal: ${continued.fatalMsg})`,
+  );
+  expect(continued.stageVisible, 'continue: the stage is visible');
+  expect(
+    continued.search.includes('phone=1'),
+    `continue: the reload carries the override in the URL (${continued.search})`,
+  );
+  expect(
+    continued.stored === '1',
+    `continue: the choice is remembered for the next visit (${continued.stored})`,
+  );
+  expect(continued.errs.length === 0, `continue: no page errors (${continued.errs.join('; ')})`);
 
   // ── A tablet: touch-only exactly like the phone, but big enough. This is the
   // deliberate carve-out, so it is asserted as ALLOWED — if the size signal were ever
