@@ -1,11 +1,16 @@
 /**
- * The constant tables: which key moves which fish, the minigame's key map, and the two
- * small constants the room scripts read.
+ * The constant tables: which key moves which fish, the minigame's key map, which panel
+ * region each touch button sends, and the two small constants the room scripts read.
  *
  * Pure data — no state, no side effects, nothing to initialise. They live here because
  * they were carrying edges out of `main.ts`'s core purely by being declared there:
  * the keyboard, the pointer and the room loader all reach for them, and a constant
  * table is the cheapest possible thing to stop reaching into `main.ts` for.
+ *
+ * `TOUCH_REGIONS` arrived for the same reason one step removed: it was declared in
+ * `touchButtons.ts`, which reaches the DOM through `loadingUi.ts`, so the unit test that
+ * checks the markup against it could not import it without a document. Pure data that
+ * only a DOM module happens to use is exactly what this file is for.
  */
 import { Dir } from '../core/dir.js';
 import type { RoomScript } from '../core/script.js';
@@ -50,3 +55,22 @@ export const ARROWS: Record<string, number> = {
   ArrowRight: Dir.right,
   ArrowDown: Dir.down,
 };
+
+/**
+ * Which panel region each in-room touch button sends (`src/app/touchButtons.ts`), by the
+ * name of its verb. The regions are Uovl's, dispatched through `main.ts`'s `panelAction`
+ * exactly as a mouse click on the faithful panel is.
+ *
+ * The buttons themselves are driven by the `data-region` attributes in `index.html`, not
+ * by this table — reading the DOM is what lets the markup own the order and the labels.
+ * The table exists so that the pairing can be CHECKED: `test/touchButtons.test.ts`
+ * asserts the markup against it, which is the only thing standing between a transposed
+ * digit and a Save button that quietly loads. Delete one and the other is decoration.
+ */
+export const TOUCH_REGIONS = {
+  map: 14,
+  save: 12,
+  load: 13,
+  options: 16,
+  swap: 11,
+} as const;

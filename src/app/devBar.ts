@@ -21,10 +21,12 @@ import { isFitMode } from './layout.js';
 import { devSolveRoom } from './cheats.js';
 import { setSolveSpeed, solveStatus } from './solveMode.js';
 import { solutionFor } from '../rooms/index.js';
-import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn, solveSpeedSelect } from './dom.js';
+import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn, solveSpeedSelect, touchSelect } from './dom.js';
 import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
 import { settings } from './playerSettings.js';
+import { refreshTouchMode } from './touchButtons.js';
+import { readTouchOverride, writeTouchOverride } from './touchMode.js';
 import { saveSettings } from '../core/settings.js';
 import {
   graphics,
@@ -103,6 +105,21 @@ export function initDevBar(h: DevBarHost): void {
     el.addEventListener('change', () => {
       const v = el.value;
       setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
+    });
+  }
+  // The touch-UI override. Dev chrome, not a player setting — see touchMode.ts for why
+  // "which controls do you want" is a question the device already answers. It takes
+  // effect immediately rather than on reload: the bar's visibility is derived per frame,
+  // so re-reading the mode and relaying out is the whole of it.
+  if (touchSelect) {
+    const el = touchSelect;
+    el.value = readTouchOverride(window);
+    el.addEventListener('change', () => {
+      const v = el.value;
+      writeTouchOverride(window, v === 'on' || v === 'off' ? v : 'auto');
+      refreshTouchMode();
+      relayout();
+      wake();
     });
   }
   if (idleDirtyToggle) {

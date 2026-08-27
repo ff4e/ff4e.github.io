@@ -73,6 +73,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `boot.ts` | 2.5 k | The boot sequence in load order — fonts, panel and map graphics, sound packages, room 7, first frame. |
 | `deviceGate.ts` | 1.4 k | What kind of device this is: refusing to run on a phone, and the player's "continue anyway" override. Runs before every side effect. |
 | `orientation.ts` | 1.1 k | Which way up a phone has to be held for what is on screen. Pure numbers; nothing here touches the DOM. |
+| `touchMode.ts` | 0.9 k | Whether the game is being played by touch, and the dev override that lets a desktop pretend it is. |
 | `dom.ts` | 1.3 k | The element handles and their 2D contexts. |
 | `helpDom.ts` | 2.4 k | The control-help pages (`Help.pas`) as a document: builds `src/data/helpText.ts` into DOM over #screen and scales it to the stage box. |
 | `gameState.ts` | 2.6 k | The live room and how it is currently being played. Live bindings plus setters, because of the 1 237 references only 74 are writes. |
@@ -93,11 +94,12 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `roomLoad.ts` | 4.2 k | Fetching a room, arming its voices, starting its music — and the order that keeps audio behind art. Owns the two post-art entry holds and their composition, `roomEntryHeld()`. |
 | `roomPreload.ts` | 2.4 k | What a room's PLAY can demand beyond its art and sound — KUFRIK's briefcase cutscene, the leg story page — fetched on entering it, and held for. Plus the unheld `niceToHave` warm of ZAVER, which is the rule's one deliberate exception. |
 | `roomLaunch.ts` | 4.0 k | The room-entry parchment and the launch it belongs to. |
-| `keyTables.ts` | 0.5 k | Which key moves which fish, the minigame's key map, and two constants the room scripts read. |
+| `keyTables.ts` | 0.6 k | Which key moves which fish, the minigame's key map, which panel region each touch button sends, and two constants the room scripts read. |
 | **Screens** | | |
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. |
+| `touchButtons.ts` | 1.3 k | The in-room touch bar: five buttons, every one dispatched through the panel's own `panelAction` table. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |

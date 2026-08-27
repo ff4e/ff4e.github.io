@@ -368,6 +368,61 @@
          scrolls, and centres only while there is room to (`safe`). Scoped to the notice:
          the loading and fatal overlays are short and are not worth the risk. */
       #unsupported { overflow-y: auto; justify-content: safe center; }
+      /* ── The touch controls ───────────────────────────────────────────────
+         A bar of five thumb-sized buttons, down the right in landscape and along
+         the bottom in portrait, shown only in touch mode and only in a room.
+
+         It RESERVES its space rather than floating over the game, and it does so
+         with a MARGIN on .stage rather than padding — `relayout()` measures the
+         stage with `clientWidth`, which includes padding and excludes margin, so
+         padding would have shrunk the bar's neighbour on screen without telling
+         the layout about it, and the room would have been scaled to a box wider
+         than it had.
+
+         Both attributes come from src/app/touchButtons.ts: `data-touch` is the
+         mode (fixed for the session), `data-touchbar` is the bar actually being
+         up (a room, not the map). Which EDGE it sits on is pure CSS: a media
+         query already knows the orientation, so nothing in JS has to. */
+      #touchbar {
+        position: fixed;
+        z-index: 120;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        background: #10161acc;
+        backdrop-filter: blur(2px);
+      }
+      #touchbar[hidden] { display: none; }
+      .tbtn {
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        gap: 3px;
+        flex: 0 1 auto;
+        min-width: 56px; min-height: 52px;
+        padding: 6px 4px;
+        color: #bdd; background: #18262e; border: 1px solid #35555f; border-radius: 10px;
+        font: 600 10px/1 system-ui, sans-serif; letter-spacing: 0.3px;
+        /* A tap must not select the label, show a magnifier, or bounce the page. */
+        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none; user-select: none;
+        touch-action: manipulation;
+      }
+      .tbtn svg {
+        width: 24px; height: 24px;
+        fill: none; stroke: currentColor; stroke-width: 1.8;
+        stroke-linecap: round; stroke-linejoin: round;
+      }
+      /* No :hover rule: on a touch screen it sticks after the tap, leaving the last
+         button lit as if it were still held. Pressed state only. */
+      .tbtn:active { background: #24414c; border-color: #6cc; }
+      @media (orientation: landscape) {
+        #touchbar { top: 0; right: 0; bottom: 0; width: 72px; flex-direction: column; }
+        html[data-touchbar] .stage { margin-right: 72px; }
+      }
+      @media (orientation: portrait) {
+        #touchbar { left: 0; right: 0; bottom: 0; height: 66px; flex-direction: row; }
+        html[data-touchbar] .stage { margin-bottom: 66px; }
+      }
       /* ── "Turn your phone" ────────────────────────────────────────────────
          Under the loading and fatal overlays (z 200), because both of those are
          about whether there is a game at all, which outranks how it is being
@@ -678,6 +733,11 @@
         <option value="enhanced">Enhanced (FFNG)</option>
         <option value="ai">AI-upscaled</option>
       </select></label>
+      <label title="Touch controls (the in-room button bar, and the rest of the touch UI). Auto = on for any touch-capable device, off for a mouse. Force it on to look at the touch UI from a desktop browser without device emulation.">Touch <select id="touchmode">
+        <option value="auto">Auto (by device)</option>
+        <option value="on">On</option>
+        <option value="off">Off</option>
+      </select></label>
       <label title="Repaint an idle room only when it changes (~12.5fps) instead of 60fps"><input type="checkbox" id="idledirty" checked> Idle-FPS saver</label>
       <button id="solveroom" type="button" title="Play the room from its recorded solution, live: fish speak, moves recorded. Stops and says so if anything goes wrong.">Solve room</button>
       <select id="solvespeed" title="How fast a solution replay runs. It shortens the logic tick — every tick still happens, in order — so the run is the same, only compressed. 1x is the pace a player would see.">
@@ -702,6 +762,36 @@
           <button id="feedback-open" type="button">Send feedback</button>
         </div>
       </div>
+    </div>
+    <!-- The touch controls: the panel's whole-room verbs as thumb-sized buttons, shown
+         only in touch mode and only inside a room (src/app/touchButtons.ts). Each
+         `data-region` is a Uovl panel region and is dispatched through the SAME
+         `panelAction` table the mouse uses — see that file for why nothing here calls
+         saveGame()/showMap() directly. No direction buttons (touch swipes instead), no
+         Undo (it does not exist yet), no Restart (one mis-tap from losing an attempt).
+         The icons are inline SVG rather than fetched: this bar exists on connections that
+         have just been asked for 600 MB of artwork. -->
+    <div id="touchbar" hidden>
+      <button class="tbtn" type="button" data-region="14" aria-label="Back to the map">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/></svg>
+        <span>Map</span>
+      </button>
+      <button class="tbtn" type="button" data-region="12" aria-label="Save the game">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15v4h16v-4"/><path d="M12 4v10"/><path d="M7 9l5 5 5-5"/></svg>
+        <span>Save</span>
+      </button>
+      <button class="tbtn" type="button" data-region="13" aria-label="Load the saved game">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 15v4h16v-4"/><path d="M12 14V4"/><path d="M7 9l5-5 5 5"/></svg>
+        <span>Load</span>
+      </button>
+      <button class="tbtn" type="button" data-region="16" aria-label="Options">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/><circle cx="8" cy="7" r="2.2"/><circle cx="15" cy="12" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg>
+        <span>Options</span>
+      </button>
+      <button class="tbtn" type="button" data-region="11" aria-label="Swap the active fish">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M16 5l4 4-4 4"/><path d="M20 15H4M8 11l-4 4 4 4"/></svg>
+        <span>Swap</span>
+      </button>
     </div>
     <div id="info"></div>
     <dialog id="feedback" aria-labelledby="feedback-title">
