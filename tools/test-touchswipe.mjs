@@ -1,5 +1,5 @@
 /**
- * UI test: swipe to move.
+ * UI test: the touch gestures on the play area — swipe to move, tap to swap.
  *
  * A probe rather than a unit test because the thing under test is a real pointer stream
  * and the browser's own behaviour around it: which compatibility mouse events a moved
@@ -11,11 +11,11 @@
  * despite the shared `?touch=on` setup: that probe runs on a plain desktop context on
  * purpose, so as not to be a test of Chromium's touch emulation as well as of the bar.
  *
- * What it pins is the three sentences of the requirement — one square per swipe,
- * continuous movement while the finger stays down, and nothing at all on a desktop —
- * plus the one thing the implementation had to add for the platform: a touch that MOVES
- * still fires a compatibility click, and without suppressing it the fish would swim to
- * the finger the moment it let go.
+ * What it pins is the requirement — one square per swipe, continuous movement while the
+ * finger stays down, a tap swapping the fish, and nothing at all on a desktop — plus the
+ * two things the platform forced: the gesture has to work on the black margin as well as
+ * on the room, and the compatibility click a touch leaves behind has to be suppressed or
+ * the fish swims off to wherever the finger let go.
  */
 import { chromium } from 'playwright';
 import { exitProbe, tickSleep, WAIT_BACKSTOP } from './ui-lib.mjs';
@@ -90,13 +90,15 @@ async function open(query, touch) {
  * tap. `pointerType: 'touch'` is the part that matters — it is what the suppression of
  * the compatibility click keys off.
  */
-const gesture = (p, dx, dy, compat = true) =>
+const gesture = (p, dx, dy, { compat = true, from = '#screen' } = {}) =>
   p.evaluate(
-    ({ dx, dy, compat }) => {
-      const el = document.getElementById('screen');
+    ({ dx, dy, compat, from }) => {
+      const el = document.querySelector(from);
       const r = el.getBoundingClientRect();
-      const x0 = r.left + r.width / 2;
-      const y0 = r.top + r.height / 2;
+      // The margin is sampled at its top-left corner plus a few px, because the middle of
+      // `body` is the room. `#screen` is sampled at its centre.
+      const x0 = from === 'body' ? r.left + 6 : r.left + r.width / 2;
+      const y0 = from === 'body' ? r.top + 6 : r.top + r.height / 2;
       const send = (type, x, y) =>
         el.dispatchEvent(
           new PointerEvent(type, {
@@ -122,7 +124,7 @@ const gesture = (p, dx, dy, compat = true) =>
           );
       };
     },
-    { dx, dy, compat },
+    { dx, dy, compat, from },
   );
 
 const release = (p) => p.evaluate(() => window.__ffSwipeEnd());
@@ -212,22 +214,41 @@ try {
     'and the click behind the swipe did not start a swim',
   );
 
-  // ── A tap is not a swipe: under the threshold nothing is sent, and the room's own
-  // mouse handling is left exactly as it was.
+  // ── The black margin swipes too. A phone draws the room into a fraction of the glass,
+  // and requiring the gesture to start on the canvas left most of the screen inert — the
+  // first thing that felt wrong on the device. Started on `body`, which is what a finger
+  // on the letterboxing actually hits.
   await p.evaluate(() => window.__ff.restart());
   await rest(p);
   await arrows(p);
+  from = await cell(p);
+  await gesture(p, 60, 0, { from: 'body' });
+  await release(p);
+  await rest(p);
+  to = await cell(p);
+  expect(
+    to.x === from.x + 1 && to.y === from.y,
+    `a swipe on the black margin moves the fish too (${from.x},${from.y} -> ${to.x},${to.y})`,
+  );
+
+  // ── A tap is not a swipe: under the threshold no arrow is sent, and the tap SWAPS the
+  // fish. Martin's call after playing it — on a phone the mouse's click-to-swim reads as
+  // the game wandering off on its own, while the other fish is what a thumb wants.
+  await arrows(p);
+  const wasActive = await p.evaluate(() => window.__ff.state().active);
   await gesture(p, 8, 0);
   await release(p);
   await rest(p);
   expect((await arrows(p)).length === 0, 'a short drag is a tap: no arrow is sent');
-  // ...and its click is NOT swallowed, so the room's own mouse handling is exactly as it
-  // was. Tap-to-swim is pre-existing behaviour, deliberately neither extended nor removed
-  // here (Martin: tap-to-select is revisited after swipe has been tried on hardware), so
-  // what this pins is that the swipe layer left it alone.
   expect(
-    (await p.evaluate(() => window.__ff.state().swimming)) === true,
-    'and its click still reaches the room underneath',
+    (await p.evaluate(() => window.__ff.state().active)) !== wasActive,
+    `and the tap swaps the active fish (was ${wasActive})`,
+  );
+  // The other half of the same decision: the compatibility click a tap leaves behind is
+  // suppressed, so click-to-swim is off on touch. It stays exactly as it is for a mouse.
+  expect(
+    (await p.evaluate(() => window.__ff.state().swimming)) === false,
+    'and no click-to-swim is started behind it',
   );
 
   // ── A desktop is untouched: the same gesture on a page without the override does
@@ -235,7 +256,7 @@ try {
   const desktop = await open('', false);
   await rest(desktop);
   await arrows(desktop);
-  await gesture(desktop, 60, 0, false);
+  await gesture(desktop, 60, 0, { compat: false });
   await release(desktop);
   await rest(desktop);
   const onDesktop = await arrows(desktop);

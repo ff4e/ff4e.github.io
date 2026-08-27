@@ -1,16 +1,16 @@
 /**
- * Swipe to move: a finger drag on the room is a held arrow key.
+ * Touch gestures on the play area: a drag moves a fish, a tap swaps them.
  *
  * ── The one decision in this file ────────────────────────────────────────────
- * A swipe is delivered as a synthetic `keydown`/`keyup` pair for the matching arrow,
- * dispatched on `window` exactly where a real one would arrive. It is NOT a second entry
- * point into `movement.ts`.
+ * A gesture is delivered as a synthetic `keydown`/`keyup` pair — the matching arrow for a
+ * swipe, `Space` for a tap — dispatched on `window` exactly where a real one would arrive.
+ * It is NOT a second entry point into `movement.ts`.
  *
- * The requirement is literally "behave like a held arrow key" — one square per swipe,
- * continuous movement while the finger stays down — and `movement.ts` already implements
- * every part of that, keyed by a keyboard `code`. What a separate entry point would have
- * had to reproduce is not the movement; it is everything the keyboard router does around
- * it, and that list is long and load-bearing:
+ * The requirement is literally "behave like a held arrow key": one square per swipe,
+ * continuous movement while the finger stays down. `movement.ts` already implements every
+ * part of that, keyed by a keyboard `code`. What a separate entry point would have had to
+ * reproduce is not the movement; it is everything the keyboard router does around it, and
+ * that list is long and load-bearing:
  *
  *   - `hracNespi()` on the way in (URoom.pas:26787), which the repeat path deliberately
  *     does NOT call — see the comment on `dispatchHeldMove`. Getting that pair wrong in a
@@ -25,8 +25,9 @@
  *   - The `blur` / `visibilitychange` clean-up, and every future fix to any of the above.
  *
  * `sys` = true falls out of using the ARROW keys specifically: arrows move whichever fish
- * is ACTIVE at dispatch (kdo:=sys), which is what a swipe should do — the touch bar has a
- * Swap button, and the fish-specific keys (WSAD / IKJL) have no gesture.
+ * is ACTIVE at dispatch (kdo:=sys), which is what a swipe should do. The tap uses `Space`
+ * for the same reason — it is already the swap key (akce_switch), including its rule that
+ * a dead partner cannot be swapped to.
  *
  * The cost is one line of indirection: `movement.ts` will report `heldKey === 'ArrowUp'`
  * for a swipe. That is not a lie — it is the same command — and it means the debug
@@ -41,15 +42,36 @@
  * second input while one is held — so it is deliberately not attempted before the plain
  * version has been tried on real hardware.
  *
- * ── What it does not touch ───────────────────────────────────────────────────
- * Tap-to-swim. It already works on a touch device (the browser's emulated click reaches
- * the canvas's mouse handler) and this PR neither extends nor removes it; Martin's
- * decision is that tap-to-select / tap-to-swim is revisited after swipe has been tried.
- * What IS suppressed is the emulated click at the END of a swipe — a touch that moves
- * still produces one, and without this the fish would swim to wherever the finger came to
- * rest the moment it let go.
+ * Under the threshold it is a TAP, and a tap swaps the active fish. That is Martin's call
+ * after playing it: on a phone the mouse's click-to-swim reads as the game wandering off
+ * on its own, while the one thing a thumb wants constantly is the other fish.
+ *
+ * ── Why the whole play area, and how the chrome is kept out ──────────────────
+ * The listeners are on `window`, not on `#screen`. A phone draws the room into a fraction
+ * of the glass and the rest is black margin; requiring the gesture to start on the canvas
+ * meant most of the screen did nothing, which is the first thing that felt wrong on the
+ * device.
+ *
+ * `onSurface` is therefore an ALLOW-list, not a deny-list: a gesture counts if it starts
+ * inside `.stage` (the room, the letterboxing, the subtitle overlay) or on the page
+ * background itself. Everything else is excluded by construction rather than by being
+ * remembered — the touch bar, the dev bar, the dialogs and every full-screen overlay are
+ * fixed-position SIBLINGS of `.stage`, so they are not inside it and are not the body.
+ * The one thing that is inside and must not count is the faithful panel column, which has
+ * its own buttons; it is named.
+ *
+ * ── Click-to-swim, off on touch ──────────────────────────────────────────────
+ * The browser's compatibility `mousedown` after a touch reaches the room's mouse handler,
+ * which reads it as click-to-swim. That is right for a mouse and wrong for a finger — the
+ * fish walks off towards wherever you happened to tap — so on touch it is suppressed for
+ * every gesture, swipe and tap alike, and the tap does the swap instead. Suppressed twice
+ * over on purpose: `preventDefault()` on `pointerdown` is what the spec says stops the
+ * compatibility events, and the capture-phase listener below is the belt for browsers
+ * that fire them anyway. A MOUSE in touch mode is left alone (its `mousedown` lands at
+ * the start of a drag, where there is nothing yet to suppress) so the dev override still
+ * shows the desktop behaviour it is overriding.
  */
-import { canvas } from './dom.js';
+import { cutscene } from './gameState.js';
 import { touchUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 import { Dir } from '../core/dir.js';
@@ -72,25 +94,22 @@ const ARROW_FOR: Record<number, string> = {
   [Dir.right]: 'ArrowRight',
 };
 
+/** Swap the active fish (akce_switch) — what a tap is delivered as. */
+const TAP_KEY = 'Space';
+
 /** The pointer being followed, or null between gestures. One at a time: a second finger
  *  is ignored rather than fighting the first, which is also what the held machine does. */
 let tracking: number | null = null;
 let startX = 0;
 let startY = 0;
-/** The arrow this gesture became, once it passed the threshold. */
+/** The arrow this gesture became, once it passed the threshold. Null while it is a tap. */
 let arrow: string | null = null;
-/**
- * Swallow the browser's emulated mouse events after a swipe.
- *
- * A touch that MOVES still produces the compatibility `mousedown`/`click` at the point it
- * ended, after `pointerup` — so without this, letting go of a swipe would immediately
- * click-to-swim the fish towards the finger. Set on release and consumed by the capturing
- * listener below, so a plain TAP is untouched: its mousedown falls through to the room's
- * own handler exactly as it does today.
- */
+/** Whether the pointer being followed is a finger, i.e. whether it leaves mouse events. */
+let touchPointer = false;
+/** See the note on click-to-swim above: one emulated `mousedown` to eat. */
 let swallowMouse = false;
 
-/** Send the arrow the way the keyboard would, so every guard downstream sees a keypress. */
+/** Send a key the way the keyboard would, so every guard downstream sees a keypress. */
 function sendKey(type: 'keydown' | 'keyup', code: string): void {
   // `key` as well as `code`: the typed-cheat buffer reads `e.key`, and a real arrow
   // carries the same string in both. Cancelable so the router's preventDefault is a no-op
@@ -98,20 +117,33 @@ function sendKey(type: 'keydown' | 'keyup', code: string): void {
   window.dispatchEvent(new KeyboardEvent(type, { code, key: code, bubbles: true, cancelable: true }));
 }
 
-/** Is a drag on the room a movement command right now? */
+/** Is a gesture on the play area a command right now? */
 function armed(): boolean {
-  return touchUi() && ui.screen === 'room';
+  // Not during the briefcase demo or the help pages: both are still `screen === 'room'`
+  // and both are dismissed by a TAP today. Leaving them out here leaves that untouched,
+  // rather than swallowing the tap that skips them.
+  return touchUi() && ui.screen === 'room' && !ui.helpOpen && !cutscene;
 }
 
-/** End the gesture, releasing the arrow if one was sent. */
-function endGesture(mouse: boolean): void {
-  if (arrow) {
-    sendKey('keyup', arrow);
-    // Only a gesture that actually moved a fish suppresses the click behind it, and only
-    // a finger's: a real mouse fires its `mousedown` at the START of the drag, where there
-    // is nothing yet to suppress, so arming the flag for one would only eat the NEXT press.
-    if (!mouse) swallowMouse = true;
+/** Did this gesture start on the play area rather than on a control? See the file note. */
+function onSurface(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest('#panelcol')) return false;
+  return (
+    target === document.body ||
+    target === document.documentElement ||
+    target.closest('.stage') !== null
+  );
+}
+
+/** End the gesture: release a held arrow, or deliver the tap it turned out to be. */
+function endGesture(): void {
+  if (arrow) sendKey('keyup', arrow);
+  else {
+    sendKey('keydown', TAP_KEY);
+    sendKey('keyup', TAP_KEY);
   }
+  if (touchPointer) swallowMouse = true;
   tracking = null;
   arrow = null;
 }
@@ -122,26 +154,23 @@ function endGesture(mouse: boolean): void {
  * second place that decides what touch mode is.
  */
 export function initTouchSwipe(): void {
-  canvas.addEventListener('pointerdown', (e) => {
-    if (!armed() || tracking !== null) return;
+  window.addEventListener('pointerdown', (e) => {
+    if (!armed() || tracking !== null || !onSurface(e.target)) return;
     // A gesture that ended in `pointercancel` never got its emulated mousedown, so the
-    // flag would otherwise be waiting to eat an unrelated press. The compatibility events
-    // of the PREVIOUS gesture have all arrived by now, so this is the safe place to drop it.
+    // flag would otherwise be waiting to eat an unrelated press. Every compatibility event
+    // of the PREVIOUS gesture has arrived by now, so this is the safe place to drop it.
     swallowMouse = false;
     tracking = e.pointerId;
+    touchPointer = e.pointerType !== 'mouse';
     startX = e.clientX;
     startY = e.clientY;
     arrow = null;
-    // Keep receiving moves after the finger leaves the canvas — a swipe near the edge
-    // otherwise stops being reported halfway through and the fish never lets go.
-    try {
-      canvas.setPointerCapture(e.pointerId);
-    } catch {
-      // A synthetic pointer (a probe) has nothing to capture; the events still arrive.
-    }
+    // The spec's own way to stop the compatibility mouse events, and it has to be here:
+    // by `pointerup` the browser has already decided. Only for a finger — see the file note.
+    if (touchPointer) e.preventDefault();
   });
 
-  canvas.addEventListener('pointermove', (e) => {
+  window.addEventListener('pointermove', (e) => {
     if (e.pointerId !== tracking || arrow) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
@@ -155,15 +184,15 @@ export function initTouchSwipe(): void {
   });
 
   for (const type of ['pointerup', 'pointercancel'] as const) {
-    canvas.addEventListener(type, (e) => {
+    window.addEventListener(type, (e) => {
       if (e.pointerId !== tracking) return;
-      endGesture(e.pointerType === 'mouse');
+      endGesture();
     });
   }
 
-  // Capturing, so it runs before the room's own `mousedown` handler and can take the
-  // event away from it. See `swallowMouse`.
-  canvas.addEventListener(
+  // Capturing, and on `window`, so it runs before the room's own `mousedown` handler and
+  // can take the event away from it. See the note on click-to-swim.
+  window.addEventListener(
     'mousedown',
     (e) => {
       if (!swallowMouse) return;
