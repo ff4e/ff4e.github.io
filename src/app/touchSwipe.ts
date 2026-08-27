@@ -35,12 +35,22 @@
  * about it.
  *
  * ── What a gesture is ────────────────────────────────────────────────────────
- * Down, then SWIPE_PX in some direction: the dominant axis of the displacement from the
- * start point picks one of four. The direction is then LOCKED until the finger lifts,
- * exactly as a held key is: to go up and then right you lift and swipe again. Steering
- * mid-drag would be a nicer gesture and a different machine — `beginHeldMove` refuses a
- * second input while one is held — so it is deliberately not attempted before the plain
- * version has been tried on real hardware.
+ * Down, then SWIPE_PX in some direction: the dominant axis of the displacement picks one
+ * of four. Move another SWIPE_PX a different way without lifting and the fish TURNS —
+ * the finger steers, rather than the gesture being locked in until it lifts.
+ *
+ * Two details make that work, and neither is obvious:
+ *
+ *   - **The anchor trails the finger.** Every time the threshold is crossed the origin is
+ *     moved to where the finger is now, so it is never more than SWIPE_PX behind. Measured
+ *     from the point the gesture STARTED, a long drag's committed axis would dominate for
+ *     ever: after 200 px right, 30 px up is still a rightward vector. Re-anchoring is what
+ *     turns the reading from "where has this gesture been" into "where is it going now".
+ *   - **The turn is a release and a press**, in that order, because `beginHeldMove` refuses
+ *     a second input while one is held (`heldState` 1 or 2 — the original's `KeyRoom`).
+ *     Sending the keyup first is exactly what a player changing arrow keys does, so the
+ *     machine needs no new state and the most recent input wins, which is the rule the
+ *     rest of the input layer already follows.
  *
  * Under the threshold it is a TAP, and a tap swaps the active fish. That is Martin's call
  * after playing it: on a phone the mouse's click-to-swim reads as the game wandering off
@@ -100,8 +110,9 @@ const TAP_KEY = 'Space';
 /** The pointer being followed, or null between gestures. One at a time: a second finger
  *  is ignored rather than fighting the first, which is also what the held machine does. */
 let tracking: number | null = null;
-let startX = 0;
-let startY = 0;
+/** Where the current direction was last committed — see "the anchor trails the finger". */
+let anchorX = 0;
+let anchorY = 0;
 /** The arrow this gesture became, once it passed the threshold. Null while it is a tap. */
 let arrow: string | null = null;
 /** Whether the pointer being followed is a finger, i.e. whether it leaves mouse events. */
@@ -162,8 +173,8 @@ export function initTouchSwipe(): void {
     swallowMouse = false;
     tracking = e.pointerId;
     touchPointer = e.pointerType !== 'mouse';
-    startX = e.clientX;
-    startY = e.clientY;
+    anchorX = e.clientX;
+    anchorY = e.clientY;
     arrow = null;
     // The spec's own way to stop the compatibility mouse events, and it has to be here:
     // by `pointerup` the browser has already decided. Only for a finger — see the file note.
@@ -171,16 +182,25 @@ export function initTouchSwipe(): void {
   });
 
   window.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== tracking || arrow) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
+    if (e.pointerId !== tracking) return;
+    const dx = e.clientX - anchorX;
+    const dy = e.clientY - anchorY;
     if (Math.abs(dx) < SWIPE_PX && Math.abs(dy) < SWIPE_PX) return;
     // The dominant axis wins, so a diagonal drag resolves to the way it leans rather than
     // to whichever axis happened to cross the threshold first.
     const dir =
       Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? Dir.right : Dir.left) : dy > 0 ? Dir.down : Dir.up;
-    arrow = ARROW_FOR[dir]!;
-    sendKey('keydown', arrow);
+    // Unconditionally, not only on a turn: this is what keeps the anchor within SWIPE_PX
+    // of the finger, and so what makes the next turn readable at all.
+    anchorX = e.clientX;
+    anchorY = e.clientY;
+    const next = ARROW_FOR[dir]!;
+    if (next === arrow) return;
+    // Release before pressing. `beginHeldMove` ignores a second input while one is held,
+    // so a turn has to look like a player letting go of one arrow and taking the next.
+    if (arrow) sendKey('keyup', arrow);
+    arrow = next;
+    sendKey('keydown', next);
   });
 
   for (const type of ['pointerup', 'pointercancel'] as const) {

@@ -112,6 +112,11 @@ const gesture = (p, dx, dy, { compat = true, from = '#screen' } = {}) =>
         );
       send('pointerdown', x0, y0);
       for (let i = 1; i <= 4; i++) send('pointermove', x0 + (dx * i) / 4, y0 + (dy * i) / 4);
+      // Keep dragging from the same gesture, in absolute offsets from where it began —
+      // which is how a turn has to be driven: the finger never lifts.
+      window.__ffSwipeTo = (x, y) => {
+        for (let i = 1; i <= 4; i++) send('pointermove', x0 + (x * i) / 4, y0 + (y * i) / 4);
+      };
       window.__ffSwipeEnd = () => {
         send('pointerup', x0 + dx, y0 + dy);
         // The compatibility mouse event a real finger leaves behind, fired explicitly
@@ -128,6 +133,8 @@ const gesture = (p, dx, dy, { compat = true, from = '#screen' } = {}) =>
   );
 
 const release = (p) => p.evaluate(() => window.__ffSwipeEnd());
+/** Keep the same gesture going, to a new offset from where it started. */
+const steer = (p, x, y) => p.evaluate(({ x, y }) => window.__ffSwipeTo(x, y), { x, y });
 /** The arrows emitted since the last check, and reset for the next one. */
 const arrows = (p) =>
   p.evaluate(() => {
@@ -212,6 +219,40 @@ try {
   expect(
     (await p.evaluate(() => window.__ff.state().swimming)) === false,
     'and the click behind the swipe did not start a swim',
+  );
+
+  // ── Steering: the finger turns without lifting, and the fish turns with it. Driven as
+  // a reversal, which needs no knowledge of the room — the way back is the way it just
+  // came. What it proves is the trailing anchor: measured from where the gesture STARTED,
+  // 120 px back is still a net-rightward vector and nothing would turn.
+  await p.evaluate(() => window.__ff.restart());
+  await rest(p);
+  await arrows(p);
+  from = await cell(p);
+  await gesture(p, 60, 0);
+  await p.waitForFunction(
+    ({ x }) => {
+      const s = window.__ff.state();
+      return s && s[s.active].x - x >= 2;
+    },
+    { x: from.x },
+  );
+  const peak = await cell(p);
+  await steer(p, -60, 0);
+  await p.waitForFunction(
+    ({ x }) => {
+      const s = window.__ff.state();
+      return s && s[s.active].x < x;
+    },
+    { x: peak.x },
+  );
+  expect(true, `turning the finger round turns the fish round (out to ${peak.x}, then back)`);
+  await release(p);
+  await rest(p);
+  const turned = await arrows(p);
+  expect(
+    turned.join(',') === 'ArrowRight,ArrowLeft',
+    `and it is one press each way, in order (${turned.join(',') || 'nothing'})`,
   );
 
   // ── The black margin swipes too. A phone draws the room into a fraction of the glass,
