@@ -13,6 +13,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  deviceClass,
   isUnsupportedDevice,
   phoneOverrideActive,
   rememberPhoneOverride,
@@ -212,5 +213,40 @@ describe('rememberPhoneOverride', () => {
     // the thing that breaks the button.
     expect(() => rememberPhoneOverride({ localStorage: store({}, 'set') })).not.toThrow();
     expect(() => rememberPhoneOverride({})).not.toThrow();
+  });
+});
+
+/**
+ * The device classes.
+ *
+ * `isUnsupportedDevice` is now `deviceClass(win) === 'phone'`, so the cases above already
+ * pin the phone/not-phone line exhaustively. What is left to pin is the distinction the
+ * gate itself does not care about but the touch UI does: touch-capable-and-big is a
+ * TABLET, while no touch at all is a DESKTOP — the gate admits both and cannot tell them
+ * apart, so nothing above would notice if they were ever conflated.
+ */
+describe('deviceClass', () => {
+  it('separates the two kinds of admitted device', () => {
+    expect(deviceClass(win([COARSE], SCREEN.iPad))).toBe('tablet');
+    expect(deviceClass(win([FINE], SCREEN.desktop))).toBe('desktop');
+    expect(deviceClass(win([COARSE], SCREEN.iPhone15ProMax))).toBe('phone');
+  });
+
+  it('calls a touch device of unknown size a tablet, not a phone', () => {
+    // The fail-open lean, spelled as a class: unknown size must not be refused, and
+    // "tablet" is the class that is admitted.
+    expect(deviceClass(win([COARSE]))).toBe('tablet');
+    expect(deviceClass(win([COARSE], { width: 0, height: 0 }))).toBe('tablet');
+  });
+
+  it('calls a browser that cannot answer a desktop', () => {
+    const thrower: GateWindow = {
+      matchMedia: (() => {
+        throw new Error('no matchMedia');
+      }) as Window['matchMedia'],
+      screen: SCREEN.iPhoneSE,
+    };
+    expect(deviceClass(thrower)).toBe('desktop');
+    expect(deviceClass(win([], SCREEN.iPhoneSE))).toBe('desktop');
   });
 });

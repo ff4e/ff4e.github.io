@@ -71,7 +71,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | **Composition and state** | | |
 | `main.ts` | 19.1 k | The composition root: the leftover state, the boot-time wiring of every module below, and the keyboard and pointer routers. |
 | `boot.ts` | 2.5 k | The boot sequence in load order — fonts, panel and map graphics, sound packages, room 7, first frame. |
-| `deviceGate.ts` | 1.4 k | Refusing to run on a phone, and the player's "continue anyway" override. Runs before every side effect. |
+| `deviceGate.ts` | 1.4 k | What kind of device this is: refusing to run on a phone, and the player's "continue anyway" override. Runs before every side effect. |
+| `orientation.ts` | 1.1 k | Which way up a phone has to be held for what is on screen. Pure numbers; nothing here touches the DOM. |
 | `dom.ts` | 1.3 k | The element handles and their 2D contexts. |
 | `helpDom.ts` | 2.4 k | The control-help pages (`Help.pas`) as a document: builds `src/data/helpText.ts` into DOM over #screen and scales it to the stage box. |
 | `gameState.ts` | 2.6 k | The live room and how it is currently being played. Live bindings plus setters, because of the 1 237 references only 74 are writes. |
@@ -83,6 +84,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `paintClock.ts` | 0.4 k | The paint-rate cap, kept pure so it can be tested against synthetic refresh trains. |
 | `framePacing.ts` | 5.7 k | Whether the next frame must be painted at all, and the perf HUD's counters. |
 | `renderLoop.ts` | 3.7 k | The rAF callback: which screen paints, how many logic steps run, when to sleep. |
+| `rotatePrompt.ts` | 1.2 k | The "turn your phone" overlay, derived once per frame from the screen, the room and the viewport. |
 | `framePainter.ts` | 3.5 k | One room frame, all three art tiers, both backends. |
 | `logicTick.ts` | 3.0 k | One 80 ms game step: script, engine, dialogue, death, screensaver. |
 | **Playing a room** | | |
