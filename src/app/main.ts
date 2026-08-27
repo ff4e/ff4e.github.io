@@ -120,6 +120,7 @@ import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDr
 import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { initTouchButtons } from './touchButtons.js';
+import { initTouchSwipe } from './touchSwipe.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
   applyVolumeSettings,
@@ -970,12 +971,13 @@ initPanel({
   },
 });
 
-//#region Touch controls wiring | anchors: initTouchButtons | Hands `touchButtons.ts` the panel's dispatch table. The in-room touch buttons — which regions they send, when the bar is up — are in that module.
+//#region Touch controls wiring | anchors: initTouchButtons, initTouchSwipe | Hands `touchButtons.ts` the panel's dispatch table, and arms the swipe gestures. What the bar sends, when it is up, and what a swipe IS are in those modules.
 initTouchButtons({
   get panelAction() {
     return panelAction;
   },
 });
+initTouchSwipe();
 
 //#region Map drawing wiring | anchors: initMapDraw | Hands `mapDraw.ts` the four names it needs, all of them the persisted record the map is a view of. The drawing is in that module.
 initMapDraw({

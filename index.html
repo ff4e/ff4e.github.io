@@ -54,6 +54,12 @@
         background: #000;
         border: 1px solid #333;
       }
+      /* In touch mode a drag on the room is a movement command (src/app/touchSwipe.ts),
+         so the browser must not claim it first. Without this the first few pixels of
+         every swipe are eaten deciding whether it is a scroll, and a vertical one ends
+         in `pointercancel` with the fish half-committed. Scoped to touch mode and to the
+         game canvas: the page still scrolls anywhere else, and a mouse is unaffected. */
+      html[data-touch] #screen { touch-action: none; }
       /* The game area fills the remaining viewport; the stage box + panel are
          centered and sized by the layout code (src/app/layout.ts). */
       .stage {

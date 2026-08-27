@@ -55,7 +55,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // the point: the touch buttons dispatch through the SAME table as the mouse rather
   // than calling saveGame()/showMap() themselves, so the alternative to these seven
   // lines was not fewer lines, it was a second copy of what a panel press means.
-  ['src/app/main.ts', 2228],
+  //
+  // Raised 2 228 -> 2 230 for swipe-to-move: an import and a bare `initTouchSwipe()`.
+  // It takes no host at all — a swipe is delivered as a synthetic arrow keydown, so it
+  // reaches the router already in this file rather than needing a name handed out of it.
+  ['src/app/main.ts', 2230],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
