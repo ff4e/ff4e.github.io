@@ -1,6 +1,6 @@
 /**
- * The in-room touch controls: five buttons, down the right in landscape and along the
- * bottom in portrait.
+ * The in-room touch controls: five buttons, down the left in landscape and along the
+ * top in portrait.
  *
  * ── What they are, and what they deliberately are not ────────────────────────
  * Map, Save, Load, Options, Restart — the panel's whole-room verbs, and nothing else. The
