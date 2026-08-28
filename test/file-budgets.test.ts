@@ -60,9 +60,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // two: one import, and a second `init*` call against the SAME host object, which is
   // why the wiring block became a named const rather than a second literal. The touch
   // Options needs exactly the name the buttons already needed — `panelAction` — because
-  // its sliders dispatch through regions 17-19 like everything else. Nothing about the
-  // screen itself is in this file.
-  ['src/app/main.ts', 2233],
+  // its sliders dispatch through regions 17-19 like everything else.
+  //
+  // 2 233 -> 2 235 for the touch gestures, which is an import and a bare
+  // `initTouchSwipe()`. That one takes no host at all: a swipe is delivered as a
+  // synthetic arrow keydown, so it reaches the router that already lives here rather
+  // than needing a name handed out of it. Nothing about either screen is in this file.
+  ['src/app/main.ts', 2235],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

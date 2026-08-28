@@ -54,6 +54,35 @@
         background: #000;
         border: 1px solid #333;
       }
+      /* In touch mode a drag anywhere on the play area is a movement command
+         (src/app/touchSwipe.ts), so the browser must not claim it first. Without
+         this the first few pixels of every swipe are eaten deciding whether it is
+         a scroll, and a vertical one ends in `pointercancel` with the fish half
+         committed. On the BODY rather than the canvas: a phone draws the room
+         into a fraction of the glass, and swiping the black margin has to work
+         too. The page has nothing to scroll anyway — the layout is a fixed-height
+         flex column — so the only exceptions are the things that do: the
+         full-screen overlays and the feedback dialog.
+
+         Selection goes with it. A drag that the browser decides is a text
+         selection leaves the labels highlighted and the fish not moving, which is
+         what Martin hit on the device; `-webkit-touch-callout` is the other half
+         (a long press otherwise raises iOS's callout over the room). Re-enabled
+         for real text fields, which are the one place a touch player still needs
+         a caret. Touch mode only, so a mouse player can still select and copy. */
+      html[data-touch] body {
+        touch-action: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-touch-callout: none;
+      }
+      html[data-touch] .overlay,
+      html[data-touch] dialog { touch-action: pan-y; }
+      html[data-touch] input,
+      html[data-touch] textarea {
+        -webkit-user-select: auto;
+        user-select: auto;
+      }
       /* The game area fills the remaining viewport; the stage box + panel are
          centered and sized by the layout code (src/app/layout.ts). */
       .stage {
