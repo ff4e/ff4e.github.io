@@ -19,6 +19,7 @@ import {
   STAGE_EDGE,
   MAX_CONTENT_W,
   PANEL_NATIVE_W,
+  PANEL_FOOTPRINT_W,
   CAPPED_MAX,
   FIT_FACTORS,
   FIT_MODES,
@@ -184,6 +185,99 @@ describe('stageBoxWidth — the elastic stage box', () => {
     // The graded modes keep a real ceiling — that is where a wider box genuinely stops
     // buying anything.
     expect(stageBoxCeiling('medium')).toBeCloseTo(MAX_CONTENT_W * FIT_FACTORS.medium, 9);
+  });
+});
+
+/**
+ * Touch mode retires the side panel, and the layout stops reserving its footprint.
+ *
+ * Two halves, and the first one is the important one: the mouse layout must be
+ * bit-for-bit what it was, which is why `panel` defaults to true and is asserted to be a
+ * no-op when passed explicitly. The second is the point of the change — 167 native px of
+ * panel + gap go back to the room.
+ */
+describe('the panel footprint — retired in touch mode', () => {
+  const VIEWPORTS = [
+    [1512, 982], // a 16:10 laptop panel, width-bound
+    [2048, 1017], // a wide window, height-bound
+    [852, 393], // a phone in landscape
+    [393, 852], // the same phone in portrait
+    [3440, 1400],
+  ] as const;
+
+  it('is the panel plus the gap it travels with', () => {
+    expect(PANEL_FOOTPRINT_W).toBe(STAGE_GAP + PANEL_NATIVE_W);
+  });
+
+  it('is reserved by default — the mouse layout cannot move', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of VIEWPORTS) {
+        expect(computeStageLayout(w, h, mode, true)).toEqual(computeStageLayout(w, h, mode));
+        expect(computeStageScale(w, h, true)).toBe(computeStageScale(w, h));
+        const s = computeStageScale(w, h);
+        expect(stageBoxWidth(w, h, s, mode, true)).toBe(stageBoxWidth(w, h, s, mode));
+      }
+    }
+  });
+
+  it('drops out of the width the scale has to fit', () => {
+    // Width-bound BOTH ways (w/STAGE_W < h/STAGE_H), so the scale is exactly
+    // availW / footprint and the footprint is the only thing that changed.
+    const w = 1512;
+    const h = 1200;
+    expect(computeStageScale(w, h, true)).toBeCloseTo(w / (STAGE_W + PANEL_FOOTPRINT_W), 9);
+    expect(computeStageScale(w, h, false)).toBeCloseTo(w / STAGE_W, 9);
+  });
+
+  it('leaves a height-bound viewport at the same scale, and widens its box instead', () => {
+    const [w, h] = [2048, 1017] as const;
+    expect(computeStageScale(w, h, false)).toBe(computeStageScale(w, h, true));
+    // The scale declined to use that width, so it lands in the elastic box — up to the
+    // mode's ceiling, past which nothing can use it.
+    const withPanel = computeStageLayout(w, h, 'medium', true);
+    const without = computeStageLayout(w, h, 'medium', false);
+    expect(without.boxW).toBeGreaterThanOrEqual(withPanel.boxW);
+  });
+
+  it('never leaves the room with LESS space than the panel did', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of VIEWPORTS) {
+        const withPanel = computeStageLayout(w, h, mode, true);
+        const without = computeStageLayout(w, h, mode, false);
+        expect(without.scale).toBeGreaterThanOrEqual(withPanel.scale - 1e-9);
+        expect(without.boxW * without.scale).toBeGreaterThanOrEqual(
+          withPanel.boxW * withPanel.scale - 1e-9,
+        );
+      }
+    }
+  });
+
+  it('reports no panel and no gap to draw', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of VIEWPORTS) {
+        const l = computeStageLayout(w, h, mode, false);
+        expect(l.panelW).toBe(0);
+        expect(l.panelH).toBe(0);
+        expect(l.gap).toBe(0);
+      }
+    }
+  });
+
+  it('still keeps the group inside the viewport, with the edge margin reserved', () => {
+    // Same invariant as the panelled case, and the same viewports: above the
+    // MIN_STAGE_SCALE floor, where the maths — not the floor — decides the fit.
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of [
+        [1512, 860],
+        [2048, 1017],
+        [3440, 1400],
+        [2560, 1380],
+      ] as const) {
+        const l = computeStageLayout(w, h, mode, false);
+        const used = l.stageW + l.gap + l.panelW + 2 * STAGE_EDGE * l.scale;
+        expect(used).toBeLessThanOrEqual(w + 1e-6);
+      }
+    }
   });
 });
 

@@ -204,7 +204,18 @@ export function drawPanel(): void {
   // 2048x1017. Hiding it removes the jump at its source rather than damping it, and the
   // page is self-contained anyway: nothing on the panel acts on it. `helpClose` is the
   // way out that this takes away (dom.ts).
-  const visible = (ui.screen === 'room' || asMapOverlay) && !ui.helpOpen;
+  //
+  // Hidden for good in touch mode, which is the last step of the touch series and the
+  // reason the other five came first: the panel is the only way to reach map/save/load/
+  // options/swap and to move a fish, so retiring it before the bar and the swipe layer
+  // existed would have left the game controls-less. Everything it does now has a
+  // thumb-sized counterpart, and its own controls are the ones a thumb cannot work — the
+  // 9px option sliders, the 12px direction arrows. `asMapOverlay` cannot be true here
+  // either: `openMapOptions` hands over to the HTML Options in touch mode and leaves
+  // `ui.mapOverlay === 'none'`, and it is the only writer of `'options'`. It is left in
+  // the expression rather than asserted away, because the touch term already covers it
+  // and a second rule would only be a second thing to keep true.
+  const visible = (ui.screen === 'room' || asMapOverlay) && !ui.helpOpen && !touchUi();
   // Hide the COLUMN, not just the canvas inside it. `display: none` takes an element
   // out of the flex row entirely, and with it the row's gap; hiding only the canvas
   // would leave a zero-width column still claiming that gap, so the map sat half a gap

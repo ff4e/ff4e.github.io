@@ -51,6 +51,31 @@ const barState = (p) =>
     };
   });
 
+/**
+ * The faithful panel column, and what the stage row is spending its width on.
+ *
+ * `#stagebox` and `#panelcol` are the row's only children, so their extremes ARE its
+ * content. Measured as extremes rather than with `scrollWidth`, which is no use here: the
+ * row is centred, so it overflows BOTH ways and only the right-hand half of that shows up
+ * in a scroll width.
+ */
+const rowState = (p) =>
+  p.evaluate(() => {
+    const stage = document.querySelector('.stage');
+    const col = document.getElementById('panelcol');
+    const box = document.getElementById('stagebox');
+    const shown = [...stage.children].filter((el) => getComputedStyle(el).display !== 'none');
+    const rects = shown.map((el) => el.getBoundingClientRect());
+    return {
+      panel: col !== null && getComputedStyle(col).display !== 'none',
+      panelW: col ? Math.round(col.getBoundingClientRect().width) : 0,
+      roomW: box ? Math.round(box.getBoundingClientRect().width) : 0,
+      left: Math.round(Math.min(...rects.map((r) => r.left))),
+      right: Math.round(Math.max(...rects.map((r) => r.right))),
+      viewW: window.innerWidth,
+    };
+  });
+
 async function open(query) {
   const ctx = await browser.newContext({ viewport: { width: 1100, height: 620 } });
   const p = await ctx.newPage();
@@ -86,6 +111,20 @@ const enter = async (p, num) => {
 const settle = (p, want) =>
   p.waitForFunction((w) => document.documentElement.hasAttribute('data-touchbar') === w, want);
 
+/**
+ * Wait for a resize or a mode change to reach the screen.
+ *
+ * `relayout()` only recomputes the stage; the box is re-sized in the room's draw, so a
+ * measurement taken straight after either would be the PREVIOUS frame's. Waits for the
+ * width to stop being what it was rather than for a target, so the caller does not have
+ * to predict the number it is about to measure.
+ */
+const settleBox = (p, was) =>
+  p.waitForFunction(
+    (w) => Math.round(document.getElementById('stagebox').getBoundingClientRect().width) !== w,
+    was,
+  );
+
 const tap = (p, region) => p.click(`#touchbar [data-region="${region}"]`);
 
 /**
@@ -114,6 +153,9 @@ try {
   expect(!d.mode, 'desktop: touch mode is off');
   expect(!d.visible && !d.reserving, 'desktop: no bar in a room, and the stage keeps its width');
   expect(d.marginRight === '0px', `desktop: the stage has no margin reserved (${d.marginRight})`);
+  const dRow = await rowState(desktop);
+  expect(dRow.panel, 'desktop: the faithful control panel is beside the room');
+  expect(dRow.panelW > 0, `desktop: and it is taking its width (${dRow.panelW}px)`);
   // The mouse player's Options is untouched: the corner button still scrolls the panel
   // to the canvas face, and the HTML one stays out of it. This is the guarantee the
   // whole touch series rests on, asserted at the one place the two could collide.
@@ -146,6 +188,52 @@ try {
     inRoom.marginRight === '72px' && inRoom.stageW <= inRoom.viewW - 72,
     `the bar reserves its width from the stage (margin ${inRoom.marginRight}, stage ${inRoom.stageW} of ${inRoom.viewW})`,
   );
+
+  // ── The faithful panel is retired, and the room is given its footprint back. The
+  // whole point of doing this LAST: everything the panel does now has a thumb-sized
+  // counterpart, so hiding it leaves nothing unreachable.
+  const tRow = await rowState(p);
+  expect(!tRow.panel, 'the faithful panel column is gone in touch mode');
+  expect(
+    tRow.panelW === 0,
+    `and it is claiming no width at all — column, not canvas (${tRow.panelW}px)`,
+  );
+
+  // ── The clipping this fixes. A phone-width portrait viewport could not hold the row:
+  // measured 404px of content in a 393px one, with touch mode OFF, and `#stagebox`'s
+  // `overflow: hidden` cut the difference off. Nothing about the touch bar caused it —
+  // the 167 native px of panel + gap did — so retiring the panel is what fixes it.
+  // Resized rather than opened in a context of its own: the viewport is a page property,
+  // and a second context would pay the boot again to assert two numbers.
+  await p.setViewportSize({ width: 393, height: 852 });
+  await settleBox(p, tRow.roomW);
+  const portrait = await rowState(p);
+  expect(
+    portrait.left >= 0 && portrait.right <= portrait.viewW,
+    `portrait phone width: the row fits the viewport (${portrait.left}..${portrait.right} of ${portrait.viewW})`,
+  );
+
+  // ── And the room genuinely gets that width, measured end to end rather than in the
+  // layout maths (test/layout.test.ts has the arithmetic). It takes a WIDTH-bound
+  // viewport to show: where the height is what limits the scale, the panel's 167px were
+  // never what the room was short of. 900x1000 is width-bound (900/800 < 1000/600) and
+  // far enough above MIN_STAGE_SCALE that the floor, not the maths, is not what decides.
+  await p.setViewportSize({ width: 900, height: 1000 });
+  await settleBox(p, portrait.roomW);
+  const noPanel = await rowState(p);
+  await p.selectOption('#touchmode', 'off');
+  await p.waitForFunction(() => !document.documentElement.hasAttribute('data-touch'));
+  await settleBox(p, noPanel.roomW);
+  const withPanel = await rowState(p);
+  expect(
+    noPanel.roomW > withPanel.roomW,
+    `the room gets the panel's width back (${noPanel.roomW} without it, ${withPanel.roomW} with)`,
+  );
+  await p.selectOption('#touchmode', 'on');
+  await p.waitForFunction(() => document.documentElement.hasAttribute('data-touch'));
+  await settleBox(p, withPanel.roomW);
+  await p.setViewportSize({ width: 1100, height: 620 });
+  await settleBox(p, noPanel.roomW);
 
   // ── Options (region 16): in touch mode the corner button opens the plain-HTML
   // Options, NOT the canvas face the mouse gets. Both halves matter: a touch player has
@@ -248,6 +336,8 @@ try {
   const off = await barState(p);
   expect(!off.visible, 'the dev-bar control turns the touch UI off, over a ?touch=on URL');
   expect(off.marginRight === '0px', `and the stage gets its width back (${off.marginRight})`);
+  const offRow = await rowState(p);
+  expect(offRow.panel, 'and the faithful panel comes back with it');
   await p.selectOption('#touchmode', 'on');
   await settle(p, true);
   expect((await barState(p)).visible, 'and back on again');
