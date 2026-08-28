@@ -199,10 +199,15 @@ try {
     `and it is claiming no width at all — column, not canvas (${tRow.panelW}px)`,
   );
 
-  // ── The clipping this fixes. A phone-width portrait viewport could not hold the row:
-  // measured 404px of content in a 393px one, with touch mode OFF, and `#stagebox`'s
-  // `overflow: hidden` cut the difference off. Nothing about the touch bar caused it —
-  // the 167 native px of panel + gap did — so retiring the panel is what fixes it.
+  // ── The clipping this mostly fixes. A phone-width portrait viewport could not hold the
+  // row: measured at 393x852 with touch OFF, rooms overhang it by 22px (KOSTE), 84px and
+  // 93px (the 795-wide ones), and `#stagebox`'s `overflow: hidden` cut the difference off.
+  // The 167 native px of panel + gap were the bulk of it, so retiring the panel is the
+  // bulk of the fix — but NOT all: `MIN_STAGE_SCALE` floors the scale at 0.5 here, so the
+  // logical box is 400px in a 393px viewport and a room wide enough to fill it still
+  // overhangs by 7. That residual is pinned in test/layout.test.ts, where it is arithmetic
+  // rather than a second room to load. KOSTE (540 native) does not fill the box, so this
+  // assertion is about KOSTE and says so.
   // Resized rather than opened in a context of its own: the viewport is a page property,
   // and a second context would pay the boot again to assert two numbers.
   await p.setViewportSize({ width: 393, height: 852 });
@@ -210,7 +215,7 @@ try {
   const portrait = await rowState(p);
   expect(
     portrait.left >= 0 && portrait.right <= portrait.viewW,
-    `portrait phone width: the row fits the viewport (${portrait.left}..${portrait.right} of ${portrait.viewW})`,
+    `portrait phone width: this room's row fits the viewport (${portrait.left}..${portrait.right} of ${portrait.viewW})`,
   );
 
   // ── And the room genuinely gets that width, measured end to end rather than in the
@@ -232,8 +237,12 @@ try {
   await p.selectOption('#touchmode', 'on');
   await p.waitForFunction(() => document.documentElement.hasAttribute('data-touch'));
   await settleBox(p, withPanel.roomW);
+  // Back to the probe's own viewport. Waits on `innerWidth`, NOT on `settleBox`: the box
+  // here differs from the 900x1000 one by a single rounded pixel, and a "wait for it to
+  // change" that the two sides can tie on is a wait that hangs the probe with no
+  // diagnostic. Nothing after this reads geometry, so the resize landing is enough.
   await p.setViewportSize({ width: 1100, height: 620 });
-  await settleBox(p, noPanel.roomW);
+  await p.waitForFunction(() => window.innerWidth === 1100);
 
   // ── Options (region 16): in touch mode the corner button opens the plain-HTML
   // Options, NOT the canvas face the mouse gets. Both halves matter: a touch player has

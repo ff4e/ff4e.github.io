@@ -10,7 +10,12 @@
  *
  * Restart (region 15) is absent too, and that one IS a judgement call rather than a
  * sequencing one: it is one mis-tap from destroying an attempt, it has no confirmation,
- * and Martin's list did not include it. It stays reachable from the faithful panel.
+ * and Martin's list did not include it. It used to stay reachable from the faithful
+ * panel — but that panel is hidden in touch mode now (`panel.ts:drawPanel`), and region
+ * 15's only other door is the `Backspace` key (`main.ts`), which a phone does not have.
+ * So on touch it currently has **no** direct route; leaving the room from the Map and
+ * entering it again is the workaround, and whether Restart earns a sixth button is an
+ * open question rather than a settled omission.
  *
  * ── Everything goes through `panelAction` ────────────────────────────────────
  * Not through `saveGame()` / `showMap()` / `swapActive()` directly, which would be the

@@ -29,8 +29,11 @@
  *    nothing may change for). The touch build replaces the panel's verbs with a bar of
  *    its own (`app/touchButtons.ts`) and drives the fish by swipe, so the column is
  *    hidden outright by `drawPanel` and the 167 native px it was claiming
- *    (`PANEL_FOOTPRINT_W`) go back to the room. On a phone that is the difference
- *    between a row that fits the viewport and one that overflows it.
+ *    (`PANEL_FOOTPRINT_W`) go back to the room. On a 393 px phone in portrait that takes
+ *    the row's overflow from up to 93 px down to at most 7 px — NOT to zero, and the
+ *    remainder is `MIN_STAGE_SCALE`: at that width the scale floors at 0.5, so the
+ *    logical box is `STAGE_W x 0.5 = 400` display px and a room wide enough to fill it
+ *    still overhangs a 393 px viewport by 7. Pinned in test/layout.test.ts.
  *  - That box is the SCALING envelope, and it is room-independent. The DOM element
  *    that holds the content (`#stagebox`) is sized to the CONTENT instead, so the
  *    panel sits beside the room rather than beside the box's empty slack — a room

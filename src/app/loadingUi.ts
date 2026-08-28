@@ -254,11 +254,12 @@ export function relayout(): void {
   const availW = stageRow?.clientWidth || window.innerWidth;
   const availH = stageRow?.clientHeight || window.innerHeight;
   // Touch mode has no side panel to reserve room for (drawPanel hides the column), so the
-  // 167 native px of panel + gap go back to the game. That is what makes the phone
-  // viewport fit at all: the row was 404px wide in a 393px one, clipped by #stagebox's
-  // `overflow: hidden`. Asked of `touchUi()` rather than worked out here — one predicate,
-  // one place (touchMode.ts) — and the dev-bar override calls this straight after
-  // flipping it, so switching modes resizes the game immediately.
+  // 167 native px of panel + gap go back to the game. Measured at 393x852: the row used to
+  // overhang the viewport by 22-93px depending on the room, and now overhangs by at most
+  // 7px — the remainder is the MIN_STAGE_SCALE floor, not the panel (see layout.ts).
+  // Asked of `touchUi()` rather than worked out here — one predicate, one place
+  // (touchMode.ts) — and the dev-bar override calls this straight after flipping it, so
+  // switching modes resizes the game immediately.
   setStage(computeStageLayout(availW, availH, settings.fitMode, !touchUi()));
   // The box HUGS its content horizontally rather than being pinned to the full stage
   // width: `wrap` is the box's only in-flow child and is sized to the room/map/cutscene

@@ -19,6 +19,7 @@ import {
   STAGE_EDGE,
   MAX_CONTENT_W,
   PANEL_NATIVE_W,
+  PANEL_NATIVE_H,
   PANEL_FOOTPRINT_W,
   CAPPED_MAX,
   FIT_FACTORS,
@@ -220,6 +221,26 @@ describe('the panel footprint — retired in touch mode', () => {
     }
   });
 
+  it('and the default is still the OLD footprint, rebuilt from the parts', () => {
+    // The test above only proves the parameter defaults to `true`; it takes its
+    // expectation from the same code it is testing, so it cannot fail if the footprint
+    // itself changed. This one rebuilds the mouse numbers from `STAGE_GAP` and
+    // `PANEL_NATIVE_W` — deliberately NOT from `PANEL_FOOTPRINT_W`, which is the term
+    // under test. If you ever simplify this to use that constant, the guarantee the whole
+    // touch series rests on stops being checked anywhere.
+    for (const [w, h] of VIEWPORTS) {
+      const expected = Math.max(
+        MIN_STAGE_SCALE,
+        Math.min(w / (STAGE_W + STAGE_GAP + PANEL_NATIVE_W), h / STAGE_H),
+      );
+      expect(computeStageScale(w, h)).toBeCloseTo(expected, 9);
+      const l = computeStageLayout(w, h, 'medium');
+      expect(l.panelW).toBeCloseTo(PANEL_NATIVE_W * expected, 9);
+      expect(l.panelH).toBeCloseTo(PANEL_NATIVE_H * expected, 9);
+      expect(l.gap).toBeCloseTo(STAGE_GAP * expected, 9);
+    }
+  });
+
   it('drops out of the width the scale has to fit', () => {
     // Width-bound BOTH ways (w/STAGE_W < h/STAGE_H), so the scale is exactly
     // availW / footprint and the footprint is the only thing that changed.
@@ -278,6 +299,24 @@ describe('the panel footprint — retired in touch mode', () => {
         expect(used).toBeLessThanOrEqual(w + 1e-6);
       }
     }
+  });
+
+  it('does NOT fit a 393px phone in portrait — the floor is what is left over there', () => {
+    // Retiring the panel is most of the phone-portrait clip, and deliberately not all of
+    // it. Measured at 393x852, touch on: rooms overhang the viewport by 22-93px with the
+    // panel and by at most 7px without it. The 7 are MIN_STAGE_SCALE, not the panel:
+    // 393/800 = 0.491 is below the floor, so the scale is 0.5 whatever the width says,
+    // and the logical box is 400 display px in a 393px viewport. Only a room wide enough
+    // to fill the box pays it (795-native-wide ones do; KOSTE at 540 has 32px of slack).
+    // Asserted so a change that makes it WORSE fails, and so the residual is written
+    // down rather than remembered.
+    const l = computeStageLayout(393, 786, 'medium', false);
+    expect(l.scale).toBe(MIN_STAGE_SCALE);
+    expect(l.stageW).toBeCloseTo(STAGE_W * MIN_STAGE_SCALE, 9);
+    expect(l.stageW - 393).toBeCloseTo(7, 9);
+    // With the panel it was very much worse — that part IS fixed.
+    const panelled = computeStageLayout(393, 786, 'medium', true);
+    expect(panelled.stageW + panelled.gap + panelled.panelW - 393).toBeGreaterThan(85);
   });
 });
 
