@@ -47,7 +47,8 @@ const barState = (p) =>
       reserving: document.documentElement.hasAttribute('data-touchbar'),
       visible: bar !== null && !bar.hidden,
       buttons: bar ? [...bar.querySelectorAll('[data-region]')].map((b) => b.dataset.region) : [],
-      marginRight: stage ? getComputedStyle(stage).marginRight : '',
+      marginLeft: stage ? getComputedStyle(stage).marginLeft : '',
+      marginTop: stage ? getComputedStyle(stage).marginTop : '',
       stageW: stage ? stage.clientWidth : 0,
       viewW: window.innerWidth,
     };
@@ -154,7 +155,7 @@ try {
   const d = await barState(desktop);
   expect(!d.mode, 'desktop: touch mode is off');
   expect(!d.visible && !d.reserving, 'desktop: no bar in a room, and the stage keeps its width');
-  expect(d.marginRight === '0px', `desktop: the stage has no margin reserved (${d.marginRight})`);
+  expect(d.marginLeft === '0px', `desktop: the stage has no margin reserved (${d.marginLeft})`);
   const dRow = await rowState(desktop);
   expect(dRow.panel, 'desktop: the faithful control panel is beside the room');
   expect(dRow.panelW > 0, `desktop: and it is taking its width (${dRow.panelW}px)`);
@@ -187,8 +188,8 @@ try {
   // clientWidth, so a margin is the only thing that both moves the bar out of the way
   // and tells the layout about it.
   expect(
-    inRoom.marginRight === '72px' && inRoom.stageW <= inRoom.viewW - 72,
-    `the bar reserves its width from the stage (margin ${inRoom.marginRight}, stage ${inRoom.stageW} of ${inRoom.viewW})`,
+    inRoom.marginLeft === '72px' && inRoom.stageW <= inRoom.viewW - 72,
+    `the bar reserves its width from the stage (margin ${inRoom.marginLeft}, stage ${inRoom.stageW} of ${inRoom.viewW})`,
   );
 
   // ── The faithful panel is retired, and the room is given its footprint back. The
@@ -218,6 +219,14 @@ try {
   expect(
     portrait.left >= 0 && portrait.right <= portrait.viewW,
     `portrait phone width: this room's row fits the viewport (${portrait.left}..${portrait.right} of ${portrait.viewW})`,
+  );
+  // The portrait half of the same reservation, asserted for parity with the landscape
+  // check above: the bar is on the TOP edge here, so the height it costs is a
+  // `margin-top`, and the landscape `margin-left` must be gone with its media query.
+  const portraitBar = await barState(p);
+  expect(
+    portraitBar.marginTop === '66px' && portraitBar.marginLeft === '0px',
+    `portrait: the bar reserves its height from the top (margin-top ${portraitBar.marginTop}, margin-left ${portraitBar.marginLeft})`,
   );
 
   // ── And the room genuinely gets that width, measured end to end rather than in the
@@ -340,8 +349,8 @@ try {
   const onMap = await barState(p);
   expect(!onMap.visible, 'Map leaves the room, and the bar comes down with it');
   expect(
-    onMap.marginRight === '0px',
-    `the map gets its width back (${onMap.marginRight})`,
+    onMap.marginLeft === '0px',
+    `the map gets its width back (${onMap.marginLeft})`,
   );
   // ── The map's own Options corner is the SECOND door into the faithful face, and it
   // has to hand over too — otherwise the panel column floats over the map on a phone
@@ -367,7 +376,7 @@ try {
   await settle(p, false);
   const off = await barState(p);
   expect(!off.visible, 'the dev-bar control turns the touch UI off, over a ?touch=on URL');
-  expect(off.marginRight === '0px', `and the stage gets its width back (${off.marginRight})`);
+  expect(off.marginLeft === '0px', `and the stage gets its width back (${off.marginLeft})`);
   const offRow = await rowState(p);
   expect(offRow.panel, 'and the faithful panel comes back with it');
   await p.selectOption('#touchmode', 'on');

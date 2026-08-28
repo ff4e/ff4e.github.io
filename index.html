@@ -385,8 +385,8 @@
         .creature i { animation: none; }
       }
       /* ── The touch controls ───────────────────────────────────────────────
-         A bar of five thumb-sized buttons, down the right in landscape and along
-         the bottom in portrait, shown only in touch mode and only in a room.
+         A bar of five thumb-sized buttons, down the left in landscape and along
+         the top in portrait, shown only in touch mode and only in a room.
 
          It RESERVES its space rather than floating over the game, and it does so
          with a MARGIN on .stage rather than padding — `relayout()` measures the
@@ -432,12 +432,12 @@
          button lit as if it were still held. Pressed state only. */
       .tbtn:active { background: #24414c; border-color: #6cc; }
       @media (orientation: landscape) {
-        #touchbar { top: 0; right: 0; bottom: 0; width: 72px; flex-direction: column; }
-        html[data-touchbar] .stage { margin-right: 72px; }
+        #touchbar { top: 0; left: 0; bottom: 0; width: 72px; flex-direction: column; }
+        html[data-touchbar] .stage { margin-left: 72px; }
       }
       @media (orientation: portrait) {
-        #touchbar { left: 0; right: 0; bottom: 0; height: 66px; flex-direction: row; }
-        html[data-touchbar] .stage { margin-bottom: 66px; }
+        #touchbar { left: 0; right: 0; top: 0; height: 66px; flex-direction: row; }
+        html[data-touchbar] .stage { margin-top: 66px; }
       }
       /* ── The touch Options ────────────────────────────────────────────────
          Plain HTML controls over the same settings the panel's Options face
