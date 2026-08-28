@@ -25,7 +25,7 @@
  * main.ts. Passing them by value would read them in their temporal dead zone.
  *
  * Module scope here is deliberately side-effect-free — a couple of `new CheatEntry()`
- * and some flags — so nothing jumps ahead of main.ts's phone gate.
+ * and some flags — so nothing jumps ahead of the boot order main.ts sequences.
  */
 import { AudioEngine } from '../audio/audio.js';
 import {

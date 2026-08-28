@@ -10,15 +10,15 @@
  * from `main.ts` when it left (`settings`, for the player's fit mode) and needs none now
  * that those live in `playerSettings.ts`.
  *
- * ── What deliberately did NOT come with it ───────────────────────────────────
- * The device gate. `main.ts` refuses to run on a phone before any other side effect, via
- * a never-settling top-level `await`, and an imported module is evaluated before any
- * statement of its importer — so moving the gate here would move it AFTER things it must
- * precede, and moving anything that touches the DOM here would jump it AHEAD of the gate.
- * The gate stays in `main.ts` as the first statement it runs. See AGENTS.md, "the
- * module-evaluation trap".
+ * ── Why nothing here runs at import time ────────────────────────────────────
+ * An imported module is evaluated before any statement of its importer, so anything at
+ * module scope here would jump ahead of the boot order `main.ts` sequences. (It used to
+ * jump ahead of something sharper: a phone refusal that ran as `main.ts`'s first
+ * statement. That is gone — see `deviceGate.ts` — and with it the loud failure, which
+ * makes the rule easier to break, not safer to ignore. AGENTS.md, "the
+ * module-evaluation trap".)
  *
- * That is also why `stage` is measured in `initStageGeometry()` rather than in its
+ * That is why `stage` is measured in `initStageGeometry()` rather than in its
  * initialiser: `window.innerWidth` is a DOM read, and this module must do nothing at
  * import time.
  */
@@ -41,8 +41,8 @@ import type { Settings } from '../core/settings.js';
 // Replaces the old fixed `SCALE = 2`. Input stays scale-agnostic (every pointer
 // handler maps via getBoundingClientRect ratios), so only display sizing changes.
 // Measured in initStageGeometry(), not here: reading window.innerWidth at module scope
-// would happen BEFORE main.ts's phone gate, and this module's whole contract is that
-// importing it does nothing. The literal below is the same fallback the old expression
+// would happen before main.ts has sequenced anything, and this module's whole contract
+// is that importing it does nothing. The literal below is the same fallback the old expression
 // used when there was no window at all; the fit mode is the shipped default rather than
 // the player's, because `settings` has not been loaded yet at this point.
 export let stage: StageLayout = computeStageLayout(1600, 1200, defaultSettings().fitMode);

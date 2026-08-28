@@ -3,7 +3,7 @@
  *
  * It is a `let` behind `initAudio()` rather than a module-scope `new AudioEngine()`
  * because an imported module is evaluated before any statement of its importer, and a
- * constructor here would run before `main.ts`'s device gate. `initAudio()` is called
+ * constructor here would run ahead of the boot order `main.ts` sequences. `initAudio()` is called
  * from exactly the point in `main.ts` the `new AudioEngine()` line used to sit at, so
  * the order is unchanged. Restoring the persisted volume levels stays in `main.ts` on
  * the line after, where it always was.

@@ -3,17 +3,21 @@
  * best move counts, best-solution records, and per-room play time.
  *
  * A closed store rather than a module of exported globals. That is deliberate:
- * ── Ordering. main.ts refuses to run on a phone before ANY other side effect, and an
- *    imported module is evaluated before a single statement of its importer. Loading
- *    (and migrating) save data at module scope would have jumped ahead of that
- *    refusal and stamped ff.schema into a phone visitor's storage. openSaveStore() is
- *    called from main.ts at exactly the point this code used to run instead.
+ * ── Ordering. main.ts owns the boot order, and an imported module is evaluated before
+ *    a single statement of its importer. Loading (and migrating) save data at module
+ *    scope would have jumped ahead of everything main.ts sequences — it used to jump
+ *    ahead of the phone refusal in particular, stamping ff.schema into the storage of a
+ *    visitor who was then turned away. That refusal is gone (deviceGate.ts), but the
+ *    ordering discipline is not: openSaveStore() is called from main.ts at exactly the
+ *    point this code used to run instead.
  * ── The migration invariant. migrateSaves() must run "before any ff.* key is read".
  *    Module-scope consts would have read first and migrated second — harmless at
  *    schema v1, which only stamps, and a silent data bug at the first real migration.
- *    ONE key is a deliberate exception: `ff.phoneOverride` is read by the device gate,
- *    which by contract runs before everything including this. See deviceGate.ts, which
- *    carries the note explaining why that key can therefore never change shape.
+ *    ONE key is still read before it: `ff.subfont`, by initStageState() (stageState.ts),
+ *    which main.ts calls while assembling the stage, thirty lines ahead of this store.
+ *    So that key must keep its shape — a candidate font NAME, or absent — for ever; a
+ *    migration that renamed it would be read pre-migration and silently ignored. The
+ *    other exception, `ff.phoneOverride`, went with the phone refusal that read it.
  *
  * main.ts destructures the returned object, so every call site there is unchanged.
  */

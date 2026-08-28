@@ -35,7 +35,7 @@
  * module only has to be right about which region each button sends.
  *
  * ── Shown only in a room, and only in touch mode ─────────────────────────────
- * Derived per frame, like `rotatePrompt.ts` and `loadingUi.ts` — `ui.screen` changes
+ * Derived per frame, like `loadingUi.ts` and `touchOptions.ts` — `ui.screen` changes
  * from half a dozen places and none of them should have to know about a button bar. The
  * bar reserves real space rather than floating over the game (`.stage` gets a margin
  * while it is up, so `relayout()` measures the smaller area), which is why a change of

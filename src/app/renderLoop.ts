@@ -21,7 +21,6 @@ import { clearDomSubtitles } from './subtitleDom.js';
 import { drawCutscene } from './cutscene.js';
 import { drawCredits, drawLegImage } from './mapNav.js';
 import { syncLoadingUi } from './loadingUi.js';
-import { syncRotatePrompt } from './rotatePrompt.js';
 import { syncTouchButtons } from './touchButtons.js';
 import { syncTouchOptions } from './touchOptions.js';
 import { drawMap } from './mapDraw.js';
@@ -305,9 +304,8 @@ export function loop(now: number): void {
   // After every draw branch: the overlay is a view of "is this screen still loading",
   // and hiding it here means the frame underneath has already been painted this tick.
   syncLoadingUi(now);
-  // Same contract, same reason they are here and not pushed from the room/orientation
-  // changes they depend on. All three leave immediately on anything that is not touch.
-  syncRotatePrompt();
+  // Same contract, same reason they are here and not pushed from the room/screen changes
+  // they depend on. Both leave immediately on anything that is not touch.
   syncTouchButtons();
   syncTouchOptions();
   updatePerfHud(now);

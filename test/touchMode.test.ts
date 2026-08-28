@@ -55,8 +55,8 @@ const DESKTOP = { width: 2560, height: 1440 };
 
 describe('touchModeActive — the device decides', () => {
   it('is on for a phone and for a tablet', () => {
-    // The tablet is in deliberately: the gate admits it because the faithful panel FITS,
-    // which is not the same as being pleasant to hit with a thumb.
+    // The tablet is in deliberately: the faithful panel FITS on one, which is not the
+    // same as being pleasant to hit with a thumb.
     expect(touchModeActive(win([COARSE], PHONE))).toBe(true);
     expect(touchModeActive(win([COARSE], TABLET))).toBe(true);
   });

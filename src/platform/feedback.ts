@@ -174,7 +174,7 @@ export interface FeedbackFacts {
  * The narrow view of the world `collectFacts` is allowed to read.
  *
  * Deliberately an explicit interface rather than the real globals, exactly as the
- * device gate does (src/app/deviceGate.ts): it makes the collection unit-testable
+ * device classifier does (src/app/deviceGate.ts): it makes the collection unit-testable
  * against a stub, and — the point — it makes the list of things a report CAN contain
  * a declaration you can read in ten seconds. There is no `localStorage` here, no
  * `document.cookie`, no saved game and no solved-room list, so none of them can end

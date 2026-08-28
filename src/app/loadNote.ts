@@ -43,7 +43,7 @@
  *
  * ── No init(), deliberately ───────────────────────────────────────────────────
  * The elements are looked up on first use rather than in a boot-time `init*()`. Module
- * scope stays side-effect-free (nothing runs before main.ts's phone gate — see the
+ * scope stays side-effect-free (nothing runs ahead of main.ts's boot order — see the
  * ordering note in the repo's AGENTS.md), and it needs no wiring line in `main.ts`,
  * which is at its line budget.
  */

@@ -56,10 +56,11 @@ file is 44, and you find code by name now.
 composition root. It declares the state that has no better owner yet, wires each module its
 handful of names at boot, and holds the two input routers (keyboard and pointer), which touch
 almost every subsystem and so cost more to move than they save. It is a top-level-`await`
-module and the ordering is load-bearing: the device gate must precede every side effect, and
-`migrateSaves()` must precede any `ff.*` read. **An imported module is evaluated before any
-statement of its importer** — which is why every module here keeps module scope inert and does
-its real work in an `initX()` that `main.ts` calls at the point the code used to run.
+module and the ordering is load-bearing: `migrateSaves()` must precede any `ff.*` read, and
+the boot sequence must precede everything that depends on it. **An imported module is
+evaluated before any statement of its importer** — which is why every module here keeps
+module scope inert and does its real work in an `initX()` that `main.ts` calls at the point
+the code used to run.
 
 `//#region` markers still divide `main.ts`, and `node tools/region-graph.mjs` still measures
 what depends on what. What is gone is the promise to keep a line-number table honest.
@@ -71,8 +72,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | **Composition and state** | | |
 | `main.ts` | 19.1 k | The composition root: the leftover state, the boot-time wiring of every module below, and the keyboard and pointer routers. |
 | `boot.ts` | 2.5 k | The boot sequence in load order — fonts, panel and map graphics, sound packages, room 7, first frame. |
-| `deviceGate.ts` | 1.4 k | What kind of device this is: refusing to run on a phone, and the player's "continue anyway" override. Runs before every side effect. |
-| `orientation.ts` | 1.1 k | Which way up a phone has to be held for what is on screen. Pure numbers; nothing here touches the DOM. |
+| `deviceGate.ts` | 1.4 k | What kind of device this is — desktop, phone or tablet — from the pointer and the screen's short side. Read by touch mode. |
 | `touchMode.ts` | 0.9 k | Whether the game is being played by touch, and the dev override that lets a desktop pretend it is. |
 | `dom.ts` | 1.3 k | The element handles and their 2D contexts. |
 | `helpDom.ts` | 2.4 k | The control-help pages (`Help.pas`) as a document: builds `src/data/helpText.ts` into DOM over #screen and scales it to the stage box. |
@@ -85,7 +85,6 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `paintClock.ts` | 0.4 k | The paint-rate cap, kept pure so it can be tested against synthetic refresh trains. |
 | `framePacing.ts` | 5.7 k | Whether the next frame must be painted at all, and the perf HUD's counters. |
 | `renderLoop.ts` | 3.7 k | The rAF callback: which screen paints, how many logic steps run, when to sleep. |
-| `rotatePrompt.ts` | 1.2 k | The "turn your phone" overlay, derived once per frame from the screen, the room and the viewport. |
 | `framePainter.ts` | 3.5 k | One room frame, all three art tiers, both backends. |
 | `logicTick.ts` | 3.0 k | One 80 ms game step: script, engine, dialogue, death, screensaver. |
 | **Playing a room** | | |

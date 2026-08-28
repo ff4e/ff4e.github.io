@@ -32,7 +32,7 @@
  * `mapLaunching()`.
  *
  * initRoomLaunch() is called from main.ts at the point this code used to sit. Module
- * scope is side-effect-free, so nothing runs before main.ts's phone gate.
+ * scope is side-effect-free, so nothing runs ahead of main.ts's boot order.
  */
 import { parseBmp, bmpToRgba } from '../data/bmp.js';
 import { MAP_W } from '../render/worldMap.js';

@@ -12,9 +12,9 @@
  *
  * ── Ordering ─────────────────────────────────────────────────────────────────
  * `new IntroPlayer(...)` touches the DOM and `probeAiMovies()` issues HEAD requests, so both
- * happen in `initIntro()` rather than at import time. `main.ts` refuses to run on a phone
- * before any other side effect, and firing network probes ahead of that gate is exactly what
- * the rule forbids. See AGENTS.md, "the module-evaluation trap".
+ * happen in `initIntro()` rather than at import time. `main.ts` sequences its own side
+ * effects, and firing network probes ahead of that order is exactly what the rule
+ * forbids. See AGENTS.md, "the module-evaluation trap".
  */
 import { IntroPlayer } from './intro.js';
 import { optionalAsset } from '../render/assetFetch.js';

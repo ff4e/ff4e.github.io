@@ -22,7 +22,7 @@
  * async load lands, which is the whole point of it.
  *
  * initArt() is called from main.ts at the point this code used to sit. Module scope is
- * side-effect-free, so nothing runs before main.ts's phone gate.
+ * side-effect-free, so nothing here runs ahead of the boot order main.ts sequences.
  */
 import { HookSystem } from '../core/hooks.js';
 import { Room } from '../core/room.js';

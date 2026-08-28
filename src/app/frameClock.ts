@@ -29,9 +29,9 @@
  *
  * ── Module scope stays side-effect-free ──────────────────────────────────────
  * Nothing here runs until `initFrameClock`, which `main.ts` calls at the point the code
- * originally ran. `main.ts` is a top-level-`await` module that refuses to run on a phone
- * before any other side effect, and an imported module is evaluated before any statement
- * of its importer — see AGENTS.md, "the module-evaluation trap".
+ * originally ran. `main.ts` is a top-level-`await` module whose boot order is
+ * load-bearing, and an imported module is evaluated before any statement of its
+ * importer — see AGENTS.md, "the module-evaluation trap".
  */
 import { advancePaintDeadline, shouldSkipPaint } from './paintClock.js';
 

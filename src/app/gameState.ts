@@ -27,8 +27,8 @@
  *
  * ── Ordering ─────────────────────────────────────────────────────────────────
  * Module scope is side-effect-free — every declaration below is a literal or `null`.
- * `main.ts` refuses to run on a phone before any other side effect, and an imported
- * module is evaluated before any statement of its importer (AGENTS.md, "the
+ * `main.ts` sequences its own side effects, and an imported module is evaluated
+ * before any statement of its importer (AGENTS.md, "the
  * module-evaluation trap"). Nothing here touches the DOM, `localStorage` or the network.
  */
 import type { CapAction } from '../intro/helpCap.js';

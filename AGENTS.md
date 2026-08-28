@@ -235,12 +235,15 @@ effectively the public API of the game for testing.
 `src/app/main.ts` is a **top-level-`await` module with side effects at module scope**, and the order is
 load-bearing:
 
-- It **refuses to run on a phone before any other side effect** (`isUnsupportedDevice`), via a
-  never-settling `await`. Anything that must not happen on a phone must come after it.
 - **An imported module is evaluated before any statement of its importer.** So a new module that touches
-  the document, `localStorage`, or the network *at module scope* jumps ahead of that gate. This is why
-  `dom.ts` exposes `buildStage()`, `persist.ts` exposes `openSaveStore()`, and the others expose `init*()` —
-  each is called from `main.ts` at the point the code originally ran. Keep module scope side-effect-free.
+  the document, `localStorage`, or the network *at module scope* jumps ahead of the boot order `main.ts`
+  sequences. This is why `dom.ts` exposes `buildStage()`, `persist.ts` exposes `openSaveStore()`, and the
+  others expose `init*()` — each is called from `main.ts` at the point the code originally ran. Keep module
+  scope side-effect-free.
+- This rule was originally enforced by something sharper: the game **refused to run on a phone before any
+  other side effect**, via a never-settling `await`, and anything that ran at import time slipped past the
+  refusal. That gate is gone (`deviceGate.ts` now only classifies the device), so nothing fails loudly any
+  more when the rule is broken — which makes it easier, not harder, to get wrong.
 - `migrateSaves()` must run before any `ff.*` key is read. That is why the save store is a function, not a
   set of module-scope consts.
 

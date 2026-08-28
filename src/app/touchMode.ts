@@ -4,8 +4,8 @@
  * ── What decides it ─────────────────────────────────────────────────────────
  * The device, via `deviceClass` — anything touch-capable gets the touch UI, phone and
  * tablet alike. The tablet is included deliberately (Martin's decision, 2026-08-26):
- * the device gate admits tablets on the grounds that the faithful control panel FITS
- * there, but fitting is not the same as being pleasant to hit with a thumb, and shipping
+ * the faithful control panel FITS on a tablet, which is why the old device gate admitted
+ * one, but fitting is not the same as being pleasant to hit with a thumb, and shipping
  * two different products for one device class would be worse than either.
  *
  * A desktop is never in touch mode by the rule. That is the guarantee the whole touch
@@ -62,7 +62,7 @@ export function resetTouchSession(): void {
  * looked dead. An action taken NOW must beat a parameter typed earlier. It also gives
  * the control something to fall back on when storage refuses the write.
  *
- * URL then storage for the rest, exactly like the phone gate's override, and for the
+ * URL then storage for the rest, exactly like the phone gate's override did, and for the
  * same reason: the URL is the carrier that works when storage does not, and it is what
  * a probe can set without a click.
  */
