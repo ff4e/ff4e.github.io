@@ -172,6 +172,33 @@ const pressOutside = (p, selector) =>
     el.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true }));
   }, selector);
 
+/**
+ * Is a `touchstart` here cancelled? The one thing iOS's long-press magnifier honours.
+ *
+ * Asserted as `defaultPrevented` rather than by looking for the loupe, because the loupe
+ * is drawn by the OS and is not in the DOM at all — this is the only observable the
+ * browser gives us, and it is exactly the signal Safari's gesture recognizer reads.
+ * Dispatched as a real `TouchEvent`: `PointerEvent` is a different event, and cancelling
+ * that one is what was already happening while the bubble still came up.
+ */
+const touchStartCancelled = (p, selector) =>
+  p.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const t = new Touch({ identifier: 31, target: el, clientX: x, clientY: y });
+    const e = new TouchEvent('touchstart', {
+      touches: [t],
+      targetTouches: [t],
+      changedTouches: [t],
+      bubbles: true,
+      cancelable: true,
+    });
+    el.dispatchEvent(e);
+    return e.defaultPrevented;
+  }, selector);
+
 /** Keep the same gesture going, to a new offset from where it started. */
 const steer = (p, x, y) => p.evaluate(({ x, y }) => window.__ffSwipeTo(x, y), { x, y });
 /** The arrows emitted since the last check, and reset for the next one. */
@@ -329,6 +356,40 @@ try {
   expect(
     (await p.evaluate(() => window.__ff.state().swimming)) === false,
     'and no click-to-swim is started behind it',
+  );
+
+  // ── iOS's selection loupe. Safari runs the long-press magnifier from a gesture
+  // recognizer upstream of Pointer Events, so the `preventDefault()` on `pointerdown` that
+  // kills the compatibility click above never reaches it, and neither does the body's
+  // `-webkit-user-select: none` — Martin's report was the selection correctly dead and an
+  // empty magnifying bubble on screen anyway. `touchstart` is the only event it honours.
+  expect(
+    (await touchStartCancelled(p, '#screen')) === true,
+    'a touch on the room cancels touchstart, so iOS raises no selection loupe',
+  );
+  expect(
+    (await touchStartCancelled(p, 'body')) === true,
+    'and so does one on the black margin, which is most of a phone screen',
+  );
+  // The other half, and the reason this is not a blanket handler: cancelling `touchstart`
+  // also cancels the compatibility `mousedown`/`click`. The touch bar is driven by `click`
+  // and the world map by the canvas's `mousedown`, so suppressing it on either would leave
+  // a phone unable to press a button or pick a level.
+  expect(
+    (await touchStartCancelled(p, '#touchbar [data-region="14"]')) === false,
+    'a touch on the bar is left alone — its buttons need the click',
+  );
+  await p.evaluate(() => window.__ff.panelAction(14));
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
+  expect(
+    (await touchStartCancelled(p, '#screen')) === false,
+    'and so is one on the world map, which picks a level with that same mousedown',
+  );
+  await p.evaluate((n) => window.__ff.enterRoomAwait(n), ROOM);
+  await p.waitForFunction(
+    (n) =>
+      window.__ff.screen() === 'room' && !window.__ff.roomLoading() && window.__ff.roomNum() === n,
+    ROOM,
   );
 
   // ── The swallow must not outlive its gesture. In a spec-compliant browser the
