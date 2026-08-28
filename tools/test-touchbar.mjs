@@ -51,6 +51,31 @@ const barState = (p) =>
     };
   });
 
+/**
+ * The faithful panel column, and what the stage row is spending its width on.
+ *
+ * `#stagebox` and `#panelcol` are the row's only children, so their extremes ARE its
+ * content. Measured as extremes rather than with `scrollWidth`, which is no use here: the
+ * row is centred, so it overflows BOTH ways and only the right-hand half of that shows up
+ * in a scroll width.
+ */
+const rowState = (p) =>
+  p.evaluate(() => {
+    const stage = document.querySelector('.stage');
+    const col = document.getElementById('panelcol');
+    const box = document.getElementById('stagebox');
+    const shown = [...stage.children].filter((el) => getComputedStyle(el).display !== 'none');
+    const rects = shown.map((el) => el.getBoundingClientRect());
+    return {
+      panel: col !== null && getComputedStyle(col).display !== 'none',
+      panelW: col ? Math.round(col.getBoundingClientRect().width) : 0,
+      roomW: box ? Math.round(box.getBoundingClientRect().width) : 0,
+      left: Math.round(Math.min(...rects.map((r) => r.left))),
+      right: Math.round(Math.max(...rects.map((r) => r.right))),
+      viewW: window.innerWidth,
+    };
+  });
+
 async function open(query) {
   const ctx = await browser.newContext({ viewport: { width: 1100, height: 620 } });
   const p = await ctx.newPage();
@@ -86,6 +111,20 @@ const enter = async (p, num) => {
 const settle = (p, want) =>
   p.waitForFunction((w) => document.documentElement.hasAttribute('data-touchbar') === w, want);
 
+/**
+ * Wait for a resize or a mode change to reach the screen.
+ *
+ * `relayout()` only recomputes the stage; the box is re-sized in the room's draw, so a
+ * measurement taken straight after either would be the PREVIOUS frame's. Waits for the
+ * width to stop being what it was rather than for a target, so the caller does not have
+ * to predict the number it is about to measure.
+ */
+const settleBox = (p, was) =>
+  p.waitForFunction(
+    (w) => Math.round(document.getElementById('stagebox').getBoundingClientRect().width) !== w,
+    was,
+  );
+
 const tap = (p, region) => p.click(`#touchbar [data-region="${region}"]`);
 
 /**
@@ -114,6 +153,9 @@ try {
   expect(!d.mode, 'desktop: touch mode is off');
   expect(!d.visible && !d.reserving, 'desktop: no bar in a room, and the stage keeps its width');
   expect(d.marginRight === '0px', `desktop: the stage has no margin reserved (${d.marginRight})`);
+  const dRow = await rowState(desktop);
+  expect(dRow.panel, 'desktop: the faithful control panel is beside the room');
+  expect(dRow.panelW > 0, `desktop: and it is taking its width (${dRow.panelW}px)`);
   // The mouse player's Options is untouched: the corner button still scrolls the panel
   // to the canvas face, and the HTML one stays out of it. This is the guarantee the
   // whole touch series rests on, asserted at the one place the two could collide.
@@ -136,8 +178,8 @@ try {
   const inRoom = await barState(p);
   expect(inRoom.visible, 'in a room: the bar is up');
   expect(
-    inRoom.buttons.join(',') === '14,12,13,16,11',
-    `the five buttons send map/save/load/options/swap (${inRoom.buttons.join(',')})`,
+    inRoom.buttons.join(',') === '14,12,13,16,15',
+    `the five buttons send map/save/load/options/restart (${inRoom.buttons.join(',')})`,
   );
   // It reserves space rather than floating over the room: the stage is measured with
   // clientWidth, so a margin is the only thing that both moves the bar out of the way
@@ -146,6 +188,61 @@ try {
     inRoom.marginRight === '72px' && inRoom.stageW <= inRoom.viewW - 72,
     `the bar reserves its width from the stage (margin ${inRoom.marginRight}, stage ${inRoom.stageW} of ${inRoom.viewW})`,
   );
+
+  // ── The faithful panel is retired, and the room is given its footprint back. The
+  // whole point of doing this LAST: everything the panel does now has a thumb-sized
+  // counterpart, so hiding it leaves nothing unreachable.
+  const tRow = await rowState(p);
+  expect(!tRow.panel, 'the faithful panel column is gone in touch mode');
+  expect(
+    tRow.panelW === 0,
+    `and it is claiming no width at all — column, not canvas (${tRow.panelW}px)`,
+  );
+
+  // ── The clipping this mostly fixes. A phone-width portrait viewport could not hold the
+  // row: measured at 393x852 with touch OFF, rooms overhang it by 22px (KOSTE), 84px and
+  // 93px (the 795-wide ones), and `#stagebox`'s `overflow: hidden` cut the difference off.
+  // The 167 native px of panel + gap were the bulk of it, so retiring the panel is the
+  // bulk of the fix — but NOT all: `MIN_STAGE_SCALE` floors the scale at 0.5 here, so the
+  // logical box is 400px in a 393px viewport and a room wide enough to fill it still
+  // overhangs by 7. That residual is pinned in test/layout.test.ts, where it is arithmetic
+  // rather than a second room to load. KOSTE (540 native) does not fill the box, so this
+  // assertion is about KOSTE and says so.
+  // Resized rather than opened in a context of its own: the viewport is a page property,
+  // and a second context would pay the boot again to assert two numbers.
+  await p.setViewportSize({ width: 393, height: 852 });
+  await settleBox(p, tRow.roomW);
+  const portrait = await rowState(p);
+  expect(
+    portrait.left >= 0 && portrait.right <= portrait.viewW,
+    `portrait phone width: this room's row fits the viewport (${portrait.left}..${portrait.right} of ${portrait.viewW})`,
+  );
+
+  // ── And the room genuinely gets that width, measured end to end rather than in the
+  // layout maths (test/layout.test.ts has the arithmetic). It takes a WIDTH-bound
+  // viewport to show: where the height is what limits the scale, the panel's 167px were
+  // never what the room was short of. 900x1000 is width-bound (900/800 < 1000/600) and
+  // far enough above MIN_STAGE_SCALE that the floor, not the maths, is not what decides.
+  await p.setViewportSize({ width: 900, height: 1000 });
+  await settleBox(p, portrait.roomW);
+  const noPanel = await rowState(p);
+  await p.selectOption('#touchmode', 'off');
+  await p.waitForFunction(() => !document.documentElement.hasAttribute('data-touch'));
+  await settleBox(p, noPanel.roomW);
+  const withPanel = await rowState(p);
+  expect(
+    noPanel.roomW > withPanel.roomW,
+    `the room gets the panel's width back (${noPanel.roomW} without it, ${withPanel.roomW} with)`,
+  );
+  await p.selectOption('#touchmode', 'on');
+  await p.waitForFunction(() => document.documentElement.hasAttribute('data-touch'));
+  await settleBox(p, withPanel.roomW);
+  // Back to the probe's own viewport. Waits on `innerWidth`, NOT on `settleBox`: the box
+  // here differs from the 900x1000 one by a single rounded pixel, and a "wait for it to
+  // change" that the two sides can tie on is a wait that hangs the probe with no
+  // diagnostic. Nothing after this reads geometry, so the resize landing is enough.
+  await p.setViewportSize({ width: 1100, height: 620 });
+  await p.waitForFunction(() => window.innerWidth === 1100);
 
   // ── Options (region 16): in touch mode the corner button opens the plain-HTML
   // Options, NOT the canvas face the mouse gets. Both halves matter: a touch player has
@@ -194,12 +291,30 @@ try {
   await p.waitForFunction(() => !document.documentElement.hasAttribute('data-touchopts'));
   expect(true, 'Done closes it again');
 
-  // ── Swap (region 11): the active fish changes. Asserted as a CHANGE from whatever it
-  // was, so it does not depend on which fish a room starts with.
-  const before = await p.evaluate(() => window.__ff.showmodeState().activeFish);
-  await tap(p, 11);
-  await p.waitForFunction((b) => window.__ff.showmodeState().activeFish !== b, before);
-  expect(true, `Swap changes the active fish (from ${before})`);
+  // ── Restart (region 15): the room goes back to a fresh attempt. It is on the bar ONLY
+  // because retiring the faithful panel took away its last touch-reachable door — its
+  // other one is the Backspace key, which a phone does not have (touchButtons.ts). It is
+  // also the one destructive button here, so it is worth knowing it does exactly the
+  // panel's verb and not something adjacent.
+  //
+  // Asserted by two effects, because either alone is weak: the attempt counter moves
+  // (`pokus`, the original's own "this is another try"), and the active fish is back to
+  // what the room started with — which is what a rebuild does, and which a mere repaint
+  // would not. The swap in between is what gives the rebuild something to undo; it goes
+  // through `panelAction(11)` rather than a button because Swap no longer HAS one (a tap
+  // on the play area swaps, and test-touchswipe covers that).
+  const startActive = await p.evaluate(() => window.__ff.state().active);
+  const startPokus = await p.evaluate(() => window.__ff.script().pokus);
+  await p.evaluate(() => window.__ff.panelAction(11));
+  await p.waitForFunction((a) => window.__ff.state().active !== a, startActive);
+  await tap(p, 15);
+  await p.waitForFunction((a) => window.__ff.state().active === a, startActive);
+  expect(true, `Restart rebuilds the room (active fish back to ${startActive})`);
+  const nowPokus = await p.evaluate(() => window.__ff.script().pokus);
+  expect(
+    nowPokus === startPokus + 1,
+    `and it counts as a fresh attempt (pokus ${startPokus} -> ${nowPokus})`,
+  );
 
   // ── Save (region 12): a save exists afterwards where none did before.
   await p.evaluate(() => localStorage.removeItem('ff.save.' + window.__ff.roomNum()));
@@ -248,6 +363,8 @@ try {
   const off = await barState(p);
   expect(!off.visible, 'the dev-bar control turns the touch UI off, over a ?touch=on URL');
   expect(off.marginRight === '0px', `and the stage gets its width back (${off.marginRight})`);
+  const offRow = await rowState(p);
+  expect(offRow.panel, 'and the faithful panel comes back with it');
   await p.selectOption('#touchmode', 'on');
   await settle(p, true);
   expect((await barState(p)).visible, 'and back on again');

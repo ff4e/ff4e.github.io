@@ -3,14 +3,22 @@
  * bottom in portrait.
  *
  * ── What they are, and what they deliberately are not ────────────────────────
- * Map, Save, Load, Options, Swap — the panel's whole-room verbs, and nothing else. The
+ * Map, Save, Load, Options, Restart — the panel's whole-room verbs, and nothing else. The
  * panel's direction buttons (regions 1-4 and 6-9) have no counterpart here on purpose:
  * touch drives the fish by swipe, which is a separate layer. Undo is absent because it
  * does not exist yet in any form; it is its own task and must not be half-built here.
  *
- * Restart (region 15) is absent too, and that one IS a judgement call rather than a
- * sequencing one: it is one mis-tap from destroying an attempt, it has no confirmation,
- * and Martin's list did not include it. It stays reachable from the faithful panel.
+ * **Swap (region 11) was here and is not any more.** The gesture layer makes a tap on the
+ * play area swap the fish (`touchSwipe.ts`), which is both quicker than reaching for the
+ * bar and where a player's hand already is, so the button was redundant rather than
+ * missing (Martin's call, 2026-08-28). The verb is untouched — `panelAction(11)` and the
+ * Space key still do it.
+ *
+ * **Restart (region 15) took its place**, and only because retiring the faithful panel
+ * left it with nowhere else to go: its two doors were that panel and the `Backspace` key,
+ * and a phone has neither. It is the one destructive button on the bar — one tap, no
+ * confirmation, and the attempt is gone — which is why it was left off for as long as the
+ * panel was still there to carry it.
  *
  * ── Everything goes through `panelAction` ────────────────────────────────────
  * Not through `saveGame()` / `showMap()` / `swapActive()` directly, which would be the

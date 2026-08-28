@@ -24,6 +24,16 @@
  *    object-size spread across all 72 tightens slightly, 1.342x -> 1.316x). The
  *    panel's position was NOT the constraint and moving it changes nothing: the
  *    room is centred in the box, and the panel sits beside that box.
+ *  - **In touch mode there is no side panel**, and every function that reserves its
+ *    footprint takes a `panel` flag to say so (default `true` — a mouse is the case
+ *    nothing may change for). The touch build replaces the panel's verbs with a bar of
+ *    its own (`app/touchButtons.ts`) and drives the fish by swipe, so the column is
+ *    hidden outright by `drawPanel` and the 167 native px it was claiming
+ *    (`PANEL_FOOTPRINT_W`) go back to the room. On a 393 px phone in portrait that takes
+ *    the row's overflow from up to 93 px down to at most 7 px — NOT to zero, and the
+ *    remainder is `MIN_STAGE_SCALE`: at that width the scale floors at 0.5, so the
+ *    logical box is `STAGE_W x 0.5 = 400` display px and a room wide enough to fill it
+ *    still overhangs a 393 px viewport by 7. Pinned in test/layout.test.ts.
  *  - That box is the SCALING envelope, and it is room-independent. The DOM element
  *    that holds the content (`#stagebox`) is sized to the CONTENT instead, so the
  *    panel sits beside the room rather than beside the box's empty slack — a room
@@ -161,6 +171,28 @@ export const CAPPED_MAX = FIT_FACTORS.medium;
 /** Never shrink the stage below this scale, even on tiny viewports. */
 export const MIN_STAGE_SCALE = 0.5;
 
+/**
+ * Native px the side panel takes out of the row: the panel itself plus the gap it is
+ * separated from the stage box by.
+ *
+ * A single term because the two always travel together — a hidden panel takes its gap
+ * with it (`display: none` removes the flex item AND the row's gap; see drawPanel), so
+ * reserving one without the other would describe a layout that cannot happen.
+ */
+export const PANEL_FOOTPRINT_W = STAGE_GAP + PANEL_NATIVE_W;
+
+/**
+ * How much of the row the panel is claiming, in native px.
+ *
+ * `panel` is false in exactly one case: touch mode, where the faithful control panel is
+ * retired in favour of the touch bar and the room is given its 167 px back. It is an
+ * ARGUMENT rather than something this file works out, because these functions are pure —
+ * the caller (`relayout`) is the one that knows, and it asks `touchUi()`.
+ */
+function sideFootprint(panel: boolean): number {
+  return panel ? PANEL_FOOTPRINT_W : 0;
+}
+
 export interface StageLayout {
   /** Display px per native px for the stage box + panel (constant across rooms). */
   scale: number;
@@ -190,9 +222,11 @@ export interface StageLayout {
  * grows into width the scale has already declined to use, so letting it feed back into
  * the scale would be circular — and would trade a bigger scale for a wider box, which is
  * the opposite of the point.
+ *
+ * `panel` false drops the panel's footprint from that fit — see `sideFootprint`.
  */
-export function computeStageScale(availW: number, availH: number): number {
-  const footprintW = STAGE_W + STAGE_GAP + PANEL_NATIVE_W;
+export function computeStageScale(availW: number, availH: number, panel = true): number {
+  const footprintW = STAGE_W + sideFootprint(panel);
   const footprintH = STAGE_H;
   const s = Math.min(availW / footprintW, availH / footprintH);
   if (!Number.isFinite(s) || s <= 0) return MIN_STAGE_SCALE;
@@ -244,25 +278,40 @@ export function stageBoxCeiling(mode: FitMode): number {
  * the same size on differently-shaped windows — a deliberate extension of the deviation
  * documented in the header, not a new one.
  */
-export function stageBoxWidth(availW: number, availH: number, scale: number, mode: FitMode): number {
+export function stageBoxWidth(
+  availW: number,
+  availH: number,
+  scale: number,
+  mode: FitMode,
+  panel = true,
+): number {
   if (!Number.isFinite(scale) || scale <= 0) return STAGE_W;
-  const usable = availW / scale - STAGE_GAP - PANEL_NATIVE_W - 2 * STAGE_EDGE;
+  const usable = availW / scale - sideFootprint(panel) - 2 * STAGE_EDGE;
   if (!Number.isFinite(usable)) return STAGE_W;
   return Math.max(STAGE_W, Math.min(stageBoxCeiling(mode), usable));
 }
 
 /** Full stage layout (stage box + panel display sizes) for an available area. */
-export function computeStageLayout(availW: number, availH: number, mode: FitMode): StageLayout {
-  const scale = computeStageScale(availW, availH);
-  const boxW = stageBoxWidth(availW, availH, scale, mode);
+export function computeStageLayout(
+  availW: number,
+  availH: number,
+  mode: FitMode,
+  panel = true,
+): StageLayout {
+  const scale = computeStageScale(availW, availH, panel);
+  const boxW = stageBoxWidth(availW, availH, scale, mode, panel);
   return {
     scale,
-    gap: STAGE_GAP * scale,
+    // Zero when the panel is gone, and both for the same reason: the row has one item
+    // left, so there is no gap between anything, and the panel canvas is not drawn at
+    // all (drawPanel returns before it reads these). A layout that still reported them
+    // would be describing a column that is `display: none`.
+    gap: panel ? STAGE_GAP * scale : 0,
     boxW,
     stageW: boxW * scale,
     stageH: STAGE_H * scale,
-    panelW: PANEL_NATIVE_W * scale,
-    panelH: PANEL_NATIVE_H * scale,
+    panelW: panel ? PANEL_NATIVE_W * scale : 0,
+    panelH: panel ? PANEL_NATIVE_H * scale : 0,
   };
 }
 

@@ -31,6 +31,11 @@ import { renderer } from './renderSettings.js';
 import { ui } from './screenState.js';
 import { computeStageLayout } from './layout.js';
 import { setStage, stage } from './stageGeometry.js';
+// `touchButtons.ts` imports `relayout` from this file, so this is a cycle — a safe one:
+// neither module reads the other while it is being evaluated, only from functions called
+// after boot. The alternative was re-deriving touch mode here, and the series' rule is
+// that there is exactly one predicate for it.
+import { touchUi } from './touchButtons.js';
 import { ROOMS } from '../data/roomTable.js';
 import type { MissingAssetError, TransientAssetError } from '../render/assetFetch.js';
 import { isAssetError, isTransient } from '../render/assetFetch.js';
@@ -248,7 +253,14 @@ export function maybeShowWebglNote(): void {
 export function relayout(): void {
   const availW = stageRow?.clientWidth || window.innerWidth;
   const availH = stageRow?.clientHeight || window.innerHeight;
-  setStage(computeStageLayout(availW, availH, settings.fitMode));
+  // Touch mode has no side panel to reserve room for (drawPanel hides the column), so the
+  // 167 native px of panel + gap go back to the game. Measured at 393x852: the row used to
+  // overhang the viewport by 22-93px depending on the room, and now overhangs by at most
+  // 7px — the remainder is the MIN_STAGE_SCALE floor, not the panel (see layout.ts).
+  // Asked of `touchUi()` rather than worked out here — one predicate, one place
+  // (touchMode.ts) — and the dev-bar override calls this straight after flipping it, so
+  // switching modes resizes the game immediately.
+  setStage(computeStageLayout(availW, availH, settings.fitMode, !touchUi()));
   // The box HUGS its content horizontally rather than being pinned to the full stage
   // width: `wrap` is the box's only in-flow child and is sized to the room/map/cutscene
   // canvas, so `width: auto` tracks the content for free — including room changes, which
