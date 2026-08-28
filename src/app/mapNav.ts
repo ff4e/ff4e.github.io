@@ -21,6 +21,8 @@ import { settings } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
 import { O_NORMAL, O_OPTIONS, SCMAX, ui } from './screenState.js';
 import { contentScaleFor, scalingFilterFor } from './stageGeometry.js';
+import { touchUi } from './touchButtons.js';
+import { openTouchOptions } from './touchOptions.js';
 import { musicUrl } from '../audio/music.js';
 import { saveSettings } from '../core/settings.js';
 import { bmpToRgba, parseBmp } from '../data/bmp.js';
@@ -354,6 +356,14 @@ export function dispatchMapCorner(action: MapAction | null): void {
 
 /** Open the Options panel over the map (daOptions modal Ovl, UMain.pas:1120-1135). */
 export function openMapOptions(): void {
+  // The map's own door into the Options face, and in touch mode it leads to the HTML
+  // one instead — the same hand-over `togglePanelOptions` makes for the in-room door.
+  // Note what is NOT set below in that case: `ui.mapOverlay` stays 'none', so the panel
+  // column never floats over the map and there is no overlay state to unwind on close.
+  if (touchUi()) {
+    openTouchOptions();
+    return;
+  }
   ui.mapOverlay = 'options';
   ui.ostav = O_OPTIONS; // open straight to the options face (no in-room scroll)
   ui.scroll = SCMAX;

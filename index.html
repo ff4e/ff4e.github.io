@@ -423,6 +423,60 @@
         #touchbar { left: 0; right: 0; bottom: 0; height: 66px; flex-direction: row; }
         html[data-touchbar] .stage { margin-bottom: 66px; }
       }
+      /* ── The touch Options ────────────────────────────────────────────────
+         Plain HTML controls over the same settings the panel's Options face
+         edits — deliberately not a copy of it, because that face's sliders are
+         9px tall (src/app/touchOptions.ts explains the whole choice).
+
+         Above the touch bar (z 120), below "turn your phone" (z 190) and the
+         loading/fatal pair (z 200): a screen you are asked to rotate, or that
+         has not loaded, outranks the settings on it. It scrolls rather than
+         squeezing, because a phone in landscape has ~330px of height for it. */
+      #touchopts { z-index: 150; justify-content: safe center; overflow-y: auto; }
+      .topts-card {
+        display: flex; flex-direction: column; gap: 16px;
+        width: min(420px, 100%);
+        text-align: left;
+      }
+      .topts-card h1 { text-align: center; }
+      .topts-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; }
+      .topts-row label { font: 600 13px/1.4 system-ui, sans-serif; }
+      .topts-row output { font: 600 13px/1.4 system-ui, sans-serif; color: #6cc; min-width: 2.2em; text-align: right; }
+      .topts-row input[type='range'] {
+        grid-column: 1 / -1;
+        width: 100%; height: 34px; accent-color: #6cc; touch-action: manipulation;
+      }
+      .topts-subs { border: 1px solid #35555f; border-radius: 10px; padding: 10px 12px; margin: 0; }
+      .topts-subs legend { font: 600 13px/1 system-ui, sans-serif; padding: 0 6px; }
+      .topts-subs div { display: flex; gap: 14px; flex-wrap: wrap; }
+      .topts-subs label {
+        display: flex; align-items: center; gap: 6px;
+        min-height: 40px; font: 14px/1 system-ui, sans-serif;
+        -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+      }
+      .topts-subs input { width: 20px; height: 20px; accent-color: #6cc; }
+      .topts-buttons { display: flex; gap: 10px; }
+      .topts-buttons button {
+        flex: 1 1 0; min-height: 46px;
+        color: #bdd; background: #18262e; border: 1px solid #35555f; border-radius: 10px;
+        font: 600 14px/1 system-ui, sans-serif;
+        -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+      }
+      .topts-buttons button:active { background: #24414c; border-color: #6cc; }
+      #topt-close { background: #24414c; border-color: #6cc; }
+      /* A phone in landscape is the shape this screen has to fit, and it is the tight
+         one: ~390px of height, against a card that wants 406. Compacted rather than
+         left to scroll, because the control that would fall below the fold is Done —
+         the way out. Everything here still clears the 40px touch-target floor. */
+      @media (max-height: 500px) {
+        #touchopts { padding: 10px 16px; }
+        .topts-card { gap: 8px; }
+        .topts-card h1 { font: 600 19px/1.2 system-ui, sans-serif; }
+        .topts-row input[type='range'] { height: 28px; }
+        .topts-subs { padding: 2px 12px 6px; }
+        .topts-subs label { min-height: 40px; }
+        .topts-buttons button { min-height: 42px; }
+      }
       /* ── "Turn your phone" ────────────────────────────────────────────────
          Under the loading and fatal overlays (z 200), because both of those are
          about whether there is a game at all, which outranks how it is being
@@ -794,6 +848,45 @@
       </button>
     </div>
     <div id="info"></div>
+    <!-- The touch Options: the panel's Options face as plain HTML, because that face's
+         sliders are 9px tall and its subtitle buttons ~20px square — unhittable with a
+         thumb at the scale a phone draws the panel. Shown instead of it in touch mode;
+         the canvas face is unchanged for mouse players and the two are never both
+         reachable. Every control dispatches through the SAME `panelAction` regions the
+         panel uses (17-19 volumes, 20-22 subtitles, 23 help) — see
+         src/app/touchOptions.ts for why, sliders included. -->
+    <div id="touchopts" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="topt-title">
+      <div class="topts-card">
+        <h1 id="topt-title">Options</h1>
+        <div class="topts-row">
+          <label for="topt-effect">Sound effects</label>
+          <output id="topt-effect-val" for="topt-effect"></output>
+          <input type="range" id="topt-effect" min="0" max="12" step="1" />
+        </div>
+        <div class="topts-row">
+          <label for="topt-voice">Voices</label>
+          <output id="topt-voice-val" for="topt-voice"></output>
+          <input type="range" id="topt-voice" min="0" max="12" step="1" />
+        </div>
+        <div class="topts-row">
+          <label for="topt-music">Music</label>
+          <output id="topt-music-val" for="topt-music"></output>
+          <input type="range" id="topt-music" min="0" max="12" step="1" />
+        </div>
+        <fieldset class="topts-subs">
+          <legend>Subtitles</legend>
+          <div>
+            <label><input type="radio" name="topt-subs" value="cz" />Čeština</label>
+            <label><input type="radio" name="topt-subs" value="en" />English</label>
+            <label><input type="radio" name="topt-subs" value="off" />Off</label>
+          </div>
+        </fieldset>
+        <div class="topts-buttons">
+          <button id="topt-help" type="button">Help</button>
+          <button id="topt-close" type="button">Done</button>
+        </div>
+      </div>
+    </div>
     <dialog id="feedback" aria-labelledby="feedback-title">
       <div class="fb-body">
         <h2 id="feedback-title">Send feedback</h2>

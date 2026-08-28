@@ -119,6 +119,21 @@ export function sliderIndex(x: number): number {
   return Math.max(0, Math.min(12, Math.floor((x - 12) / 10)));
 }
 
+/**
+ * The inverse: a panel x that `sliderIndex` maps back to exactly this index.
+ *
+ * It exists for the touch Options (`src/app/touchOptions.ts`), which is plain HTML and
+ * has a 0..12 number where the panel has a click position. Dispatching a volume change
+ * through `panelAction(17..19, sliderX(i))` keeps that UI inside the one table that
+ * defines what a panel press IS — hrac_nespi and all — instead of reaching past it into
+ * `setVolume`. The alternative was to open-code `12 + i * 10` in an HTML module, which
+ * would have put the panel's pixel geometry in a second file; here the pair sits
+ * together and `test/hud-options.test.ts` round-trips all thirteen steps.
+ */
+export function sliderX(index: number): number {
+  return 12 + Math.max(0, Math.min(12, Math.floor(index))) * 10;
+}
+
 function usek(out: Uint8Array, src: Uint8Array, top: number, bottom: number): void {
   const from = top * PANEL_W;
   const to = (bottom + 1) * PANEL_W;

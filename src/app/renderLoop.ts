@@ -23,6 +23,7 @@ import { drawCredits, drawLegImage } from './mapNav.js';
 import { syncLoadingUi } from './loadingUi.js';
 import { syncRotatePrompt } from './rotatePrompt.js';
 import { syncTouchButtons } from './touchButtons.js';
+import { syncTouchOptions } from './touchOptions.js';
 import { drawMap } from './mapDraw.js';
 import { drawHelp, drawPanel, tickPanelScroll } from './panel.js';
 import { enhancedArtActive, graphics, renderOnDirty, renderer } from './renderSettings.js';
@@ -305,9 +306,10 @@ export function loop(now: number): void {
   // and hiding it here means the frame underneath has already been painted this tick.
   syncLoadingUi(now);
   // Same contract, same reason they are here and not pushed from the room/orientation
-  // changes they depend on. Both leave immediately on anything that is not touch.
+  // changes they depend on. All three leave immediately on anything that is not touch.
   syncRotatePrompt();
   syncTouchButtons();
+  syncTouchOptions();
   updatePerfHud(now);
   scheduleNextFrame();
 }
