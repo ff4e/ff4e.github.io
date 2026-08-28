@@ -119,7 +119,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `audioEngine.ts` | 0.3 k | Who owns the `AudioEngine`. |
 | `renderSettings.ts` | 2.0 k | What the game is drawn WITH — the four persisted choices: art tier, backend, idle-FPS saver, developer pane. |
 | `playerSettings.ts` | 1.2 k | The player's options: subtitle language and the three volume buses. |
-| `layout.ts` | 2.2 k | Display layout and scaling. |
+| `layout.ts` | 2.9 k | Display layout and scaling. |
 | `stageGeometry.ts` | 2.2 k | How big the game is drawn, and the constants the simulation is timed by. |
 | `cheats.ts` | 6.2 k | The typed codes, the effects they switch on, and the Tetris minigame. |
 | `showmodeHolds.ts` | 1.1 k | Pauses lengthened by hand in the KUFRIK demonstration — its only deviation from the 1998 recording. |

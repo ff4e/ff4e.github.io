@@ -76,7 +76,10 @@ export function contentScaleFor(w: number, h: number): number {
   // Pass devicePixelRatio so 'native' can snap to whole PHYSICAL pixels (crisp at
   // any browser zoom / display scaling); the other modes ignore it.
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  return fitScale(w, h, stage.scale, settings.fitMode, dpr, stage.boxW);
+  // `stage.mode`, not `settings.fitMode`: touch mode overrides the setting to 'fill'
+  // (layout.ts, effectiveFitMode) and the content must be scaled by the same mode the box
+  // was sized by, or the box's ceilings and the content's bound would disagree.
+  return fitScale(w, h, stage.scale, stage.mode, dpr, stage.boxW, stage.boxH);
 }
 
 /**

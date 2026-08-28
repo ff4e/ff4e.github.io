@@ -254,9 +254,10 @@ export function relayout(): void {
   const availW = stageRow?.clientWidth || window.innerWidth;
   const availH = stageRow?.clientHeight || window.innerHeight;
   // Touch mode has no side panel to reserve room for (drawPanel hides the column), so the
-  // 167 native px of panel + gap go back to the game. Measured at 393x852: the row used to
-  // overhang the viewport by 22-93px depending on the room, and now overhangs by at most
-  // 7px — the remainder is the MIN_STAGE_SCALE floor, not the panel (see layout.ts).
+  // 167 native px of panel + gap go back to the game, and the fit mode is forced to 'fill'
+  // (layout.ts, effectiveFitMode). Measured at 393x852: the row used to overhang the
+  // viewport by 22-93px depending on the room, then by 7px once the panel went, and now by
+  // none — the 7 were the MIN_STAGE_SCALE floor, which no longer overruns the width.
   // Asked of `touchUi()` rather than worked out here — one predicate, one place
   // (touchMode.ts) — and the dev-bar override calls this straight after flipping it, so
   // switching modes resizes the game immediately.
@@ -267,6 +268,9 @@ export function relayout(): void {
   // never reach relayout(). `stage.stageW` stays as the ceiling the content is scaled
   // into, so nothing can grow past the logical box; `contentScale` still bounds every
   // room against `stage.boxW`, which is what keeps the box room-INDEPENDENT for scaling.
+  // The HEIGHT is set outright, and it is now the elastic `stage.boxH` rather than a fixed
+  // 600 native px (layout.ts, stageBoxHeight) — on a width-bound viewport that is what
+  // stops the box throwing away the leftover height.
   //
   // Why hug at all: the panel sits beside the box, so a room narrower than the box was
   // pushed away from it by the box's slack — a median 230px and up to 593px of dead gap

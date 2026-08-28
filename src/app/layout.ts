@@ -24,16 +24,34 @@
  *    object-size spread across all 72 tightens slightly, 1.342x -> 1.316x). The
  *    panel's position was NOT the constraint and moving it changes nothing: the
  *    room is centred in the box, and the panel sits beside that box.
+ *  - The box's HEIGHT is elastic on the same terms (`stageBoxHeight`), and that is the
+ *    MIRROR of the width rule rather than a further deviation: the two fire on
+ *    complementary viewports and can never both move. A height-bound viewport has
+ *    `scale = availH / STAGE_H`, so `availH / scale` is exactly STAGE_H and the height
+ *    cannot grow; a width-bound one has no spare width and the WIDTH cannot grow. The
+ *    absence of this half was a real defect and portrait paid for it: at 638x1310 with
+ *    no panel the scale is width-bound at 638/800, the box is 638x479 inside a 638x1310
+ *    area, and ~64% of the height was simply unused. Measured over the 72 rooms it moves
+ *    0 of them on every landscape/desktop viewport tried (1600x1017, 2048x1017, 1280x800,
+ *    852x327) and up to +135% in portrait, and the object-size spread within a mode does
+ *    not change at all (1.342x in 'medium', the same as on the desktop) because it is
+ *    FIT_FACTORS, not the box, that bounds it. Only the 34 rooms taller than the box's
+ *    own 4:3 can gain anything: the other 38 are already at the largest scale the
+ *    viewport allows, because their own WIDTH is what binds.
  *  - **In touch mode there is no side panel**, and every function that reserves its
  *    footprint takes a `panel` flag to say so (default `true` — a mouse is the case
  *    nothing may change for). The touch build replaces the panel's verbs with a bar of
  *    its own (`app/touchButtons.ts`) and drives the fish by swipe, so the column is
  *    hidden outright by `drawPanel` and the 167 native px it was claiming
- *    (`PANEL_FOOTPRINT_W`) go back to the room. On a 393 px phone in portrait that takes
- *    the row's overflow from up to 93 px down to at most 7 px — NOT to zero, and the
- *    remainder is `MIN_STAGE_SCALE`: at that width the scale floors at 0.5, so the
- *    logical box is `STAGE_W x 0.5 = 400` display px and a room wide enough to fill it
- *    still overhangs a 393 px viewport by 7. Pinned in test/layout.test.ts.
+ *    (`PANEL_FOOTPRINT_W`) go back to the room.
+ *  - **Touch mode is also always `fill`** (`effectiveFitMode`). The fit mode is a
+ *    desktop control — the touch Options offers no way to change it — so the stored
+ *    value is whatever a mouse session on the same browser last chose, and letting it
+ *    bound a phone is letting a setting the player cannot see decide how big the game is.
+ *    A phone has no pixels to spare, so it takes all of them; the price is that object
+ *    size varies between rooms there (spread 2.79x rather than 'medium's 1.342x), which
+ *    is the trade 'fill' has always made and is Martin's decision for this device class
+ *    (2026-08-28). The desktop is untouched: `panel` true keeps the player's own mode.
  *  - That box is the SCALING envelope, and it is room-independent. The DOM element
  *    that holds the content (`#stagebox`) is sized to the CONTENT instead, so the
  *    panel sits beside the room rather than beside the box's empty slack — a room
@@ -163,12 +181,17 @@ export const STAGE_GAP = 12;
 export const STAGE_EDGE = 12;
 /** The widest content the stage box ever has to hold (DRAKAR/PUCLIK are 795 native px wide). */
 export const MAX_CONTENT_W = 795;
+/** The tallest content the stage box ever has to hold (PUCLIK is 585 native px tall). */
+export const MAX_CONTENT_H = 585;
 /** Control-panel native size (mirrors PANEL_W/PANEL_H in data/ffp.ts). */
 export const PANEL_NATIVE_W = 155;
 export const PANEL_NATIVE_H = 395;
 /** Legacy alias for the 'medium' fit factor (was the sole 'capped' bound). */
 export const CAPPED_MAX = FIT_FACTORS.medium;
-/** Never shrink the stage below this scale, even on tiny viewports. */
+/**
+ * Never shrink the stage below this scale, even on tiny viewports — up to the point
+ * where the floor would put the box OUTSIDE the viewport (see `computeStageScale`).
+ */
 export const MIN_STAGE_SCALE = 0.5;
 
 /**
@@ -196,6 +219,12 @@ function sideFootprint(panel: boolean): number {
 export interface StageLayout {
   /** Display px per native px for the stage box + panel (constant across rooms). */
   scale: number;
+  /**
+   * The fit mode this layout was sized by — `effectiveFitMode(mode, panel)`, NOT the raw
+   * setting, because touch overrides it. Carried for the same reason as `boxW`: the box
+   * and the content must be scaled by the same one, and only this function knows it.
+   */
+  mode: FitMode;
   /** Gap between stage box and panel, in display px. */
   gap: number;
   /**
@@ -206,6 +235,8 @@ export interface StageLayout {
    * takes it as an argument for exactly that reason.
    */
   boxW: number;
+  /** Stage box HEIGHT IN NATIVE px — `STAGE_H` or taller, per `stageBoxHeight()`. */
+  boxH: number;
   /** Stage box size in display px. */
   stageW: number;
   stageH: number;
@@ -224,13 +255,26 @@ export interface StageLayout {
  * the opposite of the point.
  *
  * `panel` false drops the panel's footprint from that fit — see `sideFootprint`.
+ *
+ * **The floor yields to the width.** `MIN_STAGE_SCALE` exists so a very small window
+ * still shows a usable game rather than collapsing, and it is allowed to overflow the
+ * HEIGHT to do it — a short window letterboxes the box and the player scrolls nothing,
+ * which is the intended trade. Overflowing the WIDTH is a different thing: `.stage` is
+ * `overflow: hidden`, so a row wider than the viewport does not make the room bigger, it
+ * makes a strip of it invisible. That is what a 393 px phone in portrait hit — 393/800 =
+ * 0.491 is below the floor, so the scale was 0.5, the logical box was 400 display px in a
+ * 393 px viewport, and a room wide enough to fill it was clipped by 7 px. Capping the
+ * floor at `availW / footprintW` removes exactly that case and nothing else: on any
+ * viewport where the floor was not already the binding term the expression is unchanged,
+ * and a short-and-wide window still floors at 0.5.
  */
 export function computeStageScale(availW: number, availH: number, panel = true): number {
   const footprintW = STAGE_W + sideFootprint(panel);
   const footprintH = STAGE_H;
   const s = Math.min(availW / footprintW, availH / footprintH);
   if (!Number.isFinite(s) || s <= 0) return MIN_STAGE_SCALE;
-  return Math.max(MIN_STAGE_SCALE, s);
+  const floor = Math.min(MIN_STAGE_SCALE, availW / footprintW);
+  return Math.max(floor, s);
 }
 
 /**
@@ -291,6 +335,58 @@ export function stageBoxWidth(
   return Math.max(STAGE_W, Math.min(stageBoxCeiling(mode), usable));
 }
 
+/**
+ * The same ceiling for the box's HEIGHT, in native px.
+ *
+ * `MAX_CONTENT_H` rather than `MAX_CONTENT_W` is the only difference — once the box can
+ * hold the TALLEST content at the mode's bound, extra height buys nothing, exactly as
+ * extra width does not. The crisp-integer family is viewport-bounded for the reason given
+ * in `stageBoxCeiling`.
+ */
+export function stageBoxHeightCeiling(mode: FitMode): number {
+  if (NATIVE_TARGET[mode] !== undefined) return Infinity;
+  return MAX_CONTENT_H * (FIT_FACTORS[mode] ?? 1);
+}
+
+/**
+ * The fit mode actually in force, given the input device.
+ *
+ * Touch is always `fill`. There is no fit control in the touch Options (`touchOptions.ts`
+ * deliberately offers a short list), so on a phone the stored mode is whatever a mouse
+ * session on the same browser last picked — a setting the player cannot see, deciding how
+ * big the game is on the device with the fewest pixels. `fill` takes every pixel the
+ * viewport allows; measured over the 72 rooms at 638x1310 that puts ALL of them at the
+ * viewport maximum, against 38 before.
+ *
+ * `panel` is the same flag the rest of this file takes, and it is false in exactly one
+ * case — touch mode. Resolved here rather than at each call site so that the box and the
+ * content are sized by the SAME mode: `computeStageLayout` reports it back on
+ * `StageLayout.mode`, and every consumer reads that instead of the raw setting.
+ */
+export function effectiveFitMode(mode: FitMode, panel = true): FitMode {
+  return panel ? mode : 'fill';
+}
+
+/**
+ * The stage box height for a viewport, in native px — `STAGE_H` or taller.
+ *
+ * The mirror of `stageBoxWidth`, and it fires on the complementary viewport: a
+ * height-bound one has `scale = availH / STAGE_H`, so `availH / scale` is STAGE_H exactly
+ * and this returns the floor. Only a WIDTH-bound viewport — a phone in portrait, a tall
+ * narrow window — has leftover height, and there the box's fixed 600 native px were
+ * throwing it away (measured: 638x479 of a 638x1310 area, ~64% of the height unused).
+ *
+ * It does not take `panel`: the panel is a side column and costs width, not height. It
+ * does keep the same `STAGE_EDGE` margin, for the same reason — `#stagebox` clips, and
+ * spending the last pixel means the rounding lands on the content.
+ */
+export function stageBoxHeight(availH: number, scale: number, mode: FitMode): number {
+  if (!Number.isFinite(scale) || scale <= 0) return STAGE_H;
+  const usable = availH / scale - 2 * STAGE_EDGE;
+  if (!Number.isFinite(usable)) return STAGE_H;
+  return Math.max(STAGE_H, Math.min(stageBoxHeightCeiling(mode), usable));
+}
+
 /** Full stage layout (stage box + panel display sizes) for an available area. */
 export function computeStageLayout(
   availW: number,
@@ -298,18 +394,22 @@ export function computeStageLayout(
   mode: FitMode,
   panel = true,
 ): StageLayout {
+  const fit = effectiveFitMode(mode, panel);
   const scale = computeStageScale(availW, availH, panel);
-  const boxW = stageBoxWidth(availW, availH, scale, mode, panel);
+  const boxW = stageBoxWidth(availW, availH, scale, fit, panel);
+  const boxH = stageBoxHeight(availH, scale, fit);
   return {
     scale,
+    mode: fit,
     // Zero when the panel is gone, and both for the same reason: the row has one item
     // left, so there is no gap between anything, and the panel canvas is not drawn at
     // all (drawPanel returns before it reads these). A layout that still reported them
     // would be describing a column that is `display: none`.
     gap: panel ? STAGE_GAP * scale : 0,
     boxW,
+    boxH,
     stageW: boxW * scale,
-    stageH: STAGE_H * scale,
+    stageH: boxH * scale,
     panelW: panel ? PANEL_NATIVE_W * scale : 0,
     panelH: panel ? PANEL_NATIVE_H * scale : 0,
   };
@@ -335,7 +435,8 @@ export function computeStageLayout(
  * `boxW` is the stage box's NATIVE width — `stage.boxW`, which is elastic (see
  * `stageBoxWidth`). It is a parameter and not a read of `STAGE_W` so that every consumer
  * is forced to use the same box the layout actually sized; defaulting to `STAGE_W` keeps
- * the pre-elastic behaviour for callers that genuinely have no layout to hand.
+ * the pre-elastic behaviour for callers that genuinely have no layout to hand. `boxH` is
+ * the same for the height (`stage.boxH`, `stageBoxHeight`), and defaults to `STAGE_H`.
  */
 export function contentScale(
   w: number,
@@ -344,8 +445,9 @@ export function contentScale(
   mode: FitMode,
   dpr = 1,
   boxW: number = STAGE_W,
+  boxH: number = STAGE_H,
 ): number {
-  const fill = Math.min(boxW / w, STAGE_H / h); // grow-to-fill-the-box factor (≥1)
+  const fill = Math.min(boxW / w, boxH / h); // grow-to-fill-the-box factor (≥1)
   const target = NATIVE_TARGET[mode];
   if (target !== undefined) {
     const maxFit = stageScale * fill; // largest CSS scale that still fits the box
