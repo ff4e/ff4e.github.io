@@ -178,8 +178,8 @@ try {
   const inRoom = await barState(p);
   expect(inRoom.visible, 'in a room: the bar is up');
   expect(
-    inRoom.buttons.join(',') === '14,12,13,16,11',
-    `the five buttons send map/save/load/options/swap (${inRoom.buttons.join(',')})`,
+    inRoom.buttons.join(',') === '14,12,13,16,15',
+    `the five buttons send map/save/load/options/restart (${inRoom.buttons.join(',')})`,
   );
   // It reserves space rather than floating over the room: the stage is measured with
   // clientWidth, so a margin is the only thing that both moves the bar out of the way
@@ -291,12 +291,30 @@ try {
   await p.waitForFunction(() => !document.documentElement.hasAttribute('data-touchopts'));
   expect(true, 'Done closes it again');
 
-  // ── Swap (region 11): the active fish changes. Asserted as a CHANGE from whatever it
-  // was, so it does not depend on which fish a room starts with.
-  const before = await p.evaluate(() => window.__ff.showmodeState().activeFish);
-  await tap(p, 11);
-  await p.waitForFunction((b) => window.__ff.showmodeState().activeFish !== b, before);
-  expect(true, `Swap changes the active fish (from ${before})`);
+  // ── Restart (region 15): the room goes back to a fresh attempt. It is on the bar ONLY
+  // because retiring the faithful panel took away its last touch-reachable door — its
+  // other one is the Backspace key, which a phone does not have (touchButtons.ts). It is
+  // also the one destructive button here, so it is worth knowing it does exactly the
+  // panel's verb and not something adjacent.
+  //
+  // Asserted by two effects, because either alone is weak: the attempt counter moves
+  // (`pokus`, the original's own "this is another try"), and the active fish is back to
+  // what the room started with — which is what a rebuild does, and which a mere repaint
+  // would not. The swap in between is what gives the rebuild something to undo; it goes
+  // through `panelAction(11)` rather than a button because Swap no longer HAS one (a tap
+  // on the play area swaps, and test-touchswipe covers that).
+  const startActive = await p.evaluate(() => window.__ff.state().active);
+  const startPokus = await p.evaluate(() => window.__ff.script().pokus);
+  await p.evaluate(() => window.__ff.panelAction(11));
+  await p.waitForFunction((a) => window.__ff.state().active !== a, startActive);
+  await tap(p, 15);
+  await p.waitForFunction((a) => window.__ff.state().active === a, startActive);
+  expect(true, `Restart rebuilds the room (active fish back to ${startActive})`);
+  const nowPokus = await p.evaluate(() => window.__ff.script().pokus);
+  expect(
+    nowPokus === startPokus + 1,
+    `and it counts as a fresh attempt (pokus ${startPokus} -> ${nowPokus})`,
+  );
 
   // ── Save (region 12): a save exists afterwards where none did before.
   await p.evaluate(() => localStorage.removeItem('ff.save.' + window.__ff.roomNum()));

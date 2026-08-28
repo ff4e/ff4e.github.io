@@ -72,5 +72,5 @@ export const TOUCH_REGIONS = {
   save: 12,
   load: 13,
   options: 16,
-  swap: 11,
+  restart: 15,
 } as const;

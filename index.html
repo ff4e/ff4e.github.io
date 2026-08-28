@@ -850,8 +850,9 @@
          only in touch mode and only inside a room (src/app/touchButtons.ts). Each
          `data-region` is a Uovl panel region and is dispatched through the SAME
          `panelAction` table the mouse uses — see that file for why nothing here calls
-         saveGame()/showMap() directly. No direction buttons (touch swipes instead), no
-         Undo (it does not exist yet), no Restart (one mis-tap from losing an attempt).
+         saveGame()/showMap() directly. No direction buttons and no Swap (touch swipes to
+         move and taps to swap), no Undo (it does not exist yet). Restart IS here: the
+         faithful panel is hidden in touch mode and Backspace is its only other door.
          The icons are inline SVG rather than fetched: this bar exists on connections that
          have just been asked for 600 MB of artwork. -->
     <div id="touchbar" hidden>
@@ -871,9 +872,9 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/><circle cx="8" cy="7" r="2.2"/><circle cx="15" cy="12" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg>
         <span>Options</span>
       </button>
-      <button class="tbtn" type="button" data-region="11" aria-label="Swap the active fish">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h16M16 5l4 4-4 4"/><path d="M20 15H4M8 11l-4 4 4 4"/></svg>
-        <span>Swap</span>
+      <button class="tbtn" type="button" data-region="15" aria-label="Restart the room">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3.5V9h-5.5"/></svg>
+        <span>Restart</span>
       </button>
     </div>
     <div id="info"></div>

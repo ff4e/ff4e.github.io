@@ -66,7 +66,7 @@ describe('the touch bar markup', () => {
       Save: TOUCH_REGIONS.save,
       Load: TOUCH_REGIONS.load,
       Options: TOUCH_REGIONS.options,
-      Swap: TOUCH_REGIONS.swap,
+      Restart: TOUCH_REGIONS.restart,
     };
     for (const [label, region] of buttons()) {
       expect(want, `"${label}" is one of the five known buttons`).toHaveProperty(label);
