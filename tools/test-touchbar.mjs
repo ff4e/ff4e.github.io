@@ -530,8 +530,11 @@ try {
   );
 
   // Portrait's tight case takes a viewport small enough that the room fills the height it
-  // is left (320x360: 294px of it against a 240px-tall room, less than one bar of slack).
-  // Same rule as landscape — the bar is the one thing that outranks the centre.
+  // is left (320x360: 294px of it against a 284px-tall room, less than one bar of slack).
+  // Same rule as landscape — the bar is the one thing that outranks the centre — and the
+  // same upper bound, which is the half that bites: the box is sized SHORTER than the
+  // stage and `.stage` re-centres it, so without `#stagebox` growing to fill the height
+  // the room settles `STAGE_EDGE * scale` below the bar rather than against it.
   await settleRoom(player, 320, 360);
   const squat = await roomCentre(player);
   expect(
@@ -539,8 +542,8 @@ try {
     `portrait tight: the bar wins over centring (room top ${squat.top}, bar bottom ${squat.barBottom})`,
   );
   expect(
-    squat.bottom <= squat.viewH,
-    `portrait tight: and the room still fits below it (${squat.top}..${squat.bottom} of ${squat.viewH})`,
+    squat.top <= squat.barBottom + 1 && squat.bottom <= squat.viewH,
+    `portrait tight: and takes no more than it must (${squat.top}..${squat.bottom} of ${squat.viewH})`,
   );
 } catch (e) {
   ok = false;
