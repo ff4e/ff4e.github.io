@@ -23,8 +23,8 @@
  * character of the prefix is about 160 tokens on a file that is read on every change.
  *
  * ── Ordering ─────────────────────────────────────────────────────────────────
- * Module scope must stay side-effect-free: `main.ts` refuses to run on a phone before any
- * other side effect, and an imported module is evaluated before any statement of its
+ * Module scope must stay side-effect-free: `main.ts` sequences its own side effects,
+ * and an imported module is evaluated before any statement of its
  * importer (AGENTS.md, "the module-evaluation trap"). Everything below is a plain value.
  */
 import type { DeskyData } from '../data/desky.js';

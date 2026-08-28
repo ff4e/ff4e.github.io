@@ -7,8 +7,8 @@
  * All four values are stored in `localStorage`, and `persist.ts` states the invariant that
  * `migrateSaves()` must run before any `ff.*` key is read. Module scope runs before any
  * statement of the importer, so reading them at the top of this file would read them
- * before the store had been opened — and before `main.ts`'s device gate, which must
- * precede every other side effect.
+ * before the store had been opened, which is the one ordering rule `persist.ts` calls
+ * an invariant rather than a habit.
  *
  * So each is declared with the default its stored value falls back to, and the real read
  * happens in `initRenderSettings()`, which `main.ts` calls exactly where these

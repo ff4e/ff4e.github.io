@@ -50,7 +50,6 @@ import { newDeathState } from '../core/deathlines.js';
 import { movesOf, lengthOfRecord } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
 import { ROOMS } from '../data/roomTable.js';
-import { isUnsupportedDevice, phoneOverrideActive, showUnsupportedNotice } from './deviceGate.js';
 import { canvas, info, panelCanvas, select } from './dom.js';
 import { ARROWS, KEYS, MLUVI_PRIOR, NOOP_SCRIPT, TETRIS_KEYS } from './keyTables.js';
 import { audio, initAudio } from './audioEngine.js';
@@ -259,29 +258,9 @@ import {
   mapLaunching,
   parchmentReady,
 } from './roomLaunch.js';
-//#region Device gate | anchors: isUnsupportedDevice, phoneOverrideActive, showUnsupportedNotice | Phones are refused here, before any art is fetched — and before every other side effect in the file. The player can override the refusal from the notice itself, which reloads with the flag set. The stage scaling and the tick constants that used to sit with it are in `stageGeometry.ts`.
-
-// Phones are refused here, before a single byte of game ART is fetched. (The engine
-// bundle itself has already been downloaded — this statement is inside it — so the claim
-// is about the ~600 MB of art, not about every byte.) The touch scheme is still being
-// built (deviceGate.ts), so this must come before every other side effect in the module.
-//
-// `phoneOverrideActive` is the player's own "continue anyway", checked at the CALL SITE:
-// `isUnsupportedDevice` answers what the device is, this answers what the player asked
-// for, and only the second may be talked out of the refusal.
-//
-// The never-settling await is what stops the rest of this file: it is a top-level-await
-// module, so there is no function to return from, and throwing would surface a scary
-// console error (and trip the probes' pageerror capture) for what is a normal,
-// intentional refusal.
-if (typeof window !== 'undefined' && isUnsupportedDevice(window) && !phoneOverrideActive(window)) {
-  showUnsupportedNotice(document, window);
-  await new Promise<never>(() => {});
-}
-
 //#region Stage geometry wiring | anchors: initStageGeometry | Hands `stageGeometry.ts` its one name and takes the first stage measurement. The scaling itself is in that module.
-// Immediately after the gate, which is where the stage used to be measured: the window
-// is only read once the device has been accepted, and never at import time.
+// The first side effect in the module, and the first measurement of the stage: the
+// window is read here and never at import time.
 //
 // It takes no arguments: `settings` was its only dependency and now lives in
 // `playerSettings.ts`, which this module imports directly.
@@ -302,7 +281,7 @@ function hideAiCredits(): void {
   if (aiCredits) aiCredits.hide();
   if (canvas.style.display === 'none') canvas.style.display = '';
 }
-//#region Save store + cheats wiring | anchors: openSaveStore, initCheats | Opens `persist.ts` and hands `cheats.ts` its view of the game, after the gate.
+//#region Save store + cheats wiring | anchors: openSaveStore, initCheats | Opens `persist.ts` and hands `cheats.ts` its view of the game.
 const {
   solved,
   cheated,
@@ -411,7 +390,7 @@ initCheats({
 });
 //#region Player settings wiring | anchors: initPlayerSettings | Hands `playerSettings.ts` its two names and loads the persisted options. Subtitle language and the volume buses are in that module.
 // Called HERE, where `const settings = loadSettings()` used to sit: after the save store is
-// open (so the `ff.*` read is legal) and after the device gate.
+// open, which is what makes the `ff.*` read legal (persist.ts).
 initPlayerSettings({
   get ensureDeskyData() {
     return ensureDeskyData;
@@ -436,7 +415,7 @@ initPlayerSettings({
 //    behaviour (vector subtitles, the anti-flash load hold).
 //#region Render settings wiring | anchors: initRenderSettings | Hands `renderSettings.ts` its one name and loads the four persisted choices. The tier/backend switches are in that module.
 // Called HERE, where the declarations used to sit: after the save store is open, which is
-// what makes reading the `ff.*` keys legal (persist.ts), and after the device gate.
+// what makes reading the `ff.*` keys legal (persist.ts).
 initRenderSettings({
   get setInfo() {
     return setInfo;

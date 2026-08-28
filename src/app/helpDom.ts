@@ -31,7 +31,7 @@
  * there because enlarging a bitmap only blurs it; text scales as text.
  *
  * Module scope is side-effect-free (see `dom.ts`): `createElement` only, nothing attached
- * and nothing measured until `main.ts` has run its device gate.
+ * and nothing measured until `main.ts` calls into this module.
  */
 import { helpPages, type HelpBlock, type HelpLang, type HelpPageContent } from '../data/helpText.js';
 import { canvas, ctx, helpPageEl } from './dom.js';

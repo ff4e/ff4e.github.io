@@ -7,17 +7,18 @@
  * no setter has to be exported.
  *
  * ── The one thing to be careful about ─────────────────────────────────────────
- * `main.ts` refuses to run on a phone (`deviceGate.ts`) BEFORE anything else happens,
- * deliberately: "this must come before every other side effect in the module". An
- * imported module is evaluated before any of its importer's statements, so anything
- * here that mutated the document would jump ahead of that refusal.
+ * `main.ts` sequences its own side effects deliberately, and an imported module is
+ * evaluated before any of its importer's statements, so anything here that mutated the
+ * document would jump ahead of that sequence. (It used to jump ahead of something
+ * sharper still: `main.ts` refused to run on a phone before anything else happened. The
+ * refusal is gone — see `deviceGate.ts` — but the ordering it enforced is still what
+ * this file's shape is for.)
  *
  * So this module is split in two:
  *   - Everything at module scope is side-effect-free as far as the page is concerned:
  *     `getElementById` reads, and `createElement` for elements that stay DETACHED.
  *   - `buildStage()` does every document mutation — the inserts, the appends, the
- *     styles — and `main.ts` calls it at exactly the point that code used to run,
- *     which is after the gate.
+ *     styles — and `main.ts` calls it at exactly the point that code used to run.
  * Keep that division. Moving one `appendChild` up here would be silent and wrong.
  */
 
@@ -91,8 +92,8 @@ export const fatalEl = document.getElementById('fatal') as HTMLElement | null;
 /**
  * Assemble the stage: nest #screen and its two overlays inside the stage box.
  *
- * Called from `main.ts` at the point this code used to sit — after the device gate,
- * before anything that measures or draws. Not done at module scope on purpose; see
+ * Called from `main.ts` at the point this code used to sit — before anything that
+ * measures or draws. Not done at module scope on purpose; see
  * the header.
  */
 export function buildStage(): void {

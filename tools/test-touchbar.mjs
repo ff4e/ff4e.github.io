@@ -19,7 +19,9 @@
  *
  * It runs on a plain desktop context with `?touch=on`, deliberately: the touch UI has to
  * be reachable that way (it is the dev override's whole purpose), and it means this probe
- * is not also a test of Chromium's touch emulation, which test-rotate.mjs already covers.
+ * is not also a test of Chromium's touch emulation, which test-phone-boots.mjs (a phone
+ * reaches touch mode on its own) and test-touchswipe.mjs (a real touch pointer stream)
+ * cover between them.
  */
 import { chromium } from 'playwright';
 import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';

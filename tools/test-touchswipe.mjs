@@ -5,7 +5,8 @@
  * and the browser's own behaviour around it: which compatibility mouse events a moved
  * touch produces, and whether the page tries to scroll instead of reporting the drag.
  *
- * It builds its own context with `hasTouch` — the pattern `tools/test-rotate.mjs` uses,
+ * It builds its own context with `hasTouch` — the pattern `tools/test-phone-boots.mjs`
+ * uses,
  * and for the same reason: touch capability is a browser-CONTEXT option, so `withApp`
  * cannot express it. That is also why this is not folded into `tools/test-touchbar.mjs`
  * despite the shared `?touch=on` setup: that probe runs on a plain desktop context on

@@ -57,8 +57,8 @@ let host!: GlPlumbingHost;
  *
  * The listeners are attached HERE rather than at module scope. An imported module is
  * evaluated before any statement of its importer, so registering them at module scope
- * put them ahead of main.ts's phone gate — which is supposed to precede every side
- * effect. They were harmless there (glCanvas is detached until buildStage() runs, and a
+ * put them ahead of everything main.ts sequences, which module scope must never do.
+ * They were harmless there (glCanvas is detached until buildStage() runs, and a
  * detached canvas cannot lose a context it never had), but "harmless because of a
  * second fact" is a worse invariant than "does not happen". Called once, during boot.
  */

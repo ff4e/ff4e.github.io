@@ -16,9 +16,8 @@
  * ── Ordering ─────────────────────────────────────────────────────────────────
  * The three listeners this file installs (the fatal-screen reload button, and the
  * boot-failure `error` / `unhandledrejection` traps) are registered from
- * `initLoadingUi()`, not at module scope: `main.ts` refuses to run on a phone before any
- * other side effect, and an imported module is evaluated before any statement of its
- * importer. See AGENTS.md, "the module-evaluation trap".
+ * `initLoadingUi()`, not at module scope: `main.ts` sequences its own side effects, and
+ * an imported module is evaluated before any statement of its importer. See AGENTS.md, "the module-evaluation trap".
  */
 import { mapArtHolding, mapPresented, roomArtPending } from './art.js';
 import { roomEntryHeld } from './roomLoad.js';
@@ -290,7 +289,7 @@ export function relayout(): void {
 // before the map on first run, and replayable from the map's top-left corner.
 
 /**
- * Register the fatal-screen handlers. Call once, from `main.ts`, after the device gate.
+ * Register the fatal-screen handlers. Call once, from `main.ts`, during boot wiring.
  *
  * It took a one-member host until `booted` got an owner in `stageState.ts`; now there is
  * nothing to hand over, only listeners that must not be armed at import time.

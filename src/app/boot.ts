@@ -10,7 +10,7 @@
  *
  * This is a function rather than module-scope top-level await on purpose. An imported
  * module is evaluated before any statement of its importer, so at module scope this
- * would run before `main.ts`'s device gate and before `migrateSaves()`. `runBoot()` is
+ * would run ahead of everything `main.ts` sequences, `migrateSaves()` included. `runBoot()` is
  * awaited from `main.ts` at exactly the point these statements used to sit.
  */
 import { beginMapArt, curNum, mapArtHolding } from './art.js';

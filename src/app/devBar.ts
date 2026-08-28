@@ -13,8 +13,8 @@
  * ── Ordering ─────────────────────────────────────────────────────────────────
  * Every statement in this file used to run at `main.ts`'s module scope, which is why the
  * whole thing is inside `initDevBar()`: an imported module is evaluated before any
- * statement of its importer, so leaving it at module scope would wire the DOM ahead of the
- * device gate. See AGENTS.md, "the module-evaluation trap".
+ * statement of its importer, so leaving it at module scope would wire the DOM ahead of
+ * everything `main.ts` sequences. See AGENTS.md, "the module-evaluation trap".
  */
 import { ROOMS } from '../data/roomTable.js';
 import { isFitMode } from './layout.js';
