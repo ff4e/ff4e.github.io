@@ -11,13 +11,17 @@ import {
   computeStageScale,
   computeStageLayout,
   contentScale,
+  effectiveFitMode,
   stageBoxCeiling,
+  stageBoxHeight,
+  stageBoxHeightCeiling,
   stageBoxWidth,
   STAGE_W,
   STAGE_H,
   STAGE_GAP,
   STAGE_EDGE,
   MAX_CONTENT_W,
+  MAX_CONTENT_H,
   PANEL_NATIVE_W,
   PANEL_NATIVE_H,
   PANEL_FOOTPRINT_W,
@@ -50,8 +54,16 @@ describe('computeStageScale', () => {
     expect(s).toBeCloseTo(3, 5);
   });
 
-  it('never collapses below the floor on a tiny viewport', () => {
-    expect(computeStageScale(1, 1)).toBe(MIN_STAGE_SCALE);
+  it('never collapses to nothing on a tiny viewport', () => {
+    // The floor is `min(MIN_STAGE_SCALE, availW / footprintW)`: 0.5 unless the viewport is
+    // narrower than the box itself, where a smaller game beats a clipped one (see
+    // computeStageScale). So a 1x1 viewport no longer reports 0.5 — but it is still
+    // positive and finite, which is all anything downstream needs of it.
+    const tiny = computeStageScale(1, 1);
+    expect(tiny).toBeGreaterThan(0);
+    expect(Number.isFinite(tiny)).toBe(true);
+    // A viewport wide enough for the box at 0.5 still gets the floor, however short.
+    expect(computeStageScale(2000, 1)).toBe(MIN_STAGE_SCALE);
     expect(computeStageScale(0, 0)).toBe(MIN_STAGE_SCALE);
   });
 });
@@ -60,7 +72,7 @@ describe('computeStageLayout', () => {
   it('derives panel + stage display sizes from one scale', () => {
     const l = computeStageLayout(4000, 3000, 'medium');
     expect(l.stageW).toBeCloseTo(l.boxW * l.scale, 5);
-    expect(l.stageH).toBeCloseTo(STAGE_H * l.scale, 5);
+    expect(l.stageH).toBeCloseTo(l.boxH * l.scale, 5);
     expect(l.panelW).toBeCloseTo(PANEL_NATIVE_W * l.scale, 5);
     expect(l.gap).toBeCloseTo(STAGE_GAP * l.scale, 5);
   });
@@ -229,9 +241,10 @@ describe('the panel footprint — retired in touch mode', () => {
     // under test. If you ever simplify this to use that constant, the guarantee the whole
     // touch series rests on stops being checked anywhere.
     for (const [w, h] of VIEWPORTS) {
+      const footprint = STAGE_W + STAGE_GAP + PANEL_NATIVE_W;
       const expected = Math.max(
-        MIN_STAGE_SCALE,
-        Math.min(w / (STAGE_W + STAGE_GAP + PANEL_NATIVE_W), h / STAGE_H),
+        Math.min(MIN_STAGE_SCALE, w / footprint),
+        Math.min(w / footprint, h / STAGE_H),
       );
       expect(computeStageScale(w, h)).toBeCloseTo(expected, 9);
       const l = computeStageLayout(w, h, 'medium');
@@ -301,22 +314,177 @@ describe('the panel footprint — retired in touch mode', () => {
     }
   });
 
-  it('does NOT fit a 393px phone in portrait — the floor is what is left over there', () => {
-    // Retiring the panel is most of the phone-portrait clip, and deliberately not all of
-    // it. Measured at 393x852, touch on: rooms overhang the viewport by 22-93px with the
-    // panel and by at most 7px without it. The 7 are MIN_STAGE_SCALE, not the panel:
-    // 393/800 = 0.491 is below the floor, so the scale is 0.5 whatever the width says,
-    // and the logical box is 400 display px in a 393px viewport. Only a room wide enough
-    // to fill the box pays it (795-native-wide ones do; KOSTE at 540 has 32px of slack).
-    // Asserted so a change that makes it WORSE fails, and so the residual is written
-    // down rather than remembered.
+  it('and now FITS a 393px phone in portrait — the floor no longer overruns the width', () => {
+    // Retiring the panel was most of the phone-portrait clip and deliberately not all of
+    // it: 393/800 = 0.491 is below MIN_STAGE_SCALE, so the scale was 0.5 whatever the
+    // width said, the logical box was 400 display px in a 393px viewport, and a room wide
+    // enough to fill it was cut by 7px. The floor now yields to the width
+    // (`computeStageScale`), because clipping a room is not a smaller evil than shrinking
+    // it by 1.8%. Asserted as an equality: the box is the viewport, to the pixel.
     const l = computeStageLayout(393, 786, 'medium', false);
-    expect(l.scale).toBe(MIN_STAGE_SCALE);
-    expect(l.stageW).toBeCloseTo(STAGE_W * MIN_STAGE_SCALE, 9);
-    expect(l.stageW - 393).toBeCloseTo(7, 9);
-    // With the panel it was very much worse — that part IS fixed.
+    expect(l.scale).toBeLessThan(MIN_STAGE_SCALE);
+    expect(l.scale).toBeCloseTo(393 / STAGE_W, 9);
+    expect(l.stageW).toBeCloseTo(393, 9);
+    // With the panel the row now fits too — the floor was overrunning that case as well —
+    // but it costs the room 167 native px, which is the whole reason touch retires it.
     const panelled = computeStageLayout(393, 786, 'medium', true);
-    expect(panelled.stageW + panelled.gap + panelled.panelW - 393).toBeGreaterThan(85);
+    expect(panelled.stageW + panelled.gap + panelled.panelW).toBeLessThanOrEqual(393 + 1e-6);
+    expect(panelled.scale).toBeLessThan(l.scale);
+    expect(l.stageW - panelled.stageW).toBeGreaterThan(60);
+  });
+
+  it('keeps the floor everywhere it was not the width that was short', () => {
+    // The floor's job — a small window shows a usable game rather than collapsing — is
+    // unchanged; only the case where honouring it put the box OUTSIDE the viewport moved.
+    // A short, wide window still floors at 0.5 and still letterboxes.
+    expect(computeStageScale(1500, 200, false)).toBe(MIN_STAGE_SCALE);
+    expect(computeStageScale(0, 0)).toBe(MIN_STAGE_SCALE);
+    for (const [w, h] of VIEWPORTS) {
+      // Every room the game has, on every viewport in this list: nothing is ever drawn
+      // wider than the viewport, which is the property the 7px violated.
+      const l = computeStageLayout(w, h, 'medium', false);
+      expect(l.stageW).toBeLessThanOrEqual(w + 1e-6);
+    }
+  });
+});
+
+/**
+ * The stage box's HEIGHT is elastic on the same terms as its width, and the pair fire on
+ * complementary viewports — which is what makes this safe for the mouse game rather than
+ * merely measured to be safe. See the header of layout.ts.
+ */
+describe('stageBoxHeight — the other elastic axis', () => {
+  const HEIGHT_BOUND = [
+    [2048, 1017],
+    [3440, 1400],
+    [1600, 900],
+  ] as const;
+  const WIDTH_BOUND = [
+    [900, 1000],
+    [638, 1310],
+    [393, 786],
+  ] as const;
+
+  it('is STAGE_H on any height-bound viewport — there is no leftover height to spend', () => {
+    // Not a measurement but an identity: height-bound means `scale = availH / STAGE_H`,
+    // so `availH / scale` is STAGE_H and the box cannot grow. This is why the change
+    // cannot reach a landscape desktop window.
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of HEIGHT_BOUND) {
+        const s = computeStageScale(w, h);
+        expect(s).toBeCloseTo(h / STAGE_H, 9); // the premise
+        expect(stageBoxHeight(h, s, mode)).toBe(STAGE_H);
+        expect(computeStageLayout(w, h, mode).boxH).toBe(STAGE_H);
+      }
+    }
+  });
+
+  it('never goes below STAGE_H, so nothing is ever smaller than it was', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of [...HEIGHT_BOUND, ...WIDTH_BOUND]) {
+        for (const panel of [true, false]) {
+          expect(computeStageLayout(w, h, mode, panel).boxH).toBeGreaterThanOrEqual(STAGE_H);
+        }
+      }
+    }
+  });
+
+  it('grows into the leftover height of a width-bound viewport', () => {
+    for (const [w, h] of WIDTH_BOUND) {
+      const l = computeStageLayout(w, h, 'fill', false);
+      expect(l.boxH).toBeGreaterThan(STAGE_H);
+      // It spends the leftover, and keeps the same edge margin the width rule keeps.
+      expect(l.boxH).toBeCloseTo(h / l.scale - 2 * STAGE_EDGE, 9);
+    }
+  });
+
+  it('stops at the tallest content the mode can enlarge, mirroring the width ceiling', () => {
+    expect(stageBoxHeightCeiling('medium')).toBeCloseTo(MAX_CONTENT_H * FIT_FACTORS.medium, 9);
+    expect(stageBoxHeightCeiling('large')).toBeCloseTo(MAX_CONTENT_H * FIT_FACTORS.large, 9);
+    expect(stageBoxHeightCeiling('fixed')).toBeLessThan(STAGE_H); // never widens; falls out
+    for (const mode of ['native', 'x1', 'x2', 'x3', 'x4'] as const) {
+      expect(stageBoxHeightCeiling(mode)).toBe(Infinity);
+    }
+    // A viewport tall enough to blow past the ceiling is held at it. `panel` true: touch
+    // is 'fill', whose ceiling is the viewport by design.
+    expect(computeStageLayout(800, 100000, 'medium', true).boxH).toBeCloseTo(
+      stageBoxHeightCeiling('medium'),
+      9,
+    );
+  });
+
+  it('never lets content overflow the box, on either axis', () => {
+    for (const mode of FIT_MODES) {
+      for (const [vw, vh] of [...HEIGHT_BOUND, ...WIDTH_BOUND]) {
+        const l = computeStageLayout(vw, vh, mode, false);
+        for (const [w, h] of ROOMS) {
+          const s = contentScale(w, h, l.scale, l.mode, 1, l.boxW, l.boxH);
+          expect(w * s).toBeLessThanOrEqual(l.boxW * l.scale + 1e-6);
+          expect(h * s).toBeLessThanOrEqual(l.boxH * l.scale + 1e-6);
+          // …and the box is inside the viewport, so neither is the room.
+          expect(w * s).toBeLessThanOrEqual(vw + 1e-6);
+          expect(h * s).toBeLessThanOrEqual(vh + 1e-6);
+        }
+      }
+    }
+  });
+
+  it('leaves the fill term alone for callers with no layout to hand', () => {
+    // `boxH` defaults to STAGE_H exactly as `boxW` defaults to STAGE_W, so every existing
+    // caller and every assertion above that omits it describes the pre-elastic box.
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of ROOMS) {
+        expect(contentScale(w, h, 2, mode, 1, STAGE_W)).toBe(
+          contentScale(w, h, 2, mode, 1, STAGE_W, STAGE_H),
+        );
+      }
+    }
+  });
+});
+
+/**
+ * Touch takes every pixel: the fit mode is a desktop control, so on a phone the stored
+ * value is a setting the player cannot see. See `effectiveFitMode`.
+ */
+describe('effectiveFitMode — touch is always fill', () => {
+  it('leaves the mouse game on the player’s own mode', () => {
+    for (const mode of FIT_MODES) {
+      expect(effectiveFitMode(mode, true)).toBe(mode);
+      expect(effectiveFitMode(mode)).toBe(mode); // the default is the mouse
+    }
+  });
+
+  it('overrides every mode to fill when there is no panel', () => {
+    for (const mode of FIT_MODES) {
+      expect(effectiveFitMode(mode, false)).toBe('fill');
+    }
+  });
+
+  it('is what the layout reports, and what sized its box', () => {
+    for (const mode of FIT_MODES) {
+      expect(computeStageLayout(1600, 1017, mode, true).mode).toBe(mode);
+      const touch = computeStageLayout(638, 1310, mode, false);
+      expect(touch.mode).toBe('fill');
+      // Sized by the reported mode, not the requested one — that is the whole point of
+      // carrying it: `contentScaleFor` reads `stage.mode` and must agree with the box.
+      expect(touch.boxW).toBe(stageBoxWidth(638, 1310, touch.scale, 'fill', false));
+      expect(touch.boxH).toBe(stageBoxHeight(1310, touch.scale, 'fill'));
+    }
+  });
+
+  it('puts every room at the largest scale a portrait phone allows', () => {
+    // The defect this series is about: at 638x1310 the box was 638x479 of a 638x1310 area
+    // and 'medium'/'large'/'fill' were bit-identical, so the setting did nothing at all.
+    for (const [vw, vh] of [
+      [638, 1310],
+      [393, 786],
+    ] as const) {
+      const l = computeStageLayout(vw, vh, 'medium', false);
+      for (const [w, h] of ROOMS) {
+        const s = contentScale(w, h, l.scale, l.mode, 1, l.boxW, l.boxH);
+        expect(s).toBeCloseTo(Math.min(vw / w, vh / h), 9);
+      }
+    }
   });
 });
 

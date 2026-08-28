@@ -199,15 +199,15 @@ try {
     `and it is claiming no width at all — column, not canvas (${tRow.panelW}px)`,
   );
 
-  // ── The clipping this mostly fixes. A phone-width portrait viewport could not hold the
-  // row: measured at 393x852 with touch OFF, rooms overhang it by 22px (KOSTE), 84px and
-  // 93px (the 795-wide ones), and `#stagebox`'s `overflow: hidden` cut the difference off.
-  // The 167 native px of panel + gap were the bulk of it, so retiring the panel is the
-  // bulk of the fix — but NOT all: `MIN_STAGE_SCALE` floors the scale at 0.5 here, so the
-  // logical box is 400px in a 393px viewport and a room wide enough to fill it still
-  // overhangs by 7. That residual is pinned in test/layout.test.ts, where it is arithmetic
-  // rather than a second room to load. KOSTE (540 native) does not fill the box, so this
-  // assertion is about KOSTE and says so.
+  // ── The clipping this fixes. A phone-width portrait viewport could not hold the row:
+  // measured at 393x852 with touch OFF, rooms overhang it by 22px (KOSTE), 84px and 93px
+  // (the 795-wide ones), and `#stagebox`'s `overflow: hidden` cut the difference off. The
+  // 167 native px of panel + gap were the bulk of it, and `MIN_STAGE_SCALE` was the rest:
+  // it floored the scale at 0.5, so the logical box was 400px in a 393px viewport and a
+  // room wide enough to fill it still overhung by 7. The floor now yields to the width, so
+  // the residual is gone; the arithmetic for both halves is in test/layout.test.ts.
+  // Resized rather than opened in a context of its own: the viewport is a page property,
+  // and a second context would pay the boot again to assert two numbers.
   // Resized rather than opened in a context of its own: the viewport is a page property,
   // and a second context would pay the boot again to assert two numbers.
   await p.setViewportSize({ width: 393, height: 852 });
@@ -221,8 +221,11 @@ try {
   // ── And the room genuinely gets that width, measured end to end rather than in the
   // layout maths (test/layout.test.ts has the arithmetic). It takes a WIDTH-bound
   // viewport to show: where the height is what limits the scale, the panel's 167px were
-  // never what the room was short of. 900x1000 is width-bound (900/800 < 1000/600) and
-  // far enough above MIN_STAGE_SCALE that the floor, not the maths, is not what decides.
+  // never what the room was short of. 900x1000 is width-bound (900/800 < 1000/600).
+  // Two things now separate the two numbers, not one: the panel's width, and the fit mode
+  // — touch is always 'fill' (layout.ts, effectiveFitMode) and a width-bound viewport also
+  // hands the box its leftover HEIGHT (stageBoxHeight). Both move the room the same way,
+  // so the assertion is still one-directional; it just no longer isolates the panel.
   await p.setViewportSize({ width: 900, height: 1000 });
   await settleBox(p, portrait.roomW);
   const noPanel = await rowState(p);
