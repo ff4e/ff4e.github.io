@@ -23,7 +23,8 @@ import { setSolveSpeed, solveStatus } from './solveMode.js';
 import { solutionFor } from '../rooms/index.js';
 import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn, solveSpeedSelect, touchSelect } from './dom.js';
 import { relayout } from './loadingUi.js';
-import { ui } from './screenState.js';
+import { closeMapOverlay } from './mapNav.js';
+import { O_NORMAL, O_SC_DOWN, ui } from './screenState.js';
 import { settings } from './playerSettings.js';
 import { refreshTouchMode } from './touchButtons.js';
 import { readTouchOverride, writeTouchOverride } from './touchMode.js';
@@ -118,6 +119,14 @@ export function initDevBar(h: DevBarHost): void {
       const v = el.value;
       writeTouchOverride(window, v === 'on' || v === 'off' ? v : 'auto');
       refreshTouchMode();
+      // Put the FAITHFUL Options face back to a known state on the way through. Turning
+      // touch on while it is open would strand it: the hand-over in `togglePanelOptions`
+      // returns before the branch that scrolls it back down, so nothing could close it
+      // until the next room load. This control is the only way that can happen — a real
+      // device never changes touch mode mid-session — but the series' invariant is that
+      // the two Options are never both on screen, so it is unwound rather than excepted.
+      if (ui.mapOverlay === 'options') closeMapOverlay();
+      else if (ui.ostav !== O_NORMAL) ui.ostav = O_SC_DOWN;
       relayout();
       wake();
     });

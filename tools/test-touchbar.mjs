@@ -251,6 +251,19 @@ try {
   await p.selectOption('#touchmode', 'on');
   await settle(p, true);
   expect((await barState(p)).visible, 'and back on again');
+
+  // ── Turning the override ON while the CANVAS Options face is open must not strand it.
+  // The hand-over returns before the branch that scrolls that face back down, so without
+  // an unwind nothing could close it until the next room load and both Options would be
+  // on screen at once — the one thing this series promises cannot happen. Only reachable
+  // from this control, which is exactly why nothing else was watching it.
+  await p.selectOption('#touchmode', 'off');
+  await p.waitForFunction(() => !document.documentElement.hasAttribute('data-touch'));
+  await p.evaluate(() => window.__ff.panelAction(16));
+  await p.waitForFunction(() => window.__ff.optionsOpen());
+  await p.selectOption('#touchmode', 'on');
+  await p.waitForFunction(() => !window.__ff.optionsOpen());
+  expect(true, 'switching to touch closes the canvas options face behind it');
 } catch (e) {
   ok = false;
   console.log('  FAIL threw: ' + (e?.message ?? e));
