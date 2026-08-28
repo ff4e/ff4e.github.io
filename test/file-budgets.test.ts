@@ -56,10 +56,17 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // than calling saveGame()/showMap() themselves, so the alternative to these seven
   // lines was not fewer lines, it was a second copy of what a panel press means.
   //
-  // Raised 2 228 -> 2 230 for swipe-to-move: an import and a bare `initTouchSwipe()`.
-  // It takes no host at all — a swipe is delivered as a synthetic arrow keydown, so it
-  // reaches the router already in this file rather than needing a name handed out of it.
-  ['src/app/main.ts', 2230],
+  // Raised 2 228 -> 2 233 for the touch Options, and it is the same seven lines plus
+  // two: one import, and a second `init*` call against the SAME host object, which is
+  // why the wiring block became a named const rather than a second literal. The touch
+  // Options needs exactly the name the buttons already needed — `panelAction` — because
+  // its sliders dispatch through regions 17-19 like everything else.
+  //
+  // 2 233 -> 2 235 for the touch gestures, which is an import and a bare
+  // `initTouchSwipe()`. That one takes no host at all: a swipe is delivered as a
+  // synthetic arrow keydown, so it reaches the router that already lives here rather
+  // than needing a name handed out of it. Nothing about either screen is in this file.
+  ['src/app/main.ts', 2235],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
@@ -163,7 +170,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // out of it into a named function. That is the whole of the growth — `drawCredits` got
   // shorter, not longer. If this file takes on a third overlay, the credits are the
   // coherent piece to lift out (load + hold + a draw branch per tier), not the map.
-  ['src/app/mapNav.ts', 580],
+  //
+  // 580 -> 583 for the touch Options hand-over: the map corner is one of the two doors
+  // into the Options face, so a touch device has to be turned away here as well as in
+  // `panel.ts`. The guard is three lines; the rest is the note on what deliberately is
+  // NOT set with it (no `mapOverlay`, so the panel column never floats over the map),
+  // which is the part a later reader would otherwise have to reconstruct.
+  ['src/app/mapNav.ts', 583],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak

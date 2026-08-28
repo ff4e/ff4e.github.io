@@ -120,6 +120,7 @@ import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDr
 import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { initTouchButtons } from './touchButtons.js';
+import { initTouchOptions } from './touchOptions.js';
 import { initTouchSwipe } from './touchSwipe.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
@@ -971,12 +972,16 @@ initPanel({
   },
 });
 
-//#region Touch controls wiring | anchors: initTouchButtons, initTouchSwipe | Hands `touchButtons.ts` the panel's dispatch table, and arms the swipe gestures. What the bar sends, when it is up, and what a swipe IS are in those modules.
-initTouchButtons({
+//#region Touch controls wiring | anchors: initTouchButtons, initTouchOptions, initTouchSwipe | Hands the touch modules the panel's dispatch table and arms the swipe gestures. What the bar sends, what the plain-HTML Options looks like, and what a gesture IS are in those modules.
+// One host for the two that need one; the gestures need none, being a synthetic arrow
+// keydown that reaches the router already in this file.
+const touchHost = {
   get panelAction() {
     return panelAction;
   },
-});
+};
+initTouchButtons(touchHost);
+initTouchOptions(touchHost);
 initTouchSwipe();
 
 //#region Map drawing wiring | anchors: initMapDraw | Hands `mapDraw.ts` the four names it needs, all of them the persisted record the map is a view of. The drawing is in that module.
