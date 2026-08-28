@@ -431,13 +431,50 @@
       /* No :hover rule: on a touch screen it sticks after the tap, leaving the last
          button lit as if it were still held. Pressed state only. */
       .tbtn:active { background: #24414c; border-color: #6cc; }
+      /* ── Centring the room on the SCREEN, not on what the bar left over ──
+         The margin above reserves the bar's space by shrinking `.stage`'s own box, and
+         `.stage` centres its content inside THAT box — so "centred" meant centred in
+         [barWidth, viewport], which puts the room half a bar's width off true centre
+         (+36px landscape, +33px portrait; measured, and exactly what a player sees).
+         The room should sit on the viewport's centre, and only be pushed off it when
+         there is not enough room to clear the bar as well:
+
+             nearEdge = max(barSize, (viewport - roomSize) / 2)
+
+         That is a one-sided clamp, which `justify-content`/`align-items` cannot express
+         — they always centre within the box they are given. A pair of flex SPACERS can:
+         two `flex: 1 1 0` items split the free space evenly (which is what centring is),
+         a `min-*` on the near one is the clamp, and a negative margin of one whole bar on
+         that same spacer is what shifts the split from the shrunk box back onto the
+         viewport. The three together resolve to exactly `-min(barSize/2, slack/2)` — the
+         full half-bar correction while there is slack, tapering to nothing when the room
+         has to hug the bar. Deliberately CSS and not a computed offset in `relayout()`:
+         the box hugs its content, and a room change never reaches `relayout()` (see the
+         comment there), so a JS number would go stale on the next room.
+
+         The two orientations clamp on DIFFERENT elements, because that is where the
+         slack physically is. Landscape: the box hugs the room horizontally, so the room's
+         own left gap is `.stage`'s. Portrait: the box is handed the whole height and the
+         room is letterboxed INSIDE it, so `.stage` has almost no vertical slack to give
+         and the correction has to happen in `#stagebox`, around the room itself. */
       @media (orientation: landscape) {
         #touchbar { top: 0; left: 0; bottom: 0; width: 72px; flex-direction: column; }
         html[data-touchbar] .stage { margin-left: 72px; }
+        html[data-touchbar] .stage::before {
+          content: ''; flex: 1 1 0; min-width: 72px; margin-left: -72px;
+        }
+        html[data-touchbar] .stage::after { content: ''; flex: 1 1 0; }
       }
       @media (orientation: portrait) {
         #touchbar { left: 0; right: 0; top: 0; height: 66px; flex-direction: row; }
         html[data-touchbar] .stage { margin-top: 66px; }
+        /* `wrap` is the box's only in-flow child, so turning the box's main axis
+           vertical costs nothing and lets the same two spacers work on the height. */
+        html[data-touchbar] #stagebox { flex-direction: column; }
+        html[data-touchbar] #stagebox::before {
+          content: ''; flex: 1 1 0; min-height: 66px; margin-top: -66px;
+        }
+        html[data-touchbar] #stagebox::after { content: ''; flex: 1 1 0; }
       }
       /* ── The touch Options ────────────────────────────────────────────────
          Plain HTML controls over the same settings the panel's Options face

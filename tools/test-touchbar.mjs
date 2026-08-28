@@ -79,6 +79,37 @@ const rowState = (p) =>
     };
   });
 
+/**
+ * Where the ROOM's centre lands, against the screen's, and how close it comes to the bar.
+ *
+ * `#stagebox`/`#panelcol` are no use for this: the box hugs the room horizontally but is
+ * handed the whole HEIGHT and letterboxes the room inside it, so its centre is the room's
+ * on one axis only. `#screen` is the room. Measured through `clientLeft`/`clientWidth`
+ * rather than the bounding rect, which includes the canvas's 1px border — a pixel that
+ * `#stagebox`'s `overflow: hidden` clips and the player never sees, but that would show
+ * up here as a one-pixel overlap of the bar.
+ */
+const roomCentre = (p) =>
+  p.evaluate(() => {
+    const el = document.getElementById('screen');
+    const r = el.getBoundingClientRect();
+    const bar = document.getElementById('touchbar').getBoundingClientRect();
+    const left = r.left + el.clientLeft;
+    const top = r.top + el.clientTop;
+    return {
+      dx: Math.round(left + el.clientWidth / 2 - window.innerWidth / 2),
+      dy: Math.round(top + el.clientHeight / 2 - window.innerHeight / 2),
+      left: Math.round(left),
+      top: Math.round(top),
+      right: Math.round(left + el.clientWidth),
+      bottom: Math.round(top + el.clientHeight),
+      barRight: Math.round(bar.right),
+      barBottom: Math.round(bar.bottom),
+      viewW: window.innerWidth,
+      viewH: window.innerHeight,
+    };
+  });
+
 async function open(query) {
   const ctx = await browser.newContext({ viewport: { width: 1100, height: 620 } });
   const p = await ctx.newPage();
@@ -127,6 +158,44 @@ const settleBox = (p, was) =>
     (w) => Math.round(document.getElementById('stagebox').getBoundingClientRect().width) !== w,
     was,
   );
+
+/**
+ * Resize, and wait for the new size to reach the ROOM.
+ *
+ * `settleBox` above is no use for the centring block, twice over: it waits for a WIDTH to
+ * change, so a resize that only moves the height never satisfies it, and a rect that has
+ * merely stopped moving is not the same as a rect that is RIGHT — `#screen` sits at the
+ * canvas default of 300x150 until the first draw after `enter()`, which is stable, wrong,
+ * and (being centred like anything else) passes a centring assertion vacuously.
+ *
+ * So it waits for two things: that the room's rect has actually MOVED (the same idiom as
+ * `settleBox` — `relayout()` runs off the resize event, which is not ordered against this
+ * poll, so "the new size arrived" cannot be assumed from `innerWidth` alone), and that the
+ * DOM then agrees with the app's own layout — `roomGeom()` is what `relayout()` computed,
+ * the canvas takes it in the room's draw, and the two match only once both have caught up.
+ * Every viewport this is called with therefore has to change the room's size.
+ */
+const settleRoom = async (p, width, height) => {
+  const was = await p.evaluate(() => {
+    const el = document.getElementById('screen');
+    return [el.clientWidth, el.clientHeight].join(',');
+  });
+  await p.setViewportSize({ width, height });
+  await p.waitForFunction(
+    ([w, h]) => window.innerWidth === w && window.innerHeight === h,
+    [width, height],
+  );
+  await p.waitForFunction((was) => {
+    const g = window.__ff.roomGeom();
+    const el = document.getElementById('screen');
+    return (
+      g !== null &&
+      [el.clientWidth, el.clientHeight].join(',') !== was &&
+      Math.abs(el.clientWidth - g.cssW) <= 1 &&
+      Math.abs(el.clientHeight - g.cssH) <= 1
+    );
+  }, was);
+};
 
 const tap = (p, region) => p.click(`#touchbar [data-region="${region}"]`);
 
@@ -395,6 +464,84 @@ try {
   await p.selectOption('#touchmode', 'on');
   await p.waitForFunction(() => !window.__ff.optionsOpen());
   expect(true, 'switching to touch closes the canvas options face behind it');
+
+  // ── The room is centred on the SCREEN, not on what the bar left over ─────────────
+  // The bar reserves its space with a margin on `.stage`, and `.stage` centres its
+  // content inside its OWN box — so before this was fixed "centred" meant centred in
+  // [barWidth, viewport], and the room sat half a bar's width off true centre: +36px in
+  // landscape, +33px in portrait, independent of the room. What is wanted is
+  // `nearEdge = max(barSize, (viewport - roomSize) / 2)` — the screen's centre, given up
+  // only as far as it takes to clear the bar — so both halves of that max are asserted,
+  // on both axes. See the flex-spacer rules in index.html for how the clamp is expressed.
+  //
+  // Runs LAST, on this page rather than a context of its own, because it needs the dev
+  // chrome GONE: `#devbar` and `#info` are in-flow siblings of `.stage`, so while they
+  // are up the stage is not the viewport and the vertical half of this cannot be measured
+  // against `innerHeight` at all. Ctrl+Alt+D is the only door out of dev mode (main.ts),
+  // and it takes the dev bar this file's previous section drives with it — hence last,
+  // rather than paying another boot to say the same thing.
+  await enter(p, ROOM);
+  await settle(p, true);
+  await p.keyboard.press('Control+Alt+D');
+  await p.waitForFunction(() => !document.body.classList.contains('dev'));
+  const player = p;
+
+  // 900x800 is width-bound (828 of usable width against 800 native px), so the room fills
+  // everything the bar left and there is nowhere to take a centring gap from. The bar
+  // wins — that is the one thing allowed to beat true centring — but by exactly the width
+  // it needs and no more. First, because dropping the dev chrome resizes nothing on its
+  // own and `settleRoom` needs a viewport that actually moves.
+  await settleRoom(player, 900, 800);
+  const tight = await roomCentre(player);
+  expect(
+    tight.left >= tight.barRight,
+    `landscape tight: the bar wins over centring (room left ${tight.left}, bar right ${tight.barRight})`,
+  );
+  expect(
+    tight.left <= tight.barRight + 1 && tight.right <= tight.viewW,
+    `landscape tight: and takes no more than it must (${tight.left}..${tight.right} of ${tight.viewW})`,
+  );
+
+  // Slack on both sides — the reported case, and the one where the clamp must NOT bind.
+  await settleRoom(player, 1100, 620);
+  const wide = await roomCentre(player);
+  expect(
+    Math.abs(wide.dx) <= 1,
+    `landscape: the room's centre is the screen's (off by ${wide.dx}px of ${wide.viewW})`,
+  );
+  expect(
+    wide.left >= wide.barRight,
+    `landscape: and the bar still does not overlap it (room left ${wide.left}, bar right ${wide.barRight})`,
+  );
+
+  // The portrait half. A different element carries it — the box is handed the whole
+  // height and letterboxes the room inside it, so the vertical slack is in `#stagebox`,
+  // not in `.stage` — which is exactly why it needs a probe of its own rather than being
+  // assumed to follow from the landscape one.
+  await settleRoom(player, 393, 852);
+  const tall = await roomCentre(player);
+  expect(
+    Math.abs(tall.dy) <= 1,
+    `portrait: the room's centre is the screen's (off by ${tall.dy}px of ${tall.viewH})`,
+  );
+  expect(
+    tall.top >= tall.barBottom,
+    `portrait: and the bar still does not overlap it (room top ${tall.top}, bar bottom ${tall.barBottom})`,
+  );
+
+  // Portrait's tight case takes a viewport small enough that the room fills the height it
+  // is left (320x360: 294px of it against a 240px-tall room, less than one bar of slack).
+  // Same rule as landscape — the bar is the one thing that outranks the centre.
+  await settleRoom(player, 320, 360);
+  const squat = await roomCentre(player);
+  expect(
+    squat.top >= squat.barBottom,
+    `portrait tight: the bar wins over centring (room top ${squat.top}, bar bottom ${squat.barBottom})`,
+  );
+  expect(
+    squat.bottom <= squat.viewH,
+    `portrait tight: and the room still fits below it (${squat.top}..${squat.bottom} of ${squat.viewH})`,
+  );
 } catch (e) {
   ok = false;
   console.log('  FAIL threw: ' + (e?.message ?? e));
