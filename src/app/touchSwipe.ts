@@ -226,6 +226,36 @@ export function initTouchSwipe(): void {
     e.preventDefault();
   });
 
+  // iOS's selection loupe is the one thing `pointerdown` above cannot call off.
+  //
+  // Safari runs the long-press magnifier from its own gesture recognizer, upstream of the
+  // Pointer Events layer, so a `preventDefault()` on `pointerdown` never reaches it and
+  // neither does CSS: `-webkit-user-select: none` and `-webkit-touch-callout: none` are
+  // already on the body (index.html) and they DO stop the selection and the callout menu
+  // — Martin's report was that selection was correctly dead and the empty bubble came up
+  // anyway. `touchstart` is the only event the recognizer honours.
+  //
+  // Gated on exactly the same two conditions as the gesture above, and that is the whole
+  // reason this is narrow rather than a blanket `document` handler: preventing the
+  // default on `touchstart` also cancels the compatibility `mousedown`/`click`, and the
+  // world map, the help pages, the briefcase demo and the credits are all still driven by
+  // `canvas`'s `mousedown` (main.ts). Suppressing it there would leave a phone unable to
+  // pick a level. In a room it costs nothing: the swipe layer already suppresses those
+  // same compatibility events on purpose (see the note on click-to-swim), and the tap is
+  // delivered by `endGesture()` as a key, not as a click.
+  //
+  // NOT passive: a `touchstart` listener is passive by default, and a passive listener's
+  // `preventDefault()` is ignored with a console warning — which would look exactly like
+  // this fix working locally and doing nothing on the device.
+  window.addEventListener(
+    'touchstart',
+    (e) => {
+      if (!armed() || !onSurface(e.target)) return;
+      e.preventDefault();
+    },
+    { passive: false },
+  );
+
   window.addEventListener('pointermove', (e) => {
     if (e.pointerId !== tracking) return;
     const dx = e.clientX - anchorX;
