@@ -70,16 +70,39 @@
  * The one thing that is inside and must not count is the faithful panel column, which has
  * its own buttons; it is named.
  *
+ * ── A finger only, never a mouse ─────────────────────────────────────────────
+ * The whole layer leaves on `pointerType === 'mouse'`, and that is a correctness rule
+ * rather than a preference. Touch mode is a property of the DEVICE — `touchModeActive`
+ * is `deviceClass(win) !== 'desktop'`, which is `(any-pointer: coarse)` — so it is true
+ * on a touchscreen laptop or a tablet with a trackpad, where the player may well be on
+ * the mouse. Delivering gestures for a mouse pointer there would give one click BOTH its
+ * ordinary click-to-swim AND a synthetic `Space` swap, and a mouse drag would inject
+ * arrows on top of that. `touchMode.ts` promises the mouse-and-keyboard game cannot
+ * change under anyone; keying the layer on the pointer that is actually in the player's
+ * hand, not on what the device is capable of, is what keeps that true.
+ *
+ * The cost is that the dev override (`?touch=on` on a desktop) can no longer drive a
+ * swipe with the mouse — device emulation, which is what a touch UI has to be looked at
+ * in anyway, is the way to exercise it.
+ *
  * ── Click-to-swim, off on touch ──────────────────────────────────────────────
  * The browser's compatibility `mousedown` after a touch reaches the room's mouse handler,
  * which reads it as click-to-swim. That is right for a mouse and wrong for a finger — the
- * fish walks off towards wherever you happened to tap — so on touch it is suppressed for
- * every gesture, swipe and tap alike, and the tap does the swap instead. Suppressed twice
- * over on purpose: `preventDefault()` on `pointerdown` is what the spec says stops the
+ * fish walks off towards wherever you happened to tap — so it is suppressed for every
+ * gesture, swipe and tap alike, and the tap does the swap instead. Suppressed twice over
+ * on purpose: `preventDefault()` on `pointerdown` is what the spec says stops the
  * compatibility events, and the capture-phase listener below is the belt for browsers
- * that fire them anyway. A MOUSE in touch mode is left alone (its `mousedown` lands at
- * the start of a drag, where there is nothing yet to suppress) so the dev override still
- * shows the desktop behaviour it is overriding.
+ * that fire them anyway.
+ *
+ * The belt has to be disarmed as carefully as it is armed. In a spec-compliant browser
+ * the compatibility event never comes, so the flag is never consumed — and a flag left
+ * set eats the next unrelated `mousedown` instead. Measured: after one swipe, the first
+ * tap on the world map never reached the game, and the first tap on the faithful panel
+ * (which is driven by `mousedown`, unlike the touch bar's `click`) was likewise dead.
+ * So it is cleared at the TOP of `pointerdown`, before every guard: a mouse press fires
+ * `pointerdown` before its own `mousedown`, so any new interaction of any kind disarms a
+ * stale flag, and the only event that can still be swallowed is one arriving between a
+ * `pointerup` and the next press — which is exactly the compatibility event.
  */
 import { cutscene } from './gameState.js';
 import { touchUi } from './touchButtons.js';
@@ -95,6 +118,17 @@ import { Dir } from '../core/dir.js';
  * and that has nothing to do with how large the room happens to be drawn.
  */
 const SWIPE_PX = 24;
+
+/**
+ * How decisively the new axis must beat the committed one before the fish turns.
+ *
+ * Without it a sustained ~45-degree drag thrashes: the dominant axis alternates on thumb
+ * jitter, every SWIPE_PX flips the direction, and each flip is a release and a press into
+ * the held-move machine — so the fish spends its time turning on the spot (a horizontal
+ * step animates turn-first, stav_otocka) instead of going anywhere. Half again is enough
+ * that a true diagonal settles on one axis and a deliberate turn still reads instantly.
+ */
+const TURN_BIAS = 1.5;
 
 /** The arrow each direction is delivered as. `Dir` is the game's, the code is the DOM's. */
 const ARROW_FOR: Record<number, string> = {
@@ -115,8 +149,6 @@ let anchorX = 0;
 let anchorY = 0;
 /** The arrow this gesture became, once it passed the threshold. Null while it is a tap. */
 let arrow: string | null = null;
-/** Whether the pointer being followed is a finger, i.e. whether it leaves mouse events. */
-let touchPointer = false;
 /** See the note on click-to-swim above: one emulated `mousedown` to eat. */
 let swallowMouse = false;
 
@@ -154,7 +186,21 @@ function endGesture(): void {
     sendKey('keydown', TAP_KEY);
     sendKey('keyup', TAP_KEY);
   }
-  if (touchPointer) swallowMouse = true;
+  swallowMouse = true;
+  tracking = null;
+  arrow = null;
+}
+
+/**
+ * Drop a gesture without delivering anything.
+ *
+ * For the two ways a drag ends without a `pointerup`: the window losing focus and the tab
+ * being hidden. `main.ts` already clears the MOVEMENT side on both (the fish stops), but
+ * the gesture's own `tracking`/`arrow` would survive — and a live `tracking` makes the
+ * layer refuse every later gesture, which is a wedge with nothing to release it.
+ */
+function abandonGesture(): void {
+  if (arrow) sendKey('keyup', arrow);
   tracking = null;
   arrow = null;
 }
@@ -166,19 +212,18 @@ function endGesture(): void {
  */
 export function initTouchSwipe(): void {
   window.addEventListener('pointerdown', (e) => {
-    if (!armed() || tracking !== null || !onSurface(e.target)) return;
-    // A gesture that ended in `pointercancel` never got its emulated mousedown, so the
-    // flag would otherwise be waiting to eat an unrelated press. Every compatibility event
-    // of the PREVIOUS gesture has arrived by now, so this is the safe place to drop it.
+    // FIRST, before any guard: a press of any kind, anywhere, disarms a stale swallow.
+    // See the note on click-to-swim for the two taps this was measured to be eating.
     swallowMouse = false;
+    if (e.pointerType === 'mouse') return; // a finger only — see the file note
+    if (!armed() || tracking !== null || !onSurface(e.target)) return;
     tracking = e.pointerId;
-    touchPointer = e.pointerType !== 'mouse';
     anchorX = e.clientX;
     anchorY = e.clientY;
     arrow = null;
     // The spec's own way to stop the compatibility mouse events, and it has to be here:
-    // by `pointerup` the browser has already decided. Only for a finger — see the file note.
-    if (touchPointer) e.preventDefault();
+    // by `pointerup` the browser has already decided.
+    e.preventDefault();
   });
 
   window.addEventListener('pointermove', (e) => {
@@ -187,9 +232,14 @@ export function initTouchSwipe(): void {
     const dy = e.clientY - anchorY;
     if (Math.abs(dx) < SWIPE_PX && Math.abs(dy) < SWIPE_PX) return;
     // The dominant axis wins, so a diagonal drag resolves to the way it leans rather than
-    // to whichever axis happened to cross the threshold first.
-    const dir =
-      Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? Dir.right : Dir.left) : dy > 0 ? Dir.down : Dir.up;
+    // to whichever axis happened to cross the threshold first. Once an axis is committed
+    // it keeps the benefit of the doubt (TURN_BIAS) so a near-diagonal hold cannot thrash;
+    // a reversal along the SAME axis is not an axis change and still reads instantly.
+    const ax = Math.abs(dx);
+    const ay = Math.abs(dy);
+    const onX = arrow === 'ArrowLeft' || arrow === 'ArrowRight';
+    const horizontal = arrow === null ? ax >= ay : onX ? ax * TURN_BIAS >= ay : ax >= ay * TURN_BIAS;
+    const dir = horizontal ? (dx > 0 ? Dir.right : Dir.left) : dy > 0 ? Dir.down : Dir.up;
     // Unconditionally, not only on a turn: this is what keeps the anchor within SWIPE_PX
     // of the finger, and so what makes the next turn readable at all.
     anchorX = e.clientX;
@@ -209,6 +259,13 @@ export function initTouchSwipe(): void {
       endGesture();
     });
   }
+
+  // The two ways a drag ends without a `pointerup`, mirroring what `main.ts` already does
+  // for a held KEY at the same two moments.
+  window.addEventListener('blur', abandonGesture);
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) abandonGesture();
+  });
 
   // Capturing, and on `window`, so it runs before the room's own `mousedown` handler and
   // can take the event away from it. See the note on click-to-swim.

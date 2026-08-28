@@ -70,6 +70,13 @@ async function open(query, touch) {
       },
       true,
     );
+    // Did a mousedown SURVIVE the gesture layer's capture-phase eater? Registered on
+    // `document` in the bubble phase, which is downstream of it: a swallowed event
+    // (stopPropagation at window-capture) never gets here, an untouched one does. This is
+    // how the swallow's LIFETIME is observable at all — the assertion that only checks
+    // "no swim started" passes whether or not the flag leaks past the gesture.
+    window.__ffMouseThrough = 0;
+    document.addEventListener('mousedown', () => { window.__ffMouseThrough += 1; }, false);
   });
   await p.goto(BASE + query, { waitUntil: 'domcontentloaded' });
   await p.waitForFunction(() => window.__ff !== undefined);
@@ -90,9 +97,9 @@ async function open(query, touch) {
  * tap. `pointerType: 'touch'` is the part that matters — it is what the suppression of
  * the compatibility click keys off.
  */
-const gesture = (p, dx, dy, { compat = true, from = '#screen' } = {}) =>
+const gesture = (p, dx, dy, { compat = true, from = '#screen', pointerType = 'touch' } = {}) =>
   p.evaluate(
-    ({ dx, dy, compat, from }) => {
+    ({ dx, dy, compat, from, pointerType }) => {
       const el = document.querySelector(from);
       const r = el.getBoundingClientRect();
       // The margin is sampled at its top-left corner plus a few px, because the middle of
@@ -103,7 +110,7 @@ const gesture = (p, dx, dy, { compat = true, from = '#screen' } = {}) =>
         el.dispatchEvent(
           new PointerEvent(type, {
             pointerId: 7,
-            pointerType: 'touch',
+            pointerType,
             clientX: x,
             clientY: y,
             bubbles: true,
@@ -113,9 +120,18 @@ const gesture = (p, dx, dy, { compat = true, from = '#screen' } = {}) =>
       send('pointerdown', x0, y0);
       for (let i = 1; i <= 4; i++) send('pointermove', x0 + (dx * i) / 4, y0 + (dy * i) / 4);
       // Keep dragging from the same gesture, in absolute offsets from where it began —
-      // which is how a turn has to be driven: the finger never lifts.
+      // which is how a turn has to be driven: the finger never lifts. It interpolates from
+      // the LAST point, not from the origin: replaying from the origin every time would
+      // yank the finger back and forth, which the layer would rightly read as a series of
+      // reversals rather than as the one continuous drag being tested.
+      let lx = dx;
+      let ly = dy;
       window.__ffSwipeTo = (x, y) => {
-        for (let i = 1; i <= 4; i++) send('pointermove', x0 + (x * i) / 4, y0 + (y * i) / 4);
+        for (let i = 1; i <= 4; i++) {
+          send('pointermove', x0 + lx + ((x - lx) * i) / 4, y0 + ly + ((y - ly) * i) / 4);
+        }
+        lx = x;
+        ly = y;
       };
       window.__ffSwipeEnd = () => {
         send('pointerup', x0 + dx, y0 + dy);
@@ -129,10 +145,32 @@ const gesture = (p, dx, dy, { compat = true, from = '#screen' } = {}) =>
           );
       };
     },
-    { dx, dy, compat, from },
+    { dx, dy, compat, from, pointerType },
   );
 
 const release = (p) => p.evaluate(() => window.__ffSwipeEnd());
+/** Mousedowns that reached the game since the last check, and reset for the next one. */
+const through = (p) =>
+  p.evaluate(() => {
+    const n = window.__ffMouseThrough;
+    window.__ffMouseThrough = 0;
+    return n;
+  });
+
+/** A press somewhere that is NOT the play area, as a finger: pointer pair + the
+ *  compatibility mousedown a browser fires when nothing suppressed it. */
+const pressOutside = (p, selector) =>
+  p.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    const r = el.getBoundingClientRect();
+    const x = r.left + r.width / 2;
+    const y = r.top + r.height / 2;
+    const opts = { pointerId: 21, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, cancelable: true };
+    el.dispatchEvent(new PointerEvent('pointerdown', opts));
+    el.dispatchEvent(new PointerEvent('pointerup', opts));
+    el.dispatchEvent(new MouseEvent('mousedown', { button: 0, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+  }, selector);
+
 /** Keep the same gesture going, to a new offset from where it started. */
 const steer = (p, x, y) => p.evaluate(({ x, y }) => window.__ffSwipeTo(x, y), { x, y });
 /** The arrows emitted since the last check, and reset for the next one. */
@@ -290,6 +328,55 @@ try {
   expect(
     (await p.evaluate(() => window.__ff.state().swimming)) === false,
     'and no click-to-swim is started behind it',
+  );
+
+  // ── The swallow must not outlive its gesture. In a spec-compliant browser the
+  // compatibility mousedown never arrives (preventDefault on pointerdown stopped it), so
+  // the flag is never consumed — and a flag left set eats the next unrelated press. This
+  // is driven exactly that way: a swipe with NO compatibility event, then an ordinary
+  // press on the faithful panel, which is driven by `mousedown` (unlike the touch bar's
+  // `click`, which is why the bar hid this for a while). Measured before the fix: the tap
+  // did not reach the game at all.
+  await p.evaluate(() => window.__ff.restart());
+  await rest(p);
+  await gesture(p, 60, 0, { compat: false });
+  await release(p);
+  await rest(p);
+  await through(p);
+  await pressOutside(p, '#panel');
+  expect(
+    (await through(p)) === 1,
+    'a press after a swipe still reaches the game (the swallow does not outlive its gesture)',
+  );
+
+  // ── A near-diagonal hold must settle on one axis. Without the turn bias the dominant
+  // axis alternates on jitter and every crossing is a release-and-press into the held-move
+  // machine, so the fish turns on the spot instead of swimming.
+  await arrows(p);
+  await gesture(p, 60, 0);
+  for (let i = 1; i <= 6; i++) await steer(p, 60 + i * 30, i * 30); // ~45 degrees, held
+  await release(p);
+  await rest(p);
+  const diagonal = await arrows(p);
+  expect(
+    diagonal.length === 1,
+    `a 45-degree drag commits to one direction (${diagonal.join(',') || 'nothing'})`,
+  );
+
+  // ── A MOUSE on a touch-capable device is left alone. `touchModeActive` is a property of
+  // the DEVICE — true on a touchscreen laptop — so without a pointer-type check a single
+  // mouse click would both swim (its own mousedown) and swap (a synthetic Space), and a
+  // drag would inject arrows on top. This is the same page, in touch mode, on the mouse.
+  await arrows(p);
+  from = await cell(p);
+  await gesture(p, 60, 0, { compat: false, pointerType: 'mouse' });
+  await release(p);
+  await rest(p);
+  const byMouse = await arrows(p);
+  to = await cell(p);
+  expect(
+    byMouse.length === 0 && to.x === from.x && to.y === from.y,
+    `touch mode, mouse pointer: the gesture layer stays out of it (${byMouse.join(',') || 'nothing'})`,
   );
 
   // ── A desktop is untouched: the same gesture on a page without the override does
