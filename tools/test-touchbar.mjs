@@ -197,6 +197,20 @@ const settleRoom = async (p, width, height) => {
   }, was);
 };
 
+/** Where the bar's buttons actually end up, for the "do six of them still fit?" check. */
+const barFit = (p) =>
+  p.evaluate(() => {
+    const els = [...document.querySelectorAll('#touchbar [data-region]')];
+    const rects = els.map((el) => el.getBoundingClientRect());
+    return {
+      count: els.length,
+      left: Math.round(Math.min(...rects.map((r) => r.left))),
+      right: Math.round(Math.max(...rects.map((r) => r.right))),
+      minW: Math.round(Math.min(...rects.map((r) => r.width))),
+      viewW: window.innerWidth,
+    };
+  });
+
 const tap = (p, region) => p.click(`#touchbar [data-region="${region}"]`);
 
 /**
@@ -250,8 +264,8 @@ try {
   const inRoom = await barState(p);
   expect(inRoom.visible, 'in a room: the bar is up');
   expect(
-    inRoom.buttons.join(',') === '14,12,13,16,15',
-    `the five buttons send map/save/load/options/restart (${inRoom.buttons.join(',')})`,
+    inRoom.buttons.join(',') === '14,12,13,24,16,15',
+    `the six buttons send map/save/load/undo/options/restart (${inRoom.buttons.join(',')})`,
   );
   // It reserves space rather than floating over the room: the stage is measured with
   // clientWidth, so a margin is the only thing that both moves the bar out of the way
@@ -297,6 +311,28 @@ try {
     portraitBar.marginTop === '66px' && portraitBar.marginLeft === '0px',
     `portrait: the bar reserves its height from the top (margin-top ${portraitBar.marginTop}, margin-left ${portraitBar.marginLeft})`,
   );
+  // ── Six buttons in a portrait ROW, at the narrowest width this game is willing to be
+  // played at. Landscape stacks them in a 72px column and has the whole height to spend,
+  // so it cannot run out; portrait is the axis that can, and the bar neither wraps nor
+  // scrolls — `.tbtn` is floored at 56px wide with a 6px gap, so six of them need 366px
+  // before the sixth is pushed off the edge. 375 is an iPhone SE (deviceGate.ts's own
+  // device table), which leaves 9px. Asserted from the rendered rects rather than from
+  // that arithmetic, so a seventh button, a wider label or a padding change fails here
+  // instead of on somebody's phone.
+  await p.setViewportSize({ width: 375, height: 812 });
+  await settleBox(p, portrait.roomW);
+  const narrow = await barFit(p);
+  const narrowRow = await rowState(p);
+  expect(
+    narrow.count === 6 && narrow.left >= 0 && narrow.right <= narrow.viewW,
+    `portrait 375px: all ${narrow.count} buttons fit on screen (${narrow.left}..${narrow.right} of ${narrow.viewW})`,
+  );
+  expect(
+    narrow.minW >= 44,
+    `portrait 375px: and none is shrunk below a thumb (narrowest ${narrow.minW}px)`,
+  );
+  await p.setViewportSize({ width: 393, height: 852 });
+  await settleBox(p, narrowRow.roomW);
 
   // ── And the room genuinely gets that width, measured end to end rather than in the
   // layout maths (test/layout.test.ts has the arithmetic). It takes a WIDTH-bound
@@ -374,6 +410,98 @@ try {
   await p.waitForFunction(() => !document.documentElement.hasAttribute('data-touchopts'));
   expect(true, 'Done closes it again');
 
+  // ── Undo (region 24), and the `-` key that is its desktop door. The one button on this
+  // bar with no `Uovl.pas` region behind it: the 1998 game has no undo, so nothing here
+  // is a fidelity question and nothing else in the repo would notice a wrong region.
+  //
+  // Asserted by walking a run forwards banking `posHash` after each move — the hash that
+  // exists for exactly this ("undo/load must reproduce it exactly", debugHooks.ts) — and
+  // then undoing back down it. That is the property the whole approach rests on, and the
+  // browser is where it is worth checking, because the unit suite drives the engine
+  // directly while this drives the real room build, the real tick and the real button.
+  //
+  // The moves are found rather than chosen: which pushes are legal is a fact about KOSTE,
+  // and a probe that hard-codes them breaks the day the room data is looked at again. Any
+  // press that the record accepts will do.
+  await p.evaluate(() => window.__ff.restart());
+  await p.waitForFunction(() => window.__ff.moves() === 0 && window.__ff.undoDepth() === 1);
+  const bank = [await p.evaluate(() => window.__ff.posHash())];
+  for (const which of ['little', 'big']) {
+    for (const dir of [4, 3, 1, 2]) {
+      if (bank.length >= 4) break;
+      const depth = bank.length;
+      // One round trip per press: read the record, press, and hand back what was read.
+      // Three moves, not thirty — each undo is a real room rebuild, and this probe pays
+      // for every one of them.
+      await p.evaluate(([w, d]) => window.__ff.press(w, d), [which, dir]);
+      await p.waitForFunction(() => window.__ff.phase() === 'idle');
+      const after = await p.evaluate(() => [window.__ff.undoDepth(), window.__ff.posHash()]);
+      if (after[0] === depth) continue; // the push was blocked: try another direction
+      bank.push(after[1]);
+    }
+  }
+  expect(bank.length === 4, `three moves banked to undo (${bank.length - 1})`);
+  // The `-` key first, once, so the desktop trigger is asserted on a real key event and
+  // not only through the button. FFNG's key for it, which is where the choice comes from.
+  await p.keyboard.press('Minus');
+  await p.waitForFunction((n) => window.__ff.moves() === n, bank.length - 2);
+  expect(
+    (await p.evaluate(() => window.__ff.posHash())) === bank[bank.length - 2],
+    'the − key takes back exactly one move',
+  );
+  // …and on a layout that is not the one this machine is typing on. Playwright presses a
+  // physical key, so the line above only ever proves the US position; the binding matches
+  // `e.key` precisely so that it does not. On a Czech QWERTZ the `-` key reports
+  // `code: 'Slash'` — a `code: 'Minus'` binding does nothing there and silently steals
+  // `=`, which is the key that IS in that position. Both halves are asserted, because the
+  // second is how the first was found: reported from a real Czech keyboard, where the
+  // on-screen button worked and the key did not.
+  const czech = (key, code) =>
+    p.evaluate(
+      (e) => window.dispatchEvent(new KeyboardEvent('keydown', { ...e, bubbles: true, cancelable: true })),
+      { key, code },
+    );
+  let atMoves = await p.evaluate(() => window.__ff.moves());
+  await czech('-', 'Slash');
+  await p.waitForFunction((n) => window.__ff.moves() === n - 1, atMoves);
+  expect(true, "a Czech/German layout's − (code 'Slash') undoes too");
+  atMoves = await p.evaluate(() => window.__ff.moves());
+  await czech('=', 'Minus');
+  await p.waitForTimeout(200);
+  expect(
+    (await p.evaluate(() => window.__ff.moves())) === atMoves,
+    "and the '=' sitting at the US − position does not",
+  );
+  for (let i = (await p.evaluate(() => window.__ff.moves())); i > 0; i--) {
+    await tap(p, 24);
+    await p.waitForFunction((n) => window.__ff.moves() === n, i - 1);
+    expect(
+      (await p.evaluate(() => window.__ff.posHash())) === bank[i - 1],
+      `Undo #${bank.length - i} lands exactly on the position before move ${i}`,
+    );
+  }
+  // And it stops at the room's start instead of running off the bottom: the last point in
+  // the history IS where the player is, so there is nothing below it.
+  expect(!(await p.evaluate(() => window.__ff.canUndo())), 'at the start, there is nothing to undo');
+  await tap(p, 24);
+  const after = await p.evaluate(() => [window.__ff.moves(), window.__ff.screen()]);
+  expect(after[0] === 0 && after[1] === 'room', 'and pressing it anyway is a clean no-op');
+
+  // ── The rescue case, which is why undo does NOT copy save's rule. `CanSave` refuses
+  // while a fish is dead (URoom.pas:26900) and a lone survivor deliberately keeps playing,
+  // so before this the only way out of a fatal move was a full restart. Undo is the way
+  // out, and this is the assertion that says so: refused by save, offered by undo.
+  await p.evaluate(() => window.__ff.press('little', 3));
+  await p.waitForFunction(() => window.__ff.phase() === 'idle' && window.__ff.undoDepth() === 2);
+  await p.evaluate(() => window.__ff.killFish('little'));
+  await p.waitForFunction(() => window.__ff.state().dead);
+  const dead = await p.evaluate(() => [window.__ff.canSave(), window.__ff.canUndo()]);
+  expect(!dead[0], 'with a fish dead, saving is refused');
+  expect(dead[1], 'and undo is offered anyway');
+  await tap(p, 24);
+  await p.waitForFunction(() => !window.__ff.state().dead);
+  expect(true, 'Undo brings the dead fish back — the move that killed it is taken back');
+
   // ── Restart (region 15): the room goes back to a fresh attempt. It is on the bar ONLY
   // because retiring the faithful panel took away its last touch-reachable door — its
   // other one is the Backspace key, which a phone does not have (touchButtons.ts). It is
@@ -399,16 +527,72 @@ try {
     `and it counts as a fresh attempt (pokus ${startPokus} -> ${nowPokus})`,
   );
 
-  // ── Save (region 12): a save exists afterwards where none did before.
+  // ── Save (region 12): a save exists afterwards where none did before. One move first,
+  // remembering the position BEFORE it, because what the save has to carry is not only
+  // where the player is but how they got there.
   await p.evaluate(() => localStorage.removeItem('ff.save.' + window.__ff.roomNum()));
+  let beforeLast = null;
+  for (const dir of [3, 4, 1, 2]) {
+    const depth = await p.evaluate(() => window.__ff.undoDepth());
+    const at = await p.evaluate(() => window.__ff.posHash());
+    await p.evaluate((d) => window.__ff.press('little', d), dir);
+    await p.waitForFunction(() => window.__ff.phase() === 'idle');
+    if ((await p.evaluate(() => window.__ff.undoDepth())) > depth) {
+      beforeLast = at;
+      break;
+    }
+  }
+  expect(beforeLast !== null, 'a move before saving, so the save has a history to carry');
+  const savedMoves = await p.evaluate(() => window.__ff.moves());
   await tap(p, 12);
   await p.waitForFunction(() => window.__ff.hasSave());
   expect(true, 'Save writes a save for this room');
 
+  // ── A save carries the undo history with it (Martin, 2026-08-29), so a load resumes an
+  // ATTEMPT and not merely a position: undo after it walks back through the moves that
+  // reached the save. Restart in between is what makes this an assertion about the SAVE —
+  // it throws the in-memory history away, so anything undoable afterwards came off disk.
+  await tap(p, 15);
+  await p.waitForFunction(() => window.__ff.moves() === 0 && !window.__ff.canUndo());
+  expect(true, 'Restart in between leaves nothing in memory to undo');
+
   // ── Load (region 13): it takes, without the room ending up somewhere else.
   await tap(p, 13);
-  await p.waitForFunction(() => !window.__ff.roomLoading() && window.__ff.screen() === 'room');
+  // `loading()` as well as `roomLoading()`, and they are different things: the second is
+  // the ROOM being fetched, the first is the load's fast-forward still replaying the
+  // record. `phase` is 'idle' between that replay's moves and `moves()` reaches its total
+  // on the last one, so without this the probe can measure a load that has not finished —
+  // and undo is deliberately refused while it runs, which is a real refusal read as a bug.
+  await p.waitForFunction(
+    (n) =>
+      !window.__ff.roomLoading() &&
+      !window.__ff.loading() &&
+      window.__ff.moves() === n &&
+      window.__ff.phase() === 'idle',
+    savedMoves,
+  );
   expect((await p.evaluate(() => window.__ff.roomNum())) === ROOM, 'Load stays in the same room');
+  expect(
+    await p.evaluate(() => window.__ff.canUndo()),
+    'and it brings the saved run\'s undo history back with it',
+  );
+  await tap(p, 24);
+  await p.waitForFunction((h) => window.__ff.posHash() === h, beforeLast);
+  expect(true, 'Undo after a load steps back INTO the saved run, one move at a time');
+
+  // ── Nothing in this room's history failed to replay. `undoMove` falls back to an
+  // earlier point when a replay does not reproduce the one it was aimed at, which is a
+  // real case (PARTY2 #18 replays one of its own records into a dead fish) — but in an
+  // ordinary room it must never fire, and a counter that has moved here means the replay
+  // path has drifted from the live one.
+  expect(
+    (await p.evaluate(() => window.__ff.undoDiverged())) === 0,
+    'no point in this room needed the divergence fallback',
+  );
+  expect(
+    (await p.evaluate(() => window.__ff.undoSnapshots())) <= 120,
+    'and the history keeps script snapshots only for the newest points',
+  );
 
   // ── Map (region 14): off to the world map, and the bar goes with it. The second half
   // is the one a pushed implementation would get wrong.

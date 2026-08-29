@@ -73,4 +73,9 @@ export const TOUCH_REGIONS = {
   load: 13,
   options: 16,
   restart: 15,
+  // Undo has no counterpart in the original's panel — the 1998 game has no undo at all,
+  // so there is no `Uovl.pas` region to be faithful to. 24 is the first number past the
+  // whole range the panel uses (1-23, the Options sub-panel taking 17-23), which keeps it
+  // clear of `hud.ts`'s `hitTest` — hard-capped at NOBLMYSI = 23 — by construction.
+  undo: 24,
 } as const;

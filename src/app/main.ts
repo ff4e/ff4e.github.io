@@ -79,6 +79,7 @@ import {
   startShowmode,
 } from './cutscene.js';
 import { cancelSolve, inAutoPlay, inSolvemode } from './solveMode.js';
+import { loadUndoHistory, undoAvailable, undoHistoryForSave, undoMove } from './undo.js';
 import {
   closeMapOverlay,
   dismissLegImage,
@@ -174,6 +175,7 @@ import {
 import {
   activeScript,
   blink,
+  clearUndoHistory,
   count,
   cutscene,
   cutsceneSubs,
@@ -606,7 +608,7 @@ function setInfo(): void {
     ? `${base}   ✓ SOLVED in ${lengthOfRecord(engine?.srecord ?? '')} moves${best !== undefined ? ` (best ${best})` : ''} — returning to the map…`
     : room?.anyFishDead
       ? `${base}   ✗ crushed — restarting…`
-      : `${base}  · active: ${engine?.active ?? 'little'} · moves: ${lengthOfRecord(engine?.srecord ?? '')} · ⌫ restart · F2 save${saveExists() ? ' · F3 load' : ''} · subs: ${settings.subtitles.toUpperCase()} (G)`;
+      : `${base}  · active: ${engine?.active ?? 'little'} · moves: ${lengthOfRecord(engine?.srecord ?? '')} · ⌫ restart${undoAvailable() ? ' · − undo' : ''} · F2 save${saveExists() ? ' · F3 load' : ''} · subs: ${settings.subtitles.toUpperCase()} (G)`;
 }
 
 /** Apply a vector-subtitle font candidate by index (wraps) and persist it. */
@@ -670,6 +672,10 @@ function buildRoom(carryPole = false): void {
   // like roompole above, because TRoom.Init clears them in the very same block
   // (URoom.pas:1430-1433), while TRoom.Restart leaves them alone.
   if (!carryPole) resetRoomScopedCheats();
+  // A room CHANGE starts a fresh undo history — one of the three places that mean a fresh
+  // attempt, with `restartRoom` and the death auto-restarts. Not keyed on the rebuild
+  // itself: `restore` (a load, and undo) rebuilds too and must keep its history.
+  if (!carryPole) clearUndoHistory();
   // Re-apply whatever survived (a restart), onto the freshly built Room.
   applySpriteCheats();
   if (oldWater) {
@@ -870,16 +876,29 @@ function canSave(): boolean {
   return !!room && room.canSave;
 }
 
-/** Save the current move record + script state to localStorage. */
+/**
+ * Save the move record, the script state, and the undo history, so a load resumes an
+ * ATTEMPT and not merely the position it ended on. If the slot will not take all of it
+ * the history is what yields: a save that silently does not happen is the worse failure,
+ * and the history is the part whose size grows with time spent in the room.
+ */
 function saveGame(): void {
   if (!canSave()) return; // DalsiPrikaz: `if not CanSave then kdo:=0` (URoom.pas:27010)
+  const snapshot = activeScript?.s.snapshot() ?? null;
+  const rec = engine?.srecord ?? '';
   try {
-    const snapshot = activeScript?.s.snapshot() ?? null;
-    localStorage.setItem(saveKey(), JSON.stringify({ rec: engine?.srecord ?? '', vars: snapshot }));
-    setInfo();
+    localStorage.setItem(
+      saveKey(),
+      JSON.stringify({ rec, vars: snapshot, undo: undoHistoryForSave() }),
+    );
   } catch {
-    /* storage unavailable */
+    try {
+      localStorage.setItem(saveKey(), JSON.stringify({ rec, vars: snapshot }));
+    } catch {
+      /* storage unavailable */
+    }
   }
+  setInfo();
 }
 
 /** Load and re-simulate the saved move record for this room, restoring script state. */
@@ -894,15 +913,18 @@ function loadGame(): void {
   if (raw === null) return;
   let rec = raw;
   let snapshot: ScriptSnapshot | null = null;
+  let undoData: unknown = null;
   try {
-    const parsed = JSON.parse(raw) as { rec?: string; vars?: ScriptSnapshot | null };
+    const parsed = JSON.parse(raw) as { rec?: string; vars?: ScriptSnapshot | null; undo?: unknown };
     if (parsed && typeof parsed === 'object' && typeof parsed.rec === 'string') {
       rec = parsed.rec;
       snapshot = parsed.vars ?? null;
+      undoData = parsed.undo ?? null;
     }
   } catch {
     /* legacy plain-string save (just the move record) */
   }
+  loadUndoHistory(undoData); // the saved attempt's points, before its record is replayed
   restore(rec, snapshot, false, true); // player load: fast-forward animated replay (TRoom.Load)
 }
 
@@ -1130,6 +1152,9 @@ function panelAction(region: number, panelX = 0): void {
       break;
     case 23: // help screens (oblhelp / akce_help)
       openHelp();
+      break;
+    case 24: // take back one move — the touch bar's Undo (no Uovl region: see keyTables.ts)
+      undoMove();
       break;
   }
   setInfo();
@@ -1502,6 +1527,15 @@ window.addEventListener('keydown', (e) => {
     // Same hole as F2: `atRest()` is true between the recording's moves, and a load would
     // drop a saved room on top of a running replay. Escape is how you stop one.
     if (atRest() && !inSolvemode()) loadGame();
+    return;
+  }
+  // Minus takes back one move (FFNG's key; its `+` redo is not ported). Nothing in the
+  // 1998 game — see `undo.ts`, which carries the gates, including the one it deliberately
+  // does NOT share with F2: a dead fish, and which explains why this is the one binding
+  // in this handler matched on `e.key` rather than on a physical `e.code`.
+  if (e.key === '-') {
+    e.preventDefault();
+    undoMove();
     return;
   }
 

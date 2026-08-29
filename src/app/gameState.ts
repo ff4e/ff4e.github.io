@@ -87,6 +87,16 @@ export let engine: StepEngine | null = null;
 export let alpha = 0; // sub-tick interpolation fraction (0..1) for smooth rendering
 export let linesSpoken = 0; // debug: total dialogue lines fired
 export let lastLine: { name: string; count: number } | null = null;
+/**
+ * The undo stack: one `{rec, snapshot}` point per settled move, oldest first, with the
+ * room's starting position at the bottom. Exactly the shape `showmodeSave` already uses
+ * for its single checkpoint — the record replays the physics, and the snapshot carries
+ * the script's "already said"/progress state, which a move-only replay cannot re-derive.
+ *
+ * The state lives here rather than in `undo.ts` so `movement.ts` can clear it on a
+ * restart without importing the module that imports `restore` from it.
+ */
+export const undoHistory: { rec: string; snapshot: ScriptSnapshot | null }[] = [];
 
 export function setActiveScript(v: { def: RoomScript; s: Script } | null): void {
   activeScript = v;
@@ -117,6 +127,15 @@ export function setLinesSpoken(v: number): void {
 }
 export function setLastLine(v: { name: string; count: number } | null): void {
   lastLine = v;
+}
+/** Start a fresh undo history: a room change, or the player's own Restart. */
+export function clearUndoHistory(): void {
+  undoHistory.length = 0;
+}
+/** Replace the history wholesale — a load, restoring the saved attempt's own points. */
+export function setUndoHistory(points: readonly { rec: string; snapshot: ScriptSnapshot | null }[]): void {
+  undoHistory.length = 0;
+  for (const p of points) undoHistory.push(p); // a loop, not a spread: a long attempt is thousands
 }
 
 // ── Per-fish tick state ─────────────────────────────────────────────────────

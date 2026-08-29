@@ -8,7 +8,7 @@
  * share a file.
  */
 import { wake } from './frameClock.js';
-import { activeScript, cutscene, engine, loadmode, pokus, room, screenShoveX, setLoadmode, setPokus, setScreenShoveX } from './gameState.js';
+import { activeScript, clearUndoHistory, cutscene, engine, loadmode, pokus, room, screenShoveX, setLoadmode, setPokus, setScreenShoveX } from './gameState.js';
 import { fishBusy } from './roomGates.js';
 import { ui } from './screenState.js';
 import { Dir } from '../core/dir.js';
@@ -154,14 +154,12 @@ export function applyMoveInstant(which: 'little' | 'big', dir: number): boolean 
 }
 
 /**
- * Apply one recorded step of a move-only re-simulation (load / undo). A move is
- * re-run through the physics; a push-out is re-applied from its record marker,
- * because prog() — which marks the item spec=9 — does not run on this path
- * (the 'q' case of the original's replay dispatch, URoom.pas:24184).
+ * Apply one recorded step of a move-only re-simulation (load / undo). The step itself
+ * belongs to the engine — it owns both the physics and the record — so this is only the
+ * host's null-safe way in.
  */
 export function applyRecordStep(st: RecordStep): void {
-  if (st.kind === 'pushOut') room?.removePushedOut(st.idx);
-  else applyMoveInstant(st.which, st.dir);
+  engine?.applyRecordStep(st);
 }
 
 /**
@@ -259,6 +257,7 @@ export function restartRoom(): void {
   wake();
   if (!room || ui.screen !== 'room' || cutscene) return;
   host.endShowmode(); // a player restart aborts the KUFRIK demonstration (unlike a death-restart)
+  clearUndoHistory(); // Restart means "throw this attempt away" — it is not undoable
   setPokus(pokus + 1);
   host.buildRoom(true);
   host.setInfo();

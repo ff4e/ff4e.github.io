@@ -66,7 +66,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `initTouchSwipe()`. That one takes no host at all: a swipe is delivered as a
   // synthetic arrow keydown, so it reaches the router that already lives here rather
   // than needing a name handed out of it. Nothing about either screen is in this file.
-  ['src/app/main.ts', 2235],
+  //
+  // 2 235 -> 2 250 for undo, and every one of those lines is a thing this file already
+  // is. The `-` binding is a case in the keyboard router; region 24 is a case in
+  // `panelAction`'s dispatch table; the history clear is one line in `buildRoom`; and the
+  // save slot gains a field, in the save/load pair that has always lived here. Undo
+  // ITSELF is two new modules (`src/core/undoStack.ts`, `src/app/undo.ts`) and nothing of
+  // it is in this file — main.ts cannot say what an undo is, only which key asks for one.
+  ['src/app/main.ts', 2250],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

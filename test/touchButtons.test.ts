@@ -12,6 +12,10 @@
  * A unit test rather than an assertion in the UI probe: it is a static fact about a
  * file, it costs milliseconds against the probe's ~8 s, and it fails with the exact
  * mismatch rather than with a game that behaved oddly.
+ *
+ * Undo (24) is the one region here with no `Uovl.pas` counterpart — the 1998 game has no
+ * undo — so nothing else in the repo would notice if the markup sent 4 (little fish left)
+ * instead. That is the transposition case again, one digit further out.
  */
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -65,16 +69,17 @@ describe('the touch bar markup', () => {
       Map: TOUCH_REGIONS.map,
       Save: TOUCH_REGIONS.save,
       Load: TOUCH_REGIONS.load,
+      Undo: TOUCH_REGIONS.undo,
       Options: TOUCH_REGIONS.options,
       Restart: TOUCH_REGIONS.restart,
     };
     for (const [label, region] of buttons()) {
-      expect(want, `"${label}" is one of the five known buttons`).toHaveProperty(label);
+      expect(want, `"${label}" is one of the known buttons`).toHaveProperty(label);
       expect(region, `"${label}" sends its own region`).toBe(want[label]);
     }
   });
 
-  it('has all five buttons', () => {
+  it('has a button for every verb in the table', () => {
     expect(buttons()).toHaveLength(Object.keys(TOUCH_REGIONS).length);
   });
 });

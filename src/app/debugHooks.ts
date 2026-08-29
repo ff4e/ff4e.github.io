@@ -94,8 +94,10 @@ import {
   showmodeTraceOn,
   cutsceneSubs,
   subs,
+  undoHistory,
 } from './gameState.js';
 import { cancelSolve, setSolveSpeed, solveStatus } from './solveMode.js';
+import { canUndo, undoDivergedCount, undoMove } from './undo.js';
 import { solutionFor } from '../rooms/index.js';
 import { ROOMS } from '../data/roomTable.js';
 import { renderer, setRendererValue } from './renderSettings.js';
@@ -321,6 +323,13 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     save: () => host.saveGame(),
     load: () => host.loadGame(),
     hasSave: () => host.saveExists(),
+    /** Undo, whether it would do anything, and the history: depth, points the replay
+     *  failed to reproduce (anything but 0 is a regression), snapshots still carried. */
+    undo: () => undoMove(),
+    canUndo: () => canUndo(),
+    undoDepth: () => undoHistory.length,
+    undoDiverged: () => undoDivergedCount(),
+    undoSnapshots: () => undoHistory.reduce((n, p) => n + (p.snapshot ? 1 : 0), 0),
     /** CanSave (URoom.pas:26900): whether the current position may be saved at all. */
     canSave: () => host.canSave(),
     /** The panel's per-element colour state (for asserting the greyed save button). */

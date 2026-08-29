@@ -1,12 +1,16 @@
 /**
- * The in-room touch controls: five buttons, down the left in landscape and along the
+ * The in-room touch controls: six buttons, down the left in landscape and along the
  * top in portrait.
  *
  * ── What they are, and what they deliberately are not ────────────────────────
- * Map, Save, Load, Options, Restart — the panel's whole-room verbs, and nothing else. The
- * panel's direction buttons (regions 1-4 and 6-9) have no counterpart here on purpose:
- * touch drives the fish by swipe, which is a separate layer. Undo is absent because it
- * does not exist yet in any form; it is its own task and must not be half-built here.
+ * Map, Save, Load, Undo, Options, Restart — the panel's whole-room verbs, and nothing
+ * else. The panel's direction buttons (regions 1-4 and 6-9) have no counterpart here on
+ * purpose: touch drives the fish by swipe, which is a separate layer.
+ *
+ * **Undo (region 24) is the one button with no `Uovl.pas` region behind it**, because
+ * the 1998 game has no undo to be faithful to — see `keyTables.ts` for why 24, and
+ * `undo.ts` for the verb. On desktop it is the `-` key; the faithful canvas panel has no
+ * room for it and is a separate question.
  *
  * **Swap (region 11) was here and is not any more.** The gesture layer makes a tap on the
  * play area swap the fish (`touchSwipe.ts`), which is both quicker than reaching for the

@@ -89,6 +89,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `logicTick.ts` | 3.0 k | One 80 ms game step: script, engine, dialogue, death, screensaver. |
 | **Playing a room** | | |
 | `movement.ts` | 2.6 k | The held-key state machine, and replaying a saved record back into a room. |
+| `undo.ts` | 1.7 k | Take back one move (`-` / the bar's Undo), by rebuilding the room from a shorter record — why a dead fish does not block it, and how a save carries the history. |
 | `roomGates.ts` | 0.5 k | May the room accept a command at all — `idle`, `atRest`, `fishBusy`. |
 | `roomLoad.ts` | 4.2 k | Fetching a room, arming its voices, starting its music — and the order that keeps audio behind art. Owns the two post-art entry holds and their composition, `roomEntryHeld()`. |
 | `roomPreload.ts` | 2.4 k | What a room's PLAY can demand beyond its art and sound — KUFRIK's briefcase cutscene, the leg story page — fetched on entering it, and held for. Plus the unheld `niceToHave` warm of ZAVER, which is the rule's one deliberate exception. |
@@ -98,12 +99,9 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
-| `touchButtons.ts` | 1.3 k | The in-room touch bar: five buttons, every one dispatched through the panel's own `panelAction` table. |
-<<<<<<< HEAD
+| `touchButtons.ts` | 1.3 k | The in-room touch bar: six buttons, every one dispatched through the panel's own `panelAction` table. |
 | `touchSwipe.ts` | 1.6 k | Swipe to move: a finger drag on the room is delivered as a held arrow key, so every guard the keyboard has applies unchanged. |
-=======
 | `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
->>>>>>> origin/main
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
