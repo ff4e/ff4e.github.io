@@ -154,14 +154,12 @@ export function applyMoveInstant(which: 'little' | 'big', dir: number): boolean 
 }
 
 /**
- * Apply one recorded step of a move-only re-simulation (load / undo). A move is
- * re-run through the physics; a push-out is re-applied from its record marker,
- * because prog() — which marks the item spec=9 — does not run on this path
- * (the 'q' case of the original's replay dispatch, URoom.pas:24184).
+ * Apply one recorded step of a move-only re-simulation (load / undo). The step itself
+ * belongs to the engine — it owns both the physics and the record — so this is only the
+ * host's null-safe way in.
  */
 export function applyRecordStep(st: RecordStep): void {
-  if (st.kind === 'pushOut') room?.removePushedOut(st.idx);
-  else applyMoveInstant(st.which, st.dir);
+  engine?.applyRecordStep(st);
 }
 
 /**

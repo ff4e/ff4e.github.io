@@ -16,6 +16,7 @@ import { Room } from './room.js';
 import type { RoomScript, Script } from './script.js';
 import { exitCheer } from './ambient.js';
 import { moveChar, pushOutMarker } from './record.js';
+import type { RecordStep } from './record.js';
 
 export type Which = 'little' | 'big';
 export type Phase = 'idle' | 'move' | 'fall' | 'turn' | 'exit' | 'cork' | 'kuk';
@@ -172,6 +173,27 @@ export class StepEngine {
     }
     this.recordMove(which, dir);
     return true;
+  }
+
+  /**
+   * Apply one recorded step of a move-only re-simulation (load / undo). A move is
+   * re-run through the physics; a push-out is re-applied from its record marker,
+   * because `prog()` — which marks the item spec=9 — does not run on this path
+   * (the 'q' case of the original's replay dispatch, URoom.pas:24184).
+   *
+   * The marker is re-logged as well as re-applied. `restore` rebuilds `srecord` from
+   * whatever the replay writes, so without this a replayed record comes back one marker
+   * short and stops reproducing itself: the next save — or the next undo, which replays
+   * a record that a replay produced — would restore with the pushed-out item back in the
+   * room. The live path writes the same marker from the cork phase below.
+   */
+  applyRecordStep(st: RecordStep): void {
+    if (st.kind === 'pushOut') {
+      this.room.removePushedOut(st.idx);
+      this.srecord += pushOutMarker(st.idx);
+    } else {
+      this.applyMoveInstant(st.which, st.dir);
+    }
   }
 
   /**
