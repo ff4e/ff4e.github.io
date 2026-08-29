@@ -9,13 +9,14 @@
 import { audio } from './audioEngine.js';
 import { tickFrameEffects } from './cheats.js';
 import { advanceReplay, advanceShowmode, cutsceneCaption, disposeAiKufr, inReplay } from './cutscene.js';
-import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, room, roomDepth, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
+import { activeScript, blink, chatter, clearUndoHistory, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, room, roomDepth, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
 import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
 import { advanceSolve, inSolvemode, noteSolveDeath, noteSolveWin, solvemode, tickSolveWatchdog } from './solveMode.js';
 import { subsOn } from './playerSettings.js';
 import { ui } from './screenState.js';
+import { sampleUndoPoint } from './undo.js';
 import { EFFECT_VOL, LOGIC_MS } from './stageGeometry.js';
 import { maybeBubble } from '../core/ambient.js';
 import { tickChatter } from '../core/chatter.js';
@@ -186,6 +187,7 @@ export function step(): boolean {
     if (!room.alive[engine.active] && room.alive[other]) engine.active = other;
     if (!room.alive.little && !room.alive.big && !room.won && eroded && !showmode) {
       setPokus(pokus + 1); // another attempt
+      clearUndoHistory(); // a fresh attempt, like Restart: there is nothing behind it to undo
       host.buildRoom(true);
       return true;
     }
@@ -253,6 +255,7 @@ export function step(): boolean {
       engine.phase === 'idle'
     ) {
       setPokus(pokus + 1);
+      clearUndoHistory(); // same as the crush restart above
       host.buildRoom(true);
       return true;
     }
@@ -261,6 +264,11 @@ export function step(): boolean {
   // fall/turn/exit/cork animation with its exit cheer + triggerWin, and the pending
   // auto-swim / ZELVA possession step) — the same path the headless harness runs.
   engine.advance();
+  // Record the position, if that advance settled the room into a new one. Deliberately
+  // ABOVE the held-key repeat below: a held direction starts the next cell on the same
+  // tick the previous one finished, so sampling afterwards would never see the rest
+  // between them and a five-cell hold would collapse into a single undo point.
+  sampleUndoPoint();
   // Engine-level held-key repeat (DalsiPrikaz, URoom.pas:26941): re-issue the held
   // movement key on a rest tick. Run AFTER advance() so a cell that just completed
   // immediately starts the next one on the SAME tick — no stationary gap between cells
