@@ -15,6 +15,7 @@ import {
 } from './layoutCandidate.js';
 import type { LayoutRequest, LayoutResult, LayoutTarget, StripEdge } from './layoutCandidate.js';
 import { layoutRoomShipped, preferredStripEdgeShipped } from './layoutShipped.js';
+import { layoutRoomBefore } from './layoutBefore.js';
 import { LAB_MAP, LAB_ROOMS } from './layoutLabRooms.js';
 import { LAB_VIEWPORTS, sizeFor } from './layoutLabViewports.js';
 import type { LabDevice, LabOrientation, LabSize } from './layoutLabViewports.js';
@@ -47,7 +48,13 @@ interface State {
   edge: 'auto' | 'left' | 'top';
   margin: number;
   dpr: number;
-  both: boolean;
+  /**
+   * What the right-hand panel holds. `before` is the layout as it was on `origin/main`
+   * (`tools/before/layout.ts`, frozen) — the only setting that shows a real difference
+   * today, and the one that makes the "differs from origin/main" badge mean something you
+   * can look at rather than take on trust.
+   */
+  compare: 'candidate' | 'before' | 'none';
   grid: boolean;
   guide: boolean;
 }
@@ -67,7 +74,7 @@ const state: State = {
   edge: 'auto',
   margin: 0,
   dpr: 1,
-  both: true,
+  compare: 'candidate',
   grid: true,
   guide: true,
 };
@@ -235,14 +242,18 @@ function wire(): void {
   slider('dpr', 'dpr', 'dprv');
   slider('chrome', 'chrome', 'chromev');
 
-  const chk = (id: string, key: 'both' | 'grid' | 'guide') => {
+  $<HTMLSelectElement>('compare').addEventListener('change', (e) => {
+    state.compare = (e.target as HTMLSelectElement).value as State['compare'];
+    render();
+  });
+
+  const chk = (id: string, key: 'grid' | 'guide') => {
     const el = $<HTMLInputElement>(id);
     el.addEventListener('change', () => {
       state[key] = el.checked;
       render();
     });
   };
-  chk('showboth', 'both');
   chk('showgrid', 'grid');
   chk('showguide', 'guide');
 
@@ -340,7 +351,7 @@ function request(edge: StripEdge): LayoutRequest {
  * same sentence in both, but it is evaluated against that model's own placement, and the
  * whole-room test can only ever fire on the shipped one.
  */
-function edgeFor(model: 'shipped' | 'candidate'): StripEdge {
+function edgeFor(model: ModelName): StripEdge {
   if (state.target === 'pc') return 'none';
   if (state.edge !== 'auto') return state.edge;
   // **Portrait is not the room-aware rule's business.** In the shipped game a plain
@@ -351,14 +362,18 @@ function edgeFor(model: 'shipped' | 'candidate'): StripEdge {
   const v = viewport();
   if (v.h > v.w) return 'top';
   const base = request('left');
-  const pick = model === 'shipped' ? preferredStripEdgeShipped : preferredStripEdge;
-  // The strip differs per edge, so the rule has to price each edge with its own size.
-  const both = (e: StripEdge) => ({ ...base, stripEdge: e, stripPx: e === 'top' ? state.stripTop : state.stripLeft });
-  const top = model === 'shipped' ? layoutRoomShipped(both('top')) : layoutRoom(both('top'));
-  const left = model === 'shipped' ? layoutRoomShipped(both('left')) : layoutRoom(both('left'));
+  // The strip differs per edge, so the rule has to price each edge with its own size — and
+  // each model has to be asked with its OWN placement, since the whole-room test can only
+  // ever fire on the pre-rework one.
+  const both = (e: StripEdge) => ({
+    ...base,
+    stripEdge: e,
+    stripPx: e === 'top' ? state.stripTop : state.stripLeft,
+  });
+  const top = place(model, both('top'));
+  const left = place(model, both('left'));
   if (top.cut !== left.cut) return top.cut ? 'left' : 'top';
-  if (top.visible !== left.visible) return top.visible > left.visible ? 'top' : 'left';
-  return pick(both('left')); // identical scores — defer to the rule's own tie-break (top)
+  return top.visible >= left.visible ? 'top' : 'left'; // ties go to the top (#128)
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
@@ -397,7 +412,7 @@ function gitLabel(): string {
 let zoomNow = 1;
 
 function render(): void {
-  const models: ('shipped' | 'candidate')[] = state.both ? ['shipped', 'candidate'] : ['candidate'];
+  const models: ModelName[] = state.compare === 'none' ? ['shipped'] : ['shipped', state.compare];
   const v = viewport();
 
   const availW = frames.clientWidth - (models.length - 1) * 14;
@@ -410,7 +425,7 @@ function render(): void {
   for (const m of models) {
     const edge = edgeFor(m);
     const req = { ...request(edge), stripEdge: edge };
-    const r = m === 'shipped' ? layoutRoomShipped(req) : layoutRoom(req);
+    const r = place(m, req);
     results[m] = r;
     frames.append(frameFor(m, r, edge, zoom, v));
   }
@@ -420,9 +435,15 @@ function render(): void {
     ` &nbsp;in&nbsp; <b>${v.w}x${v.h}</b> (${(v.w / v.h).toFixed(2)}:1)` +
     (state.chrome ? ` &nbsp;<span style="color:#667">${state.vh} minus ${state.chrome} of chrome</span>` : '') +
     ` &nbsp;·&nbsp; drawn at <b>${(zoom * 100).toFixed(0)}%</b> here` +
-    (results.shipped && results.candidate ? ` &nbsp;·&nbsp; ${verdict(results)}` : '');
+    (state.compare !== 'none' ? ` &nbsp;·&nbsp; ${verdict(results, state.compare)}` : '');
 
   $('targethint').textContent = TARGET_HINT[state.target];
+  $('comparehint').textContent =
+    state.compare === 'before'
+      ? 'The layout on origin/main, frozen. To SEE the cut room: touch, ZRC 555x225, 669x280, and set "which edge" to top — on auto the old rule dodges it. For the vanishing reserve: touch, BOTTLES 720x585, 1491x1114 then 1557x1114.'
+      : state.compare === 'candidate'
+        ? 'The same model written twice. They should agree — a difference means an experiment, or a bug in one of them.'
+        : '';
   $('modenote').textContent = state.target === 'pc' ? '' : 'forced to fill';
   renderChecks(results);
 }
@@ -435,21 +456,65 @@ function render(): void {
  * when it is in fact the comparison passing. Any difference is either an experiment in
  * progress or a bug in one of the two, and it should be impossible to mistake for noise.
  */
-function verdict(r: Record<string, LayoutResult>): string {
-  const s = r.shipped!;
-  const c = r.candidate!;
+/** Which of the three layouts a panel is showing. */
+type ModelName = 'shipped' | 'candidate' | 'before';
+
+/**
+ * One model's answer for one request.
+ *
+ * `before` goes through `tools/before/layout.ts` — `src/app/layout.ts` vendored verbatim
+ * from `origin/main` — rather than through a description of it, so the defects it produces
+ * are the real ones and not a re-enactment of them.
+ */
+function place(model: ModelName, req: LayoutRequest): LayoutResult {
+  if (model === 'candidate') return layoutRoom(req);
+  if (model === 'before') return layoutRoomBefore(req);
+  return layoutRoomShipped(req);
+}
+
+/** Short names for the checks block — the same words the panel headings use. */
+const CHECK_LABEL: Record<ModelName, string> = {
+  shipped: 'this checkout',
+  candidate: 'candidate',
+  before: 'before the rework (origin/main)',
+};
+
+const MODEL_TITLE: Record<ModelName, () => string> = {
+  shipped: () => `THIS CHECKOUT <span>— src/app/layout.ts as it is on ${gitLabel()}</span>`,
+  candidate: () =>
+    'CANDIDATE <span>— somewhere to try a change (tools/layoutCandidate.ts). Nothing imports this.</span>',
+  before: () =>
+    'BEFORE THE REWORK <span>— origin/main, frozen in tools/before/layout.ts. This is where the defects live.</span>',
+};
+
+/**
+ * What the two panels are saying, in words rather than a bare percentage.
+ *
+ * Against the CANDIDATE, agreeing is the expected reading — the two are the same model
+ * written twice, so "+0.00%" is the comparison passing and should not look like it is
+ * broken. Against BEFORE, agreeing merely means this viewport is not one where the rework
+ * changed anything, which is most of them, so it points at two where it did.
+ */
+function verdict(r: Record<string, LayoutResult>, other: 'candidate' | 'before'): string {
+  const a = r.shipped;
+  const b = r[other];
+  if (!a || !b) return '';
   const same =
-    Math.abs(c.contentScale - s.contentScale) < 1e-9 &&
-    Math.abs(c.roomX - s.roomX) < 1e-9 &&
-    Math.abs(c.roomY - s.roomY) < 1e-9;
+    Math.abs(b.contentScale - a.contentScale) < 1e-9 &&
+    Math.abs(b.roomX - a.roomX) < 1e-9 &&
+    Math.abs(b.roomY - a.roomY) < 1e-9;
+  const label = other === 'before' ? 'the old layout' : 'the candidate';
   if (same) {
-    return '<b style="color:#8d8">identical</b> <span style="color:#667">— expected while the candidate model is the one this checkout runs</span>';
+    return other === 'candidate'
+      ? '<b style="color:#8d8">identical</b> <span style="color:#667">— expected while the candidate model is the one this checkout runs</span>'
+      : `<b style="color:#8d8">identical here</b> <span style="color:#667">— ${label} agreed at this viewport; try 669x280 or 1491x1114</span>`;
   }
-  const d = c.contentScale / s.contentScale - 1;
-  return (
-    `<b style="color:#eb6">DIFFERENT</b> — the candidate draws the room <b>${pct(d)}</b>` +
-    ' <span style="color:#667">(an experiment in progress, or a bug in one of the two)</span>'
-  );
+  const d = b.contentScale / a.contentScale - 1;
+  const cut = b.cut && !a.cut ? ' and <b style="color:#f88">CUTS the room</b>' : '';
+  return other === 'before'
+    ? `<b style="color:#eb6">DIFFERENT</b> — ${label} draws the room <b>${pct(d)}</b>${cut}`
+    : `<b style="color:#eb6">DIFFERENT</b> — the candidate draws the room <b>${pct(d)}</b>` +
+        ' <span style="color:#667">(an experiment in progress, or a bug in one of the two)</span>';
 }
 
 function pct(x: number): string {
@@ -474,10 +539,7 @@ function frameFor(
   wrap.className = 'fw';
 
   const h3 = document.createElement('h3');
-  h3.innerHTML =
-    model === 'shipped'
-      ? `THIS CHECKOUT <span>— src/app/layout.ts as it is on ${gitLabel()}</span>`
-      : 'CANDIDATE <span>— somewhere to try a change (tools/layoutCandidate.ts). Nothing imports this.</span>';
+  h3.innerHTML = MODEL_TITLE[model as ModelName]();
   wrap.append(h3);
 
   const outer = el('outer', { width: `${v.w * zoom}px`, height: `${v.h * zoom}px` });
@@ -631,14 +693,14 @@ function renderChecks(results: Record<string, LayoutResult>): void {
   for (const [name, r] of Object.entries(results)) {
     const v = viewport();
     const probe = (dw: number, dh: number) => {
-      const edge = state.target === 'pc' ? 'none' : (state.edge === 'auto' ? edgeFor(name as 'shipped') : state.edge);
+      const edge = state.target === 'pc' ? 'none' : (state.edge === 'auto' ? edgeFor(name as ModelName) : state.edge);
       const req: LayoutRequest = {
         ...request(edge as StripEdge),
         viewportW: v.w + dw,
         viewportH: v.h + dh,
         stripEdge: edge as StripEdge,
       };
-      return name === 'shipped' ? layoutRoomShipped(req) : layoutRoom(req);
+      return place(name as ModelName, req);
     };
     // 1. Monotonicity: a bigger window must never give a smaller room (Martin's decision,
     //    2026-08-31). Probed over the next 200px on each axis, 1px at a time.
@@ -669,9 +731,11 @@ function renderChecks(results: Record<string, LayoutResult>): void {
     //    the viewport cannot do that. Both models are asked the same question now.
     const near = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
     const reserve =
-      near >= state.margin - 0.51
-        ? `<span class="good">holds</span> smallest gap ${near.toFixed(1)}px >= ${state.margin}`
-        : `<span class="bad">FAILS</span> smallest gap ${near.toFixed(1)}px < ${state.margin}`;
+      name === 'before'
+        ? `<span class="warn">not expressible</span> — STAGE_EDGE is 12 NATIVE px inside the box; here it is worth ${near.toFixed(1)}px`
+        : near >= state.margin - 0.51
+          ? `<span class="good">holds</span> smallest gap ${near.toFixed(1)}px >= ${state.margin}`
+          : `<span class="bad">FAILS</span> smallest gap ${near.toFixed(1)}px < ${state.margin}`;
 
     // 3. Nothing runs off the viewport — the property the reserve used to exist for, and
     //    which nothing tested until the rework.
@@ -685,7 +749,7 @@ function renderChecks(results: Record<string, LayoutResult>): void {
     //    one-sided clamp, which is the case where the room cannot clear the strip as well.
     //    "Slack" has to count the model's own reserve: a room whose gaps ARE the margin is
     //    already against the edge of the space it is allowed.
-    const slackFloor = (name === 'shipped' ? 0 : state.margin) + 0.51;
+    const slackFloor = (name === 'before' ? 0 : state.margin) + 0.51;
     const centreErr = Math.abs(r.roomX + r.drawnW / 2 + (r.panelW + r.gap) / 2 - v.w / 2);
     const clamped =
       r.gapLeft <= slackFloor ||
@@ -700,7 +764,7 @@ function renderChecks(results: Record<string, LayoutResult>): void {
           : `<span class="bad">FAILS</span> ${centreErr.toFixed(1)}px off centre with slack to spare`;
 
     lines.push(
-      `<b>${name}</b>\n` +
+      `<b>${CHECK_LABEL[name as ModelName]}</b>\n` +
         `  monotone (bigger window, never a smaller room)   ${mono}\n` +
         `  the reserve is uniform                           ${reserve}\n` +
         `  nothing overflows the viewport                   ${contained}\n` +

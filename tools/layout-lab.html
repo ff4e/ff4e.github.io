@@ -200,8 +200,13 @@
         overflow without it, so it buys air and costs about 2&times;margin/height of room size.
         TV defaults to 27 &mdash; a title-safe inset is this same reserve.</p>
 
-      <h2>Show</h2>
-      <div class="chk"><input type="checkbox" id="showboth" checked /><label for="showboth" style="margin:0">both models side by side</label></div>
+      <h2>Compare</h2>
+      <select id="compare">
+        <option value="candidate">this checkout vs candidate</option>
+        <option value="before">this checkout vs BEFORE the rework (origin/main)</option>
+        <option value="none">this checkout only</option>
+      </select>
+      <p class="hint" id="comparehint"></p>
       <div class="chk"><input type="checkbox" id="showgrid" checked /><label for="showgrid" style="margin:0">15px cell grid</label></div>
       <div class="chk"><input type="checkbox" id="showguide" checked /><label for="showguide" style="margin:0">margin guide</label></div>
       <label for="dpr">device pixel ratio <span class="val" id="dprv">1</span></label>
