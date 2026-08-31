@@ -1,8 +1,8 @@
 /**
- * End-to-end check: does `tools/layoutShipped.ts` really describe the running game?
+ * End-to-end check: does `tools/layoutPlaced.ts` really describe the running game?
  *
  * The layout lab renders the shipped model beside a candidate, and every conclusion drawn
- * from it rests on the left-hand side being the truth. `layoutShipped.ts` calls
+ * from it rests on the left-hand side being the truth. `layoutPlaced.ts` calls
  * `src/app/layout.ts`'s own functions, so the SCALING cannot drift — but the PLACEMENT
  * (where the room lands, how much gap is left on each side) lives in `index.html`'s
  * stylesheet and had to be reproduced. This pins that reproduction against a real
@@ -20,7 +20,7 @@
  * Usage: FF_UI_PORT=<port> npx tsx tools/verify-layout-lab.mjs
  */
 import { chromium } from 'playwright';
-import { layoutRoomShipped } from './layoutShipped.ts';
+import { layoutRoom } from './layoutPlaced.ts';
 
 const BASE = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 
@@ -88,7 +88,7 @@ for (const c of CASES) {
     };
   });
 
-  const model = layoutRoomShipped({
+  const model = layoutRoom({
     viewportW: c.w,
     viewportH: c.h,
     roomW: real.nativeW,

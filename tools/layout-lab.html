@@ -23,13 +23,13 @@
   candidate side by side at the same viewport.
 
   ── What is real here and what is not ────────────────────────────────────────
-  The left frame calls `src/app/layout.ts`'s own `computeStageLayout` and `contentScale`,
-  exactly as `relayout()` does — no re-implementation, so it cannot drift from the game.
-  Only the PLACEMENT is reproduced (it lives in index.html's stylesheet and cannot be
-  imported); `tools/verify-layout-lab.mjs` pins that reproduction against a real Chromium.
+  The frame calls `src/app/layout.ts`'s own `computeStageLayout` and `contentScale`, exactly
+  as `relayout()` does — no re-implementation, so it cannot drift from the game. Only the
+  PLACEMENT is reproduced (it lives in this file's stylesheet and cannot be imported);
+  `tools/verify-layout-lab.mjs` pins that reproduction against a real Chromium.
 
-  The right frame is `tools/layoutCandidate.ts`, a model derived from one stated result
-  rather than from six interacting mechanisms. Nothing in src/ imports it yet.
+  It reads the WORKING TREE, so it shows the branch you are serving — not necessarily
+  `main`, and not necessarily what players run. The heading names the revision.
 -->
 <html lang="en">
   <head>
@@ -67,6 +67,8 @@
         background: #0e0e16; color: #99a; border: 1px solid #333449; border-radius: 5px;
       }
       .seg button[aria-pressed='true'] { background: #1d3b44; color: #9fd; border-color: #4a8b98; }
+      .seg button#copy { padding: 7px 4px; color: #9fd; border-color: #4a8b98; }
+      .seg button#copy:hover { background: #1d3b44; }
       .chk { display: flex; align-items: center; gap: 6px; margin: 5px 0; color: #99a; font-size: 11px; }
       .chk input { accent-color: #6cc; }
       .val { float: right; color: #6cc; font-variant-numeric: tabular-nums; }
@@ -135,10 +137,9 @@
       <h1>Layout lab</h1>
       <p class="sub">Rooms are rectangles. Drag the corner, or type a size.</p>
       <p class="sub" style="color:#778;border-left:2px solid #2a2a3a;padding-left:8px">
-        <b style="color:#9fd">Two panels.</b> <b>THIS CHECKOUT</b> is
-        <code>src/app/layout.ts</code> as it is <em>in the branch you are serving</em> &mdash; not
-        necessarily <code>main</code>, and not necessarily what players run.
-        <b>CANDIDATE</b> is a second copy to try changes in; nothing imports it.
+        Shows <code>src/app/layout.ts</code> <em>as it is in the branch you are serving</em> &mdash;
+        not necessarily <code>main</code>, and not necessarily what players run. The heading names
+        the revision.
       </p>
 
       <h2>Target</h2>
@@ -200,13 +201,15 @@
         overflow without it, so it buys air and costs about 2&times;margin/height of room size.
         TV defaults to 27 &mdash; a title-safe inset is this same reserve.</p>
 
-      <h2>Compare</h2>
-      <select id="compare">
-        <option value="candidate">this checkout vs candidate</option>
-        <option value="before">this checkout vs BEFORE the rework (origin/main)</option>
-        <option value="none">this checkout only</option>
-      </select>
-      <p class="hint" id="comparehint"></p>
+      <h2>Export</h2>
+      <div class="seg">
+        <button id="copy">Copy settings for PC + Touch + TV</button>
+      </div>
+      <p class="hint" id="copyhint">Puts a plain-text block on the clipboard: every tunable for all
+        three targets, plus what they produce for this room across a spread of real viewports.
+        Paste it straight into a conversation.</p>
+      <textarea id="dump" readonly spellcheck="false"
+        style="width:100%;height:120px;margin-top:6px;background:#0e0e16;color:#8aa;border:1px solid #333449;border-radius:5px;font:10px/1.35 ui-monospace,Menlo,monospace;padding:5px;display:none"></textarea>
       <div class="chk"><input type="checkbox" id="showgrid" checked /><label for="showgrid" style="margin:0">15px cell grid</label></div>
       <div class="chk"><input type="checkbox" id="showguide" checked /><label for="showguide" style="margin:0">margin guide</label></div>
       <label for="dpr">device pixel ratio <span class="val" id="dprv">1</span></label>

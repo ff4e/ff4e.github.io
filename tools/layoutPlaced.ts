@@ -1,18 +1,13 @@
 /**
- * The SHIPPED layout (`src/app/layout.ts` + the CSS that places its output), expressed in
- * the same shape as `tools/layoutCandidate.ts` so the two can be rendered side by side and
- * swept against each other. DEV ONLY.
+ * The game's layout, plus where it puts things — the one model `tools/layout-lab.html`
+ * draws. DEV ONLY.
  *
- * Since the model landed in `src/app/layout.ts` the two agree by design, and that is now
- * this file's second job: `layoutCandidate.ts` is an INDEPENDENT implementation of the same
- * stated result, so the sweep comparing them is a cross-check that the port did not quietly
- * change the model. A divergence is a bug in one of them.
+ * It brings **no scaling maths of its own**, and that is the entire point:
+ * `computeStageLayout` and `contentScale` are imported from `src/app/layout.ts` and called
+ * exactly as `relayout()` calls them, so a number the lab shows is a number the game has.
  *
- * It brings **no scaling maths of its own** — that is the entire point. `computeStageLayout`
- * and `contentScale` are imported from `src/app/` and called exactly as `relayout()` calls
- * them, so a difference the lab shows is a difference the game has. What this file adds is
- * only the PLACEMENT, which in the game lives in `index.html`'s stylesheet and therefore
- * cannot be imported:
+ * What this file adds is only the PLACEMENT, which lives in `index.html`'s stylesheet and
+ * therefore cannot be imported:
  *
  *  - the row (room + gap + panel) is centred in `.stage`, so the room's centre is
  *    `availW/2 - (gap + panelW)/2` — which is why moving the panel changes nothing;
@@ -22,13 +17,14 @@
  *    SCREEN, sliding back only when the room cannot clear the bar as well.
  *
  * `tools/verify-layout-lab.mjs` asserts this reproduction against a real Chromium running
- * the actual game, so "the lab shows the shipped layout" is a measured claim and not a
+ * the actual game, so "the lab shows the game's layout" is a measured claim and not a
  * reading of the CSS.
  */
-import { computeStageLayout, contentScale, VIEWPORT_MARGIN } from '../src/app/layout.js';
+import { computeStageLayout, contentScale } from '../src/app/layout.js';
 import type { FitMode } from '../src/app/layout.js';
 import { TOUCHBAR_H, TOUCHBAR_W } from '../src/app/touchBarEdge.js';
-import type { LayoutRequest, LayoutResult, StripEdge } from './layoutCandidate.js';
+import { VIEWPORT_MARGIN } from '../src/app/layout.js';
+import type { LayoutRequest, LayoutResult, StripEdge } from './layoutModel.js';
 
 export { TOUCHBAR_W, TOUCHBAR_H };
 
@@ -50,11 +46,10 @@ function nearEdge(viewport: number, size: number, bar: number, margin: number): 
  * Lay one room out with the shipped model.
  *
  * `stripPx` overrides the bar's real 72/66 so the lab's sliders can price a different bar,
- * and `marginPx` is passed straight through to `computeStageLayout` — the reserve is a
- * parameter in CSS px now, so the lab's slider moves the real thing rather than a model of
- * it. Left at their defaults, both are exactly what ships.
+ * and `marginPx` is passed straight through to `computeStageLayout`. Left at their
+ * defaults, both are exactly what the game does.
  */
-export function layoutRoomShipped(req: LayoutRequest): LayoutResult {
+export function layoutRoom(req: LayoutRequest): LayoutResult {
   const panel = req.target === 'pc';
   const stripEdge: StripEdge = panel ? 'none' : (req.stripEdge ?? 'left');
   const strip =
@@ -126,10 +121,10 @@ export function layoutRoomShipped(req: LayoutRequest): LayoutResult {
   };
 }
 
-/** The shipped edge rule (#128), so the lab can show both rules on both models. */
-export function preferredStripEdgeShipped(req: Omit<LayoutRequest, 'stripEdge'>): StripEdge {
-  const top = layoutRoomShipped({ ...req, stripEdge: 'top' });
-  const left = layoutRoomShipped({ ...req, stripEdge: 'left' });
+/** The edge rule (#128): lay the room out both ways and keep whichever shows more of it. */
+export function preferredStripEdge(req: Omit<LayoutRequest, 'stripEdge'>): StripEdge {
+  const top = layoutRoom({ ...req, stripEdge: 'top' });
+  const left = layoutRoom({ ...req, stripEdge: 'left' });
   if (top.cut !== left.cut) return top.cut ? 'left' : 'top';
   return top.visible >= left.visible ? 'top' : 'left';
 }

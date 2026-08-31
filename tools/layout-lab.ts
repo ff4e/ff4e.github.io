@@ -1,21 +1,26 @@
 /**
  * The layout lab's wiring — DEV ONLY. See `tools/layout-lab.html` for what it is for.
  *
- * It holds no scaling maths: every number on screen comes from `tools/layoutShipped.ts`
- * (which calls `src/app/layout.ts` directly) or `tools/layoutCandidate.ts`. This file
- * only turns their output into rectangles, and runs the small local probes that make a
- * property visible at the viewport you are looking at rather than in a sweep's summary.
+ * It holds no scaling maths: every number on screen comes from `tools/layoutPlaced.ts`,
+ * which calls `src/app/layout.ts` directly. This file turns that into rectangles, runs the
+ * small local probes that make a property visible at the viewport you are looking at, and
+ * writes the settings block the Copy button puts on the clipboard.
  */
-import { FIT_MODES } from '../src/app/layout.js';
-import type { FitMode } from '../src/app/layout.js';
 import {
-  TARGET_DEFAULTS,
-  layoutRoom,
-  preferredStripEdge,
-} from './layoutCandidate.js';
-import type { LayoutRequest, LayoutResult, LayoutTarget, StripEdge } from './layoutCandidate.js';
-import { layoutRoomShipped, preferredStripEdgeShipped } from './layoutShipped.js';
-import { layoutRoomBefore } from './layoutBefore.js';
+  FIT_MODES,
+  MIN_STAGE_SCALE,
+  PANEL_FOOTPRINT_W,
+  PANEL_NATIVE_H,
+  PANEL_NATIVE_W,
+  STAGE_GAP,
+  STAGE_H,
+  STAGE_W,
+  VIEWPORT_MARGIN,
+} from '../src/app/layout.js';
+import type { FitMode } from '../src/app/layout.js';
+import { TARGET_DEFAULTS } from './layoutModel.js';
+import type { LayoutRequest, LayoutResult, LayoutTarget, StripEdge } from './layoutModel.js';
+import { layoutRoom, preferredStripEdge } from './layoutPlaced.js';
 import { LAB_MAP, LAB_ROOMS } from './layoutLabRooms.js';
 import { LAB_VIEWPORTS, sizeFor } from './layoutLabViewports.js';
 import type { LabDevice, LabOrientation, LabSize } from './layoutLabViewports.js';
@@ -48,13 +53,6 @@ interface State {
   edge: 'auto' | 'left' | 'top';
   margin: number;
   dpr: number;
-  /**
-   * What the right-hand panel holds. `before` is the layout as it was on `origin/main`
-   * (`tools/before/layout.ts`, frozen) — the only setting that shows a real difference
-   * today, and the one that makes the "differs from origin/main" badge mean something you
-   * can look at rather than take on trust.
-   */
-  compare: 'candidate' | 'before' | 'none';
   grid: boolean;
   guide: boolean;
 }
@@ -74,7 +72,6 @@ const state: State = {
   edge: 'auto',
   margin: 0,
   dpr: 1,
-  compare: 'candidate',
   grid: true,
   guide: true,
 };
@@ -207,13 +204,8 @@ function wire(): void {
       // target's ones.
       const d = TARGET_DEFAULTS[state.target];
       state.margin = d.margin;
-      if (state.target === 'tv') {
-        state.stripLeft = d.strip;
-        state.stripTop = d.strip;
-      } else if (state.target === 'touch') {
-        state.stripLeft = 72;
-        state.stripTop = 66;
-      }
+      state.stripLeft = d.left;
+      state.stripTop = d.top;
       syncSliders();
       render();
     });
@@ -241,11 +233,6 @@ function wire(): void {
   slider('margin', 'margin', 'marginv');
   slider('dpr', 'dpr', 'dprv');
   slider('chrome', 'chrome', 'chromev');
-
-  $<HTMLSelectElement>('compare').addEventListener('change', (e) => {
-    state.compare = (e.target as HTMLSelectElement).value as State['compare'];
-    render();
-  });
 
   const chk = (id: string, key: 'grid' | 'guide') => {
     const el = $<HTMLInputElement>(id);
@@ -323,7 +310,7 @@ function syncSliders(): void {
   $('marginv').textContent = String(state.margin);
 }
 
-// ── The two models ──────────────────────────────────────────────────────────
+// ── The layout ──────────────────────────────────────────────────────────────
 
 /** The viewport actually handed to the page, once browser chrome is off the height. */
 function viewport(): { w: number; h: number } {
@@ -346,12 +333,8 @@ function request(edge: StripEdge): LayoutRequest {
   };
 }
 
-/**
- * The edge each model would choose. They are asked separately on purpose: the rule is the
- * same sentence in both, but it is evaluated against that model's own placement, and the
- * whole-room test can only ever fire on the shipped one.
- */
-function edgeFor(model: ModelName): StripEdge {
+/** Which edge the strip takes, by the shipped rule (#128), unless it is being overridden. */
+function edgeFor(): StripEdge {
   if (state.target === 'pc') return 'none';
   if (state.edge !== 'auto') return state.edge;
   // **Portrait is not the room-aware rule's business.** In the shipped game a plain
@@ -370,8 +353,8 @@ function edgeFor(model: ModelName): StripEdge {
     stripEdge: e,
     stripPx: e === 'top' ? state.stripTop : state.stripLeft,
   });
-  const top = place(model, both('top'));
-  const left = place(model, both('left'));
+  const top = layoutRoom(both('top'));
+  const left = layoutRoom(both('left'));
   if (top.cut !== left.cut) return top.cut ? 'left' : 'top';
   return top.visible >= left.visible ? 'top' : 'left'; // ties go to the top (#128)
 }
@@ -412,109 +395,26 @@ function gitLabel(): string {
 let zoomNow = 1;
 
 function render(): void {
-  const models: ModelName[] = state.compare === 'none' ? ['shipped'] : ['shipped', state.compare];
   const v = viewport();
-
-  const availW = frames.clientWidth - (models.length - 1) * 14;
-  const availH = frames.clientHeight - 78; // title + readout
-  const zoom = Math.min(1, availW / models.length / v.w, availH / v.h);
+  const zoom = Math.min(1, (frames.clientWidth - 4) / v.w, (frames.clientHeight - 78) / v.h);
   zoomNow = zoom;
 
+  const edge = edgeFor();
+  const r = layoutRoom({ ...request(edge), stripEdge: edge });
+
   frames.textContent = '';
-  const results: Record<string, LayoutResult> = {};
-  for (const m of models) {
-    const edge = edgeFor(m);
-    const req = { ...request(edge), stripEdge: edge };
-    const r = place(m, req);
-    results[m] = r;
-    frames.append(frameFor(m, r, edge, zoom, v));
-  }
+  frames.append(frameFor(r, edge, zoom, v));
 
   $('topline').innerHTML =
     `<b>${state.roomName} ${state.roomW}x${state.roomH}</b> (${(state.roomW / state.roomH).toFixed(2)}:1)` +
     ` &nbsp;in&nbsp; <b>${v.w}x${v.h}</b> (${(v.w / v.h).toFixed(2)}:1)` +
     (state.chrome ? ` &nbsp;<span style="color:#667">${state.vh} minus ${state.chrome} of chrome</span>` : '') +
     ` &nbsp;·&nbsp; drawn at <b>${(zoom * 100).toFixed(0)}%</b> here` +
-    (state.compare !== 'none' ? ` &nbsp;·&nbsp; ${verdict(results, state.compare)}` : '');
+    ` &nbsp;·&nbsp; <span style="color:#667">${gitLabel()}</span>`;
 
   $('targethint').textContent = TARGET_HINT[state.target];
-  $('comparehint').textContent =
-    state.compare === 'before'
-      ? 'The layout on origin/main, frozen. To SEE the cut room: touch, ZRC 555x225, 669x280, and set "which edge" to top — on auto the old rule dodges it. For the vanishing reserve: touch, BOTTLES 720x585, 1491x1114 then 1557x1114.'
-      : state.compare === 'candidate'
-        ? 'The same model written twice. They should agree — a difference means an experiment, or a bug in one of them.'
-        : '';
   $('modenote').textContent = state.target === 'pc' ? '' : 'forced to fill';
-  renderChecks(results);
-}
-
-/**
- * What the two panels are saying, in words rather than a percentage.
- *
- * The candidate landed in `src/app/layout.ts`, so the two are the SAME model written twice
- * and agreeing is the expected reading — a bare "+0.00%" looks like a broken comparison
- * when it is in fact the comparison passing. Any difference is either an experiment in
- * progress or a bug in one of the two, and it should be impossible to mistake for noise.
- */
-/** Which of the three layouts a panel is showing. */
-type ModelName = 'shipped' | 'candidate' | 'before';
-
-/**
- * One model's answer for one request.
- *
- * `before` goes through `tools/before/layout.ts` — `src/app/layout.ts` vendored verbatim
- * from `origin/main` — rather than through a description of it, so the defects it produces
- * are the real ones and not a re-enactment of them.
- */
-function place(model: ModelName, req: LayoutRequest): LayoutResult {
-  if (model === 'candidate') return layoutRoom(req);
-  if (model === 'before') return layoutRoomBefore(req);
-  return layoutRoomShipped(req);
-}
-
-/** Short names for the checks block — the same words the panel headings use. */
-const CHECK_LABEL: Record<ModelName, string> = {
-  shipped: 'this checkout',
-  candidate: 'candidate',
-  before: 'before the rework (origin/main)',
-};
-
-const MODEL_TITLE: Record<ModelName, () => string> = {
-  shipped: () => `THIS CHECKOUT <span>— src/app/layout.ts as it is on ${gitLabel()}</span>`,
-  candidate: () =>
-    'CANDIDATE <span>— somewhere to try a change (tools/layoutCandidate.ts). Nothing imports this.</span>',
-  before: () =>
-    'BEFORE THE REWORK <span>— origin/main, frozen in tools/before/layout.ts. This is where the defects live.</span>',
-};
-
-/**
- * What the two panels are saying, in words rather than a bare percentage.
- *
- * Against the CANDIDATE, agreeing is the expected reading — the two are the same model
- * written twice, so "+0.00%" is the comparison passing and should not look like it is
- * broken. Against BEFORE, agreeing merely means this viewport is not one where the rework
- * changed anything, which is most of them, so it points at two where it did.
- */
-function verdict(r: Record<string, LayoutResult>, other: 'candidate' | 'before'): string {
-  const a = r.shipped;
-  const b = r[other];
-  if (!a || !b) return '';
-  const same =
-    Math.abs(b.contentScale - a.contentScale) < 1e-9 &&
-    Math.abs(b.roomX - a.roomX) < 1e-9 &&
-    Math.abs(b.roomY - a.roomY) < 1e-9;
-  const label = other === 'before' ? 'the old layout' : 'the candidate';
-  if (same) {
-    return other === 'candidate'
-      ? '<b style="color:#8d8">identical</b> <span style="color:#667">— expected while the candidate model is the one this checkout runs</span>'
-      : `<b style="color:#8d8">identical here</b> <span style="color:#667">— ${label} agreed at this viewport; try 669x280 or 1491x1114</span>`;
-  }
-  const d = b.contentScale / a.contentScale - 1;
-  const cut = b.cut && !a.cut ? ' and <b style="color:#f88">CUTS the room</b>' : '';
-  return other === 'before'
-    ? `<b style="color:#eb6">DIFFERENT</b> — ${label} draws the room <b>${pct(d)}</b>${cut}`
-    : `<b style="color:#eb6">DIFFERENT</b> — the candidate draws the room <b>${pct(d)}</b>` +
-        ' <span style="color:#667">(an experiment in progress, or a bug in one of the two)</span>';
+  renderChecks(r);
 }
 
 function pct(x: number): string {
@@ -529,7 +429,6 @@ function el(cls: string, style: Partial<CSSStyleDeclaration>): HTMLDivElement {
 }
 
 function frameFor(
-  model: string,
   r: LayoutResult,
   edge: StripEdge,
   zoom: number,
@@ -538,10 +437,6 @@ function frameFor(
   const wrap = document.createElement('div');
   wrap.className = 'fw';
 
-  const h3 = document.createElement('h3');
-  h3.innerHTML = MODEL_TITLE[model as ModelName]();
-  wrap.append(h3);
-
   const outer = el('outer', { width: `${v.w * zoom}px`, height: `${v.h * zoom}px` });
   const frame = el(`frame${r.cut ? ' cut' : ''}`, {
     width: `${v.w}px`,
@@ -549,11 +444,10 @@ function frameFor(
     transform: `scale(${zoom})`,
   });
 
-  if (state.guide) {
-    const m = model === 'shipped' ? 0 : state.margin;
-    if (m > 0) {
-      frame.append(el('guide', { left: `${m}px`, top: `${m}px`, right: `${m}px`, bottom: `${m}px` }));
-    }
+  // The reserve, drawn as a dashed box so a margin you cannot otherwise see is visible.
+  if (state.guide && state.margin > 0) {
+    const m = state.margin;
+    frame.append(el('guide', { left: `${m}px`, top: `${m}px`, right: `${m}px`, bottom: `${m}px` }));
   }
 
   if (edge === 'left' && state.stripLeft > 0) {
@@ -688,19 +582,18 @@ function fmt(x: number): string {
  * Every one of them is a property a shipped defect violated, or one that was asserted in a
  * doc comment and never actually tested.
  */
-function renderChecks(results: Record<string, LayoutResult>): void {
+function renderChecks(r: LayoutResult): void {
   const lines: string[] = [];
-  for (const [name, r] of Object.entries(results)) {
+  {
     const v = viewport();
     const probe = (dw: number, dh: number) => {
-      const edge = state.target === 'pc' ? 'none' : (state.edge === 'auto' ? edgeFor(name as ModelName) : state.edge);
-      const req: LayoutRequest = {
+      const edge = state.target === 'pc' ? 'none' : state.edge === 'auto' ? edgeFor() : state.edge;
+      return layoutRoom({
         ...request(edge as StripEdge),
         viewportW: v.w + dw,
         viewportH: v.h + dh,
         stripEdge: edge as StripEdge,
-      };
-      return place(name as ModelName, req);
+      });
     };
     // 1. Monotonicity: a bigger window must never give a smaller room (Martin's decision,
     //    2026-08-31). Probed over the next 200px on each axis, 1px at a time.
@@ -731,11 +624,9 @@ function renderChecks(results: Record<string, LayoutResult>): void {
     //    the viewport cannot do that. Both models are asked the same question now.
     const near = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
     const reserve =
-      name === 'before'
-        ? `<span class="warn">not expressible</span> — STAGE_EDGE is 12 NATIVE px inside the box; here it is worth ${near.toFixed(1)}px`
-        : near >= state.margin - 0.51
-          ? `<span class="good">holds</span> smallest gap ${near.toFixed(1)}px >= ${state.margin}`
-          : `<span class="bad">FAILS</span> smallest gap ${near.toFixed(1)}px < ${state.margin}`;
+      near >= state.margin - 0.51
+        ? `<span class="good">holds</span> smallest gap ${near.toFixed(1)}px >= ${state.margin}`
+        : `<span class="bad">FAILS</span> smallest gap ${near.toFixed(1)}px < ${state.margin}`;
 
     // 3. Nothing runs off the viewport — the property the reserve used to exist for, and
     //    which nothing tested until the rework.
@@ -749,7 +640,7 @@ function renderChecks(results: Record<string, LayoutResult>): void {
     //    one-sided clamp, which is the case where the room cannot clear the strip as well.
     //    "Slack" has to count the model's own reserve: a room whose gaps ARE the margin is
     //    already against the edge of the space it is allowed.
-    const slackFloor = (name === 'before' ? 0 : state.margin) + 0.51;
+    const slackFloor = state.margin + 0.51;
     const centreErr = Math.abs(r.roomX + r.drawnW / 2 + (r.panelW + r.gap) / 2 - v.w / 2);
     const clamped =
       r.gapLeft <= slackFloor ||
@@ -764,8 +655,7 @@ function renderChecks(results: Record<string, LayoutResult>): void {
           : `<span class="bad">FAILS</span> ${centreErr.toFixed(1)}px off centre with slack to spare`;
 
     lines.push(
-      `<b>${CHECK_LABEL[name as ModelName]}</b>\n` +
-        `  monotone (bigger window, never a smaller room)   ${mono}\n` +
+      `  monotone (bigger window, never a smaller room)   ${mono}\n` +
         `  the reserve is uniform                           ${reserve}\n` +
         `  nothing overflows the viewport                   ${contained}\n` +
         `  the room is centred on the screen (#126)         ${centred}\n` +
@@ -775,8 +665,118 @@ function renderChecks(results: Record<string, LayoutResult>): void {
   $('checks').innerHTML = lines.join('\n\n');
 }
 
+/**
+ * Everything the lab is currently set to, as plain text you can paste into a conversation.
+ *
+ * All three targets, not just the one on screen, because the strip sizes are decided
+ * against each other — a left strip is nearly free and a top one is not, and the numbers
+ * only argue with each other when they are side by side. The viewport spread is fixed and
+ * named so two exports are comparable: change a slider, copy again, and the diff is the
+ * answer.
+ *
+ * The constants are included because they are the things being polished, and a settings
+ * block that omits them describes a layout nobody can reproduce.
+ */
+function settingsDump(): string {
+  const L: string[] = [];
+  const p2 = (n: number) => n.toFixed(2);
+  L.push('FISH FILLETS — layout lab settings');
+  L.push(git ? `revision: branch ${git.branch} @ ${git.head}${git.differsFromMain ? ' (differs from origin/main)' : ''}${git.uncommitted ? ' + uncommitted edits' : ''}` : 'revision: unknown');
+  L.push(`room on screen: ${state.roomName} ${state.roomW}x${state.roomH} native (${p2(state.roomW / state.roomH)}:1)`);
+  L.push('');
+  L.push('CONSTANTS (src/app/layout.ts)');
+  L.push(`  STAGE_W/STAGE_H     ${STAGE_W}x${STAGE_H} native   the object-size envelope`);
+  L.push(`  PANEL               ${PANEL_NATIVE_W}x${PANEL_NATIVE_H} native + ${STAGE_GAP} gap = ${PANEL_FOOTPRINT_W} footprint (PC only)`);
+  L.push(`  MIN_STAGE_SCALE     ${MIN_STAGE_SCALE}`);
+  L.push(`  VIEWPORT_MARGIN     ${VIEWPORT_MARGIN} css px (the shipped default)`);
+  L.push('');
+
+  const CASES: Record<LayoutTarget, [string, number, number][]> = {
+    pc: [
+      ['laptop 16:10', 1280, 800],
+      ['MacBook Pro 14', 1512, 860],
+      ['1080p maximised', 1920, 1030],
+      ['1440p maximised', 2560, 1380],
+    ],
+    touch: [
+      ['iPhone 15 landscape', 734, 343],
+      ['iPhone 15 portrait', 393, 659],
+      ['Pixel 8 Pro landscape', 945, 396],
+      ['iPad landscape', 1024, 696],
+    ],
+    tv: [
+      ['720p', 1280, 720],
+      ['1080p', 1920, 1080],
+    ],
+  };
+
+  for (const target of ['pc', 'touch', 'tv'] as const) {
+    const live = target === state.target;
+    const strip = target === 'pc' ? 0 : live ? state.stripLeft : TARGET_DEFAULTS[target].left;
+    const stripTop = target === 'pc' ? 0 : live ? state.stripTop : TARGET_DEFAULTS[target].top;
+    const margin = live ? state.margin : TARGET_DEFAULTS[target].margin;
+    const mode = target === 'pc' ? state.mode : 'fill';
+    L.push(`${target.toUpperCase()}${target === state.target ? '   <- the one on screen, so these are your live values' : '   (defaults; switch to it in the lab to tune)'}`);
+    L.push(`  strip           ${target === 'pc' ? 'none — the faithful 155x395 panel instead' : `${strip} px left / ${stripTop} px top`}`);
+    L.push(`  margin          ${margin} css px per edge${target === 'tv' ? '  (title-safe inset — this is the TV padding)' : ''}`);
+    L.push(`  fit mode        ${mode}${target === 'pc' ? '' : ' (forced)'}`);
+    L.push(`  edge rule       ${target === 'pc' ? 'n/a' : state.edge === 'auto' ? 'auto — whichever shows more of the room' : `forced ${state.edge}`}`);
+    for (const [name, vw, vh] of CASES[target]) {
+      const base: Omit<LayoutRequest, 'stripEdge'> = {
+        viewportW: vw,
+        viewportH: vh,
+        roomW: state.roomW,
+        roomH: state.roomH,
+        target,
+        mode: mode as typeof state.mode,
+        stripPx: strip,
+        marginPx: margin,
+        dpr: state.dpr,
+      };
+      // Portrait belongs to the media query, which always picks the top (see edgeFor).
+      const edge: StripEdge =
+        target === 'pc'
+          ? 'none'
+          : vh > vw
+            ? 'top'
+            : state.edge === 'auto'
+              ? preferredStripEdge(base)
+              : state.edge;
+      const px = edge === 'top' ? stripTop : strip;
+      const r = layoutRoom({ ...base, stripEdge: edge, stripPx: px });
+      L.push(
+        `    ${name.padEnd(22)} ${`${vw}x${vh}`.padEnd(10)} bar ${edge.padEnd(5)}` +
+          ` scale ${r.contentScale.toFixed(4)}  room ${Math.round(r.drawnW)}x${Math.round(r.drawnH)}` +
+          `  gaps L${Math.round(r.gapLeft)} R${Math.round(r.gapRight)} T${Math.round(r.gapTop)} B${Math.round(r.gapBottom)}` +
+          (r.cut ? `  CUT ${r.cutW.toFixed(1)}x${r.cutH.toFixed(1)} native px` : ''),
+      );
+    }
+    L.push('');
+  }
+  return L.join('\n');
+}
+
+function wireExport(): void {
+  const ta = $<HTMLTextAreaElement>('dump');
+  $('copy').addEventListener('click', async () => {
+    const text = settingsDump();
+    ta.value = text;
+    ta.style.display = 'block';
+    try {
+      await navigator.clipboard.writeText(text);
+      $('copyhint').textContent = 'Copied to the clipboard. It is also in the box below if the copy was blocked.';
+    } catch {
+      // A page served over plain http can be denied the clipboard; the textarea is the
+      // fallback and is selected so one Cmd+C still works.
+      ta.select();
+      $('copyhint').textContent = 'The browser blocked the clipboard — the text is selected below, press Cmd+C.';
+    }
+  });
+}
+
 buildSelects();
 wire();
+wireExport();
 syncSliders();
 syncViewport();
 render();

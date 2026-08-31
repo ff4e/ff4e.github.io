@@ -32,17 +32,16 @@
  *             net, since it is the property that catches a layout that simply gives up.
  *
  * ── Usage ────────────────────────────────────────────────────────────────────
- *   npx tsx tools/sweep-layout.mjs                    # both models, default grid
+ *   npx tsx tools/sweep-layout.mjs                    # every property, default grid
  *   npx tsx tools/sweep-layout.mjs --step 4           # finer viewport grid (slower)
  *   npx tsx tools/sweep-layout.mjs --target touch     # one target
  *   npx tsx tools/sweep-layout.mjs --margin 0         # price the candidate's reserve
  *   npx tsx tools/sweep-layout.mjs --strip 56         # price a different touch strip
  *   npx tsx tools/sweep-layout.mjs --mono             # worst CUMULATIVE monotonicity loss
- *   npx tsx tools/sweep-layout.mjs --cost             # room size, candidate vs shipped
  *   npx tsx tools/sweep-layout.mjs --strip-curve      # room size against strip size
  */
-import { layoutRoom, TARGET_DEFAULTS } from './layoutCandidate.ts';
-import { layoutRoomShipped } from './layoutShipped.ts';
+import { TARGET_DEFAULTS } from './layoutModel.ts';
+import { layoutRoom } from './layoutPlaced.ts';
 import { LAB_ROOMS, LAB_SIZES } from './layoutLabRooms.ts';
 
 const argv = process.argv.slice(2);
@@ -61,7 +60,6 @@ const MARGIN = arg('--margin', 12);
 const STRIP_LEFT = arg('--strip', 72);
 const STRIP_TOP = arg('--strip-top', 66);
 const ONLY_TARGET = str('--target', null);
-const ONLY_MODEL = str('--model', null);
 
 /**
  * The rectangle set. 63 distinct sizes rather than 72 rooms: a property either holds for a
@@ -93,8 +91,8 @@ function cases() {
     { target: 'pc', edge: 'none', strip: 0, margin: MARGIN, mode: 'fill' },
     { target: 'touch', edge: 'left', strip: STRIP_LEFT, margin: MARGIN, mode: 'fill' },
     { target: 'touch', edge: 'top', strip: STRIP_TOP, margin: MARGIN, mode: 'fill' },
-    { target: 'tv', edge: 'left', strip: TARGET_DEFAULTS.tv.strip, margin: TARGET_DEFAULTS.tv.margin, mode: 'fill' },
-    { target: 'tv', edge: 'top', strip: TARGET_DEFAULTS.tv.strip, margin: TARGET_DEFAULTS.tv.margin, mode: 'fill' },
+    { target: 'tv', edge: 'left', strip: TARGET_DEFAULTS.tv.left, margin: TARGET_DEFAULTS.tv.margin, mode: 'fill' },
+    { target: 'tv', edge: 'top', strip: TARGET_DEFAULTS.tv.top, margin: TARGET_DEFAULTS.tv.margin, mode: 'fill' },
   ];
   return ONLY_TARGET ? all.filter((c) => c.target === ONLY_TARGET) : all;
 }
@@ -277,12 +275,7 @@ function report(label, props) {
 function monoReport() {
   console.log('\n══ worst CUMULATIVE loss from growing the window ════════');
   console.log('  (the largest drop below the best size already seen, walking one axis)\n');
-  const models = [
-    ['shipped', layoutRoomShipped],
-    ['candidate', layoutRoom],
-  ].filter(([n]) => !ONLY_MODEL || ONLY_MODEL === n);
-
-  for (const [name, place] of models) {
+  for (const [name, place] of [['layout', layoutRoom]]) {
     for (const c of cases()) {
       let worstH = { d: 0 };
       let worstW = { d: 0 };
@@ -332,57 +325,6 @@ function monoReport() {
   }
 }
 
-/**
- * How much room size the candidate gives up (or gains) against the shipped model.
- *
- * Split on whether the SHIPPED layout was showing the whole room, and that split is the
- * whole point: where the shipped model draws a room larger than the screen it is not
- * winning, it is hiding part of the level, so a raw mean over every viewport reports the
- * defect as if it were a benefit. Measured over a 32px grid, the shipped model cuts the
- * room on ~10% of combinations, and those alone drag the mean from about -1% to -5%.
- */
-function costReport() {
-  console.log('\n══ room size: candidate vs shipped ══════════════════════');
-  console.log('  (all 72 rooms — a player walks through 72, not 63)');
-  console.log('  TV is omitted: the shipped model has no TV, so there is nothing to compare to.\n');
-  for (const c of cases()) {
-    if (c.target === 'tv') continue;
-    let sum = 0;
-    let n = 0;
-    let cutSum = 0;
-    let cutN = 0;
-    let worst = { d: Infinity };
-    let best = { d: -Infinity };
-    let wins = 0;
-    for (const room of LAB_ROOMS) {
-      for (const [w, h] of viewports()) {
-        const r = req(c, room, w, h);
-        const sr = layoutRoomShipped(r);
-        const kr = layoutRoom(r);
-        if (!(sr.contentScale > 0) || !(kr.contentScale > 0)) continue;
-        const d = kr.contentScale / sr.contentScale - 1;
-        if (sr.cut) {
-          cutSum += d;
-          cutN++;
-          continue;
-        }
-        sum += d;
-        n++;
-        if (d > 1e-9) wins++;
-        if (d < worst.d) worst = { d, room: room.name, vp: `${w}x${h}` };
-        if (d > best.d) best = { d, room: room.name, vp: `${w}x${h}` };
-      }
-    }
-    const tot = n + cutN;
-    console.log(`  ${`${c.target}/${c.edge} ${c.mode}`.padEnd(22)}`);
-    console.log(`    where shipped showed the WHOLE room (${((n / tot) * 100).toFixed(1)}% of combinations)`);
-    console.log(`      mean ${((sum / n) * 100).toFixed(2)}%   candidate bigger in ${((wins / n) * 100).toFixed(1)}%`);
-    console.log(`      worst ${(worst.d * 100).toFixed(2)}% (${worst.room} at ${worst.vp}), best +${(best.d * 100).toFixed(2)}% (${best.room} at ${best.vp})`);
-    console.log(`    where shipped CUT the room (${((cutN / tot) * 100).toFixed(1)}%) — not a size comparison`);
-    console.log(`      the candidate is ${((cutSum / cutN) * 100).toFixed(1)}% smaller there because it is showing all of it\n`);
-  }
-}
-
 /** What a strip size costs, per target — the cost curve PLAN.md asks for. */
 function stripCurve() {
   console.log('\n══ what a strip costs, mean room scale over the 72 rooms ══');
@@ -427,19 +369,16 @@ function stripCurve() {
 const combos = viewports().length * SIZES.length * cases().length;
 console.log(
   `sweep-layout: ${SIZES.length} rectangles x ${viewports().length.toLocaleString()} viewports ` +
-    `(${STEP}px grid) x ${cases().length} cases = ${combos.toLocaleString()} combinations per model`,
+    `(${STEP}px grid) x ${cases().length} cases = ${combos.toLocaleString()} combinations`,
 );
 console.log(`margin ${MARGIN}px, strip ${STRIP_LEFT} left / ${STRIP_TOP} top`);
 
 if (flag('--mono')) {
   monoReport();
-} else if (flag('--cost')) {
-  costReport();
 } else if (flag('--strip-curve')) {
   stripCurve();
 } else {
   const t0 = Date.now();
-  if (ONLY_MODEL !== 'candidate') report('shipped — src/app/layout.ts', run('shipped', layoutRoomShipped));
-  if (ONLY_MODEL !== 'shipped') report('candidate — tools/layoutCandidate.ts', run('candidate', layoutRoom));
+  report('src/app/layout.ts', run('layout', layoutRoom));
   console.log(`\n(${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 }
