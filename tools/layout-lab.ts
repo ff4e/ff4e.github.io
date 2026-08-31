@@ -17,7 +17,7 @@ import type { LayoutRequest, LayoutResult, LayoutTarget, StripEdge } from './lay
 import { layoutRoomShipped, preferredStripEdgeShipped } from './layoutShipped.js';
 import { LAB_MAP, LAB_ROOMS } from './layoutLabRooms.js';
 import { LAB_VIEWPORTS, sizeFor } from './layoutLabViewports.js';
-import type { LabDevice, LabOrientation } from './layoutLabViewports.js';
+import type { LabDevice, LabOrientation, LabSize } from './layoutLabViewports.js';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 /** `"720x585"` -> `[720, 585]`. The option values carry the size, so the picker needs no map. */
@@ -286,12 +286,21 @@ function syncOrientButtons(): void {
     if (v !== 'rotate') b.setAttribute('aria-pressed', String(v === state.orient));
   }
   const d = currentDevice();
-  const has = state.orient === 'portrait' ? d.port : d.land;
-  $('orienthint').textContent = has
-    ? state.orient === 'landscape'
+  const axis =
+    state.orient === 'landscape'
       ? 'Landscape: height is the scarce axis, so a LEFT strip is nearly free and a top one is not.'
-      : "Portrait: the shipped game's media query owns this and always puts the bar on TOP."
-    : `Playwright lists this one ${state.orient === 'portrait' ? 'landscape' : 'portrait'} only — the size shown is transposed.`;
+      : "Portrait: the shipped game's media query owns this and always puts the bar on TOP.";
+  // Once the corner has been dragged the viewport is no longer the device that is still
+  // showing in the picker, and saying so is the point — a size nothing ships is exactly the
+  // kind of window the two defects were found in.
+  const fits = (s: LabSize | null) => !!s && s.w === state.vw && s.h === state.vh;
+  const onDevice = fits(d.port) || fits(d.land);
+  const transposed = !onDevice && (state.orient === 'portrait' ? !d.port : !d.land);
+  $('orienthint').textContent = onDevice
+    ? axis
+    : transposed
+      ? `${axis} (${d.name} is listed ${state.orient === 'portrait' ? 'landscape' : 'portrait'} only, so this size is transposed.)`
+      : `${axis} (Custom size — no longer ${d.name}.)`;
 }
 
 function syncSliders(): void {
@@ -356,6 +365,13 @@ function edgeFor(model: 'shipped' | 'candidate'): StripEdge {
 
 const frames = $('frames');
 
+/**
+ * The scale `render()` last drew the frames at. Module-level because a drag in progress has
+ * to convert screen px into viewport px with the CURRENT one, and the drag outlives every
+ * DOM node `render()` makes.
+ */
+let zoomNow = 1;
+
 function render(): void {
   const models: ('shipped' | 'candidate')[] = state.both ? ['shipped', 'candidate'] : ['candidate'];
   const v = viewport();
@@ -363,6 +379,7 @@ function render(): void {
   const availW = frames.clientWidth - (models.length - 1) * 14;
   const availH = frames.clientHeight - 78; // title + readout
   const zoom = Math.min(1, availW / models.length / v.w, availH / v.h);
+  zoomNow = zoom;
 
   frames.textContent = '';
   const results: Record<string, LayoutResult> = {};
@@ -474,36 +491,60 @@ function frameFor(
   frame.append(room);
 
   outer.append(frame);
-  if (model !== 'shipped' || !state.both) outer.append(grip(zoom));
-  else outer.append(grip(zoom));
+  outer.append(grip());
   wrap.append(outer);
   wrap.append(readout(r, edge));
   return wrap;
 }
 
-/** Drag the corner to resize the modelled viewport — the method that found both defects. */
-function grip(zoom: number): HTMLElement {
+/**
+ * Drag the corner to resize the modelled viewport — the method that found both defects, so
+ * it is the one control here that has to be reliable.
+ *
+ * Two things make it less obvious than it looks:
+ *
+ *  - **The listeners live on `window`, not on the grip.** `render()` rebuilds `#frames`
+ *    from scratch, so the grip that received the `pointerdown` is detached from the
+ *    document by the time the first `pointermove` would arrive. With the listeners on the
+ *    element (and `setPointerCapture` on it, which is equally void once it is detached) a
+ *    drag moved the viewport by exactly one step and then stopped dead.
+ *  - **The delta is applied incrementally against the CURRENT zoom.** The frame is drawn at
+ *    `zoom` so a 3440px viewport fits on screen, and that zoom changes *while you drag*
+ *    because the thing being scaled is what you are resizing. Anchoring to the start point
+ *    with the zoom captured at `pointerdown` makes the corner run away from the cursor as
+ *    soon as the zoom steps.
+ */
+function grip(): HTMLElement {
   const g = el('grip', {});
   g.addEventListener('pointerdown', (e) => {
     e.preventDefault();
-    g.setPointerCapture(e.pointerId);
-    const x0 = e.clientX;
-    const y0 = e.clientY;
-    const w0 = state.vw;
-    const h0 = state.vh;
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+    // Kept as floats: at a zoom of 0.39 a 1px mouse step is 2.5 viewport px, and rounding
+    // each step into `state` would quantise the drag and lose ground on the way back.
+    let w = state.vw;
+    let h = state.vh;
     const move = (m: PointerEvent) => {
-      state.vw = Math.max(200, Math.round(w0 + (m.clientX - x0) / zoom));
-      state.vh = Math.max(150, Math.round(h0 + (m.clientY - y0) / zoom));
+      w = Math.max(200, w + (m.clientX - lastX) / zoomNow);
+      h = Math.max(150, h + (m.clientY - lastY) / zoomNow);
+      lastX = m.clientX;
+      lastY = m.clientY;
+      state.vw = Math.round(w);
+      state.vh = Math.round(h);
       state.orient = state.vw >= state.vh ? 'landscape' : 'portrait';
       syncViewport();
       render();
     };
     const up = () => {
-      g.removeEventListener('pointermove', move);
-      g.removeEventListener('pointerup', up);
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', up);
+      document.body.classList.remove('dragging');
     };
-    g.addEventListener('pointermove', move);
-    g.addEventListener('pointerup', up);
+    document.body.classList.add('dragging');
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
   });
   return g;
 }

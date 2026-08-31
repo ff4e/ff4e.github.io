@@ -104,11 +104,19 @@
         font-variant-numeric: tabular-nums; text-shadow: 0 0 4px #000, 0 0 4px #000;
       }
       .guide { position: absolute; border: 1px dashed #55556e; pointer-events: none; }
+      /* `touch-action: none` is load-bearing: without it a drag on a trackpad or a touch
+         screen is claimed by the browser's own scroll/zoom gesture and never reaches the
+         pointermove handler. */
       .grip {
-        position: absolute; width: 16px; height: 16px; right: -8px; bottom: -8px;
-        background: #6cc; border-radius: 3px; cursor: nwse-resize; z-index: 5;
+        position: absolute; width: 20px; height: 20px; right: -10px; bottom: -10px;
+        background: #6cc; border-radius: 4px; cursor: nwse-resize; z-index: 5;
+        touch-action: none;
       }
-      .grip::after { content: ''; position: absolute; inset: 4px; border-right: 2px solid #05050a; border-bottom: 2px solid #05050a; }
+      .grip:hover, body.dragging .grip { background: #9fd; box-shadow: 0 0 0 3px #6cc4; }
+      .grip::after { content: ''; position: absolute; inset: 5px; border-right: 2px solid #05050a; border-bottom: 2px solid #05050a; }
+      /* While a corner is being dragged the pointer leaves the grip constantly — keep the
+         resize cursor and stop the drag selecting the readouts it passes over. */
+      body.dragging { cursor: nwse-resize; user-select: none; }
       /* ── Readouts ─────────────────────────────────────────────────────── */
       .read {
         font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
