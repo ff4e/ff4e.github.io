@@ -42,6 +42,12 @@ others are small enough to read.
   `//#region`s of `main.ts` reference which; `capture-digest.mjs` is the byte-exact behavioural
   fingerprint, comparable across git revisions — read its header for what it does and does not
   cover; `mutate-*.mjs` are the mutation harnesses ([`TESTING.md`](TESTING.md)).
+  The **layout lab** is a group of its own: `layout-lab.html` renders the shipped layout beside a
+  candidate at any viewport with rooms as coloured rectangles, `layoutCandidate.ts` is that
+  candidate (derived from one stated result rather than six mechanisms, nothing in `src/` imports
+  it), `layoutShipped.ts` is `src/app/layout.ts` plus the placement the stylesheet does,
+  `sweep-layout.mjs` runs six layout properties over millions of (room, viewport) pairs, and
+  `verify-layout-lab.mjs` pins the reproduction against a real browser.
 - **`test/`** — the unit and integration suites; **`test/ui/`** the browser probes. See
   [`TESTING.md`](TESTING.md).
 
