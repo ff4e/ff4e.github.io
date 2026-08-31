@@ -12,14 +12,10 @@ import {
   computeStageLayout,
   contentScale,
   effectiveFitMode,
-  stageBoxCeiling,
-  stageBoxHeight,
-  stageBoxHeightCeiling,
-  stageBoxWidth,
   STAGE_W,
   STAGE_H,
   STAGE_GAP,
-  STAGE_EDGE,
+  VIEWPORT_MARGIN,
   MAX_CONTENT_W,
   MAX_CONTENT_H,
   PANEL_NATIVE_W,
@@ -31,6 +27,20 @@ import {
   isFitMode,
   MIN_STAGE_SCALE,
 } from '../src/app/layout.js';
+
+/**
+ * The old fixed 800x600 stage box, expressed as an AREA in display px at `stageScale`.
+ *
+ * `contentScale` used to default its last two arguments to `STAGE_W`/`STAGE_H` in native
+ * px; it now takes the content's real area in display px and has no default, because a
+ * caller that took the old one was silently scaling against an area that did not exist.
+ * The tests below that mean "bounded by the stage box" say so through this, so they keep
+ * asserting exactly what they always did.
+ */
+const boxArea = (stageScale: number): [number, number] => [STAGE_W * stageScale, STAGE_H * stageScale];
+/** `contentScale` against that box — the shape most of these tests were written in. */
+const cs = (w: number, h: number, stageScale: number, mode: FitMode, dpr = 1): number =>
+  contentScale(w, h, stageScale, mode, dpr, ...boxArea(stageScale));
 
 // A representative spread of real room sizes (measured across the 72 rooms).
 const ROOMS: ReadonlyArray<[number, number]> = [
@@ -69,137 +79,169 @@ describe('computeStageScale', () => {
 });
 
 describe('computeStageLayout', () => {
-  it('derives panel + stage display sizes from one scale', () => {
+  it('derives panel + area display sizes from one scale', () => {
     const l = computeStageLayout(4000, 3000, 'medium');
-    expect(l.stageW).toBeCloseTo(l.boxW * l.scale, 5);
-    expect(l.stageH).toBeCloseTo(l.boxH * l.scale, 5);
+    expect(l.stageW).toBeCloseTo(l.availW, 9);
+    expect(l.stageH).toBeCloseTo(l.availH, 9);
     expect(l.panelW).toBeCloseTo(PANEL_NATIVE_W * l.scale, 5);
+    expect(l.panelH).toBeCloseTo(PANEL_NATIVE_H * l.scale, 5);
     expect(l.gap).toBeCloseTo(STAGE_GAP * l.scale, 5);
   });
 });
 
 /**
- * The elastic stage box (see stageBoxWidth). The room is centred in the box and the panel
- * sits BESIDE the box, so the box width — not the panel's position — is the only thing
- * that can enlarge a room whose fit is width-bound. These pin the three properties that
- * make that safe: it never shrinks, it never exceeds what the mode can use, and it is one
- * width shared by every room.
+ * The CONTENT AREA — what replaced the elastic stage box.
+ *
+ * The box was `max(STAGE_W/H, avail/scale - margin)` in NATIVE px, and its floor is what
+ * made it larger than the space it sat in on a small viewport, so a room that filled it ran
+ * off the screen. `stage.availW/availH` is the real area in DISPLAY px, and `contentScale`
+ * may never exceed it. These pin that, and the properties that follow from it — each one
+ * chosen because a defect that shipped violated it, or because a doc comment asserted it
+ * and nothing tested it.
  */
-describe('stageBoxWidth — the elastic stage box', () => {
-  // 967x600 footprint => any viewport wider than 1.611:1 leaves width over.
-  const wide = { w: 2048, h: 1017 }; // 2.01:1 — a maximised window on a 4K-scaled display
-  const narrow = { w: 1512, h: 982 }; // 1.54:1 — a 16:10 laptop panel at true fullscreen
-  const box = (v: { w: number; h: number }, mode: Parameters<typeof stageBoxWidth>[3]) =>
-    computeStageLayout(v.w, v.h, mode).boxW;
+describe('the content area, and the properties it buys', () => {
+  /** A spread that reaches BELOW the 800x600 box on both axes, where the old floors bound. */
+  const VIEWPORTS = [
+    [240, 200],
+    [393, 852],
+    [669, 280], // the room-sliced defect
+    [852, 393],
+    [1180, 820],
+    [1491, 1114], // the held-reserve defect
+    [1557, 1114], // ... and the width at which it used to vanish
+    [1512, 860],
+    [2048, 1017],
+    [3440, 1400],
+  ] as const;
 
-  it('never goes below the old fixed width, at any viewport or mode', () => {
-    for (const mode of FIT_MODES) {
-      for (const [w, h] of [
-        [1, 1],
-        [320, 240],
-        [narrow.w, narrow.h],
-        [wide.w, wide.h],
-        [3440, 1400],
-        [100000, 100],
-      ] as const) {
-        expect(computeStageLayout(w, h, mode).boxW).toBeGreaterThanOrEqual(STAGE_W);
+  it('is the viewport minus the margin and the panel column, in display px', () => {
+    for (const panel of [true, false]) {
+      for (const [w, h] of VIEWPORTS) {
+        const l = computeStageLayout(w, h, 'medium', panel);
+        expect(l.availW).toBeCloseTo(w - 2 * VIEWPORT_MARGIN - l.gap - l.panelW, 9);
+        expect(l.availH).toBeCloseTo(h - 2 * VIEWPORT_MARGIN, 9);
+        // The DOM box IS the area — that is what lets `#stagebox`'s `overflow: hidden`
+        // stop being something the layout has to stay ahead of.
+        expect(l.stageW).toBeCloseTo(l.availW, 9);
+        expect(l.stageH).toBeCloseTo(l.availH, 9);
       }
     }
   });
 
-  it('gives a width-bound viewport exactly the old box (no slack to spend)', () => {
-    // Narrower than the footprint's aspect: the scale is already limited by width.
-    expect(box(narrow, 'medium')).toBe(STAGE_W);
-    expect(computeStageScale(narrow.w, narrow.h)).toBeCloseTo(
-      narrow.w / (STAGE_W + STAGE_GAP + PANEL_NATIVE_W),
-      5,
-    );
-  });
-
-  it('spends the leftover width of a height-bound viewport', () => {
-    expect(box(wide, 'medium')).toBeGreaterThan(STAGE_W);
-    // The scale itself is untouched — the box grows into width the scale declined to use,
-    // so subtitle sizing (which reads stage.scale) cannot move.
-    expect(computeStageScale(wide.w, wide.h)).toBeCloseTo(wide.h / STAGE_H, 5);
-  });
-
-  it('keeps the whole group inside the viewport, with the edge margin reserved', () => {
+  it('never lets any room be drawn past it, in any mode — the 669x280 defect', () => {
+    // ZRC 555x225 at 669x280 was drawn 266px tall into 214px of space, so 52px of the level
+    // was not on screen. Asserted for every room, mode and viewport rather than for that
+    // one case, because the one case is how it was found and not what was wrong.
     for (const mode of FIT_MODES) {
-      for (const [w, h] of [
-        [1512, 860],
-        [wide.w, wide.h],
-        [3440, 1400],
-        [2560, 1380],
-      ] as const) {
+      for (const panel of [true, false]) {
+        for (const [w, h] of VIEWPORTS) {
+          const l = computeStageLayout(w, h, mode, panel);
+          for (const [rw, rh] of ROOMS) {
+            const s = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+            expect(s * rw).toBeLessThanOrEqual(l.availW + 1e-6);
+            expect(s * rh).toBeLessThanOrEqual(l.availH + 1e-6);
+          }
+        }
+      }
+    }
+  });
+
+  it('is the whole of the scaling: min(stageScale x factor, fitScale)', () => {
+    // The model, restated independently of the implementation. If this ever needs a second
+    // term, the file's opening sentence has changed and the change should be argued there.
+    for (const mode of ['fixed', 'small', 'medium', 'large', 'fill'] as const) {
+      for (const [w, h] of VIEWPORTS) {
         const l = computeStageLayout(w, h, mode);
-        const used = l.stageW + l.gap + l.panelW + 2 * STAGE_EDGE * l.scale;
-        expect(used).toBeLessThanOrEqual(w + 1e-6);
+        for (const [rw, rh] of ROOMS) {
+          const fit = Math.min(l.availW / rw, l.availH / rh);
+          const want = Math.min(l.scale * FIT_FACTORS[mode], fit);
+          expect(contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH)).toBeCloseTo(want, 9);
+        }
       }
     }
   });
 
-  it('never exceeds the width the mode can actually use', () => {
-    for (const mode of FIT_MODES) {
-      const ceiling = stageBoxCeiling(mode);
-      // A viewport far wider than anything real, so only the ceiling can bind.
-      const l = computeStageLayout(100000, 1200, mode);
-      expect(l.boxW).toBeLessThanOrEqual(Math.max(STAGE_W, ceiling) + 1e-6);
-    }
-  });
-
-  it('the ceiling is the point past which the widest room stops growing', () => {
-    // medium: 795 x 1.35 = 1073. Beyond it the widest content is already at its bound.
-    expect(stageBoxCeiling('medium')).toBeCloseTo(MAX_CONTENT_W * FIT_FACTORS.medium, 9);
-    expect(stageBoxCeiling('large')).toBeCloseTo(MAX_CONTENT_W * FIT_FACTORS.large, 9);
-    const stageScale = 2;
-    const [w, h] = [795, 435]; // DRAKAR — the widest room, and width-bound in the old box
-    const atCeiling = contentScale(w, h, stageScale, 'medium', 1, stageBoxCeiling('medium'));
-    const wayPast = contentScale(w, h, stageScale, 'medium', 1, stageBoxCeiling('medium') * 4);
-    expect(wayPast).toBeCloseTo(atCeiling, 9);
-  });
-
-  it("'fixed' never widens the box — a wider one cannot help it", () => {
-    // contentScale === stageScale in 'fixed', so the box is irrelevant to it. Its bound
-    // is 1, which lands below STAGE_W, so the floor wins — no special case needed.
-    expect(stageBoxCeiling('fixed')).toBeLessThan(STAGE_W);
-    expect(box(wide, 'fixed')).toBe(STAGE_W);
-    const l = computeStageLayout(wide.w, wide.h, 'fixed');
-    for (const [w, h] of ROOMS) {
-      expect(contentScale(w, h, l.scale, 'fixed', 1, l.boxW)).toBe(l.scale);
-    }
-  });
-
-  it('is one box that contains every room at a given viewport', () => {
-    // The box takes no room argument, so "room-independent" is structural — what is
-    // worth asserting is the consequence: ONE box, and every room fits inside that same
-    // one. A box derived per room would let a room fill a box of its own and break the
-    // containment that keeps rooms comparable in size (see the file header).
-    for (const mode of FIT_MODES) {
-      const l = computeStageLayout(wide.w, wide.h, mode);
-      for (const [w, h] of ROOMS) {
-        const s = contentScale(w, h, l.scale, mode, 1, l.boxW);
-        expect(w * s).toBeLessThanOrEqual(l.boxW * l.scale + 1e-6);
-        expect(h * s).toBeLessThanOrEqual(STAGE_H * l.scale + 1e-6);
+  it('a bigger viewport never gives a smaller room — except the panel case', () => {
+    // Martin's requirement (2026-08-31). The old reserve was 12 NATIVE px, so it cost
+    // `12 x stageScale` and grew faster than the space it took from: widening 301 -> 456 at
+    // height 300 shrank VRAK by 1.59%. In CSS px the property holds by construction.
+    //
+    // The exception is real and accepted (see layout.ts's header): on the PANELLED layout a
+    // taller window widens the panel, which can cost a width-bound room up to 4.4% in the
+    // default mode. It is an impossibility, not an oversight — so it is asserted to be
+    // confined to that case rather than asserted away.
+    for (const mode of ['medium', 'fill'] as const) {
+      for (const [rw, rh] of ROOMS) {
+        for (let w = 300; w <= 2000; w += 37) {
+          for (let h = 220; h <= 1200; h += 41) {
+            const at = (vw: number, vh: number) => {
+              const l = computeStageLayout(vw, vh, mode, false);
+              return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+            };
+            const here = at(w, h);
+            expect(at(w + 1, h)).toBeGreaterThanOrEqual(here - 1e-9);
+            expect(at(w, h + 1)).toBeGreaterThanOrEqual(here - 1e-9);
+          }
+        }
       }
     }
   });
 
-  it('the ceiling never denies a crisp-integer mode a scale the viewport allows', () => {
-    // NATIVE_TARGET is PHYSICAL px per game px; the box is native px and bounds `fill`,
-    // a multiplier on stageScale. A native-px ceiling built from that target mixes units.
-    // Regression case: 1600x500, dpr 1, 'x1', UTES 780x225 — a 936 box is available, and
-    // 'x1' means exactly 1.0. A 795-based ceiling clamped the box to STAGE_W and gave
-    // 0.855 instead.
-    const l = computeStageLayout(1600, 500, 'x1');
-    expect(contentScale(780, 225, l.scale, 'x1', 1, l.boxW)).toBeCloseTo(1, 9);
-    for (const mode of ['native', 'x1', 'x2', 'x3', 'x4'] as const) {
-      expect(stageBoxCeiling(mode)).toBe(Infinity);
+  it('the panel exception is only ever on the HEIGHT axis, and only with a panel', () => {
+    let sawIt = false;
+    for (const [rw, rh] of ROOMS) {
+      for (let w = 400; w <= 2400; w += 53) {
+        for (let h = 240; h <= 1400; h += 47) {
+          const at = (vw: number, vh: number) => {
+            const l = computeStageLayout(vw, vh, 'fill', true);
+            return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+          };
+          const here = at(w, h);
+          // Widening is monotone even with the panel — the panel grows with the width, but
+          // so does the row, and the room's share of it never falls.
+          expect(at(w + 1, h)).toBeGreaterThanOrEqual(here - 1e-9);
+          if (at(w, h + 1) < here - 1e-9) sawIt = true;
+        }
+      }
     }
-    // The graded modes keep a real ceiling — that is where a wider box genuinely stops
-    // buying anything.
-    expect(stageBoxCeiling('medium')).toBeCloseTo(MAX_CONTENT_W * FIT_FACTORS.medium, 9);
+    // Pinned as PRESENT, not absent: if a later change removes it, this test should be the
+    // thing that says so rather than a comment quietly going stale.
+    expect(sawIt).toBe(true);
+  });
+
+  it('holds the reserve equally at every viewport, or not at all', () => {
+    // The 1491-vs-1557 defect: `stageBoxHeight`'s `max` picked its STAGE_H floor and the
+    // margin stopped being subtracted, so the reserve was 21px per side at 1491 and 0 at
+    // 1557. In CSS px there is no floor to fall off.
+    for (const [w, h] of VIEWPORTS) {
+      const l = computeStageLayout(w, h, 'fill', false);
+      expect(w - l.availW).toBeCloseTo(2 * VIEWPORT_MARGIN, 9);
+      expect(h - l.availH).toBeCloseTo(2 * VIEWPORT_MARGIN, 9);
+    }
+    // And it moves when asked, which is what a TV's title-safe inset needs.
+    const safe = computeStageLayout(1920, 1080, 'fill', false, 27);
+    expect(safe.availW).toBeCloseTo(1920 - 54, 9);
+    expect(safe.availH).toBeCloseTo(1080 - 54, 9);
+  });
+
+  it('is one area for every room — the box invariant, kept', () => {
+    // The point of the old fixed box was that it did not depend on the room. Neither does
+    // this: `computeStageLayout` never sees a room, so the object-size reference and the
+    // area are both room-independent and only `fitScale` varies.
+    for (const [w, h] of VIEWPORTS) {
+      const l = computeStageLayout(w, h, 'medium');
+      for (const [rw, rh] of ROOMS) {
+        const again = computeStageLayout(w, h, 'medium');
+        expect(again.availW).toBe(l.availW);
+        expect(again.availH).toBe(l.availH);
+        expect(again.scale).toBe(l.scale);
+        expect(rw * rh).toBeGreaterThan(0); // the room is an input to nothing here
+      }
+    }
   });
 });
+
+
 
 /**
  * Touch mode retires the side panel, and the layout stops reserving its footprint.
@@ -227,8 +269,6 @@ describe('the panel footprint — retired in touch mode', () => {
       for (const [w, h] of VIEWPORTS) {
         expect(computeStageLayout(w, h, mode, true)).toEqual(computeStageLayout(w, h, mode));
         expect(computeStageScale(w, h, true)).toBe(computeStageScale(w, h));
-        const s = computeStageScale(w, h);
-        expect(stageBoxWidth(w, h, s, mode, true)).toBe(stageBoxWidth(w, h, s, mode));
       }
     }
   });
@@ -263,14 +303,16 @@ describe('the panel footprint — retired in touch mode', () => {
     expect(computeStageScale(w, h, false)).toBeCloseTo(w / STAGE_W, 9);
   });
 
-  it('leaves a height-bound viewport at the same scale, and widens its box instead', () => {
+  it('leaves a height-bound viewport at the same scale, and gives the room the width', () => {
     const [w, h] = [2048, 1017] as const;
     expect(computeStageScale(w, h, false)).toBe(computeStageScale(w, h, true));
-    // The scale declined to use that width, so it lands in the elastic box — up to the
-    // mode's ceiling, past which nothing can use it.
+    // The scale had already declined to use that width, so retiring the panel cannot raise
+    // it — the 167 native px go to the CONTENT'S AREA instead, which is the only thing that
+    // can enlarge a room whose fit is width-bound.
     const withPanel = computeStageLayout(w, h, 'medium', true);
     const without = computeStageLayout(w, h, 'medium', false);
-    expect(without.boxW).toBeGreaterThanOrEqual(withPanel.boxW);
+    expect(without.scale).toBe(withPanel.scale);
+    expect(without.availW - withPanel.availW).toBeCloseTo(PANEL_FOOTPRINT_W * without.scale, 9);
   });
 
   it('never leaves the room with LESS space than the panel did', () => {
@@ -279,9 +321,7 @@ describe('the panel footprint — retired in touch mode', () => {
         const withPanel = computeStageLayout(w, h, mode, true);
         const without = computeStageLayout(w, h, mode, false);
         expect(without.scale).toBeGreaterThanOrEqual(withPanel.scale - 1e-9);
-        expect(without.boxW * without.scale).toBeGreaterThanOrEqual(
-          withPanel.boxW * withPanel.scale - 1e-9,
-        );
+        expect(without.availW).toBeGreaterThanOrEqual(withPanel.availW - 1e-9);
       }
     }
   });
@@ -308,8 +348,10 @@ describe('the panel footprint — retired in touch mode', () => {
         [2560, 1380],
       ] as const) {
         const l = computeStageLayout(w, h, mode, false);
-        const used = l.stageW + l.gap + l.panelW + 2 * STAGE_EDGE * l.scale;
-        expect(used).toBeLessThanOrEqual(w + 1e-6);
+        // The reserve is a CSS-px constant taken off the viewport, so this is an equality
+        // rather than the old inequality — which restated the formula with the constant on
+        // both sides and so could not tell a good value from a bad one.
+        expect(l.stageW + l.gap + l.panelW + 2 * VIEWPORT_MARGIN).toBeCloseTo(w, 9);
       }
     }
   });
@@ -349,100 +391,6 @@ describe('the panel footprint — retired in touch mode', () => {
 });
 
 /**
- * The stage box's HEIGHT is elastic on the same terms as its width, and the pair fire on
- * complementary viewports — which is what makes this safe for the mouse game rather than
- * merely measured to be safe. See the header of layout.ts.
- */
-describe('stageBoxHeight — the other elastic axis', () => {
-  const HEIGHT_BOUND = [
-    [2048, 1017],
-    [3440, 1400],
-    [1600, 900],
-  ] as const;
-  const WIDTH_BOUND = [
-    [900, 1000],
-    [638, 1310],
-    [393, 786],
-  ] as const;
-
-  it('is STAGE_H on any height-bound viewport — there is no leftover height to spend', () => {
-    // Not a measurement but an identity: height-bound means `scale = availH / STAGE_H`,
-    // so `availH / scale` is STAGE_H and the box cannot grow. This is why the change
-    // cannot reach a landscape desktop window.
-    for (const mode of FIT_MODES) {
-      for (const [w, h] of HEIGHT_BOUND) {
-        const s = computeStageScale(w, h);
-        expect(s).toBeCloseTo(h / STAGE_H, 9); // the premise
-        expect(stageBoxHeight(h, s, mode)).toBe(STAGE_H);
-        expect(computeStageLayout(w, h, mode).boxH).toBe(STAGE_H);
-      }
-    }
-  });
-
-  it('never goes below STAGE_H, so nothing is ever smaller than it was', () => {
-    for (const mode of FIT_MODES) {
-      for (const [w, h] of [...HEIGHT_BOUND, ...WIDTH_BOUND]) {
-        for (const panel of [true, false]) {
-          expect(computeStageLayout(w, h, mode, panel).boxH).toBeGreaterThanOrEqual(STAGE_H);
-        }
-      }
-    }
-  });
-
-  it('grows into the leftover height of a width-bound viewport', () => {
-    for (const [w, h] of WIDTH_BOUND) {
-      const l = computeStageLayout(w, h, 'fill', false);
-      expect(l.boxH).toBeGreaterThan(STAGE_H);
-      // It spends the leftover, and keeps the same edge margin the width rule keeps.
-      expect(l.boxH).toBeCloseTo(h / l.scale - 2 * STAGE_EDGE, 9);
-    }
-  });
-
-  it('stops at the tallest content the mode can enlarge, mirroring the width ceiling', () => {
-    expect(stageBoxHeightCeiling('medium')).toBeCloseTo(MAX_CONTENT_H * FIT_FACTORS.medium, 9);
-    expect(stageBoxHeightCeiling('large')).toBeCloseTo(MAX_CONTENT_H * FIT_FACTORS.large, 9);
-    expect(stageBoxHeightCeiling('fixed')).toBeLessThan(STAGE_H); // never widens; falls out
-    for (const mode of ['native', 'x1', 'x2', 'x3', 'x4'] as const) {
-      expect(stageBoxHeightCeiling(mode)).toBe(Infinity);
-    }
-    // A viewport tall enough to blow past the ceiling is held at it. `panel` true: touch
-    // is 'fill', whose ceiling is the viewport by design.
-    expect(computeStageLayout(800, 100000, 'medium', true).boxH).toBeCloseTo(
-      stageBoxHeightCeiling('medium'),
-      9,
-    );
-  });
-
-  it('never lets content overflow the box, on either axis', () => {
-    for (const mode of FIT_MODES) {
-      for (const [vw, vh] of [...HEIGHT_BOUND, ...WIDTH_BOUND]) {
-        const l = computeStageLayout(vw, vh, mode, false);
-        for (const [w, h] of ROOMS) {
-          const s = contentScale(w, h, l.scale, l.mode, 1, l.boxW, l.boxH);
-          expect(w * s).toBeLessThanOrEqual(l.boxW * l.scale + 1e-6);
-          expect(h * s).toBeLessThanOrEqual(l.boxH * l.scale + 1e-6);
-          // …and the box is inside the viewport, so neither is the room.
-          expect(w * s).toBeLessThanOrEqual(vw + 1e-6);
-          expect(h * s).toBeLessThanOrEqual(vh + 1e-6);
-        }
-      }
-    }
-  });
-
-  it('leaves the fill term alone for callers with no layout to hand', () => {
-    // `boxH` defaults to STAGE_H exactly as `boxW` defaults to STAGE_W, so every existing
-    // caller and every assertion above that omits it describes the pre-elastic box.
-    for (const mode of FIT_MODES) {
-      for (const [w, h] of ROOMS) {
-        expect(contentScale(w, h, 2, mode, 1, STAGE_W)).toBe(
-          contentScale(w, h, 2, mode, 1, STAGE_W, STAGE_H),
-        );
-      }
-    }
-  });
-});
-
-/**
  * Touch takes every pixel: the fit mode is a desktop control, so on a phone the stored
  * value is a setting the player cannot see. See `effectiveFitMode`.
  */
@@ -460,15 +408,18 @@ describe('effectiveFitMode — touch is always fill', () => {
     }
   });
 
-  it('is what the layout reports, and what sized its box', () => {
+  it('is what the layout reports, and what the content must be scaled by', () => {
     for (const mode of FIT_MODES) {
       expect(computeStageLayout(1600, 1017, mode, true).mode).toBe(mode);
       const touch = computeStageLayout(638, 1310, mode, false);
       expect(touch.mode).toBe('fill');
-      // Sized by the reported mode, not the requested one — that is the whole point of
-      // carrying it: `contentScaleFor` reads `stage.mode` and must agree with the box.
-      expect(touch.boxW).toBe(stageBoxWidth(638, 1310, touch.scale, 'fill', false));
-      expect(touch.boxH).toBe(stageBoxHeight(1310, touch.scale, 'fill'));
+      // Carrying it is the whole point: `contentScaleFor` reads `stage.mode`, and scaling
+      // the content by the raw setting while the layout was sized by the effective one is
+      // how the two would disagree. Every requested mode lands on the same layout here.
+      const asFill = computeStageLayout(638, 1310, 'fill', false);
+      expect(touch.availW).toBe(asFill.availW);
+      expect(touch.availH).toBe(asFill.availH);
+      expect(touch.scale).toBe(asFill.scale);
     }
   });
 
@@ -481,68 +432,83 @@ describe('effectiveFitMode — touch is always fill', () => {
     ] as const) {
       const l = computeStageLayout(vw, vh, 'medium', false);
       for (const [w, h] of ROOMS) {
-        const s = contentScale(w, h, l.scale, l.mode, 1, l.boxW, l.boxH);
-        expect(s).toBeCloseTo(Math.min(vw / w, vh / h), 9);
+        const s = contentScale(w, h, l.scale, l.mode, 1, l.availW, l.availH);
+        expect(s).toBeCloseTo(Math.min(l.availW / w, l.availH / h), 9);
       }
     }
   });
 });
 
-describe('contentScale — with an elastic box', () => {
+/**
+ * The same three questions the elastic box was asked, now asked of the AREA.
+ *
+ * They are kept because they are still the right questions — does more room enlarge a
+ * width-bound room, does it leave a height-bound one alone, is the per-mode bound still
+ * honoured — but the quantity has changed unit, from a native-px box to display px of
+ * actual space, so the numbers are written in display px throughout.
+ */
+describe('contentScale — against the content area', () => {
   const stageScale = 2;
-  const wider = 1000; // between STAGE_W and the 'medium' ceiling
+  const [boxW, boxH] = [STAGE_W * stageScale, STAGE_H * stageScale]; // the old box, in display px
+  const wider = 1000 * stageScale; // more width than the box had
 
   it('enlarges a width-bound room and leaves a height-bound one alone', () => {
     // UTES 780x225 is width-bound in the 800 box (800/780 = 1.026 < 600/225 = 2.67).
-    const utesBefore = contentScale(780, 225, stageScale, 'medium', 1, STAGE_W);
-    const utesAfter = contentScale(780, 225, stageScale, 'medium', 1, wider);
+    const utesBefore = contentScale(780, 225, stageScale, 'medium', 1, boxW, boxH);
+    const utesAfter = contentScale(780, 225, stageScale, 'medium', 1, wider, boxH);
     expect(utesAfter).toBeGreaterThan(utesBefore);
-    // VRAK 315x555 is height-bound; a wider box cannot help it.
-    expect(contentScale(315, 555, stageScale, 'medium', 1, wider)).toBe(
-      contentScale(315, 555, stageScale, 'medium', 1, STAGE_W),
+    // VRAK 315x555 is height-bound; more width cannot help it.
+    expect(contentScale(315, 555, stageScale, 'medium', 1, wider, boxH)).toBe(
+      contentScale(315, 555, stageScale, 'medium', 1, boxW, boxH),
     );
   });
 
-  it('still never enlarges content past the box it was given', () => {
+  it('never enlarges content past the area it was given', () => {
     for (const mode of ['small', 'medium', 'large', 'fill', 'native'] as const) {
       for (const [w, h] of ROOMS) {
-        const s = contentScale(w, h, stageScale, mode, 1, wider);
-        expect(w * s).toBeLessThanOrEqual(wider * stageScale + 1e-6);
-        expect(h * s).toBeLessThanOrEqual(STAGE_H * stageScale + 1e-6);
+        const s = contentScale(w, h, stageScale, mode, 1, wider, boxH);
+        expect(w * s).toBeLessThanOrEqual(wider + 1e-6);
+        expect(h * s).toBeLessThanOrEqual(boxH + 1e-6);
       }
     }
   });
 
   it('still respects the per-mode enlargement bound', () => {
     for (const [w, h] of ROOMS) {
-      const f = contentScale(w, h, stageScale, 'medium', 1, wider) / stageScale;
+      const f = contentScale(w, h, stageScale, 'medium', 1, wider, boxH) / stageScale;
       expect(f).toBeGreaterThanOrEqual(1);
       expect(f).toBeLessThanOrEqual(CAPPED_MAX + 1e-9);
     }
   });
 
-  it('defaults to the old fixed box when no box is passed', () => {
+  it('shrinks content that does not fit, in every mode — including fixed', () => {
+    // The term the elastic box had no expression for. `fixed` used to return `stageScale`
+    // unconditionally, so on an area too small to letterbox into it drew the room off the
+    // screen rather than smaller.
+    const tightW = 500;
+    const tightH = 300;
     for (const mode of FIT_MODES) {
       for (const [w, h] of ROOMS) {
-        expect(contentScale(w, h, stageScale, mode)).toBe(
-          contentScale(w, h, stageScale, mode, 1, STAGE_W),
-        );
+        const s = contentScale(w, h, stageScale, mode, 1, tightW, tightH);
+        expect(w * s).toBeLessThanOrEqual(tightW + 1e-6);
+        expect(h * s).toBeLessThanOrEqual(tightH + 1e-6);
       }
     }
+    expect(contentScale(795, 585, stageScale, 'fixed', 1, tightW, tightH)).toBeLessThan(stageScale);
   });
 });
 
 describe('contentScale — fixed (Approach D)', () => {
   it('gives every room an identical object scale', () => {
     const stageScale = 2.5;
-    const scales = ROOMS.map(([w, h]) => contentScale(w, h, stageScale, 'fixed'));
+    const scales = ROOMS.map(([w, h]) => cs(w, h, stageScale, 'fixed'));
     for (const s of scales) expect(s).toBe(stageScale);
   });
 
   it('keeps every room within the stage box', () => {
     const stageScale = 2.5;
     for (const [w, h] of ROOMS) {
-      const s = contentScale(w, h, stageScale, 'fixed');
+      const s = cs(w, h, stageScale, 'fixed');
       expect(w * s).toBeLessThanOrEqual(STAGE_W * stageScale + 1e-6);
       expect(h * s).toBeLessThanOrEqual(STAGE_H * stageScale + 1e-6);
     }
@@ -552,7 +518,7 @@ describe('contentScale — fixed (Approach D)', () => {
 describe('contentScale — capped (Approach C, medium)', () => {
   it('enlarges small rooms but bounds the variance', () => {
     const stageScale = 2;
-    const factors = ROOMS.map(([w, h]) => contentScale(w, h, stageScale, 'medium') / stageScale);
+    const factors = ROOMS.map(([w, h]) => cs(w, h, stageScale, 'medium') / stageScale);
     for (const f of factors) {
       expect(f).toBeGreaterThanOrEqual(1); // never smaller than fixed
       expect(f).toBeLessThanOrEqual(CAPPED_MAX + 1e-9); // bounded enlargement
@@ -565,7 +531,7 @@ describe('contentScale — capped (Approach C, medium)', () => {
   it('never enlarges content past the stage box', () => {
     const stageScale = 2;
     for (const [w, h] of ROOMS) {
-      const s = contentScale(w, h, stageScale, 'medium');
+      const s = cs(w, h, stageScale, 'medium');
       expect(w * s).toBeLessThanOrEqual(STAGE_W * stageScale + 1e-6);
       expect(h * s).toBeLessThanOrEqual(STAGE_H * stageScale + 1e-6);
     }
@@ -577,7 +543,7 @@ describe('contentScale — graded fit modes', () => {
     const stageScale = 2;
     const [w, h] = ROOMS[0]; // MIKRO — smallest, so it hits every cap
     const modes = ['fixed', 'small', 'medium', 'large', 'fill'] as const;
-    const scales = modes.map((m) => contentScale(w, h, stageScale, m));
+    const scales = modes.map((m) => cs(w, h, stageScale, m));
     for (let i = 1; i < scales.length; i++) {
       expect(scales[i]).toBeGreaterThanOrEqual(scales[i - 1]);
     }
@@ -592,7 +558,7 @@ describe('contentScale — graded fit modes', () => {
   it("'fill' grows small content to exactly fill the stage box", () => {
     const stageScale = 2;
     const [w, h] = ROOMS[0];
-    const s = contentScale(w, h, stageScale, 'fill');
+    const s = cs(w, h, stageScale, 'fill');
     // Content touches (at least) one edge of the box and never overflows it.
     const wFrac = (w * s) / (STAGE_W * stageScale);
     const hFrac = (h * s) / (STAGE_H * stageScale);
@@ -606,7 +572,7 @@ describe('contentScale — graded fit modes', () => {
     const modes = ['small', 'medium', 'large', 'fill'] as const;
     for (const m of modes) {
       for (const [w, h] of ROOMS) {
-        const s = contentScale(w, h, stageScale, m);
+        const s = cs(w, h, stageScale, m);
         expect(w * s).toBeLessThanOrEqual(STAGE_W * stageScale + 1e-6);
         expect(h * s).toBeLessThanOrEqual(STAGE_H * stageScale + 1e-6);
       }
@@ -618,7 +584,7 @@ describe('contentScale — native (crisp integer)', () => {
   it('returns a whole-number scale that fits the stage box', () => {
     const stageScale = 2.5;
     for (const [w, h] of ROOMS) {
-      const s = contentScale(w, h, stageScale, 'native');
+      const s = cs(w, h, stageScale, 'native');
       expect(Number.isInteger(s)).toBe(true);
       expect(s).toBeGreaterThanOrEqual(1);
       expect(w * s).toBeLessThanOrEqual(STAGE_W * stageScale + 1e-6);
@@ -629,8 +595,8 @@ describe('contentScale — native (crisp integer)', () => {
   it('is the largest integer ≤ the fill scale (no fractional upscaling)', () => {
     const stageScale = 2;
     for (const [w, h] of ROOMS) {
-      const fill = contentScale(w, h, stageScale, 'fill'); // exact grow-to-fill scale
-      const native = contentScale(w, h, stageScale, 'native');
+      const fill = cs(w, h, stageScale, 'fill'); // exact grow-to-fill scale
+      const native = cs(w, h, stageScale, 'native');
       expect(native).toBe(Math.floor(fill));
       // one more step would overflow the box
       expect((native + 1) * Math.max(w / STAGE_W, h / STAGE_H)).toBeGreaterThan(stageScale);
@@ -639,15 +605,15 @@ describe('contentScale — native (crisp integer)', () => {
 
   it('a small room reaches a higher integer scale than a large one', () => {
     const stageScale = 2;
-    const small = contentScale(...ROOMS[0], stageScale, 'native');
-    const large = contentScale(...ROOMS[ROOMS.length - 1], stageScale, 'native');
+    const small = cs(...ROOMS[0], stageScale, 'native');
+    const large = cs(...ROOMS[ROOMS.length - 1], stageScale, 'native');
     expect(small).toBeGreaterThanOrEqual(large);
   });
 
   it('falls back to the fitting scale when even 1× would overflow (tiny viewport)', () => {
     const stageScale = MIN_STAGE_SCALE; // 0.5 — box is smaller than the largest room at 1×
     const [w, h] = ROOMS[ROOMS.length - 1]; // largest room
-    const s = contentScale(w, h, stageScale, 'native');
+    const s = cs(w, h, stageScale, 'native');
     // No integer fits, so it degrades to the exact fitting scale (< 1) rather than clipping.
     expect(s).toBeLessThan(1);
     expect(w * s).toBeLessThanOrEqual(STAGE_W * stageScale + 1e-6);
@@ -657,8 +623,8 @@ describe('contentScale — native (crisp integer)', () => {
   it('dpr defaults to 1 → plain floor of the fill scale (unchanged behaviour)', () => {
     const stageScale = 2.5;
     for (const [w, h] of ROOMS) {
-      const withoutDpr = contentScale(w, h, stageScale, 'native');
-      const withDpr1 = contentScale(w, h, stageScale, 'native', 1);
+      const withoutDpr = cs(w, h, stageScale, 'native');
+      const withDpr1 = cs(w, h, stageScale, 'native', 1);
       expect(withDpr1).toBe(withoutDpr);
       expect(Number.isInteger(withDpr1)).toBe(true);
     }
@@ -668,7 +634,7 @@ describe('contentScale — native (crisp integer)', () => {
     const stageScale = 2.5;
     for (const dpr of [1, 1.25, 1.5, 2, 3]) {
       for (const [w, h] of ROOMS) {
-        const s = contentScale(w, h, stageScale, 'native', dpr);
+        const s = cs(w, h, stageScale, 'native', dpr);
         // Each game pixel maps to a whole number of PHYSICAL pixels.
         expect(Math.abs(s * dpr - Math.round(s * dpr))).toBeLessThan(1e-9);
         expect(s).toBeGreaterThan(0);
@@ -681,14 +647,14 @@ describe('contentScale — native (crisp integer)', () => {
   it('a fractional dpr unlocks intermediate CSS scales (finer than integer steps)', () => {
     const stageScale = 2;
     for (const [w, h] of ROOMS) {
-      const fill = contentScale(w, h, stageScale, 'fill'); // exact grow-to-fill CSS scale
+      const fill = cs(w, h, stageScale, 'fill'); // exact grow-to-fill CSS scale
       const dpr = 2;
-      const s = contentScale(w, h, stageScale, 'native', dpr);
+      const s = cs(w, h, stageScale, 'native', dpr);
       // k = largest integer physical-px-per-game-px; s = k/dpr.
       const k = Math.floor(fill * dpr);
       expect(s).toBeCloseTo(k >= 1 ? k / dpr : fill, 9);
       // At dpr 2 the native scale is at least as large as the dpr=1 (integer) scale.
-      expect(s).toBeGreaterThanOrEqual(contentScale(w, h, stageScale, 'native', 1) - 1e-9);
+      expect(s).toBeGreaterThanOrEqual(cs(w, h, stageScale, 'native', 1) - 1e-9);
     }
   });
 });
@@ -704,7 +670,7 @@ describe('contentScale — fixed integer scales (x1…x4)', () => {
         [3, 'x3'],
       ] as const) {
         const [w, h] = ROOMS[0]; // smallest room — all these multiples fit
-        const s = contentScale(w, h, stageScale, mode, dpr);
+        const s = cs(w, h, stageScale, mode, dpr);
         expect(s * dpr).toBeCloseTo(n, 9); // N whole physical px per game px
       }
     }
@@ -712,9 +678,9 @@ describe('contentScale — fixed integer scales (x1…x4)', () => {
 
   it('xN is capped so it never overflows the stage box (falls back to native max)', () => {
     for (const [w, h] of ROOMS) {
-      const nativeMax = contentScale(w, h, stageScale, 'native'); // largest that fits
+      const nativeMax = cs(w, h, stageScale, 'native'); // largest that fits
       // A very large request (x4) can never exceed what the box allows.
-      const x4 = contentScale(w, h, stageScale, 'x4');
+      const x4 = cs(w, h, stageScale, 'x4');
       expect(x4).toBeLessThanOrEqual(nativeMax + 1e-9);
       expect(w * x4).toBeLessThanOrEqual(STAGE_W * stageScale + 1e-6);
       expect(h * x4).toBeLessThanOrEqual(STAGE_H * stageScale + 1e-6);
@@ -724,9 +690,9 @@ describe('contentScale — fixed integer scales (x1…x4)', () => {
   it('the integer choices are ordered x1 ≤ x2 ≤ x3 ≤ x4 (each ≤ native)', () => {
     for (const [w, h] of ROOMS) {
       const [a, b, c, d] = (['x1', 'x2', 'x3', 'x4'] as const).map((m) =>
-        contentScale(w, h, stageScale, m),
+        cs(w, h, stageScale, m),
       );
-      const native = contentScale(w, h, stageScale, 'native');
+      const native = cs(w, h, stageScale, 'native');
       expect(a).toBeLessThanOrEqual(b + 1e-9);
       expect(b).toBeLessThanOrEqual(c + 1e-9);
       expect(c).toBeLessThanOrEqual(d + 1e-9);

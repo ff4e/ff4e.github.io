@@ -174,30 +174,15 @@ function run(model, place) {
         }, offNative);
 
         // reserve — the margin must be the same at every viewport. Half a pixel of slack
-        // for rounding; anything more is the reserve decaying, which is the 1491/1557 case.
-        const want = model === 'shipped' ? null : c.margin;
-        if (want !== null) {
-          const near = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
-          note(props.reserve, near < want - 0.51, {
-            case: `${c.target}/${c.edge}/${c.mode}`,
-            size: `${size.w}x${size.h}`,
-            vp: `${w}x${h}`,
-            detail: `smallest gap ${near.toFixed(2)}px, wanted ${want}`,
-          }, want - near);
-        } else {
-          // The shipped model has no margin parameter, so the property is restated as the
-          // thing it is supposed to guarantee: the reserve does not CHANGE with the
-          // viewport. Measured against the same room one step wider.
-          const r2 = place(req(c, size, w + STEP, h));
-          const a = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
-          const b = Math.min(r2.gapLeft, r2.gapRight, r2.gapTop, r2.gapBottom);
-          note(props.reserve, Math.abs(a - b) > 0.51 && (a < 0.51 || b < 0.51), {
-            case: `${c.target}/${c.edge}/${c.mode}`,
-            size: `${size.w}x${size.h}`,
-            vp: `${w}x${h}`,
-            detail: `reserve ${a.toFixed(1)}px here, ${b.toFixed(1)}px at ${w + STEP}px wide`,
-          }, Math.abs(a - b));
-        }
+        // for rounding; anything more is the reserve decaying, which is the 1491/1557 case
+        // the old native-px `STAGE_EDGE` produced.
+        const near = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
+        note(props.reserve, near < c.margin - 0.51, {
+          case: `${c.target}/${c.edge}/${c.mode}`,
+          size: `${size.w}x${size.h}`,
+          vp: `${w}x${h}`,
+          detail: `smallest gap ${near.toFixed(2)}px, wanted ${c.margin}`,
+        }, c.margin - near);
 
         // centred (#126) — the room's centre is the screen's centre, unless it has no
         // slack, in which case it is pinned clear of the furniture. Both are correct.
@@ -206,7 +191,7 @@ function run(model, place) {
         // exactly the margin is against the edge of the space it is allowed, and asking it
         // to centre further would be asking it to spend the reserve. Measuring slack as
         // `gap > 0` instead reported 12% false failures.
-        const slackFloor = (model === 'shipped' ? 0 : c.margin) + 0.51;
+        const slackFloor = c.margin + 0.51;
         const centreErr = Math.abs(r.roomX + r.drawnW / 2 + (r.panelW + r.gap) / 2 - w / 2);
         const noSlack =
           r.gapLeft <= slackFloor ||

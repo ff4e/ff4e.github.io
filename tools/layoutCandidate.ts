@@ -1,6 +1,14 @@
 /**
  * A candidate layout model, stated as a RESULT rather than as six interacting mechanisms.
  *
+ * ── Status ───────────────────────────────────────────────────────────────────
+ * **This model LANDED in `src/app/layout.ts`** (2026-08-31). The file stays for two jobs:
+ * it is an INDEPENDENT implementation of the same stated result, so `tools/sweep-layout.mjs`
+ * comparing it against `tools/layoutShipped.ts` is a real cross-check that the port did not
+ * quietly change the model — they must agree exactly, and a divergence is a bug in one of
+ * them — and it is where the NEXT proposed change to the layout is written and shown in the
+ * lab before it is made. Everything below describes why the model is what it is.
+ *
  * ── Why this file exists ─────────────────────────────────────────────────────
  * `src/app/layout.ts` is correct in most places and was arrived at one measured decision
  * at a time, but nowhere does it say what the finished layout is SUPPOSED to look like —
@@ -17,8 +25,7 @@
  *
  * It is DEV ONLY and nothing in `src/` imports it. `tools/layout-lab.html` renders it
  * beside the shipped model so the two can be compared by eye at any viewport, and
- * `tools/sweep-layout.mjs` runs both over millions of (room, viewport) pairs. Promoting
- * it into `src/app/` is a separate, later step (BRIEFING.md stage 3).
+ * `tools/sweep-layout.mjs` runs both over millions of (room, viewport) pairs.
  *
  * ── What it changes, and why each change is forced by that sentence ──────────
  *
@@ -100,13 +107,15 @@ export type StripEdge = 'left' | 'top' | 'none';
  * Per-target defaults. Every one of these is a proposal the lab can move, not a constant
  * of the model — which is the point of them being here rather than inline.
  *
- * `margin` is the reserve per viewport edge, in CSS px. 12 matches what `STAGE_EDGE`
- * costs on a 1x desktop today, so the desktop starts unchanged. TV's 27 is 2.5% of a
- * 1080p height, the low end of the broadcast title-safe convention (2.5-5%).
+ * `margin` is the reserve per viewport edge, in CSS px, and mirrors `VIEWPORT_MARGIN`:
+ * **0** on PC and touch (Martin, 2026-08-31 — `fitScale` bounds the content to the area by
+ * construction, so the reserve buys air and nothing else, at a cost of ~2 x margin /
+ * viewportH). TV's 27 is 2.5% of a 1080p height, the low end of the broadcast title-safe
+ * convention (2.5-5%), and is the case the parameter is kept for.
  */
 export const TARGET_DEFAULTS: Record<LayoutTarget, { strip: number; margin: number }> = {
-  pc: { strip: 0, margin: 12 },
-  touch: { strip: 72, margin: 12 },
+  pc: { strip: 0, margin: 0 },
+  touch: { strip: 72, margin: 0 },
   tv: { strip: 48, margin: 27 },
 };
 

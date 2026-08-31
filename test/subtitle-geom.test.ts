@@ -33,7 +33,7 @@ import {
   waveDy,
   wavePhase,
 } from '../src/render/subtitleGeom.js';
-import { STAGE_W, computeStageLayout, contentScale } from '../src/app/layout.js';
+import { STAGE_H, STAGE_W, computeStageLayout, contentScale } from '../src/app/layout.js';
 
 const SCREEN_W = 780; // a wide room
 const maxW = SCREEN_W - BORDERTITLE * 2;
@@ -238,16 +238,22 @@ describe('subtitleScale — constant on screen, but never too big for the room',
   //     returns stageScale and a wider box cannot move the text at all;
   //   - crisp-integer modes: a wider box raises the room's scale, and the text rises
   //     WITH it, toward — never past — the constant stage size.
-  it('a wider stage box moves the text only where the room is drawn below the stage', () => {
-    // Driven through the REAL layout rather than hand-picked scales, because the thing
-    // that was got wrong here is precisely how contentScale's elastic box feeds this.
-    const vp = { w: 2048, h: 1017 }; // height-bound, so the box grows
-    const room = [780, 225] as const; // UTES — width-bound in the old 800 box
+  it('a bigger content area moves the text only where the room is drawn below the stage', () => {
+    // Driven through the REAL layout rather than hand-picked scales, because the thing that
+    // was got wrong here is precisely how `contentScale`'s area feeds this. The area used
+    // to be an elastic stage box in native px; it is the content's own area in display px
+    // now (layout.ts), but the question this pins is unchanged — does a room that grows
+    // drag the subtitle with it?
+    const vp = { w: 2048, h: 1017 }; // height-bound, so there is spare width for the room
+    const room = [780, 225] as const; // UTES — the widest, so it is the one that can grow
     for (const mode of ['medium', 'native'] as const) {
       const l = computeStageLayout(vp.w, vp.h, mode);
-      const before = contentScale(room[0], room[1], l.scale, mode, 1, STAGE_W);
-      const after = contentScale(room[0], room[1], l.scale, mode, 1, l.boxW);
-      expect(after).toBeGreaterThan(before); // the box really does enlarge this room
+      // "Before" is the room confined to the old fixed 800x600 box at this stage scale;
+      // "after" is the area it actually gets. The first is expressed in display px so the
+      // two are comparable at all — which is exactly the unit confusion the rework removed.
+      const before = contentScale(room[0], room[1], l.scale, mode, 1, STAGE_W * l.scale, STAGE_H * l.scale);
+      const after = contentScale(room[0], room[1], l.scale, mode, 1, l.availW, l.availH);
+      expect(after).toBeGreaterThan(before); // the wider area really does enlarge this room
       const textBefore = subtitleScale(l.scale, before);
       const textAfter = subtitleScale(l.scale, after);
       if (mode === 'medium') {

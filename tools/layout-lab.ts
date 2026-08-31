@@ -56,7 +56,7 @@ const state: State = {
   stripLeft: 72,
   stripTop: 66,
   edge: 'auto',
-  margin: 12,
+  margin: 0,
   dpr: 1,
   both: true,
   grid: true,
@@ -326,7 +326,7 @@ function frameFor(
   h3.innerHTML =
     model === 'shipped'
       ? 'shipped <span>— src/app/layout.ts, as relayout() calls it</span>'
-      : 'candidate <span>— tools/layoutCandidate.ts</span>';
+      : 'candidate <span>— tools/layoutCandidate.ts, the same model written independently</span>';
   wrap.append(h3);
 
   const outer = el('outer', { width: `${v.w * zoom}px`, height: `${v.h * zoom}px` });
@@ -488,20 +488,19 @@ function renderChecks(results: Record<string, LayoutResult>): void {
         ? `<span class="bad">FAILS</span> widening +${atW} costs ${pct(worstW)}, heightening +${atH} costs ${pct(worstH)}`
         : `<span class="good">holds</span> over the next 200px on both axes`;
 
-    // 2. The reserve is either kept or it is not — it must not appear and vanish either
-    //    side of a floor. Measured as the smallest gap actually left at this viewport.
+    // 2. The reserve is either kept at every viewport or it is not kept at all. The old
+    //    `STAGE_EDGE` was 12 NATIVE px inside the box calculation and vanished the moment
+    //    the box hit its floor, which is the 1491-vs-1557 case; a CSS-px constant taken off
+    //    the viewport cannot do that. Both models are asked the same question now.
     const near = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
-    const want = name === 'shipped' ? null : state.margin;
     const reserve =
-      want === null
-        ? `<span class="warn">not expressible</span> — STAGE_EDGE is native px inside the box; here it is worth ${near.toFixed(1)}px`
-        : near >= want - 0.51
-          ? `<span class="good">holds</span> smallest gap ${near.toFixed(1)}px >= ${want}`
-          : `<span class="bad">FAILS</span> smallest gap ${near.toFixed(1)}px < ${want}`;
+      near >= state.margin - 0.51
+        ? `<span class="good">holds</span> smallest gap ${near.toFixed(1)}px >= ${state.margin}`
+        : `<span class="bad">FAILS</span> smallest gap ${near.toFixed(1)}px < ${state.margin}`;
 
-    // 3. Nothing runs off the viewport — the property STAGE_EDGE exists for and which
-    //    `test/layout.test.ts:135` restates rather than tests.
-    const off = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
+    // 3. Nothing runs off the viewport — the property the reserve used to exist for, and
+    //    which nothing tested until the rework.
+    const off = near;
     const contained =
       off >= -0.01
         ? `<span class="good">holds</span>`

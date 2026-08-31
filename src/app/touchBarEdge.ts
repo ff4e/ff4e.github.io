@@ -130,7 +130,7 @@ function roomOn(
     return { visible: 0, cut: false };
   }
   const l = computeStageLayout(availW, availH, mode, false);
-  const s = contentScale(roomW, roomH, l.scale, l.mode, dpr, l.boxW, l.boxH);
+  const s = contentScale(roomW, roomH, l.scale, l.mode, dpr, l.availW, l.availH);
   const drawnW = s * roomW;
   const drawnH = s * roomH;
   // The overflow measured in the ARTWORK's own pixels, not in CSS px. Below one native
@@ -152,18 +152,21 @@ function roomOn(
  * `viewportW`/`viewportH` are the WHOLE viewport (`window.innerWidth/innerHeight`); each
  * candidate subtracts its own bar.
  *
- * **Showing the WHOLE room outranks showing more of it**, and that ordering is not
- * cosmetic — it is the case a plain area comparison gets wrong. Measured at 669x280 with
- * ZRC (555x225): the top edge leaves 214px of height, `MIN_STAGE_SCALE`'s floor overflows
- * it, and the room is drawn 266px tall, so 52px of the level is not on screen at all. It
- * STILL wins on visible area — 140,598 against 138,740 — because what survives the cut is
- * larger than the whole room is on the other edge. Area alone therefore moves the bar onto
- * the layout that hides part of the level, which is the wrong trade in a game where the
- * level IS the puzzle. (Found by Martin, 2026-08-31, at exactly this viewport.)
+ * **Showing the WHOLE room outranks showing more of it.** That ordering is a guard now
+ * rather than a live branch, and it is worth knowing what it was for. Measured at 669x280
+ * with ZRC (555x225), BEFORE `layout.ts`'s rework: the top edge left 214px of height,
+ * `MIN_STAGE_SCALE`'s floor overflowed it, and the room was drawn 266px tall — 52px of the
+ * level not on screen. It STILL won on visible area, 140,598 against 138,740, because what
+ * survived the cut was larger than the whole room is on the other edge. So a plain area
+ * comparison moved the bar onto the layout that hid part of the level, which is the wrong
+ * trade in a game where the level IS the puzzle. (Found by Martin, 2026-08-31, at exactly
+ * this viewport, by resizing a window.)
  *
- * When both edges cut — a viewport so short that the floor overflows the height whatever
- * the bar does (KOSTE and DRAKAR at that same 669x280) — there is no whole room to prefer
- * and the comparison falls back to which one hides less.
+ * The content can no longer be drawn past its area, so `cut` is false on both edges at that
+ * viewport and the plain area comparison now reaches the same answer on its own
+ * (`test/touchBarEdge.test.ts` asserts both halves). The branch stays because it is two
+ * lines and it is the only thing standing between a reintroduced clip and a bar that moves
+ * onto it.
  */
 export function preferredTouchBarEdge(
   roomW: number,

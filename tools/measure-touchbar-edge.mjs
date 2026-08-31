@@ -91,7 +91,7 @@ function rooms() {
 
 function measure(room, availW, availH) {
   const l = computeStageLayout(availW, availH, 'fill', false);
-  const s = contentScale(room.w, room.h, l.scale, l.mode, 1, l.boxW, l.boxH);
+  const s = contentScale(room.w, room.h, l.scale, l.mode, 1, l.availW, l.availH);
   return { scale: s, drawnH: s * room.h, drawnW: s * room.w };
 }
 

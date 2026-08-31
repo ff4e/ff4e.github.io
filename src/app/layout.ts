@@ -1,90 +1,108 @@
 /**
- * Display layout for the public release (Phase 1 scaling refactor).
+ * Display layout: how big the game is drawn, and where it lands.
  *
- * The original ran a fixed window with each room's playfield centered inside it;
- * objects were therefore a constant on-screen size in every room. The port had
- * drifted to a fixed 2x per-room scale, so the canvas physically resized between
- * rooms (measured: 72 rooms span 285-795 x 210-585 px, 63 distinct sizes).
+ * ── The result this file exists to produce ───────────────────────────────────
+ * Everything below is derived from one sentence, and if a change cannot be justified
+ * against it, it does not belong here:
  *
- * We restore the faithful model and make it fill the viewport:
+ *   **Place the content as large as the viewport allows, WHOLLY on screen, centred on the
+ *   screen, with the input device's furniture reserved — and never smaller than it would
+ *   be on any smaller viewport.**
  *
- *  - A fixed **stage box** (STAGE_W x STAGE_H) contains every room (max 795x585)
- *    and the world map (640x480). The stage box + side panel are scaled together
- *    (`stageScale`) to be as large as the available viewport allows, so the panel
- *    is a constant size across all rooms (it no longer tracks the room height).
- *    The box's WIDTH is elastic (see `stageBoxWidth`): STAGE_W is its minimum, and
- *    on a window wider than the 967x600 footprint's 1.61:1 it grows into the width
- *    the height-bound scale has already declined to use. It is still the same box
- *    for every room — that invariant is the point of this file — but it now tracks
- *    the window, so one room is no longer the same size on differently-shaped
- *    windows. That is a deliberate extension of the deviation below, taken because
- *    the leftover width was otherwise simply empty and it is the ONLY thing that
- *    enlarges a room whose fit is width-bound (measured: the wide, short rooms gain
- *    up to +27% on a 2048x1017 window; 44 of the 72 rooms are unaffected, and the
- *    object-size spread across all 72 tightens slightly, 1.342x -> 1.316x). The
- *    panel's position was NOT the constraint and moving it changes nothing: the
- *    room is centred in the box, and the panel sits beside that box.
- *  - The box's HEIGHT is elastic on the same terms (`stageBoxHeight`), and that is the
- *    MIRROR of the width rule rather than a further deviation: the two fire on
- *    complementary viewports and can never both move. A height-bound viewport has
- *    `scale = availH / STAGE_H`, so `availH / scale` is exactly STAGE_H and the height
- *    cannot grow; a width-bound one has no spare width and the WIDTH cannot grow. The
- *    absence of this half was a real defect and portrait paid for it: at 638x1310 with
- *    no panel the scale is width-bound at 638/800, the box is 638x479 inside a 638x1310
- *    area, and ~64% of the height was simply unused. Measured over the 72 rooms it moves
- *    0 of them on every landscape/desktop viewport tried (1600x1017, 2048x1017, 1280x800,
- *    852x327) and up to +135% in portrait, and the object-size spread within a mode does
- *    not change at all (1.342x in 'medium', the same as on the desktop) because it is
- *    FIT_FACTORS, not the box, that bounds it. Only the 34 rooms taller than the box's
- *    own 4:3 can gain anything: the other 38 are already at the largest scale the
- *    viewport allows, because their own WIDTH is what binds.
+ * That sentence was written down after two defects shipped: a room drawn 266px tall into
+ * 214px of space at 669x280 (52px of the level simply off screen) and a room held 21px off
+ * both viewport edges at 1491x1114 which reaches them once the window is 1557 wide. Both
+ * passed 2223 unit tests, 94 UI probes and a code review, and both were found in minutes by
+ * dragging a window edge. The cause in each case was the same thing: the file stated what
+ * every MECHANISM was for and never what the RESULT should be, so a mechanism could be
+ * locally reasonable and jointly wrong. `tools/layout-lab.html` is where a change to any of
+ * this is now shown before it is made, and `tools/sweep-layout.mjs` is what proves a
+ * property over millions of (room, viewport) pairs rather than at one hand-picked size.
+ *
+ * ── The faithful part, which does not change ─────────────────────────────────
+ * The original ran a fixed window with each room's playfield centred inside it, so an
+ * object was a constant on-screen size in every room. The **stage box** (STAGE_W x STAGE_H)
+ * is that window: it contains every room (max 795x585) and the world map (640x480), and
+ * `stageScale` is how big it is drawn. The panel is scaled by the same number, so it too is
+ * a constant size across rooms. **`stageScale` is the OBJECT-SIZE REFERENCE and nothing
+ * else** — that is the one job it kept.
+ *
+ * ── The scaling, in one line ─────────────────────────────────────────────────
+ *
+ *     contentScale = min(stageScale x FIT_FACTORS[mode], fitScale)
+ *
+ * where `fitScale` is the largest scale that shows the whole content in the space left for
+ * it. `fixed` (factor 1) is `min(stageScale, fitScale)`; `fill` (Infinity) is exactly
+ * `fitScale`; the graded modes sit between; the crisp-integer family floors `fitScale` to a
+ * whole number of physical pixels. `fitScale` is a ceiling in every mode, and that is the
+ * "wholly on screen" half of the sentence.
+ *
+ * This replaced an elastic stage box with two per-mode ceilings and a `max(STAGE_W/H, …)`
+ * floor in the middle of it. The box was computing exactly this expression, in native px —
+ * except that its floor made it BIGGER than the space it was in on a small viewport, which
+ * is how a room came to be drawn off the screen. Removing it is not a loss of the
+ * "one box for every room" invariant: `stageScale` still carries it, and `fitScale` depends
+ * only on the room and the area, never on the box.
+ *
+ * ── The reserve, and why it is CSS px ────────────────────────────────────────
+ * `VIEWPORT_MARGIN` replaces the old `STAGE_EDGE`, which was 12 NATIVE px applied inside the
+ * box calculation. That cost `12 x stageScale` on screen, so widening the window made the
+ * reserve grow faster than the space it was taking from and the room got SMALLER as the
+ * window got BIGGER (measured: widening 301 -> 456 at height 300 cost VRAK 1.59%). It also
+ * vanished entirely whenever the box hit its floor, which on a height-bound viewport is
+ * always. A margin between the game and the edge of the SCREEN is a property of the screen,
+ * so it is now in the screen's unit and subtracted from the viewport once, up front — which
+ * makes every quantity below a monotone function of the viewport by construction.
+ *
+ * It is 0 (Martin, 2026-08-31): its old job was to stop the elastic box spending the last
+ * pixel into `#stagebox`'s `overflow: hidden`, and `fitScale` now bounds the content to the
+ * area by construction, so at 0 nothing can overflow — confirmed over 1,255,527 combinations.
+ * It is kept as a real parameter because it is the knob a TV target needs: a title-safe
+ * overscan inset is exactly "a reserve per viewport edge" (conventionally 2.5-5% of the
+ * height), and because what is left of it is a purely aesthetic choice that costs a
+ * measurable ~2 x margin / viewportH of content size.
+ *
+ * ── The one property that does NOT hold, and cannot ──────────────────────────
+ * On the DESKTOP target only, making a window TALLER can make a width-bound room slightly
+ * smaller: the panel is reserved in NATIVE px, so a taller window raises `stageScale`, which
+ * widens the panel, which takes width from a room that was already width-bound. Worst
+ * measured: -4.39% in the shipped `medium` default, -10.62% in `fill`. It never happens in
+ * `fixed` (there the room scales with the stage too) and never in touch mode (no panel).
+ *
+ * It is not a bug to be fixed but an impossibility to be known: **the panel cannot be
+ * (a) a constant size in every room and scaled with the stage, (b) guaranteed to fit the
+ * viewport, and (c) harmless to a width-bound room when the window grows taller.** Making
+ * it (c) means sizing it from the width alone — a panel 345px wide and 879px tall on a
+ * 2000x552 window. Accepted deliberately (Martin, 2026-08-31); the previous model had the
+ * same defect and slightly worse (-4.83%).
+ *
+ * ── The deliberate deviations from the original ──────────────────────────────
+ *  - **The room is not letterboxed into a fixed 800x600 unless `fixed` asks for it.** The
+ *    graded modes enlarge small content toward the space available, which the original
+ *    never did; `medium` is the shipped default (core/settings.ts), so out of the box a
+ *    room IS zoomed to fit, by 1.006x to 1.35x across the 71 rooms. That spread is why
+ *    subtitles are sized from the stage and not from the room (app/framePainter.ts).
+ *  - **The panel's x tracks the room**, because `#stagebox` hugs its content: the original's
+ *    panel was a fixed side column, so a narrow room genuinely did sit far from it, and here
+ *    it would have been pushed away by a median 230px of the box's empty slack. The room
+ *    itself does not move — its centre is `availW/2 - (gap + panelW)/2`, which is why moving
+ *    the panel to the other side changes nothing about the room's size.
  *  - **In touch mode there is no side panel**, and every function that reserves its
- *    footprint takes a `panel` flag to say so (default `true` — a mouse is the case
- *    nothing may change for). The touch build replaces the panel's verbs with a bar of
- *    its own (`app/touchButtons.ts`) and drives the fish by swipe, so the column is
- *    hidden outright by `drawPanel` and the 167 native px it was claiming
- *    (`PANEL_FOOTPRINT_W`) go back to the room.
- *  - **Touch mode is also always `fill`** (`effectiveFitMode`). The fit mode is a
- *    desktop control — the touch Options offers no way to change it — so the stored
- *    value is whatever a mouse session on the same browser last chose, and letting it
- *    bound a phone is letting a setting the player cannot see decide how big the game is.
- *    A phone has no pixels to spare, so it takes all of them; the price is that object
- *    size varies between rooms there (spread 2.79x rather than 'medium's 1.342x), which
- *    is the trade 'fill' has always made and is Martin's decision for this device class
- *    (2026-08-28). The desktop is untouched: `panel` true keeps the player's own mode.
- *  - That box is the SCALING envelope, and it is room-independent. The DOM element
- *    that holds the content (`#stagebox`) is sized to the CONTENT instead, so the
- *    panel sits beside the room rather than beside the box's empty slack — a room
- *    narrower than the box was otherwise pushed away from its own controls by a
- *    median 230px, up to 593px. That is a second deliberate deviation: the original's
- *    panel was a FIXED side column, so a narrow room genuinely did sit far from it,
- *    whereas here the panel's x tracks the room. The room itself does not move — its
- *    centre is `availW/2 - (gap + panelW)/2`, which the box width cancels out of.
- *  - Note for anything reading a room's scale: `contentScale` is now a function of the
- *    elastic box, so the ROOM's scale moves with the viewport width even though
- *    `stageScale` does not. Subtitle sizing reads both (`subtitleScale` takes the min of
- *    the two, `fitScreenW` takes the room's), so it is NOT invariant here: in the
- *    graded modes the min still returns `stageScale`, but in the crisp-integer modes a
- *    wider box raises the room's scale and the subtitle grows with it, toward — never
- *    past — the constant stage size. See render/subtitleGeom.ts.
- *  - Each piece of content (room / map / cutscene) is drawn at `contentScale`
- *    and centered inside the stage box:
- *      * mode 'fixed'  (Approach D, the faithful one): contentScale === stageScale, so
- *        objects are an identical on-screen size in every room; small rooms are
- *        letterboxed.
- *      * the graded "fill" modes (C): small content is enlarged up to a per-mode
- *        bound (FIT_FACTORS) to fill more of the stage box, keeping object-size
- *        variance bounded. 'small'→'large' pick how aggressive that is; 'fill'
- *        grows content until it exactly fills the stage box (no bound).
- *        **'medium' is the shipped default** (core/settings.ts), not 'fixed' — so out
- *        of the box a room IS zoomed to fit, by 1.006x to 1.35x across the 71 rooms.
- *        That spread is why subtitles are sized from the stage and not from the room
- *        (app/framePainter.ts, updateRoomSubtitles).
- *      * mode 'native': the largest INTEGER display scale that still fits the stage
- *        box (1×/2×/3×…). With `image-rendering: pixelated` this gives uniform,
- *        crisp nearest-neighbour pixels — the closest thing to the original's 1:1
- *        pixels — at the cost of object size varying between rooms (like 'fill',
- *        but snapped to a whole number so there is no fractional upscaling shimmer).
+ *    footprint takes a `panel` flag to say so (default `true` — a mouse is the case nothing
+ *    may change for). The touch build replaces the panel's verbs with a bar of its own
+ *    (`app/touchButtons.ts`) and drives the fish by swipe, so the column is hidden outright
+ *    by `drawPanel` and the 167 native px it was claiming (`PANEL_FOOTPRINT_W`) go back to
+ *    the room.
+ *  - **Touch mode is also always `fill`** (`effectiveFitMode`). The fit mode is a desktop
+ *    control — the touch Options offers no way to change it — so the stored value is
+ *    whatever a mouse session on the same browser last chose, and letting it bound a phone
+ *    is letting a setting the player cannot see decide how big the game is. The price is
+ *    that object size varies between rooms there, which is the trade 'fill' has always made
+ *    and is Martin's decision for this device class (2026-08-28).
+ *  - Note for anything reading a room's scale: `contentScale` is a function of the AREA, so
+ *    the room's scale moves with the viewport even where `stageScale` does not. Subtitle
+ *    sizing reads both (`subtitleScale` takes the min of the two, `fitScreenW` takes the
+ *    room's), so it is NOT invariant here. See render/subtitleGeom.ts.
  *
  * These functions are pure (no DOM) so the scaling maths is unit-tested; the DOM
  * wiring lives in main.ts.
@@ -171,17 +189,30 @@ export const STAGE_H = 600;
 /** Native-pixel gap between the stage box and the side panel. */
 export const STAGE_GAP = 12;
 /**
- * Native-pixel margin kept between the stage box + panel group and each viewport edge.
+ * Reserve kept between the game and each viewport edge, in **CSS px**.
  *
- * The elastic box (`stageBoxWidth`) would otherwise spend every spare pixel and leave the
- * group touching both edges — which `#stagebox`'s `overflow: hidden` then clips, because
- * the row is centred and any rounding lands on one side. Reserving a margin is what makes
- * "use the spare width" mean "use the spare width, not all of it".
+ * The unit is the point. Its predecessor `STAGE_EDGE` was 12 NATIVE px applied inside the
+ * stage box's own arithmetic, so on screen it cost `12 x stageScale`: widening the window
+ * raised the scale, the reserve grew faster than the space it was taking from, and the room
+ * shrank as the window grew. It also disappeared whenever the box hit its `max(STAGE_H, …)`
+ * floor — which on a height-bound viewport is always, so the vertical reserve was mostly
+ * fiction. Subtracting a CSS-px constant from the viewport once, before anything else, has
+ * neither problem and makes everything downstream monotone in the viewport.
+ *
+ * **0 today** (Martin, 2026-08-31). Its old job was to stop the elastic box spending the
+ * last pixel into `#stagebox`'s `overflow: hidden`; `contentScale`'s `fitScale` ceiling now
+ * bounds the content to the area by construction, so at 0 nothing can overflow. What is
+ * left is air around the picture, which costs about `2 x margin / viewportH` of content
+ * size — ~2.2% at 1080p for 12px a side.
+ *
+ * Kept as a named parameter rather than deleted because it is exactly the knob a TV target
+ * needs: a title-safe overscan inset is "a reserve per viewport edge", conventionally
+ * 2.5-5% of the height.
  */
-export const STAGE_EDGE = 12;
-/** The widest content the stage box ever has to hold (DRAKAR/PUCLIK are 795 native px wide). */
+export const VIEWPORT_MARGIN = 0;
+/** The widest content the layout ever has to hold (DRAKAR/PUCLIK are 795 native px wide). */
 export const MAX_CONTENT_W = 795;
-/** The tallest content the stage box ever has to hold (PUCLIK is 585 native px tall). */
+/** The tallest content the layout ever has to hold (PUCLIK is 585 native px tall). */
 export const MAX_CONTENT_H = 585;
 /** Control-panel native size (mirrors PANEL_W/PANEL_H in data/ffp.ts). */
 export const PANEL_NATIVE_W = 155;
@@ -217,27 +248,41 @@ function sideFootprint(panel: boolean): number {
 }
 
 export interface StageLayout {
-  /** Display px per native px for the stage box + panel (constant across rooms). */
+  /**
+   * Display px per native px for the stage box + panel — the OBJECT-SIZE REFERENCE.
+   *
+   * Constant across rooms, which is what makes a crate the same size on screen everywhere
+   * and is the faithful core of this file. It is NOT a bound on the content: that is
+   * `contentScale`'s `fitScale`, computed from `availW`/`availH`.
+   */
   scale: number;
   /**
    * The fit mode this layout was sized by — `effectiveFitMode(mode, panel)`, NOT the raw
-   * setting, because touch overrides it. Carried for the same reason as `boxW`: the box
-   * and the content must be scaled by the same one, and only this function knows it.
+   * setting, because touch overrides it. Carried so the layout and the content are scaled
+   * by the SAME one; every consumer reads this rather than `settings.fitMode`.
    */
   mode: FitMode;
   /** Gap between stage box and panel, in display px. */
   gap: number;
   /**
-   * Stage box WIDTH IN NATIVE px — `STAGE_W` or wider, per `stageBoxWidth()`.
+   * The area left for the CONTENT, in **display px**: the viewport, minus the input
+   * device's furniture, minus the two margins, minus the panel column.
    *
-   * Carried on the layout rather than read from the `STAGE_W` constant, because it is now
-   * a property of the viewport and every consumer must use the SAME one. `contentScale`
-   * takes it as an argument for exactly that reason.
+   * This is what replaced the elastic stage box's `boxW`/`boxH`, and the change of UNIT is
+   * deliberate rather than incidental. The box was in native px and floored at STAGE_W/H,
+   * so on a small viewport it described an area LARGER than the one the content was going
+   * into and the content ran off the screen. This is the real area, measured in the unit
+   * the screen is measured in, and `contentScale` may never exceed it.
    */
-  boxW: number;
-  /** Stage box HEIGHT IN NATIVE px — `STAGE_H` or taller, per `stageBoxHeight()`. */
-  boxH: number;
-  /** Stage box size in display px. */
+  availW: number;
+  availH: number;
+  /**
+   * The stage box's display size — what `relayout()` gives `#stagebox`.
+   *
+   * Identical to `availW`/`availH`: the box IS the area now. Kept as separate names
+   * because they are two different ideas (one is a DOM element's size, the other is a
+   * budget) and because it is the DOM box that has `overflow: hidden`.
+   */
   stageW: number;
   stageH: number;
   /** Panel size in display px (fixed — does not track the room). */
@@ -246,27 +291,27 @@ export interface StageLayout {
 }
 
 /**
- * The scale that fits the stage box + gap + panel into the available area, as
- * large as possible. Clamped to a floor so it never collapses on tiny viewports.
+ * The scale that fits the stage box + gap + panel into the available area, as large as
+ * possible — the object-size reference, and nothing else.
  *
- * Computed from the MINIMUM box (`STAGE_W`), never the elastic one: the box only ever
- * grows into width the scale has already declined to use, so letting it feed back into
- * the scale would be circular — and would trade a bigger scale for a wider box, which is
- * the opposite of the point.
+ * `availW`/`availH` are the area the game has AFTER the furniture and the margins are off;
+ * `relayout()` measures `.stage`, whose margin already reserves the touch bar.
  *
  * `panel` false drops the panel's footprint from that fit — see `sideFootprint`.
  *
- * **The floor yields to the width.** `MIN_STAGE_SCALE` exists so a very small window
- * still shows a usable game rather than collapsing, and it is allowed to overflow the
- * HEIGHT to do it — a short window letterboxes the box and the player scrolls nothing,
- * which is the intended trade. Overflowing the WIDTH is a different thing: `.stage` is
- * `overflow: hidden`, so a row wider than the viewport does not make the room bigger, it
- * makes a strip of it invisible. That is what a 393 px phone in portrait hit — 393/800 =
- * 0.491 is below the floor, so the scale was 0.5, the logical box was 400 display px in a
- * 393 px viewport, and a room wide enough to fill it was clipped by 7 px. Capping the
- * floor at `availW / footprintW` removes exactly that case and nothing else: on any
- * viewport where the floor was not already the binding term the expression is unchanged,
- * and a short-and-wide window still floors at 0.5.
+ * **The floor yields to the width.** `MIN_STAGE_SCALE` exists so a very small window still
+ * shows usable objects and a usable panel rather than collapsing. It is allowed to overflow
+ * the HEIGHT to do it, which letterboxes; overflowing the WIDTH is a different thing,
+ * because `.stage` is `overflow: hidden` and a row wider than the viewport puts the panel
+ * off the side of the screen. Capping the floor at `availW / footprintW` removes exactly
+ * that case: on any viewport where the floor was not already binding the expression is
+ * unchanged, and a short-and-wide window still floors at 0.5.
+ *
+ * **What the floor can no longer do is cut the content.** It used to feed a stage box that
+ * was `max(STAGE_W/H, …)`, so a floored scale produced a box bigger than the viewport and a
+ * room drawn off the screen — the 669x280 defect. The content is now bounded by
+ * `availW`/`availH` independently, so the floor affects only the panel and the object-size
+ * reference.
  */
 export function computeStageScale(availW: number, availH: number, panel = true): number {
   const footprintW = STAGE_W + sideFootprint(panel);
@@ -278,88 +323,16 @@ export function computeStageScale(availW: number, availH: number, panel = true):
 }
 
 /**
- * How wide the stage box may grow before a wider one buys nothing, in native px.
- *
- * A GRADED mode enlarges a room by at most its own bound, so once the box can hold the
- * widest content at that bound, extra width buys nothing. Measured across the 72 rooms,
- * the mean gain saturates exactly there: `medium` stops moving at 795x1.35 = 1073,
- * `large` at 795x1.6 = 1272. `fixed`'s bound is 1, which lands below `STAGE_W`, so it
- * never widens the box — right, and it falls out rather than being special-cased, since
- * `contentScale === stageScale` in `fixed`.
- *
- * `fill` and the crisp-integer family are bounded by the VIEWPORT instead — see the note
- * in the body for why a native-px ceiling is the wrong instrument for the integer modes.
- */
-export function stageBoxCeiling(mode: FitMode): number {
-  // The crisp-integer family is bounded by its own `k = min(target, kMax)` and by the
-  // viewport, not by a width in native px. Its target is PHYSICAL pixels per game pixel,
-  // so the box width it needs depends on `stageScale` and `dpr` — neither of which a
-  // room-independent ceiling can know. Multiplying MAX_CONTENT_W by it mixes the two
-  // units and silently denies the mode a scale it could have had: measured at 1600x500,
-  // dpr 1, 'x1' on UTES 780x225, a 936 box was available and would have given the exact
-  // 1.0 the mode asks for, but a 795 ceiling clamped the box to STAGE_W and the room was
-  // drawn at 0.855. Leaving them viewport-bounded costs nothing now that the DOM box
-  // hugs its content, so a box wider than the content cannot push the panel away.
-  if (NATIVE_TARGET[mode] !== undefined) return Infinity;
-  return MAX_CONTENT_W * (FIT_FACTORS[mode] ?? 1);
-}
-
-/**
- * The stage box width for a viewport, in native px — `STAGE_W` or wider.
- *
- * The layout is height-bound on any window wider than the 967x600 footprint's 1.61:1, and
- * the leftover width was simply empty: the room is centred in a FIXED box, so the panel
- * was never what limited it. This spends that leftover on the box, which is the only
- * thing that enlarges a room whose fit is width-bound — the wide, short ones.
- *
- * Never below `STAGE_W`, so nothing is ever smaller than it was; never above
- * `stageBoxCeiling(mode)`, past which no room can grow. A width-bound viewport (narrower
- * than 1.61:1 — a 16:10 laptop panel at true fullscreen is one) has no leftover and gets
- * exactly today's box.
- *
- * The box stays the same for every room, which is the invariant this file exists to keep
- * (see the header). What is new is that it tracks the WINDOW, so one room is no longer
- * the same size on differently-shaped windows — a deliberate extension of the deviation
- * documented in the header, not a new one.
- */
-export function stageBoxWidth(
-  availW: number,
-  availH: number,
-  scale: number,
-  mode: FitMode,
-  panel = true,
-): number {
-  if (!Number.isFinite(scale) || scale <= 0) return STAGE_W;
-  const usable = availW / scale - sideFootprint(panel) - 2 * STAGE_EDGE;
-  if (!Number.isFinite(usable)) return STAGE_W;
-  return Math.max(STAGE_W, Math.min(stageBoxCeiling(mode), usable));
-}
-
-/**
- * The same ceiling for the box's HEIGHT, in native px.
- *
- * `MAX_CONTENT_H` rather than `MAX_CONTENT_W` is the only difference — once the box can
- * hold the TALLEST content at the mode's bound, extra height buys nothing, exactly as
- * extra width does not. The crisp-integer family is viewport-bounded for the reason given
- * in `stageBoxCeiling`.
- */
-export function stageBoxHeightCeiling(mode: FitMode): number {
-  if (NATIVE_TARGET[mode] !== undefined) return Infinity;
-  return MAX_CONTENT_H * (FIT_FACTORS[mode] ?? 1);
-}
-
-/**
  * The fit mode actually in force, given the input device.
  *
  * Touch is always `fill`. There is no fit control in the touch Options (`touchOptions.ts`
  * deliberately offers a short list), so on a phone the stored mode is whatever a mouse
  * session on the same browser last picked — a setting the player cannot see, deciding how
  * big the game is on the device with the fewest pixels. `fill` takes every pixel the
- * viewport allows; measured over the 72 rooms at 638x1310 that puts ALL of them at the
- * viewport maximum, against 38 before.
+ * viewport allows.
  *
  * `panel` is the same flag the rest of this file takes, and it is false in exactly one
- * case — touch mode. Resolved here rather than at each call site so that the box and the
+ * case — touch mode. Resolved here rather than at each call site so that the layout and the
  * content are sized by the SAME mode: `computeStageLayout` reports it back on
  * `StageLayout.mode`, and every consumer reads that instead of the raw setting.
  */
@@ -368,100 +341,99 @@ export function effectiveFitMode(mode: FitMode, panel = true): FitMode {
 }
 
 /**
- * The stage box height for a viewport, in native px — `STAGE_H` or taller.
+ * Full stage layout for an available area.
  *
- * The mirror of `stageBoxWidth`, and it fires on the complementary viewport: a
- * height-bound one has `scale = availH / STAGE_H`, so `availH / scale` is STAGE_H exactly
- * and this returns the floor. Only a WIDTH-bound viewport — a phone in portrait, a tall
- * narrow window — has leftover height, and there the box's fixed 600 native px were
- * throwing it away (measured: 638x479 of a 638x1310 area, ~64% of the height unused).
+ * In order, and the order is the model: take the margins off the viewport; size the
+ * 800x600 envelope into what is left; take the panel column off for the content
+ * specifically. `contentScale` then does the one line.
  *
- * It does not take `panel`: the panel is a side column and costs width, not height. It
- * does keep the same `STAGE_EDGE` margin, for the same reason — `#stagebox` clips, and
- * spending the last pixel means the rounding lands on the content.
+ * `margin` is `VIEWPORT_MARGIN` by default and is a parameter so a TV target can pass a
+ * title-safe inset without a second code path.
  */
-export function stageBoxHeight(availH: number, scale: number, mode: FitMode): number {
-  if (!Number.isFinite(scale) || scale <= 0) return STAGE_H;
-  const usable = availH / scale - 2 * STAGE_EDGE;
-  if (!Number.isFinite(usable)) return STAGE_H;
-  return Math.max(STAGE_H, Math.min(stageBoxHeightCeiling(mode), usable));
-}
-
-/** Full stage layout (stage box + panel display sizes) for an available area. */
 export function computeStageLayout(
-  availW: number,
-  availH: number,
+  viewportW: number,
+  viewportH: number,
   mode: FitMode,
   panel = true,
+  margin = VIEWPORT_MARGIN,
 ): StageLayout {
   const fit = effectiveFitMode(mode, panel);
+  const availW = Math.max(0, viewportW - 2 * margin);
+  const availH = Math.max(0, viewportH - 2 * margin);
   const scale = computeStageScale(availW, availH, panel);
-  const boxW = stageBoxWidth(availW, availH, scale, fit, panel);
-  const boxH = stageBoxHeight(availH, scale, fit);
+  // Zero when the panel is gone, and both for the same reason: the row has one item left,
+  // so there is no gap between anything, and the panel canvas is not drawn at all
+  // (drawPanel returns before it reads these). A layout that still reported them would be
+  // describing a column that is `display: none`.
+  const gap = panel ? STAGE_GAP * scale : 0;
+  const panelW = panel ? PANEL_NATIVE_W * scale : 0;
+  const panelH = panel ? PANEL_NATIVE_H * scale : 0;
+  // The panel is part of the artwork, so it is reserved in NATIVE px and scales with the
+  // game — which is also the one place a taller window can cost a width-bound room a little
+  // size. See the header; it is an accepted impossibility, not an oversight.
+  const contentW = Math.max(0, availW - gap - panelW);
   return {
     scale,
     mode: fit,
-    // Zero when the panel is gone, and both for the same reason: the row has one item
-    // left, so there is no gap between anything, and the panel canvas is not drawn at
-    // all (drawPanel returns before it reads these). A layout that still reported them
-    // would be describing a column that is `display: none`.
-    gap: panel ? STAGE_GAP * scale : 0,
-    boxW,
-    boxH,
-    stageW: boxW * scale,
-    stageH: boxH * scale,
-    panelW: panel ? PANEL_NATIVE_W * scale : 0,
-    panelH: panel ? PANEL_NATIVE_H * scale : 0,
+    gap,
+    availW: contentW,
+    availH,
+    stageW: contentW,
+    stageH: availH,
+    panelW,
+    panelH,
   };
 }
 
 /**
  * Display scale for content (room / map / cutscene) of native size `w`x`h`.
- *  - 'fixed'      → stageScale (constant object size; content centered + letterboxed).
- *  - crisp integer ('native', 'x1'…'x4') → a scale that maps each game pixel to a
- *    WHOLE number of *physical* pixels (crisp, uniform nearest-neighbour). 'native'
- *    auto-picks the largest such multiple that fits the stage box; 'xN' requests
- *    exactly N physical px per game px, capped down so it never overflows the box
- *    (so e.g. 'x4' behaves like 'native' when only 3× fits). `dpr` makes this
- *    device-pixel-perfect: the returned CSS scale may be fractional (e.g. 2/1.5 at
- *    dpr 1.5), but scale×dpr is always an integer, so pixels stay square at any
- *    browser zoom / display scaling. Falls back to the exact fitting scale only
- *    when even 1 physical pixel per game pixel would overflow (a tiny viewport).
- *  - graded fits  → stageScale enlarged by up to FIT_FACTORS[mode] so small content
- *    fills more of the stage box ('fill' = grow until it fills the box exactly);
- *    content that already fills the box is left as-is.
- * Never enlarges past the point where content would overflow the stage box.
  *
- * `boxW` is the stage box's NATIVE width — `stage.boxW`, which is elastic (see
- * `stageBoxWidth`). It is a parameter and not a read of `STAGE_W` so that every consumer
- * is forced to use the same box the layout actually sized; defaulting to `STAGE_W` keeps
- * the pre-elastic behaviour for callers that genuinely have no layout to hand. `boxH` is
- * the same for the height (`stage.boxH`, `stageBoxHeight`), and defaults to `STAGE_H`.
+ * **The whole of it is `min(stageScale x FIT_FACTORS[mode], fitScale)`**, where `fitScale`
+ * is the largest scale that shows the content whole in `availW`x`availH`:
+ *
+ *  - 'fixed'      → `min(stageScale, fitScale)`. Constant object size in every room, which
+ *                   is the faithful mode; the `fitScale` term only ever binds on a viewport
+ *                   too small to letterbox into, where the alternative is cutting the room.
+ *  - graded fits  → `stageScale` enlarged by up to `FIT_FACTORS[mode]` so small content
+ *                   fills more of the screen; 'fill' (Infinity) is exactly `fitScale`.
+ *  - crisp integer ('native', 'x1'…'x4') → a scale that maps each game pixel to a WHOLE
+ *                   number of *physical* pixels (crisp, uniform nearest-neighbour). 'native'
+ *                   auto-picks the largest such multiple that fits; 'xN' requests exactly N,
+ *                   capped down so it never overflows (so 'x4' behaves like 'native' when
+ *                   only 3x fits). `dpr` makes this device-pixel-perfect: the returned CSS
+ *                   scale may be fractional (e.g. 2/1.5 at dpr 1.5), but scale x dpr is
+ *                   always an integer, so pixels stay square at any browser zoom.
+ *
+ * `availW`/`availH` are **display px** — `stage.availW`/`availH`, the area the content
+ * actually has. They are parameters rather than a read of `STAGE_W`/`STAGE_H` so that every
+ * consumer is forced to use the area the layout actually measured. There is no default:
+ * the previous signature defaulted to the fixed 800x600 box, and a caller that took the
+ * default was silently scaling against an area that did not exist.
  */
 export function contentScale(
   w: number,
   h: number,
   stageScale: number,
   mode: FitMode,
-  dpr = 1,
-  boxW: number = STAGE_W,
-  boxH: number = STAGE_H,
+  dpr: number,
+  availW: number,
+  availH: number,
 ): number {
-  const fill = Math.min(boxW / w, boxH / h); // grow-to-fill-the-box factor (≥1)
+  // The largest scale that shows the whole thing. A ceiling in every mode — this is the
+  // term the elastic stage box did not have, and its absence is why a room could be drawn
+  // 266px tall into 214px of space.
+  const fit = w > 0 && h > 0 ? Math.min(availW / w, availH / h) : 0;
   const target = NATIVE_TARGET[mode];
   if (target !== undefined) {
-    const maxFit = stageScale * fill; // largest CSS scale that still fits the box
     const d = dpr > 0 ? dpr : 1;
-    // Whole physical pixels per game pixel: k = scale×dpr. kMax is the largest that
-    // fits; 'native' takes kMax, 'xN' takes N but never more than fits.
-    const kMax = Math.floor(maxFit * d);
+    // Whole physical pixels per game pixel: k = scale x dpr. kMax is the largest that fits;
+    // 'native' takes kMax, 'xN' takes N but never more than fits.
+    const kMax = Math.floor(fit * d);
     const k = Math.min(target, kMax);
-    return k >= 1 ? k / d : maxFit; // device-integer scale, or fitting scale if <1 physical px
+    return k >= 1 ? k / d : fit; // device-integer scale, or the fitting scale if under 1 physical px
   }
   const cap = FIT_FACTORS[mode] ?? 1;
-  if (cap <= 1) return stageScale;
-  const factor = Math.max(1, Math.min(cap, fill));
-  return stageScale * factor;
+  return Math.min(stageScale * cap, fit);
 }
 
 /**

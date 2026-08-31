@@ -79,7 +79,7 @@ for (const c of CASES) {
   const availW = want === 'left' ? c.w - TOUCHBAR_W : c.w;
   const availH = want === 'top' ? c.h - TOUCHBAR_H : c.h;
   const l = computeStageLayout(availW, availH, 'fill', false);
-  const predicted = contentScale(real.nativeW, real.nativeH, l.scale, l.mode, 1, l.boxW, l.boxH);
+  const predicted = contentScale(real.nativeW, real.nativeH, l.scale, l.mode, 1, l.availW, l.availH);
 
   console.log(
     `\n${c.note}  ${c.w}x${c.h}  room ${real.nativeW}x${real.nativeH}` +
