@@ -396,13 +396,36 @@ function render(): void {
     ` &nbsp;in&nbsp; <b>${v.w}x${v.h}</b> (${(v.w / v.h).toFixed(2)}:1)` +
     (state.chrome ? ` &nbsp;<span style="color:#667">${state.vh} minus ${state.chrome} of chrome</span>` : '') +
     ` &nbsp;·&nbsp; drawn at <b>${(zoom * 100).toFixed(0)}%</b> here` +
-    (results.shipped && results.candidate
-      ? ` &nbsp;·&nbsp; candidate is <b>${pct(results.candidate.contentScale / results.shipped.contentScale - 1)}</b> vs shipped`
-      : '');
+    (results.shipped && results.candidate ? ` &nbsp;·&nbsp; ${verdict(results)}` : '');
 
   $('targethint').textContent = TARGET_HINT[state.target];
   $('modenote').textContent = state.target === 'pc' ? '' : 'forced to fill';
   renderChecks(results);
+}
+
+/**
+ * What the two panels are saying, in words rather than a percentage.
+ *
+ * The candidate landed in `src/app/layout.ts`, so the two are the SAME model written twice
+ * and agreeing is the expected reading — a bare "+0.00%" looks like a broken comparison
+ * when it is in fact the comparison passing. Any difference is either an experiment in
+ * progress or a bug in one of the two, and it should be impossible to mistake for noise.
+ */
+function verdict(r: Record<string, LayoutResult>): string {
+  const s = r.shipped!;
+  const c = r.candidate!;
+  const same =
+    Math.abs(c.contentScale - s.contentScale) < 1e-9 &&
+    Math.abs(c.roomX - s.roomX) < 1e-9 &&
+    Math.abs(c.roomY - s.roomY) < 1e-9;
+  if (same) {
+    return '<b style="color:#8d8">identical</b> <span style="color:#667">— expected: the candidate model is what the game now runs</span>';
+  }
+  const d = c.contentScale / s.contentScale - 1;
+  return (
+    `<b style="color:#eb6">DIFFERENT</b> — the candidate draws the room <b>${pct(d)}</b>` +
+    ' <span style="color:#667">(an experiment in progress, or a bug in one of the two)</span>'
+  );
 }
 
 function pct(x: number): string {
@@ -429,8 +452,8 @@ function frameFor(
   const h3 = document.createElement('h3');
   h3.innerHTML =
     model === 'shipped'
-      ? 'shipped <span>— src/app/layout.ts, as relayout() calls it</span>'
-      : 'candidate <span>— tools/layoutCandidate.ts, the same model written independently</span>';
+      ? 'SHIPPED <span>— what the game does now (src/app/layout.ts)</span>'
+      : 'CANDIDATE <span>— somewhere to try a change (tools/layoutCandidate.ts). The game does not use this.</span>';
   wrap.append(h3);
 
   const outer = el('outer', { width: `${v.w * zoom}px`, height: `${v.h * zoom}px` });
