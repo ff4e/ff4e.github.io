@@ -366,6 +366,30 @@ function edgeFor(model: 'shipped' | 'candidate'): StripEdge {
 const frames = $('frames');
 
 /**
+ * Which revision of `src/app/layout.ts` the left panel is actually showing.
+ *
+ * The lab imports the layout out of the WORKING TREE, so it shows whatever is checked out —
+ * on a feature branch that is neither `main` nor what players are running. Calling it
+ * "shipped" was wrong twice over, and the difference matters most exactly when it is easiest
+ * to forget: comparing a reworked layout against a defect that only still exists on `main`.
+ * Served by the dev-only `ff-lab-git-info` plugin in vite.config.ts.
+ */
+let git: { branch: string; head: string; differsFromMain: boolean; uncommitted: boolean } | null =
+  null;
+
+function gitLabel(): string {
+  if (!git) return 'this working tree';
+  const bits = [`branch <b>${git.branch}</b> @ ${git.head}`];
+  bits.push(
+    git.differsFromMain
+      ? '<b style="color:#eb6">differs from origin/main</b>'
+      : '<span style="color:#8d8">same as origin/main</span>',
+  );
+  if (git.uncommitted) bits.push('<b style="color:#eb6">uncommitted edits</b>');
+  return bits.join(' · ');
+}
+
+/**
  * The scale `render()` last drew the frames at. Module-level because a drag in progress has
  * to convert screen px into viewport px with the CURRENT one, and the drag outlives every
  * DOM node `render()` makes.
@@ -419,7 +443,7 @@ function verdict(r: Record<string, LayoutResult>): string {
     Math.abs(c.roomX - s.roomX) < 1e-9 &&
     Math.abs(c.roomY - s.roomY) < 1e-9;
   if (same) {
-    return '<b style="color:#8d8">identical</b> <span style="color:#667">— expected: the candidate model is what the game now runs</span>';
+    return '<b style="color:#8d8">identical</b> <span style="color:#667">— expected while the candidate model is the one this checkout runs</span>';
   }
   const d = c.contentScale / s.contentScale - 1;
   return (
@@ -452,8 +476,8 @@ function frameFor(
   const h3 = document.createElement('h3');
   h3.innerHTML =
     model === 'shipped'
-      ? 'SHIPPED <span>— what the game does now (src/app/layout.ts)</span>'
-      : 'CANDIDATE <span>— somewhere to try a change (tools/layoutCandidate.ts). The game does not use this.</span>';
+      ? `THIS CHECKOUT <span>— src/app/layout.ts as it is on ${gitLabel()}</span>`
+      : 'CANDIDATE <span>— somewhere to try a change (tools/layoutCandidate.ts). Nothing imports this.</span>';
   wrap.append(h3);
 
   const outer = el('outer', { width: `${v.w * zoom}px`, height: `${v.h * zoom}px` });
@@ -692,3 +716,15 @@ wire();
 syncSliders();
 syncViewport();
 render();
+
+// Late and non-blocking: the layout is worth looking at before git has answered, and a
+// checkout without git (or without an `origin/main`) should degrade to "this working tree"
+// rather than to a blank page.
+fetch('/__lab/git.json')
+  .then((r) => (r.ok ? r.json() : null))
+  .then((v) => {
+    if (!v) return;
+    git = v;
+    render();
+  })
+  .catch(() => {});
