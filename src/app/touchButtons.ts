@@ -1,6 +1,7 @@
 /**
- * The in-room touch controls: six buttons, down the left in landscape and along the
- * top in portrait.
+ * The in-room touch controls: six buttons, along whichever edge leaves more of the room
+ * visible — the top in portrait, and in landscape the left or the top depending on the
+ * room's shape (`touchBarEdge.ts` decides, per frame).
  *
  * ── What they are, and what they deliberately are not ────────────────────────
  * Map, Save, Load, Undo, Options, Restart — the panel's whole-room verbs, and nothing
@@ -46,9 +47,15 @@
  * visibility has to relayout: the room is scaled into what is left.
  */
 import { relayout } from './loadingUi.js';
+import { preferredTouchBarEdge } from './touchBarEdge.js';
+import type { TouchBarEdge } from './touchBarEdge.js';
+import { room } from './gameState.js';
+import { settings } from './playerSettings.js';
+import { roomScreenSize } from '../render/renderRoom.js';
 import { TOUCH_REGIONS } from './keyTables.js';
 import { touchModeActive } from './touchMode.js';
 import { ui } from './screenState.js';
+import { roomLoading } from './framePacing.js';
 
 export { TOUCH_REGIONS };
 
@@ -67,6 +74,58 @@ let active = false;
  * case free: `want` is false for ever, matches, and the sync returns without a DOM read.
  */
 let up = false;
+
+/**
+ * Last edge written to the DOM, so a steady room is not rewritten every frame.
+ *
+ * `'left'` because that is what the stylesheet does with the attribute absent, which makes
+ * the desktop and portrait cases free: `want` never moves off it and nothing is written.
+ */
+let edge: TouchBarEdge = 'left';
+
+/**
+ * Put the bar on the edge that shows more of the current room, and say whether that
+ * changed.
+ *
+ * Derived per frame rather than pushed, for the reason `rotatePrompt.ts` was (see
+ * `touchBarEdge.ts`): the viewport, the screen and the room all change from places that
+ * should not have to know a button bar exists, and one missed push would leave the room
+ * scaled for an edge the bar is no longer on. A room that has not changed costs two
+ * `computeStageLayout` calls and no DOM access.
+ *
+ * Portrait is left alone: it has its own media query, and the attribute is only read
+ * inside the landscape one, so a value written here would be inert there anyway.
+ */
+function syncEdge(): boolean {
+  // While a room is loading, `gameState.room` is still the PREVIOUS one but `ui.screen` is
+  // already 'room' — measured: entering KOSTE (540x495) reports 780x225 for one or two
+  // frames first, which is a different room's shape and answers 'top' where KOSTE answers
+  // 'left'. The bar would jump to the top edge and back within ~30ms on every room change.
+  // The room that is not on screen yet has no say in where the buttons go.
+  if (roomLoading) return false;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  let want: TouchBarEdge = 'left';
+  // Portrait has its own media query and the attribute is only read inside the landscape
+  // one, so there is nothing to decide there.
+  if (room && vw > vh) {
+    const { w, h } = roomScreenSize(room);
+    // A room that cannot be measured has no opinion, and must not be allowed to express
+    // one through the tie-break: `preferredTouchBarEdge` resolves a tie to 'top', which is
+    // right for a room that genuinely does not care and wrong for a 0x0 one.
+    if (w > 0 && h > 0) {
+      want = preferredTouchBarEdge(w, h, vw, vh, settings.fitMode, window.devicePixelRatio || 1);
+    } else {
+      return false;
+    }
+  }
+  if (want === edge) return false;
+  edge = want;
+  // An attribute, to read the same way as `data-touchbar` beside it, and SET to 'left'
+  // rather than removed so a probe can tell "decided left" from "never ran".
+  document.documentElement.setAttribute('data-touchbar-edge', want);
+  return true;
+}
 
 /**
  * Arm the buttons. Called once, from `main.ts`, during boot.
@@ -107,12 +166,23 @@ export function touchUi(): boolean {
  */
 export function syncTouchButtons(): void {
   const want = active && ui.screen === 'room';
-  if (want === up) return;
-  up = want;
-  const bar = document.getElementById('touchbar');
-  if (bar) bar.hidden = !want;
-  // The attribute the stylesheet hangs the stage's margin off — the bar reserves space
-  // rather than covering the room, so this changes how much room there is to draw in.
-  document.documentElement.toggleAttribute('data-touchbar', want);
-  relayout();
+  let changed = false;
+  if (want !== up) {
+    up = want;
+    const bar = document.getElementById('touchbar');
+    if (bar) bar.hidden = !want;
+    // The attribute the stylesheet hangs the stage's margin off — the bar reserves space
+    // rather than covering the room, so this changes how much room there is to draw in.
+    document.documentElement.toggleAttribute('data-touchbar', want);
+    changed = true;
+  }
+  // Which EDGE it reserves that space on depends on the ROOM as well as the viewport, and
+  // a room change never reaches `relayout()` (see the comment there) — so it is derived
+  // here, per frame, beside the visibility. Only while the bar is up: off-screen the
+  // attribute is inert, and recomputing it on the map would move the bar under the player
+  // on the way back in.
+  if (want && syncEdge()) changed = true;
+  // One relayout for both: the room is scaled into what the bar leaves, so either change
+  // invalidates it, and doing it twice in a frame would just repeat the work.
+  if (changed) relayout();
 }

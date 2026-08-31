@@ -146,6 +146,29 @@ const settle = (p, want) =>
   p.waitForFunction((w) => document.documentElement.hasAttribute('data-touchbar') === w, want);
 
 /**
+ * Wait for the bar's landscape EDGE to settle on `want`, room and all.
+ *
+ * Two conditions, and the second is the one that matters: the attribute alone says the
+ * decision was made, not that the room has been re-scaled into what the bar now leaves.
+ * `roomGeom()` is what `relayout()` computed and the canvas takes it in the room's draw,
+ * so they agree only once both have caught up — the same idiom as `settleRoom`.
+ *
+ * The attribute is absent until the edge first moves off its default, so a missing one
+ * reads as 'left'.
+ */
+const settleEdge = (p, want) =>
+  p.waitForFunction((w) => {
+    const g = window.__ff.roomGeom();
+    const el = document.getElementById('screen');
+    return (
+      (document.documentElement.getAttribute('data-touchbar-edge') ?? 'left') === w &&
+      g !== null &&
+      Math.abs(el.clientWidth - g.cssW) <= 1 &&
+      Math.abs(el.clientHeight - g.cssH) <= 1
+    );
+  }, want);
+
+/**
  * Wait for a resize or a mode change to reach the screen.
  *
  * `relayout()` only recomputes the stage; the box is re-sized in the room's draw, so a
@@ -728,6 +751,85 @@ try {
   expect(
     squat.top <= squat.barBottom + 1 && squat.bottom <= squat.viewH,
     `portrait tight: and takes no more than it must (${squat.top}..${squat.bottom} of ${squat.viewH})`,
+  );
+
+  // ── The third combination: which EDGE the bar takes in LANDSCAPE, per room ──
+  //
+  // The two above are orientation-only, and a media query is enough for them. This one is
+  // not: at ONE landscape viewport, a room much wider than the screen puts the bar along
+  // the top and an ordinary room leaves it down the left. Asserted as a pair at a single
+  // size, because that IS the claim — the edge tracks the room, and CSS cannot see which
+  // room is loaded (`src/app/touchBarEdge.ts`).
+  //
+  // 1100x620 is 1.77:1. KOSTE 540x495 is 1.09:1, flatter than the screen, so it is
+  // height-bound and the 72px left bar comes out of the width it was not using. UTES
+  // 780x225 is 3.47:1, wider than the screen, so it is width-bound and the same 72px come
+  // straight off the axis that decides its scale — while 66px off the height do not.
+  await settleRoom(player, 1100, 620);
+  await settleEdge(player, 'left');
+  const flatBar = await barState(player);
+  expect(
+    flatBar.marginLeft === '72px' && flatBar.marginTop === '0px',
+    `landscape, ordinary room: the bar stays down the left (margin-left ${flatBar.marginLeft}, margin-top ${flatBar.marginTop})`,
+  );
+
+  await enter(player, 7); // UTES, the widest room in the game
+  await settleEdge(player, 'top');
+  const wideBar = await barState(player);
+  expect(
+    wideBar.marginTop === '66px' && wideBar.marginLeft === '0px',
+    `landscape, very wide room: the SAME viewport puts the bar on top (margin-top ${wideBar.marginTop}, margin-left ${wideBar.marginLeft})`,
+  );
+  // The centring clamp (#126) has to hold on the new edge exactly as it does on the other
+  // two — this is the regression that would otherwise go unnoticed, since the clamp moves
+  // to a different element here (`#stagebox`, as in portrait) than it uses for the left
+  // bar (`.stage`).
+  const wideRoom = await roomCentre(player);
+  expect(
+    Math.abs(wideRoom.dx) <= 1,
+    `landscape top bar: the room's centre is still the screen's (off by ${wideRoom.dx}px of ${wideRoom.viewW})`,
+  );
+  expect(
+    wideRoom.top >= wideRoom.barBottom,
+    `landscape top bar: and the bar does not overlap it (room top ${wideRoom.top}, bar bottom ${wideRoom.barBottom})`,
+  );
+  // The edge is chosen by comparing VISIBLE area, so the winner can never be an edge that
+  // cuts the room off — the thing a scale comparison alone would have got wrong.
+  expect(
+    wideRoom.bottom <= wideRoom.viewH && wideRoom.left >= 0 && wideRoom.right <= wideRoom.viewW,
+    `landscape top bar: and the room is not clipped by it (${wideRoom.left}..${wideRoom.right} of ${wideRoom.viewW}, bottom ${wideRoom.bottom} of ${wideRoom.viewH})`,
+  );
+
+  // And back, without the viewport moving at all: a room change alone moves the bar, which
+  // is the whole reason this cannot live in `relayout()` (a room change never reaches it).
+  await enter(player, 6);
+  await settleEdge(player, 'left');
+  const backBar = await barState(player);
+  expect(
+    backBar.marginLeft === '72px' && backBar.marginTop === '0px',
+    `landscape: leaving the wide room puts the bar back on the left (margin-left ${backBar.marginLeft})`,
+  );
+
+  // ── A cut room never wins, however much of it survives the cut ──
+  //
+  // 669x280 with ZRC (555x225), found by Martin 2026-08-31. It is short enough that
+  // MIN_STAGE_SCALE's floor overflows the height once the top bar has taken 66px of it, so
+  // the room is drawn 266px tall into 214px and 52px of the level is simply not on screen.
+  // The surviving part is still LARGER than the whole room is with the bar on the left
+  // (140,598 px2 against 138,740), so a plain "bigger wins" comparison moves the bar onto
+  // the cut layout — which is what shipped first and what this pins against coming back.
+  await enter(player, 9);
+  await settleEdge(player, 'top'); // roomy window: the top edge is bigger and cuts nothing
+  await settleRoom(player, 669, 280);
+  await settleEdge(player, 'left');
+  const cut = await roomCentre(player);
+  expect(
+    cut.top >= 0 && cut.bottom <= cut.viewH,
+    `short viewport: the whole room is on screen vertically (${cut.top}..${cut.bottom} of ${cut.viewH})`,
+  );
+  expect(
+    cut.left >= cut.barRight && cut.right <= cut.viewW,
+    `short viewport: and horizontally, clear of the bar (${cut.left}..${cut.right} of ${cut.viewW}, bar right ${cut.barRight})`,
   );
 } catch (e) {
   ok = false;
