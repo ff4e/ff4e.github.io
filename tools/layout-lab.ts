@@ -16,7 +16,8 @@ import {
 import type { LayoutRequest, LayoutResult, LayoutTarget, StripEdge } from './layoutCandidate.js';
 import { layoutRoomShipped, preferredStripEdgeShipped } from './layoutShipped.js';
 import { LAB_MAP, LAB_ROOMS } from './layoutLabRooms.js';
-import { LAB_VIEWPORTS } from './layoutLabViewports.js';
+import { LAB_VIEWPORTS, sizeFor } from './layoutLabViewports.js';
+import type { LabDevice, LabOrientation } from './layoutLabViewports.js';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 /** `"720x585"` -> `[720, 585]`. The option values carry the size, so the picker needs no map. */
@@ -32,6 +33,13 @@ interface State {
   roomName: string;
   vw: number;
   vh: number;
+  /**
+   * Which way up the chosen device is held. Landscape and portrait are not two sizes of the
+   * same problem: in landscape HEIGHT is the scarce axis, so a left strip comes out of the
+   * axis with slack and is nearly free, while in portrait that inverts — and the shipped
+   * game changes rule with it (see `edgeFor`).
+   */
+  orient: LabOrientation;
   chrome: number;
   mode: FitMode;
   stripLeft: number;
@@ -51,6 +59,7 @@ const state: State = {
   roomName: 'BOTTLES',
   vw: 1491,
   vh: 1114,
+  orient: 'landscape',
   chrome: 0,
   mode: 'medium',
   stripLeft: 72,
@@ -96,15 +105,22 @@ function buildSelects(): void {
     tablet: 'Tablets (Playwright)',
     foldable: 'Foldables (Playwright)',
   };
-  for (const v of LAB_VIEWPORTS) {
-    if (v.klass !== lastKlass) {
+  // One option per DEVICE, not per size: the orientation switch picks which of its two
+  // shapes is used. A flat by-size list put a phone's two orientations dozens of entries
+  // apart, which reads as two devices.
+  for (const [i, d] of LAB_VIEWPORTS.entries()) {
+    if (d.klass !== lastKlass) {
       group = document.createElement('optgroup');
-      group.label = LABELS[v.klass] ?? v.klass;
+      group.label = LABELS[d.klass] ?? d.klass;
       preset.append(group);
-      lastKlass = v.klass;
+      lastKlass = d.klass;
     }
-    const o = opt(`${v.w}x${v.h}`, `${v.w}x${v.h} — ${v.name}`);
-    if (v.note) o.title = v.note;
+    const both = d.port && d.land;
+    const shapes = both
+      ? `${d.land!.w}x${d.land!.h} / ${d.port!.w}x${d.port!.h}`
+      : `${(d.land ?? d.port)!.w}x${(d.land ?? d.port)!.h}`;
+    const o = opt(String(i), `${d.name} — ${shapes}`);
+    if (d.note) o.title = d.note;
     group!.append(o);
   }
 
@@ -120,6 +136,11 @@ function wire(): void {
       const v = Number(el.value);
       if (Number.isFinite(v) && v > 0) {
         state[key] = v;
+        // Typing a size is as valid a way to change orientation as the switch is.
+        if (key === 'vw' || key === 'vh') {
+          state.orient = state.vw >= state.vh ? 'landscape' : 'portrait';
+          syncOrientButtons();
+        }
         render();
       }
     });
@@ -143,13 +164,30 @@ function wire(): void {
   });
 
   $<HTMLSelectElement>('preset').addEventListener('change', (e) => {
-    const [w, h] = size((e.target as HTMLSelectElement).value);
-    state.vw = w;
-    state.vh = h;
-    $<HTMLInputElement>('vw').value = String(w);
-    $<HTMLInputElement>('vh').value = String(h);
-    render();
+    const d = device(Number((e.target as HTMLSelectElement).value));
+    // Follow the device rather than the switch when it only exists one way up: picking a
+    // 1491x1114 window and being handed it sideways is never what was meant.
+    if (d.port && !d.land) state.orient = 'portrait';
+    else if (d.land && !d.port) state.orient = 'landscape';
+    applyDevice(d);
   });
+
+  for (const b of $('orient').querySelectorAll('button')) {
+    b.addEventListener('click', () => {
+      const v = (b as HTMLElement).dataset.v;
+      if (v === 'rotate') {
+        // Rotate whatever is on screen, preset or hand-typed — the honest way to ask
+        // "what does this layout do the other way up?" for a size no device has.
+        [state.vw, state.vh] = [state.vh, state.vw];
+        state.orient = state.vw >= state.vh ? 'landscape' : 'portrait';
+        syncViewport();
+        render();
+        return;
+      }
+      state.orient = v as LabOrientation;
+      applyDevice(currentDevice());
+    });
+  }
 
   for (const b of $('target').querySelectorAll('button')) {
     b.addEventListener('click', () => {
@@ -209,9 +247,51 @@ function wire(): void {
   chk('showguide', 'guide');
 
   $<HTMLSelectElement>('room').value = `${state.roomW}x${state.roomH}`;
-  $<HTMLSelectElement>('preset').value = `${state.vw}x${state.vh}`;
   $<HTMLSelectElement>('mode').value = state.mode;
   window.addEventListener('resize', render);
+}
+
+/** The device row behind a picker index. */
+function device(i: number): LabDevice {
+  return LAB_VIEWPORTS[i] ?? LAB_VIEWPORTS[0]!;
+}
+
+function currentDevice(): LabDevice {
+  return device(Number($<HTMLSelectElement>('preset').value) || 0);
+}
+
+/** Put a device on screen the currently-selected way up. */
+function applyDevice(d: LabDevice): void {
+  const s = sizeFor(d, state.orient);
+  state.vw = s.w;
+  state.vh = s.h;
+  syncViewport();
+  render();
+}
+
+function syncViewport(): void {
+  $<HTMLInputElement>('vw').value = String(state.vw);
+  $<HTMLInputElement>('vh').value = String(state.vh);
+  syncOrientButtons();
+}
+
+/**
+ * The switch and the hint, without touching the two number inputs — which is the whole
+ * reason this is separate: writing them back while the user is typing in one of them moves
+ * the caret to the end after every keystroke.
+ */
+function syncOrientButtons(): void {
+  for (const b of $('orient').querySelectorAll('button')) {
+    const v = (b as HTMLElement).dataset.v;
+    if (v !== 'rotate') b.setAttribute('aria-pressed', String(v === state.orient));
+  }
+  const d = currentDevice();
+  const has = state.orient === 'portrait' ? d.port : d.land;
+  $('orienthint').textContent = has
+    ? state.orient === 'landscape'
+      ? 'Landscape: height is the scarce axis, so a LEFT strip is nearly free and a top one is not.'
+      : "Portrait: the shipped game's media query owns this and always puts the bar on TOP."
+    : `Playwright lists this one ${state.orient === 'portrait' ? 'landscape' : 'portrait'} only — the size shown is transposed.`;
 }
 
 function syncSliders(): void {
@@ -254,6 +334,13 @@ function request(edge: StripEdge): LayoutRequest {
 function edgeFor(model: 'shipped' | 'candidate'): StripEdge {
   if (state.target === 'pc') return 'none';
   if (state.edge !== 'auto') return state.edge;
+  // **Portrait is not the room-aware rule's business.** In the shipped game a plain
+  // `@media (orientation: portrait)` puts the bar along the top and `touchBarEdge.ts` is
+  // never consulted — its own header says callers must have established landscape first.
+  // Modelling that here matters: a portrait phone is width-bound, so the comparison would
+  // often say 'left' and the lab would be showing a layout the game cannot produce.
+  const v = viewport();
+  if (v.h > v.w) return 'top';
   const base = request('left');
   const pick = model === 'shipped' ? preferredStripEdgeShipped : preferredStripEdge;
   // The strip differs per edge, so the rule has to price each edge with its own size.
@@ -407,8 +494,8 @@ function grip(zoom: number): HTMLElement {
     const move = (m: PointerEvent) => {
       state.vw = Math.max(200, Math.round(w0 + (m.clientX - x0) / zoom));
       state.vh = Math.max(150, Math.round(h0 + (m.clientY - y0) / zoom));
-      $<HTMLInputElement>('vw').value = String(state.vw);
-      $<HTMLInputElement>('vh').value = String(state.vh);
+      state.orient = state.vw >= state.vh ? 'landscape' : 'portrait';
+      syncViewport();
       render();
     };
     const up = () => {
@@ -539,4 +626,5 @@ function renderChecks(results: Record<string, LayoutResult>): void {
 buildSelects();
 wire();
 syncSliders();
+syncViewport();
 render();

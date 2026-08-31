@@ -144,8 +144,14 @@
       </div>
 
       <h2>Viewport</h2>
-      <label for="preset">Preset</label>
+      <label for="preset">Device / window</label>
       <select id="preset"></select>
+      <div class="seg" id="orient" style="margin-top:6px">
+        <button data-v="landscape" aria-pressed="true">Landscape</button>
+        <button data-v="portrait" aria-pressed="false">Portrait</button>
+        <button id="rotate" data-v="rotate" aria-pressed="false" style="flex:0 0 34px" title="Swap width and height">⤾</button>
+      </div>
+      <p class="hint" id="orienthint"></p>
       <div class="row" style="margin-top:6px">
         <div><label for="vw">css w</label><input id="vw" type="number" min="200" /></div>
         <div><label for="vh">css h</label><input id="vh" type="number" min="150" /></div>
@@ -168,14 +174,17 @@
         <option value="left">left</option>
         <option value="top">top</option>
       </select>
-      <p class="hint">72/66 is what ships today and is explicitly not final. A TV strip holds a
-        legend, not touch targets, so it can be thinner.</p>
+      <p class="hint">72/66 is what ships today and is explicitly not final. Measured: a LEFT strip
+        is nearly free at any size (a phone pays 0.49% at 72px, 0.66% at 96px), a TOP strip costs
+        ~0.29% of the room per pixel. So size the left one for thumbs and the top one as thin as
+        the icons allow. A TV strip holds a legend, not touch targets, so it can be thinner still.</p>
 
       <h2>Margin</h2>
-      <label for="margin">candidate reserve per edge, css px <span class="val" id="marginv">12</span></label>
-      <input id="margin" type="range" min="0" max="80" step="1" value="12" />
-      <p class="hint">The shipped model cannot take this: its reserve is STAGE_EDGE, 12 <em>native</em>
-        px inside the box calculation. That unit is the defect.</p>
+      <label for="margin">reserve per edge, css px <span class="val" id="marginv">0</span></label>
+      <input id="margin" type="range" min="0" max="80" step="1" value="0" />
+      <p class="hint">VIEWPORT_MARGIN, and it drives both frames. 0 on PC and touch: nothing can
+        overflow without it, so it buys air and costs about 2&times;margin/height of room size.
+        TV defaults to 27 &mdash; a title-safe inset is this same reserve.</p>
 
       <h2>Show</h2>
       <div class="chk"><input type="checkbox" id="showboth" checked /><label for="showboth" style="margin:0">both models side by side</label></div>
