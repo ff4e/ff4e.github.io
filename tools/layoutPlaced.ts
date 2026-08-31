@@ -67,7 +67,13 @@ export function layoutRoom(req: LayoutRequest): LayoutResult {
   const availH = Math.max(0, req.viewportH - stripH);
 
   const l = computeStageLayout(availW, availH, req.mode, panel, req.marginPx);
-  const s = contentScale(req.roomW, req.roomH, l.scale, l.mode, dpr, l.availW, l.availH);
+  // `l.mode` is what the game would use; `req.mode` is what the lab was asked to draw. They
+  // differ only on touch and TV, and only when previewing (see `LayoutRequest.respectMode`).
+  // Overriding it here is sound because with no panel the area and the stage scale do not
+  // depend on the mode at all — `l.availW/availH` is the viewport minus the strip and the
+  // margins, and `l.scale` is `computeStageScale` — so only the last term changes.
+  const fit = req.respectMode && !panel ? req.mode : l.mode;
+  const s = contentScale(req.roomW, req.roomH, l.scale, fit, dpr, l.availW, l.availH);
 
   const drawnW = s * req.roomW;
   const drawnH = s * req.roomH;
@@ -88,7 +94,7 @@ export function layoutRoom(req: LayoutRequest): LayoutResult {
   const cutH = Math.max(0, (drawnH - l.availH) / (s || 1));
 
   return {
-    mode: l.mode,
+    mode: fit,
     stageScale: l.scale,
     contentScale: s,
     // The scale that WOULD have shown the whole room — not a term the shipped model has,

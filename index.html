@@ -458,16 +458,16 @@
          letterboxes the room INSIDE it, so `.stage` has next to no vertical slack and the
          correction has to happen in `#stagebox`, around the room itself.
 
-         Which leaves one gap to close, and it is why `#stagebox` grows here. `relayout()`
-         sizes the box `2 * STAGE_EDGE * scale` SHORTER than the stage (layout.ts,
-         `stageBoxHeight`), and `.stage` then re-centres that shorter box — half the
-         shortfall above it, half below. While there is slack the two centrings compose
-         and the shortfall cancels; once the clamp binds it does not, and the room lands
+         `flex: 1 0 auto` on `#stagebox` makes the box fill the height it is centred in.
+         It was added to close a gap that no longer exists: `relayout()` used to size the
+         box `2 * STAGE_EDGE * scale` SHORTER than the stage, `.stage` re-centred that
+         shorter box, and once the clamp bound, the leftover half-shortfall landed the room
          up to 12px BELOW the bar instead of against it (measured 4.2-7.5px on squat
-         portrait viewports). `flex: 1 0 auto` in a now-column `.stage` makes the box fill
-         the height it is centred in, so there is no shortfall to leave behind and the
-         formula above holds on both branches. It changes only where the box CLIPS: the
-         room's size still comes from `stage.boxH`, which keeps the STAGE_EDGE margin. */
+         portrait viewports). The reserve is CSS px taken off the viewport now and the box
+         IS the content's area (layout.ts), so there is no shortfall left to leave behind.
+         The rule stays because "fill the height you are centred in" is still what this
+         branch wants to say, and it is what keeps the clamp's formula true if the reserve
+         is ever raised again — for a TV's title-safe inset, say. */
       @media (orientation: landscape) {
         html:not([data-touchbar-edge='top']) #touchbar {
           top: 0; left: 0; bottom: 0; width: 72px; flex-direction: column;

@@ -47,7 +47,16 @@ interface State {
    */
   orient: LabOrientation;
   chrome: number;
-  mode: FitMode;
+  /**
+   * The fit mode, PER TARGET.
+   *
+   * One shared mode is what the game has, and it is why touch and TV are forced to `fill`:
+   * the stored value is whatever a mouse session last chose, so overriding it is the only
+   * way to stop a setting the player cannot see deciding how big the game is on a phone.
+   * Kept per target here so the lab can show what the alternative looks like — a mode
+   * remembered for the device it was chosen on — which is the thing being decided.
+   */
+  modes: Record<LayoutTarget, FitMode>;
   stripLeft: number;
   stripTop: number;
   edge: 'auto' | 'left' | 'top';
@@ -66,7 +75,7 @@ const state: State = {
   vh: 1114,
   orient: 'landscape',
   chrome: 0,
-  mode: 'medium',
+  modes: { pc: 'medium', touch: 'fill', tv: 'fill' },
   stripLeft: 72,
   stripTop: 66,
   edge: 'auto',
@@ -212,7 +221,7 @@ function wire(): void {
   }
 
   $<HTMLSelectElement>('mode').addEventListener('change', (e) => {
-    state.mode = (e.target as HTMLSelectElement).value as FitMode;
+    state.modes[state.target] = (e.target as HTMLSelectElement).value as FitMode;
     render();
   });
   $<HTMLSelectElement>('edge').addEventListener('change', (e) => {
@@ -245,7 +254,7 @@ function wire(): void {
   chk('showguide', 'guide');
 
   $<HTMLSelectElement>('room').value = `${state.roomW}x${state.roomH}`;
-  $<HTMLSelectElement>('mode').value = state.mode;
+
   window.addEventListener('resize', render);
 }
 
@@ -325,7 +334,10 @@ function request(edge: StripEdge): LayoutRequest {
     roomW: state.roomW,
     roomH: state.roomH,
     target: state.target,
-    mode: state.mode,
+    mode: state.modes[state.target],
+    // The game would force touch and TV to `fill`; the lab draws what was asked instead, so
+    // "what would a phone look like on `medium`?" is answerable by looking.
+    respectMode: true,
     stripEdge: edge,
     stripPx: edge === 'top' ? state.stripTop : state.stripLeft,
     marginPx: state.margin,
@@ -413,7 +425,12 @@ function render(): void {
     ` &nbsp;·&nbsp; <span style="color:#667">${gitLabel()}</span>`;
 
   $('targethint').textContent = TARGET_HINT[state.target];
-  $('modenote').textContent = state.target === 'pc' ? '' : 'forced to fill';
+  $<HTMLSelectElement>('mode').value = state.modes[state.target];
+  $('modenote').textContent = state.target === 'pc' ? 'per the player' : 'per target — see below';
+  $('modehint').textContent =
+    state.target === 'pc'
+      ? 'The player picks this on desktop; it is remembered.'
+      : `The GAME forces ${state.target} to fill. The lab is drawing ${state.modes[state.target]} so you can see the alternative — a mode remembered per device rather than one shared with the desktop.`;
   renderChecks(r);
 }
 
@@ -715,11 +732,14 @@ function settingsDump(): string {
     const strip = target === 'pc' ? 0 : live ? state.stripLeft : TARGET_DEFAULTS[target].left;
     const stripTop = target === 'pc' ? 0 : live ? state.stripTop : TARGET_DEFAULTS[target].top;
     const margin = live ? state.margin : TARGET_DEFAULTS[target].margin;
-    const mode = target === 'pc' ? state.mode : 'fill';
+    const mode = state.modes[target];
     L.push(`${target.toUpperCase()}${target === state.target ? '   <- the one on screen, so these are your live values' : '   (defaults; switch to it in the lab to tune)'}`);
     L.push(`  strip           ${target === 'pc' ? 'none — the faithful 155x395 panel instead' : `${strip} px left / ${stripTop} px top`}`);
     L.push(`  margin          ${margin} css px per edge${target === 'tv' ? '  (title-safe inset — this is the TV padding)' : ''}`);
-    L.push(`  fit mode        ${mode}${target === 'pc' ? '' : ' (forced)'}`);
+    L.push(
+      `  fit mode        ${mode}` +
+        (target === 'pc' ? '' : mode === 'fill' ? '  (the game forces fill here)' : '  <- PREVIEW: the game would force fill'),
+    );
     L.push(`  edge rule       ${target === 'pc' ? 'n/a' : state.edge === 'auto' ? 'auto — whichever shows more of the room' : `forced ${state.edge}`}`);
     for (const [name, vw, vh] of CASES[target]) {
       const base: Omit<LayoutRequest, 'stripEdge'> = {
@@ -728,7 +748,8 @@ function settingsDump(): string {
         roomW: state.roomW,
         roomH: state.roomH,
         target,
-        mode: mode as typeof state.mode,
+        mode,
+        respectMode: true,
         stripPx: strip,
         marginPx: margin,
         dpr: state.dpr,

@@ -21,17 +21,20 @@
  * second calculation with buttons on side and take the button position for which the area
  * is higher."
  *
- * The comparison is over VISIBLE area — each candidate clamped to the area that bar leaves
- * — because `.stage` is `overflow: hidden` and `MIN_STAGE_SCALE` is deliberately allowed
- * to overflow the HEIGHT (see `computeStageScale`), so on a short viewport the top bar does
- * not shrink the room, it CUTS it. Measured across 172 real viewports, that clamp alone
- * caught 104 cases where comparing SCALE would have moved the bar onto a room it was
- * slicing up to 46px off.
+ * ── The second half this rule used to need, and no longer does ───────────────
+ * It once had a whole-room test ranked ABOVE the area comparison. That existed because
+ * `MIN_STAGE_SCALE`'s floor fed a stage box that could be bigger than the viewport, so on a
+ * short viewport the top bar did not shrink the room, it CUT it — and a cut room can still
+ * show more than a whole one, so plain area moved the bar onto the layout that hid part of
+ * the puzzle. Measured at 669x280 with ZRC 555x225: 140,598 visible against the left edge's
+ * 138,740, with 52px of the level off screen. Across Playwright's device registry, 44 of 48
+ * phone viewports had a top bar clip at least one room.
  *
- * **But visible area is not sufficient on its own, and an early version of this shipped
- * believing it was.** A cut room can still show more than a whole one, so the whole-room
- * test has to come FIRST — see `preferredTouchBarEdge` for the 669x280 case that
- * disproved it.
+ * **`layout.ts`'s rework removed the class outright.** `contentScale` is bounded by the
+ * area the content actually has, so nothing can be drawn past it: re-measured after the
+ * port, **0 of 48 phone viewports clip anything**, and the comparison is plain area again.
+ * `test/touchBarEdge.test.ts` keeps the 669x280 case, asserting the opposite of what it
+ * used to — that neither edge cuts, and that area alone now reaches the right answer.
  *
  * What the rule genuinely does avoid is **device classes and viewport thresholds**: the
  * comparison is already driven by the viewport, so a phone, a tablet and an open foldable
@@ -107,17 +110,18 @@ export function visibleRoomArea(
   mode: FitMode,
   dpr = 1,
 ): number {
-  return roomOn(roomW, roomH, availW, availH, mode, dpr).visible;
+  return roomOn(roomW, roomH, availW, availH, mode, dpr);
 }
 
-/** How a room comes out on one candidate area: how much of it shows, and whether it is cut. */
-interface Placed {
-  /** Visible area in CSS px2 — the drawn size clamped to the area, since `.stage` clips. */
-  visible: number;
-  /** True when at least one NATIVE pixel of the room is off-screen — see `roomOn`. */
-  cut: boolean;
-}
-
+/**
+ * How much of a room shows on one candidate area, in CSS px2.
+ *
+ * The `Math.min` pair used to do two jobs: clamp the drawn size to the area because
+ * `.stage` clips, and report whether anything had been clipped OFF, which the caller then
+ * ranked above area. The second job has no work left (see the header), so what is returned
+ * is just the area. The clamp stays because it is what makes this an honest number, not
+ * because anything can still trip it.
+ */
 function roomOn(
   roomW: number,
   roomH: number,
@@ -125,23 +129,13 @@ function roomOn(
   availH: number,
   mode: FitMode,
   dpr: number,
-): Placed {
-  if (!(roomW > 0) || !(roomH > 0) || !(availW > 0) || !(availH > 0)) {
-    return { visible: 0, cut: false };
-  }
+): number {
+  if (!(roomW > 0) || !(roomH > 0) || !(availW > 0) || !(availH > 0)) return 0;
   const l = computeStageLayout(availW, availH, mode, false);
   const s = contentScale(roomW, roomH, l.scale, l.mode, dpr, l.availW, l.availH);
   const drawnW = s * roomW;
   const drawnH = s * roomH;
-  // The overflow measured in the ARTWORK's own pixels, not in CSS px. Below one native
-  // pixel nothing of the room is hidden at all — there is no such thing as half a pixel of
-  // wall — so that is where "cut" has to start. Measuring it in CSS px instead makes the
-  // threshold depend on the scale the room happens to be drawn at, which is the quantity
-  // being compared: at 653x344 BATYSKAF overflows by 0.7 CSS px, two thirds of one game
-  // pixel, and treating that as a cut room cost 21% of the room's area for nothing.
-  const overflow = Math.max(0, drawnH - availH) + Math.max(0, drawnW - availW);
-  const cut = s > 0 && overflow / s >= 1;
-  return { visible: Math.min(drawnW, availW) * Math.min(drawnH, availH), cut };
+  return Math.min(drawnW, availW) * Math.min(drawnH, availH);
 }
 
 /**
@@ -152,21 +146,9 @@ function roomOn(
  * `viewportW`/`viewportH` are the WHOLE viewport (`window.innerWidth/innerHeight`); each
  * candidate subtracts its own bar.
  *
- * **Showing the WHOLE room outranks showing more of it.** That ordering is a guard now
- * rather than a live branch, and it is worth knowing what it was for. Measured at 669x280
- * with ZRC (555x225), BEFORE `layout.ts`'s rework: the top edge left 214px of height,
- * `MIN_STAGE_SCALE`'s floor overflowed it, and the room was drawn 266px tall — 52px of the
- * level not on screen. It STILL won on visible area, 140,598 against 138,740, because what
- * survived the cut was larger than the whole room is on the other edge. So a plain area
- * comparison moved the bar onto the layout that hid part of the level, which is the wrong
- * trade in a game where the level IS the puzzle. (Found by Martin, 2026-08-31, at exactly
- * this viewport, by resizing a window.)
- *
- * The content can no longer be drawn past its area, so `cut` is false on both edges at that
- * viewport and the plain area comparison now reaches the same answer on its own
- * (`test/touchBarEdge.test.ts` asserts both halves). The branch stays because it is two
- * lines and it is the only thing standing between a reintroduced clip and a bar that moves
- * onto it.
+ * It is a plain area comparison, which it could not be before `layout.ts`'s rework — see
+ * the header for the whole-room test that used to sit in front of it, and the 669x280 case
+ * that made it necessary. Nothing can be drawn past its area now, so the two agree.
  */
 export function preferredTouchBarEdge(
   roomW: number,
@@ -178,6 +160,5 @@ export function preferredTouchBarEdge(
 ): TouchBarEdge {
   const top = roomOn(roomW, roomH, viewportW, viewportH - TOUCHBAR_H, mode, dpr);
   const left = roomOn(roomW, roomH, viewportW - TOUCHBAR_W, viewportH, mode, dpr);
-  if (top.cut !== left.cut) return top.cut ? 'left' : 'top';
-  return top.visible >= left.visible ? 'top' : 'left';
+  return top >= left ? 'top' : 'left';
 }

@@ -46,6 +46,18 @@ export interface LayoutRequest {
   target: LayoutTarget;
   /** The player's fit mode. Resolved per target — touch and TV force `fill`. */
   mode: FitMode;
+  /**
+   * Use `mode` even on a target the game would override.
+   *
+   * The game forces touch and TV to `fill` (`effectiveFitMode`), because neither has a fit
+   * control and the stored value is whatever a mouse session last chose — a setting the
+   * player cannot see deciding how big the game is. That is a reasonable default and a poor
+   * ceiling: it also means a phone CANNOT be given a bounded mode even if that is what suits
+   * it. Setting this lets the lab draw the other modes on those targets, so the question
+   * "what would touch look like on `medium`?" can be answered by looking instead of by
+   * changing the game first.
+   */
+  respectMode?: boolean;
   /** Strip thickness in CSS px: its WIDTH on the left edge, its HEIGHT on the top edge. */
   stripPx?: number;
   stripEdge?: StripEdge;

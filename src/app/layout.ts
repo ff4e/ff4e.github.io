@@ -210,15 +210,9 @@ export const STAGE_GAP = 12;
  * 2.5-5% of the height.
  */
 export const VIEWPORT_MARGIN = 0;
-/** The widest content the layout ever has to hold (DRAKAR/PUCLIK are 795 native px wide). */
-export const MAX_CONTENT_W = 795;
-/** The tallest content the layout ever has to hold (PUCLIK is 585 native px tall). */
-export const MAX_CONTENT_H = 585;
 /** Control-panel native size (mirrors PANEL_W/PANEL_H in data/ffp.ts). */
 export const PANEL_NATIVE_W = 155;
 export const PANEL_NATIVE_H = 395;
-/** Legacy alias for the 'medium' fit factor (was the sole 'capped' bound). */
-export const CAPPED_MAX = FIT_FACTORS.medium;
 /**
  * Never shrink the stage below this scale, even on tiny viewports — up to the point
  * where the floor would put the box OUTSIDE the viewport (see `computeStageScale`).

@@ -16,12 +16,9 @@ import {
   STAGE_H,
   STAGE_GAP,
   VIEWPORT_MARGIN,
-  MAX_CONTENT_W,
-  MAX_CONTENT_H,
   PANEL_NATIVE_W,
   PANEL_NATIVE_H,
   PANEL_FOOTPRINT_W,
-  CAPPED_MAX,
   FIT_FACTORS,
   FIT_MODES,
   isFitMode,
@@ -477,7 +474,7 @@ describe('contentScale — against the content area', () => {
     for (const [w, h] of ROOMS) {
       const f = contentScale(w, h, stageScale, 'medium', 1, wider, boxH) / stageScale;
       expect(f).toBeGreaterThanOrEqual(1);
-      expect(f).toBeLessThanOrEqual(CAPPED_MAX + 1e-9);
+      expect(f).toBeLessThanOrEqual(FIT_FACTORS.medium + 1e-9);
     }
   });
 
@@ -521,10 +518,10 @@ describe('contentScale — capped (Approach C, medium)', () => {
     const factors = ROOMS.map(([w, h]) => cs(w, h, stageScale, 'medium') / stageScale);
     for (const f of factors) {
       expect(f).toBeGreaterThanOrEqual(1); // never smaller than fixed
-      expect(f).toBeLessThanOrEqual(CAPPED_MAX + 1e-9); // bounded enlargement
+      expect(f).toBeLessThanOrEqual(FIT_FACTORS.medium + 1e-9); // bounded enlargement
     }
     // The smallest room is enlarged to the cap; the largest stays ~fixed.
-    expect(factors[0]).toBeCloseTo(CAPPED_MAX, 5);
+    expect(factors[0]).toBeCloseTo(FIT_FACTORS.medium, 5);
     expect(factors[factors.length - 1]).toBeCloseTo(1, 1);
   });
 
