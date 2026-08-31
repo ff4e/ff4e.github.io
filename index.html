@@ -469,12 +469,46 @@
          formula above holds on both branches. It changes only where the box CLIPS: the
          room's size still comes from `stage.boxH`, which keeps the STAGE_EDGE margin. */
       @media (orientation: landscape) {
-        #touchbar { top: 0; left: 0; bottom: 0; width: 72px; flex-direction: column; }
-        html[data-touchbar] .stage { margin-left: 72px; }
-        html[data-touchbar] .stage::before {
+        html:not([data-touchbar-edge='top']) #touchbar {
+          top: 0; left: 0; bottom: 0; width: 72px; flex-direction: column;
+        }
+        html[data-touchbar]:not([data-touchbar-edge='top']) .stage { margin-left: 72px; }
+        html[data-touchbar]:not([data-touchbar-edge='top']) .stage::before {
           content: ''; flex: 1 1 0; min-width: 72px; margin-left: -72px;
         }
-        html[data-touchbar] .stage::after { content: ''; flex: 1 1 0; }
+        html[data-touchbar]:not([data-touchbar-edge='top']) .stage::after { content: ''; flex: 1 1 0; }
+        /* ── The same bar, along the TOP, while still in landscape ──
+           A room much wider than the viewport is WIDTH-bound, so the 72px the left bar
+           takes come off the axis that decides its scale, while the 66px a top bar takes
+           come off the axis that had slack. `app/touchBarEdge.ts` lays the room out both
+           ways every frame and sets `data-touchbar-edge` to whichever shows more of it —
+           on a phone that is the widest rooms only (UTES gains ~10% and crosses 1:1), on
+           a near-square foldable it is most of them.
+
+           Deliberately NOT a media query: the answer depends on which ROOM is loaded, and
+           CSS cannot see that. This is the one part of the touch bar's placement that JS
+           decides, which is why the rules above are scoped to the attribute's absence
+           rather than being overridden here — an override would have to undo the width
+           clamp as well as apply the height one, and the two clamps are easy to leave
+           half-applied.
+
+           The body of this branch is the PORTRAIT rule, verbatim: same edge, same 66px,
+           same reason the clamp moves to `#stagebox` (the box is given the height outright
+           and letterboxes the room inside it, so `.stage` has no vertical slack to correct
+           on). Keeping them identical is the point — the centring fix (#126) then cannot
+           regress on one edge while holding on the other. */
+        html[data-touchbar-edge='top'] #touchbar {
+          top: 0; left: 0; right: 0; bottom: auto;
+          width: auto; height: 66px; flex-direction: row;
+        }
+        html[data-touchbar][data-touchbar-edge='top'] .stage {
+          margin-top: 66px; flex-direction: column;
+        }
+        html[data-touchbar][data-touchbar-edge='top'] #stagebox { flex: 1 0 auto; flex-direction: column; }
+        html[data-touchbar][data-touchbar-edge='top'] #stagebox::before {
+          content: ''; flex: 1 1 0; min-height: 66px; margin-top: -66px;
+        }
+        html[data-touchbar][data-touchbar-edge='top'] #stagebox::after { content: ''; flex: 1 1 0; }
       }
       @media (orientation: portrait) {
         #touchbar { left: 0; right: 0; top: 0; height: 66px; flex-direction: row; }
