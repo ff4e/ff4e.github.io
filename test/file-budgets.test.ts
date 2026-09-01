@@ -184,6 +184,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // NOT set with it (no `mapOverlay`, so the panel column never floats over the map),
   // which is the part a later reader would otherwise have to reconstruct.
   ['src/app/mapNav.ts', 583],
+  // New entry: the layout rework took this over the 520-line threshold. The CODE shrank
+  // (162 -> 138 lines, 9 -> 5 exported functions; the elastic stage box and its two per-mode
+  // ceilings are gone). What grew is the prose: the file now opens with the RESULT it is
+  // supposed to produce, because stating only what each mechanism was for is how two defects
+  // came to be locally reasonable and jointly wrong. The cell ceiling and VIEWPORT_MARGIN
+  // carry their measurements with them for the same reason — the numbers are the argument,
+  // and a reader who cannot see them will reasonably assume they were guessed.
+  ['src/app/layout.ts', 560],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak

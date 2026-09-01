@@ -8,6 +8,8 @@
  */
 import {
   FIT_MODES,
+  CELL_NATIVE,
+  MAX_CELL_PX,
   MIN_STAGE_SCALE,
   PANEL_FOOTPRINT_W,
   PANEL_NATIVE_H,
@@ -68,6 +70,8 @@ interface State {
    */
   marginX: number;
   marginY: number;
+  /** `MAX_CELL_PX` — the ceiling on how big one 15px game cell may be drawn. */
+  maxCellPx: number;
   dpr: number;
   grid: boolean;
   guide: boolean;
@@ -88,6 +92,7 @@ const state: State = {
   edge: 'auto',
   marginX: 0,
   marginY: 0,
+  maxCellPx: MAX_CELL_PX,
   dpr: 1,
   grid: true,
   guide: true,
@@ -222,6 +227,7 @@ function wire(): void {
       const d = TARGET_DEFAULTS[state.target];
       state.marginX = d.marginX;
       state.marginY = d.marginY;
+      state.maxCellPx = d.maxCellPx;
       state.stripLeft = d.left;
       state.stripTop = d.top;
       syncSliders();
@@ -240,7 +246,7 @@ function wire(): void {
 
   const slider = (
     id: string,
-    key: 'stripLeft' | 'stripTop' | 'marginX' | 'marginY' | 'dpr' | 'chrome',
+    key: 'stripLeft' | 'stripTop' | 'marginX' | 'marginY' | 'maxCellPx' | 'dpr' | 'chrome',
     out: string,
   ) => {
     const el = $<HTMLInputElement>(id);
@@ -254,6 +260,7 @@ function wire(): void {
   slider('striptop', 'stripTop', 'striptopv');
   slider('marginx', 'marginX', 'marginxv');
   slider('marginy', 'marginY', 'marginyv');
+  slider('maxcell', 'maxCellPx', 'maxcellv');
   slider('dpr', 'dpr', 'dprv');
   slider('chrome', 'chrome', 'chromev');
 
@@ -333,6 +340,8 @@ function syncSliders(): void {
   $('marginxv').textContent = String(state.marginX);
   $<HTMLInputElement>('marginy').value = String(state.marginY);
   $('marginyv').textContent = String(state.marginY);
+  $<HTMLInputElement>('maxcell').value = String(state.maxCellPx);
+  $('maxcellv').textContent = String(state.maxCellPx);
 }
 
 // ── The layout ──────────────────────────────────────────────────────────────
@@ -357,6 +366,7 @@ function request(edge: StripEdge): LayoutRequest {
     stripEdge: edge,
     stripPx: edge === 'top' ? state.stripTop : state.stripLeft,
     marginPx: { x: state.marginX, y: state.marginY },
+    maxCellPx: state.maxCellPx,
     dpr: state.dpr,
   };
 }
@@ -441,6 +451,14 @@ function render(): void {
     ` &nbsp;·&nbsp; <span style="color:#667">${gitLabel()}</span>`;
 
   $('targethint').textContent = TARGET_HINT[state.target];
+  // The cell is what a player perceives — a crate, a step — so its size is reported in the
+  // units the decision was made in, including whether the ceiling is actually doing anything.
+  const cellPx = r.contentScale * CELL_NATIVE;
+  const bound = cellPx >= state.maxCellPx - 0.51;
+  $('cellhint').textContent =
+    `This cell: ${cellPx.toFixed(1)}px${bound ? ' — AT the ceiling' : ' — under the ceiling, it is not binding here'}. ` +
+    `28 reproduces the 1998 original's apparent size on a desktop (an 800x600 window on a period CRT was ~31-35 arc-minutes per cell). ` +
+    `A phone never reaches it; a TV wants ~45 because it is five times further away.`;
   $<HTMLSelectElement>('mode').value = state.modes[state.target];
   $('modenote').textContent = state.target === 'pc' ? 'per the player' : 'per target — see below';
   $('modehint').textContent =
@@ -730,6 +748,7 @@ function settingsDump(): string {
   L.push(`  STAGE_W/STAGE_H     ${STAGE_W}x${STAGE_H} native   the object-size envelope`);
   L.push(`  PANEL               ${PANEL_NATIVE_W}x${PANEL_NATIVE_H} native + ${STAGE_GAP} gap = ${PANEL_FOOTPRINT_W} footprint (PC only)`);
   L.push(`  MIN_STAGE_SCALE     ${MIN_STAGE_SCALE}`);
+  L.push(`  MAX_CELL_PX         ${MAX_CELL_PX} css px per 15px cell (the shipped ceiling)`);
   L.push(`  VIEWPORT_MARGIN     ${VIEWPORT_MARGIN} css px (the shipped default; per-axis is supported)`);
   L.push('');
 
@@ -767,6 +786,7 @@ function settingsDump(): string {
           ? '  (title-safe / overscan inset — this is the TV padding. Costs 0.56% horizontally, 4.62% vertically)'
           : ''),
     );
+    L.push(`  cell ceiling    ${live ? state.maxCellPx : TARGET_DEFAULTS[target].maxCellPx} css px per 15px cell`);
     L.push(
       `  fit mode        ${mode}` +
         (target === 'pc' ? '' : mode === 'fill' ? '  (the game forces fill here)' : '  <- PREVIEW: the game would force fill'),
@@ -783,6 +803,7 @@ function settingsDump(): string {
         respectMode: true,
         stripPx: strip,
         marginPx: { x: mx, y: my },
+        maxCellPx: live ? state.maxCellPx : TARGET_DEFAULTS[target].maxCellPx,
         dpr: state.dpr,
       };
       // Portrait belongs to the media query, which always picks the top (see edgeFor).
@@ -798,6 +819,7 @@ function settingsDump(): string {
       const r = layoutRoom({ ...base, stripEdge: edge, stripPx: px });
       L.push(
         `    ${name.padEnd(22)} ${`${vw}x${vh}`.padEnd(10)} bar ${edge.padEnd(5)}` +
+          ` cell ${(r.contentScale * CELL_NATIVE).toFixed(1)}px` +
           ` scale ${r.contentScale.toFixed(4)}  room ${Math.round(r.drawnW)}x${Math.round(r.drawnH)}` +
           `  gaps L${Math.round(r.gapLeft)} R${Math.round(r.gapRight)} T${Math.round(r.gapTop)} B${Math.round(r.gapBottom)}` +
           (r.cut ? `  CUT ${r.cutW.toFixed(1)}x${r.cutH.toFixed(1)} native px` : ''),

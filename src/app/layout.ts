@@ -226,6 +226,48 @@ export const VIEWPORT_MARGIN = 0;
  */
 export type ViewportMargin = number | { x: number; y: number };
 
+/**
+ * Native px per game cell. The rooms are laid out on a grid and every room's size is a whole
+ * number of these (72 rooms, 285x210 to 795x585, all multiples of 15), so it is the unit a
+ * player actually perceives — a crate, a step, a fish's head.
+ */
+export const CELL_NATIVE = 15;
+
+/**
+ * The largest a single game cell may be drawn, in CSS px — a ceiling on ENLARGEMENT.
+ *
+ * ── The problem ──────────────────────────────────────────────────────────────
+ * The graded modes and `fill` enlarge small content toward the space available, and the
+ * space available on a modern screen is enormous. Measured on `fill`, one cell of MIKRO
+ * (360x210, the smallest room) comes out at **21mm on a 27" monitor** — and within that one
+ * screen the smallest and largest rooms differ by **2.6x**. It looks wrong because it IS
+ * wrong: the same room is a different size on every machine, and on a big one it is absurd.
+ *
+ * ── Why 28, and why CSS px ───────────────────────────────────────────────────
+ * There is a faithful number to aim at. The original ran a fixed 800x600 window, so one
+ * cell subtended roughly **31-35 arc-minutes** on a period CRT (a 15" 4:3 tube at ~575mm:
+ * 5.3mm, 31'). Reproducing that today needs about 27px on a laptop and 30px on a 27"
+ * monitor, so **28 lands both within a couple of arc-minutes of the 1998 original** —
+ * measured, the 27" goes from 40'-104' to a flat 32' and the MacBook to 28'-35'.
+ *
+ * The unit has to be CSS px because it is the only physical-ish quantity a browser will
+ * give you: real ppi is not exposed (fingerprinting) and CSS `mm` is a fixed 1in = 96px
+ * ratio, so a "millimetre" cap would be a CSS-px cap wearing a costume. CSS px is at least
+ * *defined* as an angular reference, which is what the eye cares about.
+ *
+ * ── Why it needs no device detection ─────────────────────────────────────────
+ * **A phone never reaches it.** Its biggest cell on `fill` is 24.5px, under this ceiling, so
+ * a phone keeps every pixel it has — which matters, because phones are the case that looks
+ * too SMALL (their big rooms are fit-bound at ~17', and no fit mode can help that; only more
+ * viewport can). "Generous on phones, bounded on big screens" therefore falls out of the
+ * arithmetic rather than being a rule with a device class and a threshold to argue about —
+ * the same property #128 was careful to keep for the touch bar's edge.
+ *
+ * A TV wants a larger number (~45px): it is five times further away, so it needs more CSS px
+ * for the same apparent size. That belongs with the TV target, which does not exist yet.
+ */
+export const MAX_CELL_PX = 28;
+
 /** The reserve resolved to a pair, so the callers below can stop caring which form it took. */
 function marginAxes(m: ViewportMargin): { x: number; y: number } {
   return typeof m === 'number' ? { x: m, y: m } : m;
@@ -412,6 +454,7 @@ export function computeStageLayout(
  *                   too small to letterbox into, where the alternative is cutting the room.
  *  - graded fits  → `stageScale` enlarged by up to `FIT_FACTORS[mode]` so small content
  *                   fills more of the screen; 'fill' (Infinity) is exactly `fitScale`.
+ *                   **Bounded by `maxCellPx`** — see `MAX_CELL_PX`.
  *  - crisp integer ('native', 'x1'…'x4') → a scale that maps each game pixel to a WHOLE
  *                   number of *physical* pixels (crisp, uniform nearest-neighbour). 'native'
  *                   auto-picks the largest such multiple that fits; 'xN' requests exactly N,
@@ -425,6 +468,8 @@ export function computeStageLayout(
  * consumer is forced to use the area the layout actually measured. There is no default:
  * the previous signature defaulted to the fixed 800x600 box, and a caller that took the
  * default was silently scaling against an area that did not exist.
+ *
+ * `maxCellPx` is the enlargement ceiling (`MAX_CELL_PX`); pass `Infinity` to lift it.
  */
 export function contentScale(
   w: number,
@@ -434,6 +479,7 @@ export function contentScale(
   dpr: number,
   availW: number,
   availH: number,
+  maxCellPx: number = MAX_CELL_PX,
 ): number {
   // The largest scale that shows the whole thing. A ceiling in every mode — this is the
   // term the elastic stage box did not have, and its absence is why a room could be drawn
@@ -449,7 +495,18 @@ export function contentScale(
     return k >= 1 ? k / d : fit; // device-integer scale, or the fitting scale if under 1 physical px
   }
   const cap = FIT_FACTORS[mode] ?? 1;
-  return Math.min(stageScale * cap, fit);
+  // What 'fixed' would give: the faithful, constant-object-size scale.
+  const base = Math.min(stageScale, fit);
+  if (cap <= 1) return base;
+  const enlarged = Math.min(stageScale * cap, fit);
+  const ceiling = maxCellPx > 0 ? maxCellPx / CELL_NATIVE : Infinity;
+  // **Never below `base`**, and that floor is not a detail. The graded modes are defined as
+  // "'fixed', enlarged by up to N", so the mode list reads as increasing magnification. A
+  // bare ceiling breaks that on a big monitor — `stageScale` alone can exceed it there, so
+  // 'medium' would come out SMALLER than 'fixed' and switching to the faithful mode would
+  // make the room bigger. Bounding the ENLARGEMENT rather than the scale keeps the ordering
+  // true, and costs nothing where the ceiling was the binding term anyway.
+  return Math.max(base, Math.min(enlarged, ceiling));
 }
 
 /**

@@ -20,13 +20,13 @@
  * the actual game, so "the lab shows the game's layout" is a measured claim and not a
  * reading of the CSS.
  */
-import { computeStageLayout, contentScale } from '../src/app/layout.js';
+import { computeStageLayout, contentScale, CELL_NATIVE } from '../src/app/layout.js';
 import type { FitMode } from '../src/app/layout.js';
 import { TOUCHBAR_H, TOUCHBAR_W } from '../src/app/touchBarEdge.js';
 import { VIEWPORT_MARGIN } from '../src/app/layout.js';
 import type { LayoutRequest, LayoutResult, StripEdge } from './layoutModel.js';
 
-export { TOUCHBAR_W, TOUCHBAR_H };
+export { TOUCHBAR_W, TOUCHBAR_H, CELL_NATIVE };
 
 /**
  * #126's centring clamp, as the three flex rules resolve to it: centre on the whole
@@ -73,7 +73,7 @@ export function layoutRoom(req: LayoutRequest): LayoutResult {
   // depend on the mode at all — `l.availW/availH` is the viewport minus the strip and the
   // margins, and `l.scale` is `computeStageScale` — so only the last term changes.
   const fit = req.respectMode && !panel ? req.mode : l.mode;
-  const s = contentScale(req.roomW, req.roomH, l.scale, fit, dpr, l.availW, l.availH);
+  const s = contentScale(req.roomW, req.roomH, l.scale, fit, dpr, l.availW, l.availH, req.maxCellPx);
 
   const drawnW = s * req.roomW;
   const drawnH = s * req.roomH;

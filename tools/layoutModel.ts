@@ -8,6 +8,7 @@
  * now — but the shapes are still what `tools/layoutPlaced.ts` and `tools/layout-lab.ts`
  * agree on, and what any future experiment would want to speak.
  */
+import { MAX_CELL_PX } from '../src/app/layout.js';
 import type { FitMode } from '../src/app/layout.js';
 
 export type LayoutTarget = 'pc' | 'touch' | 'tv';
@@ -45,11 +46,14 @@ export type StripEdge = 'left' | 'top' | 'none';
  */
 export const TARGET_DEFAULTS: Record<
   LayoutTarget,
-  { left: number; top: number; marginX: number; marginY: number }
+  { left: number; top: number; marginX: number; marginY: number; maxCellPx: number }
 > = {
-  pc: { left: 0, top: 0, marginX: 0, marginY: 0 },
-  touch: { left: 72, top: 66, marginX: 0, marginY: 0 },
-  tv: { left: 48, top: 40, marginX: 48, marginY: 27 },
+  pc: { left: 0, top: 0, marginX: 0, marginY: 0, maxCellPx: MAX_CELL_PX },
+  touch: { left: 72, top: 66, marginX: 0, marginY: 0, maxCellPx: MAX_CELL_PX },
+  // A TV is ~5x further away than a desktop, so it needs more CSS px for the same apparent
+  // size: at the desktop's 28 a 1080p TV drops to 22-27 arc-minutes, well under the 31-35'
+  // the original had. 45 puts it back. Not in `src/` — there is no TV target yet.
+  tv: { left: 48, top: 40, marginX: 48, marginY: 27, maxCellPx: 45 },
 };
 
 export interface LayoutRequest {
@@ -79,6 +83,8 @@ export interface LayoutRequest {
   stripEdge?: StripEdge;
   /** Reserve per viewport edge, CSS px — one number, or one per axis (see ViewportMargin). */
   marginPx?: number | { x: number; y: number };
+  /** Ceiling on how big one 15px game cell may be drawn, CSS px. `Infinity` lifts it. */
+  maxCellPx?: number;
   /** Device pixel ratio, for the crisp-integer fit modes. */
   dpr?: number;
 }

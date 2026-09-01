@@ -16,6 +16,8 @@ import {
   STAGE_H,
   STAGE_GAP,
   VIEWPORT_MARGIN,
+  MAX_CELL_PX,
+  CELL_NATIVE,
   PANEL_NATIVE_W,
   PANEL_NATIVE_H,
   PANEL_FOOTPRINT_W,
@@ -38,6 +40,16 @@ const boxArea = (stageScale: number): [number, number] => [STAGE_W * stageScale,
 /** `contentScale` against that box — the shape most of these tests were written in. */
 const cs = (w: number, h: number, stageScale: number, mode: FitMode, dpr = 1): number =>
   contentScale(w, h, stageScale, mode, dpr, ...boxArea(stageScale));
+/**
+ * The same, with the cell ceiling lifted (`MAX_CELL_PX`).
+ *
+ * The crisp-integer tests below use `fill` as a stand-in for "the exact grow-to-fill scale",
+ * which is a property of the AREA and has nothing to do with the ceiling; leaving the
+ * ceiling on would have them comparing an integer scale against a bounded reference and
+ * failing for a reason that is not about integers at all.
+ */
+const csUncapped = (w: number, h: number, stageScale: number, mode: FitMode, dpr = 1): number =>
+  contentScale(w, h, stageScale, mode, dpr, ...boxArea(stageScale), Infinity);
 
 // A representative spread of real room sizes (measured across the 72 rooms).
 const ROOMS: ReadonlyArray<[number, number]> = [
@@ -143,16 +155,38 @@ describe('the content area, and the properties it buys', () => {
     }
   });
 
-  it('is the whole of the scaling: min(stageScale x factor, fitScale)', () => {
-    // The model, restated independently of the implementation. If this ever needs a second
+  it('is the whole of the scaling: the mode, the fit, and the cell ceiling', () => {
+    // The model, restated independently of the implementation. If this ever needs another
     // term, the file's opening sentence has changed and the change should be argued there.
     for (const mode of ['fixed', 'small', 'medium', 'large', 'fill'] as const) {
       for (const [w, h] of VIEWPORTS) {
         const l = computeStageLayout(w, h, mode);
         for (const [rw, rh] of ROOMS) {
           const fit = Math.min(l.availW / rw, l.availH / rh);
-          const want = Math.min(l.scale * FIT_FACTORS[mode], fit);
+          const base = Math.min(l.scale, fit); // what 'fixed' gives
+          const want =
+            FIT_FACTORS[mode] <= 1
+              ? base
+              : Math.max(base, Math.min(l.scale * FIT_FACTORS[mode], fit, MAX_CELL_PX / CELL_NATIVE));
           expect(contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH)).toBeCloseTo(want, 9);
+        }
+      }
+    }
+  });
+
+  it('lifting the ceiling restores the plain two-term model', () => {
+    // The ceiling is the only thing between `min(stageScale x factor, fitScale)` and what
+    // ships, so passing Infinity has to give exactly the old expression back — which is what
+    // makes it a bound bolted on top rather than a change to the model underneath.
+    for (const mode of ['fixed', 'small', 'medium', 'large', 'fill'] as const) {
+      for (const [w, h] of VIEWPORTS) {
+        const l = computeStageLayout(w, h, mode);
+        for (const [rw, rh] of ROOMS) {
+          const fit = Math.min(l.availW / rw, l.availH / rh);
+          const want = Math.min(l.scale * FIT_FACTORS[mode], fit);
+          expect(
+            contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, Infinity),
+          ).toBeCloseTo(want, 9);
         }
       }
     }
@@ -451,12 +485,14 @@ describe('contentScale — against the content area', () => {
 
   it('enlarges a width-bound room and leaves a height-bound one alone', () => {
     // UTES 780x225 is width-bound in the 800 box (800/780 = 1.026 < 600/225 = 2.67).
-    const utesBefore = contentScale(780, 225, stageScale, 'medium', 1, boxW, boxH);
-    const utesAfter = contentScale(780, 225, stageScale, 'medium', 1, wider, boxH);
+    // The ceiling is lifted: this is about whether more AREA enlarges the room, and at this
+    // hand-picked stageScale of 2 a cell is 30px, so MAX_CELL_PX would mask the answer.
+    const utesBefore = contentScale(780, 225, stageScale, 'medium', 1, boxW, boxH, Infinity);
+    const utesAfter = contentScale(780, 225, stageScale, 'medium', 1, wider, boxH, Infinity);
     expect(utesAfter).toBeGreaterThan(utesBefore);
     // VRAK 315x555 is height-bound; more width cannot help it.
-    expect(contentScale(315, 555, stageScale, 'medium', 1, wider, boxH)).toBe(
-      contentScale(315, 555, stageScale, 'medium', 1, boxW, boxH),
+    expect(contentScale(315, 555, stageScale, 'medium', 1, wider, boxH, Infinity)).toBe(
+      contentScale(315, 555, stageScale, 'medium', 1, boxW, boxH, Infinity),
     );
   });
 
@@ -495,6 +531,11 @@ describe('contentScale — against the content area', () => {
   });
 });
 
+/**
+ * The four `describe`s below pin the ENLARGEMENT rule, at a hand-picked `stageScale` of 2 —
+ * where one cell is 30px and `MAX_CELL_PX` would bind. They predate the ceiling and are not
+ * about it, so they lift it; the ceiling has its own `describe` at the end of the file.
+ */
 describe('contentScale — fixed (Approach D)', () => {
   it('gives every room an identical object scale', () => {
     const stageScale = 2.5;
@@ -515,7 +556,7 @@ describe('contentScale — fixed (Approach D)', () => {
 describe('contentScale — capped (Approach C, medium)', () => {
   it('enlarges small rooms but bounds the variance', () => {
     const stageScale = 2;
-    const factors = ROOMS.map(([w, h]) => cs(w, h, stageScale, 'medium') / stageScale);
+    const factors = ROOMS.map(([w, h]) => csUncapped(w, h, stageScale, 'medium') / stageScale);
     for (const f of factors) {
       expect(f).toBeGreaterThanOrEqual(1); // never smaller than fixed
       expect(f).toBeLessThanOrEqual(FIT_FACTORS.medium + 1e-9); // bounded enlargement
@@ -540,7 +581,7 @@ describe('contentScale — graded fit modes', () => {
     const stageScale = 2;
     const [w, h] = ROOMS[0]; // MIKRO — smallest, so it hits every cap
     const modes = ['fixed', 'small', 'medium', 'large', 'fill'] as const;
-    const scales = modes.map((m) => cs(w, h, stageScale, m));
+    const scales = modes.map((m) => csUncapped(w, h, stageScale, m));
     for (let i = 1; i < scales.length; i++) {
       expect(scales[i]).toBeGreaterThanOrEqual(scales[i - 1]);
     }
@@ -555,7 +596,7 @@ describe('contentScale — graded fit modes', () => {
   it("'fill' grows small content to exactly fill the stage box", () => {
     const stageScale = 2;
     const [w, h] = ROOMS[0];
-    const s = cs(w, h, stageScale, 'fill');
+    const s = csUncapped(w, h, stageScale, 'fill');
     // Content touches (at least) one edge of the box and never overflows it.
     const wFrac = (w * s) / (STAGE_W * stageScale);
     const hFrac = (h * s) / (STAGE_H * stageScale);
@@ -592,7 +633,7 @@ describe('contentScale — native (crisp integer)', () => {
   it('is the largest integer ≤ the fill scale (no fractional upscaling)', () => {
     const stageScale = 2;
     for (const [w, h] of ROOMS) {
-      const fill = cs(w, h, stageScale, 'fill'); // exact grow-to-fill scale
+      const fill = csUncapped(w, h, stageScale, 'fill'); // exact grow-to-fill scale
       const native = cs(w, h, stageScale, 'native');
       expect(native).toBe(Math.floor(fill));
       // one more step would overflow the box
@@ -644,7 +685,7 @@ describe('contentScale — native (crisp integer)', () => {
   it('a fractional dpr unlocks intermediate CSS scales (finer than integer steps)', () => {
     const stageScale = 2;
     for (const [w, h] of ROOMS) {
-      const fill = cs(w, h, stageScale, 'fill'); // exact grow-to-fill CSS scale
+      const fill = csUncapped(w, h, stageScale, 'fill'); // exact grow-to-fill CSS scale
       const dpr = 2;
       const s = cs(w, h, stageScale, 'native', dpr);
       // k = largest integer physical-px-per-game-px; s = k/dpr.
@@ -701,6 +742,105 @@ describe('contentScale — fixed integer scales (x1…x4)', () => {
     for (const m of FIT_MODES) expect(isFitMode(m)).toBe(true);
     for (const bad of ['capped', 'x5', 'x0', '', 'NATIVE', 42, null, undefined]) {
       expect(isFitMode(bad)).toBe(false);
+    }
+  });
+});
+
+/**
+ * The cell ceiling (`MAX_CELL_PX`) — a bound on ENLARGEMENT, not on the layout.
+ *
+ * It exists because `fill` and the graded modes enlarge toward the space available, and the
+ * space on a modern screen is enormous: one cell of the smallest room came out at 21mm on a
+ * 27" monitor, with a 2.6x spread between the smallest and largest room on that one screen.
+ * 28px is the value that reproduces the 1998 original's apparent size (an 800x600 window on
+ * a period CRT was ~31-35 arc-minutes per cell).
+ */
+describe('the cell ceiling — how big one square may get', () => {
+  /** A 27" desktop: the case the ceiling exists for. */
+  const BIG: [number, number] = [2560, 1380];
+  /** A phone in landscape: the case that must not be touched. */
+  const PHONE: [number, number] = [734, 343];
+
+  it('no graded mode draws a cell past the ceiling, unless `fixed` already did', () => {
+    for (const mode of ['small', 'medium', 'large', 'fill'] as const) {
+      for (const [w, h] of [BIG, PHONE, [1512, 860], [1180, 748]] as const) {
+        for (const panel of [true, false]) {
+          const l = computeStageLayout(w, h, mode, panel);
+          for (const [rw, rh] of ROOMS) {
+            const s = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+            const fixed = contentScale(rw, rh, l.scale, 'fixed', 1, l.availW, l.availH);
+            // The floor is `fixed`: on a big monitor the faithful scale alone can exceed the
+            // ceiling, and coming out below it would invert the mode list (see contentScale).
+            expect(s * CELL_NATIVE).toBeLessThanOrEqual(
+              Math.max(MAX_CELL_PX, fixed * CELL_NATIVE) + 1e-6,
+            );
+          }
+        }
+      }
+    }
+  });
+
+  it('leaves a phone alone — its biggest cell on `fill` is under the ceiling', () => {
+    const l = computeStageLayout(PHONE[0] - 72, PHONE[1], 'fill', false);
+    let biggest = 0;
+    for (const [rw, rh] of ROOMS) {
+      const capped = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+      const lifted = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, Infinity);
+      expect(capped).toBeCloseTo(lifted, 9); // the ceiling never binds here
+      biggest = Math.max(biggest, capped * CELL_NATIVE);
+    }
+    expect(biggest).toBeLessThan(MAX_CELL_PX);
+  });
+
+  it('exempts `fixed` and the whole crisp-integer family', () => {
+    // 'fixed' promises a constant object size and the xN modes promise exactly N physical
+    // pixels per game pixel. Both are contracts a ceiling would break silently.
+    for (const mode of ['fixed', 'native', 'x1', 'x2', 'x3', 'x4'] as const) {
+      for (const [w, h] of [BIG, PHONE] as const) {
+        const l = computeStageLayout(w, h, mode);
+        for (const [rw, rh] of ROOMS) {
+          expect(contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH)).toBe(
+            contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, Infinity),
+          );
+        }
+      }
+    }
+  });
+
+  it('never puts a graded mode below `fixed` — the mode list stays ordered', () => {
+    // The reason the ceiling has a floor. Without it, 'medium' would come out SMALLER than
+    // 'fixed' on a 27", so choosing the faithful mode would make the room bigger.
+    for (const [w, h] of [BIG, PHONE, [1512, 860], [1920, 1030]] as const) {
+      for (const panel of [true, false]) {
+        for (const [rw, rh] of ROOMS) {
+          const at = (mode: FitMode) => {
+            const l = computeStageLayout(w, h, mode, panel);
+            return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+          };
+          const ladder = (['fixed', 'small', 'medium', 'large', 'fill'] as const).map(at);
+          for (let i = 1; i < ladder.length; i++) {
+            expect(ladder[i]!).toBeGreaterThanOrEqual(ladder[i - 1]! - 1e-9);
+          }
+        }
+      }
+    }
+  });
+
+  it('cannot break monotonicity — it is constant in the viewport', () => {
+    for (const mode of ['medium', 'fill'] as const) {
+      for (const [rw, rh] of ROOMS) {
+        for (let w = 600; w <= 2600; w += 97) {
+          for (let h = 400; h <= 1400; h += 89) {
+            const at = (vw: number, vh: number) => {
+              const l = computeStageLayout(vw, vh, mode, false);
+              return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+            };
+            const here = at(w, h);
+            expect(at(w + 1, h)).toBeGreaterThanOrEqual(here - 1e-9);
+            expect(at(w, h + 1)).toBeGreaterThanOrEqual(here - 1e-9);
+          }
+        }
+      }
     }
   });
 });
