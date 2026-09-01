@@ -61,7 +61,12 @@ export const TARGET_DEFAULTS: Record<
   // A TV is ~5x further away than a desktop, so it needs more CSS px for the same apparent
   // size: at the desktop's 28 a 1080p TV drops to 22-27 arc-minutes, well under the 31-35'
   // the original had. 45 puts it back. Not in `src/` — there is no TV target yet.
-  tv: { left: 48, top: 40, marginX: 0, marginY: 0, maxCellPx: 45 },
+  // 68/68 is Martin's, set in the lab 2026-09-01. A TV strip holds a LEGEND of the
+  // controller's buttons rather than tappable targets, so it could be thinner than touch's
+  // 72 — but it is also five times further away, and 68 css px on a 1080p panel is ~42mm,
+  // about 58 arc-minutes at 2.5m, which is legible. It costs ~0.3% of room scale on the left
+  // edge, so the size is very nearly free and should be chosen for legibility alone.
+  tv: { left: 68, top: 68, marginX: 0, marginY: 0, maxCellPx: 45 },
 };
 
 /**
