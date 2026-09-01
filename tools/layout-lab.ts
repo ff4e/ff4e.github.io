@@ -34,8 +34,40 @@ const size = (v: string): [number, number] => {
   return [w ?? 0, h ?? 0];
 };
 
+/**
+ * Everything ONE target owns. Held per target rather than globally, because switching
+ * target used to overwrite the sliders with that target's defaults — so tuning PC, moving
+ * to Touch and coming back lost the PC values, and exporting all three was impossible.
+ * These are also exactly the numbers the export prints, so a switch can no longer silently
+ * turn a value you set back into a default.
+ */
+interface TargetSettings {
+  stripLeft: number;
+  stripTop: number;
+  /**
+   * The reserve per viewport edge, per axis. Two numbers because the TV title-safe
+   * convention is asymmetric and because the two cost very different amounts — 0.56%
+   * horizontally against 4.62% vertically, since the rooms are already letterboxed sideways
+   * on a 16:9 screen.
+   */
+  marginX: number;
+  marginY: number;
+  /** `MAX_CELL_PX` — the ceiling on how big one 15px game cell may be drawn. */
+  maxCellPx: number;
+  /**
+   * The fit mode.
+   *
+   * Per target because that is the open question: the game has ONE shared mode and forces
+   * touch and TV to `fill`, since the stored value is whatever a mouse session last chose.
+   * Holding one each is what lets the lab show the alternative.
+   */
+  mode: FitMode;
+}
+
 interface State {
   target: LayoutTarget;
+  /** One settings record per target — see `TargetSettings`. */
+  per: Record<LayoutTarget, TargetSettings>;
   roomW: number;
   roomH: number;
   roomName: string;
@@ -49,36 +81,29 @@ interface State {
    */
   orient: LabOrientation;
   chrome: number;
-  /**
-   * The fit mode, PER TARGET.
-   *
-   * One shared mode is what the game has, and it is why touch and TV are forced to `fill`:
-   * the stored value is whatever a mouse session last chose, so overriding it is the only
-   * way to stop a setting the player cannot see deciding how big the game is on a phone.
-   * Kept per target here so the lab can show what the alternative looks like — a mode
-   * remembered for the device it was chosen on — which is the thing being decided.
-   */
-  modes: Record<LayoutTarget, FitMode>;
-  stripLeft: number;
-  stripTop: number;
+  /** A view override, not a value being decided — so it is shared, not per target. */
   edge: 'auto' | 'left' | 'top';
-  /**
-   * The reserve per viewport edge, per axis. Two numbers because the TV title-safe
-   * convention is asymmetric (48 x 27 at 1080p) and because the two cost very different
-   * amounts here — 0.56% horizontally against 4.62% vertically, since the rooms are already
-   * letterboxed sideways on a 16:9 screen.
-   */
-  marginX: number;
-  marginY: number;
-  /** `MAX_CELL_PX` — the ceiling on how big one 15px game cell may be drawn. */
-  maxCellPx: number;
   dpr: number;
   grid: boolean;
   guide: boolean;
 }
 
+/** A target's settings as they ship / are proposed today. */
+function defaultsFor(t: LayoutTarget): TargetSettings {
+  const d = TARGET_DEFAULTS[t];
+  return {
+    stripLeft: d.left,
+    stripTop: d.top,
+    marginX: d.marginX,
+    marginY: d.marginY,
+    maxCellPx: d.maxCellPx,
+    mode: t === 'pc' ? 'medium' : 'fill',
+  };
+}
+
 const state: State = {
   target: 'pc',
+  per: { pc: defaultsFor('pc'), touch: defaultsFor('touch'), tv: defaultsFor('tv') },
   roomW: 720,
   roomH: 585,
   roomName: 'BOTTLES',
@@ -86,17 +111,45 @@ const state: State = {
   vh: 1114,
   orient: 'landscape',
   chrome: 0,
-  modes: { pc: 'medium', touch: 'fill', tv: 'fill' },
-  stripLeft: 72,
-  stripTop: 66,
   edge: 'auto',
-  marginX: 0,
-  marginY: 0,
-  maxCellPx: MAX_CELL_PX,
   dpr: 1,
   grid: true,
   guide: true,
 };
+
+/** The settings of the target currently on screen. */
+function cur(): TargetSettings {
+  return state.per[state.target];
+}
+
+/**
+ * Tuning survives a reload.
+ *
+ * The lab is where the numbers are decided and then pasted into a conversation, so losing
+ * them to a stray refresh is the same annoyance as losing them to a target switch. Only the
+ * per-target settings are stored — the room and the viewport are what you are looking
+ * through, not what you are deciding.
+ */
+const STORE_KEY = 'ff-layout-lab-v1';
+function saveTuning(): void {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(state.per));
+  } catch {
+    // A private window can refuse storage; the lab still works, it just forgets.
+  }
+}
+function loadTuning(): void {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return;
+    const v = JSON.parse(raw) as Partial<Record<LayoutTarget, Partial<TargetSettings>>>;
+    for (const t of ['pc', 'touch', 'tv'] as const) {
+      if (v[t]) Object.assign(state.per[t], v[t]);
+    }
+  } catch {
+    // Corrupt or from an older shape — the defaults are a fine answer.
+  }
+}
 
 const TARGET_HINT: Record<LayoutTarget, string> = {
   pc: 'Mouse + keyboard. The faithful 155x395 panel is reserved in native px beside the room, and the player picks the fit mode.',
@@ -224,19 +277,17 @@ function wire(): void {
       // Each target brings its own proposed strip and margin — they are the numbers
       // this task exists to decide, so switching target must not silently keep the last
       // target's ones.
-      const d = TARGET_DEFAULTS[state.target];
-      state.marginX = d.marginX;
-      state.marginY = d.marginY;
-      state.maxCellPx = d.maxCellPx;
-      state.stripLeft = d.left;
-      state.stripTop = d.top;
+      // Switching RESTORES this target's settings; it does not reset them. Resetting is
+      // what made tuning all three impossible — every switch quietly overwrote the sliders
+      // with defaults, so the export printed a default for whichever target you had left.
       syncSliders();
       render();
     });
   }
 
   $<HTMLSelectElement>('mode').addEventListener('change', (e) => {
-    state.modes[state.target] = (e.target as HTMLSelectElement).value as FitMode;
+    cur().mode = (e.target as HTMLSelectElement).value as FitMode;
+    saveTuning();
     render();
   });
   $<HTMLSelectElement>('edge').addEventListener('change', (e) => {
@@ -244,11 +295,28 @@ function wire(): void {
     render();
   });
 
-  const slider = (
+  /** A slider over one of the CURRENT TARGET's settings — remembered per target, and saved. */
+  const targetSlider = (
     id: string,
-    key: 'stripLeft' | 'stripTop' | 'marginX' | 'marginY' | 'maxCellPx' | 'dpr' | 'chrome',
+    key: 'stripLeft' | 'stripTop' | 'marginX' | 'marginY' | 'maxCellPx',
     out: string,
   ) => {
+    const el = $<HTMLInputElement>(id);
+    el.addEventListener('input', () => {
+      cur()[key] = Number(el.value);
+      $(out).textContent = el.value;
+      saveTuning();
+      render();
+    });
+  };
+  targetSlider('stripleft', 'stripLeft', 'striplefv');
+  targetSlider('striptop', 'stripTop', 'striptopv');
+  targetSlider('marginx', 'marginX', 'marginxv');
+  targetSlider('marginy', 'marginY', 'marginyv');
+  targetSlider('maxcell', 'maxCellPx', 'maxcellv');
+
+  /** A slider over something you are looking THROUGH rather than deciding — not per target. */
+  const viewSlider = (id: string, key: 'dpr' | 'chrome', out: string) => {
     const el = $<HTMLInputElement>(id);
     el.addEventListener('input', () => {
       state[key] = Number(el.value);
@@ -256,13 +324,8 @@ function wire(): void {
       render();
     });
   };
-  slider('stripleft', 'stripLeft', 'striplefv');
-  slider('striptop', 'stripTop', 'striptopv');
-  slider('marginx', 'marginX', 'marginxv');
-  slider('marginy', 'marginY', 'marginyv');
-  slider('maxcell', 'maxCellPx', 'maxcellv');
-  slider('dpr', 'dpr', 'dprv');
-  slider('chrome', 'chrome', 'chromev');
+  viewSlider('dpr', 'dpr', 'dprv');
+  viewSlider('chrome', 'chrome', 'chromev');
 
   const chk = (id: string, key: 'grid' | 'guide') => {
     const el = $<HTMLInputElement>(id);
@@ -332,16 +395,16 @@ function syncOrientButtons(): void {
 }
 
 function syncSliders(): void {
-  $<HTMLInputElement>('stripleft').value = String(state.stripLeft);
-  $('striplefv').textContent = String(state.stripLeft);
-  $<HTMLInputElement>('striptop').value = String(state.stripTop);
-  $('striptopv').textContent = String(state.stripTop);
-  $<HTMLInputElement>('marginx').value = String(state.marginX);
-  $('marginxv').textContent = String(state.marginX);
-  $<HTMLInputElement>('marginy').value = String(state.marginY);
-  $('marginyv').textContent = String(state.marginY);
-  $<HTMLInputElement>('maxcell').value = String(state.maxCellPx);
-  $('maxcellv').textContent = String(state.maxCellPx);
+  $<HTMLInputElement>('stripleft').value = String(cur().stripLeft);
+  $('striplefv').textContent = String(cur().stripLeft);
+  $<HTMLInputElement>('striptop').value = String(cur().stripTop);
+  $('striptopv').textContent = String(cur().stripTop);
+  $<HTMLInputElement>('marginx').value = String(cur().marginX);
+  $('marginxv').textContent = String(cur().marginX);
+  $<HTMLInputElement>('marginy').value = String(cur().marginY);
+  $('marginyv').textContent = String(cur().marginY);
+  $<HTMLInputElement>('maxcell').value = String(cur().maxCellPx);
+  $('maxcellv').textContent = String(cur().maxCellPx);
 }
 
 // ── The layout ──────────────────────────────────────────────────────────────
@@ -359,14 +422,14 @@ function request(edge: StripEdge): LayoutRequest {
     roomW: state.roomW,
     roomH: state.roomH,
     target: state.target,
-    mode: state.modes[state.target],
+    mode: cur().mode,
     // The game would force touch and TV to `fill`; the lab draws what was asked instead, so
     // "what would a phone look like on `medium`?" is answerable by looking.
     respectMode: true,
     stripEdge: edge,
-    stripPx: edge === 'top' ? state.stripTop : state.stripLeft,
-    marginPx: { x: state.marginX, y: state.marginY },
-    maxCellPx: state.maxCellPx,
+    stripPx: edge === 'top' ? cur().stripTop : cur().stripLeft,
+    marginPx: { x: cur().marginX, y: cur().marginY },
+    maxCellPx: cur().maxCellPx,
     dpr: state.dpr,
   };
 }
@@ -389,7 +452,7 @@ function edgeFor(): StripEdge {
   const both = (e: StripEdge) => ({
     ...base,
     stripEdge: e,
-    stripPx: e === 'top' ? state.stripTop : state.stripLeft,
+    stripPx: e === 'top' ? cur().stripTop : cur().stripLeft,
   });
   const top = layoutRoom(both('top'));
   const left = layoutRoom(both('left'));
@@ -454,17 +517,17 @@ function render(): void {
   // The cell is what a player perceives — a crate, a step — so its size is reported in the
   // units the decision was made in, including whether the ceiling is actually doing anything.
   const cellPx = r.contentScale * CELL_NATIVE;
-  const bound = cellPx >= state.maxCellPx - 0.51;
+  const bound = cellPx >= cur().maxCellPx - 0.51;
   $('cellhint').textContent =
     `This cell: ${cellPx.toFixed(1)}px${bound ? ' — AT the ceiling' : ' — under the ceiling, it is not binding here'}. ` +
     `28 reproduces the 1998 original's apparent size on a desktop (an 800x600 window on a period CRT was ~31-35 arc-minutes per cell). ` +
     `A phone never reaches it; a TV wants ~45 because it is five times further away.`;
-  $<HTMLSelectElement>('mode').value = state.modes[state.target];
+  $<HTMLSelectElement>('mode').value = cur().mode;
   $('modenote').textContent = state.target === 'pc' ? 'per the player' : 'per target — see below';
   $('modehint').textContent =
     state.target === 'pc'
       ? 'The player picks this on desktop; it is remembered.'
-      : `The GAME forces ${state.target} to fill. The lab is drawing ${state.modes[state.target]} so you can see the alternative — a mode remembered per device rather than one shared with the desktop.`;
+      : `The GAME forces ${state.target} to fill. The lab is drawing ${cur().mode} so you can see the alternative — a mode remembered per device rather than one shared with the desktop.`;
   renderChecks(r);
 }
 
@@ -496,13 +559,13 @@ function frameFor(
   });
 
   // The reserve, drawn as a dashed box so a margin you cannot otherwise see is visible.
-  if (state.guide && (state.marginX > 0 || state.marginY > 0)) {
+  if (state.guide && (cur().marginX > 0 || cur().marginY > 0)) {
     frame.append(
       el('guide', {
-        left: `${state.marginX}px`,
-        right: `${state.marginX}px`,
-        top: `${state.marginY}px`,
-        bottom: `${state.marginY}px`,
+        left: `${cur().marginX}px`,
+        right: `${cur().marginX}px`,
+        top: `${cur().marginY}px`,
+        bottom: `${cur().marginY}px`,
       }),
     );
   }
@@ -511,23 +574,23 @@ function frameFor(
   // thing on screen a player has to aim at, so pinning it to the panel's edge — where the
   // room was already being kept away from — had it exactly the wrong way round. Costs no
   // size: the room already began at `margin + strip`.
-  if (edge === 'left' && state.stripLeft > 0) {
+  if (edge === 'left' && cur().stripLeft > 0) {
     const s = el('strip', {
-      left: `${state.marginX}px`,
-      top: `${state.marginY}px`,
-      bottom: `${state.marginY}px`,
-      width: `${state.stripLeft}px`,
+      left: `${cur().marginX}px`,
+      top: `${cur().marginY}px`,
+      bottom: `${cur().marginY}px`,
+      width: `${cur().stripLeft}px`,
     });
-    s.innerHTML = `<span>${state.stripLeft}</span>`;
+    s.innerHTML = `<span>${cur().stripLeft}</span>`;
     frame.append(s);
-  } else if (edge === 'top' && state.stripTop > 0) {
+  } else if (edge === 'top' && cur().stripTop > 0) {
     const s = el('strip', {
-      left: `${state.marginX}px`,
-      right: `${state.marginX}px`,
-      top: `${state.marginY}px`,
-      height: `${state.stripTop}px`,
+      left: `${cur().marginX}px`,
+      right: `${cur().marginX}px`,
+      top: `${cur().marginY}px`,
+      height: `${cur().stripTop}px`,
     });
-    s.innerHTML = `<span>${state.stripTop}</span>`;
+    s.innerHTML = `<span>${cur().stripTop}</span>`;
     frame.append(s);
   }
 
@@ -696,12 +759,12 @@ function renderChecks(r: LayoutResult): void {
     // Per axis, because the reserve is: a horizontal gap is not evidence about a vertical one.
     const nearX = Math.min(r.gapLeft, r.gapRight);
     const nearY = Math.min(r.gapTop, r.gapBottom);
-    const okX = nearX >= state.marginX - 0.51;
-    const okY = nearY >= state.marginY - 0.51;
+    const okX = nearX >= cur().marginX - 0.51;
+    const okY = nearY >= cur().marginY - 0.51;
     const reserve =
       okX && okY
-        ? `<span class="good">holds</span> gaps ${nearX.toFixed(1)}x${nearY.toFixed(1)} >= ${state.marginX}x${state.marginY}`
-        : `<span class="bad">FAILS</span> gaps ${nearX.toFixed(1)}x${nearY.toFixed(1)} < ${state.marginX}x${state.marginY}`;
+        ? `<span class="good">holds</span> gaps ${nearX.toFixed(1)}x${nearY.toFixed(1)} >= ${cur().marginX}x${cur().marginY}`
+        : `<span class="bad">FAILS</span> gaps ${nearX.toFixed(1)}x${nearY.toFixed(1)} < ${cur().marginX}x${cur().marginY}`;
 
     // 3. Nothing runs off the viewport — the property the reserve used to exist for, and
     //    which nothing tested until the rework.
@@ -717,10 +780,10 @@ function renderChecks(r: LayoutResult): void {
     //    already against the edge of the space it is allowed.
     const centreErr = Math.abs(r.roomX + r.drawnW / 2 + (r.panelW + r.gap) / 2 - v.w / 2);
     const clamped =
-      r.gapLeft <= state.marginX + 0.51 ||
-      r.gapRight <= state.marginX + 0.51 ||
-      r.gapTop <= state.marginY + 0.51 ||
-      r.gapBottom <= state.marginY + 0.51;
+      r.gapLeft <= cur().marginX + 0.51 ||
+      r.gapRight <= cur().marginX + 0.51 ||
+      r.gapTop <= cur().marginY + 0.51 ||
+      r.gapBottom <= cur().marginY + 0.51;
     const centred =
       centreErr < 0.51
         ? `<span class="good">holds</span>`
@@ -786,26 +849,37 @@ function settingsDump(): string {
   };
 
   for (const target of ['pc', 'touch', 'tv'] as const) {
-    const live = target === state.target;
-    const strip = target === 'pc' ? 0 : live ? state.stripLeft : TARGET_DEFAULTS[target].left;
-    const stripTop = target === 'pc' ? 0 : live ? state.stripTop : TARGET_DEFAULTS[target].top;
-    const mx = live ? state.marginX : TARGET_DEFAULTS[target].marginX;
-    const my = live ? state.marginY : TARGET_DEFAULTS[target].marginY;
-    const mode = state.modes[target];
-    L.push(`${target.toUpperCase()}${target === state.target ? '   <- the one on screen, so these are your live values' : '   (defaults; switch to it in the lab to tune)'}`);
-    L.push(`  strip           ${target === 'pc' ? 'none — the faithful 155x395 panel instead' : `${strip} px left / ${stripTop} px top`}`);
-    L.push(
-      `  margin          ${mx} css px left/right, ${my} top/bottom` +
-        (target === 'tv'
-          ? '  (title-safe / overscan inset — this is the TV padding. Costs 0.56% horizontally, 4.62% vertically)'
-          : ''),
+    const t = state.per[target];
+    const d = defaultsFor(target);
+    // Every target is a live value now — they are all held and all saved, so nothing here is
+    // a default standing in for something you did not get to. Only what you CHANGED is
+    // flagged, which is the part worth reading.
+    const changed = (['stripLeft', 'stripTop', 'marginX', 'marginY', 'maxCellPx', 'mode'] as const).filter(
+      (k) => t[k] !== d[k],
     );
-    L.push(`  cell ceiling    ${live ? state.maxCellPx : TARGET_DEFAULTS[target].maxCellPx} css px per 15px cell`);
     L.push(
-      `  fit mode        ${mode}` +
-        (target === 'pc' ? '' : mode === 'fill' ? '  (the game forces fill here)' : '  <- PREVIEW: the game would force fill'),
+      `${target.toUpperCase()}${target === state.target ? '   <- on screen' : ''}` +
+        (changed.length ? `   CHANGED: ${changed.join(', ')}` : '   (unchanged from the shipped values)'),
     );
-    L.push(`  edge rule       ${target === 'pc' ? 'n/a' : state.edge === 'auto' ? 'auto — whichever shows more of the room' : `forced ${state.edge}`}`);
+    L.push(
+      `  strip           ${target === 'pc' ? 'none — the faithful 155x395 panel instead' : `${t.stripLeft} px left / ${t.stripTop} px top`}`,
+    );
+    L.push(
+      `  margin          ${t.marginX} css px left/right, ${t.marginY} top/bottom` +
+        (target === 'tv' ? '  (title-safe inset; 0 because a TV browser already handles overscan)' : ''),
+    );
+    L.push(`  cell ceiling    ${t.maxCellPx} css px per 15px cell`);
+    L.push(
+      `  fit mode        ${t.mode}` +
+        (target === 'pc'
+          ? ''
+          : t.mode === 'fill'
+            ? '  (the game forces fill here)'
+            : '  <- PREVIEW: the game would force fill'),
+    );
+    L.push(
+      `  edge rule       ${target === 'pc' ? 'n/a' : state.edge === 'auto' ? 'auto — whichever shows more of the room' : `forced ${state.edge}`}`,
+    );
     for (const [name, vw, vh] of CASES[target]) {
       const base: Omit<LayoutRequest, 'stripEdge'> = {
         viewportW: vw,
@@ -813,11 +887,11 @@ function settingsDump(): string {
         roomW: state.roomW,
         roomH: state.roomH,
         target,
-        mode,
+        mode: t.mode,
         respectMode: true,
-        stripPx: strip,
-        marginPx: { x: mx, y: my },
-        maxCellPx: live ? state.maxCellPx : TARGET_DEFAULTS[target].maxCellPx,
+        stripPx: t.stripLeft,
+        marginPx: { x: t.marginX, y: t.marginY },
+        maxCellPx: t.maxCellPx,
         dpr: state.dpr,
       };
       // Portrait belongs to the media query, which always picks the top (see edgeFor).
@@ -829,7 +903,7 @@ function settingsDump(): string {
             : state.edge === 'auto'
               ? preferredStripEdge(base)
               : state.edge;
-      const px = edge === 'top' ? stripTop : strip;
+      const px = edge === 'top' ? t.stripTop : t.stripLeft;
       const r = layoutRoom({ ...base, stripEdge: edge, stripPx: px });
       L.push(
         `    ${name.padEnd(22)} ${`${vw}x${vh}`.padEnd(10)} bar ${edge.padEnd(5)}` +
@@ -846,6 +920,13 @@ function settingsDump(): string {
 
 function wireExport(): void {
   const ta = $<HTMLTextAreaElement>('dump');
+  $('reset').addEventListener('click', () => {
+    for (const t of ['pc', 'touch', 'tv'] as const) state.per[t] = defaultsFor(t);
+    saveTuning();
+    syncSliders();
+    render();
+    $('copyhint').textContent = 'All three targets are back to the shipped values.';
+  });
   $('copy').addEventListener('click', async () => {
     const text = settingsDump();
     ta.value = text;
@@ -862,6 +943,7 @@ function wireExport(): void {
   });
 }
 
+loadTuning();
 buildSelects();
 wire();
 wireExport();
