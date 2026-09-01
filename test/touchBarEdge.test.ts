@@ -14,6 +14,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { computeStageLayout, contentScale } from '../src/app/layout.js';
 import {
   preferredTouchBarEdge,
   visibleRoomArea,
@@ -85,17 +86,40 @@ describe('preferredTouchBarEdge', () => {
     }
   });
 
-  it('prefers the WHOLE room over a bigger cut one (669x280, Martin 2026-08-31)', () => {
-    // The case that disproved "visible area is enough on its own". ZRC 555x225 at 669x280:
-    // the top edge leaves 214px of height, MIN_STAGE_SCALE's floor overflows it, and the
-    // room is drawn 266px tall — 52px of it cut off. It still wins on visible area,
-    // 140,598 against the left edge's 138,740, because the surviving part is bigger than
-    // the whole room is on the other edge. Seeing all of the level beats seeing more of it.
+  it('no longer has a cut room to prefer against (669x280, Martin 2026-08-31)', () => {
+    // This case is why the whole-room test exists. ZRC 555x225 at 669x280: the top edge
+    // left 214px of height, `MIN_STAGE_SCALE`'s floor overflowed it, and the room was drawn
+    // 266px tall — 52px of the level not on screen. It still won on visible area (140,598
+    // against 138,740) because the surviving part was bigger than the whole room is on the
+    // other edge, so a plain area comparison moved the bar onto the layout that hid part of
+    // the puzzle.
+    //
+    // `layout.ts`'s rework removed the class: `contentScale` is bounded by the area, so
+    // NEITHER edge cuts anything here any more, and the plain area comparison now gets the
+    // same answer the whole-room test used to have to rescue. Both halves are asserted —
+    // that nothing is cut, and that the rule still says 'left'.
     const short: [number, number] = [669, 280];
     const onTop = visibleRoomArea(555, 225, short[0], short[1] - TOUCHBAR_H, 'fill');
     const onLeft = visibleRoomArea(555, 225, short[0] - TOUCHBAR_W, short[1], 'fill');
-    expect(onTop).toBeGreaterThan(onLeft); // area alone would say 'top'
-    expect(edge(555, 225, short)).toBe('left'); // and it is wrong
+    expect(onTop).toBeLessThan(onLeft); // area alone now says 'left' on its own
+    expect(edge(555, 225, short)).toBe('left');
+    // And it says it because the room FITS both ways, not because one was rejected.
+    //
+    // That has to be asserted against the DRAWN size, not against `visibleRoomArea` —
+    // `roomOn` clamps its result to the area it was given, so `visible <= availW * availH`
+    // is true by construction and an assertion in those terms cannot fail for any input in
+    // any version of `layout.ts`. Re-deriving the scale here is the only way to see what the
+    // room would have been drawn at BEFORE the clamp, which is the quantity that used to be
+    // 266px into 214px of space.
+    for (const [availW, availH] of [
+      [short[0], short[1] - TOUCHBAR_H], // the top edge — the one that used to cut
+      [short[0] - TOUCHBAR_W, short[1]],
+    ] as const) {
+      const l = computeStageLayout(availW, availH, 'fill', false);
+      const s = contentScale(555, 225, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
+      expect(s * 555).toBeLessThanOrEqual(availW + 1e-6);
+      expect(s * 225).toBeLessThanOrEqual(availH + 1e-6);
+    }
   });
 
   it('ignores an overflow smaller than one pixel of the artwork', () => {

@@ -1,0 +1,242 @@
+<!doctype html>
+<!--
+  Layout lab — DEV ONLY.
+
+  Lives under tools/ deliberately: `vite build` has a single entry (index.html), so
+  nothing here can reach the built site, and tools/ is not staged by
+  tools/stage-pages-assets.mjs either. Open it on the dev server:
+
+      npm run dev
+      http://127.0.0.1:<the port it prints>/tools/layout-lab.html
+
+  ── Why a standalone page ────────────────────────────────────────────────────
+  The display layout was only ever observable inside a running game, where every check
+  costs a room load. That is how two defects survived 2223 unit tests, 94 UI probes and a
+  code review and were then found in minutes by Martin dragging a window edge: a room
+  drawn 266px tall into 214px of space at 669x280, and a room held 21px off both edges at
+  1491x1114 that reaches them at 1557.
+
+  For layout purposes a room IS just a rectangle — 72 of them, 63 distinct sizes, 285x210
+  to 795x585 — so coloured boxes are a faithful model of the whole problem, with no game,
+  no assets and no room loading. What the lab adds over the game is that you can see the
+  NUMBERS beside the picture, resize by dragging, and put the shipped model and a
+  candidate side by side at the same viewport.
+
+  ── What is real here and what is not ────────────────────────────────────────
+  The frame calls `src/app/layout.ts`'s own `computeStageLayout` and `contentScale`, exactly
+  as `relayout()` does — no re-implementation, so it cannot drift from the game. Only the
+  PLACEMENT is reproduced (it lives in this file's stylesheet and cannot be imported);
+  `tools/verify-layout-lab.mjs` pins that reproduction against a real Chromium.
+
+  It reads the WORKING TREE, so it shows the branch you are serving — not necessarily
+  `main`, and not necessarily what players run. The heading names the revision.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Fish Fillets — layout lab</title>
+    <style>
+      :root { color-scheme: dark; }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0; height: 100vh; display: flex; background: #0d0d12; color: #cdd;
+        font: 13px/1.45 system-ui, sans-serif; overflow: hidden;
+      }
+      /* ── Controls ─────────────────────────────────────────────────────── */
+      #controls {
+        width: 300px; flex: none; padding: 12px 14px; overflow-y: auto;
+        background: #14141c; border-right: 1px solid #2a2a3a;
+      }
+      h1 { font-size: 15px; margin: 0 0 2px; color: #9fd; }
+      .sub { color: #667; font-size: 11px; margin: 0 0 14px; }
+      h2 {
+        font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: #778;
+        margin: 16px 0 7px; border-bottom: 1px solid #2a2a3a; padding-bottom: 4px;
+      }
+      label { display: block; margin: 6px 0 2px; color: #99a; font-size: 11px; }
+      select, input[type=number], input[type=text] {
+        width: 100%; background: #0e0e16; color: #cdd; border: 1px solid #333449;
+        border-radius: 5px; padding: 4px 6px; font: inherit; font-size: 12px;
+      }
+      input[type=range] { width: 100%; margin: 2px 0 0; accent-color: #6cc; }
+      .row { display: flex; gap: 6px; }
+      .row > * { flex: 1; min-width: 0; }
+      .seg { display: flex; gap: 4px; margin-top: 4px; }
+      .seg button {
+        flex: 1; padding: 5px 2px; font: inherit; font-size: 11px; cursor: pointer;
+        background: #0e0e16; color: #99a; border: 1px solid #333449; border-radius: 5px;
+      }
+      .seg button[aria-pressed='true'] { background: #1d3b44; color: #9fd; border-color: #4a8b98; }
+      .seg button#copy { padding: 7px 4px; color: #9fd; border-color: #4a8b98; }
+      .seg button#copy:hover { background: #1d3b44; }
+      .chk { display: flex; align-items: center; gap: 6px; margin: 5px 0; color: #99a; font-size: 11px; }
+      .chk input { accent-color: #6cc; }
+      .val { float: right; color: #6cc; font-variant-numeric: tabular-nums; }
+      .hint { color: #667; font-size: 10.5px; margin: 3px 0 0; }
+      /* ── The frames ───────────────────────────────────────────────────── */
+      #view { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 10px 12px; gap: 8px; }
+      #topline { display: flex; gap: 14px; align-items: baseline; flex: none; font-size: 12px; color: #99a; }
+      #topline b { color: #9fd; font-weight: 600; }
+      #frames { flex: 1; min-height: 0; display: flex; gap: 14px; align-items: flex-start; }
+      .fw { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+      .fw h3 { margin: 0; font-size: 12px; color: #9fd; font-weight: 600; }
+      .fw h3 span { color: #667; font-weight: 400; font-size: 11px; }
+      .outer { position: relative; flex: none; }
+      /* The modelled viewport, drawn at `zoom` so a 3440px window still fits on screen.
+         `overflow: hidden` is not decoration — it is what makes a cut room LOOK cut,
+         which is the failure mode the automated checks could not see. */
+      .frame {
+        position: absolute; top: 0; left: 0; transform-origin: 0 0;
+        background: #05050a; border: 1px solid #3a3a55; overflow: hidden;
+      }
+      .frame.cut { border-color: #d8484c; box-shadow: 0 0 0 2px #d8484c55; }
+      .strip { position: absolute; background: #1d3b44; border: 1px solid #4a8b98; }
+      .strip span {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        color: #7ac; font-size: 10px; writing-mode: inherit;
+      }
+      .panel { position: absolute; background: #2a2438; border: 1px solid #6b5a8e; }
+      .panel span { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #a e9; font-size: 10px; }
+      /* The room. The cell grid is the whole reason to draw one at all: it turns
+         "contentScale 1.83" into something the eye can compare between two frames. */
+      .room { position: absolute; background: #16323a; border: 1px solid #6cc; }
+      .room .cells { position: absolute; inset: 0; }
+      .room .tag {
+        position: absolute; left: 3px; top: 2px; color: #9fd; font-size: 10px;
+        font-variant-numeric: tabular-nums; text-shadow: 0 0 4px #000, 0 0 4px #000;
+      }
+      .guide { position: absolute; border: 1px dashed #55556e; pointer-events: none; }
+      /* `touch-action: none` is load-bearing: without it a drag on a trackpad or a touch
+         screen is claimed by the browser's own scroll/zoom gesture and never reaches the
+         pointermove handler. */
+      .grip {
+        position: absolute; width: 20px; height: 20px; right: -10px; bottom: -10px;
+        background: #6cc; border-radius: 4px; cursor: nwse-resize; z-index: 5;
+        touch-action: none;
+      }
+      .grip:hover, body.dragging .grip { background: #9fd; box-shadow: 0 0 0 3px #6cc4; }
+      .grip::after { content: ''; position: absolute; inset: 5px; border-right: 2px solid #05050a; border-bottom: 2px solid #05050a; }
+      /* While a corner is being dragged the pointer leaves the grip constantly — keep the
+         resize cursor and stop the drag selecting the readouts it passes over. */
+      body.dragging { cursor: nwse-resize; user-select: none; }
+      /* ── Readouts ─────────────────────────────────────────────────────── */
+      .read {
+        font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: #99a; background: #101019; border: 1px solid #23233a; border-radius: 6px;
+        padding: 6px 8px; white-space: pre; overflow-x: auto;
+      }
+      .read b { color: #9fd; font-weight: 600; }
+      .read .bad { color: #f88; }
+      .read .good { color: #8d8; }
+      .read .warn { color: #eb6; }
+      #checks { flex: none; }
+    </style>
+  </head>
+  <body>
+    <div id="controls">
+      <h1>Layout lab</h1>
+      <p class="sub">Rooms are rectangles. Drag the corner, or type a size.</p>
+      <p class="sub" style="color:#778;border-left:2px solid #2a2a3a;padding-left:8px">
+        Shows <code>src/app/layout.ts</code> <em>as it is in the branch you are serving</em> &mdash;
+        not necessarily <code>main</code>, and not necessarily what players run. The heading names
+        the revision.
+      </p>
+
+      <h2>Target</h2>
+      <div class="seg" id="target">
+        <button data-v="pc" aria-pressed="true">PC</button>
+        <button data-v="touch" aria-pressed="false">Touch</button>
+        <button data-v="tv" aria-pressed="false">TV</button>
+      </div>
+      <p class="hint" id="targethint"></p>
+
+      <h2>Room</h2>
+      <label for="room">One of the 72 (63 distinct sizes)</label>
+      <select id="room"></select>
+      <div class="row" style="margin-top:6px">
+        <div><label for="roomw">native w</label><input id="roomw" type="number" min="15" step="15" /></div>
+        <div><label for="roomh">native h</label><input id="roomh" type="number" min="15" step="15" /></div>
+      </div>
+
+      <h2>Viewport</h2>
+      <label for="preset">Device / window</label>
+      <select id="preset"></select>
+      <div class="seg" id="orient" style="margin-top:6px">
+        <button data-v="landscape" aria-pressed="true">Landscape</button>
+        <button data-v="portrait" aria-pressed="false">Portrait</button>
+        <button id="rotate" data-v="rotate" aria-pressed="false" style="flex:0 0 34px" title="Swap width and height">⤾</button>
+      </div>
+      <p class="hint" id="orienthint"></p>
+      <div class="row" style="margin-top:6px">
+        <div><label for="vw">css w</label><input id="vw" type="number" min="200" /></div>
+        <div><label for="vh">css h</label><input id="vh" type="number" min="150" /></div>
+      </div>
+      <label for="chrome">browser chrome off the height <span class="val" id="chromev">0</span></label>
+      <input id="chrome" type="range" min="0" max="120" step="4" value="0" />
+      <p class="hint">Playwright's phone sizes are already the page's area; its tablet sizes are full screen.</p>
+
+      <h2>Fit mode <span class="val" id="modenote"></span></h2>
+      <select id="mode"></select>
+      <p class="hint" id="modehint"></p>
+
+      <h2>Furniture</h2>
+      <label for="stripleft">strip on the LEFT, css px <span class="val" id="striplefv">72</span></label>
+      <input id="stripleft" type="range" min="0" max="140" step="1" value="72" />
+      <label for="striptop">strip on the TOP, css px <span class="val" id="striptopv">66</span></label>
+      <input id="striptop" type="range" min="0" max="140" step="1" value="66" />
+      <label for="edge">which edge</label>
+      <select id="edge">
+        <option value="auto">auto — whichever shows more of the room</option>
+        <option value="left">left</option>
+        <option value="top">top</option>
+      </select>
+      <p class="hint">72/66 is what ships today and is explicitly not final. Measured: a LEFT strip
+        is nearly free at any size (a phone pays 0.49% at 72px, 0.66% at 96px), a TOP strip costs
+        ~0.29% of the room per pixel. So size the left one for thumbs and the top one as thin as
+        the icons allow. A TV strip holds a legend, not touch targets, so it can be thinner still.</p>
+
+      <h2>Cell ceiling</h2>
+      <label for="maxcell">largest one 15px cell may be, css px <span class="val" id="maxcellv">28</span></label>
+      <input id="maxcell" type="range" min="14" max="90" step="1" value="28" />
+      <p class="hint" id="cellhint"></p>
+
+      <h2>Margin</h2>
+      <label for="marginx">reserve left/right, css px <span class="val" id="marginxv">0</span></label>
+      <input id="marginx" type="range" min="0" max="120" step="1" value="0" />
+      <label for="marginy">reserve top/bottom, css px <span class="val" id="marginyv">0</span></label>
+      <input id="marginy" type="range" min="0" max="120" step="1" value="0" />
+      <p class="hint">VIEWPORT_MARGIN. <b>0 on PC and touch</b> &mdash; nothing can overflow without
+        it, so it only buys air. <b>TV defaults to 48&times;27</b>, the Android TV / Google TV
+        title-safe inset (2.5% of each axis). Per axis because the convention is, and because the
+        two cost very differently here: measured over the 72 rooms at 1080p, the horizontal
+        reserve costs <b>0.56%</b> and the vertical <b>4.62%</b> &mdash; the rooms are narrower
+        than 16:9, so 67 of 72 sit against the top and bottom edges and only 5 reach the sides.</p>
+
+      <h2>Export</h2>
+      <div class="seg">
+        <button id="copy">Copy settings for PC + Touch + TV</button>
+      </div>
+      <div class="seg" style="margin-top:4px">
+        <button id="reset" style="flex:0 0 auto;padding:4px 8px">Reset all three to shipped values</button>
+      </div>
+      <p class="hint" id="copyhint">Puts a plain-text block on the clipboard: every tunable for all
+        three targets, plus what they produce for this room across a spread of real viewports.
+        Each target keeps its own settings &mdash; switching target restores them, it does not reset
+        them &mdash; and they survive a reload. Paste it straight into a conversation.</p>
+      <textarea id="dump" readonly spellcheck="false"
+        style="width:100%;height:120px;margin-top:6px;background:#0e0e16;color:#8aa;border:1px solid #333449;border-radius:5px;font:10px/1.35 ui-monospace,Menlo,monospace;padding:5px;display:none"></textarea>
+      <div class="chk"><input type="checkbox" id="showgrid" checked /><label for="showgrid" style="margin:0">15px cell grid</label></div>
+      <div class="chk"><input type="checkbox" id="showguide" checked /><label for="showguide" style="margin:0">margin guide</label></div>
+      <label for="dpr">device pixel ratio <span class="val" id="dprv">1</span></label>
+      <input id="dpr" type="range" min="1" max="3" step="0.5" value="1" />
+    </div>
+
+    <div id="view">
+      <div id="topline"></div>
+      <div id="frames"></div>
+      <div class="read" id="checks"></div>
+    </div>
+
+    <script type="module" src="./layout-lab.ts"></script>
+  </body>
+</html>

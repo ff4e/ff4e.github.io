@@ -79,7 +79,9 @@ export function contentScaleFor(w: number, h: number): number {
   // `stage.mode`, not `settings.fitMode`: touch mode overrides the setting to 'fill'
   // (layout.ts, effectiveFitMode) and the content must be scaled by the same mode the box
   // was sized by, or the box's ceilings and the content's bound would disagree.
-  return fitScale(w, h, stage.scale, stage.mode, dpr, stage.boxW, stage.boxH);
+  // `stage.maxCellPx`, not the constant: the ceiling is per target and only the layout was
+  // told which target this is (layout.ts, MAX_CELL_PX / MAX_CELL_PX_TOUCH).
+  return fitScale(w, h, stage.scale, stage.mode, dpr, stage.availW, stage.availH, stage.maxCellPx);
 }
 
 /**

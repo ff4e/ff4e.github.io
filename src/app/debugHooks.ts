@@ -454,7 +454,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
         host.settings.fitMode = v;
         saveSettings(host.settings);
         host.forceRoomRedraw = true;
-        relayout(); // per-mode box width ceiling (stageBoxCeiling) — mirrors the dev bar
+        relayout(); // the layout carries the mode — mirrors the dev bar
         host.wake();
       }
       return host.settings.fitMode;

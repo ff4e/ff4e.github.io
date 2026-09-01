@@ -195,7 +195,20 @@ await withApp(async ({ p, expect }) => {
   // at the SAME scale — but one smaller than the stage, so stage-sized text does not fit
   // and every line gets shrunk by whatever its own room's width demands. That second case
   // is the one that was reported, and it looks nothing like the first.
+  //
+  // The two need DIFFERENT windows, and the reason is the cell ceiling (layout.ts,
+  // MAX_CELL_PX). 'x1' needs a big window — the integer modes only diverge from the stage
+  // once the stage is past one physical pixel per game pixel. 'medium' needs a smaller one:
+  // at a big enough window the stage alone exceeds MAX_CELL_PX, so
+  // every room falls back to the faithful scale and DRAKAR and MIKRO come out identical —
+  // which is correct behaviour and leaves this half of the probe with nothing to measure.
+  // At 1200x760 the stage is 25px per cell, under the ceiling, and the two rooms differ by
+  // 34% again. The zoom is read back and asserted below, so if either window ever drifts
+  // out of its band the probe says so instead of passing vacuously.
+  const MODE_VIEWPORT = { medium: { width: 1200, height: 760 }, x1: { width: 1934, height: 1200 } };
   for (const mode of ['medium', 'x1']) {
+    await p.setViewportSize(MODE_VIEWPORT[mode]);
+    await tickSleep(p, 3);
     await p.evaluate((m) => window.__ff.fitMode(m), mode);
     const big = await lineInk(17); // DRAKAR — the widest room
     const small = await lineInk(33); // MIKRO — the smallest

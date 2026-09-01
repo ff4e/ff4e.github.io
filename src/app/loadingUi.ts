@@ -244,10 +244,10 @@ export function maybeShowWebglNote(): void {
  * Recompute the stage scale from the available game area and size the stage box +
  * side panel. Called on boot, window resize, and fullscreen change.
  *
- * Also on a FIT MODE change: the box's width ceiling depends on the mode
- * (`stageBoxCeiling`), so a mode switch that only repainted would leave the box at the
- * previous mode's width. The room/map/cutscene canvases are sized per-frame in their draw
- * functions from `stage`.
+ * Also on a FIT MODE change: the mode is carried on the layout (`StageLayout.mode`) and is
+ * what `contentScale` is bounded by, so a mode switch that only repainted would scale the
+ * content by one mode inside a box sized for another. The room/map/cutscene canvases are
+ * sized per-frame in their draw functions from `stage`.
  */
 export function relayout(): void {
   const availW = stageRow?.clientWidth || window.innerWidth;
@@ -264,17 +264,18 @@ export function relayout(): void {
   // The box HUGS its content horizontally rather than being pinned to the full stage
   // width: `wrap` is the box's only in-flow child and is sized to the room/map/cutscene
   // canvas, so `width: auto` tracks the content for free — including room changes, which
-  // never reach relayout(). `stage.stageW` stays as the ceiling the content is scaled
-  // into, so nothing can grow past the logical box; `contentScale` still bounds every
-  // room against `stage.boxW`, which is what keeps the box room-INDEPENDENT for scaling.
-  // The HEIGHT is set outright, and it is now the elastic `stage.boxH` rather than a fixed
-  // 600 native px (layout.ts, stageBoxHeight) — on a width-bound viewport that is what
-  // stops the box throwing away the leftover height.
+  // never reach relayout(). `stage.stageW` is its max-width, so nothing can grow past the
+  // area; the HEIGHT is set outright to `stage.stageH`, which is that area exactly.
+  //
+  // Both are now the CONTENT'S AREA in display px, not a stage box in native px scaled up.
+  // The old box was `max(STAGE_W/H, avail/scale - margin)`, so on a small viewport it was
+  // LARGER than the space it sat in and `overflow: hidden` cut the room (the 669x280
+  // defect). `contentScale` is bounded by the same area, so the box can be the area and
+  // nothing overflows it — see layout.ts.
   //
   // Why hug at all: the panel sits beside the box, so a room narrower than the box was
   // pushed away from it by the box's slack — a median 230px and up to 593px of dead gap
-  // at 2048x1017, paid by exactly the 44 rooms that gain nothing from the wider box.
-  // Hugging moves ONLY the panel: the content's centre is
+  // at 2048x1017. Hugging moves ONLY the panel: the content's centre is
   // `availW/2 - (gap + panelW)/2` regardless of the box width, because the row is centred
   // and the gap and panel are constant.
   stageBox.style.width = '';
