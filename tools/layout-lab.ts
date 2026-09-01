@@ -507,12 +507,26 @@ function frameFor(
     );
   }
 
+  // The strip sits INSIDE the reserve (layoutModel.ts, STRIP_INSIDE_MARGIN). It is the one
+  // thing on screen a player has to aim at, so pinning it to the panel's edge — where the
+  // room was already being kept away from — had it exactly the wrong way round. Costs no
+  // size: the room already began at `margin + strip`.
   if (edge === 'left' && state.stripLeft > 0) {
-    const s = el('strip', { left: '0', top: '0', bottom: '0', width: `${state.stripLeft}px` });
+    const s = el('strip', {
+      left: `${state.marginX}px`,
+      top: `${state.marginY}px`,
+      bottom: `${state.marginY}px`,
+      width: `${state.stripLeft}px`,
+    });
     s.innerHTML = `<span>${state.stripLeft}</span>`;
     frame.append(s);
   } else if (edge === 'top' && state.stripTop > 0) {
-    const s = el('strip', { left: '0', top: '0', right: '0', height: `${state.stripTop}px` });
+    const s = el('strip', {
+      left: `${state.marginX}px`,
+      right: `${state.marginX}px`,
+      top: `${state.marginY}px`,
+      height: `${state.stripTop}px`,
+    });
     s.innerHTML = `<span>${state.stripTop}</span>`;
     frame.append(s);
   }

@@ -39,6 +39,10 @@ export { TOUCHBAR_W, TOUCHBAR_H, CELL_NATIVE };
  * the reserve. Modelled here so the lab shows that before anyone ships it.
  */
 function nearEdge(viewport: number, size: number, bar: number, margin: number): number {
+  // `bar + margin` and not `max(bar, margin)`: the strip sits INSIDE the reserve
+  // (layoutModel.ts, STRIP_INSIDE_MARGIN), so the two stack rather than overlap. The room
+  // therefore starts past both, which is what it already did — moving the strip inward
+  // changed where the strip is drawn and nothing about the room's size.
   return Math.max(bar + margin, (viewport - size) / 2);
 }
 

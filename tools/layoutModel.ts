@@ -26,23 +26,31 @@ export type StripEdge = 'left' | 'top' | 'none';
  * Size the left one for thumbs; make the top one as thin as its icons allow.
  *
  * `marginX`/`marginY` are the reserve per viewport edge in CSS px, mirroring
- * `VIEWPORT_MARGIN`. **0 on PC and touch**: `contentScale` bounds the content to the area by
- * construction, so a reserve there buys air and nothing else.
+ * `VIEWPORT_MARGIN`, and they are **0 on every target** — including TV.
  *
- * **TV's 48 x 27 is the title-safe / overscan inset**, and it is asymmetric because the
- * convention is: Android TV and Google TV specify 48dp left and right against 27dp top and
- * bottom at 1920x1080 — 2.5% of each axis, not 2.5% of one of them. It is still current
- * practice rather than a CRT relic; Google Play's TV review checks it, tvOS exposes it as
- * `safeAreaInsets`, and Xbox asks for title-safe content, because plenty of sets still ship
- * with overscan on by default and most owners never change it.
+ * ── Why TV is 0, having briefly been 48x27 ───────────────────────────────────
+ * The title-safe / overscan inset is real, but it belongs to a delivery path this game does
+ * not use. The distinction is between:
  *
- * Measured over the 72 rooms on a 1080p TV, the two axes cost very different amounts —
- * **vertical 4.62%, horizontal 0.56%** — and the asymmetry is the game's, not the
- * convention's: rooms are 1.07-3.47 aspect against a 1.78 screen, so most are already
- * letterboxed sideways. 67 of 72 sit with their top and bottom rows against the screen edge,
- * exactly where overscan bites; only 5 reach the sides at all. So the vertical inset is
- * doing all the work and paying for it, and the horizontal one is nearly free and nearly
- * pointless — worth keeping only because it costs 0.56% to be compliant.
+ *   - **an HDMI input** — a console or PC feeding a panel. True overscan happens here, and
+ *     it is where the 5% conventions come from (Android TV 48x27dp at 1080p, Xbox
+ *     title-safe). The set crops the signal and the source cannot see that it did.
+ *   - **a smart TV's own browser** — webOS, Tizen. The platform composites its apps into
+ *     the panel's real pixels, so there is no legacy overscan to compensate for, and
+ *     **webOS's browser already reserves about 20px per side itself**. Reserving again on
+ *     top is double-counting.
+ *
+ * Fish Fillets is a web page, so the second path is ours. Reserving 2.5% of each axis for a
+ * crop that will not happen cost a measured **4.62% of room scale vertically** — the rooms
+ * are 1.07-3.47 aspect against a 1.78 screen, so 67 of 72 sit against the top and bottom
+ * edges where the reserve bites, and only 5 reach the sides. Paying that for nothing is
+ * exactly the "weird" Martin called it (2026-09-01).
+ *
+ * The parameter stays because the moment a real TV target exists on an HDMI path — the
+ * Xbox port is a live task — it is the knob that answers it, and because a real device
+ * showing a clipped edge is the only evidence that should turn it on.
+ *
+ * **Whatever it is set to, the STRIP goes inside it.** See `STRIP_INSIDE_MARGIN` below.
  */
 export const TARGET_DEFAULTS: Record<
   LayoutTarget,
@@ -53,8 +61,23 @@ export const TARGET_DEFAULTS: Record<
   // A TV is ~5x further away than a desktop, so it needs more CSS px for the same apparent
   // size: at the desktop's 28 a 1080p TV drops to 22-27 arc-minutes, well under the 31-35'
   // the original had. 45 puts it back. Not in `src/` — there is no TV target yet.
-  tv: { left: 48, top: 40, marginX: 48, marginY: 27, maxCellPx: 45 },
+  tv: { left: 48, top: 40, marginX: 0, marginY: 0, maxCellPx: 45 },
 };
+
+/**
+ * The strip sits INSIDE the reserve, not against the panel's edge.
+ *
+ * This was the wrong way round and it mattered: the room was inset and the strip — the only
+ * thing on screen a player has to *aim at* — was pinned to x=0, exactly where a cropping set
+ * eats it. Every platform's guidance says the same thing, that a background may run
+ * edge-to-edge while interactive elements may not, and the strip is the interactive element.
+ *
+ * It is free. The room already starts at `margin + strip`, so moving the strip from `[0,
+ * strip]` to `[margin, margin + strip]` changes no size at all — only where the strip is
+ * drawn. Recorded as a named constant rather than a comment because the eventual CSS has to
+ * do the same thing (`left: marginX` rather than `left: 0`), and that is easy to miss.
+ */
+export const STRIP_INSIDE_MARGIN = true;
 
 export interface LayoutRequest {
   /** The whole viewport, CSS px. */
