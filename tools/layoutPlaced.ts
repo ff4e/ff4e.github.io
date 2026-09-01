@@ -77,7 +77,11 @@ export function layoutRoom(req: LayoutRequest): LayoutResult {
   // depend on the mode at all — `l.availW/availH` is the viewport minus the strip and the
   // margins, and `l.scale` is `computeStageScale` — so only the last term changes.
   const fit = req.respectMode && !panel ? req.mode : l.mode;
-  const s = contentScale(req.roomW, req.roomH, l.scale, fit, dpr, l.availW, l.availH, req.maxCellPx);
+  // `l.maxCellPx` is the game's own per-target ceiling; `req.maxCellPx` is the lab's slider
+  // overriding it. Falling back to the layout's rather than to the parameter default matters:
+  // the default is the DESKTOP ceiling, so a tool that omitted it would model touch and TV
+  // with the wrong number and could report a spurious failure against a correct game.
+  const s = contentScale(req.roomW, req.roomH, l.scale, fit, dpr, l.availW, l.availH, req.maxCellPx ?? l.maxCellPx);
 
   const drawnW = s * req.roomW;
   const drawnH = s * req.roomH;

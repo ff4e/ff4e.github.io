@@ -17,6 +17,7 @@ import {
   STAGE_GAP,
   VIEWPORT_MARGIN,
   MAX_CELL_PX,
+  MAX_CELL_PX_TOUCH,
   CELL_NATIVE,
   PANEL_NATIVE_W,
   PANEL_NATIVE_H,
@@ -207,7 +208,7 @@ describe('the content area, and the properties it buys', () => {
           for (let h = 220; h <= 1200; h += 41) {
             const at = (vw: number, vh: number) => {
               const l = computeStageLayout(vw, vh, mode, false);
-              return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+              return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
             };
             const here = at(w, h);
             expect(at(w + 1, h)).toBeGreaterThanOrEqual(here - 1e-9);
@@ -760,19 +761,48 @@ describe('the cell ceiling — how big one square may get', () => {
   const BIG: [number, number] = [2560, 1380];
   /** A phone in landscape: the case that must not be touched. */
   const PHONE: [number, number] = [734, 343];
+  /** The touch bar's landscape width, so a touch viewport here is the area the game gets. */
+  const TOUCH_STRIP = 72;
+  /**
+   * Enough room SHAPES that "how many rooms does the ceiling catch" is a real count.
+   * `ROOMS` is a five-room spread chosen for the scaling tests; the ceiling's whole
+   * behaviour is about the SMALL rooms, so it needs more of them than that.
+   */
+  const ALL_ROOM_SHAPES: ReadonlyArray<[number, number]> = [
+    [285, 210], [360, 210], [420, 300], [480, 345], [540, 405], [555, 225], [585, 465],
+    [600, 450], [615, 525], [630, 480], [690, 300], [720, 555], [750, 345], [780, 225],
+    [795, 435], [795, 585],
+  ];
+
+  it('the layout carries the ceiling for its target, and it is not the same one', () => {
+    // The whole reason the ceiling lives on `StageLayout`: the two targets ship DIFFERENT
+    // numbers, and only `computeStageLayout` is told which target this is. Asserted directly,
+    // because every test below takes it from the layout — so without this one, collapsing the
+    // two constants into a single value would pass the entire suite.
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of [BIG, PHONE] as const) {
+        expect(computeStageLayout(w, h, mode, true).maxCellPx).toBe(MAX_CELL_PX);
+        expect(computeStageLayout(w, h, mode, false).maxCellPx).toBe(MAX_CELL_PX_TOUCH);
+      }
+    }
+    expect(MAX_CELL_PX_TOUCH).not.toBe(MAX_CELL_PX);
+  });
 
   it('no graded mode draws a cell past the ceiling, unless `fixed` already did', () => {
     for (const mode of ['small', 'medium', 'large', 'fill'] as const) {
-      for (const [w, h] of [BIG, PHONE, [1512, 860], [1180, 748]] as const) {
+      for (const [w, h] of [BIG, PHONE, [1512, 860], [1180, 748], [1366, 952]] as const) {
         for (const panel of [true, false]) {
           const l = computeStageLayout(w, h, mode, panel);
           for (const [rw, rh] of ROOMS) {
-            const s = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
-            const fixed = contentScale(rw, rh, l.scale, 'fixed', 1, l.availW, l.availH);
+            // `l.maxCellPx`, exactly as `stageGeometry.ts` and `touchBarEdge.ts` pass it.
+            // Taking the parameter default here would test the DESKTOP ceiling on the touch
+            // branch, which ships a different one — so a touch-only regression would pass.
+            const s = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
+            const fixed = contentScale(rw, rh, l.scale, 'fixed', 1, l.availW, l.availH, l.maxCellPx);
             // The floor is `fixed`: on a big monitor the faithful scale alone can exceed the
             // ceiling, and coming out below it would invert the mode list (see contentScale).
             expect(s * CELL_NATIVE).toBeLessThanOrEqual(
-              Math.max(MAX_CELL_PX, fixed * CELL_NATIVE) + 1e-6,
+              Math.max(l.maxCellPx, fixed * CELL_NATIVE) + 1e-6,
             );
           }
         }
@@ -780,26 +810,53 @@ describe('the cell ceiling — how big one square may get', () => {
     }
   });
 
-  it('leaves a phone alone — its biggest cell on `fill` is under the ceiling', () => {
-    const l = computeStageLayout(PHONE[0] - 72, PHONE[1], 'fill', false);
+  it('a tablet is where the touch ceiling actually bites', () => {
+    // It never binds on a phone (the next test), so if it were silently the desktop's 42 the
+    // only visible difference would be here — which is precisely why this needs its own case.
+    // Counted rather than merely bounded, so raising MAX_CELL_PX_TOUCH to 42 fails loudly.
+    const capped = (w: number, h: number) => {
+      const l = computeStageLayout(w - TOUCH_STRIP, h, 'fill', false);
+      let n = 0;
+      for (const [rw, rh] of ALL_ROOM_SHAPES) {
+        const withCap = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
+        const lifted = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, Infinity);
+        if (withCap < lifted - 1e-9) n++;
+      }
+      return n;
+    };
+    expect(capped(734, 343)).toBe(0); // iPhone 15 landscape — never
+    expect(capped(1366, 952)).toBeGreaterThan(0); // iPad Pro landscape — genuinely does
+  });
+
+  it('leaves a phone alone — its biggest cell on `fill` is under the TOUCH ceiling', () => {
+    // The claim that matters is about `MAX_CELL_PX_TOUCH`, the one a phone actually gets.
+    // Asserting it against `MAX_CELL_PX` would be true and irrelevant, since the desktop's is
+    // the larger of the two and so the weaker bound.
+    const l = computeStageLayout(PHONE[0] - TOUCH_STRIP, PHONE[1], 'fill', false);
+    expect(l.maxCellPx).toBe(MAX_CELL_PX_TOUCH);
     let biggest = 0;
-    for (const [rw, rh] of ROOMS) {
-      const capped = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+    for (const [rw, rh] of ALL_ROOM_SHAPES) {
+      const capped = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
       const lifted = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, Infinity);
       expect(capped).toBeCloseTo(lifted, 9); // the ceiling never binds here
       biggest = Math.max(biggest, capped * CELL_NATIVE);
     }
-    expect(biggest).toBeLessThan(MAX_CELL_PX);
+    expect(biggest).toBeLessThan(MAX_CELL_PX_TOUCH);
   });
 
   it('exempts `fixed` and the whole crisp-integer family', () => {
     // 'fixed' promises a constant object size and the xN modes promise exactly N physical
     // pixels per game pixel. Both are contracts a ceiling would break silently.
+    // `panel: true` only, and not an oversight: `effectiveFitMode` forces touch to `fill`, so
+    // none of these modes can be in force there — asking for 'x2' on a phone gets `fill`, and
+    // the exemption is about the mode that is actually applied. The touch ceiling's own
+    // behaviour is covered by the two tests above.
     for (const mode of ['fixed', 'native', 'x1', 'x2', 'x3', 'x4'] as const) {
       for (const [w, h] of [BIG, PHONE] as const) {
-        const l = computeStageLayout(w, h, mode);
+        const l = computeStageLayout(w, h, mode, true);
+        expect(l.mode).toBe(mode); // the mode really is the one being exempted
         for (const [rw, rh] of ROOMS) {
-          expect(contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH)).toBe(
+          expect(contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx)).toBe(
             contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, Infinity),
           );
         }
@@ -815,7 +872,7 @@ describe('the cell ceiling — how big one square may get', () => {
         for (const [rw, rh] of ROOMS) {
           const at = (mode: FitMode) => {
             const l = computeStageLayout(w, h, mode, panel);
-            return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+            return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
           };
           const ladder = (['fixed', 'small', 'medium', 'large', 'fill'] as const).map(at);
           for (let i = 1; i < ladder.length; i++) {
@@ -833,7 +890,7 @@ describe('the cell ceiling — how big one square may get', () => {
           for (let h = 400; h <= 1400; h += 89) {
             const at = (vw: number, vh: number) => {
               const l = computeStageLayout(vw, vh, mode, false);
-              return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH);
+              return contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
             };
             const here = at(w, h);
             expect(at(w + 1, h)).toBeGreaterThanOrEqual(here - 1e-9);

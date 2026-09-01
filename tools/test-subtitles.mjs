@@ -199,7 +199,7 @@ await withApp(async ({ p, expect }) => {
   // The two need DIFFERENT windows, and the reason is the cell ceiling (layout.ts,
   // MAX_CELL_PX). 'x1' needs a big window — the integer modes only diverge from the stage
   // once the stage is past one physical pixel per game pixel. 'medium' needs a smaller one:
-  // at 1934x1200 the stage alone is already at 30px per cell, over the 28px ceiling, so
+  // at a big enough window the stage alone exceeds MAX_CELL_PX, so
   // every room falls back to the faithful scale and DRAKAR and MIKRO come out identical —
   // which is correct behaviour and leaves this half of the probe with nothing to measure.
   // At 1200x760 the stage is 25px per cell, under the ceiling, and the two rooms differ by

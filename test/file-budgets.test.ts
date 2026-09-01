@@ -191,7 +191,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // came to be locally reasonable and jointly wrong. The cell ceiling and VIEWPORT_MARGIN
   // carry their measurements with them for the same reason — the numbers are the argument,
   // and a reader who cannot see them will reasonably assume they were guessed.
-  ['src/app/layout.ts', 560],
+  // 560 -> 580: MAX_CELL_PX gained a touch counterpart and its rationale now carries the
+  // measurements for both values rather than for the one I first proposed.
+  ['src/app/layout.ts', 580],
   ['src/render/glScreen.ts', 1150],
   // 1 120 -> 1 200 for the absent/failed split in loadAiRoom (assetFetch.ts): three
   // outcomes where there were two, plus closeDecoded so a rejected load does not leak

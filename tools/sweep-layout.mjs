@@ -56,9 +56,9 @@ const str = (n, d) => {
 };
 
 const STEP = arg('--step', 8);
-const MARGIN = arg('--margin', 12);
+const MARGIN = arg('--margin', 0); // VIEWPORT_MARGIN — the shipped value
 const STRIP_LEFT = arg('--strip', 72);
-const STRIP_TOP = arg('--strip-top', 66);
+const STRIP_TOP = arg('--strip-top', 54); // index.html — the shipped top bar
 const ONLY_TARGET = str('--target', null);
 
 /**

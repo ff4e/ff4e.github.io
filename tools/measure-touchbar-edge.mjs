@@ -38,7 +38,7 @@ import { computeStageLayout, contentScale } from '../src/app/layout.ts';
 import { preferredTouchBarEdge } from '../src/app/touchBarEdge.ts';
 
 const BAR_W = 72; // landscape bar width, index.html
-const BAR_H = 66; // portrait bar height, index.html
+const BAR_H = 54; // portrait bar height, index.html
 const CELL = 15; // native px per FFR cell
 
 const arg = (name, dflt) => {
@@ -91,7 +91,7 @@ function rooms() {
 
 function measure(room, availW, availH) {
   const l = computeStageLayout(availW, availH, 'fill', false);
-  const s = contentScale(room.w, room.h, l.scale, l.mode, 1, l.availW, l.availH);
+  const s = contentScale(room.w, room.h, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
   return { scale: s, drawnH: s * room.h, drawnW: s * room.w };
 }
 

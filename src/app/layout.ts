@@ -243,28 +243,37 @@ export const CELL_NATIVE = 15;
  * screen the smallest and largest rooms differ by **2.6x**. It looks wrong because it IS
  * wrong: the same room is a different size on every machine, and on a big one it is absurd.
  *
- * ── Why 28, and why CSS px ───────────────────────────────────────────────────
+ * ── Why 42 and 34, and why CSS px ────────────────────────────────────────────
  * There is a faithful number to aim at. The original ran a fixed 800x600 window, so one
  * cell subtended roughly **31-35 arc-minutes** on a period CRT (a 15" 4:3 tube at ~575mm:
- * 5.3mm, 31'). Reproducing that today needs about 27px on a laptop and 30px on a 27"
- * monitor, so **28 lands both within a couple of arc-minutes of the 1998 original** —
- * measured, the 27" goes from 40'-104' to a flat 32' and the MacBook to 28'-35'.
+ * 5.3mm, 31'), and about **28px** reproduces that on a modern desktop.
+ *
+ * **42 is deliberately looser than that**, and the reason is what the faithful number costs:
+ * at 28 a 1080p monitor loses 11.6% of room scale and gains 81px black bands, which is a
+ * large, visible change to make in the name of matching a CRT nobody is holding. 42 leaves
+ * 1080p **completely untouched** (0 of 72 rooms capped), tames 1440p gently (40 of 72,
+ * -4.9%) and still catches 4K (72 of 72, -19.1%) — so it bounds the case that actually looks
+ * absurd and charges nothing to the common one. Set by Martin in `tools/layout-lab.html`,
+ * 2026-09-01, having looked at both.
  *
  * The unit has to be CSS px because it is the only physical-ish quantity a browser will
  * give you: real ppi is not exposed (fingerprinting) and CSS `mm` is a fixed 1in = 96px
  * ratio, so a "millimetre" cap would be a CSS-px cap wearing a costume. CSS px is at least
- * *defined* as an angular reference, which is what the eye cares about.
+ * *defined* as an angular reference, which is what the eye cares about. Millimetres would
+ * also be the wrong TARGET even if they were measurable: a 1080p TV's 45mm cell subtends
+ * less than a 27" monitor's 21mm one, because it is five times further away.
  *
  * ── Why it needs no device detection ─────────────────────────────────────────
- * **A phone never reaches it.** Its biggest cell on `fill` is 24.5px, under this ceiling, so
- * a phone keeps every pixel it has — which matters, because phones are the case that looks
- * too SMALL (their big rooms are fit-bound at ~17', and no fit mode can help that; only more
- * viewport can). "Generous on phones, bounded on big screens" therefore falls out of the
- * arithmetic rather than being a rule with a device class and a threshold to argue about —
- * the same property #128 was careful to keep for the touch bar's edge.
+ * **A phone never reaches either ceiling.** Its biggest cell on `fill` is 24.5px, under even
+ * the touch value, so a phone keeps every pixel it has — which matters, because phones are
+ * the case that looks too SMALL (their big rooms are fit-bound at ~17', and no fit mode can
+ * help that; only more viewport can). "Generous on phones, bounded on big screens" therefore
+ * falls out of the arithmetic rather than being a rule with a device class and a threshold to
+ * argue about — the same property #128 was careful to keep for the touch bar's edge.
  *
- * A TV wants a larger number (~45px): it is five times further away, so it needs more CSS px
- * for the same apparent size. That belongs with the TV target, which does not exist yet.
+ * A TV wants a larger number again (~50px): five times the viewing distance needs more CSS px
+ * for the same apparent size. That belongs with the TV target, which does not exist yet — the
+ * value is parked in `tools/layoutModel.ts`'s `TARGET_DEFAULTS`.
  */
 export const MAX_CELL_PX = 42;
 

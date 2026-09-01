@@ -14,6 +14,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { computeStageLayout, contentScale } from '../src/app/layout.js';
 import {
   preferredTouchBarEdge,
   visibleRoomArea,
@@ -102,9 +103,23 @@ describe('preferredTouchBarEdge', () => {
     const onLeft = visibleRoomArea(555, 225, short[0] - TOUCHBAR_W, short[1], 'fill');
     expect(onTop).toBeLessThan(onLeft); // area alone now says 'left' on its own
     expect(edge(555, 225, short)).toBe('left');
-    // And it says it because the room fits both ways, not because one was rejected.
-    expect(onTop).toBeLessThanOrEqual(short[0] * (short[1] - TOUCHBAR_H) + 1e-6);
-    expect(onLeft).toBeLessThanOrEqual((short[0] - TOUCHBAR_W) * short[1] + 1e-6);
+    // And it says it because the room FITS both ways, not because one was rejected.
+    //
+    // That has to be asserted against the DRAWN size, not against `visibleRoomArea` —
+    // `roomOn` clamps its result to the area it was given, so `visible <= availW * availH`
+    // is true by construction and an assertion in those terms cannot fail for any input in
+    // any version of `layout.ts`. Re-deriving the scale here is the only way to see what the
+    // room would have been drawn at BEFORE the clamp, which is the quantity that used to be
+    // 266px into 214px of space.
+    for (const [availW, availH] of [
+      [short[0], short[1] - TOUCHBAR_H], // the top edge — the one that used to cut
+      [short[0] - TOUCHBAR_W, short[1]],
+    ] as const) {
+      const l = computeStageLayout(availW, availH, 'fill', false);
+      const s = contentScale(555, 225, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
+      expect(s * 555).toBeLessThanOrEqual(availW + 1e-6);
+      expect(s * 225).toBeLessThanOrEqual(availH + 1e-6);
+    }
   });
 
   it('ignores an overflow smaller than one pixel of the artwork', () => {
