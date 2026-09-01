@@ -8,7 +8,7 @@
  * now — but the shapes are still what `tools/layoutPlaced.ts` and `tools/layout-lab.ts`
  * agree on, and what any future experiment would want to speak.
  */
-import { MAX_CELL_PX } from '../src/app/layout.js';
+import { MAX_CELL_PX, MAX_CELL_PX_TOUCH } from '../src/app/layout.js';
 import type { FitMode } from '../src/app/layout.js';
 
 export type LayoutTarget = 'pc' | 'touch' | 'tv';
@@ -57,7 +57,14 @@ export const TARGET_DEFAULTS: Record<
   { left: number; top: number; marginX: number; marginY: number; maxCellPx: number }
 > = {
   pc: { left: 0, top: 0, marginX: 0, marginY: 0, maxCellPx: MAX_CELL_PX },
-  touch: { left: 72, top: 66, marginX: 0, marginY: 0, maxCellPx: MAX_CELL_PX },
+  // 72 left / 54 top, Martin 2026-09-01. The two edges get different numbers because they
+  // cost differently: measured over 72 rooms x 4 phones, shrinking the LEFT strip 72 -> 50
+  // buys 0.21% of room scale (it comes out of the axis with slack) while shrinking the TOP
+  // 66 -> 54 buys 4.07% (it comes out of the scarce one). 54 is also the smallest top strip
+  // that still holds the button as it is: `.tbtn`'s content is 6+24+3+10+6 = 49px tall and
+  // its `min-height` is 52, so anything under 52 needs the button to shrink too — against
+  // Apple's 44pt and Google's 48dp touch-target floors.
+  touch: { left: 72, top: 54, marginX: 0, marginY: 0, maxCellPx: MAX_CELL_PX_TOUCH },
   // A TV is ~5x further away than a desktop, so it needs more CSS px for the same apparent
   // size: at the desktop's 28 a 1080p TV drops to 22-27 arc-minutes, well under the 31-35'
   // the original had. 45 puts it back. Not in `src/` — there is no TV target yet.
@@ -66,7 +73,7 @@ export const TARGET_DEFAULTS: Record<
   // 72 — but it is also five times further away, and 68 css px on a 1080p panel is ~42mm,
   // about 58 arc-minutes at 2.5m, which is legible. It costs ~0.3% of room scale on the left
   // edge, so the size is very nearly free and should be chosen for legibility alone.
-  tv: { left: 68, top: 68, marginX: 0, marginY: 0, maxCellPx: 45 },
+  tv: { left: 64, top: 64, marginX: 0, marginY: 0, maxCellPx: 50 },
 };
 
 /**

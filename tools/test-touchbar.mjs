@@ -331,7 +331,7 @@ try {
   // `margin-top`, and the landscape `margin-left` must be gone with its media query.
   const portraitBar = await barState(p);
   expect(
-    portraitBar.marginTop === '66px' && portraitBar.marginLeft === '0px',
+    portraitBar.marginTop === '54px' && portraitBar.marginLeft === '0px',
     `portrait: the bar reserves its height from the top (margin-top ${portraitBar.marginTop}, margin-left ${portraitBar.marginLeft})`,
   );
   // ── Six buttons in a portrait ROW, at the narrowest width this game is willing to be
@@ -764,7 +764,7 @@ try {
   // 1100x620 is 1.77:1. KOSTE 540x495 is 1.09:1, flatter than the screen, so it is
   // height-bound and the 72px left bar comes out of the width it was not using. UTES
   // 780x225 is 3.47:1, wider than the screen, so it is width-bound and the same 72px come
-  // straight off the axis that decides its scale — while 66px off the height do not.
+  // straight off the axis that decides its scale — while 54px off the height do not.
   await settleRoom(player, 1100, 620);
   await settleEdge(player, 'left');
   const flatBar = await barState(player);
@@ -777,7 +777,7 @@ try {
   await settleEdge(player, 'top');
   const wideBar = await barState(player);
   expect(
-    wideBar.marginTop === '66px' && wideBar.marginLeft === '0px',
+    wideBar.marginTop === '54px' && wideBar.marginLeft === '0px',
     `landscape, very wide room: the SAME viewport puts the bar on top (margin-top ${wideBar.marginTop}, margin-left ${wideBar.marginLeft})`,
   );
   // The centring clamp (#126) has to hold on the new edge exactly as it does on the other
@@ -812,12 +812,15 @@ try {
 
   // ── A cut room never wins, however much of it survives the cut ──
   //
-  // 669x280 with ZRC (555x225), found by Martin 2026-08-31. It is short enough that
-  // MIN_STAGE_SCALE's floor overflows the height once the top bar has taken 66px of it, so
-  // the room is drawn 266px tall into 214px and 52px of the level is simply not on screen.
-  // The surviving part is still LARGER than the whole room is with the bar on the left
-  // (140,598 px2 against 138,740), so a plain "bigger wins" comparison moves the bar onto
-  // the cut layout — which is what shipped first and what this pins against coming back.
+  // 669x280 with ZRC (555x225), found by Martin 2026-08-31. It USED to be short enough that
+  // MIN_STAGE_SCALE's floor overflowed the height once the top bar had taken its share, so
+  // the room was drawn 266px tall into 214px and 52px of the level was not on screen — and
+  // the surviving part was still LARGER than the whole room is with the bar on the left
+  // (140,598 px2 against 138,740), so a plain "bigger wins" comparison moved the bar onto
+  // the cut layout. `layout.ts`'s rework bounds the content by its area, so nothing is cut
+  // at this viewport any more and the plain comparison reaches the same answer on its own.
+  // Kept because the ANSWER is what matters and it must not change: the bar belongs on the
+  // left here, whichever half of the rule is doing the work.
   await enter(player, 9);
   await settleEdge(player, 'top'); // roomy window: the top edge is bigger and cuts nothing
   await settleRoom(player, 669, 280);

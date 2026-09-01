@@ -266,7 +266,21 @@ export const CELL_NATIVE = 15;
  * A TV wants a larger number (~45px): it is five times further away, so it needs more CSS px
  * for the same apparent size. That belongs with the TV target, which does not exist yet.
  */
-export const MAX_CELL_PX = 28;
+export const MAX_CELL_PX = 42;
+
+/**
+ * The same ceiling for touch. Lower than the desktop's, and deliberately.
+ *
+ * A CSS px is physically smaller on a phone or tablet than on a desktop monitor (a phone at
+ * dpr 3 is ~0.17mm per CSS px against a 27" monitor's ~0.23mm) and it is held closer, so the
+ * same number of CSS px is a different thing in the hand. 34 was set by eye in the lab
+ * (Martin, 2026-09-01).
+ *
+ * It never binds on a phone — the biggest cell `fill` can produce there is ~24.5px — so this
+ * is a TABLET number in practice: measured, it caps 3 of 72 rooms on an iPad and 15 of 72 on
+ * an iPad Pro, which are exactly the screens big enough for a small room to look silly.
+ */
+export const MAX_CELL_PX_TOUCH = 34;
 
 /** The reserve resolved to a pair, so the callers below can stop caring which form it took. */
 function marginAxes(m: ViewportMargin): { x: number; y: number } {
@@ -344,6 +358,14 @@ export interface StageLayout {
   /** Panel size in display px (fixed — does not track the room). */
   panelW: number;
   panelH: number;
+  /**
+   * The cell ceiling in force, per target — `MAX_CELL_PX` or `MAX_CELL_PX_TOUCH`.
+   *
+   * Carried on the layout for the same reason `mode` is: only `computeStageLayout` is told
+   * which input device this is, so resolving it anywhere else means a caller guessing. Every
+   * consumer reads this rather than the constant.
+   */
+  maxCellPx: number;
 }
 
 /**
@@ -440,6 +462,9 @@ export function computeStageLayout(
     stageH: availH,
     panelW,
     panelH,
+    // `panel` is the same flag that means "this is the mouse game": a desktop CSS px is
+    // physically larger and further away than a phone's, so the two want different numbers.
+    maxCellPx: panel ? MAX_CELL_PX : MAX_CELL_PX_TOUCH,
   };
 }
 

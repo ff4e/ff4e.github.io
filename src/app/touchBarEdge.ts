@@ -74,7 +74,7 @@ import type { FitMode } from './layout.js';
 /**
  * The bar's footprint, in CSS px, and the ONE thing here that is duplicated from
  * `index.html`. Both numbers are the bar's real size in the stylesheet (72px wide down the
- * left, 66px tall along the top); this module has to know them because it is pricing the
+ * left, 54px tall along the top); this module has to know them because it is pricing the
  * two layouts before either is applied, and CSS cannot be asked.
  *
  * `test/touchBarEdge.test.ts` reads the stylesheet and asserts that every px length in the
@@ -85,7 +85,7 @@ import type { FitMode } from './layout.js';
  * so on its own it would not notice a constant moving.)
  */
 export const TOUCHBAR_W = 72;
-export const TOUCHBAR_H = 66;
+export const TOUCHBAR_H = 54;
 
 export type TouchBarEdge = 'left' | 'top';
 
@@ -132,7 +132,7 @@ function roomOn(
 ): number {
   if (!(roomW > 0) || !(roomH > 0) || !(availW > 0) || !(availH > 0)) return 0;
   const l = computeStageLayout(availW, availH, mode, false);
-  const s = contentScale(roomW, roomH, l.scale, l.mode, dpr, l.availW, l.availH);
+  const s = contentScale(roomW, roomH, l.scale, l.mode, dpr, l.availW, l.availH, l.maxCellPx);
   const drawnW = s * roomW;
   const drawnH = s * roomH;
   return Math.min(drawnW, availW) * Math.min(drawnH, availH);

@@ -479,7 +479,7 @@
         html[data-touchbar]:not([data-touchbar-edge='top']) .stage::after { content: ''; flex: 1 1 0; }
         /* ── The same bar, along the TOP, while still in landscape ──
            A room much wider than the viewport is WIDTH-bound, so the 72px the left bar
-           takes come off the axis that decides its scale, while the 66px a top bar takes
+           takes come off the axis that decides its scale, while the 54px a top bar takes
            come off the axis that had slack. `app/touchBarEdge.ts` lays the room out both
            ways every frame and sets `data-touchbar-edge` to whichever shows more of it —
            on a phone that is the widest rooms only (UTES gains ~10% and crosses 1:1), on
@@ -492,27 +492,27 @@
            clamp as well as apply the height one, and the two clamps are easy to leave
            half-applied.
 
-           The body of this branch is the PORTRAIT rule, verbatim: same edge, same 66px,
+           The body of this branch is the PORTRAIT rule, verbatim: same edge, same 54px,
            same reason the clamp moves to `#stagebox` (the box is given the height outright
            and letterboxes the room inside it, so `.stage` has no vertical slack to correct
            on). Keeping them identical is the point — the centring fix (#126) then cannot
            regress on one edge while holding on the other. */
         html[data-touchbar-edge='top'] #touchbar {
           top: 0; left: 0; right: 0; bottom: auto;
-          width: auto; height: 66px; flex-direction: row;
+          width: auto; height: 54px; flex-direction: row;
         }
         html[data-touchbar][data-touchbar-edge='top'] .stage {
-          margin-top: 66px; flex-direction: column;
+          margin-top: 54px; flex-direction: column;
         }
         html[data-touchbar][data-touchbar-edge='top'] #stagebox { flex: 1 0 auto; flex-direction: column; }
         html[data-touchbar][data-touchbar-edge='top'] #stagebox::before {
-          content: ''; flex: 1 1 0; min-height: 66px; margin-top: -66px;
+          content: ''; flex: 1 1 0; min-height: 54px; margin-top: -54px;
         }
         html[data-touchbar][data-touchbar-edge='top'] #stagebox::after { content: ''; flex: 1 1 0; }
       }
       @media (orientation: portrait) {
-        #touchbar { left: 0; right: 0; top: 0; height: 66px; flex-direction: row; }
-        html[data-touchbar] .stage { margin-top: 66px; }
+        #touchbar { left: 0; right: 0; top: 0; height: 54px; flex-direction: row; }
+        html[data-touchbar] .stage { margin-top: 54px; }
         /* `#stagebox` is the row's only visible child in touch mode (`#panelcol` is
            `display: none`), and `wrap` is the box's only in-flow child — so turning both
            main axes vertical costs nothing, lets the box grow to the full height, and
@@ -520,7 +520,7 @@
         html[data-touchbar] .stage { flex-direction: column; }
         html[data-touchbar] #stagebox { flex: 1 0 auto; flex-direction: column; }
         html[data-touchbar] #stagebox::before {
-          content: ''; flex: 1 1 0; min-height: 66px; margin-top: -66px;
+          content: ''; flex: 1 1 0; min-height: 54px; margin-top: -54px;
         }
         html[data-touchbar] #stagebox::after { content: ''; flex: 1 1 0; }
       }
