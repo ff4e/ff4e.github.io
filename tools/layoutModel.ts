@@ -24,16 +24,32 @@ export type StripEdge = 'left' | 'top' | 'none';
  * landscape height is the scarce axis, so the left strip comes out of the one with slack.
  * Size the left one for thumbs; make the top one as thin as its icons allow.
  *
- * `margin` is the reserve per viewport edge in CSS px, mirroring `VIEWPORT_MARGIN`: **0** on
- * PC and touch, because `contentScale` bounds the content to the area by construction so the
- * reserve buys air and nothing else. TV's 27 is 2.5% of a 1080p height, the low end of the
- * broadcast title-safe convention (2.5-5%), and is the reason the parameter exists at all —
- * it is also, visibly, why the TV target draws a border the other two do not.
+ * `marginX`/`marginY` are the reserve per viewport edge in CSS px, mirroring
+ * `VIEWPORT_MARGIN`. **0 on PC and touch**: `contentScale` bounds the content to the area by
+ * construction, so a reserve there buys air and nothing else.
+ *
+ * **TV's 48 x 27 is the title-safe / overscan inset**, and it is asymmetric because the
+ * convention is: Android TV and Google TV specify 48dp left and right against 27dp top and
+ * bottom at 1920x1080 — 2.5% of each axis, not 2.5% of one of them. It is still current
+ * practice rather than a CRT relic; Google Play's TV review checks it, tvOS exposes it as
+ * `safeAreaInsets`, and Xbox asks for title-safe content, because plenty of sets still ship
+ * with overscan on by default and most owners never change it.
+ *
+ * Measured over the 72 rooms on a 1080p TV, the two axes cost very different amounts —
+ * **vertical 4.62%, horizontal 0.56%** — and the asymmetry is the game's, not the
+ * convention's: rooms are 1.07-3.47 aspect against a 1.78 screen, so most are already
+ * letterboxed sideways. 67 of 72 sit with their top and bottom rows against the screen edge,
+ * exactly where overscan bites; only 5 reach the sides at all. So the vertical inset is
+ * doing all the work and paying for it, and the horizontal one is nearly free and nearly
+ * pointless — worth keeping only because it costs 0.56% to be compliant.
  */
-export const TARGET_DEFAULTS: Record<LayoutTarget, { left: number; top: number; margin: number }> = {
-  pc: { left: 0, top: 0, margin: 0 },
-  touch: { left: 72, top: 66, margin: 0 },
-  tv: { left: 48, top: 40, margin: 27 },
+export const TARGET_DEFAULTS: Record<
+  LayoutTarget,
+  { left: number; top: number; marginX: number; marginY: number }
+> = {
+  pc: { left: 0, top: 0, marginX: 0, marginY: 0 },
+  touch: { left: 72, top: 66, marginX: 0, marginY: 0 },
+  tv: { left: 48, top: 40, marginX: 48, marginY: 27 },
 };
 
 export interface LayoutRequest {
@@ -61,8 +77,8 @@ export interface LayoutRequest {
   /** Strip thickness in CSS px: its WIDTH on the left edge, its HEIGHT on the top edge. */
   stripPx?: number;
   stripEdge?: StripEdge;
-  /** Reserve per viewport edge, CSS px. */
-  marginPx?: number;
+  /** Reserve per viewport edge, CSS px — one number, or one per axis (see ViewportMargin). */
+  marginPx?: number | { x: number; y: number };
   /** Device pixel ratio, for the crisp-integer fit modes. */
   dpr?: number;
 }

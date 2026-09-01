@@ -60,7 +60,14 @@ interface State {
   stripLeft: number;
   stripTop: number;
   edge: 'auto' | 'left' | 'top';
-  margin: number;
+  /**
+   * The reserve per viewport edge, per axis. Two numbers because the TV title-safe
+   * convention is asymmetric (48 x 27 at 1080p) and because the two cost very different
+   * amounts here — 0.56% horizontally against 4.62% vertically, since the rooms are already
+   * letterboxed sideways on a 16:9 screen.
+   */
+  marginX: number;
+  marginY: number;
   dpr: number;
   grid: boolean;
   guide: boolean;
@@ -79,7 +86,8 @@ const state: State = {
   stripLeft: 72,
   stripTop: 66,
   edge: 'auto',
-  margin: 0,
+  marginX: 0,
+  marginY: 0,
   dpr: 1,
   grid: true,
   guide: true,
@@ -212,7 +220,8 @@ function wire(): void {
       // this task exists to decide, so switching target must not silently keep the last
       // target's ones.
       const d = TARGET_DEFAULTS[state.target];
-      state.margin = d.margin;
+      state.marginX = d.marginX;
+      state.marginY = d.marginY;
       state.stripLeft = d.left;
       state.stripTop = d.top;
       syncSliders();
@@ -229,7 +238,11 @@ function wire(): void {
     render();
   });
 
-  const slider = (id: string, key: 'stripLeft' | 'stripTop' | 'margin' | 'dpr' | 'chrome', out: string) => {
+  const slider = (
+    id: string,
+    key: 'stripLeft' | 'stripTop' | 'marginX' | 'marginY' | 'dpr' | 'chrome',
+    out: string,
+  ) => {
     const el = $<HTMLInputElement>(id);
     el.addEventListener('input', () => {
       state[key] = Number(el.value);
@@ -239,7 +252,8 @@ function wire(): void {
   };
   slider('stripleft', 'stripLeft', 'striplefv');
   slider('striptop', 'stripTop', 'striptopv');
-  slider('margin', 'margin', 'marginv');
+  slider('marginx', 'marginX', 'marginxv');
+  slider('marginy', 'marginY', 'marginyv');
   slider('dpr', 'dpr', 'dprv');
   slider('chrome', 'chrome', 'chromev');
 
@@ -315,8 +329,10 @@ function syncSliders(): void {
   $('striplefv').textContent = String(state.stripLeft);
   $<HTMLInputElement>('striptop').value = String(state.stripTop);
   $('striptopv').textContent = String(state.stripTop);
-  $<HTMLInputElement>('margin').value = String(state.margin);
-  $('marginv').textContent = String(state.margin);
+  $<HTMLInputElement>('marginx').value = String(state.marginX);
+  $('marginxv').textContent = String(state.marginX);
+  $<HTMLInputElement>('marginy').value = String(state.marginY);
+  $('marginyv').textContent = String(state.marginY);
 }
 
 // ── The layout ──────────────────────────────────────────────────────────────
@@ -340,7 +356,7 @@ function request(edge: StripEdge): LayoutRequest {
     respectMode: true,
     stripEdge: edge,
     stripPx: edge === 'top' ? state.stripTop : state.stripLeft,
-    marginPx: state.margin,
+    marginPx: { x: state.marginX, y: state.marginY },
     dpr: state.dpr,
   };
 }
@@ -462,9 +478,15 @@ function frameFor(
   });
 
   // The reserve, drawn as a dashed box so a margin you cannot otherwise see is visible.
-  if (state.guide && state.margin > 0) {
-    const m = state.margin;
-    frame.append(el('guide', { left: `${m}px`, top: `${m}px`, right: `${m}px`, bottom: `${m}px` }));
+  if (state.guide && (state.marginX > 0 || state.marginY > 0)) {
+    frame.append(
+      el('guide', {
+        left: `${state.marginX}px`,
+        right: `${state.marginX}px`,
+        top: `${state.marginY}px`,
+        bottom: `${state.marginY}px`,
+      }),
+    );
   }
 
   if (edge === 'left' && state.stripLeft > 0) {
@@ -639,15 +661,19 @@ function renderChecks(r: LayoutResult): void {
     //    `STAGE_EDGE` was 12 NATIVE px inside the box calculation and vanished the moment
     //    the box hit its floor, which is the 1491-vs-1557 case; a CSS-px constant taken off
     //    the viewport cannot do that. Both models are asked the same question now.
-    const near = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
+    // Per axis, because the reserve is: a horizontal gap is not evidence about a vertical one.
+    const nearX = Math.min(r.gapLeft, r.gapRight);
+    const nearY = Math.min(r.gapTop, r.gapBottom);
+    const okX = nearX >= state.marginX - 0.51;
+    const okY = nearY >= state.marginY - 0.51;
     const reserve =
-      near >= state.margin - 0.51
-        ? `<span class="good">holds</span> smallest gap ${near.toFixed(1)}px >= ${state.margin}`
-        : `<span class="bad">FAILS</span> smallest gap ${near.toFixed(1)}px < ${state.margin}`;
+      okX && okY
+        ? `<span class="good">holds</span> gaps ${nearX.toFixed(1)}x${nearY.toFixed(1)} >= ${state.marginX}x${state.marginY}`
+        : `<span class="bad">FAILS</span> gaps ${nearX.toFixed(1)}x${nearY.toFixed(1)} < ${state.marginX}x${state.marginY}`;
 
     // 3. Nothing runs off the viewport — the property the reserve used to exist for, and
     //    which nothing tested until the rework.
-    const off = near;
+    const off = Math.min(nearX, nearY);
     const contained =
       off >= -0.01
         ? `<span class="good">holds</span>`
@@ -657,13 +683,12 @@ function renderChecks(r: LayoutResult): void {
     //    one-sided clamp, which is the case where the room cannot clear the strip as well.
     //    "Slack" has to count the model's own reserve: a room whose gaps ARE the margin is
     //    already against the edge of the space it is allowed.
-    const slackFloor = state.margin + 0.51;
     const centreErr = Math.abs(r.roomX + r.drawnW / 2 + (r.panelW + r.gap) / 2 - v.w / 2);
     const clamped =
-      r.gapLeft <= slackFloor ||
-      r.gapRight <= slackFloor ||
-      r.gapTop <= slackFloor ||
-      r.gapBottom <= slackFloor;
+      r.gapLeft <= state.marginX + 0.51 ||
+      r.gapRight <= state.marginX + 0.51 ||
+      r.gapTop <= state.marginY + 0.51 ||
+      r.gapBottom <= state.marginY + 0.51;
     const centred =
       centreErr < 0.51
         ? `<span class="good">holds</span>`
@@ -705,7 +730,7 @@ function settingsDump(): string {
   L.push(`  STAGE_W/STAGE_H     ${STAGE_W}x${STAGE_H} native   the object-size envelope`);
   L.push(`  PANEL               ${PANEL_NATIVE_W}x${PANEL_NATIVE_H} native + ${STAGE_GAP} gap = ${PANEL_FOOTPRINT_W} footprint (PC only)`);
   L.push(`  MIN_STAGE_SCALE     ${MIN_STAGE_SCALE}`);
-  L.push(`  VIEWPORT_MARGIN     ${VIEWPORT_MARGIN} css px (the shipped default)`);
+  L.push(`  VIEWPORT_MARGIN     ${VIEWPORT_MARGIN} css px (the shipped default; per-axis is supported)`);
   L.push('');
 
   const CASES: Record<LayoutTarget, [string, number, number][]> = {
@@ -731,11 +756,17 @@ function settingsDump(): string {
     const live = target === state.target;
     const strip = target === 'pc' ? 0 : live ? state.stripLeft : TARGET_DEFAULTS[target].left;
     const stripTop = target === 'pc' ? 0 : live ? state.stripTop : TARGET_DEFAULTS[target].top;
-    const margin = live ? state.margin : TARGET_DEFAULTS[target].margin;
+    const mx = live ? state.marginX : TARGET_DEFAULTS[target].marginX;
+    const my = live ? state.marginY : TARGET_DEFAULTS[target].marginY;
     const mode = state.modes[target];
     L.push(`${target.toUpperCase()}${target === state.target ? '   <- the one on screen, so these are your live values' : '   (defaults; switch to it in the lab to tune)'}`);
     L.push(`  strip           ${target === 'pc' ? 'none — the faithful 155x395 panel instead' : `${strip} px left / ${stripTop} px top`}`);
-    L.push(`  margin          ${margin} css px per edge${target === 'tv' ? '  (title-safe inset — this is the TV padding)' : ''}`);
+    L.push(
+      `  margin          ${mx} css px left/right, ${my} top/bottom` +
+        (target === 'tv'
+          ? '  (title-safe / overscan inset — this is the TV padding. Costs 0.56% horizontally, 4.62% vertically)'
+          : ''),
+    );
     L.push(
       `  fit mode        ${mode}` +
         (target === 'pc' ? '' : mode === 'fill' ? '  (the game forces fill here)' : '  <- PREVIEW: the game would force fill'),
@@ -751,7 +782,7 @@ function settingsDump(): string {
         mode,
         respectMode: true,
         stripPx: strip,
-        marginPx: margin,
+        marginPx: { x: mx, y: my },
         dpr: state.dpr,
       };
       // Portrait belongs to the media query, which always picks the top (see edgeFor).

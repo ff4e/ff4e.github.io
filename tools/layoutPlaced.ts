@@ -79,13 +79,15 @@ export function layoutRoom(req: LayoutRequest): LayoutResult {
   const drawnH = s * req.roomH;
   const rowW = drawnW + l.gap + l.panelW;
 
-  const margin = req.marginPx ?? VIEWPORT_MARGIN;
+  // The reserve is per axis, because the TV title-safe convention is (48 x 27 at 1080p).
+  const mRaw = req.marginPx ?? VIEWPORT_MARGIN;
+  const m = typeof mRaw === 'number' ? { x: mRaw, y: mRaw } : mRaw;
   const roomX = panel
-    ? Math.max(margin, (req.viewportW - rowW) / 2)
-    : nearEdge(req.viewportW, drawnW, stripW, margin);
+    ? Math.max(m.x, (req.viewportW - rowW) / 2)
+    : nearEdge(req.viewportW, drawnW, stripW, m.x);
   const roomY = panel
-    ? Math.max(margin, (req.viewportH - drawnH) / 2)
-    : nearEdge(req.viewportH, drawnH, stripH, margin);
+    ? Math.max(m.y, (req.viewportH - drawnH) / 2)
+    : nearEdge(req.viewportH, drawnH, stripH, m.y);
 
   // Clipped by `.stage`/`#stagebox`, both `overflow: hidden`, so the area the room can
   // actually occupy is what the bar left — never the box, which may be LARGER than it

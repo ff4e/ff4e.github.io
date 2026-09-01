@@ -196,11 +196,16 @@
         the icons allow. A TV strip holds a legend, not touch targets, so it can be thinner still.</p>
 
       <h2>Margin</h2>
-      <label for="margin">reserve per edge, css px <span class="val" id="marginv">0</span></label>
-      <input id="margin" type="range" min="0" max="80" step="1" value="0" />
-      <p class="hint">VIEWPORT_MARGIN, and it drives both frames. 0 on PC and touch: nothing can
-        overflow without it, so it buys air and costs about 2&times;margin/height of room size.
-        TV defaults to 27 &mdash; a title-safe inset is this same reserve.</p>
+      <label for="marginx">reserve left/right, css px <span class="val" id="marginxv">0</span></label>
+      <input id="marginx" type="range" min="0" max="120" step="1" value="0" />
+      <label for="marginy">reserve top/bottom, css px <span class="val" id="marginyv">0</span></label>
+      <input id="marginy" type="range" min="0" max="120" step="1" value="0" />
+      <p class="hint">VIEWPORT_MARGIN. <b>0 on PC and touch</b> &mdash; nothing can overflow without
+        it, so it only buys air. <b>TV defaults to 48&times;27</b>, the Android TV / Google TV
+        title-safe inset (2.5% of each axis). Per axis because the convention is, and because the
+        two cost very differently here: measured over the 72 rooms at 1080p, the horizontal
+        reserve costs <b>0.56%</b> and the vertical <b>4.62%</b> &mdash; the rooms are narrower
+        than 16:9, so 67 of 72 sit against the top and bottom edges and only 5 reach the sides.</p>
 
       <h2>Export</h2>
       <div class="seg">

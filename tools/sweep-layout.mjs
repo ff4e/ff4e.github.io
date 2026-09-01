@@ -85,14 +85,18 @@ function viewports() {
 
 /** One (target, strip edge) case. PC has no strip; touch and TV have two edges each. */
 function cases() {
+  // The reserve is per axis (the TV title-safe convention is 48 x 27 at 1080p), so every
+  // case carries a pair and the checks below compare each axis against its own.
+  const m = { x: MARGIN, y: MARGIN };
+  const tv = { x: TARGET_DEFAULTS.tv.marginX, y: TARGET_DEFAULTS.tv.marginY };
   const all = [
-    { target: 'pc', edge: 'none', strip: 0, margin: MARGIN, mode: 'medium' },
-    { target: 'pc', edge: 'none', strip: 0, margin: MARGIN, mode: 'fixed' },
-    { target: 'pc', edge: 'none', strip: 0, margin: MARGIN, mode: 'fill' },
-    { target: 'touch', edge: 'left', strip: STRIP_LEFT, margin: MARGIN, mode: 'fill' },
-    { target: 'touch', edge: 'top', strip: STRIP_TOP, margin: MARGIN, mode: 'fill' },
-    { target: 'tv', edge: 'left', strip: TARGET_DEFAULTS.tv.left, margin: TARGET_DEFAULTS.tv.margin, mode: 'fill' },
-    { target: 'tv', edge: 'top', strip: TARGET_DEFAULTS.tv.top, margin: TARGET_DEFAULTS.tv.margin, mode: 'fill' },
+    { target: 'pc', edge: 'none', strip: 0, margin: m, mode: 'medium' },
+    { target: 'pc', edge: 'none', strip: 0, margin: m, mode: 'fixed' },
+    { target: 'pc', edge: 'none', strip: 0, margin: m, mode: 'fill' },
+    { target: 'touch', edge: 'left', strip: STRIP_LEFT, margin: m, mode: 'fill' },
+    { target: 'touch', edge: 'top', strip: STRIP_TOP, margin: m, mode: 'fill' },
+    { target: 'tv', edge: 'left', strip: TARGET_DEFAULTS.tv.left, margin: tv, mode: 'fill' },
+    { target: 'tv', edge: 'top', strip: TARGET_DEFAULTS.tv.top, margin: tv, mode: 'fill' },
   ];
   return ONLY_TARGET ? all.filter((c) => c.target === ONLY_TARGET) : all;
 }
@@ -174,13 +178,15 @@ function run(model, place) {
         // reserve — the margin must be the same at every viewport. Half a pixel of slack
         // for rounding; anything more is the reserve decaying, which is the 1491/1557 case
         // the old native-px `STAGE_EDGE` produced.
-        const near = Math.min(r.gapLeft, r.gapRight, r.gapTop, r.gapBottom);
-        note(props.reserve, near < c.margin - 0.51, {
+        const nearX = Math.min(r.gapLeft, r.gapRight);
+        const nearY = Math.min(r.gapTop, r.gapBottom);
+        const shortBy = Math.max(c.margin.x - nearX, c.margin.y - nearY);
+        note(props.reserve, shortBy > 0.51, {
           case: `${c.target}/${c.edge}/${c.mode}`,
           size: `${size.w}x${size.h}`,
           vp: `${w}x${h}`,
-          detail: `smallest gap ${near.toFixed(2)}px, wanted ${c.margin}`,
-        }, c.margin - near);
+          detail: `gaps ${nearX.toFixed(2)}x${nearY.toFixed(2)}px, wanted ${c.margin.x}x${c.margin.y}`,
+        }, shortBy);
 
         // centred (#126) — the room's centre is the screen's centre, unless it has no
         // slack, in which case it is pinned clear of the furniture. Both are correct.
@@ -189,13 +195,12 @@ function run(model, place) {
         // exactly the margin is against the edge of the space it is allowed, and asking it
         // to centre further would be asking it to spend the reserve. Measuring slack as
         // `gap > 0` instead reported 12% false failures.
-        const slackFloor = c.margin + 0.51;
         const centreErr = Math.abs(r.roomX + r.drawnW / 2 + (r.panelW + r.gap) / 2 - w / 2);
         const noSlack =
-          r.gapLeft <= slackFloor ||
-          r.gapRight <= slackFloor ||
-          r.gapTop <= slackFloor ||
-          r.gapBottom <= slackFloor;
+          r.gapLeft <= c.margin.x + 0.51 ||
+          r.gapRight <= c.margin.x + 0.51 ||
+          r.gapTop <= c.margin.y + 0.51 ||
+          r.gapBottom <= c.margin.y + 0.51;
         note(props.centred, centreErr > 0.51 && !noSlack, {
           case: `${c.target}/${c.edge}/${c.mode}`,
           size: `${size.w}x${size.h}`,
@@ -371,7 +376,10 @@ console.log(
   `sweep-layout: ${SIZES.length} rectangles x ${viewports().length.toLocaleString()} viewports ` +
     `(${STEP}px grid) x ${cases().length} cases = ${combos.toLocaleString()} combinations`,
 );
-console.log(`margin ${MARGIN}px, strip ${STRIP_LEFT} left / ${STRIP_TOP} top`);
+console.log(
+  `margin ${MARGIN}px (TV: ${TARGET_DEFAULTS.tv.marginX}x${TARGET_DEFAULTS.tv.marginY} title-safe), ` +
+    `strip ${STRIP_LEFT} left / ${STRIP_TOP} top`,
+);
 
 if (flag('--mono')) {
   monoReport();

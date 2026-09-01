@@ -206,10 +206,30 @@ export const STAGE_GAP = 12;
  * size — ~2.2% at 1080p for 12px a side.
  *
  * Kept as a named parameter rather than deleted because it is exactly the knob a TV target
- * needs: a title-safe overscan inset is "a reserve per viewport edge", conventionally
- * 2.5-5% of the height.
+ * needs: a title-safe overscan inset is "a reserve per viewport edge". `computeStageLayout`
+ * therefore takes it PER AXIS as well as as a single number — see `ViewportMargin`.
  */
 export const VIEWPORT_MARGIN = 0;
+
+/**
+ * A reserve per viewport edge, in CSS px — one number for both axes, or one per axis.
+ *
+ * Per-axis because the TV convention is asymmetric and the asymmetry is not cosmetic.
+ * Android TV / Google TV ask for 48dp left and right but 27dp top and bottom at 1920x1080
+ * (2.5% of each axis), and measured over the 72 rooms on a 1080p TV the two cost wildly
+ * different amounts: the vertical reserve costs 4.62% of room scale, the horizontal one
+ * 0.56%. The rooms are 1.07-3.47 aspect against a 1.78 screen, so most of them are already
+ * letterboxed sideways — 67 of 72 have their top and bottom rows against the screen edge
+ * where overscan would eat them, and only 5 reach the sides at all. A single number cannot
+ * say that, and rounding the pair to one would either overpay horizontally or underprotect
+ * vertically.
+ */
+export type ViewportMargin = number | { x: number; y: number };
+
+/** The reserve resolved to a pair, so the callers below can stop caring which form it took. */
+function marginAxes(m: ViewportMargin): { x: number; y: number } {
+  return typeof m === 'number' ? { x: m, y: m } : m;
+}
 /** Control-panel native size (mirrors PANEL_W/PANEL_H in data/ffp.ts). */
 export const PANEL_NATIVE_W = 155;
 export const PANEL_NATIVE_H = 395;
@@ -342,18 +362,20 @@ export function effectiveFitMode(mode: FitMode, panel = true): FitMode {
  * specifically. `contentScale` then does the one line.
  *
  * `margin` is `VIEWPORT_MARGIN` by default and is a parameter so a TV target can pass a
- * title-safe inset without a second code path.
+ * title-safe inset without a second code path — per axis if it needs to, which the TV
+ * convention does (see `ViewportMargin`).
  */
 export function computeStageLayout(
   viewportW: number,
   viewportH: number,
   mode: FitMode,
   panel = true,
-  margin = VIEWPORT_MARGIN,
+  margin: ViewportMargin = VIEWPORT_MARGIN,
 ): StageLayout {
   const fit = effectiveFitMode(mode, panel);
-  const availW = Math.max(0, viewportW - 2 * margin);
-  const availH = Math.max(0, viewportH - 2 * margin);
+  const m = marginAxes(margin);
+  const availW = Math.max(0, viewportW - 2 * m.x);
+  const availH = Math.max(0, viewportH - 2 * m.y);
   const scale = computeStageScale(availW, availH, panel);
   // Zero when the panel is gone, and both for the same reason: the row has one item left,
   // so there is no gap between anything, and the panel canvas is not drawn at all
