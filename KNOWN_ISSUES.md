@@ -27,6 +27,31 @@ Severity: 🔴 breaks play · 🟠 visible/audible glitch · 🟡 minor/cosmetic
   repo has already written down. Worth its own small PR, with the suite re-run to see whether any
   probe was quietly depending on the lighter path.
 
+## Layout: 🟡 a taller desktop window can make a width-bound room slightly smaller
+
+- **Symptom:** on the DESKTOP target only, dragging a window taller can shrink a room that is
+  width-bound, by up to **4.4%** in the shipped `medium` and **10.6%** in `fill`. Never happens
+  in `fixed`, never in touch mode, and never on the width axis.
+- **Why (measured 2026-08-31):** the faithful control panel is reserved in NATIVE px, so its
+  on-screen width is `167 x stageScale`. On a height-bound window a taller viewport raises
+  `stageScale`, which widens the panel, which takes width from a room that was already bound by
+  width. `contentScale` then follows it down.
+- **It is an impossibility, not an oversight.** The panel cannot be all three of: a constant
+  size in every room and scaled with the stage (which is what makes object size room-independent,
+  the faithful core of `layout.ts`); guaranteed to fit the viewport; and harmless to a
+  width-bound room when the window grows taller. Making it the third means sizing it from the
+  width alone — `167 x availW/967` — which is a panel 345px wide and 879px tall on a 2000x552
+  window. Accepted deliberately by Martin, 2026-08-31.
+- **It is better than what it replaced:** the pre-rework layout had the same defect and slightly
+  worse (-4.8% against -4.4%), plus a second cause (`STAGE_EDGE` in native px) that the rework
+  removed entirely — the width axis and both touch axes are now monotone, where none of them were.
+- **Where to look:** `src/app/layout.ts` (the header's "the one property that does NOT hold"),
+  `test/layout.test.ts` ("the panel exception is only ever on the HEIGHT axis"), which asserts it
+  is PRESENT so that removing it cannot go unnoticed. `npx tsx tools/sweep-layout.mjs --mono`
+  reports the worst cumulative loss per target.
+- **Next steps:** none proposed. If the panel is ever redesigned, this is the constraint to
+  revisit; `tools/layout-lab.html` is where a candidate would be shown first.
+
 ## Audio: 🟠 KUFRIK demo "beep" right after the steel pipe drops
 
 - **Symptom:** During the KUFRIK automatic demonstration, when the steel pipe (item 4, heavy)
