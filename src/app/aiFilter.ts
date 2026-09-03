@@ -3,10 +3,25 @@
  *
  * ── What this is ──────────────────────────────────────────────────────────────
  * A `filter: contrast() saturate() brightness()` over the game's canvases, applied ONLY
- * while the AI-upscaled art tier is the selected one. The upscaler flattens contrast and
- * desaturates a little against the 1998 original, and this is the knob for putting that
- * back — a display-time correction, not a re-render, so it costs no assets and no art
- * pipeline.
+ * while the AI-upscaled art tier is the selected one. It is a display-time look control:
+ * it costs no assets and no art pipeline, and it changes nothing the game simulates.
+ *
+ * ── What it is NOT, because this was measured and the assumption was wrong ────
+ * It is not a correction for a washed-out upscale. The tier was assumed to have flattened
+ * contrast and lost saturation against the 1998 original; rendering the same eight rooms
+ * on all three tiers through the CPU compositor and comparing says the opposite. Mean
+ * luminance spread: classic 50.8, enhanced 50.1, ai **53.2** — the AI tier has MORE
+ * contrast, not less. Mean chroma: classic 0.757, enhanced 0.739, ai 0.744 — the same
+ * within a couple of percent. Fitting a correction onto classic asks for
+ * `contrast(0.955)`, i.e. to take contrast AWAY.
+ *
+ * The AI tier does read a little darker (mean 73.6 against 76.6), and that is a black
+ * point, not a flattening: its 1st percentile sits at ~1 where classic's is at ~11, so
+ * the upscale reaches a true black the palette art never did.
+ *
+ * So this knob exists to make the art deliberately richer than the original, which is a
+ * taste decision, not to repair a defect. Anything shipped through it is an ADDITIVE
+ * change to the AI tier's look and should be argued as one.
  *
  * ── Why the numbers live in CSS custom properties ─────────────────────────────
  * The stylesheet owns the `filter:` declaration and reads three variables from it; this
