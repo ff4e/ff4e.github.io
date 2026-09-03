@@ -15,7 +15,10 @@
  * the game, and these tests are what says so.
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+  AI_FILTER_DEFAULT,
   AI_FILTER_KEYS,
   AI_FILTER_NEUTRAL,
   AI_FILTER_RANGES,
@@ -68,7 +71,7 @@ describe('clampAiFilter', () => {
     expect(clampAiFilter('contrast', 0)).toBeGreaterThan(0);
   });
 
-  it('falls back to neutral for anything not a finite number', () => {
+  it('falls back to identity for anything not a finite number', () => {
     for (const bad of ['', 'abc', NaN, Infinity, null, undefined, {}]) {
       expect(clampAiFilter('contrast', bad)).toBe(AI_FILTER_NEUTRAL.contrast);
     }
@@ -80,14 +83,16 @@ describe('clampAiFilter', () => {
 });
 
 describe('parseAiFilter', () => {
-  it('returns neutral for missing, malformed or non-object storage', () => {
+  it('returns the SHIPPED DEFAULT for missing, malformed or non-object storage', () => {
+    // Not identity. The key records a deviation from the default look, so "nothing
+    // stored" has to mean "the default look" or every player would lose the grade.
     for (const raw of [null, '', 'not json', '[1,2,3]', 'null', '7']) {
-      expect(parseAiFilter(raw)).toEqual(AI_FILTER_NEUTRAL);
+      expect(parseAiFilter(raw)).toEqual(AI_FILTER_DEFAULT);
     }
   });
 
-  it('fills a missing channel with its neutral value rather than dropping it', () => {
-    expect(parseAiFilter('{"contrast":1.2}')).toEqual({ ...AI_FILTER_NEUTRAL, contrast: 1.2 });
+  it('leaves the channels a partial blob does not name at their default', () => {
+    expect(parseAiFilter('{"contrast":1.2}')).toEqual({ ...AI_FILTER_DEFAULT, contrast: 1.2 });
   });
 
   it('clamps a persisted value that is out of range', () => {
@@ -97,13 +102,40 @@ describe('parseAiFilter', () => {
 });
 
 describe('aiFilterActive', () => {
-  it('is false at identity, which is what keeps the filter off the shipped default', () => {
+  it('is false at identity, which is what takes the canvases off the filter path', () => {
     expect(aiFilterActive(AI_FILTER_NEUTRAL)).toBe(false);
   });
 
   it('is true as soon as any one channel moves', () => {
     for (const key of AI_FILTER_KEYS) {
       expect(aiFilterActive({ ...AI_FILTER_NEUTRAL, [key]: 1.1 })).toBe(true);
+    }
+  });
+});
+
+describe('the shipped default', () => {
+  it('is a real grade, so the filter is live out of the box', () => {
+    expect(AI_FILTER_DEFAULT).not.toEqual(AI_FILTER_NEUTRAL);
+    expect(aiFilterActive(AI_FILTER_DEFAULT)).toBe(true);
+  });
+
+  it('is inside every slider range, so the dev bar can express and undo it', () => {
+    for (const key of AI_FILTER_KEYS) {
+      const { min, max } = AI_FILTER_RANGES[key];
+      expect(AI_FILTER_DEFAULT[key]).toBeGreaterThanOrEqual(min);
+      expect(AI_FILTER_DEFAULT[key]).toBeLessThanOrEqual(max);
+      expect(clampAiFilter(key, AI_FILTER_DEFAULT[key])).toBe(AI_FILTER_DEFAULT[key]);
+    }
+  });
+
+  it("matches the stylesheet's :root, which is what makes the first paint correct", () => {
+    // index.html carries the same three numbers so a boot cannot flash an ungraded frame.
+    // Two copies of a value is a drift risk; this is the guard that makes it safe.
+    const html = readFileSync(join(import.meta.dirname, '..', 'index.html'), 'utf8');
+    for (const key of AI_FILTER_KEYS) {
+      const m = html.match(new RegExp(`--ai-${key}:\\s*([0-9.]+);`));
+      expect(m, `index.html declares --ai-${key}`).toBeTruthy();
+      expect(Number(m![1]), `--ai-${key} matches AI_FILTER_DEFAULT`).toBe(AI_FILTER_DEFAULT[key]);
     }
   });
 });
@@ -116,23 +148,31 @@ describe('persistence', () => {
     expect(aiFilterValues().contrast).toBe(1.3);
   });
 
-  it('leaves no key behind when the tuning is returned to identity', () => {
+  it('leaves no key behind when the tuning is returned to the default', () => {
     setAiFilter('saturate', 1.4);
     expect(store.map.has('ff.aiFilter')).toBe(true);
-    setAiFilter('saturate', 1);
+    setAiFilter('saturate', AI_FILTER_DEFAULT.saturate);
     expect(store.map.has('ff.aiFilter')).toBe(false);
   });
 
-  it('resets every channel at once', () => {
-    setAiFilter('contrast', 1.3);
-    setAiFilter('brightness', 1.1);
-    expect(resetAiFilter()).toEqual(AI_FILTER_NEUTRAL);
-    expect(store.map.has('ff.aiFilter')).toBe(false);
-  });
-
-  it('boots neutral from empty storage', () => {
+  it('stores identity, because turning the grade OFF is a real choice to remember', () => {
+    for (const key of AI_FILTER_KEYS) setAiFilter(key, 1);
+    expect(store.map.has('ff.aiFilter')).toBe(true);
+    expect(aiFilterActive()).toBe(false);
     initAiFilter();
     expect(aiFilterValues()).toEqual(AI_FILTER_NEUTRAL);
-    expect(aiFilterActive()).toBe(false);
+  });
+
+  it('resets to the default, not to identity', () => {
+    setAiFilter('contrast', 1.3);
+    setAiFilter('brightness', 1.1);
+    expect(resetAiFilter()).toEqual(AI_FILTER_DEFAULT);
+    expect(store.map.has('ff.aiFilter')).toBe(false);
+  });
+
+  it('boots to the default from empty storage', () => {
+    initAiFilter();
+    expect(aiFilterValues()).toEqual(AI_FILTER_DEFAULT);
+    expect(aiFilterActive()).toBe(true);
   });
 });

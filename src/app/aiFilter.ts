@@ -30,14 +30,23 @@
  * the eventual SHIPPED default stays one place in the stylesheet, not a value smeared
  * across a stylesheet and a setter. Nothing here rewrites a `filter:` string at runtime.
  *
- * ── Why an attribute gates it, and not just the three defaults ────────────────
- * At 1/1/1 the filter is arithmetically a no-op, but `filter` is not free even then: it
- * makes the canvas its own stacking context and pushes it onto the compositor's filter
- * path for every one of the ~60 frames a second the room is repainting. So the
- * stylesheet requires `data-ai-filter` as well as `data-graphics='ai'`, and this module
- * only sets that attribute once a value actually differs from 1. Untuned, the shipped
- * game therefore has no `filter` property at all — the mechanism can land before any
- * numbers are chosen without costing the default player a thing.
+ * ── Why an attribute gates it as well as the tier ─────────────────────────────
+ * `filter` is not free even when its arithmetic is: it makes the canvas its own stacking
+ * context and pushes it onto the compositor's filter path for every one of the ~60 frames
+ * a second the room is repainting. So the stylesheet requires `data-ai-filter` as well as
+ * `data-graphics='ai'`, and this module sets it only while a value differs from IDENTITY.
+ *
+ * With a real grade now shipping (`AI_FILTER_DEFAULT`) that attribute is normally present,
+ * so the AI tier does pay that compositing cost — which is the honest price of the look,
+ * not something hidden. What the attribute still buys is the other direction: a dev who
+ * drags all three sliders back to 1 gets no `filter` property at all rather than an empty
+ * one, so "off" in the tuning tool is genuinely off and is a fair baseline to compare
+ * against.
+ *
+ * The stylesheet's `:root` carries the same three numbers as `AI_FILTER_DEFAULT`. That is
+ * deliberate duplication: it means the shipped look is already correct on the first paint,
+ * before this module has run, so boot cannot flash an ungraded frame. `test/aiFilter.test.ts`
+ * fails if the two ever drift apart.
  *
  * ── Scope, as decided ─────────────────────────────────────────────────────────
  * The gate is the SETTING (`graphics === 'ai'`, reflected onto `<html>` by
@@ -75,10 +84,26 @@ export const AI_FILTER_RANGES: Readonly<Record<AiFilterKey, { min: number; max: 
 /** Every channel's no-op value. `filter: contrast(1) saturate(1) brightness(1)` is identity. */
 export const AI_FILTER_NEUTRAL: AiFilterValues = { contrast: 1, saturate: 1, brightness: 1 };
 
+/**
+ * What the game SHIPS with on the AI tier — the tuned look, chosen 2026-09-03.
+ *
+ * Distinct from `AI_FILTER_NEUTRAL`, and the two are not interchangeable: neutral is what
+ * "the filter does nothing" means and is still what a dev drags to when comparing, while
+ * this is the default a player gets. Anything stored in `ff.aiFilter` is a deviation from
+ * THIS, not from identity.
+ *
+ * Measured rather than picked by eye. Across eight rooms it lifts luminance spread 53.2 ->
+ * 56.4 and mean chroma 0.744 -> 0.786 while losing no shadow detail and touching ~1% of
+ * highlights. Saturation stops above ~1.12 — the art is already highly saturated, so a
+ * higher value only clips channels — and contrast is limited by the pale stone and coral
+ * blowing out, not by the shadows, because the upscale's black point is already true.
+ */
+export const AI_FILTER_DEFAULT: AiFilterValues = { contrast: 1.06, saturate: 1.12, brightness: 1.03 };
+
 /** The one persisted key. Read only after `migrateSaves()`, like every other `ff.*` (see persist.ts). */
 const STORAGE_KEY = 'ff.aiFilter';
 
-let values: AiFilterValues = { ...AI_FILTER_NEUTRAL };
+let values: AiFilterValues = { ...AI_FILTER_DEFAULT };
 
 /**
  * Whether the AI tier is the selected one. Pushed in by `renderSettings.ts` rather than
@@ -159,23 +184,36 @@ export function clampAiFilter(key: AiFilterKey, raw: unknown): number {
   return Math.min(max, Math.max(min, n));
 }
 
-/** Parse a persisted blob into a complete, clamped set. Any missing or bad channel falls back to neutral. */
+/**
+ * Parse a persisted blob into a complete, clamped set.
+ *
+ * Missing, malformed or absent storage falls back to the SHIPPED DEFAULT, not to identity
+ * — the key records a deviation from the default look, so "nothing stored" has to mean
+ * "the default look", and a blob naming one channel must leave the other two alone. Only
+ * a channel that IS present is taken from storage, and then only through the clamp.
+ */
 export function parseAiFilter(raw: string | null): AiFilterValues {
-  if (!raw) return { ...AI_FILTER_NEUTRAL };
+  if (!raw) return { ...AI_FILTER_DEFAULT };
   let obj: unknown;
   try {
     obj = JSON.parse(raw);
   } catch {
-    return { ...AI_FILTER_NEUTRAL };
+    return { ...AI_FILTER_DEFAULT };
   }
-  if (typeof obj !== 'object' || obj === null) return { ...AI_FILTER_NEUTRAL };
+  if (typeof obj !== 'object' || obj === null) return { ...AI_FILTER_DEFAULT };
   const rec = obj as Record<string, unknown>;
-  const out = { ...AI_FILTER_NEUTRAL };
-  for (const k of AI_FILTER_KEYS) out[k] = clampAiFilter(k, rec[k]);
+  const out = { ...AI_FILTER_DEFAULT };
+  for (const k of AI_FILTER_KEYS) if (k in rec) out[k] = clampAiFilter(k, rec[k]);
   return out;
 }
 
-/** Is any channel tuned away from identity? This is what decides whether the filter runs at all. */
+/**
+ * Is any channel away from IDENTITY? This is what decides whether the filter is declared
+ * at all — not whether it differs from the shipped default. Normally true, since the
+ * default is a real grade; false only when a dev drags all three back to 1 to compare,
+ * and then the canvases come off the compositor's filter path entirely rather than
+ * running an arithmetically-empty filter.
+ */
 export function aiFilterActive(v: AiFilterValues = values): boolean {
   return AI_FILTER_KEYS.some((k) => v[k] !== AI_FILTER_NEUTRAL[k]);
 }
@@ -220,9 +258,15 @@ export function setAiFilter(key: AiFilterKey, raw: unknown): number {
   return values[key];
 }
 
-/** Back to identity, and forget the stored tuning entirely rather than storing 1/1/1. */
+/**
+ * Back to the SHIPPED default, and forget the stored deviation.
+ *
+ * Not to identity: the button's job is "undo my tuning", and what a player sees is the
+ * default. Identity is still one drag away on the three sliders, which is how a dev
+ * compares against no filter at all.
+ */
 export function resetAiFilter(): AiFilterValues {
-  values = { ...AI_FILTER_NEUTRAL };
+  values = { ...AI_FILTER_DEFAULT };
   apply();
   persist();
   return { ...values };
@@ -230,9 +274,10 @@ export function resetAiFilter(): AiFilterValues {
 
 function persist(): void {
   if (typeof localStorage === 'undefined') return;
-  // An untuned filter removes its key instead of writing `{"contrast":1,...}`. A player
-  // who tries the sliders and puts them back should end up with the same storage they
-  // started with, not a permanent record that they looked.
-  if (!aiFilterActive()) localStorage.removeItem(STORAGE_KEY);
+  // Storing the default writes nothing. The key means "this dev moved it", so a dev who
+  // tries the sliders and resets is left with the storage they started on — and, more
+  // importantly, nobody is pinned to today's numbers: if the shipped default is ever
+  // retuned, only the machines that actually chose something keep their own value.
+  if (AI_FILTER_KEYS.every((k) => values[k] === AI_FILTER_DEFAULT[k])) localStorage.removeItem(STORAGE_KEY);
   else localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
 }

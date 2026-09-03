@@ -55,24 +55,33 @@
         border: 1px solid #333;
       }
       /* The AI tier's colour look. Three numbers the dev bar retunes live; the
-         declaration itself lives here so the eventual shipped default is one edit in one
-         place (src/app/aiFilter.ts explains the split, and why the gate is the SETTING
-         rather than the per-frame AI gate).
+         declaration itself lives here so the shipped default is one edit in one place
+         (src/app/aiFilter.ts explains the split, and why the gate is the SETTING rather
+         than the per-frame AI gate).
+
+         These `:root` values ARE the shipped default, and they must match
+         AI_FILTER_DEFAULT in aiFilter.ts — test/aiFilter.test.ts fails if they drift.
+         Duplicated on purpose: having them here means the first painted frame is already
+         graded, so boot cannot flash an ungraded picture before the module runs.
+
+         NOT a correction. The AI tier measures HIGHER contrast than the 1998 art (spread
+         53.2 against 50.8) and the same saturation, so this is a deliberate enrichment of
+         the upscaled look: +6% spread and +5.6% chroma, losing no shadow detail and
+         touching ~1% of highlights.
 
          `canvas` reaches all three surfaces on purpose — #screen, the #screen-gl present
          canvas over it, and #panel. The panel swaps to its own AI-upscaled composite on
          this tier too, so tinting the room and leaving the panel beside it untouched
          would read as an oversight rather than a choice.
 
-         `data-ai-filter` is required as well as the tier: at 1/1/1 the filter is
-         arithmetically nothing, but declaring it still makes every canvas its own
-         stacking context and puts it on the compositor's filter path 60 times a second.
-         The attribute appears only once a value is actually tuned, so an untuned game
-         has no `filter` property at all. */
+         `data-ai-filter` is required as well as the tier. It is normally present now, so
+         the AI tier does pay for compositing a filter; what it buys is that a dev who
+         drags all three back to 1 gets NO filter property at all rather than an
+         arithmetically-empty one, which makes "off" a fair baseline to compare against. */
       :root {
-        --ai-contrast: 1;
-        --ai-saturate: 1;
-        --ai-brightness: 1;
+        --ai-contrast: 1.06;
+        --ai-saturate: 1.12;
+        --ai-brightness: 1.03;
       }
       html[data-graphics='ai'][data-ai-filter] canvas {
         filter: contrast(var(--ai-contrast)) saturate(var(--ai-saturate)) brightness(var(--ai-brightness));
@@ -854,11 +863,11 @@
            dragged — the touch Options volume sliders set that precedent. The whole group
            is disabled off the AI tier, where it would silently do nothing. -->
       <span id="aifilter" title="Colour look for the AI-upscaled tier only, applied at display time with no re-render. Not a correction: the AI tier measures HIGHER contrast than the 1998 art and the same saturation, so anything set here is a deliberate enrichment. Dev-only — the values persist, and 1/1/1 removes the filter entirely.">
-        <label>C <input type="range" id="ai-contrast" min="0.5" max="2" step="0.01" value="1"></label>
-        <label>S <input type="range" id="ai-saturate" min="0" max="2" step="0.01" value="1"></label>
-        <label>B <input type="range" id="ai-brightness" min="0.5" max="1.5" step="0.01" value="1"></label>
-        <output id="ai-filter-out">1 / 1 / 1</output>
-        <button id="ai-filter-reset" type="button" title="Back to 1 / 1 / 1 — removes the filter altogether.">↺</button>
+        <label>C <input type="range" id="ai-contrast" min="0.5" max="2" step="0.01" value="1.06"></label>
+        <label>S <input type="range" id="ai-saturate" min="0" max="2" step="0.01" value="1.12"></label>
+        <label>B <input type="range" id="ai-brightness" min="0.5" max="1.5" step="0.01" value="1.03"></label>
+        <output id="ai-filter-out">1.06 / 1.12 / 1.03</output>
+        <button id="ai-filter-reset" type="button" title="Back to the shipped default (1.06 / 1.12 / 1.03). Drag all three to 1 to see the tier with no filter at all.">↺</button>
       </span>
       <label title="Touch controls (the in-room button bar, and the rest of the touch UI). Auto = on for any touch-capable device, off for a mouse. Force it on to look at the touch UI from a desktop browser without device emulation.">Touch <select id="touchmode">
         <option value="auto">Auto (by device)</option>
