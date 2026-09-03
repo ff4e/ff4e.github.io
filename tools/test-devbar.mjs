@@ -60,10 +60,10 @@ await withApp(async ({ p, expect }) => {
 
   expect((await gfxAttr()) === 'ai', `data-graphics follows the tier (got "${await gfxAttr()}")`);
 
-  // The shipped default is a real grade, so the AI tier arrives filtered. The stylesheet's
-  // `:root` carries the same numbers as AI_FILTER_DEFAULT (drift-guarded by
-  // test/aiFilter.test.ts), which is what makes the FIRST paint correct rather than a
-  // flash of ungraded picture.
+  // The shipped default is a real grade, so the AI tier arrives filtered without anyone
+  // touching a slider. The three values reach the document from `aiFilter.ts` during boot,
+  // before any canvas paints — the stylesheet holds only the declaration and deliberately
+  // no copy of the numbers (test/aiFilter.test.ts asserts that it stays that way).
   expect((await tuned()) === true, 'the AI tier arrives with the shipped grade applied');
   for (const id of ['screen', 'screen-gl', 'panel']) {
     expect((await filterOf(id)) !== 'none', `#${id} takes the AI filter`);

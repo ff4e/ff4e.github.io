@@ -859,13 +859,20 @@
            only declares `filter` once one of these leaves 1 (see the rule near the top).
            Wired on `input`, not `change`, so the room retints while the slider is being
            dragged — the touch Options volume sliders set that precedent. The whole group
-           is disabled off the AI tier, where it would silently do nothing. -->
+           is disabled off the AI tier, where it would silently do nothing.
+
+           No NUMBERS here on purpose — only the ranges. The slider positions, the readout
+           and the reset button's tooltip are all written by syncAiFilterControls() from
+           AI_FILTER_DEFAULT at boot, so `src/app/aiFilter.ts` stays the single copy of the
+           shipped look. Hard-coding them here would put four more copies in a file that
+           has to be edited in lockstep with the module, and the tooltip in particular
+           would then be a displayed string that silently lies after the first retune. -->
       <span id="aifilter" title="Colour look for the AI-upscaled tier only, applied at display time with no re-render. Not a correction: the AI tier measures HIGHER contrast than the 1998 art and the same saturation, so anything set here is a deliberate enrichment. Dev-only — the values persist, and 1/1/1 removes the filter entirely.">
-        <label>C <input type="range" id="ai-contrast" min="0.5" max="2" step="0.01" value="1.05"></label>
-        <label>S <input type="range" id="ai-saturate" min="0" max="2" step="0.01" value="1.1"></label>
-        <label>B <input type="range" id="ai-brightness" min="0.5" max="1.5" step="0.01" value="1.03"></label>
-        <output id="ai-filter-out">1.05 / 1.10 / 1.03</output>
-        <button id="ai-filter-reset" type="button" title="Back to the shipped default (1.05 / 1.10 / 1.03). Drag all three to 1 to see the tier with no filter at all.">↺</button>
+        <label>C <input type="range" id="ai-contrast" min="0.5" max="2" step="0.01"></label>
+        <label>S <input type="range" id="ai-saturate" min="0" max="2" step="0.01"></label>
+        <label>B <input type="range" id="ai-brightness" min="0.5" max="1.5" step="0.01"></label>
+        <output id="ai-filter-out"></output>
+        <button id="ai-filter-reset" type="button">↺</button>
       </span>
       <label title="Touch controls (the in-room button bar, and the rest of the touch UI). Auto = on for any touch-capable device, off for a mouse. Force it on to look at the touch UI from a desktop browser without device emulation.">Touch <select id="touchmode">
         <option value="auto">Auto (by device)</option>

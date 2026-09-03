@@ -171,7 +171,15 @@ export function syncAiFilterControls(): void {
     el.value = String(values[key]);
     el.disabled = !onAiTier;
   }
-  if (controls.reset) controls.reset.disabled = !onAiTier;
+  if (controls.reset) {
+    controls.reset.disabled = !onAiTier;
+    // Written here rather than in the markup so the shipped numbers have exactly one
+    // home. A hand-kept tooltip is the worst kind of duplicate: nothing overwrites it, so
+    // it goes on displaying the old look with full confidence after the first retune.
+    controls.reset.title =
+      `Back to the shipped default (${AI_FILTER_KEYS.map((k) => AI_FILTER_DEFAULT[k]).join(' / ')}). ` +
+      'Drag all three to 1 to see the tier with no filter at all.';
+  }
   if (controls.out) controls.out.value = AI_FILTER_KEYS.map((k) => values[k].toFixed(2)).join(' / ');
 }
 
@@ -184,16 +192,21 @@ export function setAiFilterTier(isAi: boolean): void {
 /**
  * Coerce one channel to a usable number: finite, and inside its slider range.
  *
- * Anything unusable becomes the neutral value rather than throwing, because the caller
- * is either a `<input type=range>` (which can produce `''` mid-edit) or JSON out of
- * localStorage (which can be anything at all).
+ * Anything unusable becomes `fallback` rather than throwing. What that should BE differs
+ * by caller and is passed in explicitly at both call sites — see the note in the body.
  */
 export function clampAiFilter(key: AiFilterKey, raw: unknown, fallback = AI_FILTER_NEUTRAL[key]): number {
-  // The fallback differs by caller, and getting it wrong is silent. A slider reporting a
-  // junk value means "no change", so it falls back to identity; a junk value in STORAGE
-  // means that channel is unusable, and the right answer there is the shipped default —
-  // otherwise `{"contrast":null}` boots with contrast at 1 and the other two graded, i.e.
-  // half the look, which is worse than either whole one.
+  // The fallback differs by caller, and getting it wrong is silent:
+  //   - STORAGE (`parseAiFilter`) passes the shipped default. A junk channel means that
+  //     channel is unusable, and `{"contrast":null}` must not boot with contrast at 1 and
+  //     the other two graded — half a look is worse than either whole one.
+  //   - The SLIDER (`setAiFilter`) passes the CURRENT value, i.e. "no change". Identity
+  //     would be wrong now that the default is a real grade: it would silently drop that
+  //     channel out of the shipped look rather than leave it alone. In practice a range
+  //     input sanitises its own value, so this path is unreachable; it is written to be
+  //     right anyway, because the next editor will read it as the intended behaviour.
+  // The parameter default is identity purely so a caller that passes nothing gets a safe,
+  // caller-independent answer.
   //
   // An empty string is not zero here. `Number('')` is 0, which is finite and would clamp
   // to the bottom of the range — so a range input momentarily reporting '' (or a hand-
@@ -273,7 +286,7 @@ export function initAiFilter(): void {
  * room re-tints without the game drawing a frame.
  */
 export function setAiFilter(key: AiFilterKey, raw: unknown): number {
-  values[key] = clampAiFilter(key, raw);
+  values[key] = clampAiFilter(key, raw, values[key]);
   apply();
   persist();
   return values[key];

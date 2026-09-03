@@ -145,9 +145,11 @@ describe('the shipped default', () => {
     const html = readFileSync(join(import.meta.dirname, '..', 'index.html'), 'utf8');
     for (const key of AI_FILTER_KEYS) {
       expect(html, `index.html must not declare --ai-${key}`).not.toMatch(new RegExp(`--ai-${key}\\s*:`));
+      // ...but it must still USE every one of them. Checking only one channel would let
+      // `saturate(...)` or `brightness(...)` be dropped from the declaration silently:
+      // the probe asserts `filter !== 'none'`, which stays true with a single term left.
+      expect(html, `index.html must apply --ai-${key}`).toContain(`var(--ai-${key})`);
     }
-    // ...but it must still USE them, or the grade would never reach the canvases.
-    expect(html).toContain('var(--ai-contrast)');
   });
 
   it('can be turned to greyscale but never to an unreadable screen', () => {
