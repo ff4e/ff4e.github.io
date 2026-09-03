@@ -54,6 +54,29 @@
         background: #000;
         border: 1px solid #333;
       }
+      /* The AI tier's colour correction. Three numbers the dev bar retunes live; the
+         declaration itself lives here so the eventual shipped default is one edit in one
+         place (src/app/aiFilter.ts explains the split, and why the gate is the SETTING
+         rather than the per-frame AI gate).
+
+         `canvas` reaches all three surfaces on purpose — #screen, the #screen-gl present
+         canvas over it, and #panel. The panel swaps to its own AI-upscaled composite on
+         this tier too, so tinting the room and leaving the panel beside it untouched
+         would read as an oversight rather than a choice.
+
+         `data-ai-filter` is required as well as the tier: at 1/1/1 the filter is
+         arithmetically nothing, but declaring it still makes every canvas its own
+         stacking context and puts it on the compositor's filter path 60 times a second.
+         The attribute appears only once a value is actually tuned, so an untuned game
+         has no `filter` property at all. */
+      :root {
+        --ai-contrast: 1;
+        --ai-saturate: 1;
+        --ai-brightness: 1;
+      }
+      html[data-graphics='ai'][data-ai-filter] canvas {
+        filter: contrast(var(--ai-contrast)) saturate(var(--ai-saturate)) brightness(var(--ai-brightness));
+      }
       /* In touch mode a drag anywhere on the play area is a movement command
          (src/app/touchSwipe.ts), so the browser must not claim it first. Without
          this the first few pixels of every swipe are eaten deciding whether it is
@@ -227,6 +250,15 @@
         background: #101018;
       }
       .hint { opacity: 0.6; }
+      /* The AI colour-tuning group. Narrow sliders so three of them plus a readout fit
+         on one dev-bar row, and a whole-group fade when the AI tier is not selected —
+         the filter is scoped to that tier, so off it these controls would move and do
+         nothing visible. Disabling is done in JS (src/app/devBar.ts) because `disabled`
+         is what actually stops the drag; this only says so. */
+      #aifilter { display: inline-flex; gap: 6px; align-items: center; }
+      #aifilter input[type='range'] { width: 72px; vertical-align: middle; }
+      #aifilter output { opacity: 0.75; font-variant-numeric: tabular-nums; min-width: 92px; }
+      #aifilter:has(input:disabled) { opacity: 0.4; }
       /* Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen video over
          the stage, matching the original's full-screen MCI playback. */
       #intro-layer {
@@ -816,6 +848,18 @@
         <option value="enhanced">Enhanced (FFNG)</option>
         <option value="ai">AI-upscaled</option>
       </select></label>
+      <!-- The AI tier's colour tuning. Dev-only, and inert until moved: the stylesheet
+           only declares `filter` once one of these leaves 1 (see the rule near the top).
+           Wired on `input`, not `change`, so the room retints while the slider is being
+           dragged — the touch Options volume sliders set that precedent. The whole group
+           is disabled off the AI tier, where it would silently do nothing. -->
+      <span id="aifilter" title="Colour correction for the AI-upscaled tier only. The upscaler flattens contrast and desaturates slightly against the 1998 original; these put it back at display time, with no re-render. Dev-only — the values persist, and 1/1/1 removes the filter entirely.">
+        <label>C <input type="range" id="ai-contrast" min="0.5" max="2" step="0.01" value="1"></label>
+        <label>S <input type="range" id="ai-saturate" min="0" max="2" step="0.01" value="1"></label>
+        <label>B <input type="range" id="ai-brightness" min="0.5" max="1.5" step="0.01" value="1"></label>
+        <output id="ai-filter-out">1 / 1 / 1</output>
+        <button id="ai-filter-reset" type="button" title="Back to 1 / 1 / 1 — removes the filter altogether.">↺</button>
+      </span>
       <label title="Touch controls (the in-room button bar, and the rest of the touch UI). Auto = on for any touch-capable device, off for a mouse. Force it on to look at the touch UI from a desktop browser without device emulation.">Touch <select id="touchmode">
         <option value="auto">Auto (by device)</option>
         <option value="on">On</option>

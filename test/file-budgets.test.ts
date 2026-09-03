@@ -73,7 +73,15 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // save slot gains a field, in the save/load pair that has always lived here. Undo
   // ITSELF is two new modules (`src/core/undoStack.ts`, `src/app/undo.ts`) and nothing of
   // it is in this file — main.ts cannot say what an undo is, only which key asks for one.
-  ['src/app/main.ts', 2250],
+  // 2 250 -> 2 254 for the AI tier's colour filter, and this is the whole of what it
+  // costs here: one import and one `initAiFilter()` call under the comment explaining its
+  // ordering. The filter itself — the three tunable channels, the clamp that stops a
+  // persisted value blanking the screen, the storage and the DOM writes — is
+  // `src/app/aiFilter.ts`, and the dev-bar sliders that drive it are in `devBar.ts`.
+  // What could not move is the ordering: the call has to sit after `initRenderSettings()`
+  // (which puts `data-graphics` on the document) and after the save store is open, and
+  // boot order is the one thing this file is for.
+  ['src/app/main.ts', 2254],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

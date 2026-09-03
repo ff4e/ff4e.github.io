@@ -122,6 +122,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `glPlumbing.ts` | 4.2 k | The per-tier art sources and the two WebGL compositors. |
 | `audioEngine.ts` | 0.3 k | Who owns the `AudioEngine`. |
 | `renderSettings.ts` | 2.0 k | What the game is drawn WITH — the four persisted choices: art tier, backend, idle-FPS saver, developer pane. |
+| `aiFilter.ts` | 2.5 k | The AI tier's colour correction: three tunable channels written as CSS custom properties, clamped and persisted. |
 | `playerSettings.ts` | 1.2 k | The player's options: subtitle language and the three volume buses. |
 | `layout.ts` | 2.9 k | Display layout and scaling. |
 | `stageGeometry.ts` | 2.2 k | How big the game is drawn, and the constants the simulation is timed by. |

@@ -77,6 +77,15 @@ export const graphicsSelect = document.getElementById('graphics') as HTMLSelectE
 export const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;
 export const solveRoomBtn = document.getElementById('solveroom') as HTMLButtonElement | null;
 export const solveSpeedSelect = document.getElementById('solvespeed') as HTMLSelectElement | null;
+// The AI-tier colour tuning (src/app/aiFilter.ts): three sliders, their readout and a
+// reset. Nullable like every other dev-bar handle — the bar is chrome, and a page that
+// omits it must still boot.
+export const aiFilterGroup = document.getElementById('aifilter') as HTMLElement | null;
+export const aiFilterOut = document.getElementById('ai-filter-out') as HTMLOutputElement | null;
+export const aiFilterReset = document.getElementById('ai-filter-reset') as HTMLButtonElement | null;
+export const aiContrastInput = document.getElementById('ai-contrast') as HTMLInputElement | null;
+export const aiSaturateInput = document.getElementById('ai-saturate') as HTMLInputElement | null;
+export const aiBrightnessInput = document.getElementById('ai-brightness') as HTMLInputElement | null;
 export const perfHud = document.getElementById('perfhud') as HTMLElement | null;
 export const info = document.getElementById('info') as HTMLDivElement;
 export const stageRow = document.querySelector('.stage') as HTMLElement;

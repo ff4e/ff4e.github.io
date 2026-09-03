@@ -21,6 +21,7 @@
  * would make `art.ts` and this file a circular pair. One direction is enough.
  */
 import { retargetArtForTier } from './art.js';
+import { setAiFilterTier } from './aiFilter.js';
 import { graphicsSelect, idleDirtyToggle, rendererSelect } from './dom.js';
 import { setForceRoomRedraw } from './framePacing.js';
 import { wake } from './frameClock.js';
@@ -112,6 +113,24 @@ export function setRenderOnDirty(v: boolean): void {
 export const GRAPHICS_LEVELS: readonly GraphicsLevel[] = ['classic', 'enhanced', 'ai'];
 
 /**
+ * Reflect the tier onto `<html>` so the stylesheet can see it (`data-graphics`, read the
+ * same way as `data-touch`/`data-touchbar` beside it). The AI tier's colour filter hangs
+ * off this — `src/app/aiFilter.ts` explains what for.
+ *
+ * Called from BOTH writers below, because they are not one path: `setGraphics()` is the
+ * single entry point for a CHANGE, but boot does not go through it — `initRenderSettings()`
+ * assigns `graphics` straight from localStorage. Miss that one and the attribute is
+ * correct for every switch the player makes and wrong for the tier they actually start
+ * in, which is the AI tier by default and so wrong almost always.
+ */
+function reflectGraphics(): void {
+  if (typeof document !== 'undefined') document.documentElement.dataset.graphics = graphics;
+  // The colour tuning is scoped to the AI tier, so its dev-bar controls go live and dead
+  // with it. Pushed rather than pulled so `aiFilter.ts` need not import this module back.
+  setAiFilterTier(graphics === 'ai');
+}
+
+/**
  * Set the graphics-quality level (classic/enhanced/ai). Single entry point shared
  * by the E hotkey, the dev-bar combobox, and the ff.setGraphics hook: persists,
  * ensures the enhanced art for the current room is loaded whenever the new level
@@ -121,6 +140,7 @@ export const GRAPHICS_LEVELS: readonly GraphicsLevel[] = ['classic', 'enhanced',
 export function setGraphics(level: GraphicsLevel): void {
   graphics = level;
   localStorage.setItem('ff.graphics', graphics);
+  reflectGraphics();
   retargetArtForTier();
   if (graphicsSelect) graphicsSelect.value = graphics;
   setForceRoomRedraw(true);
@@ -153,6 +173,7 @@ export function initRenderSettings(h: RenderSettingsHost): void {
   host = h;
   const g = localStorage.getItem('ff.graphics');
   if (g === 'classic' || g === 'enhanced' || g === 'ai') graphics = g;
+  reflectGraphics();
   renderer = (localStorage.getItem('ff.renderer') as 'cpu' | 'webgl' | null) ?? 'webgl';
   renderOnDirty = localStorage.getItem('ff.renderOnDirty') !== '0';
   devEnabled = localStorage.getItem('ff.devEnabled') === '1';
