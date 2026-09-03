@@ -92,13 +92,20 @@ export const AI_FILTER_NEUTRAL: AiFilterValues = { contrast: 1, saturate: 1, bri
  * this is the default a player gets. Anything stored in `ff.aiFilter` is a deviation from
  * THIS, not from identity.
  *
- * Measured rather than picked by eye. Across eight rooms it lifts luminance spread 53.2 ->
- * 56.4 and mean chroma 0.744 -> 0.786 while losing no shadow detail and touching ~1% of
- * highlights. Saturation stops above ~1.12 — the art is already highly saturated, so a
- * higher value only clips channels — and contrast is limited by the pale stone and coral
- * blowing out, not by the shadows, because the upscale's black point is already true.
+ * Measured rather than picked by eye. Across eight rooms it lifts luminance spread
+ * 53.2 -> 56.6 and mean chroma 0.744 -> 0.781, loses NO shadow detail, and touches 1.17%
+ * of highlights. Mean luminance is unchanged (73.6 -> 73.7): the brightness lift is sized
+ * to pay back exactly what the contrast takes out of the midtones, so the grade adds
+ * depth and colour without making the game darker.
+ *
+ * The two limits worth knowing before retuning. Saturation plateaus: chroma reaches
+ * ~0.786 by `saturate(1.12)` and does not move for 1.20 or 1.35, because the art is
+ * already highly saturated and a higher value only clips channels. And the ceiling on
+ * contrast is the HIGHLIGHTS — the pale stone and coral blow out — not the shadows, which
+ * have room because the upscale's black point is already true (1st percentile ~1 against
+ * the 1998 art's ~11).
  */
-export const AI_FILTER_DEFAULT: AiFilterValues = { contrast: 1.06, saturate: 1.12, brightness: 1.03 };
+export const AI_FILTER_DEFAULT: AiFilterValues = { contrast: 1.05, saturate: 1.1, brightness: 1.03 };
 
 /** The one persisted key. Read only after `migrateSaves()`, like every other `ff.*` (see persist.ts). */
 const STORAGE_KEY = 'ff.aiFilter';

@@ -28,7 +28,7 @@ other way — outward from ALTAR's own code, keeping the original's names, its q
 **The one thing deliberately changed is how it looks.** The art was drawn for a 640×480 screen, and on
 a modern display that is a small soft rectangle. So the port ships AI-upscaled art: the same pictures,
 the same layout, the same everything the game does — just enough resolution to be worth looking at
-today. That tier also carries a small colour grade (`contrast 1.06 / saturate 1.12 / brightness 1.03`,
+today. That tier also carries a small colour grade (`contrast 1.05 / saturate 1.10 / brightness 1.03`,
 applied at display time). It is not a correction — measured across eight rooms the upscale already has
 *more* contrast than the 1998 art and the same saturation — it is a deliberate enrichment, and it is
 scoped to the AI tier alone. **Classic and Enhanced are untouched**, so the faithful look is always one
