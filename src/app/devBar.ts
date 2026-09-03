@@ -134,7 +134,8 @@ export function initDevBar(h: DevBarHost): void {
       el.blur();
     });
   }
-  registerAiFilterControls({ inputs: aiInputs, out: aiFilterOut, reset: aiFilterReset });  // The touch-UI override. Dev chrome, not a player setting — see touchMode.ts for why
+  registerAiFilterControls({ inputs: aiInputs, out: aiFilterOut, reset: aiFilterReset });
+  // The touch-UI override. Dev chrome, not a player setting — see touchMode.ts for why
   // "which controls do you want" is a question the device already answers. It takes
   // effect immediately rather than on reload: the bar's visibility is derived per frame,
   // so re-reading the mode and relaying out is the whole of it.

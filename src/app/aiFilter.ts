@@ -43,10 +43,12 @@
  * one, so "off" in the tuning tool is genuinely off and is a fair baseline to compare
  * against.
  *
- * The stylesheet's `:root` carries the same three numbers as `AI_FILTER_DEFAULT`. That is
- * deliberate duplication: it means the shipped look is already correct on the first paint,
- * before this module has run, so boot cannot flash an ungraded frame. `test/aiFilter.test.ts`
- * fails if the two ever drift apart.
+ * This module is the ONLY source of the three numbers. The stylesheet used to repeat them
+ * in a `:root` block, on the theory that it would grade the first painted frame before this
+ * module runs; it cannot, because the rule also needs `data-graphics` and `data-ai-filter`
+ * and both are written here, in the same call as the properties. Nothing is lost: the
+ * canvases sit blank behind the loading overlay until `main.ts` has run, so there is no
+ * ungraded frame to flash.
  *
  * ── Scope, as decided ─────────────────────────────────────────────────────────
  * The gate is the SETTING (`graphics === 'ai'`, reflected onto `<html>` by
@@ -69,11 +71,17 @@ export type AiFilterKey = (typeof AI_FILTER_KEYS)[number];
 export type AiFilterValues = Record<AiFilterKey, number>;
 
 /**
- * The slider bounds, which are also the CLAMP applied to anything read back from
- * storage. The lower bounds are deliberately above 0: `brightness(0)` is a black screen
- * and `contrast(0)` a flat grey one, and a persisted key is a thing a player can edit by
- * hand or carry across a version. A dev tool that can permanently blank the game on next
- * boot is a trap, so the range cannot express it.
+ * The slider bounds, which are also the CLAMP applied to anything read back from storage.
+ *
+ * `contrast` and `brightness` have lower bounds well above 0 on purpose. `brightness(0)`
+ * is a black screen and `contrast(0)` a flat grey one; `ff.aiFilter` is a thing that can
+ * be hand-edited or carried across a version, and a dev tool able to make the game
+ * unreadable on every subsequent boot is a trap, so the range cannot express one.
+ *
+ * `saturate` is the deliberate exception and goes down to 0. That is greyscale, not
+ * unreadable — every shape, edge and subtitle survives it — and "what does this room look
+ * like with the colour taken out" is a real question for a tool whose whole job is
+ * judging colour. It is recoverable from the dev bar like any other value.
  */
 export const AI_FILTER_RANGES: Readonly<Record<AiFilterKey, { min: number; max: number; step: number }>> = {
   contrast: { min: 0.5, max: 2, step: 0.01 },
@@ -180,13 +188,19 @@ export function setAiFilterTier(isAi: boolean): void {
  * is either a `<input type=range>` (which can produce `''` mid-edit) or JSON out of
  * localStorage (which can be anything at all).
  */
-export function clampAiFilter(key: AiFilterKey, raw: unknown): number {
+export function clampAiFilter(key: AiFilterKey, raw: unknown, fallback = AI_FILTER_NEUTRAL[key]): number {
+  // The fallback differs by caller, and getting it wrong is silent. A slider reporting a
+  // junk value means "no change", so it falls back to identity; a junk value in STORAGE
+  // means that channel is unusable, and the right answer there is the shipped default —
+  // otherwise `{"contrast":null}` boots with contrast at 1 and the other two graded, i.e.
+  // half the look, which is worse than either whole one.
+  //
   // An empty string is not zero here. `Number('')` is 0, which is finite and would clamp
   // to the bottom of the range — so a range input momentarily reporting '' (or a hand-
   // edited storage key with an empty field) would darken the game rather than do nothing.
-  if (typeof raw === 'string' && raw.trim() === '') return AI_FILTER_NEUTRAL[key];
+  if (typeof raw === 'string' && raw.trim() === '') return fallback;
   const n = typeof raw === 'string' ? Number(raw) : raw;
-  if (typeof n !== 'number' || !Number.isFinite(n)) return AI_FILTER_NEUTRAL[key];
+  if (typeof n !== 'number' || !Number.isFinite(n)) return fallback;
   const { min, max } = AI_FILTER_RANGES[key];
   return Math.min(max, Math.max(min, n));
 }
@@ -210,7 +224,7 @@ export function parseAiFilter(raw: string | null): AiFilterValues {
   if (typeof obj !== 'object' || obj === null) return { ...AI_FILTER_DEFAULT };
   const rec = obj as Record<string, unknown>;
   const out = { ...AI_FILTER_DEFAULT };
-  for (const k of AI_FILTER_KEYS) if (k in rec) out[k] = clampAiFilter(k, rec[k]);
+  for (const k of AI_FILTER_KEYS) if (k in rec) out[k] = clampAiFilter(k, rec[k], AI_FILTER_DEFAULT[k]);
   return out;
 }
 
@@ -281,10 +295,13 @@ export function resetAiFilter(): AiFilterValues {
 
 function persist(): void {
   if (typeof localStorage === 'undefined') return;
-  // Storing the default writes nothing. The key means "this dev moved it", so a dev who
-  // tries the sliders and resets is left with the storage they started on — and, more
-  // importantly, nobody is pinned to today's numbers: if the shipped default is ever
-  // retuned, only the machines that actually chose something keep their own value.
-  if (AI_FILTER_KEYS.every((k) => values[k] === AI_FILTER_DEFAULT[k])) localStorage.removeItem(STORAGE_KEY);
-  else localStorage.setItem(STORAGE_KEY, JSON.stringify(values));
+  // Only the channels that were actually MOVED are stored, and storing nothing removes
+  // the key. Writing the whole triple would quietly pin the other two: a dev who nudges
+  // contrast alone would freeze today's saturate and brightness on that machine forever,
+  // and a later retune of AI_FILTER_DEFAULT would never reach them on any channel. This
+  // is also why `parseAiFilter` handles a partial blob — that is the shape written here.
+  const moved: Partial<AiFilterValues> = {};
+  for (const k of AI_FILTER_KEYS) if (values[k] !== AI_FILTER_DEFAULT[k]) moved[k] = values[k];
+  if (Object.keys(moved).length === 0) localStorage.removeItem(STORAGE_KEY);
+  else localStorage.setItem(STORAGE_KEY, JSON.stringify(moved));
 }

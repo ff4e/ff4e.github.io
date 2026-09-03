@@ -7,7 +7,7 @@
  * boolean over three numbers. None of that needs a browser, and the suite's own rule is
  * to buy a probe only when the browser IS the thing under test. What a probe would add
  * here is the DOM half — that the custom properties land and the attribute appears — and
- * that is asserted by `tools/test-ai-filter.mjs`.
+ * that is asserted by the block added to `tools/test-devbar.mjs`.
  *
  * The clamp is the part that actually matters. `ff.aiFilter` is a localStorage key: a
  * player can edit it, a stale one can survive a version, and `brightness(0)` is a black
@@ -99,6 +99,15 @@ describe('parseAiFilter', () => {
     const v = parseAiFilter('{"brightness":99}');
     expect(v.brightness).toBe(AI_FILTER_RANGES.brightness.max);
   });
+
+  it('falls back to the DEFAULT for a corrupt channel, not to identity', () => {
+    // A half-applied grade — one channel at 1, the others graded — is worse than either
+    // whole answer, so an unusable channel takes the shipped value.
+    for (const bad of ['null', '"abc"', '""', '{}', '[]']) {
+      const v = parseAiFilter(`{"contrast":${bad}}`);
+      expect(v.contrast, `{"contrast":${bad}}`).toBe(AI_FILTER_DEFAULT.contrast);
+    }
+  });
 });
 
 describe('aiFilterActive', () => {
@@ -128,15 +137,24 @@ describe('the shipped default', () => {
     }
   });
 
-  it("matches the stylesheet's :root, which is what makes the first paint correct", () => {
-    // index.html carries the same three numbers so a boot cannot flash an ungraded frame.
-    // Two copies of a value is a drift risk; this is the guard that makes it safe.
+  it('is the ONLY copy of the numbers — the stylesheet must not repeat them', () => {
+    // A `:root { --ai-*: ... }` block was tried and removed: the rule also needs
+    // `data-graphics` and `data-ai-filter`, both written by JS in the same call as the
+    // properties, so a stylesheet copy is unreachable in every state. An unreachable
+    // second copy of a shipped value is a trap for whoever edits one of them.
     const html = readFileSync(join(import.meta.dirname, '..', 'index.html'), 'utf8');
     for (const key of AI_FILTER_KEYS) {
-      const m = html.match(new RegExp(`--ai-${key}:\\s*([0-9.]+);`));
-      expect(m, `index.html declares --ai-${key}`).toBeTruthy();
-      expect(Number(m![1]), `--ai-${key} matches AI_FILTER_DEFAULT`).toBe(AI_FILTER_DEFAULT[key]);
+      expect(html, `index.html must not declare --ai-${key}`).not.toMatch(new RegExp(`--ai-${key}\\s*:`));
     }
+    // ...but it must still USE them, or the grade would never reach the canvases.
+    expect(html).toContain('var(--ai-contrast)');
+  });
+
+  it('can be turned to greyscale but never to an unreadable screen', () => {
+    // saturate(0) is a deliberate exception: greyscale keeps every shape and subtitle.
+    expect(AI_FILTER_RANGES.saturate.min).toBe(0);
+    expect(AI_FILTER_RANGES.contrast.min).toBeGreaterThan(0);
+    expect(AI_FILTER_RANGES.brightness.min).toBeGreaterThan(0);
   });
 });
 
@@ -153,6 +171,15 @@ describe('persistence', () => {
     expect(store.map.has('ff.aiFilter')).toBe(true);
     setAiFilter('saturate', AI_FILTER_DEFAULT.saturate);
     expect(store.map.has('ff.aiFilter')).toBe(false);
+  });
+
+  it('stores ONLY the channels that moved, so the others still track the default', () => {
+    setAiFilter('contrast', 1.3);
+    expect(JSON.parse(store.map.get('ff.aiFilter')!)).toEqual({ contrast: 1.3 });
+    // The whole point: a later retune of the default must still reach the untouched two.
+    const restored = parseAiFilter(store.map.get('ff.aiFilter')!);
+    expect(restored.saturate).toBe(AI_FILTER_DEFAULT.saturate);
+    expect(restored.brightness).toBe(AI_FILTER_DEFAULT.brightness);
   });
 
   it('stores identity, because turning the grade OFF is a real choice to remember', () => {

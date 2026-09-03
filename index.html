@@ -54,15 +54,17 @@
         background: #000;
         border: 1px solid #333;
       }
-      /* The AI tier's colour look. Three numbers the dev bar retunes live; the
-         declaration itself lives here so the shipped default is one edit in one place
-         (src/app/aiFilter.ts explains the split, and why the gate is the SETTING rather
-         than the per-frame AI gate).
+      /* The AI tier's colour look. The three numbers live in src/app/aiFilter.ts
+         (AI_FILTER_DEFAULT) and arrive here as custom properties set on <html>; only the
+         DECLARATION is here, so the dev bar can retune the game live without this rule
+         being rewritten at runtime.
 
-         These `:root` values ARE the shipped default, and they must match
-         AI_FILTER_DEFAULT in aiFilter.ts — test/aiFilter.test.ts fails if they drift.
-         Duplicated on purpose: having them here means the first painted frame is already
-         graded, so boot cannot flash an ungraded picture before the module runs.
+         There is deliberately no `:root { --ai-*: ... }` fallback. One was tried, on the
+         theory that it would grade the first painted frame before the module runs — it
+         cannot: this rule needs `data-graphics` and `data-ai-filter`, and BOTH are only
+         ever written by JS, in the same call that writes the properties. A `:root` block
+         would therefore be unreachable in every state, and a second copy of the shipped
+         numbers that can never apply is a trap for whoever edits one of them.
 
          NOT a correction. The AI tier measures HIGHER contrast than the 1998 art (spread
          53.2 against 50.8) and the same saturation, so this is a deliberate enrichment of
@@ -79,11 +81,6 @@
          the AI tier does pay for compositing a filter; what it buys is that a dev who
          drags all three back to 1 gets NO filter property at all rather than an
          arithmetically-empty one, which makes "off" a fair baseline to compare against. */
-      :root {
-        --ai-contrast: 1.05;
-        --ai-saturate: 1.1;
-        --ai-brightness: 1.03;
-      }
       html[data-graphics='ai'][data-ai-filter] canvas {
         filter: contrast(var(--ai-contrast)) saturate(var(--ai-saturate)) brightness(var(--ai-brightness));
       }
