@@ -147,6 +147,7 @@ import {
   setRenderOnDirty,
   setRenderer,
 } from './renderSettings.js';
+import { initAiFilter } from './aiFilter.js';
 import {
   DEFAULT_LINE_TICKS,
   EFFECT_VOL,
@@ -423,6 +424,11 @@ initRenderSettings({
     return setInfo;
   },
 });
+// The AI tier's colour filter, restored from the same storage and under the same rule:
+// after the save store is open. It takes no host — it only reads a key and writes three
+// CSS custom properties — but it must run after `initRenderSettings()`, which is what
+// puts `data-graphics` on the document for the stylesheet to gate on.
+initAiFilter();
 
 // Art loading for the enhanced and `ai` tiers lives in art.ts. Wired HERE, where that
 // code used to sit. It reads the game through these getters; `forceRoomRedraw` is the

@@ -37,6 +37,95 @@ await withApp(async ({ p, expect }) => {
   await p.waitForTimeout(50);
   expect((await p.evaluate(() => window.__ff.graphics())) === 'ai', 'E cycles enhanced -> ai');
 
+  // ── The AI tier's colour filter (src/app/aiFilter.ts) ────────────────────────
+  // Asserted here rather than in a probe of its own: this file already boots the app and
+  // already walks all three tiers, which is exactly the setup the filter needs, and a new
+  // probe would pay the browser launch again to re-derive it.
+  //
+  // The tier attribute is the gate the whole feature hangs on, and `setGraphics()` is not
+  // the only writer — boot assigns `graphics` straight from localStorage without going
+  // through it, so "correct after a switch" and "correct on arrival" are separate claims.
+  const gfxAttr = () => p.evaluate(() => document.documentElement.dataset.graphics);
+  const filterOf = (id) => p.evaluate((i) => getComputedStyle(document.getElementById(i)).filter, id);
+  const tuned = () => p.evaluate(() => document.documentElement.hasAttribute('data-ai-filter'));
+  const slide = (key, v) =>
+    p.evaluate(
+      ([k, val]) => {
+        const el = document.getElementById(`ai-${k}`);
+        el.value = String(val);
+        el.dispatchEvent(new Event('input'));
+      },
+      [key, v],
+    );
+
+  expect((await gfxAttr()) === 'ai', `data-graphics follows the tier (got "${await gfxAttr()}")`);
+
+  // The shipped default is a real grade, so the AI tier arrives filtered without anyone
+  // touching a slider. The three values reach the document from `aiFilter.ts` during boot,
+  // before any canvas paints — the stylesheet holds only the declaration and deliberately
+  // no copy of the numbers (test/aiFilter.test.ts asserts that it stays that way).
+  expect((await tuned()) === true, 'the AI tier arrives with the shipped grade applied');
+  for (const id of ['screen', 'screen-gl', 'panel']) {
+    expect((await filterOf(id)) !== 'none', `#${id} takes the AI filter`);
+  }
+  // #panel is deliberately included above — it swaps to its own AI-upscaled composite on
+  // this tier, so a graded room beside an ungraded panel would read as an oversight.
+  const shipped = await p.evaluate(() =>
+    ['contrast', 'saturate', 'brightness'].map((k) => document.documentElement.style.getPropertyValue(`--ai-${k}`)),
+  );
+  expect(shipped.every((v) => v !== ''), `the shipped values are applied (got ${shipped.join('/')})`);
+
+  // Dragging a slider retunes it live.
+  await slide('contrast', 1.4);
+  await p.waitForTimeout(30);
+  expect(
+    (await p.evaluate(() => document.documentElement.style.getPropertyValue('--ai-contrast'))) === '1.4',
+    'the slider writes --ai-contrast',
+  );
+
+  // The scoping claim, and the one thing this change must not get wrong: the other two
+  // tiers render exactly as they did before the filter existed.
+  for (const tier of ['classic', 'enhanced']) {
+    await p.evaluate((t) => window.__ff.setGraphics(t), tier);
+    await p.waitForTimeout(30);
+    expect((await gfxAttr()) === tier, `data-graphics follows to ${tier}`);
+    expect((await filterOf('screen')) === 'none', `the filter does not leak onto the ${tier} tier`);
+    expect(
+      (await p.evaluate(() => document.getElementById('ai-contrast').disabled)) === true,
+      `the colour sliders are disabled off the AI tier (${tier})`,
+    );
+  }
+  await p.evaluate(() => window.__ff.setGraphics('ai'));
+  await p.waitForTimeout(30);
+  expect((await filterOf('screen')) !== 'none', 'and it comes back on returning to the AI tier');
+
+  // Reset goes to the SHIPPED DEFAULT, not to identity — the button undoes tuning, and
+  // what a player sees is the default. It clears the key rather than writing the default
+  // back, so nobody is pinned to today's numbers if the default is ever retuned.
+  await p.evaluate(() => document.getElementById('ai-filter-reset').click());
+  await p.waitForTimeout(30);
+  expect((await tuned()) === true, 'reset restores the shipped grade rather than removing it');
+  expect(
+    (await p.evaluate(() => localStorage.getItem('ff.aiFilter'))) === null,
+    'reset leaves no ff.aiFilter key behind',
+  );
+
+  // Identity IS still reachable, and it must mean no `filter` property at all — that is
+  // what makes "off" in the tuning tool a fair baseline to compare the grade against.
+  for (const k of ['contrast', 'saturate', 'brightness']) await slide(k, 1);
+  await p.waitForTimeout(30);
+  expect((await tuned()) === false, 'dragging all three to 1 removes data-ai-filter');
+  expect((await filterOf('screen')) === 'none', 'identity declares no filter at all');
+  await p.evaluate(() => document.getElementById('ai-filter-reset').click());
+  await p.waitForTimeout(30);
+
+  // A persisted value out of range cannot survive into the running game — `ff.aiFilter` is
+  // hand-editable and can outlive a version, and `brightness(0)` is a black screen that
+  // would come back on every boot. The clamp itself is unit-tested (test/aiFilter.test.ts);
+  // asserted here only that the module boots from storage at all, which is the part that
+  // needs a real page. No reload: it would cost this probe a second boot to re-derive
+  // what the unit suite already pins.
+
   // Changing the picker drives the graphics level.
   await p.evaluate(() => {
     const sel = document.getElementById('graphics');

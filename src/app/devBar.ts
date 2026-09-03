@@ -21,7 +21,8 @@ import { isFitMode } from './layout.js';
 import { devSolveRoom } from './cheats.js';
 import { setSolveSpeed, solveStatus } from './solveMode.js';
 import { solutionFor } from '../rooms/index.js';
-import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn, solveSpeedSelect, touchSelect } from './dom.js';
+import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn, solveSpeedSelect, touchSelect, aiBrightnessInput, aiContrastInput, aiFilterOut, aiFilterReset, aiSaturateInput } from './dom.js';
+import { registerAiFilterControls, resetAiFilter, setAiFilter, type AiFilterKey } from './aiFilter.js';
 import { relayout } from './loadingUi.js';
 import { closeMapOverlay } from './mapNav.js';
 import { O_NORMAL, O_SC_DOWN, ui } from './screenState.js';
@@ -108,6 +109,32 @@ export function initDevBar(h: DevBarHost): void {
       setGraphics(v === 'classic' || v === 'ai' ? v : 'enhanced');
     });
   }
+  // The AI tier's colour tuning. Three sliders over `src/app/aiFilter.ts`, wired on
+  // `input` rather than `change` so the room retints DURING the drag — the point of the
+  // tool is finding a value by eye, and a preview that only arrives on mouse-up makes
+  // that a guessing game. `touchOptions.ts`'s volume sliders set the same precedent.
+  //
+  // No repaint is requested for the same reason none is needed: the filter is applied by
+  // the compositor over whatever the canvas already holds, so an idle room retints
+  // without the game drawing a frame.
+  //
+  // Only the listeners are here. Which tier the group is live on, where the values are
+  // kept and how the controls are put back in step all belong to `aiFilter.ts` — the
+  // combobox beside this is not the only way the tier changes (the `E` hotkey and the
+  // `__ff.setGraphics` hook are the others), so that sync cannot hang off this listener.
+  const aiInputs = { contrast: aiContrastInput, saturate: aiSaturateInput, brightness: aiBrightnessInput };
+  for (const [key, el] of Object.entries(aiInputs) as [AiFilterKey, HTMLInputElement | null][]) {
+    if (!el) continue;
+    el.addEventListener('input', () => setAiFilter(key, el.value));
+  }
+  if (aiFilterReset) {
+    const el = aiFilterReset;
+    el.addEventListener('click', () => {
+      resetAiFilter();
+      el.blur();
+    });
+  }
+  registerAiFilterControls({ inputs: aiInputs, out: aiFilterOut, reset: aiFilterReset });
   // The touch-UI override. Dev chrome, not a player setting — see touchMode.ts for why
   // "which controls do you want" is a question the device already answers. It takes
   // effect immediately rather than on reload: the bar's visibility is derived per frame,
