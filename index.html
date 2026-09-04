@@ -479,6 +479,16 @@
         gap: 6px;
         background: #10161acc;
         backdrop-filter: blur(2px);
+        /* `--bar-w`/`--bar-h` are the bar's WHOLE footprint — its buttons plus the cutout
+           it has to clear — and the same value is what `.stage` reserves and what the
+           centring spacers clamp against. The cutout is spent as padding INSIDE that box,
+           so the box has to measure the way the reserve does.
+           Without this the bar is `content-box`: the padding is added ON TOP of the width,
+           the bar comes out one whole inset wider than the space reserved for it, and it
+           covers that much of the room's left edge (measured: 196px of bar against a 134px
+           reserve, in landscape on an iPhone 17 Pro). A browser cannot see it — every inset
+           is 0 there, so the padding is 0 and the two agree by accident. */
+        box-sizing: border-box;
       }
       #touchbar[hidden] { display: none; }
       .tbtn {

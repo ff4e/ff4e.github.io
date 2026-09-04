@@ -298,6 +298,40 @@ try {
     `the bar reserves its width from the stage (margin ${inRoom.marginLeft}, stage ${inRoom.stageW} of ${inRoom.viewW})`,
   );
 
+  // ── The display cutout, supplied. On a phone the native shell measures it and writes
+  // it into `--sa-*` (ios/App/App/SafeAreaBridgeViewController.swift); the bar's footprint
+  // is `72px + var(--sa-left)` and it spends the inset as padding INSIDE that box, so its
+  // rendered width and the stage's reserve are the same number by construction.
+  //
+  // A browser reports every inset as 0, which makes the whole mechanism invisible here —
+  // and that blind spot hid a real bug: `#touchbar` was `content-box`, so the padding was
+  // added ON TOP of the width, the bar came out one whole inset wider than the space
+  // reserved for it, and it covered that much of the room's left edge (196px of bar
+  // against a 134px reserve, on an iPhone 17 Pro in landscape). Nothing in the suite could
+  // see it, because with a 0 inset the padding is 0 and the two agree by accident.
+  //
+  // So set the same variable the shell sets, and assert they still agree with it non-zero.
+  const cutout = await p.evaluate(() => {
+    const root = document.documentElement;
+    root.style.setProperty('--sa-left', '62px');
+    const bar = document.getElementById('touchbar').getBoundingClientRect();
+    const stage = document.querySelector('.stage');
+    const reserve = Number.parseFloat(getComputedStyle(stage).marginLeft);
+    const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
+    root.style.removeProperty('--sa-left');
+    return { barW: Math.round(bar.width), reserve, buttonLeft: Math.round(buttonLeft) };
+  });
+  expect(
+    cutout.barW === cutout.reserve,
+    `a 62px cutout grows the bar and its reserve by the same amount (bar ${cutout.barW}px, reserve ${cutout.reserve}px)`,
+  );
+  // And the point of the padding: the buttons themselves clear the cutout, rather than the
+  // bar merely being wider around them.
+  expect(
+    cutout.buttonLeft >= 62,
+    `the buttons start past the cutout, not under it (leftmost at ${cutout.buttonLeft}px)`,
+  );
+
   // ── The faithful panel is retired, and the room is given its footprint back. The
   // whole point of doing this LAST: everything the panel does now has a thumb-sized
   // counterpart, so hiding it leaves nothing unreachable.
