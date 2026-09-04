@@ -326,10 +326,13 @@ try {
     `a 62px cutout grows the bar and its reserve by the same amount (bar ${cutout.barW}px, reserve ${cutout.reserve}px)`,
   );
   // And the point of the padding: the buttons themselves clear the cutout, rather than the
-  // bar merely being wider around them.
+  // bar merely being wider around them. EXACTLY at it, not merely past it — the lead below
+  // is a floor rather than an addend, and this is the assertion that says so. Spending both
+  // (plus centring the button in what was left) put the buttons 76px in against an island
+  // whose visible edge is near 48px, which is the gap Martin reported.
   expect(
-    cutout.buttonLeft >= 62,
-    `the buttons start past the cutout, not under it (leftmost at ${cutout.buttonLeft}px)`,
+    cutout.buttonLeft === 62,
+    `the buttons start AT the cutout, neither under it nor held off it (leftmost at ${cutout.buttonLeft}px)`,
   );
 
   // ── The display's rounded CORNER, which no inset reports. The tight case is the
@@ -337,43 +340,29 @@ try {
   // sits against bare glass and nothing has pushed the buttons in. The corner radius is
   // ~60px on an iPhone 17 Pro and iOS exposes no value for it, so a bar flush to the edge
   // put the top button's corner where the screen had already curved away — measured, with
-  // the button 8px in. `--bar-corner` is the fixed answer, spent as padding inside the
-  // bar's own footprint so the reserve does not move.
-  //
-  // Assert the clearance directly rather than the padding: it is the button's distance
-  // from the screen that the corner eats, and stating it that way survives the buttons
-  // being resized (which is the other half of the same fix).
+  // the button 8px in. `--bar-lead` is the fixed answer, spent inside the bar's own
+  // footprint so the reserve does not move.
   const corner = await p.evaluate(() => {
     const px = (n) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n));
     const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
     const bar = document.getElementById('touchbar');
     const rect = bar.getBoundingClientRect();
     const reserve = Number.parseFloat(getComputedStyle(document.querySelector('.stage')).marginLeft);
-    return {
-      buttonLeft,
-      declared: px('--bar-corner'),
-      padLeft: Number.parseFloat(getComputedStyle(bar).paddingLeft),
-      barRight: rect.right,
-      reserve,
-    };
+    return { buttonLeft, declared: px('--bar-lead'), barRight: rect.right, reserve };
   });
-  // With no cutout the padding IS the corner allowance, which is what pins the rule to the
-  // property. Asserting only the button's position would not: the buttons are narrower than
-  // the bar, so centring alone already leaves them 10px in and a dropped `padding-left`
-  // would still clear an 8px bar.
+  // The button's own position, not the padding: the two are the same number only because
+  // the buttons are left-aligned, and that alignment is half of what makes the `max()`
+  // above hold. Asserting the padding would pass with the buttons centred again, which is
+  // the shape that produced the 76px gap.
   expect(
-    corner.declared > 0 && corner.padLeft === corner.declared,
-    `the bar pads itself by --bar-corner when there is no cutout (padding ${corner.padLeft}px, --bar-corner ${corner.declared}px)`,
-  );
-  expect(
-    corner.buttonLeft >= corner.declared,
-    `so the buttons clear the display corner (leftmost at ${corner.buttonLeft}px)`,
+    corner.declared > 0 && corner.buttonLeft === corner.declared,
+    `with no cutout the buttons start at the lead that clears the display corner (${corner.buttonLeft}px, --bar-lead ${corner.declared}px)`,
   );
   // The padding is spent INSIDE the footprint, not added to it — the same failure the
   // box-sizing bug was. If it leaked, the bar would be wider than the room's reserve again.
   expect(
     corner.barRight === corner.reserve,
-    `the corner padding comes out of the bar's own width, not the room's (bar ends ${corner.barRight}px, reserve ${corner.reserve}px)`,
+    `the lead comes out of the bar's own width, not the room's (bar ends ${corner.barRight}px, reserve ${corner.reserve}px)`,
   );
 
   // ── The faithful panel is retired, and the room is given its footprint back. The

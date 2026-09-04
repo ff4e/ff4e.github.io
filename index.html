@@ -57,9 +57,10 @@
            inset can never be added in one place and forgotten in another. */
         --bar-h: calc(54px + var(--sa-top));
         --bar-w: calc(72px + var(--sa-left));
-        /* Clearance for the display's ROUNDED CORNER, which no inset describes.
+        /* How far in the buttons start when nothing else pushes them — the bar's LEAD.
+           It exists for the display's ROUNDED CORNER, which no inset describes:
            `env(safe-area-inset-*)` reports the status bar, the sensor housing and the home
-           indicator — all of them straight-edged. The corner radius is none of those, and
+           indicator, all of them straight-edged. The corner radius is none of those, and
            iOS reports nothing for it, so a bar flush against the edge is free to put a
            button where the screen has already curved away. Measured on an iPhone 17 Pro in
            the landscape where the housing is on the RIGHT (so `--sa-left` is 0 and the bar
@@ -67,9 +68,22 @@
            is ~60px, and it ate that button's top-left corner. The bottom button was fine —
            `--sa-bottom` below shifts the whole column up, so the top corner is the tight one.
            This is a fixed number because CSS has no way to ask: it is the only quantity here
-           that is not measured from the device. It is spent as padding INSIDE `--bar-w`, so
-           the bar's footprint and what `.stage` reserves for it are unchanged. */
-        --bar-corner: 8px;
+           not measured from the device.
+
+           It is a FLOOR, not an addend — `max(--sa-left, --bar-lead)`, never their sum.
+           Adding them would spend the corner allowance a second time on exactly the phones
+           that least need it: an inset means the housing is on THIS side, which has already
+           pushed the buttons far past the corner. Summing them (plus centring the button in
+           what was left) put the buttons 76px in against an island whose visible edge is
+           near 48px — a gap wide enough to read as a mistake, which is how it was found.
+
+           14px rather than 8px because that is what shipped and was verified on device:
+           8px of padding plus 6px of centring slack. The buttons are left-aligned now, so
+           the whole lead has to be stated here.
+
+           Either way it is spent INSIDE `--bar-w`, so the bar's footprint and what `.stage`
+           reserves for it never move. */
+        --bar-lead: 14px;
       }
       html, body { height: 100%; }
       /* No double-tap zoom. It is reachable on any touch device, and it is close to
@@ -573,7 +587,12 @@
       @media (orientation: landscape) {
         html:not([data-touchbar-edge='top']) #touchbar {
           top: 0; left: 0; bottom: 0; width: var(--bar-w); flex-direction: column;
-          padding-left: calc(var(--sa-left) + var(--bar-corner)); padding-bottom: var(--sa-bottom);
+          /* Left-aligned, not centred: the lead below is the whole distance from the screen
+             edge to the buttons, so centring would silently add half the leftover on top of
+             it and undo the `max()`. The slack sits on the RIGHT instead, between the
+             buttons and the room, where nothing is competing for it. */
+          align-items: flex-start;
+          padding-left: max(var(--sa-left), var(--bar-lead)); padding-bottom: var(--sa-bottom);
         }
         html[data-touchbar]:not([data-touchbar-edge='top']) .stage { margin-left: var(--bar-w); }
         html[data-touchbar]:not([data-touchbar-edge='top']) .stage::before {
