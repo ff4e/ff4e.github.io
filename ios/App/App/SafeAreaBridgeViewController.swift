@@ -30,9 +30,10 @@ import Capacitor
  cutout is; on iOS the answer is now supplied rather than computed, and everywhere else
  the `env()` fallbacks in `index.html` still apply.
 
- ── Why a subclass, and why these two hooks ───────────────────────────────────
+ ── Why a subclass, and why these three hooks ─────────────────────────────────
 
- `Main.storyboard` names this class, so it replaces the stock controller with no other
+ `SceneDelegate` installs this class as the window's root controller (see the note there —
+ the storyboard is a decoy), so it replaces the stock bridge controller with no other
  wiring. The insets are pushed from:
 
    - `viewSafeAreaInsetsDidChange` — the authoritative moment. Fires on rotation, and on
@@ -40,8 +41,14 @@ import Capacitor
    - `viewDidAppear` — because the first `viewSafeAreaInsetsDidChange` can land before the
      web view has a document to run script in, and a value written to a page that does not
      exist yet is silently lost.
+   - `viewWillTransition(to:with:)` — because of the landscape mirroring described below.
+     Turning the device 180° from one landscape to the other swaps which side the sensor
+     housing is on, but leaves `view.safeAreaInsets` bit-for-bit identical (that is the
+     whole point of mirroring), so `viewSafeAreaInsetsDidChange` never fires. Without this
+     hook the published values stay frozen on the previous orientation and the touch bar
+     keeps its gap on the wrong side.
 
- Both are idempotent, so running twice costs one `evaluateJavaScript` and changes nothing.
+ All three are idempotent, so running twice costs one `evaluateJavaScript` and changes nothing.
  */
 class SafeAreaBridgeViewController: CAPBridgeViewController {
 
@@ -55,11 +62,53 @@ class SafeAreaBridgeViewController: CAPBridgeViewController {
         publishSafeAreaInsets()
     }
 
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        // Publish after the transition, not during it: `interfaceOrientation` is still the
+        // outgoing value while the rotation is in flight.
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.publishSafeAreaInsets()
+        }
+    }
+
     /// Write the current insets onto `:root` as CSS custom properties, in CSS px.
     private func publishSafeAreaInsets() {
         // UIKit points and CSS px are the same unit here — both are the logical, non-Retina
         // coordinate space — so the values pass through without scaling by `contentScaleFactor`.
-        let insets = view.safeAreaInsets
+        var insets = view.safeAreaInsets
+
+        // ── UIKit mirrors the housing inset in landscape; we un-mirror it ──────────
+        //
+        // Measured on an iPhone 17 Pro. Portrait reports what you would expect:
+        // `top=62 right=0 bottom=34 left=0`. Landscape reports `top=0 right=62 bottom=20
+        // left=62` — the sensor housing is on ONE side, but the inset appears on BOTH.
+        //
+        // That is deliberate of UIKit: a symmetric inset keeps content from shifting when
+        // the device is flipped 180°, which is the right default for a document. It is the
+        // wrong answer for the touch bar, which is pinned to the left edge and only needs
+        // to clear something physically in its way. Padded on both sides, it wasted 62pt on
+        // whichever side the island was not — visible as a wide empty gap left of the
+        // buttons with the island over on the right.
+        //
+        // `interfaceOrientation` says which side the housing is on. Do not reason about this
+        // from the names or from Apple's "home button on the right" wording:
+        // `UIInterfaceOrientation` is the mirror image of `UIDeviceOrientation`
+        // (`landscapeLeft` is raw value 4 here and 3 there), so the obvious reading comes out
+        // backwards. Measured directly in the Simulator on an iPhone 17 Pro instead: with
+        // `interfaceOrientation == .landscapeLeft` the Dynamic Island sits on the RIGHT of the
+        // rendered page, so the right inset is the real one and the left inset is the mirror.
+        // `.landscapeRight` is the reverse.
+        //
+        // Only the horizontal pair is touched: `bottom` is the home indicator and is real in
+        // both orientations.
+        if let orientation = view.window?.windowScene?.interfaceOrientation {
+            switch orientation {
+            case .landscapeLeft: insets.left = 0
+            case .landscapeRight: insets.right = 0
+            default: break
+            }
+        }
+
         let js = """
         (function () {
           var r = document.documentElement;
