@@ -57,6 +57,19 @@
            inset can never be added in one place and forgotten in another. */
         --bar-h: calc(54px + var(--sa-top));
         --bar-w: calc(72px + var(--sa-left));
+        /* Clearance for the display's ROUNDED CORNER, which no inset describes.
+           `env(safe-area-inset-*)` reports the status bar, the sensor housing and the home
+           indicator — all of them straight-edged. The corner radius is none of those, and
+           iOS reports nothing for it, so a bar flush against the edge is free to put a
+           button where the screen has already curved away. Measured on an iPhone 17 Pro in
+           the landscape where the housing is on the RIGHT (so `--sa-left` is 0 and the bar
+           is against bare glass): the top button's left edge sat 8px in, the corner radius
+           is ~60px, and it ate that button's top-left corner. The bottom button was fine —
+           `--sa-bottom` below shifts the whole column up, so the top corner is the tight one.
+           This is a fixed number because CSS has no way to ask: it is the only quantity here
+           that is not measured from the device. It is spent as padding INSIDE `--bar-w`, so
+           the bar's footprint and what `.stage` reserves for it are unchanged. */
+        --bar-corner: 8px;
       }
       html, body { height: 100%; }
       /* No double-tap zoom. It is reachable on any touch device, and it is close to
@@ -495,17 +508,25 @@
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         gap: 3px;
         flex: 0 1 auto;
-        min-width: 56px; min-height: 52px;
-        padding: 6px 4px;
+        /* 52x48 rather than 56x52. Two reasons, and the second is why the LABEL shrank with
+           the box instead of keeping its size: the button had to give up width so the bar
+           could spend it on `--bar-corner` above, and "Options" — the longest label — was
+           already the tightest thing in here, 41.5px of text inside 54px of content box.
+           Taking 4px off the box without taking anything off the text would have left it
+           1.25px from the border on each side, which reads as touching. At 9px the label is
+           37.4px and clears by 3.3px, so it is less cramped than it was before the box
+           shrank. Still well over the 44px minimum tap target on both axes. */
+        min-width: 52px; min-height: 48px;
+        padding: 6px 3px;
         color: #bdd; background: #18262e; border: 1px solid #35555f; border-radius: 10px;
-        font: 600 10px/1 system-ui, sans-serif; letter-spacing: 0.3px;
+        font: 600 9px/1 system-ui, sans-serif; letter-spacing: 0.3px;
         /* A tap must not select the label, show a magnifier, or bounce the page. */
         -webkit-tap-highlight-color: transparent;
         -webkit-user-select: none; user-select: none;
         touch-action: manipulation;
       }
       .tbtn svg {
-        width: 24px; height: 24px;
+        width: 22px; height: 22px;
         fill: none; stroke: currentColor; stroke-width: 1.8;
         stroke-linecap: round; stroke-linejoin: round;
       }
@@ -552,7 +573,7 @@
       @media (orientation: landscape) {
         html:not([data-touchbar-edge='top']) #touchbar {
           top: 0; left: 0; bottom: 0; width: var(--bar-w); flex-direction: column;
-          padding-left: var(--sa-left); padding-bottom: var(--sa-bottom);
+          padding-left: calc(var(--sa-left) + var(--bar-corner)); padding-bottom: var(--sa-bottom);
         }
         html[data-touchbar]:not([data-touchbar-edge='top']) .stage { margin-left: var(--bar-w); }
         html[data-touchbar]:not([data-touchbar-edge='top']) .stage::before {

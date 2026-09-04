@@ -332,6 +332,50 @@ try {
     `the buttons start past the cutout, not under it (leftmost at ${cutout.buttonLeft}px)`,
   );
 
+  // ── The display's rounded CORNER, which no inset reports. The tight case is the
+  // landscape where the sensor housing is on the far side: `--sa-left` is 0, so the bar
+  // sits against bare glass and nothing has pushed the buttons in. The corner radius is
+  // ~60px on an iPhone 17 Pro and iOS exposes no value for it, so a bar flush to the edge
+  // put the top button's corner where the screen had already curved away — measured, with
+  // the button 8px in. `--bar-corner` is the fixed answer, spent as padding inside the
+  // bar's own footprint so the reserve does not move.
+  //
+  // Assert the clearance directly rather than the padding: it is the button's distance
+  // from the screen that the corner eats, and stating it that way survives the buttons
+  // being resized (which is the other half of the same fix).
+  const corner = await p.evaluate(() => {
+    const px = (n) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n));
+    const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
+    const bar = document.getElementById('touchbar');
+    const rect = bar.getBoundingClientRect();
+    const reserve = Number.parseFloat(getComputedStyle(document.querySelector('.stage')).marginLeft);
+    return {
+      buttonLeft,
+      declared: px('--bar-corner'),
+      padLeft: Number.parseFloat(getComputedStyle(bar).paddingLeft),
+      barRight: rect.right,
+      reserve,
+    };
+  });
+  // With no cutout the padding IS the corner allowance, which is what pins the rule to the
+  // property. Asserting only the button's position would not: the buttons are narrower than
+  // the bar, so centring alone already leaves them 10px in and a dropped `padding-left`
+  // would still clear an 8px bar.
+  expect(
+    corner.declared > 0 && corner.padLeft === corner.declared,
+    `the bar pads itself by --bar-corner when there is no cutout (padding ${corner.padLeft}px, --bar-corner ${corner.declared}px)`,
+  );
+  expect(
+    corner.buttonLeft >= corner.declared,
+    `so the buttons clear the display corner (leftmost at ${corner.buttonLeft}px)`,
+  );
+  // The padding is spent INSIDE the footprint, not added to it — the same failure the
+  // box-sizing bug was. If it leaked, the bar would be wider than the room's reserve again.
+  expect(
+    corner.barRight === corner.reserve,
+    `the corner padding comes out of the bar's own width, not the room's (bar ends ${corner.barRight}px, reserve ${corner.reserve}px)`,
+  );
+
   // ── The faithful panel is retired, and the room is given its footprint back. The
   // whole point of doing this LAST: everything the panel does now has a thumb-sized
   // counterpart, so hiding it leaves nothing unreachable.
