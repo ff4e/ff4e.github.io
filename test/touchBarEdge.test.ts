@@ -207,6 +207,7 @@ describe('the bar footprint in index.html and the constants here', () => {
     const inner = block.slice(block.indexOf('{') + 1);
     return [...inner.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
       selector: m[1].replace(/\s+/g, ' ').trim(),
+      body: m[2],
       lengths: [...m[2].matchAll(/-?(\d+)px/g)]
         .map((n) => Number(n[1]))
         .filter((n) => n !== 0),
@@ -237,17 +238,47 @@ describe('the bar footprint in index.html and the constants here', () => {
     expect(unclassified.map((r) => r.selector)).toEqual([]);
   });
 
+  /**
+   * The size the landscape branch spends is a custom property now, not a literal.
+   *
+   * It had to become one: a display cutout is part of what the bar has to clear, so the
+   * bar's footprint is `54px + env(safe-area-inset-top)` on the top edge and
+   * `72px + env(safe-area-inset-left)` down the left, and repeating that sum in the four
+   * places that have to agree is exactly the drift this describe block exists to catch.
+   * `:root` states it once and the rules reference it.
+   *
+   * So the guard moves with it, and keeps both directions: the branch must spend its size
+   * ONLY through the property (no stray literal creeping back), and the property must be
+   * defined as the constant plus that edge's inset (no silently resized bar, and no
+   * silently dropped inset).
+   */
+  const varRefs = (isTop: boolean) => {
+    const name = isTop ? '--bar-h' : '--bar-w';
+    return rules
+      .filter((r) =>
+        isTop ? r.selector.includes(TOP) && !r.selector.includes(NOT_TOP) : r.selector.includes(NOT_TOP),
+      )
+      .flatMap((r) => [...r.body.matchAll(new RegExp(`var\\(${name}\\)`, 'g'))]);
+  };
+
+  /** `--bar-h: calc(54px + var(--sa-top));` -> ['54', '--sa-top'] */
+  const rootDef = (name: string) => {
+    const root = html.slice(html.indexOf(':root {'), html.indexOf('html, body {'));
+    const m = new RegExp(`${name}:\\s*calc\\((\\d+)px \\+ var\\((--sa-[a-z]+)\\)\\)`).exec(root);
+    return m === null ? null : { px: Number(m[1]), inset: m[2] };
+  };
+
   it('agrees on the left bar in every rule that spends its width', () => {
     // The bar's own width, `.stage`'s margin, and both halves of #126's centring clamp
     // (`min-width` and the negative margin that shifts the split back onto the viewport).
-    const left = lengthsOf(false);
-    expect(left.length).toBeGreaterThanOrEqual(4);
-    expect([...new Set(left)]).toEqual([TOUCHBAR_W]);
+    expect(varRefs(false).length).toBeGreaterThanOrEqual(4);
+    expect(lengthsOf(false)).toEqual([]);
+    expect(rootDef('--bar-w')).toEqual({ px: TOUCHBAR_W, inset: '--sa-left' });
   });
 
   it('agrees on the top bar in every rule that spends its height', () => {
-    const top = lengthsOf(true);
-    expect(top.length).toBeGreaterThanOrEqual(4);
-    expect([...new Set(top)]).toEqual([TOUCHBAR_H]);
+    expect(varRefs(true).length).toBeGreaterThanOrEqual(4);
+    expect(lengthsOf(true)).toEqual([]);
+    expect(rootDef('--bar-h')).toEqual({ px: TOUCHBAR_H, inset: '--sa-top' });
   });
 });

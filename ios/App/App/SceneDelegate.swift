@@ -8,7 +8,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
 
         window = UIWindow(windowScene: windowScene)
-        window?.rootViewController = CAPBridgeViewController()
+        // The root controller is created HERE, not from Main.storyboard — the storyboard is
+        // still named by Info.plist, but this replaces whatever it makes. So this is the one
+        // line that decides which bridge controller the app actually runs, and pointing the
+        // storyboard at a subclass (the obvious-looking move) changes nothing at all.
+        window?.rootViewController = SafeAreaBridgeViewController()
         window?.makeKeyAndVisible()
 
         SceneDelegateProxy.shared.scene(scene, willConnectTo: session, options: connectionOptions)

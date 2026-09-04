@@ -157,8 +157,17 @@ export function preferredTouchBarEdge(
   viewportH: number,
   mode: FitMode,
   dpr = 1,
+  // What the display cutout takes on each candidate edge, on top of the bar itself. The
+  // caller reads them (they are a DOM question, and this module is deliberately pure), so
+  // they default to the phone-without-a-notch answer and every existing test still prices
+  // exactly what it used to. On an iPhone in landscape the notch is worth ~59px on one
+  // side, which is most of the left bar's own width again — pricing `left` as 72 there
+  // would put the bar on the edge that shows LESS of the room, which is the one thing
+  // this function exists to get right.
+  insetTop = 0,
+  insetLeft = 0,
 ): TouchBarEdge {
-  const top = roomOn(roomW, roomH, viewportW, viewportH - TOUCHBAR_H, mode, dpr);
-  const left = roomOn(roomW, roomH, viewportW - TOUCHBAR_W, viewportH, mode, dpr);
+  const top = roomOn(roomW, roomH, viewportW, viewportH - TOUCHBAR_H - insetTop, mode, dpr);
+  const left = roomOn(roomW, roomH, viewportW - TOUCHBAR_W - insetLeft, viewportH, mode, dpr);
   return top >= left ? 'top' : 'left';
 }
