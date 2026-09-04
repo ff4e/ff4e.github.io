@@ -1,4 +1,15 @@
 import type { CapacitorConfig } from '@capacitor/cli';
+import { assertStagedDist } from './tools/check-ios-payload';
+
+/**
+ * Checked here, at config load, rather than in an npm script, because that is the only
+ * place that covers `npx cap sync` — the command Capacitor's own docs tell you to run,
+ * and the one that silently packages 250 MB of masters when `dist/` is still the symlink
+ * tree `npm run test:ui` leaves behind. See tools/check-ios-payload.ts for the whole
+ * story. It is a few stats, and it is a no-op when `dist/` does not exist yet.
+ */
+assertStagedDist();
+
 
 /**
  * Native iOS shell for the existing web build. The app is the SAME web app, hosted by a
