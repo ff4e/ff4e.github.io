@@ -28,10 +28,18 @@ import type { CapacitorConfig } from '@capacitor/cli';
  * this way.
  */
 const config: CapacitorConfig = {
-  // Placeholder. The final bundle id is blocked on the app-name decision — it has to
-  // match the App Store Connect record, and renaming after that record exists is the
-  // expensive direction. Do not register anything against this string.
-  appId: 'io.github.ff4e.app',
+  // The App Store listing is "Fish Fillets 4ever", not "Fish Fillets". No trademark for
+  // "Fish Fillets" is registered in any software or game class in any register (TMview,
+  // including the Czech ÚPV — every "fillets" mark found is a food-industry one, mostly
+  // expired), and the studio that made the game was struck off in 2010. But Bohemia
+  // Interactive still sells Fish Fillets 2 today, and unregistered marks arise from use
+  // in commerce, so the empty register is not a green light. Guideline 4.1(c) — "you
+  // cannot use another developer's brand or product name in your app's icon or name" —
+  // is what the "4ever" is doing work against.
+  //
+  // The bundle id can still change up to the moment an App Store Connect record exists.
+  // After that it is permanent, so that registration is the point of no return.
+  appId: 'io.github.ff4e.fishfillets4ever',
   appName: 'Fish Fillets 4ever',
   webDir: 'dist',
   ios: {
