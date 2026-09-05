@@ -69,5 +69,23 @@ export function hostFetchInit(url: string, init?: RequestInit): RequestInit | un
   if (!CAPACITOR_MEDIA_EXT.has(ext)) return init;
   // `bytes=0-` is "from the start to the end" — the whole file, by the one route that
   // comes back with a status code attached.
-  return { ...init, headers: { ...(init?.headers as Record<string, string> | undefined), Range: 'bytes=0-' } };
+  //
+  // Except when the caller only wanted to know whether the file EXISTS. The handler does
+  // not look at the method: on the range path it seeks and calls `readData(ofLength:)`,
+  // which is a plain resident read, not `mappedIfSafe`, so a HEAD asking for `bytes=0-`
+  // pulls the entire file into memory to answer a question the headers already answer.
+  // `introOverlay.ts` HEAD-probes `intro_ai.mp4` at boot and that file is 44 MB, on the
+  // default graphics setting, on the smallest device we ship to.
+  //
+  // One byte is enough. The response still takes the 206 path, still carries a status and
+  // still carries `Content-Range`, which is where the real length is — the caller reads
+  // `res.ok`, and a HEAD has no body for the truncation to matter to.
+  const whole = (init?.method ?? 'GET').toUpperCase() !== 'HEAD';
+  return {
+    ...init,
+    headers: {
+      ...(init?.headers as Record<string, string> | undefined),
+      Range: whole ? 'bytes=0-' : 'bytes=0-0',
+    },
+  };
 }

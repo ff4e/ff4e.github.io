@@ -75,4 +75,23 @@ describe('hostFetchInit', () => {
     expect(got?.cache).toBe('no-store');
     expect(got?.headers).toEqual({ Accept: 'audio/*', Range: 'bytes=0-' });
   });
+
+  /**
+   * A HEAD asks whether the file is there. The handler does not read the method, so the
+   * range it is given is the range it reads — resident, not mapped — and `introOverlay.ts`
+   * probes a 44 MB `intro_ai.mp4` this way on the default graphics setting, at boot.
+   *
+   * One byte answers the same question. The status and `Content-Range` still arrive, which
+   * is all a HEAD's caller can look at anyway.
+   */
+  it('asks for one byte when the caller is only probing with HEAD', () => {
+    setProtocol('capacitor:');
+    expect(hostFetchInit('/data/Movie/intro_ai.mp4', { method: 'HEAD' })?.headers).toEqual({ Range: 'bytes=0-0' });
+    expect(hostFetchInit('/data/Movie/intro_ai.mp4', { method: 'head' })?.headers).toEqual({ Range: 'bytes=0-0' });
+    // Everything that actually wants the bytes still gets all of them.
+    expect(hostFetchInit('/data/Movie/intro_ai.mp4', { method: 'GET' })?.headers).toEqual({ Range: 'bytes=0-' });
+    expect(hostFetchInit('/data/Movie/intro_ai.mp4')?.headers).toEqual({ Range: 'bytes=0-' });
+    // And the method survives — the probe is still a HEAD.
+    expect(hostFetchInit('/data/Movie/intro_ai.mp4', { method: 'HEAD' })?.method).toBe('HEAD');
+  });
 });
