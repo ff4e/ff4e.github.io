@@ -46,6 +46,18 @@
 const CAPACITOR_MEDIA_EXT = new Set(['m4v', 'mov', 'mp4', 'aac', 'ac3', 'aiff', 'au', 'flac', 'm4a', 'mp3', 'wav']);
 
 /**
+ * The scheme Capacitor serves the app from, and the one thing here that is a shared
+ * fact rather than a local one.
+ *
+ * `ios.scheme` in capacitor.config.ts sets it, and it is settable — a project that
+ * changed it would leave `isNativeHost()` returning false on the native host, which
+ * turns every workaround in this module off silently. Nothing would crash; the music
+ * would simply stop loading, on the device only, with the web build fine. So the config
+ * pins it explicitly and a test asserts the two still say the same word.
+ */
+export const NATIVE_SCHEME = 'capacitor:';
+
+/**
  * Is the app running inside the native shell rather than a browser?
  *
  * Capacitor loads the app from `capacitor://localhost`, so the scheme is the tell and it
@@ -53,7 +65,7 @@ const CAPACITOR_MEDIA_EXT = new Set(['m4v', 'mov', 'mp4', 'aac', 'ac3', 'aiff', 
  * unit suite's default environment.
  */
 export function isNativeHost(): boolean {
-  return typeof location !== 'undefined' && location.protocol === 'capacitor:';
+  return typeof location !== 'undefined' && location.protocol === NATIVE_SCHEME;
 }
 
 /**

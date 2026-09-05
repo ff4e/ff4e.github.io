@@ -67,6 +67,13 @@ const config: CapacitorConfig = {
     // The game handles its own text; letting iOS scale it reflows the HTML overlays
     // (touch options, subtitles) independently of the canvas they sit on.
     limitsNavigationsToAppBoundDomains: false,
+    // `src/platform/nativeHost.ts` decides it is on the native host by reading
+    // `location.protocol`, and this is what sets it. It is Capacitor's default, but a
+    // default is not a promise: change it and `isNativeHost()` goes quietly false on the
+    // device, which turns off the media workaround and stops the music loading — on the
+    // device only, with the web build perfectly fine. Pinned here, and asserted against
+    // `NATIVE_SCHEME` by test/nativeHost.test.ts.
+    scheme: 'capacitor',
   },
 };
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { hostFetchInit, isNativeHost } from '../src/platform/nativeHost.js';
+import { readFileSync } from 'node:fs';
+import { hostFetchInit, isNativeHost, NATIVE_SCHEME } from '../src/platform/nativeHost.js';
 
 /**
  * The native host's media quirk, pinned.
@@ -93,5 +94,22 @@ describe('hostFetchInit', () => {
     expect(hostFetchInit('/data/Movie/intro_ai.mp4')?.headers).toEqual({ Range: 'bytes=0-' });
     // And the method survives — the probe is still a HEAD.
     expect(hostFetchInit('/data/Movie/intro_ai.mp4', { method: 'HEAD' })?.method).toBe('HEAD');
+  });
+});
+
+/**
+ * The one fact in this module that is not local to it.
+ *
+ * `isNativeHost()` is the switch every workaround here hangs off, and it reads a value
+ * the Capacitor config chooses. If the two ever disagree the app does not crash and no
+ * test fails — the music simply stops loading, on the device only, with the web build
+ * fine. That is exactly the shape of bug worth a cheap assertion.
+ */
+describe('NATIVE_SCHEME', () => {
+  it('is the scheme capacitor.config.ts pins', () => {
+    const config = readFileSync(new URL('../capacitor.config.ts', import.meta.url), 'utf8');
+    const pinned = /^\s*scheme:\s*'([^']+)'/m.exec(config)?.[1];
+    expect(pinned, 'capacitor.config.ts no longer pins ios.scheme').toBeTruthy();
+    expect(`${pinned}:`).toBe(NATIVE_SCHEME);
   });
 });
