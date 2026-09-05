@@ -154,6 +154,53 @@ describe('preferredTouchBarEdge', () => {
     // areas exactly 0, which is the only tie that can be constructed exactly.
     expect(preferredTouchBarEdge(0, 0, 800, 400, 'fill')).toBe('top');
   });
+
+  /**
+   * And the housing, which is the reason the last two parameters exist at all.
+   *
+   * Every other test in this file — and every tool that models the layout offline — calls
+   * through `edge()`, which passes no insets, so all of them price a device with no cutout
+   * on a viewport that has already had a browser's chrome taken off it. The app is the only
+   * caller that supplies the real numbers (`touchButtons.ts`), and the effect they have is
+   * the whole justification for the left bar's rework: at a 62px housing the left edge
+   * costs 58 + 62 = 120px of the room's width instead of 58 + 14 = 72, and 48px is more
+   * than enough to change which edge shows more of the room.
+   *
+   * These are real rooms at real full-bleed sizes, not constructed ones. `PHONE` and the
+   * rest above are Playwright's browser viewports; an iPhone 17 Pro in landscape gives the
+   * app the whole 852x393 and puts 47-68px of housing (model-dependent) on whichever side
+   * is up. `insetTop` stays 0 because in landscape the cutout is never on the top edge.
+   */
+  const edgeAt = (w: number, h: number, [vw, vh]: [number, number], inset: number) =>
+    preferredTouchBarEdge(w, h, vw, vh, 'fill', 1, 0, Math.max(inset, TOUCHBAR_LEAD));
+
+  it('moves the bar off the left edge when the housing makes it too expensive', () => {
+    const NATIVE: [number, number] = [852, 393]; // iPhone 17 Pro / 14 Pro, landscape, full-bleed.
+    // BATYSKAF is the clearest case: it prefers the left on a screen with no housing, and
+    // every housing this app will ever meet is enough to turn that round.
+    expect(edgeAt(690, 300, NATIVE, 0)).toBe('left');
+    for (const inset of [47, 62, 68]) expect(edgeAt(690, 300, NATIVE, inset), `${inset}`).toBe('top');
+    // VITEJTE1 needs a bigger one, which is the point — the answer tracks the number, it is
+    // not simply "any inset means top".
+    expect(edgeAt(750, 345, NATIVE, 0)).toBe('left');
+    expect(edgeAt(750, 345, NATIVE, 47)).toBe('left');
+    expect(edgeAt(750, 345, NATIVE, 62)).toBe('top');
+  });
+
+  it('leaves the answer alone on a screen with no housing', () => {
+    // The other half of the claim, and the one that protects the web: `clearLeft` defaults
+    // to the lead, so a browser gets exactly the decisions it always got. If this ever
+    // fails, a change meant for the phone has reached the website.
+    for (const [w, h] of [
+      [690, 300],
+      [750, 345],
+      [780, 225],
+      [795, 435],
+      [540, 495],
+    ] as const) {
+      expect(edgeAt(w, h, PHONE, 0), `${w}x${h}`).toBe(edge(w, h, PHONE));
+    }
+  });
 });
 
 describe('visibleRoomArea', () => {
