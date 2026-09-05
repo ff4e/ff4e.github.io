@@ -14,7 +14,10 @@
  *  - in touch mode the bar reserves its space with a MARGIN on `.stage`, so `.stage`
  *    measures `viewport - bar`, and #126's pair of flex spacers then resolves the room's
  *    near edge to exactly `max(barSize, (viewport - roomSize) / 2)` — centred on the
- *    SCREEN, sliding back only when the room cannot clear the bar as well.
+ *    SCREEN, sliding back only when the room cannot clear the bar as well;
+ *  - and what a display CUTOUT adds to that bar, which is `--bar-w`/`--bar-h` and is
+ *    therefore also stylesheet-only. The left edge's half of it is taken from the shipped
+ *    `touchBarLeftW()` rather than restated (see `housingCost`).
  *
  * `tools/verify-layout-lab.mjs` asserts this reproduction against a real Chromium running
  * the actual game, so "the lab shows the game's layout" is a measured claim and not a
@@ -27,6 +30,31 @@ import { VIEWPORT_MARGIN } from '../src/app/layout.js';
 import type { LayoutRequest, LayoutResult, StripEdge } from './layoutModel.js';
 
 export { TOUCHBAR_W, TOUCHBAR_H, CELL_NATIVE };
+
+/**
+ * What a display cutout ADDS to a strip already sized for a screen without one.
+ *
+ * Expressed as a difference rather than as a footprint, because `stripPx` is a slider: the
+ * lab is free to price a 50px bar, and the housing is a cost on top of whatever bar it is
+ * given, not a replacement for it.
+ *
+ * The LEFT edge goes through the shipped `touchBarLeftW()` rather than restating
+ * `max(inset, lead)`, so the two cannot drift — this file's rule for the housing is
+ * literally the game's rule, evaluated twice and subtracted. `TOUCHBAR_LEAD` is a FLOOR
+ * under the inset, not an addend (see `index.html`), which is why the first 14px of any
+ * cutout are free: the bar was already holding that far off the display's rounded corner.
+ *
+ * The TOP edge is a plain sum, matching `--bar-h: calc(54px + var(--sa-top))`. There is no
+ * lead to floor it: the top bar's buttons are centred along an edge whose corners are far
+ * away.
+ *
+ * Both are 0 at inset 0 by construction, which is what keeps every existing caller — and
+ * the whole website — pricing exactly what it always did.
+ */
+function housingCost(edge: StripEdge, inset: number): number {
+  if (!(inset > 0)) return 0;
+  return edge === 'left' ? touchBarLeftW(inset) - touchBarLeftW(0) : inset;
+}
 
 /**
  * #126's centring clamp, as the three flex rules resolve to it: centre on the whole
@@ -52,14 +80,19 @@ function nearEdge(viewport: number, size: number, bar: number, margin: number): 
  * `stripPx` overrides the bar's real 72/54 so the lab's sliders can price a different bar,
  * and `marginPx` is passed straight through to `computeStageLayout`. Left at their
  * defaults, both are exactly what the game does.
+ *
+ * `insetLeft`/`insetTop` are the display cutout, and default to 0 — a browser, which is
+ * what every model here described before the iOS shell existed.
  */
 export function layoutRoom(req: LayoutRequest): LayoutResult {
   const panel = req.target === 'pc';
   const stripEdge: StripEdge = panel ? 'none' : (req.stripEdge ?? 'left');
-  const strip =
+  const bar =
     stripEdge === 'none'
       ? 0
       : (req.stripPx ?? (stripEdge === 'left' ? touchBarLeftW() : TOUCHBAR_H));
+  const strip =
+    bar + housingCost(stripEdge, stripEdge === 'left' ? (req.insetLeft ?? 0) : (req.insetTop ?? 0));
   const dpr = req.dpr && req.dpr > 0 ? req.dpr : 1;
 
   const stripW = stripEdge === 'left' ? strip : 0;
@@ -137,7 +170,30 @@ export function layoutRoom(req: LayoutRequest): LayoutResult {
   };
 }
 
-/** The edge rule (#128): lay the room out both ways and keep whichever shows more of it. */
+/**
+ * The edge rule (#128): lay the room out both ways and keep whichever shows more of it.
+ *
+ * The housing rides along in `req`. At a 62px cutout the left edge costs 120px of width
+ * instead of 72 — more than the bar's own width again — but that moves THIS answer far
+ * less than it sounds. Swept over all 63 distinct room shapes at each native viewport
+ * (measured 2026-09-05, `contentScale` at the preferred edge, cutout against no cutout):
+ *
+ *   874x402 / 62   edge changes on 2,  room shrinks on 2,  worst 5.7% (VITEJTE1 750x345)
+ *   844x390 / 47   edge changes on 0,  room shrinks on 1,  worst 4.3% (VITEJTE1)
+ *   912x420 / 68   edge changes on 1,  room shrinks on 1,  worst 5.3% (VITEJTE1)
+ *
+ * Both flips at 62 are left->top, and both are rooms wide enough to have been width-bound:
+ * BATYSKAF 690x300 (1.1623 -> 1.1600, so the flip costs it almost nothing) and VITEJTE1
+ * 750x345 (1.0693 -> 1.0087). The other 61 are height-bound at a phone's landscape aspect
+ * — a screen 2.17 times wider than it is tall — and a cutout on the SIDE spends width,
+ * which they were not short of. Held on the left edge instead of allowed to flip, the same
+ * sweep shrinks 2 rooms, worst 6.0% (BATYSKAF); the edge rule is what keeps that to 5.7%.
+ *
+ * So the cutout is a small lever on the widest rooms and no lever at all on the rest —
+ * which is still the population the lab could not see before, since it priced every phone
+ * as having no housing. Left at 0 — every browser — nothing changes, by construction of
+ * `housingCost`.
+ */
 export function preferredStripEdge(req: Omit<LayoutRequest, 'stripEdge'>): StripEdge {
   const top = layoutRoom({ ...req, stripEdge: 'top' });
   const left = layoutRoom({ ...req, stripEdge: 'left' });

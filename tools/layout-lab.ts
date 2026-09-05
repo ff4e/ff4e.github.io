@@ -26,6 +26,7 @@ import { layoutRoom, preferredStripEdge } from './layoutPlaced.js';
 import { LAB_MAP, LAB_ROOMS } from './layoutLabRooms.js';
 import { LAB_VIEWPORTS, sizeFor } from './layoutLabViewports.js';
 import type { LabDevice, LabOrientation, LabSize } from './layoutLabViewports.js';
+import { housingFor, housingUnmeasuredInPortrait } from './layoutLabHousings.js';
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 /** `"720x585"` -> `[720, 585]`. The option values carry the size, so the picker needs no map. */
@@ -81,6 +82,21 @@ interface State {
    */
   orient: LabOrientation;
   chrome: number;
+  /**
+   * The display cutout, CSS px — one number, applied to whichever edge the housing is on
+   * for the orientation being shown.
+   *
+   * A property of the DEVICE and not of the target, so it sits beside `chrome` rather than
+   * in `TargetSettings`: it is something you are looking through, not something being
+   * decided. Selecting a native iPhone sets it; the slider then lets any viewport be given
+   * one, which is how "would this window still prefer the left edge on a phone's housing?"
+   * gets answered without inventing a device row.
+   *
+   * It and `chrome` are opposites in practice — a native app has a cutout and no browser
+   * furniture, a browser has furniture and (already) no cutout — but nothing stops both
+   * being set, because a wrong combination is more useful visible than forbidden.
+   */
+  inset: number;
   /** A view override, not a value being decided — so it is shared, not per target. */
   edge: 'auto' | 'left' | 'top';
   dpr: number;
@@ -111,6 +127,7 @@ const state: State = {
   vh: 1114,
   orient: 'landscape',
   chrome: 0,
+  inset: 0,
   edge: 'auto',
   dpr: 1,
   grid: true,
@@ -180,6 +197,7 @@ function buildSelects(): void {
     probe: 'Where the defects were found',
     desktop: 'Desktop windows',
     tv: 'TV',
+    native: 'iPhones (native app — full screen, with the cutout)',
     phone: 'Phones (Playwright)',
     tablet: 'Tablets (Playwright)',
     foldable: 'Foldables (Playwright)',
@@ -316,16 +334,20 @@ function wire(): void {
   targetSlider('maxcell', 'maxCellPx', 'maxcellv');
 
   /** A slider over something you are looking THROUGH rather than deciding — not per target. */
-  const viewSlider = (id: string, key: 'dpr' | 'chrome', out: string) => {
+  const viewSlider = (id: string, key: 'dpr' | 'chrome' | 'inset', out: string) => {
     const el = $<HTMLInputElement>(id);
     el.addEventListener('input', () => {
       state[key] = Number(el.value);
       $(out).textContent = el.value;
+      // The hint says which edge this cutout is actually costing, and that changes with the
+      // orientation and with nothing else on this slider.
+      syncOrientButtons();
       render();
     });
   };
   viewSlider('dpr', 'dpr', 'dprv');
   viewSlider('chrome', 'chrome', 'chromev');
+  viewSlider('inset', 'inset', 'insetv');
 
   const chk = (id: string, key: 'grid' | 'guide') => {
     const el = $<HTMLInputElement>(id);
@@ -356,6 +378,10 @@ function applyDevice(d: LabDevice): void {
   const s = sizeFor(d, state.orient);
   state.vw = s.w;
   state.vh = s.h;
+  // The housing travels with the device: picking an iPhone has to bring its cutout, or the
+  // native row would be nothing but a bigger viewport — which is the half of the truth the
+  // lab already had.
+  state.inset = housingFor(d, state.orient).left;
   syncViewport();
   render();
 }
@@ -363,6 +389,8 @@ function applyDevice(d: LabDevice): void {
 function syncViewport(): void {
   $<HTMLInputElement>('vw').value = String(state.vw);
   $<HTMLInputElement>('vh').value = String(state.vh);
+  $<HTMLInputElement>('inset').value = String(state.inset);
+  $('insetv').textContent = String(state.inset);
   syncOrientButtons();
 }
 
@@ -387,11 +415,21 @@ function syncOrientButtons(): void {
   const fits = (s: LabSize | null) => !!s && s.w === state.vw && s.h === state.vh;
   const onDevice = fits(d.port) || fits(d.land);
   const transposed = !onDevice && (state.orient === 'portrait' ? !d.port : !d.land);
-  $('orienthint').textContent = onDevice
+  // The cutout is the other half of "which device is this", and it is the half a size alone
+  // cannot show — 852x393 with a 62px island and 852x393 without one are different phones as
+  // far as the bar is concerned.
+  const housing = state.inset
+    ? state.orient === 'landscape'
+      ? ` Cutout ${state.inset}px on the LEFT edge — it costs the room only when the bar is there.`
+      : ` Cutout ${state.inset}px on the TOP edge, which is where the bar already is in portrait.`
+    : housingUnmeasuredInPortrait(d) && state.orient === 'portrait'
+      ? ` ${d.name} has a cutout, but only its landscape one was ever measured (layoutLabHousings.ts) — so this is showing 0, not a phone without one.`
+      : '';
+  $('orienthint').textContent = (onDevice
     ? axis
     : transposed
       ? `${axis} (${d.name} is listed ${state.orient === 'portrait' ? 'landscape' : 'portrait'} only, so this size is transposed.)`
-      : `${axis} (Custom size — no longer ${d.name}.)`;
+      : `${axis} (Custom size — no longer ${d.name}.)`) + housing;
 }
 
 function syncSliders(): void {
@@ -428,6 +466,11 @@ function request(edge: StripEdge): LayoutRequest {
     respectMode: true,
     stripEdge: edge,
     stripPx: edge === 'top' ? cur().stripTop : cur().stripLeft,
+    // One slider, put on the edge the housing is physically on: in landscape the notch or
+    // island is on a SIDE, in portrait it is along the top. The model prices whichever edge
+    // the strip lands on, so handing it both would be claiming a phone with two cutouts.
+    insetLeft: state.orient === 'landscape' ? state.inset : 0,
+    insetTop: state.orient === 'landscape' ? 0 : state.inset,
     marginPx: { x: cur().marginX, y: cur().marginY },
     maxCellPx: cur().maxCellPx,
     dpr: state.dpr,
@@ -510,6 +553,9 @@ function render(): void {
     `<b>${state.roomName} ${state.roomW}x${state.roomH}</b> (${(state.roomW / state.roomH).toFixed(2)}:1)` +
     ` &nbsp;in&nbsp; <b>${v.w}x${v.h}</b> (${(v.w / v.h).toFixed(2)}:1)` +
     (state.chrome ? ` &nbsp;<span style="color:#667">${state.vh} minus ${state.chrome} of chrome</span>` : '') +
+    (state.inset
+      ? ` &nbsp;<span style="color:#667">${state.inset}px cutout on the ${state.orient === 'landscape' ? 'left' : 'top'}</span>`
+      : '') +
     ` &nbsp;·&nbsp; drawn at <b>${(zoom * 100).toFixed(0)}%</b> here` +
     ` &nbsp;·&nbsp; <span style="color:#667">${gitLabel()}</span>`;
 
@@ -829,7 +875,9 @@ function settingsDump(): string {
   L.push(`  VIEWPORT_MARGIN     ${VIEWPORT_MARGIN} css px (the shipped default; per-axis is supported)`);
   L.push('');
 
-  const CASES: Record<LayoutTarget, [string, number, number][]> = {
+  // `[name, w, h, cutout]`. The cutout is the LANDSCAPE one and defaults to 0 — every
+  // browser viewport, which is what all of these were until the native rows were added.
+  const CASES: Record<LayoutTarget, [string, number, number, number?][]> = {
     pc: [
       ['laptop 16:10', 1280, 800],
       ['MacBook Pro 14', 1512, 860],
@@ -841,6 +889,11 @@ function settingsDump(): string {
       ['iPhone 15 portrait', 393, 659],
       ['Pixel 8 Pro landscape', 945, 396],
       ['iPad landscape', 1024, 696],
+      // The same phone class as the first row, but as the NATIVE app gets it: the whole
+      // screen, and the island it has to work around. The pair is the point — a settings
+      // block tuned on the browser row alone has never seen the shipped iOS layout.
+      ['iPhone 17 native landscape', 874, 402, 62],
+      ['iPhone Air native landscape', 912, 420, 68],
     ],
     tv: [
       ['720p', 1280, 720],
@@ -880,7 +933,7 @@ function settingsDump(): string {
     L.push(
       `  edge rule       ${target === 'pc' ? 'n/a' : state.edge === 'auto' ? 'auto — whichever shows more of the room' : `forced ${state.edge}`}`,
     );
-    for (const [name, vw, vh] of CASES[target]) {
+    for (const [name, vw, vh, cutout = 0] of CASES[target]) {
       const base: Omit<LayoutRequest, 'stripEdge'> = {
         viewportW: vw,
         viewportH: vh,
@@ -890,6 +943,8 @@ function settingsDump(): string {
         mode: t.mode,
         respectMode: true,
         stripPx: t.stripLeft,
+        insetLeft: vw > vh ? cutout : 0,
+        insetTop: vw > vh ? 0 : cutout,
         marginPx: { x: t.marginX, y: t.marginY },
         maxCellPx: t.maxCellPx,
         dpr: state.dpr,
@@ -907,6 +962,7 @@ function settingsDump(): string {
       const r = layoutRoom({ ...base, stripEdge: edge, stripPx: px });
       L.push(
         `    ${name.padEnd(22)} ${`${vw}x${vh}`.padEnd(10)} bar ${edge.padEnd(5)}` +
+          (cutout ? ` cut ${String(cutout).padStart(2)}` : '       ') +
           ` cell ${(r.contentScale * CELL_NATIVE).toFixed(1)}px` +
           ` scale ${r.contentScale.toFixed(4)}  room ${Math.round(r.drawnW)}x${Math.round(r.drawnH)}` +
           `  gaps L${Math.round(r.gapLeft)} R${Math.round(r.gapRight)} T${Math.round(r.gapTop)} B${Math.round(r.gapBottom)}` +
