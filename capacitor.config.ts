@@ -64,8 +64,13 @@ const config: CapacitorConfig = {
     // The canvas is the whole app. Rubber-band scrolling on a fixed-size stage only ever
     // detaches the view from the touch controls the touch series spent six PRs building.
     scrollEnabled: false,
-    // The game handles its own text; letting iOS scale it reflows the HTML overlays
-    // (touch options, subtitles) independently of the canvas they sit on.
+    // Capacitor's default, spelled out because the name suggests a restriction and the
+    // value that reads like "off" is the permissive one. It is WKWebView's app-bound
+    // domains switch: `true` confines the web view to the domains listed in an
+    // `WKAppBoundDomains` plist key and unlocks a few privileged APIs with it. The app
+    // is served entirely from the bundle, so there is nothing to gain — and the one
+    // navigation that does leave it, the feedback dialog's `target="_blank"` link to
+    // github.com (index.html:1097), is exactly the kind `true` is there to stop.
     limitsNavigationsToAppBoundDomains: false,
     // `src/platform/nativeHost.ts` decides it is on the native host by reading
     // `location.protocol`, and this is what sets it. It is Capacitor's default, but a
