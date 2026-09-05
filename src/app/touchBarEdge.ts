@@ -84,8 +84,37 @@ import type { FitMode } from './layout.js';
  * (`tools/test-touchbar.mjs` pins the rendered margins too, but against string literals,
  * so on its own it would not notice a constant moving.)
  */
-export const TOUCHBAR_W = 72;
+/**
+ * The bar's footprint, in CSS px, and the ONE thing here that is duplicated from
+ * `index.html`. This module has to know it because it is pricing the two layouts before
+ * either is applied, and CSS cannot be asked.
+ *
+ * Each is the bar's own content — its buttons plus 6px of breathing room before the room —
+ * WITHOUT the clearance it needs on that edge, which the caller supplies. So 54 = 48 + 6
+ * along the top and 58 = 52 + 6 down the left, matching `--bar-h`/`--bar-w`.
+ *
+ * `test/touchBarEdge.test.ts` reads the stylesheet and asserts that every px length in the
+ * landscape branch is the constant for that branch's axis, which is what keeps the pair
+ * honest in BOTH directions — changing the CSS alone, changing a constant alone, or
+ * updating the bar's own size while forgetting #126's centring clamp are all caught.
+ * (`tools/test-touchbar.mjs` pins the rendered margins too, but against string literals,
+ * so on its own it would not notice a constant moving.)
+ */
+export const TOUCHBAR_W = 58;
 export const TOUCHBAR_H = 54;
+
+/**
+ * How far in the buttons start down the LEFT edge when no housing pushes them — the bar's
+ * lead, and `--bar-lead` in the stylesheet.
+ *
+ * It exists for the display's rounded corner, which no safe-area inset describes (see
+ * `index.html`). It is a FLOOR under the housing inset, never added to it, so the left
+ * edge costs `TOUCHBAR_W + max(inset, TOUCHBAR_LEAD)`.
+ *
+ * The top edge has no equivalent: its buttons are centred along an edge whose corners are
+ * far away, so nothing there needs holding off.
+ */
+export const TOUCHBAR_LEAD = 14;
 
 export type TouchBarEdge = 'left' | 'top';
 
@@ -157,17 +186,24 @@ export function preferredTouchBarEdge(
   viewportH: number,
   mode: FitMode,
   dpr = 1,
-  // What the display cutout takes on each candidate edge, on top of the bar itself. The
-  // caller reads them (they are a DOM question, and this module is deliberately pure), so
-  // they default to the phone-without-a-notch answer and every existing test still prices
-  // exactly what it used to. On an iPhone in landscape the notch is worth ~59px on one
-  // side, which is most of the left bar's own width again — pricing `left` as 72 there
-  // would put the bar on the edge that shows LESS of the room, which is the one thing
-  // this function exists to get right.
+  // What each candidate edge has to CLEAR, on top of the bar's own content. The caller
+  // reads them — they are a DOM question and this module is deliberately pure.
+  //
+  // On the top edge that is just the cutout, so it defaults to 0: a screen without one
+  // costs `TOUCHBAR_H` and nothing more. On the LEFT it is `max(cutout, TOUCHBAR_LEAD)`,
+  // because the buttons start after whichever is bigger, so it defaults to the lead rather
+  // than to 0 — a phone with no housing on that side still holds them off the display's
+  // rounded corner. That default is also what keeps every caller-less test pricing the
+  // left edge at exactly what it always did (58 + 14 = the old flat 72).
+  //
+  // Getting this edge right is the whole point of taking them at all: on an iPhone in
+  // landscape the housing is worth 47-68px depending on the model, which is more than the
+  // bar's own width again, and pricing `left` without it would put the bar on the edge
+  // that shows LESS of the room.
   insetTop = 0,
-  insetLeft = 0,
+  clearLeft = TOUCHBAR_LEAD,
 ): TouchBarEdge {
   const top = roomOn(roomW, roomH, viewportW, viewportH - TOUCHBAR_H - insetTop, mode, dpr);
-  const left = roomOn(roomW, roomH, viewportW - TOUCHBAR_W - insetLeft, viewportH, mode, dpr);
+  const left = roomOn(roomW, roomH, viewportW - TOUCHBAR_W - clearLeft, viewportH, mode, dpr);
   return top >= left ? 'top' : 'left';
 }

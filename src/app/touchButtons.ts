@@ -47,7 +47,7 @@
  * visibility has to relayout: the room is scaled into what is left.
  */
 import { relayout } from './loadingUi.js';
-import { preferredTouchBarEdge } from './touchBarEdge.js';
+import { preferredTouchBarEdge, TOUCHBAR_LEAD } from './touchBarEdge.js';
 import type { TouchBarEdge } from './touchBarEdge.js';
 import { room } from './gameState.js';
 import { settings } from './playerSettings.js';
@@ -140,7 +140,11 @@ function syncEdge(): boolean {
         settings.fitMode,
         window.devicePixelRatio || 1,
         safeAreaInset('--sa-top'),
-        safeAreaInset('--sa-left'),
+        // What the LEFT edge has to clear, which is not the housing alone: the buttons
+        // start after `max(housing, lead)` (see `--bar-lead` in index.html), so pricing the
+        // housing on its own would under-price the left edge on any phone whose housing is
+        // on the far side — every one of them, in one of the two landscapes.
+        Math.max(safeAreaInset('--sa-left'), TOUCHBAR_LEAD),
       );
     } else {
       return false;

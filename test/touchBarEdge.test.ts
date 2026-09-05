@@ -19,6 +19,7 @@ import {
   preferredTouchBarEdge,
   visibleRoomArea,
   TOUCHBAR_H,
+  TOUCHBAR_LEAD,
   TOUCHBAR_W,
 } from '../src/app/touchBarEdge.js';
 
@@ -241,16 +242,23 @@ describe('the bar footprint in index.html and the constants here', () => {
   /**
    * The size the landscape branch spends is a custom property now, not a literal.
    *
-   * It had to become one: a display cutout is part of what the bar has to clear, so the
-   * bar's footprint is `54px + env(safe-area-inset-top)` on the top edge and
-   * `72px + env(safe-area-inset-left)` down the left, and repeating that sum in the four
-   * places that have to agree is exactly the drift this describe block exists to catch.
-   * `:root` states it once and the rules reference it.
+   * It had to become one: what the bar has to clear is part of its footprint, so the top
+   * edge is `54px + env(safe-area-inset-top)` and the left edge is
+   * `58px + max(env(safe-area-inset-left), --bar-lead)`, and repeating either sum in the
+   * four places that have to agree is exactly the drift this describe block exists to
+   * catch. `:root` states each once and the rules reference it.
    *
    * So the guard moves with it, and keeps both directions: the branch must spend its size
    * ONLY through the property (no stray literal creeping back), and the property must be
-   * defined as the constant plus that edge's inset (no silently resized bar, and no
-   * silently dropped inset).
+   * the constant plus that edge's clearance (no silently resized bar, and no silently
+   * dropped inset).
+   *
+   * The two edges have different SHAPES, and that difference is load-bearing rather than
+   * cosmetic. The top edge adds its inset outright. The left edge takes `max()` of the
+   * inset and the lead, because the lead is a floor under the housing and not something to
+   * spend on top of it — summing them stranded the buttons 76px in against a 62px island.
+   * A single permissive regex over both would let one collapse into the other, so each is
+   * matched for the operator it is supposed to use.
    */
   const varRefs = (isTop: boolean) => {
     const name = isTop ? '--bar-h' : '--bar-w';
@@ -261,11 +269,27 @@ describe('the bar footprint in index.html and the constants here', () => {
       .flatMap((r) => [...r.body.matchAll(new RegExp(`var\\(${name}\\)`, 'g'))]);
   };
 
-  /** `--bar-h: calc(54px + var(--sa-top));` -> ['54', '--sa-top'] */
-  const rootDef = (name: string) => {
-    const root = html.slice(html.indexOf(':root {'), html.indexOf('html, body {'));
-    const m = new RegExp(`${name}:\\s*calc\\((\\d+)px \\+ var\\((--sa-[a-z]+)\\)\\)`).exec(root);
+  const root = html.slice(html.indexOf(':root {'), html.indexOf('html, body {'));
+
+  /** `--bar-h: calc(54px + var(--sa-top));` -> { px: 54, inset: '--sa-top' } */
+  const topDef = () => {
+    const m = /--bar-h:\s*calc\((\d+)px \+ var\((--sa-[a-z]+)\)\)/.exec(root);
     return m === null ? null : { px: Number(m[1]), inset: m[2] };
+  };
+
+  /**
+   * `--bar-w: calc(58px + max(var(--sa-left), var(--bar-lead)));`
+   * -> { px: 58, inset: '--sa-left', lead: '--bar-lead' }
+   */
+  const leftDef = () => {
+    const m = /--bar-w:\s*calc\((\d+)px \+ max\(var\((--sa-[a-z]+)\), var\((--bar-[a-z]+)\)\)\)/.exec(root);
+    return m === null ? null : { px: Number(m[1]), inset: m[2], lead: m[3] };
+  };
+
+  /** `--bar-lead: 14px;` -> 14 */
+  const leadPx = () => {
+    const m = /--bar-lead:\s*(\d+)px/.exec(root);
+    return m === null ? null : Number(m[1]);
   };
 
   it('agrees on the left bar in every rule that spends its width', () => {
@@ -273,12 +297,20 @@ describe('the bar footprint in index.html and the constants here', () => {
     // (`min-width` and the negative margin that shifts the split back onto the viewport).
     expect(varRefs(false).length).toBeGreaterThanOrEqual(4);
     expect(lengthsOf(false)).toEqual([]);
-    expect(rootDef('--bar-w')).toEqual({ px: TOUCHBAR_W, inset: '--sa-left' });
+    expect(leftDef()).toEqual({ px: TOUCHBAR_W, inset: '--sa-left', lead: '--bar-lead' });
+  });
+
+  it('agrees on the lead, which is the left bar spends it as a floor', () => {
+    // The stylesheet's `--bar-lead` and this module's `TOUCHBAR_LEAD` are the same number
+    // stated twice — the module needs it to price the left edge (it is the default for
+    // `clearLeft`), and CSS needs it to lay the bar out. Nothing else would notice them
+    // drifting: the pricing would simply be wrong by the difference, on every phone.
+    expect(leadPx()).toEqual(TOUCHBAR_LEAD);
   });
 
   it('agrees on the top bar in every rule that spends its height', () => {
     expect(varRefs(true).length).toBeGreaterThanOrEqual(4);
     expect(lengthsOf(true)).toEqual([]);
-    expect(rootDef('--bar-h')).toEqual({ px: TOUCHBAR_H, inset: '--sa-top' });
+    expect(topDef()).toEqual({ px: TOUCHBAR_H, inset: '--sa-top' });
   });
 });

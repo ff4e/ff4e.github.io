@@ -334,7 +334,14 @@ try {
       const bar = document.getElementById('touchbar').getBoundingClientRect();
       const reserve = Number.parseFloat(getComputedStyle(document.querySelector('.stage')).marginLeft);
       const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
-      return { inset, barW: Math.round(bar.width), reserve, buttonLeft: Math.round(buttonLeft) };
+      const buttonRight = Math.max(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().right));
+      return {
+        inset,
+        barW: Math.round(bar.width),
+        reserve,
+        buttonLeft: Math.round(buttonLeft),
+        trailing: Math.round(bar.right - buttonRight),
+      };
     });
     root.style.removeProperty('--sa-left');
     return { lead, out };
@@ -361,6 +368,17 @@ try {
   expect(
     cutouts.lead > 0,
     `--bar-lead is set, so the no-housing landscape still clears the display corner (${cutouts.lead}px)`,
+  );
+  // And the gap on the FAR side of the buttons — between them and the room — is the same
+  // on every device. It is the half of the footprint nothing else pins: the bar's width
+  // was a flat `72px + inset`, sized for 56px buttons that started 8px in, so once they
+  // became 52px starting at `max(inset, lead)` the leftover fell out of the far side and
+  // varied with the phone — 6px without a housing, 20px with one, a ledge of dead bar
+  // between the buttons and the room on exactly the phones that have an island.
+  const trailing = new Set(cutouts.out.map((c) => c.trailing));
+  expect(
+    trailing.size === 1,
+    `the gap between the buttons and the room is the same on every device (${cutouts.out.map((c) => `${c.inset}->${c.trailing}`).join(' ')})`,
   );
 
   // ── The faithful panel is retired, and the room is given its footprint back. The

@@ -51,12 +51,25 @@
         --sa-right: env(safe-area-inset-right, 0px);
         --sa-bottom: env(safe-area-inset-bottom, 0px);
         --sa-left: env(safe-area-inset-left, 0px);
-        /* What the bar actually reserves: its own 54px/72px of buttons, plus whatever
-           the cutout on that edge takes. Everything that has to agree with the bar's
-           size — the stage margin and the centring spacers' clamp — reads these, so the
-           inset can never be added in one place and forgotten in another. */
+        /* What the bar actually reserves: its own buttons, plus whatever it has to clear
+           on that edge. Everything that has to agree with the bar's size — the stage
+           margin and the centring spacers' clamp — reads these, so the inset can never be
+           added in one place and forgotten in another.
+
+           Both are `clearance + button + 6px`, the 6px being the breathing room between
+           the buttons and the room. The top edge spells that 54 = 48 + 6 and takes its
+           clearance straight from `--sa-top`; the left edge spells it 58 = 52 + 6 and
+           takes the LARGER of the housing and the lead, because whichever of those is
+           bigger is the thing the buttons actually have to start after.
+
+           Sizing the left bar from the buttons is what keeps the trailing gap constant.
+           It used to be a flat `72px + var(--sa-left)`, which was the right total back
+           when the buttons were 56px wide and started 8px in — but after they shrank the
+           72 stopped describing anything, and the leftover landed between the buttons and
+           the room: 6px with no housing, 20px with one, which is a visible ledge of dead
+           bar on exactly the phones that have an island. */
         --bar-h: calc(54px + var(--sa-top));
-        --bar-w: calc(72px + var(--sa-left));
+        --bar-w: calc(58px + max(var(--sa-left), var(--bar-lead)));
         /* How far in the buttons start when nothing else pushes them — the bar's LEAD.
            It exists for the display's ROUNDED CORNER, which no inset describes:
            `env(safe-area-inset-*)` reports the status bar, the sensor housing and the home
