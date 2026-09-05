@@ -50,8 +50,12 @@ export { TOUCHBAR_W, TOUCHBAR_H, CELL_NATIVE };
  *
  * Both are 0 at inset 0 by construction, which is what keeps every existing caller — and
  * the whole website — pricing exactly what it always did.
+ *
+ * Exported because the lab has to DRAW the strip, and drawing it from the slider alone
+ * showed a 72px bar next to a room that had been moved over by 120 — the model was right
+ * and the picture was wrong, which is the one failure a lab must not have.
  */
-function housingCost(edge: StripEdge, inset: number): number {
+export function housingCost(edge: StripEdge, inset: number): number {
   if (!(inset > 0)) return 0;
   return edge === 'left' ? touchBarLeftW(inset) - touchBarLeftW(0) : inset;
 }

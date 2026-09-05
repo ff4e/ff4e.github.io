@@ -22,7 +22,7 @@ import {
 import type { FitMode } from '../src/app/layout.js';
 import { TARGET_DEFAULTS } from './layoutModel.js';
 import type { LayoutRequest, LayoutResult, LayoutTarget, StripEdge } from './layoutModel.js';
-import { layoutRoom, preferredStripEdge } from './layoutPlaced.js';
+import { housingCost, layoutRoom, preferredStripEdge } from './layoutPlaced.js';
 import { LAB_MAP, LAB_ROOMS } from './layoutLabRooms.js';
 import { LAB_VIEWPORTS, sizeFor } from './layoutLabViewports.js';
 import type { LabDevice, LabOrientation, LabSize } from './layoutLabViewports.js';
@@ -418,10 +418,16 @@ function syncOrientButtons(): void {
   // The cutout is the other half of "which device is this", and it is the half a size alone
   // cannot show — 852x393 with a 62px island and 852x393 without one are different phones as
   // far as the bar is concerned.
+  //
+  // On `pc` it costs nothing at all and the hint has to SAY so. A desktop build has no bar,
+  // so there is nothing for the cutout to be added to and the slider is inert — which read
+  // as "the cutout does nothing" rather than "this target has no bar to widen".
   const housing = state.inset
-    ? state.orient === 'landscape'
-      ? ` Cutout ${state.inset}px on the LEFT edge — it costs the room only when the bar is there.`
-      : ` Cutout ${state.inset}px on the TOP edge, which is where the bar already is in portrait.`
+    ? state.target === 'pc'
+      ? ` Cutout ${state.inset}px — costing nothing here: the desktop build has no bar for it to widen. Switch to touch to see it.`
+      : state.orient === 'landscape'
+        ? ` Cutout ${state.inset}px on the LEFT edge — it costs the room only when the bar is there.`
+        : ` Cutout ${state.inset}px on the TOP edge, which is where the bar already is in portrait.`
     : housingUnmeasuredInPortrait(d) && state.orient === 'portrait'
       ? ` ${d.name} has a cutout, but only its landscape one was ever measured (layoutLabHousings.ts) — so this is showing 0, not a phone without one.`
       : '';
@@ -452,6 +458,21 @@ function viewport(): { w: number; h: number } {
   return { w: state.vw, h: Math.max(80, state.vh - state.chrome) };
 }
 
+/**
+ * The cutout that lands on a given strip edge, in CSS px.
+ *
+ * One slider, put on the edge the housing is physically on: in landscape the notch or
+ * island is on a SIDE, in portrait it is along the top. Shared by `request()` and by the
+ * code that DRAWS the strip, because those two disagreeing is exactly how the lab came to
+ * show a 72px bar next to a room the model had moved 120px in.
+ */
+function insetOn(edge: StripEdge): number {
+  if (edge === 'none') return 0;
+  const landscape = state.orient === 'landscape';
+  if (edge === 'left') return landscape ? state.inset : 0;
+  return landscape ? 0 : state.inset;
+}
+
 function request(edge: StripEdge): LayoutRequest {
   const v = viewport();
   return {
@@ -466,11 +487,10 @@ function request(edge: StripEdge): LayoutRequest {
     respectMode: true,
     stripEdge: edge,
     stripPx: edge === 'top' ? cur().stripTop : cur().stripLeft,
-    // One slider, put on the edge the housing is physically on: in landscape the notch or
-    // island is on a SIDE, in portrait it is along the top. The model prices whichever edge
-    // the strip lands on, so handing it both would be claiming a phone with two cutouts.
-    insetLeft: state.orient === 'landscape' ? state.inset : 0,
-    insetTop: state.orient === 'landscape' ? 0 : state.inset,
+    // The model prices whichever edge the strip lands on, so handing it both would be
+    // claiming a phone with two cutouts. See `insetOn`.
+    insetLeft: insetOn('left'),
+    insetTop: insetOn('top'),
     marginPx: { x: cur().marginX, y: cur().marginY },
     maxCellPx: cur().maxCellPx,
     dpr: state.dpr,
@@ -554,7 +574,9 @@ function render(): void {
     ` &nbsp;in&nbsp; <b>${v.w}x${v.h}</b> (${(v.w / v.h).toFixed(2)}:1)` +
     (state.chrome ? ` &nbsp;<span style="color:#667">${state.vh} minus ${state.chrome} of chrome</span>` : '') +
     (state.inset
-      ? ` &nbsp;<span style="color:#667">${state.inset}px cutout on the ${state.orient === 'landscape' ? 'left' : 'top'}</span>`
+      ? edge === 'none'
+        ? ` &nbsp;<span style="color:#667">${state.inset}px cutout, costing nothing (no bar on this target)</span>`
+        : ` &nbsp;<span style="color:#667">${state.inset}px cutout on the ${edge}, +${housingCost(edge, insetOn(edge))}px</span>`
       : '') +
     ` &nbsp;·&nbsp; drawn at <b>${(zoom * 100).toFixed(0)}%</b> here` +
     ` &nbsp;·&nbsp; <span style="color:#667">${gitLabel()}</span>`;
@@ -620,23 +642,30 @@ function frameFor(
   // thing on screen a player has to aim at, so pinning it to the panel's edge — where the
   // room was already being kept away from — had it exactly the wrong way round. Costs no
   // size: the room already began at `margin + strip`.
-  if (edge === 'left' && cur().stripLeft > 0) {
+  //
+  // Drawn at the size the MODEL reserved, which is the slider plus whatever the housing
+  // added — not the slider alone. Drawing the slider alone put a 72px bar beside a room the
+  // model had already moved 120px in, so the cutout looked like it did nothing: the one
+  // failure a lab must not have, since looking at it is the whole point.
+  const cut = housingCost(edge, insetOn(edge));
+  const label = (base: number) => (cut > 0 ? `${base}+${cut}` : `${base}`);
+  if (edge === 'left' && cur().stripLeft + cut > 0) {
     const s = el('strip', {
       left: `${cur().marginX}px`,
       top: `${cur().marginY}px`,
       bottom: `${cur().marginY}px`,
-      width: `${cur().stripLeft}px`,
+      width: `${cur().stripLeft + cut}px`,
     });
-    s.innerHTML = `<span>${cur().stripLeft}</span>`;
+    s.innerHTML = `<span>${label(cur().stripLeft)}</span>`;
     frame.append(s);
-  } else if (edge === 'top' && cur().stripTop > 0) {
+  } else if (edge === 'top' && cur().stripTop + cut > 0) {
     const s = el('strip', {
       left: `${cur().marginX}px`,
       right: `${cur().marginX}px`,
       top: `${cur().marginY}px`,
-      height: `${cur().stripTop}px`,
+      height: `${cur().stripTop + cut}px`,
     });
-    s.innerHTML = `<span>${cur().stripTop}</span>`;
+    s.innerHTML = `<span>${label(cur().stripTop)}</span>`;
     frame.append(s);
   }
 
