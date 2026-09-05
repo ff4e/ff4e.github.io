@@ -32,8 +32,8 @@
  *      half-staged tree that has no symlinks in it at all.
  *
  * Deliberately cheap: a `readdir` plus a handful of `stat`s on known paths, not a walk of
- * 6 000 files. It runs on every `cap` invocation (capacitor.config.ts calls it), so it
- * has to cost nothing.
+ * 6 000 files. It runs on every `cap` command that copies (capacitor.config.ts calls it,
+ * and the config is loaded for all of them), so it has to cost nothing.
  */
 import { existsSync, lstatSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -84,14 +84,50 @@ export function whyNotStaged(root: string = process.cwd()): string | null {
 }
 
 /**
+ * Capacitor commands that put `webDir` into the native project.
+ *
+ * `copy` is the one that does it; `sync` is copy + update; `run` and `build` both sync
+ * first. Everything else Capacitor offers — `doctor`, `ls`, `open`, `add`, `init`,
+ * `update`, `migrate` — leaves `dist/` alone, so an unstaged one cannot hurt it.
+ *
+ * Listed rather than derived because the answer has to be wrong in the SAFE direction: a
+ * command missing from this list only means the check does not run for it, while a
+ * command wrongly in it stops work that was never in danger. A new Capacitor command that
+ * copies would need adding here, and would announce itself the first time it shipped the
+ * wrong tree — which is the same day the rest of us would notice anyway.
+ */
+const PACKAGING_COMMANDS: ReadonlySet<string> = new Set(['copy', 'sync', 'run', 'build']);
+
+/**
+ * Is this `cap` invocation one that would copy `dist/` into the native project?
+ *
+ * The command is the first argument that is not a flag: `cap sync ios`, `cap --verbose
+ * sync`, `npx cap run ios --target=…` all name it in different positions. When there is
+ * no command at all (`cap` on its own, or this module loaded by the test suite) the
+ * answer is no — nothing is being packaged.
+ */
+export function isPackagingCommand(argv: readonly string[] = process.argv): boolean {
+  const command = argv.slice(2).find((a) => !a.startsWith('-'));
+  return command !== undefined && PACKAGING_COMMANDS.has(command);
+}
+
+/**
  * Stop the command unless `dist/` is the staged payload. Called from capacitor.config.ts.
  *
  * Exits rather than throws on purpose. Capacitor catches a config-load exception and
  * prints it with a ten-frame stack through its own TypeScript require hook, which buries
  * the one sentence that matters under machinery nobody needs to read. The only useful
  * response to this failure is to run `npm run build:ios`, so it says that and stops.
+ *
+ * Only for the commands that COPY. Capacitor loads this config for everything it does,
+ * including the commands whose entire job is to tell you what is wrong — `cap doctor`
+ * refused to run at all with a UI-test `dist/` in place, which is exactly backwards: the
+ * tool you reach for when the build is broken should not be the tool that breaks first.
+ * Same for `cap ls` and `cap open`. None of them read `webDir`, so none of them can ship
+ * the wrong tree, and none of them have any business failing over it.
  */
-export function assertStagedDist(root: string = process.cwd()): void {
+export function assertStagedDist(root: string = process.cwd(), argv: readonly string[] = process.argv): void {
+  if (!isPackagingCommand(argv)) return;
   const why = whyNotStaged(root);
   if (why === null) return;
   console.error(`\nRefusing to package dist/.\n\n  ${why}\n\n  Fix: npm run build:ios  (build + stage + sync, in that order)\n`);

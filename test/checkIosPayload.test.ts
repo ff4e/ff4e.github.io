@@ -2,7 +2,7 @@ import { describe, expect, it, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { whyNotStaged } from '../tools/check-ios-payload.js';
+import { assertStagedDist, isPackagingCommand, whyNotStaged } from '../tools/check-ios-payload.js';
 
 /**
  * The guard that stops `cap sync` packaging the wrong `dist/`.
@@ -67,5 +67,48 @@ describe('whyNotStaged', () => {
       mkdirSync(join(root, 'dist', dir), { recursive: true });
       expect(whyNotStaged(root), dir).not.toBeNull();
     }
+  });
+});
+
+/**
+ * And which commands the guard is allowed to stop.
+ *
+ * The check runs at config load, and Capacitor loads the config for EVERYTHING — so
+ * before this gate existed, `cap doctor` refused to run whenever `dist/` was the UI
+ * suite's symlink tree. The tool you reach for when the build is broken cannot be the
+ * first tool to break.
+ */
+describe('isPackagingCommand', () => {
+  it('says yes to the commands that copy webDir', () => {
+    for (const c of ['copy', 'sync', 'run', 'build']) {
+      expect(isPackagingCommand(['node', 'cap', c]), c).toBe(true);
+      expect(isPackagingCommand(['node', 'cap', c, 'ios']), c).toBe(true);
+    }
+  });
+
+  it('says no to the commands that only look', () => {
+    for (const c of ['doctor', 'ls', 'open', 'add', 'init', 'update', 'migrate']) {
+      expect(isPackagingCommand(['node', 'cap', c, 'ios']), c).toBe(false);
+    }
+  });
+
+  it('finds the command past a leading flag, and does not mistake a flag for one', () => {
+    expect(isPackagingCommand(['node', 'cap', '--verbose', 'sync', 'ios'])).toBe(true);
+    expect(isPackagingCommand(['node', 'cap', 'run', 'ios', '--target=abc'])).toBe(true);
+    expect(isPackagingCommand(['node', 'cap', '--help'])).toBe(false);
+  });
+
+  it('says no when there is no command at all', () => {
+    // Which is also how the module behaves when the test suite imports it.
+    expect(isPackagingCommand(['node', 'cap'])).toBe(false);
+  });
+
+  it('is what assertStagedDist consults before it exits', () => {
+    const root = makeRoot();
+    mkdirSync(join(root, 'public'), { recursive: true });
+    symlinkSync(join('..', 'public'), join(root, 'dist/data'));
+    expect(whyNotStaged(root)).not.toBeNull(); // the tree really is unshippable
+    // …and `doctor` still runs on it. If this returned, it did not call process.exit.
+    expect(() => assertStagedDist(root, ['node', 'cap', 'doctor', 'ios'])).not.toThrow();
   });
 });

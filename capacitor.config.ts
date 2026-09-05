@@ -7,6 +7,10 @@ import { assertStagedDist } from './tools/check-ios-payload';
  * and the one that silently packages 250 MB of masters when `dist/` is still the symlink
  * tree `npm run test:ui` leaves behind. See tools/check-ios-payload.ts for the whole
  * story. It is a few stats, and it is a no-op when `dist/` does not exist yet.
+ *
+ * The config is loaded for every `cap` command, so the check picks out the ones that
+ * actually copy. `cap doctor` and `cap ls` never touch `webDir`, and a diagnostic that
+ * refuses to run when something is wrong is worse than no diagnostic at all.
  */
 assertStagedDist();
 
