@@ -7,12 +7,13 @@ import Capacitor
  ── Why this exists ────────────────────────────────────────────────────────────
 
  The web way to avoid a display cutout is `env(safe-area-inset-*)` with
- `viewport-fit=cover`, and `index.html` is written that way — it works in iOS Safari, so
- the website already handles the notch correctly.
+ `viewport-fit=cover`. `index.html` deliberately does NOT set that keyword: it would only
+ change the public website (putting it under the notch and the home indicator in iOS
+ Safari) and would buy this app nothing, for the reason below.
 
- It does not work here. Measured on an iPhone 17 Pro in the Simulator, every
- `env(safe-area-inset-*)` resolves to `0px` inside Capacitor's WKWebView, and stays 0
- across all of: `viewport-fit=cover` set, the status bar shown and hidden
+ It does not work here with or without the keyword. Measured on an iPhone 17 Pro in the
+ Simulator, every `env(safe-area-inset-*)` resolves to `0px` inside Capacitor's WKWebView,
+ and stays 0 across all of: `viewport-fit=cover` set, the status bar shown and hidden
  (`UIStatusBarHidden`), and `ios.contentInset` of both `never` (Capacitor's default) and
  `always`. Meanwhile the web view IS full-screen — `CAPBridgeViewController.loadView()`
  does `view = webView` — so the content genuinely runs under the status bar and under the
