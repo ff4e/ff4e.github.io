@@ -21,6 +21,7 @@ import {
   TOUCHBAR_H,
   TOUCHBAR_LEAD,
   TOUCHBAR_W,
+  touchBarLeftW,
 } from '../src/app/touchBarEdge.js';
 
 /** iPhone 15 in landscape, as Playwright reports it (browser chrome already off). */
@@ -101,7 +102,7 @@ describe('preferredTouchBarEdge', () => {
     // that nothing is cut, and that the rule still says 'left'.
     const short: [number, number] = [669, 280];
     const onTop = visibleRoomArea(555, 225, short[0], short[1] - TOUCHBAR_H, 'fill');
-    const onLeft = visibleRoomArea(555, 225, short[0] - TOUCHBAR_W, short[1], 'fill');
+    const onLeft = visibleRoomArea(555, 225, short[0] - touchBarLeftW(), short[1], 'fill');
     expect(onTop).toBeLessThan(onLeft); // area alone now says 'left' on its own
     expect(edge(555, 225, short)).toBe('left');
     // And it says it because the room FITS both ways, not because one was rejected.
@@ -114,7 +115,7 @@ describe('preferredTouchBarEdge', () => {
     // 266px into 214px of space.
     for (const [availW, availH] of [
       [short[0], short[1] - TOUCHBAR_H], // the top edge — the one that used to cut
-      [short[0] - TOUCHBAR_W, short[1]],
+      [short[0] - touchBarLeftW(), short[1]],
     ] as const) {
       const l = computeStageLayout(availW, availH, 'fill', false);
       const s = contentScale(555, 225, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
@@ -312,5 +313,31 @@ describe('the bar footprint in index.html and the constants here', () => {
     expect(varRefs(true).length).toBeGreaterThanOrEqual(4);
     expect(lengthsOf(true)).toEqual([]);
     expect(topDef()).toEqual({ px: TOUCHBAR_H, inset: '--sa-top' });
+  });
+
+  /**
+   * And the footprint itself, which is the number every caller outside this module wants.
+   *
+   * The two above pin the PARTS — the constant and the lead — but a caller that has to
+   * subtract the bar from a viewport needs the sum, and reading `TOUCHBAR_W` for it is the
+   * mistake that left `tools/verify-touchbar-edge.mjs` failing both left-edge cases for
+   * the whole of the iOS branch without anything noticing. `touchBarLeftW()` is that sum,
+   * so it is asserted against the stylesheet rather than against the constants it is made
+   * of — otherwise it would only be checking its own arithmetic.
+   *
+   * Both sides of the `max()`, because they are different claims: at 0 the lead is what
+   * the bar spends (this is what a browser and every offline model see), and at a real
+   * housing inset the inset is, which is the case no test that runs on this machine can
+   * reach any other way.
+   */
+  it('gives the whole left footprint a name, and it is what the stylesheet resolves to', () => {
+    const def = leftDef();
+    const lead = leadPx();
+    if (def === null || lead === null) throw new Error('index.html no longer defines --bar-w/--bar-lead');
+    // `calc(58px + max(var(--sa-left), var(--bar-lead)))`, resolved by hand at two insets.
+    expect(touchBarLeftW(0)).toEqual(def.px + Math.max(0, lead));
+    expect(touchBarLeftW(62)).toEqual(def.px + Math.max(62, lead));
+    // The no-housing case is the old flat width, which is why nothing on the web moved.
+    expect(touchBarLeftW()).toEqual(72);
   });
 });

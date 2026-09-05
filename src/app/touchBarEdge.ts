@@ -116,6 +116,29 @@ export const TOUCHBAR_H = 54;
  */
 export const TOUCHBAR_LEAD = 14;
 
+/**
+ * The left edge's WHOLE footprint — what `.stage` gives up, and what `--bar-w` resolves
+ * to — for a housing inset of `inset`.
+ *
+ * It exists because `TOUCHBAR_W` stopped being that number. Until the bar was sized from
+ * its buttons, 72 was both the constant and the footprint, so anything that wanted the
+ * footprint could just read the constant. Now the constant is the bar's own content and
+ * the clearance is added by whoever knows the inset, which left every caller that read
+ * `TOUCHBAR_W` as "the bar" quietly 14px short — and the ones OUTSIDE `src/` were not in
+ * any gate to say so (`tools/run-ui-tests.mjs` only discovers `test-*.mjs`), so
+ * `tools/verify-touchbar-edge.mjs` had been failing both of its left-edge cases,
+ * unwatched, since the split.
+ *
+ * So the footprint gets a name of its own. A caller that wants the number CSS renders
+ * asks for it here; `TOUCHBAR_W` is left meaning the one thing it now means.
+ *
+ * `inset` defaults to 0 — no housing on this side, which is the case every offline model
+ * and every browser is describing, and the one where this returns the old flat 72.
+ */
+export function touchBarLeftW(inset = 0): number {
+  return TOUCHBAR_W + Math.max(inset, TOUCHBAR_LEAD);
+}
+
 export type TouchBarEdge = 'left' | 'top';
 
 /**
