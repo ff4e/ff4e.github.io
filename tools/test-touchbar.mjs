@@ -311,58 +311,56 @@ try {
   // see it, because with a 0 inset the padding is 0 and the two agree by accident.
   //
   // So set the same variable the shell sets, and assert they still agree with it non-zero.
-  const cutout = await p.evaluate(() => {
+  //
+  // Over EVERY inset the current iPhones actually report, not one sample. Measured by
+  // installing this build on each simulator and reading back what the bridge published:
+  //
+  //     iPhone 17e                          390x844   47   (notch)
+  //     iPhone 17 / 17 Pro / 17 Pro Max      402x874   62   (Dynamic Island)
+  //     iPhone Air                           420x912   68
+  //
+  // Three different numbers across five current models, which is the whole reason none of
+  // this is a constant: the housing is a different size on different phones, and iOS is the
+  // only thing that knows. A single 62px case would pass just as well if the rule had been
+  // written as "62" somewhere, and that is exactly the bug this table exists to prevent.
+  // 0 is included because it is the OTHER landscape on any of them — the housing is on the
+  // far side, so nothing pushes the bar in and `--bar-lead` takes over.
+  const INSETS = [0, 47, 62, 68];
+  const cutouts = await p.evaluate((insets) => {
     const root = document.documentElement;
-    root.style.setProperty('--sa-left', '62px');
-    const bar = document.getElementById('touchbar').getBoundingClientRect();
-    const stage = document.querySelector('.stage');
-    const reserve = Number.parseFloat(getComputedStyle(stage).marginLeft);
-    const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
+    const lead = Number.parseFloat(getComputedStyle(root).getPropertyValue('--bar-lead'));
+    const out = insets.map((inset) => {
+      root.style.setProperty('--sa-left', `${inset}px`);
+      const bar = document.getElementById('touchbar').getBoundingClientRect();
+      const reserve = Number.parseFloat(getComputedStyle(document.querySelector('.stage')).marginLeft);
+      const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
+      return { inset, barW: Math.round(bar.width), reserve, buttonLeft: Math.round(buttonLeft) };
+    });
     root.style.removeProperty('--sa-left');
-    return { barW: Math.round(bar.width), reserve, buttonLeft: Math.round(buttonLeft) };
-  });
-  expect(
-    cutout.barW === cutout.reserve,
-    `a 62px cutout grows the bar and its reserve by the same amount (bar ${cutout.barW}px, reserve ${cutout.reserve}px)`,
-  );
-  // And the point of the padding: the buttons themselves clear the cutout, rather than the
-  // bar merely being wider around them. EXACTLY at it, not merely past it — the lead below
-  // is a floor rather than an addend, and this is the assertion that says so. Spending both
-  // (plus centring the button in what was left) put the buttons 76px in against an island
-  // whose visible edge is near 48px, which is the gap Martin reported.
-  expect(
-    cutout.buttonLeft === 62,
-    `the buttons start AT the cutout, neither under it nor held off it (leftmost at ${cutout.buttonLeft}px)`,
-  );
+    return { lead, out };
+  }, INSETS);
 
-  // ── The display's rounded CORNER, which no inset reports. The tight case is the
-  // landscape where the sensor housing is on the far side: `--sa-left` is 0, so the bar
-  // sits against bare glass and nothing has pushed the buttons in. The corner radius is
-  // ~60px on an iPhone 17 Pro and iOS exposes no value for it, so a bar flush to the edge
-  // put the top button's corner where the screen had already curved away — measured, with
-  // the button 8px in. `--bar-lead` is the fixed answer, spent inside the bar's own
-  // footprint so the reserve does not move.
-  const corner = await p.evaluate(() => {
-    const px = (n) => Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue(n));
-    const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
-    const bar = document.getElementById('touchbar');
-    const rect = bar.getBoundingClientRect();
-    const reserve = Number.parseFloat(getComputedStyle(document.querySelector('.stage')).marginLeft);
-    return { buttonLeft, declared: px('--bar-lead'), barRight: rect.right, reserve };
-  });
-  // The button's own position, not the padding: the two are the same number only because
-  // the buttons are left-aligned, and that alignment is half of what makes the `max()`
-  // above hold. Asserting the padding would pass with the buttons centred again, which is
-  // the shape that produced the 76px gap.
+  // The bar's footprint and the room's reserve are the same number at every inset — the
+  // box-sizing bug made them differ by one whole inset, and only a non-zero one shows it.
+  const mismatched = cutouts.out.filter((c) => c.barW !== c.reserve);
   expect(
-    corner.declared > 0 && corner.buttonLeft === corner.declared,
-    `with no cutout the buttons start at the lead that clears the display corner (${corner.buttonLeft}px, --bar-lead ${corner.declared}px)`,
+    mismatched.length === 0,
+    `every cutout grows the bar and its reserve by the same amount (${cutouts.out.map((c) => `${c.inset}->${c.barW}/${c.reserve}`).join(' ')})`,
   );
-  // The padding is spent INSIDE the footprint, not added to it — the same failure the
-  // box-sizing bug was. If it leaked, the bar would be wider than the room's reserve again.
+  // And the rule the buttons follow: start AT the housing, or at the lead when there is no
+  // housing on this side — `max()`, never a sum, and never centred in the leftover. Held off
+  // it by the lead (the sum) is what put them 76px in against a 62px island, which is the
+  // gap Martin reported; centred in the leftover is the other half of the same mistake.
+  const wrong = cutouts.out.filter((c) => c.buttonLeft !== Math.max(c.inset, cutouts.lead));
   expect(
-    corner.barRight === corner.reserve,
-    `the lead comes out of the bar's own width, not the room's (bar ends ${corner.barRight}px, reserve ${corner.reserve}px)`,
+    wrong.length === 0,
+    `the buttons start at max(cutout, lead=${cutouts.lead}) on every device (${cutouts.out.map((c) => `${c.inset}->${c.buttonLeft}`).join(' ')})`,
+  );
+  // The lead itself has to be a real number, or `max()` degenerates to the inset and the
+  // 0 row above passes with the buttons flush against the glass — the original bug.
+  expect(
+    cutouts.lead > 0,
+    `--bar-lead is set, so the no-housing landscape still clears the display corner (${cutouts.lead}px)`,
   );
 
   // ── The faithful panel is retired, and the room is given its footprint back. The
