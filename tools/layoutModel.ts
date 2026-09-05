@@ -116,6 +116,20 @@ export interface LayoutRequest {
   /** Strip thickness in CSS px: its WIDTH on the left edge, its HEIGHT on the top edge. */
   stripPx?: number;
   stripEdge?: StripEdge;
+  /**
+   * The display cutout on each edge, CSS px — `env(safe-area-inset-left/top)` as the native
+   * shell publishes it into `--sa-left`/`--sa-top`.
+   *
+   * They cost only on the edge the strip is ON, which is what the stylesheet says
+   * (`--bar-w: 58px + max(--sa-left, --bar-lead)`, `--bar-h: 54px + --sa-top`): a room drawn
+   * against the top edge of a landscape phone runs UNDER the island on its side and is not
+   * shrunk by it. `preferredTouchBarEdge` splits them for the same reason.
+   *
+   * Both default to 0, which is what a browser reports and therefore what every web model
+   * means. Only `tools/layoutLabHousings.ts` has non-zero ones, and only for a phone.
+   */
+  insetLeft?: number;
+  insetTop?: number;
   /** Reserve per viewport edge, CSS px — one number, or one per axis (see ViewportMargin). */
   marginPx?: number | { x: number; y: number };
   /** Ceiling on how big one 15px game cell may be drawn, CSS px. `Infinity` lifts it. */

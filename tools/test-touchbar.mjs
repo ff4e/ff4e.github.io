@@ -183,6 +183,30 @@ const settleBox = (p, was) =>
   );
 
 /**
+ * Wait until the page is quiescent, without needing to know what it looked like before.
+ *
+ * `settleBox` and `settleRoom` both wait for a CHANGE, which is the right thing after a
+ * resize and no use before one — and the cutout block below needs a settled reading BEFORE
+ * it touches anything. The four-inset sweep above sets and clears `--sa-left` four times
+ * inside a single `evaluate` and never yields, so the CSS box geometry it measures is
+ * correct while the room is still several frames behind it: 302px where the settled answer
+ * is 519px. Measure off that and the cutout appears to make the room bigger.
+ *
+ * Measured on `#stagebox` and not `#screen`, which is what `settleEdge` uses: the canvas
+ * sits at its 300x150 default here and never takes a CSS size, so a comparison against it
+ * would wait for an agreement that never comes. `#stagebox` hugs the room horizontally, so
+ * its width IS `roomGeom().cssW` once the layout has caught up — plus the canvas's 1px
+ * border on each side, which the bounding rect includes and `cssW` does not. Hence 3 and
+ * not 1: two for the border, one for rounding.
+ */
+const settled = (p) =>
+  p.waitForFunction(() => {
+    const g = window.__ff.roomGeom();
+    const box = document.getElementById('stagebox');
+    return g !== null && box !== null && Math.abs(box.getBoundingClientRect().width - g.cssW) <= 3;
+  });
+
+/**
  * Resize, and wait for the new size to reach the ROOM.
  *
  * `settleBox` above is no use for the centring block, twice over: it waits for a WIDTH to
@@ -381,6 +405,71 @@ try {
     `the gap between the buttons and the room is the same on every device (${cutouts.out.map((c) => `${c.inset}->${c.trailing}`).join(' ')})`,
   );
 
+  // ── And the ROOM's half of the same cutout. Everything above measures the BAR — its
+  // width, its buttons, its reserve — which is where the box-sizing bug was, and none of it
+  // looks at what the room does with the space that is left. Those are different failures:
+  // a bar that is the right width and a room that ignores it still overlap.
+  //
+  // Left as a separate pass at a real inset rather than folded into the loop above, because
+  // it needs the layout to have SETTLED at that inset — the loop sets four values inside one
+  // `evaluate` and reads the bar back synchronously, which is fine for CSS box geometry and
+  // useless for a canvas that resizes on a frame.
+  //
+  // 62 is the Dynamic Island, the most common of the three and the one that shipped wrong.
+  //
+  // What is NOT asserted here, deliberately: that the island makes the room smaller. It
+  // does not, at this viewport or almost any other. 1100x620 leaves the stage 1028x476, so
+  // a room is height-bound and 48 more css px off the WIDTH changes its scale by nothing;
+  // swept offline over all 63 room shapes at the native 874x402 a 62px island shrinks
+  // exactly 2 of them, because a phone in landscape is ~2.17 aspect and the cutout is on
+  // the short side. An assertion that the room shrinks would be false on every room this
+  // probe could reasonably use, and rigging a case where it is true would be testing the
+  // rigging.
+  //
+  // What IS asserted is the shape of the failure that actually shipped: 196px of bar
+  // against a 134px reserve, i.e. the two halves disagreeing about how wide the housing
+  // makes the bar. In room terms that is an overlap, so the assertions are about where the
+  // room's edges land — clear of the bar, on screen, and still centred on the SCREEN
+  // rather than on the leftover. All three hold at inset 0 too; the island is what makes
+  // them capable of failing separately.
+  const wasBar = await barState(p);
+  await p.evaluate(() => document.documentElement.style.setProperty('--sa-left', '62px'));
+  await p.waitForFunction(
+    () => getComputedStyle(document.querySelector('.stage')).marginLeft === '120px',
+  );
+  await settled(p);
+  const housed = await rowState(p);
+  const housedBar = await barState(p);
+  const reserve = Number.parseFloat(housedBar.marginLeft);
+  expect(
+    housedBar.marginLeft === '120px' && wasBar.marginLeft === '72px',
+    `the island widens the reserve by exactly itself (${wasBar.marginLeft} -> ${housedBar.marginLeft})`,
+  );
+  // An OVERLAP assertion, not a width one, so it fails for any way the bar and the room can
+  // be made to disagree and not only the way they did.
+  expect(
+    housed.left >= reserve - 0.5,
+    `with a 62px island the room starts clear of the bar (row at ${housed.left}, bar reserves ${housedBar.marginLeft})`,
+  );
+  expect(
+    housed.right <= housed.viewW + 0.5,
+    `and the island does not push the room off the far edge (${housed.left}..${housed.right} of ${housed.viewW})`,
+  );
+  // The room's centre is the SCREEN's, not the centre of what the bar left over — the same
+  // rule the landscape cases above assert, and it has to survive the island too. It is the
+  // half of the pair that "clear of the bar" cannot check on its own: a room shoved right
+  // to escape a too-wide reserve is clear of the bar and still wrong.
+  const housedOff = Math.round((housed.left + housed.right) / 2 - housed.viewW / 2);
+  expect(
+    Math.abs(housedOff) <= 1,
+    `and its centre is still the screen's (off by ${housedOff}px of ${housed.viewW})`,
+  );
+  await p.evaluate(() => document.documentElement.style.removeProperty('--sa-left'));
+  await p.waitForFunction(
+    () => getComputedStyle(document.querySelector('.stage')).marginLeft === '72px',
+  );
+  await settled(p);
+
   // ── The faithful panel is retired, and the room is given its footprint back. The
   // whole point of doing this LAST: everything the panel does now has a thumb-sized
   // counterpart, so hiding it leaves nothing unreachable.
@@ -398,8 +487,6 @@ try {
   // it floored the scale at 0.5, so the logical box was 400px in a 393px viewport and a
   // room wide enough to fill it still overhung by 7. The floor now yields to the width, so
   // the residual is gone; the arithmetic for both halves is in test/layout.test.ts.
-  // Resized rather than opened in a context of its own: the viewport is a page property,
-  // and a second context would pay the boot again to assert two numbers.
   // Resized rather than opened in a context of its own: the viewport is a page property,
   // and a second context would pay the boot again to assert two numbers.
   await p.setViewportSize({ width: 393, height: 852 });

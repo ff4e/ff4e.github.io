@@ -222,7 +222,7 @@ describe('visibleRoomArea', () => {
  * as `TOUCHBAR_W`/`TOUCHBAR_H` here, which PRICE the two placements before either is
  * applied. They have to agree, and nothing else in the suite can notice if they stop:
  * `tools/test-touchbar.mjs` pins the rendered margins against string literals, so it
- * catches a CSS change but not a change to the constants, and `verify-touchbar-edge.mjs`
+ * catches a CSS change but not a change to the constants, and `test-touchbar-edge.mjs`
  * (which would catch both) needs a browser and is not part of the suite.
  *
  * So this reads the stylesheet. Every px length inside the landscape branch has to BE the
@@ -367,7 +367,7 @@ describe('the bar footprint in index.html and the constants here', () => {
    *
    * The two above pin the PARTS — the constant and the lead — but a caller that has to
    * subtract the bar from a viewport needs the sum, and reading `TOUCHBAR_W` for it is the
-   * mistake that left `tools/verify-touchbar-edge.mjs` failing both left-edge cases for
+   * mistake that left `tools/test-touchbar-edge.mjs` failing both left-edge cases for
    * the whole of the iOS branch without anything noticing. `touchBarLeftW()` is that sum,
    * so it is asserted against the stylesheet rather than against the constants it is made
    * of — otherwise it would only be checking its own arithmetic.

@@ -8,7 +8,7 @@
  * with the WIDTH budget the left bar costs and once with the HEIGHT budget the top bar
  * costs, and reports which wins — per room, per device.
  *
- * `tools/verify-touchbar-edge.mjs` pins that model against a real browser on both edges
+ * `tools/test-touchbar-edge.mjs` pins that model against a real browser on both edges
  * the game has today (landscape/left, portrait/top), at drift 0.
  *
  * ── Where the viewports come from ────────────────────────────────────────────
@@ -31,26 +31,71 @@
  *   npx tsx tools/measure-touchbar-edge.mjs --devices     # every device
  *   npx tsx tools/measure-touchbar-edge.mjs --csv         # per room, per device
  *   npx tsx tools/measure-touchbar-edge.mjs --chrome 72   # extra browser chrome, px
+ *   npx tsx tools/measure-touchbar-edge.mjs --inset 62    # what-if: a cutout on every viewport
+ *   npx tsx tools/measure-touchbar-edge.mjs --native      # the three measured iOS viewports
  */
 import { execFileSync } from 'node:child_process';
 import { devices } from 'playwright';
 import { computeStageLayout, contentScale } from '../src/app/layout.ts';
-import { preferredTouchBarEdge } from '../src/app/touchBarEdge.ts';
+import { TOUCHBAR_H, TOUCHBAR_LEAD, preferredTouchBarEdge, touchBarLeftW } from '../src/app/touchBarEdge.ts';
+import { LAB_NATIVE_DEVICES } from './layoutLabHousings.ts';
 
-const BAR_W = 72; // landscape bar width, index.html
-const BAR_H = 54; // portrait bar height, index.html
+// The bar's own size, IMPORTED rather than restated. These used to be two literals copied
+// out of index.html, which is how this tool came to disagree with the app by 14px once
+// already (ed3ebc4): `--bar-w` is `58 + max(--sa-left, 14)`, a floor and not a sum, and a
+// copied `72` cannot know that. Now the only number here is the cutout.
 const CELL = 15; // native px per FFR cell
 
 const arg = (name, dflt) => {
   const i = process.argv.indexOf(name);
   return i >= 0 && process.argv[i + 1] ? Number(process.argv[i + 1]) : dflt;
 };
+const flag = (name) => process.argv.includes(name);
 const CHROME = arg('--chrome', 0);
+/**
+ * Force a display cutout onto every viewport, css px.
+ *
+ * Independent of `--native`: this answers "what would THIS browser viewport do if it had an
+ * island?", which is a question about the rule, whereas `--native` answers "what does the
+ * shipped iOS app actually get?", which is a question about three real phones.
+ */
+const INSET = arg('--inset', 0);
+/**
+ * Survey the native iOS viewports instead of Playwright's browser registry.
+ *
+ * They are a different SIZE as well as a different inset — mobile Safari has already taken
+ * the cutout off both sides and ~50px of furniture off the height before the page sees a
+ * viewport, so a native row is not a browser row plus a number. See
+ * `tools/layoutLabHousings.ts`.
+ */
+const NATIVE = flag('--native');
 /** Tolerance for --per-viewport: how much mean scale the nicer top edge may cost. */
 const TOL = arg('--tol', 0);
 
+/**
+ * What the bar costs on each edge AT THIS VIEWPORT.
+ *
+ * This tool surveys LANDSCAPE viewports only, and in landscape a phone's notch or island is
+ * on a SIDE — `safe-area-inset-top` is ~0 there. So the cutout is charged to the left edge
+ * and the top edge is left alone, which is precisely why it can change the answer: it is a
+ * tax on one of the two candidates, not on the screen.
+ */
+const barW = (v) => touchBarLeftW(v.inset ?? 0);
+const barH = () => TOUCHBAR_H;
+
 /** Every landscape touch viewport Playwright knows, deduplicated by size. */
 function viewports() {
+  if (NATIVE) {
+    return LAB_NATIVE_DEVICES.filter((d) => d.land).map((d) => ({
+      w: d.land.w,
+      h: d.land.h - CHROME,
+      names: [d.name],
+      klass: 'native',
+      // `--inset` still wins if it was given: overriding a measured phone with a number is
+      // a legitimate what-if, and silently ignoring the flag would be the surprising choice.
+      inset: INSET || d.housing.left,
+    }));
+  }
   const seen = new Map();
   for (const [name, d] of Object.entries(devices)) {
     if (!d.hasTouch) continue;
@@ -64,7 +109,9 @@ function viewports() {
       seen.get(key).names.push(short);
       continue;
     }
-    seen.set(key, { w, h: vh, names: [short], klass: classify(short, w, vh) });
+    // A browser viewport has NO cutout of its own — the engine subtracted it already — so
+    // anything here is the operator asking a what-if, and comes from the flag alone.
+    seen.set(key, { w, h: vh, names: [short], klass: classify(short, w, vh), inset: INSET });
   }
   return [...seen.values()].sort((a, b) => a.w / a.h - b.w / b.h);
 }
@@ -98,8 +145,8 @@ function measure(room, availW, availH) {
 /** Per-room comparison of the two edges on one viewport. */
 function compare(all, v) {
   return all.map((r) => {
-    const left = measure(r, v.w - BAR_W, v.h);
-    const top = measure(r, v.w, v.h - BAR_H);
+    const left = measure(r, v.w - barW(v), v.h);
+    const top = measure(r, v.w, v.h - barH());
     return {
       room: r,
       v,
@@ -109,7 +156,7 @@ function compare(all, v) {
       // `.stage` is overflow:hidden, so a room taller than the area is CUT, not shrunk.
       // MIN_STAGE_SCALE is deliberately allowed to overflow the height (see its comment),
       // which is how a short viewport gets here.
-      topClips: top.drawnH > v.h - BAR_H + 0.5,
+      topClips: top.drawnH > v.h - barH() + 0.5,
       leftClips: left.drawnH > v.h + 0.5,
     };
   });
@@ -138,7 +185,19 @@ function median(cmp) {
  */
 const edgeFor = (c, tol) =>
   tol === 0
-    ? preferredTouchBarEdge(c.room.w, c.room.h, c.v.w, c.v.h, 'fill')
+    ? // Landscape, so the cutout is on a SIDE: `insetTop` stays 0 and the whole of it goes
+      // into `clearLeft`, already floored at the lead — `touchBarLeftW` takes the max, so
+      // passing a raw inset below 14 would silently drop the clearance.
+      preferredTouchBarEdge(
+        c.room.w,
+        c.room.h,
+        c.v.w,
+        c.v.h,
+        'fill',
+        1,
+        0,
+        Math.max(c.v.inset ?? 0, TOUCHBAR_LEAD),
+      )
     : !c.topClips && c.gain >= -tol
       ? 'top'
       : 'left';
@@ -168,10 +227,16 @@ if (process.argv.includes('--csv')) {
 }
 
 const TOLS = [0, 3, 6, 9, 12];
+// The bar's cost is per-viewport once a cutout is in play, so state the range rather than a
+// pair of constants that would be a lie on a mixed survey.
+const costs = [...new Set(vps.map((v) => `${barW(v)}/${barH()}`))];
 console.log(
-  `${vps.length} distinct landscape touch viewports from Playwright's device registry` +
-    (CHROME ? `, minus ${CHROME}px of browser chrome` : ', as Playwright reports them') +
-    `\nbar: ${BAR_W}px on the left, or ${BAR_H}px on the top\n`,
+  `${vps.length} distinct landscape touch viewports from ` +
+    (NATIVE ? 'the measured native iOS list (tools/layoutLabHousings.ts)' : "Playwright's device registry") +
+    (CHROME ? `, minus ${CHROME}px of browser chrome` : NATIVE ? ', full-bleed' : ', as Playwright reports them') +
+    `\nbar: ${costs.join(', ')} px (left/top)` +
+    (INSET ? `, with a forced ${INSET}px cutout` : NATIVE ? ', each phone with its own measured cutout' : '') +
+    '\n',
 );
 
 if (process.argv.includes('--devices')) {
@@ -184,8 +249,8 @@ if (process.argv.includes('--devices')) {
     let lc = 0, tc = 0;
     for (const r of all) {
       const none = measure(r, v.w, v.h).scale;
-      lc += (measure(r, v.w - BAR_W, v.h).scale / none - 1) * 100;
-      tc += (measure(r, v.w, v.h - BAR_H).scale / none - 1) * 100;
+      lc += (measure(r, v.w - barW(v), v.h).scale / none - 1) * 100;
+      tc += (measure(r, v.w, v.h - barH()).scale / none - 1) * 100;
     }
     const clips = cmp.filter((c) => c.topClips).length;
     console.log(
@@ -251,8 +316,8 @@ for (const klass of ['phone', 'foldable', 'tablet']) {
     let a = 0, b = 0;
     for (const r of all) {
       const none = measure(r, v.w, v.h).scale;
-      a += (measure(r, v.w - BAR_W, v.h).scale / none - 1) * 100;
-      b += (measure(r, v.w, v.h - BAR_H).scale / none - 1) * 100;
+      a += (measure(r, v.w - barW(v), v.h).scale / none - 1) * 100;
+      b += (measure(r, v.w, v.h - barH()).scale / none - 1) * 100;
     }
     lc += a / 72;
     tc += b / 72;

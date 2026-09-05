@@ -187,7 +187,12 @@ function writeTimings(t) {
 function runProbe(file, env) {
   return new Promise((resolve) => {
     const t0 = Date.now();
-    const c = spawn('node', [join('tools', file)], {
+    // `--import tsx` so a probe can import the app's TYPESCRIPT directly
+    // (`../src/app/touchBarEdge.ts`) instead of restating its constants in JS. That
+    // restatement is not hypothetical: the edge probe carried its own `BAR_W = 72` and went
+    // on agreeing with itself for the whole life of a 14px drift (ed3ebc4). Costs ~80ms of
+    // loader startup per probe, against a suite that runs for ~315s.
+    const c = spawn('node', ['--import', 'tsx', join('tools', file)], {
       cwd: root,
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, FF_UI_PORT: String(port), ...env },

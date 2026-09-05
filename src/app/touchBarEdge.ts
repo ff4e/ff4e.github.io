@@ -126,7 +126,7 @@ export const TOUCHBAR_LEAD = 14;
  * the clearance is added by whoever knows the inset, which left every caller that read
  * `TOUCHBAR_W` as "the bar" quietly 14px short — and the ones OUTSIDE `src/` were not in
  * any gate to say so (`tools/run-ui-tests.mjs` only discovers `test-*.mjs`), so
- * `tools/verify-touchbar-edge.mjs` had been failing both of its left-edge cases,
+ * `tools/test-touchbar-edge.mjs` had been failing both of its left-edge cases,
  * unwatched, since the split.
  *
  * So the footprint gets a name of its own. A caller that wants the number CSS renders

@@ -1,7 +1,7 @@
 /**
  * Viewport presets for `tools/layout-lab.html` — DEV ONLY.
  *
- * Three sources, and the mix is deliberate:
+ * Four sources, and the mix is deliberate:
  *
  *  - **Playwright's device registry**, every `hasTouch` entry, **paired by device rather
  *    than flattened by size**. Both orientations of a device are one row here, because the
@@ -13,14 +13,25 @@
  *  - **Desktop windows**, including the two Martin was resizing when he found the defects
  *    this task exists for. They are marked so they cannot be lost in the list.
  *  - **Extremes**, to make a rule's failure mode visible rather than theoretical.
+ *  - **The iPhones as the NATIVE app sees them** — full-bleed, with the display cutout each
+ *    model reports. They live in `tools/layoutLabHousings.ts`, because they were measured on
+ *    hardware while everything else in this file is generated, and they are joined in below.
  *
  * Playwright's phone viewports are already the area the PAGE gets (iPhone 15 landscape is
  * 734x343, not the 852x393 screen); its tablet entries are full-screen, which is why the
- * lab offers a browser-chrome subtraction on top.
+ * lab offers a browser-chrome subtraction on top. **That is also why every row here has no
+ * housing:** a mobile browser has already taken the cutout off both sides before it hands
+ * the page a viewport, so the inset it reports really is 0 and adding one would be counting
+ * the same pixels twice. The native rows are a different viewport, not this one plus a
+ * number — see `layoutLabHousings.ts`.
  *
  * Generated from `playwright`'s `devices` export; regenerate with the snippet in
- * PROGRESS.md if the dependency is updated.
+ * PROGRESS.md if the dependency is updated. The native rows are NOT generated and must
+ * survive that regeneration.
  */
+import { LAB_NATIVE_DEVICES } from './layoutLabHousings.js';
+import type { LabHousing } from './layoutLabHousings.js';
+
 export type LabOrientation = 'portrait' | 'landscape';
 
 export interface LabSize {
@@ -30,10 +41,19 @@ export interface LabSize {
 
 export interface LabDevice {
   name: string;
-  klass: 'phone' | 'tablet' | 'foldable' | 'desktop' | 'tv' | 'probe';
+  klass: 'phone' | 'tablet' | 'foldable' | 'desktop' | 'tv' | 'probe' | 'native';
   /** Either may be null — a couple of registry entries only exist one way up. */
   port: LabSize | null;
   land: LabSize | null;
+  /**
+   * The display cutout this device reports, CSS px per edge — absent on everything that
+   * reports none, which is every browser viewport and every desktop window.
+   *
+   * Only ever set on a `native` row, and only for LANDSCAPE. Read it through
+   * `housingFor()` rather than directly: portrait's cutout was never measured, and that
+   * function is where the difference between "no housing" and "not measured" is kept.
+   */
+  housing?: LabHousing;
   /** A viewport a real defect was found at — kept at the top of the picker. */
   note?: string;
 }
@@ -143,6 +163,10 @@ export const LAB_VIEWPORTS: readonly LabDevice[] = [
   ...LAB_PROBE_VIEWPORTS,
   ...LAB_DESKTOP_VIEWPORTS,
   ...LAB_TV_VIEWPORTS,
+  // Before the Playwright phones on purpose: a native iPhone and its browser row are the
+  // same physical device answering two different questions, and the native one is the
+  // question nothing offline could ask until now.
+  ...LAB_NATIVE_DEVICES,
   ...LAB_DEVICES,
 ];
 

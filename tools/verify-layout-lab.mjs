@@ -6,7 +6,7 @@
  * `src/app/layout.ts`'s own functions, so the SCALING cannot drift — but the PLACEMENT
  * (where the room lands, how much gap is left on each side) lives in `index.html`'s
  * stylesheet and had to be reproduced. This pins that reproduction against a real
- * Chromium, the same way `tools/verify-touchbar-edge.mjs` pins the edge model.
+ * Chromium, the same way `tools/test-touchbar-edge.mjs` pins the edge model.
  *
  * For each room/viewport/target it asserts:
  *   1. the room is drawn at the modelled scale,

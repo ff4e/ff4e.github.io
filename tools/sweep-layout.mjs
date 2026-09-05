@@ -37,12 +37,16 @@
  *   npx tsx tools/sweep-layout.mjs --target touch     # one target
  *   npx tsx tools/sweep-layout.mjs --margin 0         # price the candidate's reserve
  *   npx tsx tools/sweep-layout.mjs --strip 56         # price a different touch strip
+ *   npx tsx tools/sweep-layout.mjs --inset 62         # give the touch cases an iPhone's cutout
  *   npx tsx tools/sweep-layout.mjs --mono             # worst CUMULATIVE monotonicity loss
  *   npx tsx tools/sweep-layout.mjs --strip-curve      # room size against strip size
  */
 import { TARGET_DEFAULTS } from './layoutModel.ts';
 import { layoutRoom } from './layoutPlaced.ts';
 import { LAB_ROOMS, LAB_SIZES } from './layoutLabRooms.ts';
+// The SHIPPED width rule, imported rather than restated: the whole reason this sweep was
+// wrong about phones is that its numbers were copies of the app's, and copies drift.
+import { touchBarLeftW } from '../src/app/touchBarEdge.ts';
 
 const argv = process.argv.slice(2);
 const flag = (n) => argv.includes(n);
@@ -59,6 +63,18 @@ const STEP = arg('--step', 8);
 const MARGIN = arg('--margin', 0); // VIEWPORT_MARGIN — the shipped value
 const STRIP_LEFT = arg('--strip', 72);
 const STRIP_TOP = arg('--strip-top', 54); // index.html — the shipped top bar
+/**
+ * The display cutout, css px, priced onto the TOUCH cases only.
+ *
+ * A TV has no housing and a desktop browser has no housing, so putting the inset on those
+ * cases would be sweeping a device that cannot exist. On touch it is the whole point: every
+ * run before this one asked the properties about a phone with no notch, on viewports a
+ * phone never has.
+ *
+ * Measured values are 47 (iPhone 17e), 62 (17 / 17 Pro) and 68 (Air) — see
+ * `tools/layoutLabHousings.ts`. 0 is the default and reproduces every earlier run exactly.
+ */
+const INSET = arg('--inset', 0);
 const ONLY_TARGET = str('--target', null);
 
 /**
@@ -102,6 +118,15 @@ function cases() {
 }
 
 function req(c, size, w, h) {
+  // The housing is on a PHYSICAL edge of the device and does not move when the bar does: in
+  // landscape the notch or island is on a SIDE, in portrait it is along the top. So it is
+  // keyed off the viewport's orientation, never off `c.edge`.
+  //
+  // That asymmetry is the whole reason the cutout is interesting rather than just a smaller
+  // screen: in landscape it taxes the LEFT edge and leaves the top alone, so it pushes the
+  // edge rule towards the top exactly where the phone is widest.
+  const inset = c.target === 'touch' ? INSET : 0;
+  const landscape = w >= h;
   return {
     viewportW: w,
     viewportH: h,
@@ -111,6 +136,8 @@ function req(c, size, w, h) {
     mode: c.mode,
     stripEdge: c.edge,
     stripPx: c.strip,
+    insetLeft: landscape ? inset : 0,
+    insetTop: landscape ? 0 : inset,
     marginPx: c.margin,
     dpr: 1,
   };
@@ -378,7 +405,10 @@ console.log(
 );
 console.log(
   `margin ${MARGIN}px (TV: ${TARGET_DEFAULTS.tv.marginX}x${TARGET_DEFAULTS.tv.marginY} title-safe), ` +
-    `strip ${STRIP_LEFT} left / ${STRIP_TOP} top`,
+    `strip ${STRIP_LEFT} left / ${STRIP_TOP} top, ` +
+    (INSET
+      ? `cutout ${INSET}px on the touch cases (left edge costs ${STRIP_LEFT + touchBarLeftW(INSET) - touchBarLeftW(0)}, top ${STRIP_TOP + INSET})`
+      : 'no cutout (browser)'),
 );
 
 if (flag('--mono')) {
