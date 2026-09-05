@@ -122,6 +122,8 @@
  * site says what happens next.
  */
 
+import { hostFetchInit } from '../platform/nativeHost.js';
+
 /**
  * How much it costs the player when this asset does not arrive.
  *
@@ -427,7 +429,7 @@ async function fetchAsset(url: string, tier: AssetTier, what?: string, init?: Re
       // The caller's own signal still has to work — it is how a room that has been left
       // cancels its loads — so the two are combined rather than one replacing the other.
       const signal = init?.signal ? AbortSignal.any([init.signal, stall.signal]) : stall.signal;
-      const res = await fetch(url, { ...init, signal });
+      const res = await fetch(url, { ...hostFetchInit(url, init), signal });
       if (retryableStatus(res.status)) throw new TransientAssetError(url, `HTTP ${res.status}`, tier, undefined, what);
       return res;
     } catch (e) {

@@ -22,7 +22,7 @@
  */
 import { computeStageLayout, contentScale, CELL_NATIVE } from '../src/app/layout.js';
 import type { FitMode } from '../src/app/layout.js';
-import { TOUCHBAR_H, TOUCHBAR_W } from '../src/app/touchBarEdge.js';
+import { TOUCHBAR_H, TOUCHBAR_W, touchBarLeftW } from '../src/app/touchBarEdge.js';
 import { VIEWPORT_MARGIN } from '../src/app/layout.js';
 import type { LayoutRequest, LayoutResult, StripEdge } from './layoutModel.js';
 
@@ -49,7 +49,7 @@ function nearEdge(viewport: number, size: number, bar: number, margin: number): 
 /**
  * Lay one room out with the shipped model.
  *
- * `stripPx` overrides the bar's real 72/66 so the lab's sliders can price a different bar,
+ * `stripPx` overrides the bar's real 72/54 so the lab's sliders can price a different bar,
  * and `marginPx` is passed straight through to `computeStageLayout`. Left at their
  * defaults, both are exactly what the game does.
  */
@@ -59,7 +59,7 @@ export function layoutRoom(req: LayoutRequest): LayoutResult {
   const strip =
     stripEdge === 'none'
       ? 0
-      : (req.stripPx ?? (stripEdge === 'left' ? TOUCHBAR_W : TOUCHBAR_H));
+      : (req.stripPx ?? (stripEdge === 'left' ? touchBarLeftW() : TOUCHBAR_H));
   const dpr = req.dpr && req.dpr > 0 ? req.dpr : 1;
 
   const stripW = stripEdge === 'left' ? strip : 0;

@@ -22,7 +22,7 @@
  */
 import { chromium } from 'playwright';
 import { computeStageLayout, contentScale } from '../src/app/layout.ts';
-import { preferredTouchBarEdge, TOUCHBAR_H, TOUCHBAR_W } from '../src/app/touchBarEdge.ts';
+import { preferredTouchBarEdge, TOUCHBAR_H, touchBarLeftW } from '../src/app/touchBarEdge.ts';
 
 const BASE = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 
@@ -76,7 +76,10 @@ for (const c of CASES) {
   const want = landscape
     ? preferredTouchBarEdge(real.nativeW, real.nativeH, c.w, c.h, 'fill')
     : 'top';
-  const availW = want === 'left' ? c.w - TOUCHBAR_W : c.w;
+  // `touchBarLeftW()`, not `TOUCHBAR_W`: the left edge's footprint is the bar's content
+  // PLUS the clearance it holds off the display corner, and only the first of those is the
+  // constant. Chromium reports no housing inset, so this is the no-inset case — 72.
+  const availW = want === 'left' ? c.w - touchBarLeftW() : c.w;
   const availH = want === 'top' ? c.h - TOUCHBAR_H : c.h;
   const l = computeStageLayout(availW, availH, 'fill', false);
   const predicted = contentScale(real.nativeW, real.nativeH, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);

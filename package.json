@@ -10,6 +10,9 @@
     "render-room": "tsx tools/render-room.ts",
     "dev": "node tools/dev-server.mjs",
     "build": "vite build",
+    "build:ios": "npm run build && node tools/stage-pages-assets.mjs && cap sync ios",
+    "check:ios-payload": "tsx tools/check-ios-payload.ts",
+    "open:ios": "cap open ios",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "NO_COLOR=1 vitest run",
@@ -42,6 +45,9 @@
     "crop-help": "tsx tools/crop-help-diagrams.ts"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "@types/node": "^22.20.0",
     "playwright": "^1.61.1",
     "tsx": "^4.19.2",

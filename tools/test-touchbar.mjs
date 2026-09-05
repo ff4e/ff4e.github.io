@@ -298,6 +298,89 @@ try {
     `the bar reserves its width from the stage (margin ${inRoom.marginLeft}, stage ${inRoom.stageW} of ${inRoom.viewW})`,
   );
 
+  // ── The display cutout, supplied. On a phone the native shell measures it and writes
+  // it into `--sa-*` (ios/App/App/SafeAreaBridgeViewController.swift); the bar's footprint
+  // is `72px + var(--sa-left)` and it spends the inset as padding INSIDE that box, so its
+  // rendered width and the stage's reserve are the same number by construction.
+  //
+  // A browser reports every inset as 0, which makes the whole mechanism invisible here —
+  // and that blind spot hid a real bug: `#touchbar` was `content-box`, so the padding was
+  // added ON TOP of the width, the bar came out one whole inset wider than the space
+  // reserved for it, and it covered that much of the room's left edge (196px of bar
+  // against a 134px reserve, on an iPhone 17 Pro in landscape). Nothing in the suite could
+  // see it, because with a 0 inset the padding is 0 and the two agree by accident.
+  //
+  // So set the same variable the shell sets, and assert they still agree with it non-zero.
+  //
+  // Over EVERY inset the current iPhones actually report, not one sample. Measured by
+  // installing this build on each simulator and reading back what the bridge published:
+  //
+  //     iPhone 17e                          390x844   47   (notch)
+  //     iPhone 17 / 17 Pro / 17 Pro Max      402x874   62   (Dynamic Island)
+  //     iPhone Air                           420x912   68
+  //
+  // Three different numbers across five current models, which is the whole reason none of
+  // this is a constant: the housing is a different size on different phones, and iOS is the
+  // only thing that knows. A single 62px case would pass just as well if the rule had been
+  // written as "62" somewhere, and that is exactly the bug this table exists to prevent.
+  // 0 is included because it is the OTHER landscape on any of them — the housing is on the
+  // far side, so nothing pushes the bar in and `--bar-lead` takes over.
+  const INSETS = [0, 47, 62, 68];
+  const cutouts = await p.evaluate((insets) => {
+    const root = document.documentElement;
+    const lead = Number.parseFloat(getComputedStyle(root).getPropertyValue('--bar-lead'));
+    const out = insets.map((inset) => {
+      root.style.setProperty('--sa-left', `${inset}px`);
+      const bar = document.getElementById('touchbar').getBoundingClientRect();
+      const reserve = Number.parseFloat(getComputedStyle(document.querySelector('.stage')).marginLeft);
+      const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
+      const buttonRight = Math.max(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().right));
+      return {
+        inset,
+        barW: Math.round(bar.width),
+        reserve,
+        buttonLeft: Math.round(buttonLeft),
+        trailing: Math.round(bar.right - buttonRight),
+      };
+    });
+    root.style.removeProperty('--sa-left');
+    return { lead, out };
+  }, INSETS);
+
+  // The bar's footprint and the room's reserve are the same number at every inset — the
+  // box-sizing bug made them differ by one whole inset, and only a non-zero one shows it.
+  const mismatched = cutouts.out.filter((c) => c.barW !== c.reserve);
+  expect(
+    mismatched.length === 0,
+    `every cutout grows the bar and its reserve by the same amount (${cutouts.out.map((c) => `${c.inset}->${c.barW}/${c.reserve}`).join(' ')})`,
+  );
+  // And the rule the buttons follow: start AT the housing, or at the lead when there is no
+  // housing on this side — `max()`, never a sum, and never centred in the leftover. Held off
+  // it by the lead (the sum) is what put them 76px in against a 62px island, which is the
+  // gap Martin reported; centred in the leftover is the other half of the same mistake.
+  const wrong = cutouts.out.filter((c) => c.buttonLeft !== Math.max(c.inset, cutouts.lead));
+  expect(
+    wrong.length === 0,
+    `the buttons start at max(cutout, lead=${cutouts.lead}) on every device (${cutouts.out.map((c) => `${c.inset}->${c.buttonLeft}`).join(' ')})`,
+  );
+  // The lead itself has to be a real number, or `max()` degenerates to the inset and the
+  // 0 row above passes with the buttons flush against the glass — the original bug.
+  expect(
+    cutouts.lead > 0,
+    `--bar-lead is set, so the no-housing landscape still clears the display corner (${cutouts.lead}px)`,
+  );
+  // And the gap on the FAR side of the buttons — between them and the room — is the same
+  // on every device. It is the half of the footprint nothing else pins: the bar's width
+  // was a flat `72px + inset`, sized for 56px buttons that started 8px in, so once they
+  // became 52px starting at `max(inset, lead)` the leftover fell out of the far side and
+  // varied with the phone — 6px without a housing, 20px with one, a ledge of dead bar
+  // between the buttons and the room on exactly the phones that have an island.
+  const trailing = new Set(cutouts.out.map((c) => c.trailing));
+  expect(
+    trailing.size === 1,
+    `the gap between the buttons and the room is the same on every device (${cutouts.out.map((c) => `${c.inset}->${c.trailing}`).join(' ')})`,
+  );
+
   // ── The faithful panel is retired, and the room is given its footprint back. The
   // whole point of doing this LAST: everything the panel does now has a thumb-sized
   // counterpart, so hiding it leaves nothing unreachable.

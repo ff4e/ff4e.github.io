@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Fish Fillets 4ever</title>
     <meta name="description" content="A faithful web port of Fish Fillets (ALTAR, 1998) — the underwater puzzle game where you move two talking fish around a room without dropping anything on either of them. No install, no account, no plugin." />
     <link rel="canonical" href="https://ff4e.github.io/" />
@@ -30,7 +30,74 @@
     <meta name="twitter:description" content="A faithful web port of Fish Fillets (ALTAR, 1998), ported from the original Delphi source. All 72 rooms, in a browser." />
     <meta name="twitter:image" content="https://ff4e.github.io/og-card.jpg" />
     <style>
-      :root { color-scheme: dark; }
+      /* ── Display cutouts, and why the bar has to know about them ─────────
+         The touch bar is `position: fixed` against a viewport edge, which on a phone is
+         exactly where the hardware is: in the native iOS shell the clock and the
+         wifi/battery icons landed on top of the Map and Restart buttons, and the Dynamic
+         Island covered the two in the middle. Hiding the status bar (ios/App/App/Info.plist)
+         deals with the drawn furniture; the island is a hole in the screen and stays.
+
+         `viewport-fit=cover` on the viewport meta is what makes these non-zero — without
+         it iOS reports 0 and lays the page out inside the safe area, which letterboxes a
+         game that wants the whole screen. So: take the whole screen, then keep the bar's
+         BUTTONS out of the cutouts by hand.
+
+         Zero everywhere else, so every `calc()` below is a no-op in a desktop browser, on
+         Android, and on any iPhone without a cutout. The fallback in `env(..., 0px)` is
+         for browsers that do not know the keyword at all. */
+      :root {
+        color-scheme: dark;
+        --sa-top: env(safe-area-inset-top, 0px);
+        --sa-right: env(safe-area-inset-right, 0px);
+        --sa-bottom: env(safe-area-inset-bottom, 0px);
+        --sa-left: env(safe-area-inset-left, 0px);
+        /* What the bar actually reserves: its own buttons, plus whatever it has to clear
+           on that edge. Everything that has to agree with the bar's size — the stage
+           margin and the centring spacers' clamp — reads these, so the inset can never be
+           added in one place and forgotten in another.
+
+           Both are `clearance + button + 6px`, the 6px being the breathing room between
+           the buttons and the room. The top edge spells that 54 = 48 + 6 and takes its
+           clearance straight from `--sa-top`; the left edge spells it 58 = 52 + 6 and
+           takes the LARGER of the housing and the lead, because whichever of those is
+           bigger is the thing the buttons actually have to start after.
+
+           Sizing the left bar from the buttons is what keeps the trailing gap constant.
+           It used to be a flat `72px + var(--sa-left)`, which was the right total back
+           when the buttons were 56px wide and started 8px in — but after they shrank the
+           72 stopped describing anything, and the leftover landed between the buttons and
+           the room: 6px with no housing, 20px with one, which is a visible ledge of dead
+           bar on exactly the phones that have an island. */
+        --bar-h: calc(54px + var(--sa-top));
+        --bar-w: calc(58px + max(var(--sa-left), var(--bar-lead)));
+        /* How far in the buttons start when nothing else pushes them — the bar's LEAD.
+           It exists for the display's ROUNDED CORNER, which no inset describes:
+           `env(safe-area-inset-*)` reports the status bar, the sensor housing and the home
+           indicator, all of them straight-edged. The corner radius is none of those, and
+           iOS reports nothing for it, so a bar flush against the edge is free to put a
+           button where the screen has already curved away. Measured on an iPhone 17 Pro in
+           the landscape where the housing is on the RIGHT (so `--sa-left` is 0 and the bar
+           is against bare glass): the top button's left edge sat 8px in, the corner radius
+           is ~60px, and it ate that button's top-left corner. The bottom button was fine —
+           `--sa-bottom` below shifts the whole column up, so the top corner is the tight one.
+           This is a fixed number because CSS has no way to ask: it is the only quantity here
+           not measured from the device.
+
+           It is a FLOOR, not an addend — `max(--sa-left, --bar-lead)`, never their sum.
+           Adding them would spend the corner allowance a second time on exactly the phones
+           that least need it: an inset means the housing is on THIS side, which has already
+           pushed the buttons far past the corner. Summing them (plus centring the button in
+           what was left) put the buttons 76px in against an island whose visible edge is
+           near 48px — a gap wide enough to read as a mistake, which is how it was found.
+
+           14px rather than 8px because that is what shipped and was verified on device:
+           8px of padding plus 6px of centring slack. The buttons are left-aligned now, so
+           the whole lead has to be stated here.
+
+           Either way it is spent INSIDE `--bar-w`, so the bar's footprint and what `.stage`
+           reserves for it never move. */
+        --bar-lead: 14px;
+      }
       html, body { height: 100%; }
       /* No double-tap zoom. It is reachable on any touch device, and it is close to
          unrecoverable here: `body` has
@@ -332,7 +399,12 @@
         background: #0b0b12;
         color: #cdd;
         text-align: center;
-        padding: 24px;
+        /* The 24px is the design's own breathing room; the insets are the hardware's.
+           Added rather than max()'d because on a cutout device the two are stacked
+           physical constraints, not alternatives — a dialog 24px from the edge is still
+           24px INTO the island. */
+        padding: calc(24px + var(--sa-top)) calc(24px + var(--sa-right)) calc(24px + var(--sa-bottom))
+          calc(24px + var(--sa-left));
       }
       .overlay[hidden] { display: none; }
       /* ── The parrot on the failure screen ──────────────────────────────────
@@ -447,23 +519,41 @@
         gap: 6px;
         background: #10161acc;
         backdrop-filter: blur(2px);
+        /* `--bar-w`/`--bar-h` are the bar's WHOLE footprint — its buttons plus the cutout
+           it has to clear — and the same value is what `.stage` reserves and what the
+           centring spacers clamp against. The cutout is spent as padding INSIDE that box,
+           so the box has to measure the way the reserve does.
+           Without this the bar is `content-box`: the padding is added ON TOP of the width,
+           the bar comes out one whole inset wider than the space reserved for it, and it
+           covers that much of the room's left edge (measured: 196px of bar against a 134px
+           reserve, in landscape on an iPhone 17 Pro). A browser cannot see it — every inset
+           is 0 there, so the padding is 0 and the two agree by accident. */
+        box-sizing: border-box;
       }
       #touchbar[hidden] { display: none; }
       .tbtn {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         gap: 3px;
         flex: 0 1 auto;
-        min-width: 56px; min-height: 52px;
-        padding: 6px 4px;
+        /* 52x48 rather than 56x52. Two reasons, and the second is why the LABEL shrank with
+           the box instead of keeping its size: the button had to give up width so the bar
+           could spend it on `--bar-lead` above, and "Options" — the longest label — was
+           already the tightest thing in here, 41.5px of text inside 54px of content box.
+           Taking 4px off the box without taking anything off the text would have left it
+           1.25px from the border on each side, which reads as touching. At 9px the label is
+           37.4px and clears by 3.3px, so it is less cramped than it was before the box
+           shrank. Still well over the 44px minimum tap target on both axes. */
+        min-width: 52px; min-height: 48px;
+        padding: 6px 3px;
         color: #bdd; background: #18262e; border: 1px solid #35555f; border-radius: 10px;
-        font: 600 10px/1 system-ui, sans-serif; letter-spacing: 0.3px;
+        font: 600 9px/1 system-ui, sans-serif; letter-spacing: 0.3px;
         /* A tap must not select the label, show a magnifier, or bounce the page. */
         -webkit-tap-highlight-color: transparent;
         -webkit-user-select: none; user-select: none;
         touch-action: manipulation;
       }
       .tbtn svg {
-        width: 24px; height: 24px;
+        width: 22px; height: 22px;
         fill: none; stroke: currentColor; stroke-width: 1.8;
         stroke-linecap: round; stroke-linejoin: round;
       }
@@ -509,11 +599,17 @@
          is ever raised again — for a TV's title-safe inset, say. */
       @media (orientation: landscape) {
         html:not([data-touchbar-edge='top']) #touchbar {
-          top: 0; left: 0; bottom: 0; width: 72px; flex-direction: column;
+          top: 0; left: 0; bottom: 0; width: var(--bar-w); flex-direction: column;
+          /* Left-aligned, not centred: the lead below is the whole distance from the screen
+             edge to the buttons, so centring would silently add half the leftover on top of
+             it and undo the `max()`. The slack sits on the RIGHT instead, between the
+             buttons and the room, where nothing is competing for it. */
+          align-items: flex-start;
+          padding-left: max(var(--sa-left), var(--bar-lead)); padding-bottom: var(--sa-bottom);
         }
-        html[data-touchbar]:not([data-touchbar-edge='top']) .stage { margin-left: 72px; }
+        html[data-touchbar]:not([data-touchbar-edge='top']) .stage { margin-left: var(--bar-w); }
         html[data-touchbar]:not([data-touchbar-edge='top']) .stage::before {
-          content: ''; flex: 1 1 0; min-width: 72px; margin-left: -72px;
+          content: ''; flex: 1 1 0; min-width: var(--bar-w); margin-left: calc(-1 * var(--bar-w));
         }
         html[data-touchbar]:not([data-touchbar-edge='top']) .stage::after { content: ''; flex: 1 1 0; }
         /* ── The same bar, along the TOP, while still in landscape ──
@@ -538,20 +634,20 @@
            regress on one edge while holding on the other. */
         html[data-touchbar-edge='top'] #touchbar {
           top: 0; left: 0; right: 0; bottom: auto;
-          width: auto; height: 54px; flex-direction: row;
+          width: auto; height: var(--bar-h); padding-top: var(--sa-top); flex-direction: row;
         }
         html[data-touchbar][data-touchbar-edge='top'] .stage {
-          margin-top: 54px; flex-direction: column;
+          margin-top: var(--bar-h); flex-direction: column;
         }
         html[data-touchbar][data-touchbar-edge='top'] #stagebox { flex: 1 0 auto; flex-direction: column; }
         html[data-touchbar][data-touchbar-edge='top'] #stagebox::before {
-          content: ''; flex: 1 1 0; min-height: 54px; margin-top: -54px;
+          content: ''; flex: 1 1 0; min-height: var(--bar-h); margin-top: calc(-1 * var(--bar-h));
         }
         html[data-touchbar][data-touchbar-edge='top'] #stagebox::after { content: ''; flex: 1 1 0; }
       }
       @media (orientation: portrait) {
-        #touchbar { left: 0; right: 0; top: 0; height: 54px; flex-direction: row; }
-        html[data-touchbar] .stage { margin-top: 54px; }
+        #touchbar { left: 0; right: 0; top: 0; height: var(--bar-h); padding-top: var(--sa-top); flex-direction: row; }
+        html[data-touchbar] .stage { margin-top: var(--bar-h); }
         /* `#stagebox` is the row's only visible child in touch mode (`#panelcol` is
            `display: none`), and `wrap` is the box's only in-flow child — so turning both
            main axes vertical costs nothing, lets the box grow to the full height, and
@@ -559,7 +655,7 @@
         html[data-touchbar] .stage { flex-direction: column; }
         html[data-touchbar] #stagebox { flex: 1 0 auto; flex-direction: column; }
         html[data-touchbar] #stagebox::before {
-          content: ''; flex: 1 1 0; min-height: 54px; margin-top: -54px;
+          content: ''; flex: 1 1 0; min-height: var(--bar-h); margin-top: calc(-1 * var(--bar-h));
         }
         html[data-touchbar] #stagebox::after { content: ''; flex: 1 1 0; }
       }
@@ -609,7 +705,7 @@
          left to scroll, because the control that would fall below the fold is Done —
          the way out. Everything here still clears the 40px touch-target floor. */
       @media (max-height: 500px) {
-        #touchopts { padding: 10px 16px; }
+        #touchopts { padding: calc(10px + var(--sa-top)) calc(16px + var(--sa-right)) calc(10px + var(--sa-bottom)) calc(16px + var(--sa-left)); }
         .topts-card { gap: 8px; }
         .topts-card h1 { font: 600 19px/1.2 system-ui, sans-serif; }
         .topts-row input[type='range'] { height: 28px; }
@@ -785,7 +881,8 @@
       <div class="spinner"></div>
       <div id="loading-msg">Loading…</div>
       <div id="loading-credit">
-        A fan port of ALTAR's 1998 <em>Fish Fillets</em>. Not affiliated with ALTAR interactive.
+        A fan port of ALTAR's 1998 <em>Fish Fillets</em>, released by ALTAR under the GPL in 2002.
+        Not affiliated with ALTAR interactive.
       </div>
     </div>
     <!-- The one player-facing failure screen. Raised for a boot failure AND, since the

@@ -19,7 +19,9 @@ import {
   preferredTouchBarEdge,
   visibleRoomArea,
   TOUCHBAR_H,
+  TOUCHBAR_LEAD,
   TOUCHBAR_W,
+  touchBarLeftW,
 } from '../src/app/touchBarEdge.js';
 
 /** iPhone 15 in landscape, as Playwright reports it (browser chrome already off). */
@@ -100,7 +102,7 @@ describe('preferredTouchBarEdge', () => {
     // that nothing is cut, and that the rule still says 'left'.
     const short: [number, number] = [669, 280];
     const onTop = visibleRoomArea(555, 225, short[0], short[1] - TOUCHBAR_H, 'fill');
-    const onLeft = visibleRoomArea(555, 225, short[0] - TOUCHBAR_W, short[1], 'fill');
+    const onLeft = visibleRoomArea(555, 225, short[0] - touchBarLeftW(), short[1], 'fill');
     expect(onTop).toBeLessThan(onLeft); // area alone now says 'left' on its own
     expect(edge(555, 225, short)).toBe('left');
     // And it says it because the room FITS both ways, not because one was rejected.
@@ -113,7 +115,7 @@ describe('preferredTouchBarEdge', () => {
     // 266px into 214px of space.
     for (const [availW, availH] of [
       [short[0], short[1] - TOUCHBAR_H], // the top edge — the one that used to cut
-      [short[0] - TOUCHBAR_W, short[1]],
+      [short[0] - touchBarLeftW(), short[1]],
     ] as const) {
       const l = computeStageLayout(availW, availH, 'fill', false);
       const s = contentScale(555, 225, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
@@ -151,6 +153,53 @@ describe('preferredTouchBarEdge', () => {
     // preferred look — so the comparison is `>=`, not `>`. A degenerate room makes both
     // areas exactly 0, which is the only tie that can be constructed exactly.
     expect(preferredTouchBarEdge(0, 0, 800, 400, 'fill')).toBe('top');
+  });
+
+  /**
+   * And the housing, which is the reason the last two parameters exist at all.
+   *
+   * Every other test in this file — and every tool that models the layout offline — calls
+   * through `edge()`, which passes no insets, so all of them price a device with no cutout
+   * on a viewport that has already had a browser's chrome taken off it. The app is the only
+   * caller that supplies the real numbers (`touchButtons.ts`), and the effect they have is
+   * the whole justification for the left bar's rework: at a 62px housing the left edge
+   * costs 58 + 62 = 120px of the room's width instead of 58 + 14 = 72, and 48px is more
+   * than enough to change which edge shows more of the room.
+   *
+   * These are real rooms at real full-bleed sizes, not constructed ones. `PHONE` and the
+   * rest above are Playwright's browser viewports; an iPhone 17 Pro in landscape gives the
+   * app the whole 852x393 and puts 47-68px of housing (model-dependent) on whichever side
+   * is up. `insetTop` stays 0 because in landscape the cutout is never on the top edge.
+   */
+  const edgeAt = (w: number, h: number, [vw, vh]: [number, number], inset: number) =>
+    preferredTouchBarEdge(w, h, vw, vh, 'fill', 1, 0, Math.max(inset, TOUCHBAR_LEAD));
+
+  it('moves the bar off the left edge when the housing makes it too expensive', () => {
+    const NATIVE: [number, number] = [852, 393]; // iPhone 17 Pro / 14 Pro, landscape, full-bleed.
+    // BATYSKAF is the clearest case: it prefers the left on a screen with no housing, and
+    // every housing this app will ever meet is enough to turn that round.
+    expect(edgeAt(690, 300, NATIVE, 0)).toBe('left');
+    for (const inset of [47, 62, 68]) expect(edgeAt(690, 300, NATIVE, inset), `${inset}`).toBe('top');
+    // VITEJTE1 needs a bigger one, which is the point — the answer tracks the number, it is
+    // not simply "any inset means top".
+    expect(edgeAt(750, 345, NATIVE, 0)).toBe('left');
+    expect(edgeAt(750, 345, NATIVE, 47)).toBe('left');
+    expect(edgeAt(750, 345, NATIVE, 62)).toBe('top');
+  });
+
+  it('leaves the answer alone on a screen with no housing', () => {
+    // The other half of the claim, and the one that protects the web: `clearLeft` defaults
+    // to the lead, so a browser gets exactly the decisions it always got. If this ever
+    // fails, a change meant for the phone has reached the website.
+    for (const [w, h] of [
+      [690, 300],
+      [750, 345],
+      [780, 225],
+      [795, 435],
+      [540, 495],
+    ] as const) {
+      expect(edgeAt(w, h, PHONE, 0), `${w}x${h}`).toBe(edge(w, h, PHONE));
+    }
   });
 });
 
@@ -207,6 +256,7 @@ describe('the bar footprint in index.html and the constants here', () => {
     const inner = block.slice(block.indexOf('{') + 1);
     return [...inner.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
       selector: m[1].replace(/\s+/g, ' ').trim(),
+      body: m[2],
       lengths: [...m[2].matchAll(/-?(\d+)px/g)]
         .map((n) => Number(n[1]))
         .filter((n) => n !== 0),
@@ -237,17 +287,104 @@ describe('the bar footprint in index.html and the constants here', () => {
     expect(unclassified.map((r) => r.selector)).toEqual([]);
   });
 
+  /**
+   * The size the landscape branch spends is a custom property now, not a literal.
+   *
+   * It had to become one: what the bar has to clear is part of its footprint, so the top
+   * edge is `54px + env(safe-area-inset-top)` and the left edge is
+   * `58px + max(env(safe-area-inset-left), --bar-lead)`, and repeating either sum in the
+   * four places that have to agree is exactly the drift this describe block exists to
+   * catch. `:root` states each once and the rules reference it.
+   *
+   * So the guard moves with it, and keeps both directions: the branch must spend its size
+   * ONLY through the property (no stray literal creeping back), and the property must be
+   * the constant plus that edge's clearance (no silently resized bar, and no silently
+   * dropped inset).
+   *
+   * The two edges have different SHAPES, and that difference is load-bearing rather than
+   * cosmetic. The top edge adds its inset outright. The left edge takes `max()` of the
+   * inset and the lead, because the lead is a floor under the housing and not something to
+   * spend on top of it — summing them stranded the buttons 76px in against a 62px island.
+   * A single permissive regex over both would let one collapse into the other, so each is
+   * matched for the operator it is supposed to use.
+   */
+  const varRefs = (isTop: boolean) => {
+    const name = isTop ? '--bar-h' : '--bar-w';
+    return rules
+      .filter((r) =>
+        isTop ? r.selector.includes(TOP) && !r.selector.includes(NOT_TOP) : r.selector.includes(NOT_TOP),
+      )
+      .flatMap((r) => [...r.body.matchAll(new RegExp(`var\\(${name}\\)`, 'g'))]);
+  };
+
+  const root = html.slice(html.indexOf(':root {'), html.indexOf('html, body {'));
+
+  /** `--bar-h: calc(54px + var(--sa-top));` -> { px: 54, inset: '--sa-top' } */
+  const topDef = () => {
+    const m = /--bar-h:\s*calc\((\d+)px \+ var\((--sa-[a-z]+)\)\)/.exec(root);
+    return m === null ? null : { px: Number(m[1]), inset: m[2] };
+  };
+
+  /**
+   * `--bar-w: calc(58px + max(var(--sa-left), var(--bar-lead)));`
+   * -> { px: 58, inset: '--sa-left', lead: '--bar-lead' }
+   */
+  const leftDef = () => {
+    const m = /--bar-w:\s*calc\((\d+)px \+ max\(var\((--sa-[a-z]+)\), var\((--bar-[a-z]+)\)\)\)/.exec(root);
+    return m === null ? null : { px: Number(m[1]), inset: m[2], lead: m[3] };
+  };
+
+  /** `--bar-lead: 14px;` -> 14 */
+  const leadPx = () => {
+    const m = /--bar-lead:\s*(\d+)px/.exec(root);
+    return m === null ? null : Number(m[1]);
+  };
+
   it('agrees on the left bar in every rule that spends its width', () => {
     // The bar's own width, `.stage`'s margin, and both halves of #126's centring clamp
     // (`min-width` and the negative margin that shifts the split back onto the viewport).
-    const left = lengthsOf(false);
-    expect(left.length).toBeGreaterThanOrEqual(4);
-    expect([...new Set(left)]).toEqual([TOUCHBAR_W]);
+    expect(varRefs(false).length).toBeGreaterThanOrEqual(4);
+    expect(lengthsOf(false)).toEqual([]);
+    expect(leftDef()).toEqual({ px: TOUCHBAR_W, inset: '--sa-left', lead: '--bar-lead' });
+  });
+
+  it('agrees on the lead, which is the left bar spends it as a floor', () => {
+    // The stylesheet's `--bar-lead` and this module's `TOUCHBAR_LEAD` are the same number
+    // stated twice — the module needs it to price the left edge (it is the default for
+    // `clearLeft`), and CSS needs it to lay the bar out. Nothing else would notice them
+    // drifting: the pricing would simply be wrong by the difference, on every phone.
+    expect(leadPx()).toEqual(TOUCHBAR_LEAD);
   });
 
   it('agrees on the top bar in every rule that spends its height', () => {
-    const top = lengthsOf(true);
-    expect(top.length).toBeGreaterThanOrEqual(4);
-    expect([...new Set(top)]).toEqual([TOUCHBAR_H]);
+    expect(varRefs(true).length).toBeGreaterThanOrEqual(4);
+    expect(lengthsOf(true)).toEqual([]);
+    expect(topDef()).toEqual({ px: TOUCHBAR_H, inset: '--sa-top' });
+  });
+
+  /**
+   * And the footprint itself, which is the number every caller outside this module wants.
+   *
+   * The two above pin the PARTS — the constant and the lead — but a caller that has to
+   * subtract the bar from a viewport needs the sum, and reading `TOUCHBAR_W` for it is the
+   * mistake that left `tools/verify-touchbar-edge.mjs` failing both left-edge cases for
+   * the whole of the iOS branch without anything noticing. `touchBarLeftW()` is that sum,
+   * so it is asserted against the stylesheet rather than against the constants it is made
+   * of — otherwise it would only be checking its own arithmetic.
+   *
+   * Both sides of the `max()`, because they are different claims: at 0 the lead is what
+   * the bar spends (this is what a browser and every offline model see), and at a real
+   * housing inset the inset is, which is the case no test that runs on this machine can
+   * reach any other way.
+   */
+  it('gives the whole left footprint a name, and it is what the stylesheet resolves to', () => {
+    const def = leftDef();
+    const lead = leadPx();
+    if (def === null || lead === null) throw new Error('index.html no longer defines --bar-w/--bar-lead');
+    // `calc(58px + max(var(--sa-left), var(--bar-lead)))`, resolved by hand at two insets.
+    expect(touchBarLeftW(0)).toEqual(def.px + Math.max(0, lead));
+    expect(touchBarLeftW(62)).toEqual(def.px + Math.max(62, lead));
+    // The no-housing case is the old flat width, which is why nothing on the web moved.
+    expect(touchBarLeftW()).toEqual(72);
   });
 });
