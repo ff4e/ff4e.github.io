@@ -277,7 +277,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   //
   // All of it is the context's lifetime, which is this file's job: extracting it would
   // mean handing another module the graph, the music channel and the kill bookkeeping.
-  ['src/audio/audio.ts', 1015],
+  //
+  // Raised 1015 -> 1035 for the modal-pause half of the same bug. An interruption that
+  // arrives while the help overlay is up must be remembered until the overlay closes, so
+  // three places that used to drop it (scheduleRebuild, verifyAudible, setModalPause) now
+  // hand it on, and each needs the reasoning next to it — the flag is invisible state and
+  // the failure it prevents is silence, which nothing else in the file would explain.
+  ['src/audio/audio.ts', 1035],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

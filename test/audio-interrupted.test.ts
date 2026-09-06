@@ -193,6 +193,42 @@ describe('an interrupted context', () => {
 
     expect(made).toHaveLength(1);
   });
+
+  it('is still owed when the help overlay closes, and is paid then', async () => {
+    const { engine, ctx } = playingEngine();
+    engine.setModalPause(true);
+    await appSwitch(ctx);
+    expect(made).toHaveLength(1); // deliberately silent, as above
+
+    engine.setModalPause(false);
+    await vi.advanceTimersByTimeAsync(600);
+
+    // Resuming `ctx` is the obvious move here and the wrong one: it is the zombie from
+    // the app switch, and it would have answered 'running' for the rest of the session
+    // while playing nothing. Staying silent under the overlay is the feature; forgetting
+    // WHY it was silent is the bug, and it is invisible until the overlay closes.
+    expect(ctx.closed).toBe(true);
+    expect(made).toHaveLength(2);
+    expect(made[1]!.live).toBe(true);
+  });
+
+  it('is not lost to an overlay opened while the replacement is being checked', async () => {
+    const { engine, ctx } = playingEngine();
+    makeZombiesFromNowOn();
+    await appSwitch(ctx); // rebuilt, but into a context that is dead too
+    expect(made).toHaveLength(2);
+
+    // The overlay goes up inside the 500 ms verify window, so the check that would have
+    // caught the dead replacement never runs.
+    engine.setModalPause(true);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(made).toHaveLength(2);
+
+    engine.setModalPause(false);
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(made.length).toBeGreaterThan(2);
+  });
 });
 
 describe('the replacement context', () => {

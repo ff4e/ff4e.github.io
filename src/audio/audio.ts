@@ -313,9 +313,12 @@ export class AudioEngine {
     this.rebuildQueued = true;
     setTimeout(() => {
       this.rebuildQueued = false;
-      this.interrupted = false;
-      if (this.modalPaused) return; // came back to a help overlay; stay silent on purpose
-      this.rebuildCtx();
+      // Came back to a help overlay: stay silent on purpose, but stay OWED. Clearing
+      // `interrupted` here would leave setModalPause resuming the dead context when the
+      // overlay closes, and nothing afterwards could tell it was dead — it reports
+      // `'running'` for ever. That is the original bug, on the path that fixes it.
+      if (this.modalPaused) return;
+      this.rebuildCtx(); // clears `interrupted`
       this.verifyAudible(1);
     }, REBUILD_DELAY_MS);
   }
@@ -332,7 +335,13 @@ export class AudioEngine {
     const started = this.ctx?.currentTime ?? 0;
     setTimeout(() => {
       const ctx = this.ctx;
-      if (!ctx || this.modalPaused) return;
+      if (!ctx) return;
+      // A modal opened mid-verify. Hand the unfinished repair back rather than dropping
+      // it: `interrupted` is what setModalPause and handleGesture both read.
+      if (this.modalPaused) {
+        this.interrupted = true;
+        return;
+      }
       if (ctx.currentTime > started) return; // the clock is moving: it can be heard
       if (attempt >= REBUILD_ATTEMPTS) return;
       this.rebuildCtx();
@@ -436,6 +445,14 @@ export class AudioEngine {
           this.activeUntil.set(prior, until + delta);
         }
       }
+    }
+    // An interruption that landed while the overlay was up was deliberately left owed
+    // (scheduleRebuild, verifyAudible). Resuming would hand back a context that says
+    // `'running'` and plays nothing, so pay the debt instead.
+    if (this.interrupted) {
+      this.rebuildCtx();
+      this.verifyAudible(1);
+      return;
     }
     if (ctx) void ctx.resume();
   }
