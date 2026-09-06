@@ -130,6 +130,10 @@ export function step(): boolean {
   // original's DalsiPrikaz exits early during a load, URoom.pas:26930).
   if (loadmode) {
     advanceLoadmode();
+    // Keep the death latch in step while the load replays. Without this, a save taken
+    // after a death arrives with the flag still false, and the first live tick reads the
+    // already-dead fish as a death that just happened and buzzes for it.
+    buzzedDead = room.anyFishDead;
     return false;
   }
   // After a win, hold on the solved room while the cheer plays, then auto-return

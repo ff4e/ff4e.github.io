@@ -80,7 +80,7 @@ export function hapticBlocked(): void {
   if (!isNativeHost()) return;
   ensure();
   if (!mod) return;
-  void mod.Haptics.impact({ style: mod.ImpactStyle.Light }).catch(() => {});
+  void mod.Haptics.impact({ style: mod.ImpactStyle.Light }).catch(() => undefined);
 }
 
 /** A fish died. The error pattern is three beats — it reads as "that went wrong". */
@@ -88,7 +88,7 @@ export function hapticDeath(): void {
   if (!isNativeHost()) return;
   ensure();
   if (!mod) return;
-  void mod.Haptics.notification({ type: mod.NotificationType.Error }).catch(() => {});
+  void mod.Haptics.notification({ type: mod.NotificationType.Error }).catch(() => undefined);
 }
 
 /** The room is solved. The counterpart pattern, and the only celebratory one. */
@@ -96,7 +96,7 @@ export function hapticSolved(): void {
   if (!isNativeHost()) return;
   ensure();
   if (!mod) return;
-  void mod.Haptics.notification({ type: mod.NotificationType.Success }).catch(() => {});
+  void mod.Haptics.notification({ type: mod.NotificationType.Success }).catch(() => undefined);
 }
 
 /** Test seam: forget the loaded plugin so a case can observe the load path again. */
