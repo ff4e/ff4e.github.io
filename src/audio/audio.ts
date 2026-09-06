@@ -239,7 +239,10 @@ export class AudioEngine {
       this.master.gain.value = 0.8;
       this.master.connect(this.ctx.destination);
       // The one warning iOS gives that the audio has been taken away. See onStateChange.
-      this.ctx.addEventListener('statechange', () => this.onStateChange());
+      // The context is passed in because a rebuild leaves the old one's listener alive
+      // until it is collected, and by then `this.ctx` names its replacement.
+      const ctx = this.ctx;
+      ctx.addEventListener('statechange', () => this.onStateChange(ctx));
       // The three category buses sit between the per-sound gains and the master,
       // so a slider change scales a whole category at once (NastavZvuk).
       for (const bus of ['effect', 'voice', 'music'] as const) {
@@ -254,14 +257,13 @@ export class AudioEngine {
     // where a suspended context is DELIBERATE (see setModalPause): without this guard
     // the next play()/busNode() from anywhere would silently un-pause the whole game.
     //
-    // The test is "not running" rather than "is suspended" because iOS has a third
-    // state: backgrounding the app moves the context to `'interrupted'`, a WebKit
-    // extension absent from the spec and so from `AudioContextState`, which an
-    // `=== 'suspended'` test cannot see. That was the whole of the bug where the game
-    // came back from the app switcher silent for ever. `'closed'` is excluded because
-    // resuming one rejects; this engine never closes its context anyway.
-    const state: string = this.ctx.state;
-    if (state !== 'running' && state !== 'closed' && !this.modalPaused) void this.ctx.resume();
+    // Only `'suspended'`. iOS has a third state — backgrounding moves the context to
+    // `'interrupted'`, a WebKit extension absent from `AudioContextState` — and resuming
+    // one of those rejects with "Failed to start the audio device". That state belongs to
+    // the rebuild path (onStateChange), which replaces the context instead of arguing with
+    // it; nudging it from here would only add an unhandled rejection to the ~400 ms before
+    // the replacement lands. `'closed'` never happens outside rebuildCtx.
+    if (this.ctx.state === 'suspended' && !this.modalPaused) void this.ctx.resume();
     return this.ctx;
   }
 
@@ -285,9 +287,10 @@ export class AudioEngine {
    * What is reliable is that the interruption itself is announced. So remember it, and
    * when iOS says it has finished, replace the context rather than believe it.
    */
-  private onStateChange(): void {
-    const ctx = this.ctx;
-    if (!ctx) return;
+  private onStateChange(ctx: AudioContext): void {
+    // A dead context's last statechange must not be answered with its replacement's
+    // state — rebuildCtx closes the old one, and that close is itself a statechange.
+    if (ctx !== this.ctx) return;
     const state: string = ctx.state;
     if (state === 'interrupted') {
       this.interrupted = true;
