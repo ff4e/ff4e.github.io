@@ -84,7 +84,7 @@ const sh = (cmd, opts = {}) => execSync(cmd, { encoding: 'utf8', stdio: ['ignore
  * The team to sign as, read off the codesigning certificates in the keychain.
  *
  * The tempting string is the one in parentheses in the certificate's name —
- * `Apple Development: <email> (RB9543ZN3K)` — and it is the wrong one. That is
+ * `Apple Development: <email> (ABCDE12345)` — and it is the wrong one. That is
  * the certificate's own id. The Team ID lives in the subject's OU field, and on
  * a personal team the two differ, so the name has to be turned into a real
  * certificate and the subject parsed.
