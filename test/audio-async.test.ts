@@ -49,6 +49,10 @@ const sources: FakeSource[] = [];
 class FakeAudioContext {
   state = 'running';
   destination = { connect: () => {} };
+  /** A real AudioContext is an EventTarget, and the engine listens for 'statechange' on it
+   *  to notice iOS interrupting the audio. Nothing here exercises that; this only keeps
+   *  the fake a fake rather than something the engine trips over. */
+  addEventListener(): void {}
   resume(): void {}
   createGain(): unknown {
     return { gain: { value: 1 }, connect: () => {}, disconnect: () => {} };

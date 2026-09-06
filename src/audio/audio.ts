@@ -36,6 +36,17 @@ const TALKING_MEZ_MS = TALKING_MEZ_SEC * 1000;
  *  reports whether the room track is sounding; `KSnd(-999)` stops it. */
 export const MUSIC_PRIOR = -999;
 
+/** How long to let iOS finish restoring the audio session before opening a new context
+ *  over the interrupted one (see `scheduleRebuild`). Long enough that the device is ready,
+ *  short enough that the gap is heard as the app animating back rather than as a fault. */
+const REBUILD_DELAY_MS = 400;
+/** How long to give a rebuilt context to prove its clock is moving (`verifyAudible`).
+ *  A working context advances within a frame or two; this is generous on purpose. */
+const VERIFY_DELAY_MS = 500;
+/** Rebuild attempts per interruption. A device that has not come back by the third try is
+ *  not coming back, and retrying for ever would be a leak dressed up as a repair. */
+const REBUILD_ATTEMPTS = 3;
+
 interface Pkg {
   /** Package id, as the original names its files: '025', 'x01', 'restored'. */
   id: string;
@@ -104,6 +115,15 @@ export class AudioEngine {
   private musicGen = 0;
   /** True while a modal overlay has deliberately suspended the context (setModalPause). */
   private modalPaused = false;
+  /** The last looping track and where it came from, so a rebuilt context can put it back
+   *  without the caller having to notice a rebuild happened (see rebuildCtx). */
+  private musicUrl = '';
+  private musicLoop = 0;
+  /** Set when this context has been interrupted and is therefore no longer to be trusted,
+   *  whatever it says about itself afterwards. See `onStateChange`. */
+  private interrupted = false;
+  /** Guards against queueing two rebuilds for one interruption. */
+  private rebuildQueued = false;
   /** Wall-clock time the modal pause began, so `activeUntil` can be carried across it. */
   private modalPausedAt = 0;
   private musicBufs = new Map<string, AudioBuffer>();
@@ -218,6 +238,8 @@ export class AudioEngine {
       this.master = this.ctx.createGain();
       this.master.gain.value = 0.8;
       this.master.connect(this.ctx.destination);
+      // The one warning iOS gives that the audio has been taken away. See onStateChange.
+      this.ctx.addEventListener('statechange', () => this.onStateChange());
       // The three category buses sit between the per-sound gains and the master,
       // so a slider change scales a whole category at once (NastavZvuk).
       for (const bus of ['effect', 'voice', 'music'] as const) {
@@ -244,22 +266,132 @@ export class AudioEngine {
   }
 
   /**
-   * Wake the context after the app comes back from the background.
+   * Notice that iOS has taken the audio away, and put it back when it is willing.
    *
-   * iOS interrupts it on the way out and does not undo that on the way in, so something
-   * has to ask. `ensureCtx` would, at the next sound — but that can be a long way off:
-   * room music already playing needs no further call to keep going, so a player who
-   * switches away mid-room would sit in silence until they happened to move a fish.
+   * Backgrounding the app moves the context to `'interrupted'` — a WebKit state the spec
+   * does not have, so `AudioContextState` does not name it — and coming back moves it to
+   * `'running'` again. That second transition is a lie, and it is the whole bug. Measured
+   * on an iPhone 12 (iOS 26.6.1), across an app-switch away and back:
    *
-   * Does nothing without a context (building one here would only make a suspended one
-   * outside a gesture), and nothing under a modal pause — coming back to a help overlay
-   * should come back paused.
+   *     statechange -> interrupted  currentTime 38.42
+   *     statechange -> running      currentTime 38.42     <- and it never moves again
+   *
+   * The context reports itself running for ever after while its clock stands still and it
+   * plays nothing. So NOTHING the context says about itself can be used to decide whether
+   * the game can be heard, which is why two earlier attempts at this failed: resuming an
+   * interrupted context rejects with "Failed to start the audio device", and by the time
+   * a finger arrives the state reads 'running' and looks fine.
+   *
+   * What is reliable is that the interruption itself is announced. So remember it, and
+   * when iOS says it has finished, replace the context rather than believe it.
    */
-  handleForeground(): void {
+  private onStateChange(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const state: string = ctx.state;
+    if (state === 'interrupted') {
+      this.interrupted = true;
+      return;
+    }
+    // Out the other side. `'closed'` is us, in rebuildCtx, and must not re-trigger.
+    if (this.interrupted && state !== 'closed') this.scheduleRebuild();
+  }
+
+  /**
+   * Replace the context shortly after iOS hands it back.
+   *
+   * Not immediately: the transition out of `'interrupted'` is the moment iOS starts
+   * putting the audio session back, not the moment it has, and a context opened into the
+   * middle of that can fail to start — which would trade one silence for another. The
+   * delay is a guess, so `verifyAudible` checks the guess rather than trusting it.
+   */
+  private scheduleRebuild(): void {
+    if (this.rebuildQueued) return;
+    this.rebuildQueued = true;
+    setTimeout(() => {
+      this.rebuildQueued = false;
+      this.interrupted = false;
+      if (this.modalPaused) return; // came back to a help overlay; stay silent on purpose
+      this.rebuildCtx();
+      this.verifyAudible(1);
+    }, REBUILD_DELAY_MS);
+  }
+
+  /**
+   * Check that the new context is really playing, and try again if it is not.
+   *
+   * A context that cannot reach the audio device still says `'running'`, so the only
+   * honest test is whether its clock moves: `currentTime` is driven by the device, and
+   * stands still exactly when nothing can be heard. Bounded, because a device that will
+   * not come back must not be retried for the rest of the session.
+   */
+  private verifyAudible(attempt: number): void {
+    const started = this.ctx?.currentTime ?? 0;
+    setTimeout(() => {
+      const ctx = this.ctx;
+      if (!ctx || this.modalPaused) return;
+      if (ctx.currentTime > started) return; // the clock is moving: it can be heard
+      if (attempt >= REBUILD_ATTEMPTS) return;
+      this.rebuildCtx();
+      this.verifyAudible(attempt + 1);
+    }, VERIFY_DELAY_MS);
+  }
+
+  /**
+   * Repair the audio from inside a user gesture. Wired to pointerdown/keydown in boot.
+   *
+   * The belt to `onStateChange`'s brace: if the transition out of `'interrupted'` never
+   * arrives, the interruption stays remembered and the next touch acts on it. A gesture is
+   * also the one context in which iOS will honour a `resume()`, which is what the ordinary
+   * non-iOS case below needs.
+   */
+  handleGesture(): void {
     const ctx = this.ctx;
     if (!ctx || this.modalPaused) return;
-    const state: string = ctx.state;
-    if (state !== 'running' && state !== 'closed') void ctx.resume();
+    if (this.interrupted) {
+      this.interrupted = false;
+      this.rebuildCtx();
+      this.verifyAudible(1);
+      return;
+    }
+    // The ordinary suspended context — a gesture unlock, or a browser that parked it.
+    // Resuming keeps every sound's place, so prefer it while it still works.
+    if ((ctx.state as string) !== 'running') {
+      void ctx.resume().catch(() => {
+        // It refused, so it is the iOS case after all and only a new context will do.
+        this.rebuildCtx();
+        this.verifyAudible(1);
+      });
+    }
+  }
+
+  /**
+   * Throw the context away and build another one, then put the room music back.
+   *
+   * Everything sounding is lost — there is no way to move a playing source to another
+   * context — so this is the expensive repair and `handleGesture` is careful about when
+   * it is worth it. The decoded buffers are NOT thrown away: an `AudioBuffer` is data
+   * rather than a piece of the graph, so the ~13 MB of speech a room decoded on the way
+   * in stays valid, which is the difference between a rebuild costing a moment and
+   * costing a reload.
+   */
+  private rebuildCtx(): void {
+    const old = this.ctx;
+    // killAll() clears these, so take them first: the point of the rebuild is that the
+    // player hears the room again, and the room is mostly its music.
+    const name = this.musicName;
+    const url = this.musicUrl;
+    const loop = this.musicLoop;
+    this.killAll();
+    this.ctx = null;
+    this.master = null;
+    this.buses = { effect: null, voice: null, music: null };
+    this.interrupted = false;
+    if (old) void old.close().catch(() => undefined);
+    this.ensureCtx();
+    if (name && url) {
+      void this.playMusic(name, url, loop).catch(() => undefined);
+    }
   }
 
   /**
@@ -760,6 +892,10 @@ export class AudioEngine {
     if (this.musicStarting === name && this.musicName === name) return;
     this.stopMusic();
     this.musicName = name;
+    // Remembered for rebuildCtx, which has to start this same track again on a context
+    // the caller never asked for and will never hear about.
+    this.musicUrl = url;
+    this.musicLoop = loopSample;
     this.musicStarting = name;
     // Claim this start. Any later start — or any stopMusic() — bumps the counter, so
     // when this decode resolves it can tell whether it is still the current intent.

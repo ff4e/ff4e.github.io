@@ -23,6 +23,10 @@ class FakeAudioContext {
   suspends = 0;
   resumes = 0;
   destination = { connect: () => {} };
+  /** A real AudioContext is an EventTarget, and the engine listens for 'statechange' on it
+   *  to notice iOS interrupting the audio. Nothing here exercises that; this only keeps
+   *  the fake a fake rather than something the engine trips over. */
+  addEventListener(): void {}
   suspend(): void {
     this.suspends++;
     this.state = 'suspended';

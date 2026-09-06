@@ -215,11 +215,23 @@ export async function runBoot(): Promise<void> {
   window.addEventListener('pointerdown', unlockAudio, { once: true });
   window.addEventListener('keydown', unlockAudio, { once: true });
 
-  // Coming back from the app switcher is the other half of that: iOS interrupts the audio
-  // context on the way out and leaves it interrupted on the way in, so the return trip has
-  // to ask for it back. Not `{ once: true }` — this happens every time the app is
-  // backgrounded, unlike the gesture unlock above, which is genuinely once per load.
-  document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) audio.handleForeground();
-  });
+  // The fallback half of surviving the app switcher. iOS interrupts the audio context when
+  // the app leaves the screen, and the repair is driven from inside the engine, off the
+  // interruption iOS announces (`onStateChange`) — not from here, because there is no
+  // reliable event out here to hang it on: `visibilitychange` fires too early to act on,
+  // which is what the first attempt at this bug got wrong.
+  //
+  // This is what remains for the case where the announcement that iOS has finished never
+  // arrives: the interruption stays remembered and the next touch acts on it. A touch is
+  // also the only moment iOS honours a plain `resume()`, which is what every non-iOS
+  // browser needs after parking a context. Note the game gives no gesture of its own —
+  // sounds are played from the logic tick, long after the touch that caused them has
+  // expired — so this listener is the only touch the audio ever sees.
+  //
+  // Not `{ once: true }`: an interruption can happen any number of times — the app
+  // switcher, a phone call, Siri — and this has to work on every one of them. On a context
+  // that is already running it costs a state read.
+  const wakeAudio = (): void => audio.handleGesture();
+  window.addEventListener('pointerdown', wakeAudio);
+  window.addEventListener('keydown', wakeAudio);
 }

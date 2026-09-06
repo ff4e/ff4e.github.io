@@ -261,15 +261,23 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // 50-100 ms between that check and the install, in which a slow room A could replace
   // the package room B had already installed. `prepare` returns a decoded package and
   // `installRoom` puts it in place without yielding, so the check is the last word again.
-  // 850 -> 880 for surviving the app switcher. iOS moves a backgrounded context into
-  // `'interrupted'`, a WebKit state the spec does not have and `AudioContextState` does
-  // not name, and never moves it back — so `ensureCtx`'s "is it suspended?" nudge was
-  // blind to the one case that mattered and the game returned from the app switcher
-  // silent for ever. The check widened to "is it running?", and `handleForeground` was
-  // added beside it because waiting for the next sound is not good enough: room music
-  // already playing makes no further call, so there would be nothing left to trigger the
-  // recovery. Both belong to the context's lifetime, which is this file's job.
-  ['src/audio/audio.ts', 880],
+  // 850 -> 1015 for surviving the app switcher, which took three tries to get right and
+  // the file carries the reasoning so nobody spends that time again. iOS moves a
+  // backgrounded context into `'interrupted'`, a WebKit state the spec does not have and
+  // `AudioContextState` does not name, so `ensureCtx`'s "is it suspended?" nudge was blind
+  // to the one case that mattered and the game came back from the app switcher silent for
+  // ever. Widening that check did not fix it, and neither did resuming on a touch: measured
+  // on an iPhone 12, `resume()` from 'interrupted' REJECTS with "Failed to start the audio
+  // device", and on the way back the context announces `'running'` while its clock stands
+  // still and it plays nothing. Nothing it says about itself can be believed, so the fix
+  // hangs on the one honest signal — the interruption is announced (`onStateChange`) — and
+  // replaces the context rather than reviving it (`rebuildCtx`, plus `musicUrl`/`musicLoop`
+  // to put the room's music back). `verifyAudible` then checks the replacement's clock is
+  // moving instead of assuming, because assuming is what the first two attempts did.
+  //
+  // All of it is the context's lifetime, which is this file's job: extracting it would
+  // mean handing another module the graph, the music channel and the kill bookkeeping.
+  ['src/audio/audio.ts', 1015],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */
