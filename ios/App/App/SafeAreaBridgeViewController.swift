@@ -42,6 +42,16 @@ import Capacitor
    - `viewDidAppear` — because the first `viewSafeAreaInsetsDidChange` can land before the
      web view has a document to run script in, and a value written to a page that does not
      exist yet is silently lost.
+   - the end of every page load — because `viewDidAppear` is not late enough either, and
+     believing it was is what put the touch bar under the notch on a real iPhone 12. Both
+     of the hooks above fire while the web view still holds the empty document it starts
+     with. Writing to that one succeeds and then evaporates: loading `index.html` installs
+     a NEW document, and inline styles do not survive a navigation. Nothing fired again
+     afterwards — the insets had not CHANGED, so `viewSafeAreaInsetsDidChange` had no
+     reason to — so the page ran with no `--sa-*` at all, fell back to the `env()` values
+     in `index.html` (every one of them 0 in this web view), and drew its buttons under the
+     housing. Rotating "fixed" it only because rotation is the one path that publishes
+     again. Observing `isLoading` catches the moment the real document exists.
    - `viewWillTransition(to:with:)` — because of the landscape mirroring described below.
      Turning the device 180° from one landscape to the other swaps which side the sensor
      housing is on, but leaves `view.safeAreaInsets` bit-for-bit identical (that is the
@@ -52,6 +62,23 @@ import Capacitor
  All three are idempotent, so running twice costs one `evaluateJavaScript` and changes nothing.
  */
 class SafeAreaBridgeViewController: CAPBridgeViewController {
+
+    /// Held for the controller's lifetime — releasing it ends the observation.
+    private var loadObservation: NSKeyValueObservation?
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // Republish once the web view has finished loading a document, which is the first
+        // moment a write to `:root` has anything durable to land on. See the note above.
+        //
+        // KVO rather than `WKNavigationDelegate`: the bridge is already the navigation
+        // delegate and there is only one of those, so taking it would break Capacitor.
+        // Observing is additive and tells nobody else anything.
+        loadObservation = webView?.observe(\.isLoading, options: [.new]) { [weak self] _, change in
+            guard change.newValue == false else { return }
+            DispatchQueue.main.async { self?.publishSafeAreaInsets() }
+        }
+    }
 
     override func viewSafeAreaInsetsDidChange() {
         super.viewSafeAreaInsetsDidChange()
