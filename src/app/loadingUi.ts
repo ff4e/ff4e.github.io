@@ -297,6 +297,13 @@ export function relayout(): void {
  */
 export function initLoadingUi(): void {
   document.getElementById('fatal-reload')?.addEventListener('click', () => location.reload());
+  // What went wrong, in a form that survives the trip to a log.
+  //
+  // Capacitor's console bridge JSON-serialises whatever it is handed, and neither `Error`
+  // nor `DOMException` has enumerable own properties — so the one useful thing about a
+  // fatal boot arrived on the device as `boot failed: {}`. Say it as text.
+  const describe = (reason: unknown): string =>
+    reason instanceof Error ? `${reason.name}: ${reason.message}` : String(reason);
   // Any unhandled failure DURING boot means the game never became playable → fatal.
   //
   // After boot the rule NARROWS rather than stopping, and this is the layer that makes
@@ -318,7 +325,7 @@ export function initLoadingUi(): void {
   window.addEventListener('unhandledrejection', (ev) => {
     if (isAssetError(ev.reason)) reportAssetError(ev.reason);
     else if (!booted) {
-      console.error('boot failed:', ev.reason);
+      console.error('boot failed:', describe(ev.reason));
       showFatal();
     }
   });
@@ -330,7 +337,7 @@ export function initLoadingUi(): void {
   window.addEventListener('error', (ev) => {
     if (isAssetError(ev.error)) reportAssetError(ev.error);
     else if (!booted) {
-      console.error('boot failed:', ev.error ?? ev.message);
+      console.error('boot failed:', describe(ev.error ?? ev.message));
       showFatal();
     }
   });

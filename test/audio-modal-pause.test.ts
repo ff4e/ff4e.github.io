@@ -23,13 +23,22 @@ class FakeAudioContext {
   suspends = 0;
   resumes = 0;
   destination = { connect: () => {} };
+  /** A real AudioContext is an EventTarget, and the engine listens for 'statechange' on it
+   *  to notice iOS interrupting the audio. Nothing here exercises that; this only keeps
+   *  the fake a fake rather than something the engine trips over. */
+  addEventListener(): void {}
   suspend(): void {
     this.suspends++;
     this.state = 'suspended';
   }
-  resume(): void {
+  /** Both return a promise in the real API, and the engine now uses it: iOS rejects a
+   *  resume made outside a user gesture, so ensureCtx catches that refusal rather than
+   *  letting it reach the boot error handler. A void-returning fake made the engine
+   *  throw on `.catch` — the fake was wrong, not the engine. */
+  resume(): Promise<void> {
     this.resumes++;
     this.state = 'running';
+    return Promise.resolve();
   }
   createGain(): unknown {
     return { gain: { value: 1 }, connect: () => {}, disconnect: () => {} };

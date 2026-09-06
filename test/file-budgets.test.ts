@@ -261,7 +261,45 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // 50-100 ms between that check and the install, in which a slow room A could replace
   // the package room B had already installed. `prepare` returns a decoded package and
   // `installRoom` puts it in place without yielding, so the check is the last word again.
-  ['src/audio/audio.ts', 850],
+  // 850 -> 1015 for surviving the app switcher, which took three tries to get right and
+  // the file carries the reasoning so nobody spends that time again. iOS moves a
+  // backgrounded context into `'interrupted'`, a WebKit state the spec does not have and
+  // `AudioContextState` does not name, so `ensureCtx`'s "is it suspended?" nudge was blind
+  // to the one case that mattered and the game came back from the app switcher silent for
+  // ever. Widening that check did not fix it, and neither did resuming on a touch: measured
+  // on an iPhone 12, `resume()` from 'interrupted' REJECTS with "Failed to start the audio
+  // device", and on the way back the context announces `'running'` while its clock stands
+  // still and it plays nothing. Nothing it says about itself can be believed, so the fix
+  // hangs on the one honest signal — the interruption is announced (`onStateChange`) — and
+  // replaces the context rather than reviving it (`rebuildCtx`, plus `musicUrl`/`musicLoop`
+  // to put the room's music back). `verifyAudible` then checks the replacement's clock is
+  // moving instead of assuming, because assuming is what the first two attempts did.
+  //
+  // All of it is the context's lifetime, which is this file's job: extracting it would
+  // mean handing another module the graph, the music channel and the kill bookkeeping.
+  //
+  // Raised 1015 -> 1035 for the modal-pause half of the same bug. An interruption that
+  // arrives while the help overlay is up must be remembered until the overlay closes, so
+  // three places that used to drop it (scheduleRebuild, verifyAudible, setModalPause) now
+  // hand it on, and each needs the reasoning next to it — the flag is invisible state and
+  // the failure it prevents is silence, which nothing else in the file would explain.
+  // Raised 1035 -> 1045 for the speculative-resume catch in ensureCtx. iOS refuses a
+  // resume outside a user gesture, and unhandled that refusal reached the boot error
+  // handler and put the fatal overlay over a healthy game — found on a device, so the
+  // comment carries what the device taught and why swallowing it is right here.
+  //
+  // Raised 1045 -> 1080 for `logAudio`, `pageVisibility` and their call sites. The interruption repair runs on
+  // a timer, invisibly, and can end in a silence that no longer tries; until these lines
+  // it left no trace, so the only report it could produce was "sometimes I have to touch
+  // the screen". Diagnostics for a failure this quiet are not optional extras.
+  //
+  // Raised 1080 -> 1115 for `handleVisible`, once those diagnostics said what was actually
+  // wrong: iOS announces the START of an interruption every time and the END only
+  // sometimes, so the repair that hangs off the announcement usually never ran. The app
+  // returning to the screen is the trigger that is always there. Most of the additions are
+  // the comment, because the reason this trigger was passed over the first time is a good
+  // one and the answer to it — early is survivable, absent is not — is the whole point.
+  ['src/audio/audio.ts', 1115],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

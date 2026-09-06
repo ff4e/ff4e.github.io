@@ -34,6 +34,7 @@ import { parseBmp, type Bmp } from '../data/bmp.js';
 import { parseFfp } from '../data/ffp.js';
 import { roomByNumber } from '../data/roomTable.js';
 import { initAnalytics } from '../platform/analytics.js';
+import { initHaptics } from '../platform/haptics.js';
 import { decodeAsset, requiredBytes } from '../render/assetFetch.js';
 import { FontData } from '../render/font.js';
 import { webgl2Available } from '../render/glScreen.js';
@@ -177,6 +178,7 @@ export async function runBoot(): Promise<void> {
   setBooted(true);
   console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
   initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
+  initHaptics(); // warm the Taptic plugin on the native host; no-op in a browser
   // The feedback form. Reads the live game state only when the player opens it — there is
   // no collection before that, and nothing is ever sent without a click (see feedback.ts).
   ui.feedback = initFeedback({
@@ -212,4 +214,36 @@ export async function runBoot(): Promise<void> {
   };
   window.addEventListener('pointerdown', unlockAudio, { once: true });
   window.addEventListener('keydown', unlockAudio, { once: true });
+
+  // Surviving the app switcher, on all three triggers it takes.
+  //
+  // iOS interrupts the audio context when the app leaves the screen, and the repair is
+  // driven from inside the engine. It used to hang entirely off the interruption iOS
+  // announces (`onStateChange`), on the reasoning that `visibilitychange` fires too early
+  // to act on. Measured on an iPhone 12, that reasoning cost the player the sound: six app
+  // switches announced the interruption six times and announced the END twice, so four
+  // times nothing ran and the game sat silent until it was touched.
+  //
+  // So the app coming back on screen is a trigger too. It is early, which is exactly why
+  // it goes into the same `scheduleRebuild` as everything else — that waits, then checks
+  // the result against the clock and tries again. Early is survivable; absent is not.
+  const wakeAudioOnReturn = (): void => {
+    if (!document.hidden) audio.handleVisible();
+  };
+  document.addEventListener('visibilitychange', wakeAudioOnReturn);
+
+  // And the last resort, for the interruption that ends with the app already on screen —
+  // a phone call, Siri — where nothing announces anything and nothing changes visibility:
+  // the interruption stays remembered and the next touch acts on it. A touch is
+  // also the only moment iOS honours a plain `resume()`, which is what every non-iOS
+  // browser needs after parking a context. Note the game gives no gesture of its own —
+  // sounds are played from the logic tick, long after the touch that caused them has
+  // expired — so this listener is the only touch the audio ever sees.
+  //
+  // Not `{ once: true }`: an interruption can happen any number of times — the app
+  // switcher, a phone call, Siri — and this has to work on every one of them. On a context
+  // that is already running it costs a state read.
+  const wakeAudio = (): void => audio.handleGesture();
+  window.addEventListener('pointerdown', wakeAudio);
+  window.addEventListener('keydown', wakeAudio);
 }

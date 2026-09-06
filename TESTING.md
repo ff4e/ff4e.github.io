@@ -219,3 +219,74 @@ assertions.
   death keeps the survivor playing + speaks a line; both dead auto-restarts). Each drives the app through the
   deterministic `__ff` debug hooks and hard-fails on any bad assertion or console error. (The per-room music
   test decodes a ~5 MB WAV and can flake under machine load — re-run in isolation.)
+
+### The iOS app: what has to be tested by hand, and how
+
+The suites above all run against the web build. The Capacitor wrapper adds a layer none of
+them see — the WKWebView's own quirks, the launch screen, the safe area, haptics — and
+every bug found there so far was invisible to the Simulator, the browser, or both. This is
+how to get at them.
+
+Both paths below start from a normal `npm run build:ios` (Vite build + `cap sync`), which
+`build:device` does for you.
+
+#### Simulator: fast, free, and lies about audio
+
+    xcrun simctl list devices available | grep iPhone       # pick a UDID
+    xcrun simctl boot <sim-udid>
+    cd ios/App && xcodebuild -project App.xcodeproj -scheme App \
+      -configuration Debug -destination "id=<sim-udid>" \
+      -derivedDataPath /tmp/dd build CODE_SIGNING_ALLOWED=NO
+    xcrun simctl install <sim-udid> /tmp/dd/Build/Products/Debug-iphonesimulator/App.app
+    xcrun simctl launch --console-pty <sim-udid> io.github.ff4e.fishfillets4ever
+
+`--console-pty` puts the web view's `console.log` in your terminal, which is the only
+practical way to see what the app thinks it is doing. `xcodebuild` must be run from
+`ios/App`. Backgrounding, to reproduce anything about leaving the app, is
+`xcrun simctl launch <sim-udid> com.apple.mobilesafari`, and coming back is relaunching our
+own bundle id.
+
+The id above is the **shipping** one, which is safe here and only here: a Simulator install
+claims nothing. The device block below deliberately uses a different, throwaway id, and the
+two must not be swapped — see the warning there.
+
+Use the Simulator for layout, navigation and anything visual. **Do not trust it about
+audio.** It shares the Mac's audio stack rather than emulating iOS's, so an interrupted
+context recovers there by itself — the app-switcher bug fixed in `audio.ts` reproduces only
+on hardware, and the Simulator cheerfully showed a healthy clock while a real iPhone was
+silent. It never draws the launch screen either, and it has no haptics.
+
+#### Device: the only place some of this is visible
+
+    npm run build:device
+
+`tools/device-build.mjs` builds, signs and installs onto the one connected iPhone. It uses
+free provisioning, so no paid Apple Developer membership is needed — but read the header of
+that file before changing it, because free provisioning claims whatever bundle id it signs
+**permanently and with no way to release it**. That is why it builds as a throwaway
+`io.github.ff4e.devbuild` and never the shipping id. The profile expires after 7 days; when
+the app stops opening, run it again. First install also needs
+*Settings → General → VPN & Device Management → your Apple ID → Trust*.
+
+To watch the JS console on the device, which is what actually solved the audio bug:
+
+    xcrun devicectl list devices                            # the udid you want is the
+                                                            # hardwareProperties one
+    xcrun devicectl device process launch --console --terminate-existing \
+      --device <device-udid> io.github.ff4e.devbuild
+
+Capacitor prefixes the app's own lines with `⚡️  [log] -`. Reinstalling ends the session.
+A "JS Eval error" at startup is pre-existing and harmless.
+
+Things only the device can answer, and which therefore have to be checked by hand after any
+change that could touch them:
+
+- **audio across an interruption** — switch to another app and back, take a call, or invoke
+  Siri; the music and effects must come back on their own, with no touch. See the long
+  comment on `onStateChange` in `src/audio/audio.ts` for why the context cannot simply be
+  asked whether it is healthy.
+- **the launch screen**, which the Simulator never draws.
+- **haptics** — push a fish into a wall; the blocked move should tap back.
+- **the safe area** on a notched phone, in both orientations, entering a room directly
+  rather than rotating into it. Rotating republishes the insets and hides the bug class
+  that `SafeAreaBridgeViewController` exists to fix, so rotation is not a test.
