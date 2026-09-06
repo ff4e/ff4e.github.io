@@ -81,10 +81,13 @@ const die = (msg) => {
 const sh = (cmd, opts = {}) => execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts });
 
 /**
- * The team to sign as, taken from the codesigning certificates Xcode installed
- * when the Apple ID was added. A personal team's certificate is
- * `Apple Development: <email> (<TEAMID>)`, so the team id is the parenthesised
- * field — the same string the developer portal calls a Team ID.
+ * The team to sign as, read off the codesigning certificates in the keychain.
+ *
+ * The tempting string is the one in parentheses in the certificate's name —
+ * `Apple Development: <email> (RB9543ZN3K)` — and it is the wrong one. That is
+ * the certificate's own id. The Team ID lives in the subject's OU field, and on
+ * a personal team the two differ, so the name has to be turned into a real
+ * certificate and the subject parsed.
  */
 function findTeam() {
   if (process.env.FF4E_TEAM) return process.env.FF4E_TEAM;
@@ -94,7 +97,17 @@ function findTeam() {
   } catch {
     /* handled below as "none found" */
   }
-  const teams = [...out.matchAll(/"Apple Development: [^"]*\(([A-Z0-9]{10})\)"/g)].map((m) => m[1]);
+  const names = [...out.matchAll(/"(Apple Develop(?:ment|er)[^"]*)"/g)].map((m) => m[1]);
+  const teams = [];
+  for (const name of names) {
+    try {
+      const subject = sh(`security find-certificate -c "${name}" -p | openssl x509 -noout -subject`);
+      const ou = subject.match(/OU\s*=\s*([A-Z0-9]{10})/);
+      if (ou) teams.push(ou[1]);
+    } catch {
+      /* a certificate we cannot read is one we cannot sign with either */
+    }
+  }
   const unique = [...new Set(teams)];
   if (unique.length === 0) {
     die(
