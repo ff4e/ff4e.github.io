@@ -263,7 +263,16 @@ export class AudioEngine {
     // the rebuild path (onStateChange), which replaces the context instead of arguing with
     // it; nudging it from here would only add an unhandled rejection to the ~400 ms before
     // the replacement lands. `'closed'` never happens outside rebuildCtx.
-    if (this.ctx.state === 'suspended' && !this.modalPaused) void this.ctx.resume();
+    //
+    // The rejection is caught because this nudge is speculative. iOS refuses a resume that
+    // is not inside a user gesture, and this runs from anything about to make a sound —
+    // including the boot music, before the player has touched anything. Unhandled, that
+    // refusal reaches the boot error handler and puts the fatal overlay over a game that
+    // is fine. There is nothing to do about it here: `handleGesture` unlocks the context
+    // on the first touch, which is the browser's own bargain.
+    if (this.ctx.state === 'suspended' && !this.modalPaused) {
+      void this.ctx.resume().catch(() => undefined);
+    }
     return this.ctx;
   }
 

@@ -53,7 +53,12 @@ class FakeAudioContext {
    *  to notice iOS interrupting the audio. Nothing here exercises that; this only keeps
    *  the fake a fake rather than something the engine trips over. */
   addEventListener(): void {}
-  resume(): void {}
+  /** Returns a promise, as the real one does: ensureCtx catches the rejection iOS
+   *  produces for a resume outside a user gesture, so a void-returning fake is a trap
+   *  for whoever next makes this context start suspended. */
+  resume(): Promise<void> {
+    return Promise.resolve();
+  }
   createGain(): unknown {
     return { gain: { value: 1 }, connect: () => {}, disconnect: () => {} };
   }

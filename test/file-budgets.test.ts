@@ -283,7 +283,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // three places that used to drop it (scheduleRebuild, verifyAudible, setModalPause) now
   // hand it on, and each needs the reasoning next to it — the flag is invisible state and
   // the failure it prevents is silence, which nothing else in the file would explain.
-  ['src/audio/audio.ts', 1035],
+  // Raised 1035 -> 1045 for the speculative-resume catch in ensureCtx. iOS refuses a
+  // resume outside a user gesture, and unhandled that refusal reached the boot error
+  // handler and put the fatal overlay over a healthy game — found on a device, so the
+  // comment carries what the device taught and why swallowing it is right here.
+  ['src/audio/audio.ts', 1045],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

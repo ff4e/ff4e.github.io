@@ -35,6 +35,13 @@ class FakeAudioContext {
   closed = false;
   /** Set by a test to make resume() reject, as iOS does after an interruption. */
   resumeFails = false;
+  /** Whether the caller attached a handler to the last rejected resume.
+   *
+   *  An unhandled rejection is the failure this pins, and there is no deterministic way to
+   *  observe one from inside a test using fake timers — Node only decides a promise was
+   *  unhandled a macrotask later, which is the thing the test has taken away. So the fake
+   *  watches the promise instead and records whether anyone took responsibility for it. */
+  resumeRejectionHandled = false;
   /** Whether the audio device is really running this context. A zombie has `live = false`:
    *  it answers 'running' like any other, and only its stopped clock gives it away. */
   live = true;
@@ -58,7 +65,16 @@ class FakeAudioContext {
 
   resume(): Promise<void> {
     this.resumes++;
-    if (this.resumeFails) return Promise.reject(new Error('Failed to start the audio device'));
+    if (this.resumeFails) {
+      const p = Promise.reject(new Error('Failed to start the audio device'));
+      const then = p.then.bind(p);
+      p.then = (ok, err) => {
+        if (err) this.resumeRejectionHandled = true;
+        return then(ok, err);
+      };
+      p.catch = (err) => p.then(undefined, err);
+      return p;
+    }
     this.state = 'running';
     return Promise.resolve();
   }
@@ -323,5 +339,24 @@ describe('handleGesture', () => {
     engine.handleGesture();
 
     expect(made).toHaveLength(0);
+  });
+
+  // Found on a device, not here. iOS refuses a resume that is not inside a user gesture,
+  // and ensureCtx nudges a suspended context awake from anything about to make a sound —
+  // including the boot music, before the player has touched the screen. The refusal was
+  // uncaught, so it reached the window's `unhandledrejection` handler, which during boot
+  // means fatal: the game came up healthy, played its menu music, and wore a full-screen
+  // "something went wrong" over the top of it. The only visible evidence was a log line
+  // reading `boot failed: {}`, a DOMException with no enumerable properties.
+  it('does not let iOS refusing a speculative resume escape as a boot failure', async () => {
+    const { engine, ctx } = playingEngine();
+    ctx.state = 'suspended';
+    ctx.resumeFails = true;
+
+    engine.resume();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(ctx.resumes).toBe(2);
+    expect(ctx.resumeRejectionHandled).toBe(true);
   });
 });
