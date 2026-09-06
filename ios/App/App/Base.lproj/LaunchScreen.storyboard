@@ -16,8 +16,9 @@
                         <autoresizingMask key="autoresizingMask"/>
                         <!-- The image is scaleAspectFill so this is never normally seen, but a
                              system background here is white in light mode, and any frame of it
-                             during rotation or restore reads as a flash. Match the splash art. -->
-                        <color key="backgroundColor" red="0.0" green="0.0" blue="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                             during rotation or restore reads as a flash. Match the splash art,
+                             which is `body`'s own #101018. -->
+                        <color key="backgroundColor" red="0.062745098039215685" green="0.062745098039215685" blue="0.09411764705882353" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
                     </imageView>
                 </viewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="iYj-Kq-Ea1" userLabel="First Responder" sceneMemberID="firstResponder"/>

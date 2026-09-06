@@ -34,15 +34,16 @@
 // This is ALTAR's mark for the game, re-drawn. The game data was released by ALTAR under
 // the GPL in 2002 and the FFNG data package carries the artwork under GPLv2 with no logo
 // exception, so copying it is licensed. Trademark is a separate question that the GPL does
-// not answer, and Apple's Guideline 4.1(c) is a brand rule rather than a licence one — see
-// `NAMING_RESEARCH.md` in the task hub. Martin decided on 2026-09-06 to ship the emblem
-// with that risk accepted. Consequence to keep: the App Store description has to carry the
-// ALTAR credit, the GPL line and a source URL, the same way the boot splash already does.
+// not answer, and Apple's Guideline 4.1(c) is a brand rule rather than a licence one — a
+// reviewer can refuse a mark that reads as another company's however the copy is licensed.
+// Martin decided on 2026-09-06 to ship the emblem with that risk accepted. Consequence to
+// keep: the App Store description has to carry the ALTAR credit, the GPL line and a source
+// URL, the same way the boot splash already does.
 //
 // Requires the repo's Playwright (a dev dependency already, for the UI suite).
 // Usage: `node tools/build-app-icon.mjs`
 import { chromium } from 'playwright';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,10 +56,10 @@ const SPLASH = join(CATALOG, 'Splash.imageset');
 // the top of the ring (#fff37e), through #ffd119 on the flanks, to #e6a408 underneath.
 //
 // The title art in `public/cover.webp` is blue rather than gold, and a cyan ramp drawn from
-// it was tried and rejected. Two reasons it does not carry: the art's own emblem sampled at
-// #000049..#021c6c with only its rim catching light, so anything legible on a dark icon has
-// to be invented rather than taken; and against the launch screen -- which *is* that art --
-// gold is what tells the two apart on the home screen.
+// it was tried and rejected: the art's own emblem sampled at #000049..#021c6c with only its
+// rim catching light, so anything legible at home-screen size on a dark tile has to be
+// invented rather than taken. Gold is that invention, and the launch image uses the same
+// ramp, so the icon and the first screen read as one thing.
 const MARK = ['#fff6a4', '#ffd119', '#dd9a04'];
 
 // ── The emblem, in the capture's pixel space ──────────────────────────────────
@@ -150,12 +151,14 @@ function emblem(size, cx, cy) {
 
 // The ramp is applied across the mark on a diagonal, so the top-left of every stroke catches
 // the light and the underside falls away -- the same read the metallic letterforms have.
-const DEFS = (seaR, seaY) => `
+const MARK_DEF = `
   <linearGradient id="mark" x1="0.28" y1="0" x2="0.62" y2="1">
     <stop offset="0%" stop-color="${MARK[0]}"/>
     <stop offset="42%" stop-color="${MARK[1]}"/>
     <stop offset="100%" stop-color="${MARK[2]}"/>
-  </linearGradient>
+  </linearGradient>`;
+
+const SEA_DEF = (seaR, seaY) => `
   <radialGradient id="sea" cx="50%" cy="${seaY}%" r="${seaR}%">
     <stop offset="0%" stop-color="#0f2138"/>
     <stop offset="60%" stop-color="#081426"/>
@@ -166,43 +169,45 @@ const DEFS = (seaR, seaY) => `
 // centre. The glow runs to the corners from above, the way light falls underwater.
 const iconDoc = (side, emblemSize, seaR, seaY) =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}">
-     <defs>${DEFS(seaR, seaY)}</defs>
+     <defs>${MARK_DEF}${SEA_DEF(seaR, seaY)}</defs>
      <rect width="${side}" height="${side}" fill="#03070f"/>
      <rect width="${side}" height="${side}" fill="url(#sea)"/>
      ${emblem(emblemSize, side / 2, side / 2)}
    </svg>`;
 
 // ── The launch image ──────────────────────────────────────────────────────────
-// It is not the emblem: it is the screen the game itself puts up first, so that the handover
-// from the system launch image to the web view is invisible. That screen is `#intro-cover`
-// in index.html -- `public/cover.webp` on black -- so this draws exactly that.
+// The same emblem, centred on the colour the page itself comes up in.
 //
-// Placing it takes one step of arithmetic, because two different layout systems have to
-// agree. The CSS is `background: #000 center 38%/min(88vw, 1100px)`, and a background
-// position of 38% is not "centre at 38%": it aligns the image's 38% point with the box's,
-// which puts the top at 38% of the leftover height. Meanwhile the storyboard draws this
-// square image with `scaleAspectFill`, which on a portrait screen maps the image's full
-// height onto the screen's -- so a feature at image y lands at the same fraction of the
-// screen, and the horizontal overflow is simply cropped away.
-const COVER = readFileSync(join(ROOT, 'public', 'cover.webp'));
-const COVER_ASPECT = 2200 / 528;
-const REF = { w: 402, h: 874 }; // iPhone 17 Pro, points -- near the narrowest aspect shipped
-const coverW = Math.min(0.88 * REF.w, 1100);
-const coverH = coverW / COVER_ASPECT;
-const pxPerPt = 2732 / REF.h;
-const COVER_W = coverW * pxPerPt;
-const COVER_CY = (0.38 * (REF.h - coverH) + coverH / 2) * pxPerPt;
+// It used to be `public/cover.webp` on black — the game's own first screen, drawn here so
+// that the handover from the system launch image to the web view would be invisible. Two
+// things sank that:
+//
+//   - the cover carries ALTAR's `FILLETS` wordmark. The launch image is the first thing
+//     App Store review sees, and Guideline 4.1(c) is about exactly that. The icon avoids
+//     the wordmark deliberately; the launch image cannot quietly not.
+//   - the handover was not invisible anyway. `#intro-cover` starts `hidden`, so the web
+//     view's first paint is the loading overlay on `#101018` — not the cover art.
+//
+// So match what the web view really draws first: `body`'s own background, and the mark the
+// player just tapped on the home screen, which is the more useful thing to say while a
+// bundle boots.
+//
+// Centring also settles the geometry the cover could never get right. `scaleAspectFill`
+// scales a square image by `max(w, h) / 2732`, which is the SAME factor in both orientations
+// of one device — so a centred mark is identical in size portrait and landscape. The cover
+// was placed from a portrait reference (402 x 874 pt) and came out about half the intended
+// width in landscape, which is the orientation this game is played in.
+//
+// 420 puts the ring about 139 pt across on that phone (435 px * 874 / 2732), a third of the
+// screen's short side, either way up.
+const SPLASH_BG = '#101018'; // index.html: `body { background: #101018 }`
 
-const splashDoc = (side) => {
-  const w = COVER_W;
-  const h = w / COVER_ASPECT;
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}">
-     <rect width="${side}" height="${side}" fill="#000"/>
-     <image x="${((side - w) / 2).toFixed(1)}" y="${(COVER_CY - h / 2).toFixed(1)}"
-            width="${w.toFixed(1)}" height="${h.toFixed(1)}"
-            href="data:image/webp;base64,${COVER.toString('base64')}"/>
+const splashDoc = (side) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}">
+     <defs>${MARK_DEF}</defs>
+     <rect width="${side}" height="${side}" fill="${SPLASH_BG}"/>
+     ${emblem(420, side / 2, side / 2)}
    </svg>`;
-};
 
 // One file serves every scale: the imageset is single-scale, because three copies of the
 // same square would be three copies of the same bytes.
