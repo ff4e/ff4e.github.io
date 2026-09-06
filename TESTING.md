@@ -246,6 +246,10 @@ practical way to see what the app thinks it is doing. `xcodebuild` must be run f
 `xcrun simctl launch <sim-udid> com.apple.mobilesafari`, and coming back is relaunching our
 own bundle id.
 
+The id above is the **shipping** one, which is safe here and only here: a Simulator install
+claims nothing. The device block below deliberately uses a different, throwaway id, and the
+two must not be swapped — see the warning there.
+
 Use the Simulator for layout, navigation and anything visual. **Do not trust it about
 audio.** It shares the Mac's audio stack rather than emulating iOS's, so an interrupted
 context recovers there by itself — the app-switcher bug fixed in `audio.ts` reproduces only

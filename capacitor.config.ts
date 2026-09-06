@@ -52,7 +52,14 @@ const config: CapacitorConfig = {
   // iOS truncates the home-screen label at roughly twelve characters, so any name built
   // on "Fish Fillets " is shown as an ellipsis and nothing else. "Fishes" fits whole, and
   // carrying no part of the brand there also keeps the icon and its caption clear of
-  // Guideline 4.1(c). Apple permits a short display name that differs from the listing.
+  // Guideline 4.1(c).
+  //
+  // The cost, written down because it is a real one: Guideline 2.3.7 asks that the name on
+  // the device and the name in App Store Connect be SIMILAR, so that someone can find the
+  // app they installed. "Fishes" shares no word with "Fish Fillets Forever", so this is a
+  // bet rather than a rule being obeyed, and a reviewer is entitled to ask for it back.
+  // Taken anyway on 2026-09-06: the ellipsis is a certain problem and this is a possible
+  // one. If review does ask, "Fillets" is the fallback — it fits whole and shares a word.
   //
   // The listing name is "Fish Fillets Forever", not "Fish Fillets". No trademark for
   // "Fish Fillets" is registered in any software or game class in any register (TMview,
