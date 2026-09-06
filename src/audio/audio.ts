@@ -380,8 +380,14 @@ export class AudioEngine {
         return; // the clock is moving: it can be heard
       }
       if (attempt >= REBUILD_ATTEMPTS) {
+        // Out of attempts, so stop rebuilding — but stay OWED. The context that is left is
+        // dead and says `'running'`, and `interrupted` is the only record of that; dropping
+        // it here would tell every later repair that there is nothing to repair. Kept, the
+        // next trigger of any kind — a touch, a late announcement from iOS, the app coming
+        // back on screen again — finds the debt and pays it.
+        this.interrupted = true;
         this.logAudio(
-          `SILENT after ${attempt} rebuild(s), giving up until a touch  ` +
+          `SILENT after ${attempt} rebuild(s), still owed  ` +
             `state=${ctx.state as string}  page=${pageVisibility()}`,
         );
         return;
@@ -390,6 +396,36 @@ export class AudioEngine {
       this.rebuildCtx();
       this.verifyAudible(attempt + 1);
     }, VERIFY_DELAY_MS);
+  }
+
+  /**
+   * The app is back on screen. Repair the audio if it is owed one. Wired to
+   * `visibilitychange` in boot.
+   *
+   * This is the trigger that is always there, and it had to be measured to be believed.
+   * iOS announces the START of an interruption every single time; it announces the END
+   * only sometimes. Six app switches on an iPhone 12 produced six `-> interrupted`
+   * events and two announcements back (a `'suspended'`, 10.3 s and 3.2 s later). The
+   * other four produced NO statechange at all between the interruption and the player
+   * touching the screen — so the automatic repair, which hangs off that announcement,
+   * simply never ran. The player came back to a silent game four times out of six and
+   * had to touch it to wake it up.
+   *
+   * The reason this was passed over the first time is real, but it is an argument about
+   * ACTING, not about LISTENING: `visibilitychange` fires while the app is still animating
+   * back, when a fresh context can still fail to start. That is why this goes through
+   * `scheduleRebuild` like every other trigger — 400 ms before opening anything, then
+   * `verifyAudible` checking the guess against the clock and trying again. Being early is
+   * what that machinery is for. Being absent is what nothing can fix.
+   *
+   * The announcement path stays. It is faster when it comes, `rebuildQueued` collapses the
+   * two into one rebuild when both come, and a phone call ending while the app is already
+   * on screen never changes visibility at all.
+   */
+  handleVisible(): void {
+    if (!this.interrupted) return;
+    this.logAudio('back on screen with an interruption owed');
+    this.scheduleRebuild();
   }
 
   /**

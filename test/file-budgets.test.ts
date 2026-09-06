@@ -292,7 +292,14 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // a timer, invisibly, and can end in a silence that no longer tries; until these lines
   // it left no trace, so the only report it could produce was "sometimes I have to touch
   // the screen". Diagnostics for a failure this quiet are not optional extras.
-  ['src/audio/audio.ts', 1080],
+  //
+  // Raised 1080 -> 1115 for `handleVisible`, once those diagnostics said what was actually
+  // wrong: iOS announces the START of an interruption every time and the END only
+  // sometimes, so the repair that hangs off the announcement usually never ran. The app
+  // returning to the screen is the trigger that is always there. Most of the additions are
+  // the comment, because the reason this trigger was passed over the first time is a good
+  // one and the answer to it — early is survivable, absent is not — is the whole point.
+  ['src/audio/audio.ts', 1115],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

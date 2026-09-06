@@ -341,6 +341,69 @@ describe('handleGesture', () => {
     expect(made).toHaveLength(0);
   });
 
+  // The case the whole automatic repair used to miss, measured on an iPhone 12: six app
+  // switches, six `-> interrupted` events, and only two announcements coming back. Four
+  // times iOS said nothing at all between the interruption and the player's touch, so the
+  // game came back silent. Coming back on screen is the trigger that is always there.
+  it('is repaired when the app returns to the screen, with no announcement from iOS', async () => {
+    const { engine, ctx } = playingEngine();
+
+    // Away and back WITHOUT the transition out of 'interrupted' — the common device case.
+    ctx.announce('interrupted');
+    ctx.live = false;
+    await vi.advanceTimersByTimeAsync(450);
+    expect(made).toHaveLength(1); // nothing has run: there was nothing to run off
+
+    engine.handleVisible();
+    await vi.advanceTimersByTimeAsync(450);
+
+    expect(made).toHaveLength(2);
+    expect(made[1]!.state).toBe('running');
+  });
+
+  it('is not repaired twice when iOS does announce as well', async () => {
+    const { engine, ctx } = playingEngine();
+    ctx.announce('interrupted');
+    ctx.live = false;
+
+    // Both triggers inside one rebuild delay: the app is shown, and iOS speaks.
+    engine.handleVisible();
+    ctx.announce('running');
+    await vi.advanceTimersByTimeAsync(450);
+
+    expect(made).toHaveLength(2);
+  });
+
+  it('does nothing on a return that owes nothing', async () => {
+    const { engine } = playingEngine();
+
+    engine.handleVisible();
+    await vi.advanceTimersByTimeAsync(450);
+
+    expect(made).toHaveLength(1);
+  });
+
+  // Running out of attempts stops the rebuilding, not the debt. The context left behind is
+  // dead and reports 'running'; `interrupted` is the only record of that, and a later
+  // trigger has to be able to find it.
+  it('is still owed after the rebuilds run out, and a later return pays it', async () => {
+    const { engine, ctx } = playingEngine();
+    ctx.announce('interrupted');
+    ctx.live = false;
+    makeZombiesFromNowOn(); // every replacement comes up dead, so the attempts run out
+
+    engine.handleVisible();
+    await vi.advanceTimersByTimeAsync(400 + 3 * 500 + 50);
+    const spent = made.length;
+    expect(spent).toBe(4); // the original, plus three attempts
+
+    // The app comes back on screen a second time. The debt is still there to find.
+    engine.handleVisible();
+    await vi.advanceTimersByTimeAsync(450);
+
+    expect(made.length).toBeGreaterThan(spent);
+  });
+
   // Found on a device, not here. iOS refuses a resume that is not inside a user gesture,
   // and ensureCtx nudges a suspended context awake from anything about to make a sound —
   // including the boot music, before the player has touched the screen. The refusal was

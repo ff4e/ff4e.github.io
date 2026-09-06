@@ -215,14 +215,26 @@ export async function runBoot(): Promise<void> {
   window.addEventListener('pointerdown', unlockAudio, { once: true });
   window.addEventListener('keydown', unlockAudio, { once: true });
 
-  // The fallback half of surviving the app switcher. iOS interrupts the audio context when
-  // the app leaves the screen, and the repair is driven from inside the engine, off the
-  // interruption iOS announces (`onStateChange`) — not from here, because there is no
-  // reliable event out here to hang it on: `visibilitychange` fires too early to act on,
-  // which is what the first attempt at this bug got wrong.
+  // Surviving the app switcher, on all three triggers it takes.
   //
-  // This is what remains for the case where the announcement that iOS has finished never
-  // arrives: the interruption stays remembered and the next touch acts on it. A touch is
+  // iOS interrupts the audio context when the app leaves the screen, and the repair is
+  // driven from inside the engine. It used to hang entirely off the interruption iOS
+  // announces (`onStateChange`), on the reasoning that `visibilitychange` fires too early
+  // to act on. Measured on an iPhone 12, that reasoning cost the player the sound: six app
+  // switches announced the interruption six times and announced the END twice, so four
+  // times nothing ran and the game sat silent until it was touched.
+  //
+  // So the app coming back on screen is a trigger too. It is early, which is exactly why
+  // it goes into the same `scheduleRebuild` as everything else — that waits, then checks
+  // the result against the clock and tries again. Early is survivable; absent is not.
+  const wakeAudioOnReturn = (): void => {
+    if (!document.hidden) audio.handleVisible();
+  };
+  document.addEventListener('visibilitychange', wakeAudioOnReturn);
+
+  // And the last resort, for the interruption that ends with the app already on screen —
+  // a phone call, Siri — where nothing announces anything and nothing changes visibility:
+  // the interruption stays remembered and the next touch acts on it. A touch is
   // also the only moment iOS honours a plain `resume()`, which is what every non-iOS
   // browser needs after parking a context. Note the game gives no gesture of its own —
   // sounds are played from the logic tick, long after the touch that caused them has
