@@ -34,8 +34,14 @@
  *
  *   1. Xcode → Settings → Accounts → + → Apple ID. Any Apple ID works; it does
  *      not have to be enrolled in anything.
- *   2. Plug the iPhone in and unlock it. Trust the Mac if it asks.
- *   3. On the phone: Settings → Privacy & Security → Developer Mode → on. It
+ *   2. `npm run open:ios`, select the App target → Signing & Capabilities, and
+ *      choose "<your name> (Personal Team)". This step is not optional bureaucracy:
+ *      Xcode only mints the signing certificate when it first signs something, so
+ *      until you do it there is no certificate for this tool to find. Xcode will
+ *      complain about the bundle id on that screen — ignore it, the build here
+ *      overrides it.
+ *   3. Plug the iPhone in and unlock it. Trust the Mac if it asks.
+ *   4. On the phone: Settings → Privacy & Security → Developer Mode → on. It
  *      reboots.
  *
  * Then `npm run build:device`. The first run is also the first time the phone has
@@ -92,10 +98,17 @@ function findTeam() {
   const unique = [...new Set(teams)];
   if (unique.length === 0) {
     die(
-      'No development certificate on this Mac, which means Xcode has no Apple ID yet.\n\n' +
-        '  Xcode -> Settings -> Accounts -> + -> Apple ID\n\n' +
-        'Any Apple ID will do — it does not need a paid membership. Xcode issues the\n' +
-        'certificate itself the first time it signs something.',
+      'No development certificate on this Mac.\n\n' +
+        'Adding the Apple ID is not quite enough on its own — Xcode mints the certificate\n' +
+        'lazily, the first time it signs something. So do both:\n\n' +
+        '  1. Xcode -> Settings -> Accounts -> + -> Apple ID\n' +
+        '     (any Apple ID; it does not need a paid membership)\n' +
+        '  2. npm run open:ios, then select the App target -> Signing & Capabilities,\n' +
+        '     and pick your name followed by "(Personal Team)" in the Team dropdown.\n' +
+        '     That is the step that creates the certificate.\n\n' +
+        'Xcode will show a bundle-id error there — ignore it. This tool overrides the\n' +
+        'bundle id at build time and never signs the shipping one on purpose.\n\n' +
+        'Then come back and run this again.',
     );
   }
   if (unique.length > 1) {
