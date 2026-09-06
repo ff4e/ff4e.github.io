@@ -103,7 +103,7 @@ what each test net actually proves. Then:
 |---|---|
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | repo hygiene, commit rules, deploy |
 | [`MAP.md`](MAP.md) | the layout, and file-by-file maps of `src/app/` and `src/render/` |
-| [`TESTING.md`](TESTING.md) | the suites, what they prove, and what they cost |
+| [`TESTING.md`](TESTING.md) | the suites, what they prove, and what they cost — plus how to test the iOS app on a Simulator and a real phone |
 | [`ASSETS.md`](ASSETS.md) | where the original data comes from, and every transcode applied to it |
 | [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) | where the port still differs from the original |
 | [`HISTORY.md`](HISTORY.md) | the M0–M8 milestone log |
