@@ -101,7 +101,19 @@ function findTeam() {
   const teams = [];
   for (const name of names) {
     try {
-      const subject = sh(`security find-certificate -c "${name}" -p | openssl x509 -noout -subject`);
+      // Two calls rather than one shell pipeline: the name comes out of the keychain,
+      // and a certificate whose common name contains a `$` or a backtick would other-
+      // wise be interpreted rather than matched — and the catch below would report it
+      // as a certificate we cannot read, which is a confusing way to say "quoting".
+      const pem = execFileSync('security', ['find-certificate', '-c', name, '-p'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const subject = execFileSync('openssl', ['x509', '-noout', '-subject'], {
+        input: pem,
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
       const ou = subject.match(/OU\s*=\s*([A-Z0-9]{10})/);
       if (ou) teams.push(ou[1]);
     } catch {
