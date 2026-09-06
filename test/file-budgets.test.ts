@@ -287,7 +287,12 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // resume outside a user gesture, and unhandled that refusal reached the boot error
   // handler and put the fatal overlay over a healthy game — found on a device, so the
   // comment carries what the device taught and why swallowing it is right here.
-  ['src/audio/audio.ts', 1045],
+  //
+  // Raised 1045 -> 1080 for `logAudio`, `pageVisibility` and their call sites. The interruption repair runs on
+  // a timer, invisibly, and can end in a silence that no longer tries; until these lines
+  // it left no trace, so the only report it could produce was "sometimes I have to touch
+  // the screen". Diagnostics for a failure this quiet are not optional extras.
+  ['src/audio/audio.ts', 1080],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

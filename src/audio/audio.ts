@@ -47,6 +47,16 @@ const VERIFY_DELAY_MS = 500;
  *  not coming back, and retrying for ever would be a leak dressed up as a repair. */
 const REBUILD_ATTEMPTS = 3;
 
+/** Whether the page is on screen, for the audio log. The suspicion these lines exist to
+ *  settle is that iOS announces the end of an interruption before the app is actually
+ *  back, so a repair can spend its whole budget while nothing can play yet — which is
+ *  only readable if each attempt says where it stood. `document` is not a given: the
+ *  engine is also exercised under the test runner's node environment. */
+function pageVisibility(): string {
+  const d = (globalThis as { document?: Document }).document;
+  return d ? (d.hidden ? 'hidden' : 'visible') : 'n/a';
+}
+
 interface Pkg {
   /** Package id, as the original names its files: '025', 'x01', 'restored'. */
   id: string;
@@ -131,6 +141,15 @@ export class AudioEngine {
    *  source of any glitch can be identified live in the browser console. */
   soundLog: Array<{ name: string; vol: number; t: number }> = [];
   logToConsole = true;
+  /** Debug: the audio's LIFETIME, on the same switch as the sound log.
+   *
+   *  Everything below about surviving an interruption happens on a timer, invisibly, and
+   *  ends either in sound or in a silence that no longer tries. That silence used to leave
+   *  no trace at all — the one bug report it could produce was "sometimes I have to touch
+   *  the screen", with nothing to read. These lines are what makes it a fact instead. */
+  private logAudio(msg: string): void {
+    if (this.logToConsole) console.log(`\u{1F39B}\uFE0F [audio] ${msg}  @${Math.round(performance.now())}ms`);
+  }
   private logSound(name: string, vol: number): void {
     const t = Math.round(performance.now());
     this.soundLog.push({ name, vol, t });
@@ -301,6 +320,7 @@ export class AudioEngine {
     // state — rebuildCtx closes the old one, and that close is itself a statechange.
     if (ctx !== this.ctx) return;
     const state: string = ctx.state;
+    this.logAudio(`statechange -> ${state}  clock=${ctx.currentTime.toFixed(2)}`);
     if (state === 'interrupted') {
       this.interrupted = true;
       return;
@@ -326,7 +346,11 @@ export class AudioEngine {
       // `interrupted` here would leave setModalPause resuming the dead context when the
       // overlay closes, and nothing afterwards could tell it was dead — it reports
       // `'running'` for ever. That is the original bug, on the path that fixes it.
-      if (this.modalPaused) return;
+      if (this.modalPaused) {
+        this.logAudio('rebuild deferred: modal pause, interruption still owed');
+        return;
+      }
+      this.logAudio(`rebuild 1/${REBUILD_ATTEMPTS}  page=${pageVisibility()}`);
       this.rebuildCtx(); // clears `interrupted`
       this.verifyAudible(1);
     }, REBUILD_DELAY_MS);
@@ -351,8 +375,18 @@ export class AudioEngine {
         this.interrupted = true;
         return;
       }
-      if (ctx.currentTime > started) return; // the clock is moving: it can be heard
-      if (attempt >= REBUILD_ATTEMPTS) return;
+      if (ctx.currentTime > started) {
+        this.logAudio(`audible after ${attempt} rebuild(s)  state=${ctx.state as string}`);
+        return; // the clock is moving: it can be heard
+      }
+      if (attempt >= REBUILD_ATTEMPTS) {
+        this.logAudio(
+          `SILENT after ${attempt} rebuild(s), giving up until a touch  ` +
+            `state=${ctx.state as string}  page=${pageVisibility()}`,
+        );
+        return;
+      }
+      this.logAudio(`silent, rebuild ${attempt + 1}/${REBUILD_ATTEMPTS}  page=${pageVisibility()}`);
       this.rebuildCtx();
       this.verifyAudible(attempt + 1);
     }, VERIFY_DELAY_MS);
@@ -369,6 +403,7 @@ export class AudioEngine {
   handleGesture(): void {
     const ctx = this.ctx;
     if (!ctx || this.modalPaused) return;
+    this.logAudio(`gesture  state=${ctx.state as string}  interrupted=${this.interrupted}`);
     if (this.interrupted) {
       this.interrupted = false;
       this.rebuildCtx();
