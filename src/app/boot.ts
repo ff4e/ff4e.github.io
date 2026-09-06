@@ -34,6 +34,7 @@ import { parseBmp, type Bmp } from '../data/bmp.js';
 import { parseFfp } from '../data/ffp.js';
 import { roomByNumber } from '../data/roomTable.js';
 import { initAnalytics } from '../platform/analytics.js';
+import { initHaptics } from '../platform/haptics.js';
 import { decodeAsset, requiredBytes } from '../render/assetFetch.js';
 import { FontData } from '../render/font.js';
 import { webgl2Available } from '../render/glScreen.js';
@@ -177,6 +178,7 @@ export async function runBoot(): Promise<void> {
   setBooted(true);
   console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
   initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
+  initHaptics(); // warm the Taptic plugin on the native host; no-op in a browser
   // The feedback form. Reads the live game state only when the player opens it — there is
   // no collection before that, and nothing is ever sent without a click (see feedback.ts).
   ui.feedback = initFeedback({

@@ -21,6 +21,7 @@ import { EFFECT_VOL, LOGIC_MS } from './stageGeometry.js';
 import { maybeBubble } from '../core/ambient.js';
 import { tickChatter } from '../core/chatter.js';
 import { stdSmrt } from '../core/deathlines.js';
+import { hapticDeath, hapticSolved } from '../platform/haptics.js';
 import type { HookSystem } from '../core/hooks.js';
 
 /**
@@ -38,6 +39,9 @@ export interface LogicTickHost {
 }
 
 let host!: LogicTickHost;
+
+/** Has the current death already been reported to the Taptic Engine? See below. */
+let buzzedDead = false;
 
 /** Hand this module its view of the game. Called once, from `main.ts`, during boot. */
 export function initLogicTick(h: LogicTickHost): void {
@@ -181,6 +185,14 @@ export function step(): boolean {
   // survivor (URoom.pas:26998). Auto-restart only when *both* fish are out of play
   // and it is not a win (URoom.pas:24337) — a lone survivor keeps playing until the
   // player restarts, which is what lets the death commentary (StdSmrt) be heard.
+  // One buzz at the moment of death, not one per erosion tick. The flag follows
+  // `anyFishDead` in both directions, so a room rebuilt after a death re-arms itself
+  // on the next tick with no reset hook. Silent while the KUFRIK demonstration or a
+  // solution replay kills fish on purpose — those deaths are not the player's.
+  if (room.anyFishDead !== buzzedDead) {
+    buzzedDead = room.anyFishDead;
+    if (buzzedDead && !showmode && !inReplay()) hapticDeath();
+  }
   if (room.anyFishDead) {
     const eroded = room.tickRozpad();
     const other = engine.active === 'little' ? 'big' : 'little';
@@ -210,6 +222,10 @@ export function step(): boolean {
   if (activeScript) {
     const wasWon = room.won;
     engine.runScript(count, host.casHry()); // idle timers + scalar sync + prog + tickShodLod
+    // The win edge, taken here because this is where it happens: `runScript` is what
+    // flips it. Guarded like the death commentary below — a demonstration or a replay
+    // solving the room is not the player solving it.
+    if (!wasWon && room.won && !showmode && !inReplay()) hapticSolved();
     if (!wasWon) {
       // StdSmrt: death commentary (the survivor comments ~8 ticks after a partner dies).
       // Gated on StdHlaskySmrti (URoom.pas:24942) — rooms like TRUP/VLADOVA disable it.

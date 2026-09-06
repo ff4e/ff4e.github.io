@@ -16,6 +16,7 @@ import { stepsOf } from '../core/record.js';
 import type { RecordStep } from '../core/record.js';
 import { ITEM_WALL } from '../core/room.js';
 import type { ScriptSnapshot } from '../core/script.js';
+import { hapticBlocked } from '../platform/haptics.js';
 
 /**
  * The four names this module needs from `main.ts`.
@@ -55,6 +56,8 @@ let heldSys = false; // arrow keys are kdo:=sys → move whichever fish is activ
 let heldWhich: 'little' | 'big' = 'little';
 let heldDir: number = Dir.no;
 let heldState = 0; // KeyRoom: 0 idle, 1 pressed, 2 held, 3 released
+/** Has the current hold already reported its wall? See `dispatchHeldMove`. */
+let buzzedBlocked = false;
 
 /**
  * The `KeyRoom` state itself, for the debug surface. A function rather than an exported
@@ -90,6 +93,7 @@ export function beginHeldMove(code: string, sys: boolean, which: 'little' | 'big
   heldWhich = which;
   heldDir = dir;
   heldState = 1;
+  buzzedBlocked = false; // a fresh press against the same wall earns a fresh tap
 }
 
 /** DalsiPrikaz (URoom.pas:26941): dispatch the held key on a rest tick and advance its
@@ -111,7 +115,19 @@ export function dispatchHeldMove(): void {
   if (fishBusy(which)) return; // dropped while the fish is talking (kdo:=0)
   engine.swim = null;
   engine.active = which;
-  tryStep(which, heldDir);
+  const result = tryStep(which, heldDir);
+  // One tap when the push meets the wall — not one per tick. The held key is re-issued
+  // every rest tick, so a thumb parked against a wall would otherwise buzz continuously,
+  // which is the difference between feedback and a fault. 'busy' is the animation still
+  // running and says nothing about the wall, so it neither buzzes nor clears the latch.
+  if (result === 'blocked') {
+    if (!buzzedBlocked) {
+      buzzedBlocked = true;
+      hapticBlocked();
+    }
+  } else if (result !== 'busy') {
+    buzzedBlocked = false;
+  }
   host.setInfo();
 }
 
