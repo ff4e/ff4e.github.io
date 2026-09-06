@@ -43,19 +43,30 @@ assertStagedDist();
  * this way.
  */
 const config: CapacitorConfig = {
-  // The App Store listing is "Fish Fillets 4ever", not "Fish Fillets". No trademark for
+  // Three names, deliberately different:
+  //
+  //   App Store listing   "Fish Fillets Forever"  (App Store Connect, 30 char limit)
+  //   Home screen         "Fishes"                (CFBundleDisplayName in Info.plist)
+  //   Web build / console "Fish Fillets 4ever"    (unchanged; ff4e is the site's identity)
+  //
+  // iOS truncates the home-screen label at roughly twelve characters, so any name built
+  // on "Fish Fillets " is shown as an ellipsis and nothing else. "Fishes" fits whole, and
+  // carrying no part of the brand there also keeps the icon and its caption clear of
+  // Guideline 4.1(c). Apple permits a short display name that differs from the listing.
+  //
+  // The listing name is "Fish Fillets Forever", not "Fish Fillets". No trademark for
   // "Fish Fillets" is registered in any software or game class in any register (TMview,
   // including the Czech ÚPV — every "fillets" mark found is a food-industry one, mostly
   // expired), and the studio that made the game was struck off in 2010. But Bohemia
   // Interactive still sells Fish Fillets 2 today, and unregistered marks arise from use
   // in commerce, so the empty register is not a green light. Guideline 4.1(c) — "you
   // cannot use another developer's brand or product name in your app's icon or name" —
-  // is what the "4ever" is doing work against.
+  // is what the trailing "Forever" is doing work against.
   //
   // The bundle id can still change up to the moment an App Store Connect record exists.
   // After that it is permanent, so that registration is the point of no return.
   appId: 'io.github.ff4e.fishfillets4ever',
-  appName: 'Fish Fillets 4ever',
+  appName: 'Fish Fillets Forever',
   webDir: 'dist',
   ios: {
     // The game paints its own background; a white flash between the launch screen and the
