@@ -11,6 +11,7 @@
     "dev": "node tools/dev-server.mjs",
     "build": "vite build",
     "build:ios": "npm run build && node tools/stage-pages-assets.mjs && cap sync ios",
+    "build:device": "node tools/device-build.mjs",
     "check:ios-payload": "tsx tools/check-ios-payload.ts",
     "open:ios": "cap open ios",
     "preview": "vite preview",
