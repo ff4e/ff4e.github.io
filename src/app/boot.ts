@@ -214,4 +214,12 @@ export async function runBoot(): Promise<void> {
   };
   window.addEventListener('pointerdown', unlockAudio, { once: true });
   window.addEventListener('keydown', unlockAudio, { once: true });
+
+  // Coming back from the app switcher is the other half of that: iOS interrupts the audio
+  // context on the way out and leaves it interrupted on the way in, so the return trip has
+  // to ask for it back. Not `{ once: true }` — this happens every time the app is
+  // backgrounded, unlike the gesture unlock above, which is genuinely once per load.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) audio.handleForeground();
+  });
 }

@@ -261,7 +261,15 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // 50-100 ms between that check and the install, in which a slow room A could replace
   // the package room B had already installed. `prepare` returns a decoded package and
   // `installRoom` puts it in place without yielding, so the check is the last word again.
-  ['src/audio/audio.ts', 850],
+  // 850 -> 880 for surviving the app switcher. iOS moves a backgrounded context into
+  // `'interrupted'`, a WebKit state the spec does not have and `AudioContextState` does
+  // not name, and never moves it back — so `ensureCtx`'s "is it suspended?" nudge was
+  // blind to the one case that mattered and the game returned from the app switcher
+  // silent for ever. The check widened to "is it running?", and `handleForeground` was
+  // added beside it because waiting for the next sound is not good enough: room music
+  // already playing makes no further call, so there would be nothing left to trigger the
+  // recovery. Both belong to the context's lifetime, which is this file's job.
+  ['src/audio/audio.ts', 880],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

@@ -231,8 +231,35 @@ export class AudioEngine {
     // that is about to make a sound nudges it awake. `modalPaused` is the one state
     // where a suspended context is DELIBERATE (see setModalPause): without this guard
     // the next play()/busNode() from anywhere would silently un-pause the whole game.
-    if (this.ctx.state === 'suspended' && !this.modalPaused) void this.ctx.resume();
+    //
+    // The test is "not running" rather than "is suspended" because iOS has a third
+    // state: backgrounding the app moves the context to `'interrupted'`, a WebKit
+    // extension absent from the spec and so from `AudioContextState`, which an
+    // `=== 'suspended'` test cannot see. That was the whole of the bug where the game
+    // came back from the app switcher silent for ever. `'closed'` is excluded because
+    // resuming one rejects; this engine never closes its context anyway.
+    const state: string = this.ctx.state;
+    if (state !== 'running' && state !== 'closed' && !this.modalPaused) void this.ctx.resume();
     return this.ctx;
+  }
+
+  /**
+   * Wake the context after the app comes back from the background.
+   *
+   * iOS interrupts it on the way out and does not undo that on the way in, so something
+   * has to ask. `ensureCtx` would, at the next sound — but that can be a long way off:
+   * room music already playing needs no further call to keep going, so a player who
+   * switches away mid-room would sit in silence until they happened to move a fish.
+   *
+   * Does nothing without a context (building one here would only make a suspended one
+   * outside a gesture), and nothing under a modal pause — coming back to a help overlay
+   * should come back paused.
+   */
+  handleForeground(): void {
+    const ctx = this.ctx;
+    if (!ctx || this.modalPaused) return;
+    const state: string = ctx.state;
+    if (state !== 'running' && state !== 'closed') void ctx.resume();
   }
 
   /**
