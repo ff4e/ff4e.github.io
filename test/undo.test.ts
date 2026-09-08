@@ -158,8 +158,10 @@ describe('a history in a save slot', () => {
 
   it('round-trips through JSON, values intact', () => {
     const before = attempt();
-    const after = decodeUndoHistory(JSON.parse(JSON.stringify(encodeUndoHistory(before))));
+    const data = JSON.parse(JSON.stringify(encodeUndoHistory(before)));
+    const after = decodeUndoHistory(data);
     expect(after).toEqual(before);
+    expect(decodeUndoHistory(data, { strict: true })).toEqual(before);
   });
 
   it('keeps the arrays shared, so a load does not re-inflate what a save collapsed', () => {
@@ -216,6 +218,7 @@ describe('a history in a save slot', () => {
       vars: [[4, 0, 9]], roompole: { 1: 7 }, globpole: { 1: -3, 2: 8 }, zvykacka: true, gspec: 2,
     });
     expect(history[0]!.snapshot!.roompole).toBe(history[2]!.snapshot!.roompole);
+    expect(decodeUndoHistory(legacy, { strict: true })).toEqual(history);
     expect(decodeUndoHistory(encodeUndoHistory(history))).toEqual(history);
   });
 
@@ -229,6 +232,18 @@ describe('a history in a save slot', () => {
         pool: [[], entries],
       })).toEqual([]);
     }
+  });
+
+  it('keeps runtime recovery of a malformed pool separate from strict migration', () => {
+    const data = {
+      version: 2, base: 'L', recs: [0, 1],
+      snaps: [null, { v: [], r: 0, g: 1, z: false, s: 0 }],
+      pool: [[], [1, 7, 2, null]],
+    };
+    const recovered = decodeUndoHistory(data);
+    expect(recovered).toHaveLength(2);
+    expect(recovered[1]!.snapshot!.globpole).toEqual({});
+    expect(decodeUndoHistory(data, { strict: true })).toEqual([]);
   });
 });
 
@@ -281,7 +296,10 @@ describe('a history from a room that writes globpole every tick', () => {
       snaps: [null, { v: [], r: 0, g: 1, z: false, s: 0 }],
       pool: [[], { b: 9999, d: [1, 7] }],
     };
-    expect(() => decodeUndoHistory(JSON.parse(JSON.stringify(data)))).not.toThrow();
+    const recovered = decodeUndoHistory(JSON.parse(JSON.stringify(data)));
+    expect(recovered).toHaveLength(2);
+    expect(recovered[1]!.snapshot!.globpole).toEqual({ 1: 7 });
+    expect(decodeUndoHistory(data, { strict: true })).toEqual([]);
   });
 
   it('still patches a genuinely dense bank and restores every value', () => {
@@ -294,5 +312,6 @@ describe('a history from a room that writes globpole every tick', () => {
     const data = encodeUndoHistory(history)!;
     expect(data.pool.some((e) => !Array.isArray(e))).toBe(true);
     expect(decodeUndoHistory(JSON.parse(JSON.stringify(data)))).toEqual(history);
+    expect(decodeUndoHistory(JSON.parse(JSON.stringify(data)), { strict: true })).toEqual(history);
   });
 });

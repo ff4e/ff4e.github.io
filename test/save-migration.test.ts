@@ -46,6 +46,66 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function expectRejectedSlot(raw: string): void {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  storage.setItem('ff.schema', '1');
+  storage.setItem('ff.save.1', raw);
+  storage.setItem('ff.save.6', legacySlot());
+  const write = vi.spyOn(storage, 'setItem');
+  openSaveStore();
+  expect(storage.getItem('ff.save.1')).toBe(raw);
+  expect(JSON.parse(storage.getItem('ff.save.6')!).undo.version).toBe(2);
+  expect(storage.getItem('ff.schema')).toBe('1');
+  expect(write.mock.calls.filter(([key]) => key === 'ff.save.1' || key === 'ff.schema')).toEqual([]);
+  expect(warn).toHaveBeenCalledTimes(1);
+}
+
+const undoSnapshot = { v: [], r: 0, g: 1, z: false, s: 0 };
+const undoData = (overrides: Record<string, unknown> = {}) => ({
+  base: 'L', recs: [0, 1], snaps: [null, undoSnapshot], pool: [[], [0, 7]], ...overrides,
+});
+
+const malformedUndo: [string, unknown][] = [
+  ['missing patch base', undoData({ pool: [[], { b: 9999, d: [1, 7] }] })],
+  ['self-referencing patch', undoData({ pool: [[], { b: 1, d: [] }] })],
+  ['forward patch reference', undoData({ pool: [[], { b: 2, d: [] }, []] })],
+  ['negative patch reference', undoData({ pool: [[], { b: -1, d: [] }] })],
+  ['fractional patch reference', undoData({ pool: [[], { b: 0.5, d: [] }] })],
+  ['string patch reference', undoData({ pool: [[], { b: '0', d: [] }] })],
+  ['odd patch pairs', undoData({ pool: [[0, 0], { b: 0, d: [0, 7, 1] }] })],
+  ['out-of-bounds patch index', undoData({ pool: [[], { b: 0, d: [1, 7] }] })],
+  ['negative patch index', undoData({ pool: [[0], { b: 0, d: [-1, 7] }] })],
+  ['fractional patch index', undoData({ pool: [[0], { b: 0, d: [0.5, 7] }] })],
+  ['string patch index', undoData({ pool: [[0], { b: 0, d: ['0', 7] }] })],
+  ['duplicate patch index', undoData({ pool: [[0], { b: 0, d: [0, 7, 0, 8] }] })],
+  ['nonnumeric patch value', undoData({ pool: [[0], { b: 0, d: [0, null] }] })],
+  ['nonnumeric legacy pool value', undoData({ pool: [[], [1, null]] })],
+  ['nonnumeric sparse pool value', undoData({ version: 2, pool: [[], [1, 7, 2, null]] })],
+  ['malformed unused pool entry', undoData({ pool: [[], [0, 7], ['bad']] })],
+  ['invalid item pool reference', undoData({ snaps: [null, { ...undoSnapshot, v: [99] }] })],
+  ['nonnumeric item pool reference', undoData({ snaps: [null, { ...undoSnapshot, v: ['0'] }] })],
+  ['missing item reference array', undoData({ snaps: [null, { ...undoSnapshot, v: null }] })],
+  ['invalid room bank reference', undoData({ snaps: [null, { ...undoSnapshot, r: -1 }] })],
+  ['invalid global bank reference', undoData({ snaps: [null, { ...undoSnapshot, g: 2 }] })],
+  ['fractional bank reference', undoData({ snaps: [null, { ...undoSnapshot, g: 1.5 }] })],
+  ['string bank reference', undoData({ snaps: [null, { ...undoSnapshot, g: '1' }] })],
+  ['negative prefix length', undoData({ recs: [0, -1] })],
+  ['fractional prefix length', undoData({ recs: [0, 0.5] })],
+  ['oversized prefix length', undoData({ recs: [0, 2] })],
+  ['invalid snapshot', undoData({ snaps: [null, false] })],
+  ['invalid gum flag', undoData({ snaps: [null, { ...undoSnapshot, z: 1 }] })],
+  ['missing mode', undoData({ snaps: [null, { ...undoSnapshot, s: undefined }] })],
+  ['invalid mode', undoData({ snaps: [null, { ...undoSnapshot, s: null }] })],
+  ['too-short history', undoData({ recs: [0], snaps: [null] })],
+  ['oversized legacy room bank', undoData({
+    pool: [new Array<number>(101).fill(0), []],
+  })],
+  ['oversized legacy global bank', undoData({
+    pool: [[], new Array<number>(1025).fill(0)],
+  })],
+  ['out-of-bounds sparse room bank', undoData({ version: 2, pool: [[100, 7], []] })],
+];
+
 describe('save schema 2', () => {
   it.each([null, '0', '1', 'invalid'])('migrates %s before opening the store, preserving saves and progress', (schema) => {
     if (schema !== null) storage.setItem('ff.schema', schema);
@@ -119,15 +179,24 @@ describe('save schema 2', () => {
 
   it.each(['{broken', '{"rec":"L","vars":{"roompole":null}}', '{"rec":"L","undo":{"version":3}}'])(
     'reports an invalid slot without overwriting it or blocking a valid sibling: %s', (raw) => {
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-      storage.setItem('ff.schema', '1');
-      storage.setItem('ff.save.1', raw);
-      storage.setItem('ff.save.6', legacySlot());
-      openSaveStore();
-      expect(storage.getItem('ff.save.1')).toBe(raw);
-      expect(JSON.parse(storage.getItem('ff.save.6')!).undo.version).toBe(2);
-      expect(storage.getItem('ff.schema')).toBe('1');
-      expect(warn).toHaveBeenCalledTimes(1);
+      expectRejectedSlot(raw);
     },
   );
+
+  it.each(malformedUndo)('preserves the entire slot and schema on %s', (_name, undo) => {
+    const slot = JSON.parse(legacySlot());
+    slot.undo = undo;
+    expectRejectedSlot(JSON.stringify(slot));
+  });
+
+  it('retries a malformed slot after repair, leaving an already migrated sibling unchanged', () => {
+    const raw = JSON.stringify({ rec: 'L', undo: undoData({ pool: [[], { b: 9999, d: [1, 7] }] }) });
+    expectRejectedSlot(raw);
+    const sibling = storage.getItem('ff.save.6');
+    storage.setItem('ff.save.1', legacySlot());
+    openSaveStore();
+    expect(storage.getItem('ff.schema')).toBe('2');
+    expect(storage.getItem('ff.save.1')).toBe(sibling);
+    expect(storage.getItem('ff.save.6')).toBe(sibling);
+  });
 });

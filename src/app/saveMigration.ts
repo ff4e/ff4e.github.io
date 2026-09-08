@@ -35,7 +35,7 @@ function compactSave(raw: string): string {
     };
   }
   if (slot.undo != null) {
-    const history = decodeUndoHistory(slot.undo);
+    const history = decodeUndoHistory(slot.undo, { strict: true });
     if (history.length === 0) throw new Error('Invalid undo history');
     slot.undo = encodeUndoHistory(history);
   }

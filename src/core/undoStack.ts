@@ -180,13 +180,18 @@ export function encodeUndoHistory(history: readonly UndoPoint[]): UndoSaveData |
  * Rebuild a history from a save slot. Returns an empty history for anything it does not
  * recognise, so a save written by an older build — or a corrupted one — costs the player
  * their undo history and not their save.
+ * Migration uses strict mode: none of the runtime decoder's recovery fallbacks may
+ * become a successful rewrite of the original data.
  */
-export function decodeUndoHistory(data: unknown): UndoPoint[] {
+export function decodeUndoHistory(data: unknown, { strict = false }: { strict?: boolean } = {}): UndoPoint[] {
   if (typeof data !== 'object' || data === null) return [];
   const d = data as Partial<UndoSaveData>;
   if (d.version !== undefined && d.version !== 2) return [];
   if (typeof d.base !== 'string' || !Array.isArray(d.recs) || !Array.isArray(d.snaps)) return [];
   if (!Array.isArray(d.pool) || d.recs.length !== d.snaps.length) return [];
+  if (strict && d.recs.length < 2) return []; // the encoder stores shorter histories as null
+  const indexIn = (i: unknown, length: number): i is number =>
+    typeof i === 'number' && Number.isInteger(i) && i >= 0 && i < length;
   // Rebuild the pool in one forward pass: a patch entry only ever names an earlier slot,
   // so its base is already whole by the time it is read. One array per slot, shared by
   // every snapshot that referenced it — the structural sharing `shareSnapshot` maintains
@@ -194,25 +199,39 @@ export function decodeUndoHistory(data: unknown): UndoPoint[] {
   const mats: number[][] = [];
   for (const e of d.pool) {
     if (Array.isArray(e)) {
+      if (strict) {
+        for (const n of e) if (typeof n !== 'number' || !Number.isFinite(n)) return [];
+      }
       mats.push(e.every((n) => typeof n === 'number') ? e : []);
       continue;
     }
     if (typeof e !== 'object' || e === null || !Array.isArray((e as { d?: unknown }).d)) return [];
     const patch = e as { b: number; d: number[] };
+    if (strict && (!indexIn(patch.b, mats.length) || patch.d.length % 2 !== 0)) return [];
     const a = (mats[patch.b] ?? []).slice();
+    const patched = strict ? new Set<number>() : null;
     for (let i = 0; i + 1 < patch.d.length; i += 2) {
       const at = patch.d[i]!;
+      if (patched) {
+        const value = patch.d[i + 1];
+        if (!indexIn(at, Math.min(a.length, 4096)) || patched.has(at) ||
+            typeof value !== 'number' || !Number.isFinite(value)) return [];
+        patched.add(at);
+      }
       if (typeof at === 'number' && at >= 0 && at < 4096) a[at] = patch.d[i + 1]!;
     }
     mats.push(a);
   }
   const at = (i: number): number[] => mats[i] ?? [];
   const banks = new Map<number, ScriptBank>();
-  const bankAt = (i: number): ScriptBank | null => {
-    const hit = banks.get(i);
-    if (hit) return hit;
+  const bankAt = (i: number, size: number): ScriptBank | null => {
     const arr = mats[i];
     if (!arr) return null;
+    if (strict && (d.version === 2
+      ? arr.some((n, k) => k % 2 === 0 && n >= size)
+      : arr.length > size)) return null;
+    const hit = banks.get(i);
+    if (hit) return hit;
     const bank = d.version === 2 ? bankFromEntries(arr) : captureBank(arr);
     if (bank) banks.set(i, bank);
     return bank;
@@ -220,13 +239,21 @@ export function decodeUndoHistory(data: unknown): UndoPoint[] {
   const out: UndoPoint[] = [];
   for (let k = 0; k < d.recs.length; k++) {
     const r = d.recs[k]!;
+    if (strict && typeof r !== 'string' && !indexIn(r, d.base.length + 1)) return [];
     const rec = typeof r === 'number' ? d.base.slice(0, r) : typeof r === 'string' ? r : null;
     if (rec === null) return [];
     const s = d.snaps[k]!;
+    if (strict && s !== null) {
+      if (typeof s !== 'object' || Array.isArray(s) ||
+          !Array.isArray(s.v) ||
+          !indexIn(s.r, mats.length) || !indexIn(s.g, mats.length) ||
+          typeof s.z !== 'boolean' || typeof s.s !== 'number' || !Number.isFinite(s.s)) return [];
+      for (const i of s.v) if (!indexIn(i, mats.length)) return [];
+    }
     let snapshot: ScriptSnapshot | null = null;
     if (s !== null && typeof s === 'object') {
-      const roompole = bankAt(s.r);
-      const globpole = bankAt(s.g);
+      const roompole = bankAt(s.r, 100);
+      const globpole = bankAt(s.g, 1024);
       if (!roompole || !globpole) return [];
       snapshot = {
         vars: (Array.isArray(s.v) ? s.v : []).map(at),
