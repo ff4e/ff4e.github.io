@@ -84,8 +84,10 @@ function currentWant(): DeviceOrientation {
 /**
  * Ask the OS to hold the device the way the current screen wants it.
  *
- * Called from the frame loop beside `syncTouchButtons`. Everything but the native app
- * leaves on the first line.
+ * Called from the frame loop beside `syncTouchButtons`, and once from the top of
+ * `runBoot()` so the loading overlay and the first-run audio gate are already the right
+ * way round rather than turning a second or two in. Everything but the native app leaves
+ * on the first line.
  */
 export function syncOrientationLock(): void {
   if (!isNativeHost()) return;
