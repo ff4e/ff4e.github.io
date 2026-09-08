@@ -103,19 +103,29 @@ let desired: Want | null = null;
  * which is the point: the cheapest way to be sure a redundant rotation cannot happen is
  * not to ask for one.
  *
- * Cleared when a call rejects, so a lock that failed is retried on the next frame rather
- * than remembered as applied.
+ * Cleared when a call rejects, so a lock that failed is retried rather than remembered as
+ * applied. That path is narrower than it looks: the plugin's iOS side calls its
+ * completion with `nil` unconditionally at the end of its main-queue block, and the
+ * bridge drops the callback on the first settle, so a `requestGeometryUpdate` that fails
+ * LATER arrives here as a success. What genuinely rejects is `noWindowScene`, which
+ * reports before that. Either way the outcome is the fail-open one the header describes.
  */
 let locked: Want | null = null;
 /**
- * The earliest a rejected lock may be tried again, as a `Date.now()` stamp.
+ * The earliest a REPEAT of `retryWant` may be tried again, as a `Date.now()` stamp.
  *
  * The frame loop asks every frame, so "clear `locked` on rejection and let the next
  * request retry" — correct for a transient failure — would be sixty bridge calls a second
  * for a lock that fails every time. One second between attempts keeps the retry (a lock
  * that fails once and would work now is worth re-asking) without the storm.
+ *
+ * It gates the repeat only. A player who leaves the map for a portrait room has asked a
+ * NEW question, and making them wait out a gate set by an unrelated failure would be the
+ * storm control causing the delay it exists to prevent.
  */
 let retryAfter = 0;
+/** Which want `retryAfter` is holding off; anything else is a new question, not a retry. */
+let retryWant: Want | null = null;
 
 /** How long a rejected lock waits before it may be asked for again. */
 const RETRY_MS = 1000;
@@ -188,8 +198,8 @@ function typeFor(want: Want): LockType {
  */
 function apply(): void {
   if (!mod || desired === null || desired === locked) return;
-  if (retryAfter && Date.now() < retryAfter) return;
-  retryAfter = 0;
+  if (desired === retryWant && Date.now() < retryAfter) return;
+  retryWant = null;
   const want = desired;
   locked = want;
   void mod.ScreenOrientation.lock({ orientation: typeFor(want) }).catch(() => {
@@ -197,6 +207,7 @@ function apply(): void {
     // stale rejection cannot erase a lock that has since been re-issued.
     if (locked !== want) return;
     locked = null;
+    retryWant = want;
     retryAfter = Date.now() + RETRY_MS;
   });
 }
@@ -224,4 +235,5 @@ export function resetOrientationLockForTest(): void {
   desired = null;
   locked = null;
   retryAfter = 0;
+  retryWant = null;
 }

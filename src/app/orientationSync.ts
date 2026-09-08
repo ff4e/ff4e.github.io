@@ -58,7 +58,14 @@ let want: DeviceOrientation | null = null;
  * `NON_ROOM_ORIENTATION`, which is landscape (Martin, 2026-09-08; see the constant).
  */
 function currentWant(): DeviceOrientation {
-  if (ui.screen !== 'room' || roomLoading || !room) return NON_ROOM_ORIENTATION;
+  // A room in flight is not a room yet: `gameState.room` still holds the PREVIOUS one, so
+  // acting now would answer for the room being left. Hold the standing answer instead —
+  // NOT `NON_ROOM_ORIENTATION`, which would turn a portrait room into landscape for the
+  // length of the load and then straight back, the double rotation this guard exists to
+  // prevent. (`want ?? …` only for the first room of a session, which has no standing
+  // answer and is reached from the map, which is landscape anyway.)
+  if (roomLoading) return want ?? NON_ROOM_ORIENTATION;
+  if (ui.screen !== 'room' || !room) return NON_ROOM_ORIENTATION;
   const { w, h } = roomScreenSize(room);
   // A room that cannot be measured has no opinion, and must not be allowed to express one
   // through the tie-break — `preferredDeviceOrientation` resolves a tie to landscape,

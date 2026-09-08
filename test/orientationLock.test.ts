@@ -147,6 +147,18 @@ describe('on the native host', () => {
     }
     expect(lock.mock.calls.length).toBeLessThan(3);
   });
+
+  it('lets a NEW answer through immediately after a failure, gate or no gate', async () => {
+    // The gate holds off a repeat of the request that failed. A different answer is a
+    // different question — a player leaving the map for a portrait room must not wait out
+    // a second of storm control set by something unrelated.
+    lock.mockImplementationOnce(() => Promise.reject(new Error('no window scene')));
+    lockOrientation('landscape');
+    await settle();
+    lockOrientation('portrait');
+    expect(lock).toHaveBeenLastCalledWith({ orientation: 'portrait' });
+    expect(lock).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('before the plugin has loaded', () => {
