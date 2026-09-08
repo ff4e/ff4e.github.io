@@ -107,6 +107,9 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
 | `touchButtons.ts` | 1.3 k | The in-room touch bar: six buttons, every one dispatched through the panel's own `panelAction` table. |
 | `touchBarEdge.ts` | 7.2 k | Which edge the touch bar takes in landscape: the room laid out both ways, keeping whichever shows more of it. |
+| `deviceOrientation.ts` | 1.4 k | Which way the DEVICE should be held for a room — the same "lay it out both ways" rule one level up, comparing landscape against portrait. Native app only; the website's rotation stays the player's business (#123). |
+| `orientationSync.ts` | 0.8 k | Keeping the native orientation lock in step with what is on screen, derived per frame. A no-op in every browser. |
+| `safeArea.ts` | 0.5 k | How big the display cutout is, read back from the `--sa-*` custom properties — the one place that knows their names. |
 | `touchSwipe.ts` | 1.6 k | Swipe to move: a finger drag on the room is delivered as a held arrow key, so every guard the keyboard has applies unchanged. |
 | `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |

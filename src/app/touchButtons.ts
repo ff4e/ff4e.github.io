@@ -56,26 +56,9 @@ import { TOUCH_REGIONS } from './keyTables.js';
 import { touchModeActive } from './touchMode.js';
 import { ui } from './screenState.js';
 import { roomLoading } from './framePacing.js';
+import { safeAreaInset } from './safeArea.js';
 
 export { TOUCH_REGIONS };
-
-/**
- * A display cutout's size on one edge, in CSS px — 0 on anything without one.
- *
- * `index.html` resolves `env(safe-area-inset-*)` into `--sa-top`/`--sa-left` once, and a
- * custom property is substituted at computed-value time, so this reads back a real length
- * (`'59px'`) rather than the unresolved `env(...)` text. Reading the property instead of
- * measuring an element keeps it free of layout and needs no probe node.
- *
- * Deliberately here and not in `touchBarEdge.ts`: that module prices the two layouts as a
- * pure function of numbers, and is unit-tested as one. Asking the document a question is
- * this file's job.
- */
-function safeAreaInset(name: '--sa-top' | '--sa-left'): number {
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
-  const px = Number.parseFloat(raw);
-  return Number.isFinite(px) ? px : 0;
-}
 
 /** The one name this module needs from `main.ts`. */
 export interface TouchButtonsHost {
