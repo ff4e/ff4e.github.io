@@ -13,6 +13,7 @@
  * browser — so they live here and are tested in milliseconds rather than through a probe.
  */
 import type { ScriptSnapshot } from './script.js';
+import { bankEntries, bankFromEntries, captureBank, sameBank, type ScriptBank } from './scriptBank.js';
 
 /**
  * One undoable position: the move record that reproduces it, plus the script state that
@@ -55,23 +56,25 @@ function same(a: readonly number[], b: readonly number[]): boolean {
 }
 
 /**
- * Point `next` at `prev`'s arrays wherever the two hold the same values, so an undo
+ * Point `next` at `prev`'s banks/arrays wherever the two hold the same values, so an undo
  * history of N moves does not hold N copies of everything.
  *
- * Worth the code because of one field: `globpole` is a fixed 1024-number array
- * (`script.ts`) that most rooms never write, and a fresh copy of it per move is ~8 KB —
+ * Originally worth the code because of one field: `globpole` was a fixed 1024-number array
+ * (`script.ts`) that most rooms never write, and a fresh copy of it per move was ~8 KB —
  * about 8 MB across a thousand-move attempt, on hardware that may be a phone. The
  * per-item `vars` are the same argument at smaller scale: a move touches one or two
  * items, and the rest are re-copied unchanged.
+ * Captured banks are now sparse, but sharing still avoids repeated copies of their
+ * non-zero entries and of the per-item arrays.
  *
  * Safe because a snapshot is never mutated after capture: `Script.snapshot()` builds
- * fresh arrays, and `applySnapshot` copies OUT of them (`it.vars = [...]`, element-wise
+ * fresh banks/arrays, and `applySnapshot` copies OUT of them (`it.vars = [...]`, element-wise
  * writes into roompole/globpole) rather than keeping a reference.
  */
 export function shareSnapshot(prev: ScriptSnapshot | null, next: ScriptSnapshot): ScriptSnapshot {
   if (!prev) return next;
-  if (same(prev.roompole, next.roompole)) next.roompole = prev.roompole;
-  if (same(prev.globpole, next.globpole)) next.globpole = prev.globpole;
+  if (sameBank(prev.roompole, next.roompole)) next.roompole = prev.roompole;
+  if (sameBank(prev.globpole, next.globpole)) next.globpole = prev.globpole;
   for (let i = 0; i < next.vars.length; i++) {
     const p = prev.vars[i];
     const n = next.vars[i];
@@ -85,8 +88,8 @@ export function shareSnapshot(prev: ScriptSnapshot | null, next: ScriptSnapshot)
 /**
  * A history as it goes into `localStorage`. Deliberately not the plain array: written
  * straight out, an N-move history is N full copies of the record (quadratic in the
- * characters) plus N copies of a `ScriptSnapshot`, whose `globpole` alone is 1024
- * numbers. A thousand-move room would not fit the origin's storage quota, and
+ * characters) plus N copies of a `ScriptSnapshot`. Before sparse banks, `globpole`
+ * alone was 1024 numbers. A thousand-move room would not fit the origin's storage quota, and
  * `saveGame`'s failure mode is a save that silently does not happen.
  *
  * Both halves collapse because of how a history is actually built. Every point's record
@@ -96,6 +99,8 @@ export function shareSnapshot(prev: ScriptSnapshot | null, next: ScriptSnapshot)
  * snapshot becomes a handful of indices into it.
  */
 export interface UndoSaveData {
+  /** v2: r/g pool entries are index/value pairs; absent means legacy dense banks. */
+  version?: 2;
   /** The record the numeric entries in `recs` are prefix lengths of. */
   base: string;
   /** Per point: a prefix length of `base`, or a literal record that is not one. */
@@ -112,6 +117,8 @@ export interface UndoSaveData {
    * `src/rooms/banka.ts:450`), so no two points share one — but consecutive points differ
    * in about ten of its 1024 numbers, and writing the ten costs a fortieth of writing all
    * of them. Measured on TRUHLA's committed solution: 277 KB whole, 22 KB patched.
+   * v2 pools only the non-zero bank entries, so even the first bank is compact.
+   * Patches still help long item arrays and dense banks with few changing values.
    */
   pool: (number[] | { b: number; d: number[] })[];
 }
@@ -159,14 +166,14 @@ export function encodeUndoHistory(history: readonly UndoPoint[]): UndoSaveData |
         ? null
         : {
             v: p.snapshot.vars.map(idx),
-            r: idx(p.snapshot.roompole),
-            g: idx(p.snapshot.globpole),
+            r: idx(bankEntries(p.snapshot.roompole)),
+            g: idx(bankEntries(p.snapshot.globpole)),
             z: p.snapshot.zvykacka,
             s: p.snapshot.gspec ?? 0,
           },
     );
   }
-  return { base, recs, snaps, pool };
+  return { version: 2, base, recs, snaps, pool };
 }
 
 /**
@@ -177,6 +184,7 @@ export function encodeUndoHistory(history: readonly UndoPoint[]): UndoSaveData |
 export function decodeUndoHistory(data: unknown): UndoPoint[] {
   if (typeof data !== 'object' || data === null) return [];
   const d = data as Partial<UndoSaveData>;
+  if (d.version !== undefined && d.version !== 2) return [];
   if (typeof d.base !== 'string' || !Array.isArray(d.recs) || !Array.isArray(d.snaps)) return [];
   if (!Array.isArray(d.pool) || d.recs.length !== d.snaps.length) return [];
   // Rebuild the pool in one forward pass: a patch entry only ever names an earlier slot,
@@ -199,25 +207,36 @@ export function decodeUndoHistory(data: unknown): UndoPoint[] {
     mats.push(a);
   }
   const at = (i: number): number[] => mats[i] ?? [];
+  const banks = new Map<number, ScriptBank>();
+  const bankAt = (i: number): ScriptBank | null => {
+    const hit = banks.get(i);
+    if (hit) return hit;
+    const arr = mats[i];
+    if (!arr) return null;
+    const bank = d.version === 2 ? bankFromEntries(arr) : captureBank(arr);
+    if (bank) banks.set(i, bank);
+    return bank;
+  };
   const out: UndoPoint[] = [];
   for (let k = 0; k < d.recs.length; k++) {
     const r = d.recs[k]!;
     const rec = typeof r === 'number' ? d.base.slice(0, r) : typeof r === 'string' ? r : null;
     if (rec === null) return [];
     const s = d.snaps[k]!;
-    out.push({
-      rec,
-      snapshot:
-        s === null || typeof s !== 'object'
-          ? null
-          : {
-              vars: (Array.isArray(s.v) ? s.v : []).map(at),
-              roompole: at(s.r),
-              globpole: at(s.g),
-              zvykacka: !!s.z,
-              gspec: typeof s.s === 'number' ? s.s : 0,
-            },
-    });
+    let snapshot: ScriptSnapshot | null = null;
+    if (s !== null && typeof s === 'object') {
+      const roompole = bankAt(s.r);
+      const globpole = bankAt(s.g);
+      if (!roompole || !globpole) return [];
+      snapshot = {
+        vars: (Array.isArray(s.v) ? s.v : []).map(at),
+        roompole,
+        globpole,
+        zvykacka: !!s.z,
+        gspec: typeof s.s === 'number' ? s.s : 0,
+      };
+    }
+    out.push({ rec, snapshot });
   }
   return out;
 }

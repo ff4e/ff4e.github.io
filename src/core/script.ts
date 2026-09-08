@@ -11,6 +11,7 @@
  */
 import type { Item, Room } from './room.js';
 import { Dir } from './dir.js';
+import { captureBank, type ScriptBank } from './scriptBank.js';
 
 /** natoceni facing codes (URoom.pas:420-421). */
 export const SMER_VLEVO = 1;
@@ -53,11 +54,11 @@ export interface SoundFns {
   voicesReady?: () => boolean;
 }
 
-/** Persistent script state captured in a save (Vars + roompole/globpole + flags). */
+/** Persistent script state; captured banks omit zeros, item Vars keep their lengths. */
 export interface ScriptSnapshot {
   vars: number[][];
-  roompole: number[];
-  globpole: number[];
+  roompole: ScriptBank;
+  globpole: ScriptBank;
   zvykacka: boolean;
   gspec: number;
 }
@@ -217,14 +218,14 @@ export class Script {
   snapshot(): ScriptSnapshot {
     return {
       vars: this.room.items.map((it) => [...it.vars]),
-      roompole: [...this.roompole],
-      globpole: [...this.globpole],
+      roompole: captureBank(this.roompole),
+      globpole: captureBank(this.globpole),
       zvykacka: this.zvykacka,
       gspec: this.room.gspec,
     };
   }
 
-  /** Restore a snapshot onto a freshly-built room (after the move replay). */
+  /** Restore after replay; indexed reads accept both sparse banks and legacy arrays. */
   applySnapshot(s: ScriptSnapshot): void {
     for (let i = 0; i < s.vars.length; i++) {
       const it = this.room.items[i];

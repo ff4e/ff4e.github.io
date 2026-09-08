@@ -57,13 +57,15 @@ let wasPlayback = false;
 /**
  * How many of the newest points keep their script snapshot.
  *
- * A `ScriptSnapshot` is ~8 KB, almost all of it `globpole`'s 1024 numbers, and
- * `shareSnapshot` normally reduces that to nothing because a move leaves the array
- * untouched. In TRUHLA and BANKA it does not: both use `globpole` as a per-tick animation
- * timer bank (`src/rooms/truhla.ts:136`, `src/rooms/banka.ts:450`), so every point holds
- * its own copy and an attempt as long as TRUHLA's committed solution retains 20 MB — on
+ * Before sparse banks, a `ScriptSnapshot` was ~8 KB, almost all of it `globpole`'s
+ * 1024 numbers, and `shareSnapshot` normally reduced that to nothing because a move
+ * left the array untouched. In TRUHLA and BANKA it did not: both use `globpole` as a
+ * per-tick animation timer bank (`src/rooms/truhla.ts:136`, `src/rooms/banka.ts:450`),
+ * so every point held its own copy and an attempt as long as TRUHLA's committed solution retained 20 MB — on
  * hardware that may be a phone, and 4 MB of it into a save slot shared with the player's
  * progress records.
+ * Sparse capture removes those zero-filled copies now; the retention policy stays
+ * unchanged rather than bundling a deeper script-history behaviour change with storage.
  *
  * So the DEPTH stays unlimited and the snapshots do not. Past this many points back, a
  * point keeps its record and drops its snapshot: undo still lands on the right position,
