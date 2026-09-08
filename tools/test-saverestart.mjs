@@ -63,6 +63,37 @@ const hLoad = await hash();
 const mLoad = await moves();
 console.log(`save@moves=${mSave}; moved away (changed=${hAfter !== hSave}); load restores=${hLoad === hSave} moves=${mLoad}`);
 
+// --- 3) a real saved slot migrates at boot, then restores the same attempt ---
+const beforeMigration = await p.evaluate(() => {
+  const slot = JSON.parse(localStorage.getItem('ff.save.7'));
+  const sparse = !Array.isArray(slot.vars.roompole) && !Array.isArray(slot.vars.globpole);
+  const depth = window.__ff.undoDepth();
+  slot.vars.roompole = Array.from({ length: 100 }, (_, i) => slot.vars.roompole[i] ?? 0);
+  slot.vars.globpole = Array.from({ length: 1024 }, (_, i) => slot.vars.globpole[i] ?? 0);
+  localStorage.setItem('ff.save.7', JSON.stringify(slot));
+  localStorage.setItem('ff.schema', '1');
+  return { sparse, depth, bytes: JSON.stringify(slot).length };
+});
+await p.reload();
+await p.waitForFunction(() => window.__ff?.enterRoomAwait);
+const migrated = await p.evaluate(() => {
+  const raw = localStorage.getItem('ff.save.7');
+  const slot = JSON.parse(raw);
+  return {
+    valid: localStorage.getItem('ff.schema') === '2' &&
+      !Array.isArray(slot.vars.roompole) && !Array.isArray(slot.vars.globpole),
+    bytes: raw.length,
+  };
+});
+await selectRoom(p, 7);
+await p.evaluate(() => window.__ff.load());
+await p.waitForFunction(() => !window.__ff.loading());
+await idle();
+const hMigrated = await hash();
+const mMigrated = await moves();
+const depthMigrated = await p.evaluate(() => window.__ff.undoDepth());
+console.log(`boot migration: bytes ${beforeMigration.bytes}->${migrated.bytes}; restores=${hMigrated === hSave}`);
+
 const pass =
   h1 !== h0 &&
   hEnd === h0 &&
@@ -70,6 +101,11 @@ const pass =
   kEnd === k0 + 1 &&
   hLoad === hSave &&
   mLoad === mSave &&
+  beforeMigration.sparse &&
+  migrated.valid && migrated.bytes < beforeMigration.bytes &&
+  hMigrated === hSave &&
+  mMigrated === mSave &&
+  depthMigrated === beforeMigration.depth &&
   errs.length === 0;
 console.log('errors:', errs.length ? errs : 'none');
 console.log(pass ? '\nALL PASS' : '\nFAIL');

@@ -86,6 +86,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `screenState.ts` | 1.9 k | Which screen is showing, and everything layered over it. A mutable bag — the reads are many and the shape is flat. |
 | `stageState.ts` | 0.8 k | The subtitle font in use and whether it loaded, plus `booted`. |
 | `persist.ts` | 2.5 k | Everything kept in localStorage: solved, cheated, scores, saves, and the migration. |
+| `saveMigration.ts` | 0.6 k | Compacts legacy script banks and undo pools without discarding failed save slots. |
 | **The frame** | | |
 | `frameClock.ts` | 1.6 k | When the next frame happens, and at what rate. |
 | `paintClock.ts` | 0.4 k | The paint-rate cap, kept pure so it can be tested against synthetic refresh trains. |

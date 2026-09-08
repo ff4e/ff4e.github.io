@@ -36,11 +36,29 @@ await withApp(async ({ p, expect }) => {
   // --- new save (with the script snapshot): loading does not re-fire dialogue ---
   await playUntilDialogue();
   await p.evaluate(() => window.__ff.save());
+  const sparse = await p.evaluate(() => {
+    const slot = JSON.parse(localStorage.getItem('ff.save.1'));
+    return !Array.isArray(slot.vars.roompole) && !Array.isArray(slot.vars.globpole);
+  });
+  expect(sparse, 'a new save stores sparse script banks');
   await tickSleep(p, 11); // let the current line finish
   await p.evaluate(() => window.__ff.load());
   await p.waitForFunction(() => !window.__ff.loading());
   const refiredNew = await collectRefired(42);
   expect(refiredNew.length === 0, `new save/load does not re-say dialogue (heard: [${refiredNew.join(', ')}])`);
+
+  // The same "already said" state in the old dense JSON shape must still work
+  // even if storage was unwritable and the boot migration could not compact it.
+  await p.evaluate(() => {
+    const slot = JSON.parse(localStorage.getItem('ff.save.1'));
+    slot.vars.roompole = Array.from({ length: 100 }, (_, i) => slot.vars.roompole[i] ?? 0);
+    slot.vars.globpole = Array.from({ length: 1024 }, (_, i) => slot.vars.globpole[i] ?? 0);
+    localStorage.setItem('ff.save.1', JSON.stringify(slot));
+    window.__ff.load();
+  });
+  await p.waitForFunction(() => !window.__ff.loading());
+  const refiredDense = await collectRefired(42);
+  expect(refiredDense.length === 0, `old dense snapshot does not re-say dialogue (heard: [${refiredDense.join(', ')}])`);
 
   // --- legacy save (plain move record, no snapshot): re-fires, proving the fix ---
   await playUntilDialogue();

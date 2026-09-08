@@ -65,10 +65,8 @@ const ROOMS = [
 ];
 
 await withApp(async ({ p, expect }) => {
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
-  // The button and the __ff hook are both armed only while the dev pane is enabled.
-  await p.evaluate(() => localStorage.setItem('ff.devEnabled', '1'));
-  await p.reload({ waitUntil: 'load' });
+  // withApp already enables the dev pane before boot. Reloading here would cancel
+  // AI map downloads still in flight: hasMap only means the classic map is ready.
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
 
   for (const { num, jmeno, talks, speed } of ROOMS) {

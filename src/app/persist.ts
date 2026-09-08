@@ -21,13 +21,15 @@
  *
  * main.ts destructures the returned object, so every call site there is unchanged.
  */
+import { migrateSnapshotSaves } from './saveMigration.js';
+
 export function openSaveStore() {
   /** Current localStorage save-data layout version (ff.schema). Bump when the shape
    *  of any persisted `ff.*` key changes, and add a migration step in migrateSaves().
    *  Declared before migrateSaves() runs: the call below reads SAVE_SCHEMA, so the
    *  const must be initialized first (a later declaration would be in its temporal
    *  dead zone → a swallowed ReferenceError that silently skips the migration). */
-  const SAVE_SCHEMA = 1;
+  const SAVE_SCHEMA = 2;
 
   migrateSaves();
   const solved = loadSet('ff.solved'); // set of solved (1-based) room numbers, persisted
@@ -42,13 +44,15 @@ export function openSaveStore() {
   function migrateSaves(): void {
     try {
       const raw = localStorage.getItem('ff.schema');
-      const from = raw !== null ? Number(raw) : 0;
+      const version = Number(raw);
+      const from = Number.isInteger(version) && version >= 0 ? version : 0;
       if (from >= SAVE_SCHEMA) return;
       // from 0 (unversioned) -> 1: no key changes needed (ff.solved/cheated/scores/
-      // best/graphics/renderer/... already match v1); future migrations go here.
+      // best/graphics/renderer/... already match v1).
+      if (from < 2 && !migrateSnapshotSaves(localStorage)) return;
       localStorage.setItem('ff.schema', String(SAVE_SCHEMA));
-    } catch {
-      /* storage unavailable */
+    } catch (error) {
+      console.warn('Could not migrate save storage; will retry at the next boot', error);
     }
   }
 
