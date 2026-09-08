@@ -35,6 +35,8 @@ import { parseFfp } from '../data/ffp.js';
 import { roomByNumber } from '../data/roomTable.js';
 import { initAnalytics } from '../platform/analytics.js';
 import { initHaptics } from '../platform/haptics.js';
+import { initOrientationLock } from '../platform/orientationLock.js';
+import { syncOrientationLock } from './orientationSync.js';
 import { decodeAsset, requiredBytes } from '../render/assetFetch.js';
 import { FontData } from '../render/font.js';
 import { webgl2Available } from '../render/glScreen.js';
@@ -62,6 +64,16 @@ export function initBoot(h: BootHost): void {
 
 /** Run the boot sequence. Awaited once, from `main.ts`. */
 export async function runBoot(): Promise<void> {
+  // Which way to hold the phone, decided before anything is drawn. The loading overlay
+  // and the first-run audio gate are non-room screens like any other and take
+  // `NON_ROOM_ORIENTATION`, so there is no reason to make them wait: left to the frame
+  // loop's first tick they came up portrait and turned about two seconds later (measured
+  // on the iPhone 17 Pro simulator), which is a rotation in the player's hands before the
+  // game has shown them anything. Warm the plugin and ask in the same breath — the
+  // request is held until the plugin lands (see `orientationLock.ts`). Native only; both
+  // calls return immediately in a browser.
+  initOrientationLock();
+  syncOrientationLock();
   setFont(await FontData.load('/data/Intro'));
   setLoadingMsg('Loading fonts…');
   // Enhanced subtitle fonts — all bundled + OFL/GPL so they render identically on every

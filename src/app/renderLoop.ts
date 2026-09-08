@@ -22,6 +22,7 @@ import { drawCutscene } from './cutscene.js';
 import { drawCredits, drawLegImage } from './mapNav.js';
 import { syncLoadingUi } from './loadingUi.js';
 import { syncTouchButtons } from './touchButtons.js';
+import { syncOrientationLock } from './orientationSync.js';
 import { syncTouchOptions } from './touchOptions.js';
 import { drawMap } from './mapDraw.js';
 import { drawHelp, drawPanel, tickPanelScroll } from './panel.js';
@@ -308,6 +309,9 @@ export function loop(now: number): void {
   // they depend on. Both leave immediately on anything that is not touch.
   syncTouchButtons();
   syncTouchOptions();
+  // Which way the phone should be HELD, a layer above which edge the bar takes — native
+  // app only, and a no-op in every browser (src/app/orientationSync.ts).
+  syncOrientationLock();
   updatePerfHud(now);
   scheduleNextFrame();
 }

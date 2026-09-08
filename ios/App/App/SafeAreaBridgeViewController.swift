@@ -60,8 +60,47 @@ import Capacitor
      keeps its gap on the wrong side.
 
  All three are idempotent, so running twice costs one `evaluateJavaScript` and changes nothing.
+
+ ── The second thing it corrects UIKit about: the orientation LOCK ────────────
+
+ `@capacitor/screen-orientation` cannot express "either landscape". Its
+ `fromOrientationTypeToMask` turns `'landscape'` into `UIInterfaceOrientationMask
+ .landscapeRight` — one side — and `lock()` assigns `supportedOrientations = [orientation]`,
+ which `CAPBridgeViewController.supportedInterfaceOrientations` then renders as a mask with
+ a single landscape in it. A player holding the phone the other way round is flipped 180°
+ and pinned there.
+
+ That is wrong for a game and right for nothing, so it is widened back here: a mask that
+ contains exactly one landscape and no portrait becomes `.landscape`. The plugin still
+ does the work that is hard to reproduce — `setNeedsUpdateOfSupportedInterfaceOrientations`,
+ `requestGeometryUpdate`, the pre-iOS-16 fallback — and still gets to TURN the phone,
+ because `requestGeometryUpdate` names the specific side it wants and that side is inside
+ the widened mask. What it no longer gets to do is hold the phone there afterwards.
+
+ The JS side plays its half of this by naming whichever landscape is already in effect
+ (`typeFor` in `src/platform/orientationLock.ts`), so a player already sideways is asked
+ for the geometry they already have and nothing turns at all.
+
+ **Nothing else was needed to make the plugin work here**, which was not the expectation:
+ the plugin's README installs an `application(_:supportedInterfaceOrientationsFor:)`
+ override that force-unwraps `AppDelegate.window`, and this app's window belongs to
+ `SceneDelegate`, so that example would crash. It is also unnecessary — UIKit falls back to
+ `Info.plist` when the delegate does not implement it, and intersects that with the root
+ controller's `supportedInterfaceOrientations`, which is this override. The plugin finds
+ this controller through `bridge?.viewController`, never through `AppDelegate.window`.
  */
 class SafeAreaBridgeViewController: CAPBridgeViewController {
+
+    /// Widen a single-landscape lock to both landscapes. See the header.
+    ///
+    /// Portrait is left exactly as asked: a lock to portrait must not quietly become
+    /// "portrait or upside-down", and a mask that already names both landscapes, or that
+    /// names everything, has nothing to widen.
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        let mask = super.supportedInterfaceOrientations
+        if mask == .landscapeLeft || mask == .landscapeRight { return .landscape }
+        return mask
+    }
 
     /// Held for the controller's lifetime — releasing it ends the observation.
     private var loadObservation: NSKeyValueObservation?

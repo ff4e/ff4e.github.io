@@ -56,5 +56,8 @@
     "typescript": "^5.7.2",
     "vite": "^6.4.3",
     "vitest": "^4.1.9"
+  },
+  "dependencies": {
+    "@capacitor/screen-orientation": "^8.0.1"
   }
 }
