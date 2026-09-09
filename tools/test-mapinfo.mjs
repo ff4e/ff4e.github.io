@@ -85,6 +85,17 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff.replayActive() && window.__ff.screen() === 'room');
   expect((await screen()) === 'room', 'Replay entered the room');
   expect(await p.evaluate(() => window.__ff.replayActive()), 'Replay armed best-solution playback');
+  await p.selectOption('#touchmode', 'on');
+  const silentHints = await p.evaluate(() => {
+    const line = window.__ff.lastLine();
+    const count = window.__ff.lines();
+    for (const name of ['1st-v-navod1', 'help2', 'help7', 'help11']) window.__ff.speakLine(name);
+    return !document.getElementById('dialogue-gesture-hint') &&
+      !document.querySelector('.dialogue-hint-pulse') &&
+      window.__ff.lastLine() === line && window.__ff.lines() === count;
+  });
+  expect(silentHints, 'silent replay suppresses tutorial hints and preserves the dialogue debug counters');
+  await p.selectOption('#touchmode', 'off');
 
   // A best-solution replay is SILENT, like the original's loadmode replay
   // (loadtype=nej skips Programky + Zvuky_okoli, UMain.pas:1027 / URoom.pas:24937):

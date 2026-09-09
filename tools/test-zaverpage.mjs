@@ -13,11 +13,11 @@
 import { budget, observed, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
+  const bootDocument = await p.evaluate(() => performance.timeOrigin);
   await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
-  // devWinRoom is armed only while the dev pane is enabled.
-  await p.evaluate(() => localStorage.setItem('ff.devEnabled', '1'));
-  await p.reload({ waitUntil: 'load' });
-  await p.waitForFunction(() => window.__ff && window.__ff.hasMap && window.__ff.hasMap());
+  // withApp enables the dev pane BEFORE boot. Reloading to enable it again can abort
+  // the lazy AI-map response body: hasMap means the faithful map exists, not that its
+  // AI art has arrived. Keep this document through the whole win/return flow.
 
   await p.evaluate(() => window.__ff.enterRoomAwait(71));
   await p.waitForFunction(() => window.__ff.roomNum() === 71);
@@ -40,11 +40,11 @@ await withApp(async ({ p, expect }) => {
     p.waitForFunction(() => window.__ff.screen() === 'map'),
   );
   expect(toMap, 'dismissing the page returns to the world map');
-  // …and then let the map finish arriving before the probe ends. `screen === 'map'` is
-  // true the instant the page is dismissed, while the map's own art is still downloading —
-  // so ending here tears the page down mid-request and the truncated response is logged as
-  // a console error, failing a probe whose four real assertions all passed. It became
-  // likely rather than rare once ZAVER's story page was preloaded (roomPreload.ts): the
-  // dismissal no longer waits for a fetch, so it reaches the map sooner.
+  // screen === 'map' changes on dismissal; mapPresented waits for the selected tier's
+  // art to finish loading and an actual map frame to reach the canvas.
   await p.waitForFunction(() => window.__ff.mapPresented(), null, { timeout: budget(15000) });
+  expect(
+    (await p.evaluate(() => performance.timeOrigin)) === bootDocument,
+    'the win/return flow keeps the booted document without cancelling startup assets',
+  );
 });

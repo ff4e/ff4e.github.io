@@ -34,6 +34,15 @@ applied at display time). It is not a correction — measured across eight rooms
 scoped to the AI tier alone. **Classic and Enhanced are untouched**, so the faithful look is always one
 press of `E` away.
 
+**Touch tutorial hints** are another deliberate visual addition: the first room's
+cursor-key/Space dialogue illustrates horizontal and vertical swipes followed by a tap,
+and the second room's F2/F3 narration pulses the touch bar's Save/Load buttons. They
+repeat with those lines, expire automatically, and never intercept input or change
+the dialogue. Desktop and silent solution replays show no hints; reduced-motion mode
+uses a static illustration and button highlight instead.
+The swipe/tap animation gets at least 2.5 seconds even when voice audio is unavailable;
+another line or a screen change still interrupts it without changing dialogue timing.
+
 **Done** means all 72 rooms playable end to end, the dialogue and voices in place, and every known
 deviation from the original either fixed or written down in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
 

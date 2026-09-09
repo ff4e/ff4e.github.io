@@ -7,6 +7,7 @@
     <meta name="description" content="A faithful web port of Fish Fillets (ALTAR, 1998) — the underwater puzzle game where you move two talking fish around a room without dropping anything on either of them. No install, no account, no plugin." />
     <link rel="canonical" href="https://ff4e.github.io/" />
     <meta name="theme-color" content="#101018" />
+    <link rel="stylesheet" href="/src/styles/dialogueHints.css" />
 
     <!-- The tab icon and the link preview. Both are built by tools/build-share-assets.py
          from the game's own title wordmark (public/cover.webp) and a room screenshot, and
@@ -564,6 +565,9 @@
       /* No :hover rule: on a touch screen it sticks after the tap, leaving the last
          button lit as if it were still held. Pressed state only. */
       .tbtn:active { background: #24414c; border-color: #6cc; }
+      /* Edge's native dark focus ring paints over the border. Keep keyboard focus
+         visible outside it, including after a tutorial pulse ends. */
+      .tbtn:focus-visible { outline: 2px solid #aee; outline-offset: 2px; }
       /* ── Centring the room on the SCREEN, not on what the bar left over ──
          The margin above reserves the bar's space by shrinking `.stage`'s own box, and
          `.stage` centres its content inside THAT box — so "centred" meant centred in

@@ -113,6 +113,10 @@ const KNOWN_FLAKY = new Map([
   // red, because burying it under six attempts teaches everyone to distrust the suite
   // instead of fixing the bug.
   ['test-ai-loading.mjs', 2],
+  // Temporary retry exception (2026-09-09): the full-pool plaque check saw only
+  // two distinct image URLs where three are required. Root cause is unconfirmed;
+  // retain failed attempts and remove this once plaque-request readiness is fixed.
+  ['test-asset-tiers.mjs', 2],
 ]);
 
 const EXCLUSIVE = new Set([

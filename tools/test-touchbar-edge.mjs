@@ -105,21 +105,29 @@ for (const c of CASES) {
     },
     { w: wantRoom.w, h: wantRoom.h },
   );
-  // Then let it come to rest: two consecutive polls agreeing on the stage's size. Cleared
-  // first, or the first poll of a case would compare against the PREVIOUS case's reading and
-  // pass instantly whenever the two happen to match — which, sharing a viewport, they do.
-  // Not a wait on anything asserted below — purely "the stage has stopped changing size" —
-  // so it cannot make the comparison agree with itself.
-  await page.evaluate(() => {
+  // Geometry describes the new room before it is painted. The bar is reconciled AFTER
+  // draw(), then the following draw rescales the canvas. Two stable stage reads alone
+  // can still observe the old edge. Wait for an app frame and for the canvas to match
+  // its geometry as well, without waiting for the model's predicted edge or scale.
+  // Clear the previous sample so equal-sized consecutive cases cannot pass instantly.
+  const beforePaint = await page.evaluate(() => {
     window.__edgeProbeLast = null;
+    return window.__ff.throttleInfo().loops;
   });
-  await page.waitForFunction(() => {
+  await page.waitForFunction((start) => {
+    const g = window.__ff.roomGeom();
+    const canvas = document.getElementById('screen');
+    if (window.__ff.throttleInfo().loops <= start || !g ||
+        Math.abs(canvas.clientWidth - g.cssW) > 1 || Math.abs(canvas.clientHeight - g.cssH) > 1) {
+      window.__edgeProbeLast = null;
+      return false;
+    }
     const stage = document.querySelector('.stage');
     const now = `${stage.clientWidth}x${stage.clientHeight}`;
     const was = window.__edgeProbeLast;
     window.__edgeProbeLast = now;
     return was === now;
-  });
+  }, beforePaint);
 
   const real = await page.evaluate(() => {
     const g = window.__ff.roomGeom();

@@ -122,6 +122,7 @@ import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from '
 import { initTouchButtons } from './touchButtons.js';
 import { initTouchOptions } from './touchOptions.js';
 import { initTouchSwipe } from './touchSwipe.js';
+import { showDialogueHint } from './dialogueHints.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
   applyVolumeSettings,
@@ -813,6 +814,7 @@ function scriptTalk(name: string, prior: number): number {
   setLastLine({ name, count }); // debug: track dialogue line firing
   setLinesSpoken(linesSpoken + 1);
   const dur = audio.duration(name);
+  showDialogueHint(name, dur > 0 ? dur * 1000 : DEFAULT_LINE_TICKS * LOGIC_MS);
   // Talking() lead (RSound mez): count the line as "sounding" until ~0.4535s before
   // the sample truly ends, so the mouth stops (and the queue advances) a beat early
   // rather than flapping through the sample's trailing tail (matches the original).

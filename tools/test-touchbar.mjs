@@ -25,6 +25,7 @@
  */
 import { chromium } from 'playwright';
 import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
+import { checkDialogueHints } from './ui-dialogue-hints.mjs';
 
 const BASE = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 
@@ -851,11 +852,11 @@ try {
   // only as far as it takes to clear the bar — so both halves of that max are asserted,
   // on both axes. See the flex-spacer rules in index.html for how the clamp is expressed.
   //
-  // Runs LAST, on this page rather than a context of its own, because it needs the dev
-  // chrome GONE: `#devbar` and `#info` are in-flow siblings of `.stage`, so while they
+  // Runs after the dev-bar checks on this page, because it needs the dev chrome
+  // GONE: `#devbar` and `#info` are in-flow siblings of `.stage`, so while they
   // are up the stage is not the viewport and the vertical half of this cannot be measured
   // against `innerHeight` at all. Ctrl+Alt+D is the only door out of dev mode (main.ts),
-  // and it takes the dev bar this file's previous section drives with it — hence last,
+  // and it takes the dev bar this file's previous section drives with it — hence this order,
   // rather than paying another boot to say the same thing.
   await enter(p, ROOM);
   await settle(p, true);
@@ -1004,6 +1005,14 @@ try {
     cut.left >= cut.barRight && cut.right <= cut.viewW,
     `short viewport: and horizontally, clear of the bar (${cut.left}..${cut.right} of ${cut.viewW}, bar right ${cut.barRight})`,
   );
+
+  // Hint checks enter tutorial rooms and save games; keep them after every original
+  // assertion so the boot map, options and save/load checks retain their own setup.
+  await p.setViewportSize({ width: 1100, height: 620 });
+  await p.keyboard.press('Control+Alt+D');
+  await p.waitForFunction(() => document.body.classList.contains('dev'));
+  await p.evaluate(() => window.__ff.setLang('en')); // A forced Czech restore must fail.
+  await checkDialogueHints(p, expect);
 } catch (e) {
   ok = false;
   console.log('  FAIL threw: ' + (e?.message ?? e));
