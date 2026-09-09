@@ -112,6 +112,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `orientationSync.ts` | 0.8 k | Keeping the native orientation lock in step with what is on screen, derived per frame. A no-op in every browser. |
 | `safeArea.ts` | 0.5 k | How big the display cutout is, read back from the `--sa-*` custom properties — the one place that knows their names. |
 | `touchSwipe.ts` | 1.6 k | Swipe to move: a finger drag on the room is delivered as a held arrow key, so every guard the keyboard has applies unchanged. |
+| `dialogueHints.ts` | 1.0 k | Touch-only swipe/tap illustration and Save/Load pulses triggered by tutorial dialogue, with expiry and screen/demo lifecycle cleanup. Styled by `src/styles/dialogueHints.css`. |
 | `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |

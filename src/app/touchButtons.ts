@@ -158,8 +158,20 @@ export function initTouchButtons(h: TouchButtonsHost): void {
     // fire, and `click` is the event that already encodes that. The panel's own mouse
     // path uses mousedown because it also drives the volume sliders by drag, which none
     // of these do.
-    el.addEventListener('click', () => host.panelAction(region));
+    el.addEventListener('click', (e) => {
+      // A pointer click must not leave Save focused when game keys are used next.
+      // Keyboard/assistive clicks have detail=0 and retain their focus indicator.
+      if (e.detail > 0) el.blur();
+      host.panelAction(region);
+    });
   }
+  // The canvas and swipe layer cancel default pointer handling, including the
+  // normal focus hand-off. Release only OUR button, before those handlers run.
+  window.addEventListener('pointerdown', (e) => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused.matches('#touchbar [data-region]') &&
+      e.target instanceof Node && !focused.contains(e.target)) focused.blur();
+  }, true);
 }
 
 /** Re-read whether touch mode is on. Called at boot and by the dev-bar override. */

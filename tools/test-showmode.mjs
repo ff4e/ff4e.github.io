@@ -14,11 +14,16 @@
  *  must keep advancing WHILE the fish are dead and rebuild the room (fish back to
  *  spawn, showmode preserved) at the recorded restart, then fire help7 ("Nyní
  *  začínáme znovu"). This is the bug the user hit: previously the restart cleared
- *  showmode and the fish spoke the normal pokus>1 intro instead of continuing. */
+ *  showmode and the fish spoke the normal pokus>1 intro instead of continuing.
+ *  Run both parts in desktop and touch mode, sharing one boot. The extra recorded
+ *  pass covers real touch narration without dropping the original desktop coverage. */
 import { budget, waitRoom, withApp } from './ui-lib.mjs';
 
-await withApp(async ({ p, expect }) => {
-
+async function checkShowmode({ p, expect }, mode, pulses) {
+  await p.selectOption('#touchmode', mode);
+  await p.waitForFunction((touch) => document.documentElement.hasAttribute('data-touch') === touch, mode === 'on');
+  await pulses.evaluate(({ seen }) => seen.clear());
+  console.log(`showmode in ${mode === 'on' ? 'touch' : 'desktop'} mode`);
   await p.evaluate(() => window.__ff.enterRoomAwait(2));
   await waitRoom(p, 3);
   expect(await p.evaluate(() => window.__ff.script() !== null), 'KUFRIK has an active script');
@@ -64,6 +69,12 @@ await withApp(async ({ p, expect }) => {
   const ht = await p.evaluate(() => window.__ff.showmodeState().helptext);
   expect(ht >= 2, `tutorial subtitles fired (helptext=${ht})`);
   console.log(`tutorial subtitles firing (helptext=${ht})`);
+  if (mode === 'on') {
+    await p.waitForFunction(({ seen }) => seen.has('help2'), pulses, { timeout: budget(10000) });
+    expect(true, 'recorded help2 narration highlights Save through the real dialogue queue');
+  } else {
+    expect(await pulses.evaluate(({ seen }) => seen.size === 0), 'desktop narration never highlights a touch button');
+  }
 
   await p.keyboard.press('ArrowUp');
   expect(await p.evaluate(() => window.__ff.showmodeState().active), 'arrow key did not disrupt the demo');
@@ -72,12 +83,14 @@ await withApp(async ({ p, expect }) => {
   await p.keyboard.press('Backspace');
   await p.waitForFunction(() => !window.__ff.showmodeState().active && !window.__ff.showmodeState().flag);
   expect(!(await p.evaluate(() => window.__ff.showmodeState().active)), 'Backspace ended the demonstration');
+  await p.waitForFunction(() => !document.querySelector('.dialogue-hint-pulse'));
   console.log('player restart ended the demo');
 
   // ---- Part 2: death-restart synchronisation (from a clean spawn start) ----
   // The room is back to normal play at spawn; force the demo again and kill both fish
   // early so the replay runs the death countdown through to the recorded restart.
   await p.waitForFunction(() => window.__ff.screen() === 'room' && !window.__ff.showmodeState().active);
+  await pulses.evaluate(({ seen }) => seen.clear());
   await p.evaluate(() => window.__ff.forceShowmode());
   await p.waitForFunction(() => window.__ff.showmodeState().active);
   // Let a couple of actions pass (fish at spawn), then kill both fish.
@@ -107,6 +120,10 @@ await withApp(async ({ p, expect }) => {
     timeout: budget(10000),
   });
   expect(await p.evaluate(() => window.__ff.showmodeState().active), 'demo survived + stayed synced through the death-restart');
+  if (mode === 'on') {
+    await p.waitForFunction(({ seen }) => seen.has('help7'), pulses, { timeout: budget(10000) });
+    expect(true, 'recorded help7 narration highlights Load after the demo restart');
+  }
   const afterRestart = await p.evaluate(() => window.__ff.fishCell('little'));
   expect(
     afterRestart.x === realSpawn.little.x && afterRestart.y === realSpawn.little.y,
@@ -124,6 +141,37 @@ await withApp(async ({ p, expect }) => {
     await p.evaluate(() => window.__ff.showmodeState().idx) >= 304,
     'the replay advanced past its first deliberate hold instead of re-arming on it',
   );
+  if (mode === 'off') {
+    expect(await pulses.evaluate(({ seen }) => seen.size === 0), 'desktop death-restart never highlights a touch button');
+  }
 
   console.log(`demo survived death-restart, re-synced to spawn (${afterRestart.x},${afterRestart.y}), help7 fired, cleared its first hold — showmode probe OK`);
+}
+
+await withApp(async (ctx) => {
+  // Observe before playback: a pulse can finish while another assertion is running.
+  // Latch the real line/button pair in the browser instead of polling that brief state.
+  const pulses = await ctx.p.evaluateHandle(() => {
+    const seen = new Set();
+    const observer = new MutationObserver(() => {
+      const line = window.__ff.lastLine()?.name;
+      const region = line === 'help2' ? '12' : line === 'help7' ? '13' : null;
+      const lit = document.querySelectorAll('#touchbar .dialogue-hint-pulse');
+      if (window.__ff.showmodeState().active && lit.length === 1 && lit[0].dataset.region === region) {
+        seen.add(line);
+      }
+    });
+    observer.observe(document.getElementById('touchbar'), {
+      subtree: true, attributes: true, attributeFilter: ['class'],
+    });
+    return { seen, disconnect: () => observer.disconnect() };
+  });
+  try {
+    // Keep the complete original desktop probe, including death/restart and holds.
+    // The second pass buys the same lifecycle coverage with the touch controls visible.
+    for (const mode of ['off', 'on']) await checkShowmode(ctx, mode, pulses);
+  } finally {
+    await pulses.evaluate((state) => state.disconnect());
+    await pulses.dispose();
+  }
 });

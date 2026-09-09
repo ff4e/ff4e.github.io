@@ -42,6 +42,7 @@
 import { AudioEngine } from '../audio/audio.js';
 import type { ChatterState } from '../core/chatter.js';
 import { Dir } from '../core/dir.js';
+import { MLUVI_PRIOR } from './keyTables.js';
 import { HookSystem } from '../core/hooks.js';
 import { lengthOfRecord } from '../core/record.js';
 import type { RecordStep } from '../core/record.js';
@@ -601,6 +602,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     cheat: () => cheatSolveRoom(),
     lines: () => linesSpoken,
     lastLine: () => lastLine,
+    /** Speak through the real scriptTalk path, not a subtitle-only or hint-only injection. */
+    speakLine: (name: string, which: 'little' | 'big' = 'big') => activeScript?.s.talkNow(name, MLUVI_PRIOR[which]),
     subsActive: () => subs?.active ?? false,
     /** The CUTSCENE's captions are a separate SubtitleSystem, so they need their own read. */
     cutSubsActive: () => cutsceneSubs?.active ?? false,

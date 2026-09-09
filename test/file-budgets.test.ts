@@ -81,7 +81,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // What could not move is the ordering: the call has to sit after `initRenderSettings()`
   // (which puts `data-graphics` on the document) and after the save store is open, and
   // boot order is the one thing this file is for.
-  ['src/app/main.ts', 2254],
+  // 2 254 -> 2 256 for tutorial hints: one import and one scriptTalk notification,
+  // after its silent-replay guard. The illustration and lifecycle live in dialogueHints.ts.
+  ['src/app/main.ts', 2256],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
@@ -143,7 +145,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // whether it was up would pass just as happily on the sentence that blames the player's
   // connection for a 404 — plus `roomAudioPending`, the third hold a room entry can be
   // waiting on, which a probe otherwise cannot tell from the art hold.
-  ['src/app/debugHooks.ts', 1657],
+  // Three lines for speakLine: exercises the real dialogue path in browser probes
+  // without waiting through the whole tutorial. lastLine's existing shape is unchanged.
+  ['src/app/debugHooks.ts', 1660],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
