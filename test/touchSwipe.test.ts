@@ -3,6 +3,7 @@ import { Dir } from '../src/core/dir.js';
 
 const state = vi.hoisted(() => ({
   phone: true,
+  blockedKey: null as string | null,
   room: {},
   engine: {
     active: 'little' as 'little' | 'big',
@@ -71,6 +72,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   clearHeldKey();
   state.phone = true;
+  state.blockedKey = null;
   state.room = {};
   state.engine.active = 'little';
   win = Object.assign(new EventTarget(), { innerWidth: 852, innerHeight: 393 });
@@ -84,6 +86,7 @@ beforeEach(() => {
   // the pending/repeating/released movement state machine are the production code.
   win.addEventListener('keydown', (event) => {
     if (!(event instanceof KeyEvent)) throw new Error('Expected a keyboard event');
+    if (event.code === state.blockedKey) return;
     const dir = directions[event.code];
     if (dir !== undefined) beginHeldMove(event.code, true, 'little', dir);
   });
@@ -170,6 +173,17 @@ describe('phone swipe cancellation', () => {
     pointer('pointerdown', 2, 550);
     dispatchHeldMove();
     expect(state.engine.press).not.toHaveBeenCalled();
+  });
+
+  it('retains ownership when a replacement direction is rejected by the keyboard router', () => {
+    swipe();
+    state.blockedKey = 'ArrowUp';
+    pointer('pointermove', 1, 450, 120);
+    expect(heldKeyState()).toBe(3);
+    pointer('pointerdown', 2, 550);
+    dispatchHeldMove();
+    expect(state.engine.press).not.toHaveBeenCalled();
+    expect(heldKeyState()).toBe(0);
   });
 
   it.each(['pointercancel', 'rotation', 'room change'] as const)('discards pending phone movement on %s', (reason) => {

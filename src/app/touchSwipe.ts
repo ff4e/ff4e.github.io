@@ -340,14 +340,15 @@ export function initTouchSwipe(): void {
     if (next === arrow) return;
     // Release before pressing. `beginHeldMove` ignores a second input while one is held,
     // so a turn has to look like a player letting go of one arrow and taking the next.
+    const ownedMove = swipeMove;
     if (arrow) releaseArrow();
     arrow = next;
     const previousMove = gesturePhone ? heldMoveToken() : null;
     sendKey('keydown', next);
     if (gesturePhone) {
       const currentMove = heldMoveToken();
-      // Ignored keydowns leave the token unchanged: they do not grant this swipe ownership.
-      swipeMove = currentMove !== previousMove ? currentMove : null;
+      // An ignored keydown grants no ownership, but our old released press may still be queued.
+      swipeMove = currentMove !== previousMove || currentMove === ownedMove ? currentMove : null;
     }
   });
 
