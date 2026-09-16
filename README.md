@@ -107,6 +107,10 @@ list. [`HISTORY.md`](HISTORY.md) has the milestone log, if you want the order it
 
 ## Found a bug, or want something?
 
+The [privacy policy](https://ff4e.github.io/privacy.html) describes local saves,
+optional reports and the website's hosting/analytics. Its source is
+[`public/privacy.html`](public/privacy.html).
+
 Open the **Options** panel — right-click the control panel in a room, or the *Options* corner of the
 world map — and use the **Send feedback** strip at the bottom. It writes the report for you: what you
 type, the room you were in, the build, and the **move record** for that room, so the moves that led to
