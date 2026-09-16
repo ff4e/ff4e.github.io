@@ -80,6 +80,12 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `boot.ts` | 2.5 k | The boot sequence in load order — fonts, panel and map graphics, sound packages, room 7, first frame. |
 | `deviceGate.ts` | 1.4 k | What kind of device this is — desktop, phone or tablet — from the pointer and the screen's short side. Read by touch mode. |
 | `touchMode.ts` | 0.9 k | Whether the game is being played by touch, and the dev override that lets a desktop pretend it is. |
+| `phoneControls.ts` | | Phone-only corner controls and the Load/Save/Options/Restart overflow. |
+| `phoneZoom.ts` | | Continuous per-room zoom, temporary two-finger inspection, eased fish-follow and bounded render-resolution buckets. |
+| `phoneViewport.ts` | | Phone camera transforms, viewport-relative gesture coordinates and active-fish following. |
+| `phoneUndoFocus.ts` | | Choose the available fish whose move was undone, without mistaking replay consequences for moves. |
+| `phoneSubtitleLayout.ts` | | Fixed-size phone caption word wrapping and compositor scrolling for variable-height rows. |
+| `touchPinch.ts` | | Continuous two-finger scale/centroid samples and gameplay suppression until all fingers lift. |
 | `dom.ts` | 1.3 k | The element handles and their 2D contexts. |
 | `helpDom.ts` | 2.4 k | The control-help pages (`Help.pas`) as a document: builds `src/data/helpText.ts` into DOM over #screen and scales it to the stage box. |
 | `gameState.ts` | 2.6 k | The live room and how it is currently being played. Live bindings plus setters, because of the 1 237 references only 74 are writes. |
@@ -108,8 +114,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
 | `touchButtons.ts` | 1.3 k | The in-room touch bar: six buttons, every one dispatched through the panel's own `panelAction` table. |
 | `touchBarEdge.ts` | 7.2 k | Which edge the touch bar takes in landscape: the room laid out both ways, keeping whichever shows more of it. |
-| `deviceOrientation.ts` | 1.4 k | Which way the DEVICE should be held for a room — the same "lay it out both ways" rule one level up, comparing landscape against portrait. Native app only; the website's rotation stays the player's business (#123). |
-| `orientationSync.ts` | 0.8 k | Keeping the native orientation lock in step with what is on screen, derived per frame. A no-op in every browser. |
+| `deviceOrientation.ts` | 1.4 k | Native tablet orientation policy: compare landscape and portrait with the existing bar budget. Phones and browsers keep player-controlled rotation. |
+| `orientationSync.ts` | 0.8 k | Native phones rotate freely; tablets retain per-screen orientation locks. A no-op in every browser. |
 | `safeArea.ts` | 0.5 k | How big the display cutout is, read back from the `--sa-*` custom properties — the one place that knows their names. |
 | `touchSwipe.ts` | 1.6 k | Swipe to move: a finger drag on the room is delivered as a held arrow key, so every guard the keyboard has applies unchanged. |
 | `dialogueHints.ts` | 1.0 k | Touch-only swipe/tap illustration and Save/Load pulses triggered by tutorial dialogue, with expiry and screen/demo lifecycle cleanup. Styled by `src/styles/dialogueHints.css`. |

@@ -1,5 +1,6 @@
 /**
  * Which way the phone should be held for a room (`src/app/deviceOrientation.ts`).
+ * These historical phone fixtures now cover only the retained tablet/bar-budget policy.
  *
  * The rule is `touchBarEdge.ts`'s rule one level up — lay the room out both ways and keep
  * whichever shows more of it — so this file is about the things that rule has to get right

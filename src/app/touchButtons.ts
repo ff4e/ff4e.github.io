@@ -2,6 +2,8 @@
  * The in-room touch controls: six buttons, along whichever edge leaves more of the room
  * visible — the top in portrait, and in landscape the left or the top depending on the
  * room's shape (`touchBarEdge.ts` decides, per frame).
+ * This remains the tablet bar. Phones use phoneControls.ts's corner overlays instead;
+ * neither the space reservation nor the edge selector runs on that path.
  *
  * ── What they are, and what they deliberately are not ────────────────────────
  * Map, Save, Load, Undo, Options, Restart — the panel's whole-room verbs, and nothing
@@ -53,7 +55,8 @@ import { room } from './gameState.js';
 import { settings } from './playerSettings.js';
 import { roomScreenSize } from '../render/renderRoom.js';
 import { TOUCH_REGIONS } from './keyTables.js';
-import { touchModeActive } from './touchMode.js';
+import { phoneModeActive, touchModeActive } from './touchMode.js';
+import { initPhoneControls, syncPhoneControls } from './phoneControls.js';
 import { ui } from './screenState.js';
 import { roomLoading } from './framePacing.js';
 import { safeAreaInset } from './safeArea.js';
@@ -68,6 +71,7 @@ export interface TouchButtonsHost {
 
 let host!: TouchButtonsHost;
 let active = false;
+let phone = false;
 /**
  * Last visibility written to the DOM, so a steady bar is not rewritten every frame.
  *
@@ -151,6 +155,7 @@ function syncEdge(): boolean {
 export function initTouchButtons(h: TouchButtonsHost): void {
   host = h;
   refreshTouchMode();
+  initPhoneControls(h);
   for (const el of document.querySelectorAll<HTMLElement>('#touchbar [data-region]')) {
     const region = Number(el.dataset.region);
     if (!Number.isFinite(region)) continue;
@@ -177,12 +182,18 @@ export function initTouchButtons(h: TouchButtonsHost): void {
 /** Re-read whether touch mode is on. Called at boot and by the dev-bar override. */
 export function refreshTouchMode(): void {
   active = typeof window !== 'undefined' && touchModeActive(window);
+  phone = active && phoneModeActive(window);
   document.documentElement.toggleAttribute('data-touch', active);
+  document.documentElement.toggleAttribute('data-phone', phone);
 }
 
 /** Is the touch UI on? Read by the rest of the touch series and by the dev bar. */
 export function touchUi(): boolean {
   return active;
+}
+
+export function phoneUi(): boolean {
+  return phone;
 }
 
 /**
@@ -191,7 +202,8 @@ export function touchUi(): boolean {
  * Called from the frame loop beside `syncLoadingUi`. A desktop leaves on the first line.
  */
 export function syncTouchButtons(): void {
-  const want = active && ui.screen === 'room';
+  syncPhoneControls();
+  const want = active && !phone && ui.screen === 'room';
   let changed = false;
   if (want !== up) {
     up = want;

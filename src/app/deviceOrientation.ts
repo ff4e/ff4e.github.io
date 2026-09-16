@@ -1,5 +1,7 @@
 /**
  * Which way the DEVICE should be held for a room — the native app's orientation lock.
+ * This bar-budget policy is retained for tablets. Phones now rotate freely and bypass
+ * it in orientationSync.ts; the historical phone measurements below explain the model.
  *
  * ── This deliberately reverses #123, and only for the native app ─────────────
  * #123 ("How the phone is held, and whether it plays at all, are the player's business")

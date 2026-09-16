@@ -1,5 +1,6 @@
 /**
  * The per-frame derivation (`src/app/orientationSync.ts`).
+ * Phone rotation is free; the historical shape fixtures below retain the tablet policy.
  *
  * `deviceOrientation.test.ts` pins the DECISION and `orientationLock.test.ts` the
  * plumbing; what is left in the middle is the wiring, and all of it is about the states
@@ -20,6 +21,7 @@ const state = {
   screen: 'room' as 'map' | 'room' | 'intro' | 'legimage',
   room: {} as object | null,
   loading: false,
+  phone: false,
   size: { w: 780, h: 225 }, // UTES, the widest room
 };
 
@@ -41,19 +43,28 @@ vi.mock('../src/app/framePacing.js', () => ({
 vi.mock('../src/render/renderRoom.js', () => ({ roomScreenSize: () => state.size }));
 vi.mock('../src/app/playerSettings.js', () => ({ settings: { fitMode: 'fill' } }));
 vi.mock('../src/app/safeArea.js', () => ({ housingInset: () => 62 }));
-
 const lockOrientation = vi.fn();
+const unlockOrientation = vi.fn();
 vi.mock('../src/platform/orientationLock.js', () => ({
   initOrientationLock: () => {},
   lockOrientation: (...args: unknown[]) => lockOrientation(...args),
+  unlockOrientation: () => unlockOrientation(),
 }));
 
 const { resetOrientationSyncForTest, syncOrientationLock } = await import('../src/app/orientationSync.js');
+const orientation = await import('../src/app/deviceOrientation.js');
 
 /** The iPhone 17 Pro, held either way — the answer must not depend on which. */
 const setViewport = (w: number, h: number): void => {
   Object.defineProperty(globalThis, 'window', {
-    value: { innerWidth: w, innerHeight: h, devicePixelRatio: 3 },
+    value: {
+      innerWidth: w, innerHeight: h, devicePixelRatio: 3,
+      matchMedia: () => ({ matches: true }),
+      screen: {
+        get width() { return state.phone ? 402 : 768; },
+        get height() { return state.phone ? 874 : 1024; },
+      },
+    },
     configurable: true,
     writable: true,
   });
@@ -65,26 +76,59 @@ const asked = (): unknown => lockOrientation.mock.calls.at(-1)?.[0];
 beforeEach(() => {
   resetOrientationSyncForTest();
   lockOrientation.mockClear();
+  unlockOrientation.mockClear();
   Object.defineProperty(globalThis, 'location', { value: { protocol: 'capacitor:' }, configurable: true, writable: true });
   setViewport(874, 402);
   state.screen = 'room';
   state.room = {};
   state.loading = false;
+  state.phone = false;
   state.size = { w: 780, h: 225 };
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   Reflect.deleteProperty(globalThis as Record<string, unknown>, 'location');
   Reflect.deleteProperty(globalThis as Record<string, unknown>, 'window');
 });
 
 describe('syncOrientationLock', () => {
+  it('unlocks phones from boot through rooms, loading, map and movies, without choosing an orientation', () => {
+    const choose = vi.spyOn(orientation, 'preferredDeviceOrientation');
+    state.phone = true;
+    state.room = null;
+    syncOrientationLock(); // before a room or the touch chrome has initialized
+    state.room = {};
+    for (const screen of ['room', 'map', 'intro', 'legimage'] as const) {
+      state.screen = screen;
+      for (const [w, h] of [[874, 402], [402, 874]]) {
+        setViewport(w, h);
+        syncOrientationLock();
+      }
+    }
+    state.screen = 'room';
+    state.loading = true;
+    syncOrientationLock();
+    expect(unlockOrientation).toHaveBeenCalledTimes(10);
+    expect(lockOrientation).not.toHaveBeenCalled();
+    expect(choose).not.toHaveBeenCalled();
+  });
+
+  it('retains the tablet bar budget', () => {
+    const choose = vi.spyOn(orientation, 'preferredDeviceOrientation');
+    syncOrientationLock();
+    expect(choose).toHaveBeenLastCalledWith(780, 225, 874, 402, 'fill', 3, 62);
+    expect(unlockOrientation).not.toHaveBeenCalled();
+  });
   it('does nothing at all in a browser', () => {
     Object.defineProperty(globalThis, 'location', { value: { protocol: 'https:' }, configurable: true, writable: true });
     syncOrientationLock();
     // Not "asked for landscape" — did not ask. The website's behaviour is unchanged by
     // design, and #123 stands there.
     expect(lockOrientation).not.toHaveBeenCalled();
+    state.phone = true;
+    syncOrientationLock();
+    expect(unlockOrientation).not.toHaveBeenCalled();
   });
 
   it('answers for the room on screen', () => {

@@ -23,6 +23,8 @@
  * the rules (fit-to-room size, wave phase and curve, baseline, stroke, bevel) in unit
  * tests, and test-aisubs measures the rendered text for size, bottom anchoring and
  * centring. The bitmap path is still byte-exact, and is what `classic` draws.
+ * On phones the vector hosts are fixed to the screen, outside the room's camera
+ * transform. Their fit budget and bottom anchor come from the safe viewport instead.
  */
 import {
   VECTOR_GEOM,
@@ -37,6 +39,11 @@ import {
   waveDy,
 } from '../render/subtitleGeom.js';
 import { wrap } from './dom.js';
+import { phoneUi } from './touchButtons.js';
+import { safeAreaInset } from './safeArea.js';
+import {
+  PHONE_SUBTITLE_FONT_PX, animatePhoneSubtitleRows, phoneSubtitlePositions, phoneSubtitleWordFlow,
+} from './phoneSubtitleLayout.js';
 import { aiSubScale } from './introOverlay.js';
 import { graphics } from './renderSettings.js';
 import type { SubtitleSystem } from '../render/subtitles.js';
@@ -214,6 +221,16 @@ export function syncDomSubtitles(
 ): void {
   const L = layers[owner];
   const { w: screenW, h: screenH } = sys.vectorScreen;
+  const detached = phoneUi();
+  const parent = detached ? document.body : wrap;
+  // Leave a symmetric gutter for the corner Undo target; the baseline remains at
+  // the screen bottom, above the home indicator, regardless of room size or zoom.
+  const gutter = detached ? 52 + Math.max(24, safeAreaInset('--sa-left') + 8, safeAreaInset('--sa-right') + 8) : 0;
+  if (detached) {
+    cssW = Math.max(1, window.innerWidth - 2 * gutter);
+    cssH = Math.max(1, window.innerHeight - safeAreaInset('--sa-top') - safeAreaInset('--sa-bottom') - 8);
+    boxScale = 1;
+  }
   let host = L.host;
   if (!host) {
     host = document.createElement('div');
@@ -224,20 +241,37 @@ export function syncDomSubtitles(
       // positioned in the same wrapper, so without it this layer sits 1px
       // up and to the left of the canvas the text is supposed to line up with.
       'position:absolute;left:0;top:0;border:1px solid transparent;pointer-events:none;overflow:hidden';
-    wrap.appendChild(host);
+    parent.appendChild(host);
   }
+  if (host.parentElement !== parent) parent.appendChild(host);
+  const modeChanged = host.classList.contains('phone-subtitles') !== detached;
+  host.classList.toggle('phone-subtitles', detached);
+  host.style.position = detached ? 'fixed' : 'absolute';
+  host.style.left = detached ? `${gutter}px` : '0';
+  host.style.top = detached ? 'auto' : '0';
+  host.style.bottom = detached ? 'calc(var(--sa-bottom) + 8px)' : '';
+  host.style.borderWidth = detached ? '0' : '1px';
   host.style.width = `${cssW}px`;
   host.style.height = `${cssH}px`;
+  if (modeChanged) {
+    host.style.display = detached ? 'flex' : '';
+    host.style.flexDirection = detached ? 'column' : '';
+    host.style.justifyContent = detached ? 'flex-end' : '';
+    host.style.rowGap = detached ? '4px' : '';
+    host.style.paddingBottom = detached ? '4px' : '';
+    host.style.boxSizing = detached ? 'border-box' : '';
+  }
   // The `ai` tier draws its subtitles smaller, shrunk about the bottom edge of the game
   // box. One transform on the container is the whole operation, and it
   // scales the row pitch and the wave amplitude with the glyphs, exactly as that does.
-  const tier = graphics === 'ai' ? aiSubScale : 1;
+  const tier = !detached && graphics === 'ai' ? aiSubScale : 1;
   host.style.transformOrigin = '50% 100%';
   // The room shakes (trepat, ±10 native px — fired by the very chatter scripts that put
   // a subtitle up) and shoves (screenShoveX). This layer has to ride the room's
   // transform, or the room jitters under text that stands still. The last one is kept
   // when the caller passes nothing: no repaint means the shake cannot have changed.
-  if (xform !== undefined) L.lastXform = xform;
+  if (detached) L.lastXform = '';
+  else if (xform !== undefined) L.lastXform = xform;
   const scaleT = tier === 1 ? '' : `scale(${tier})`;
   // Translate first, then scale: the shake moves the whole layer, and must not itself
   // be scaled down by the tier's transform.
@@ -249,13 +283,13 @@ export function syncDomSubtitles(
   // than a faithful one, and clamping past it would erase that. `boxScale` goes in
   // because the floor may not lift the text past what the room can carry — see
   // `clampTextScale`, which has the numbers for what that costs when it does.
-  textScale = clampTextScale(textScale, boxScale);
+  textScale = detached ? PHONE_SUBTITLE_FONT_PX / VECTOR_GEOM.fontPx : clampTextScale(textScale, boxScale);
   const fontPx = VECTOR_GEOM.fontPx * textScale;
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
   // The width a row is fitted inside. Not the same thing as the font any more, so it is
   // watched on its own — see `Layer.lastFitW`.
-  const fitW = fitScreenW(screenW, boxScale, textScale);
-  if (font !== L.lastFont || fitW !== L.lastFitW) {
+  const fitW = fitScreenW(detached ? cssW : screenW, boxScale, textScale);
+  if (font !== L.lastFont || fitW !== L.lastFitW || modeChanged) {
     // The baseline pair depends only on the font, so a budget change does not pay for a
     // second forced layout.
     if (font !== L.lastFont) ({ inset: L.baselineInset, height: L.boxHeight } = measureBaseline(font));
@@ -267,6 +301,8 @@ export function syncDomSubtitles(
   }
 
   const lines = sys.debugLines();
+  const flowChanged = detached && (lines.length !== L.lines.size || lines.some((t) => !L.lines.has(t.id)));
+  const previousRows = flowChanged ? phoneSubtitlePositions([...L.lines.values()].map((l) => l.el)) : null;
   // ONE fit per message, not one per row.
   //
   // Fitting means shrinking the font rather than wrapping or overflowing: a row that
@@ -291,6 +327,10 @@ export function syncDomSubtitles(
   const blockFit = new Map<number, number>();
   const blockNatural = new Map<number, number[]>();
   for (const t of lines) {
+    if (detached) {
+      blockFit.set(t.block, 1);
+      continue;
+    }
     const built = L.lines.get(t.id);
     if (built) {
       const cur = blockFit.get(t.block);
@@ -332,13 +372,14 @@ export function syncDomSubtitles(
     // Two scales, deliberately: the bottom edge of the ROOM is a position in the room
     // (boxScale), while the line's distance up from it is a distance in the TEXT
     // (textScale). While the two were the same number this was one multiplication.
-    const y = screenH * boxScale + lineOffset(t.ys) * textScale - inset;
+    const y = detached ? 0 : screenH * boxScale + lineOffset(t.ys) * textScale - inset;
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
         `position:absolute;left:0;right:0;text-align:center;white-space:pre;font:${lineFont};` +
         `line-height:normal;transform:translateY(${y.toFixed(2)}px);` +
         `transition:transform 80ms linear;will-change:transform`;
+      const appendPhoneGlyph = detached ? phoneSubtitleWordFlow(el) : null;
       const [r, g, b] = t.rgb;
       const top = `rgb(${r},${g},${b})`;
       const [dr, dg, db] = bevelBottomRgb(r, g, b);
@@ -374,6 +415,7 @@ export function syncDomSubtitles(
         // Two layers per glyph so the outline sits behind the fill in every engine.
         // The outer span is what the wave animates, so both move as one.
         const sp = document.createElement('span');
+        sp.className = 'subtitle-glyph';
         sp.style.cssText =
           `position:relative;display:inline-block;opacity:0;will-change:transform;` +
           // Per-character advances, as PisStringF lays them out one glyph at a time:
@@ -390,7 +432,8 @@ export function syncDomSubtitles(
           `position:relative;background-image:${bevel};-webkit-background-clip:text;` +
           `background-clip:text;color:transparent`;
         sp.append(strokeEl, fillEl);
-        el.appendChild(sp);
+        if (appendPhoneGlyph) appendPhoneGlyph(sp, ch);
+        else el.appendChild(sp);
         spans.push(sp);
         if (ch === ' ') return; // a space inks nothing; PisStringF skips it too
         // Glyph i is due when its phase reaches zero, which `wavePhase` puts at (i+1)
@@ -415,4 +458,5 @@ export function syncDomSubtitles(
     l.el.remove();
     L.lines.delete(id);
   }
+  if (previousRows) animatePhoneSubtitleRows(previousRows);
 }

@@ -88,8 +88,31 @@ async function visit(contextOpts) {
       // be the worst outcome of all: admitted, and then handed 9px sliders. Read from
       // the document flag `touchMode.ts` writes, the way the touch probes read it.
       touch: document.documentElement.hasAttribute('data-touch'),
+      phone: document.documentElement.hasAttribute('data-phone'),
     }));
-    return { ...dom, errs };
+    let undoUnchanged = null;
+    if (dom.booted && !dom.phone) {
+      // Keep the first-run boot checks above; use a playable session for this negative control.
+      await p.evaluate(() => localStorage.setItem('ff.options', JSON.stringify({ introSeen: true })));
+      await p.reload({ waitUntil: 'domcontentloaded' });
+      await p.waitForFunction(() => window.__ff);
+      await p.evaluate(async () => {
+        window.__ff.setGraphics('classic');
+        await window.__ff.enterRoomAwait(5);
+      });
+      await p.waitForFunction(() => window.__ff.roomNum() === 5 && !window.__ff.roomLoading() &&
+        !window.__ff.roomAudioPending() && !window.__ff.roomPreloadPending() &&
+        window.__ff.roomAudioReady() && window.__ff.phase() === 'idle');
+      const moves = await p.evaluate(() => {
+        const n = window.__ff.moves();
+        window.__ff.press('big', window.__ff.state().big.facingRight ? 3 : 4);
+        return n;
+      });
+      await p.waitForFunction((n) => window.__ff.moves() === n + 1 && window.__ff.phase() === 'idle', moves);
+      undoUnchanged = await p.evaluate(() => window.__ff.state().active === 'big' &&
+        window.__ff.undo() && window.__ff.state().active === 'little');
+    }
+    return { ...dom, errs, undoUnchanged };
   } finally {
     await b.close();
   }
@@ -122,6 +145,7 @@ try {
   expect(phone.stageVisible, 'phone: the stage is visible');
   expect(phone.loadingHidden, 'phone: the loading splash was dismissed, not left spinning');
   expect(phone.touch === true, `phone: touch mode is on (${phone.touch})`);
+  expect(phone.phone === true, 'phone: the phone-only presentation gate is on');
   expect(!phone.noticeEl, 'phone: there is no refusal notice in the page at all');
   expect(!phone.blocked, 'phone: the document is not marked unsupported');
   expect(phone.errs.length === 0, `phone: no page errors (${phone.errs.join('; ')})`);
@@ -170,6 +194,8 @@ try {
   expect(tablet.shortSide > 600, `tablet: reports a tablet-sized screen (${tablet.shortSide})`);
   expect(tablet.booted && !tablet.fatal, `tablet: the game booted (fatal: ${tablet.fatalMsg})`);
   expect(tablet.touch === true, `tablet: touch mode is on (${tablet.touch})`);
+  expect(tablet.phone === false, 'tablet: the phone-only presentation gate is off');
+  expect(tablet.undoUnchanged === true, 'tablet: existing Undo selection is unchanged by the phone policy');
 
   // ── A desktop: the mouse-and-keyboard game is the thing none of this may cost.
   const desktop = await visit({ viewport: { width: 1200, height: 640 } });
@@ -177,6 +203,8 @@ try {
   expect(desktop.booted && !desktop.fatal, `desktop: the game booted (fatal: ${desktop.fatalMsg})`);
   expect(desktop.stageVisible, 'desktop: the stage is visible');
   expect(desktop.touch === false, `desktop: touch mode is off (${desktop.touch})`);
+  expect(desktop.phone === false, 'desktop: the phone-only presentation gate is off');
+  expect(desktop.undoUnchanged === true, 'desktop: existing Undo selection is unchanged by the phone policy');
 } catch (e) {
   ok = false;
   console.log('  FAIL threw: ' + (e?.message ?? e));

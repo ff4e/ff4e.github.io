@@ -1,5 +1,6 @@
 /**
  * Keeping the device's orientation lock in step with what is on screen.
+ * Phones remain unlocked on every screen; the policy below is retained for tablets.
  *
  * ── Derived per frame, not pushed ────────────────────────────────────────────
  * The same architecture as `touchButtons.ts`'s `syncEdge()` and `loadingUi.ts`, and for
@@ -38,7 +39,8 @@ import { housingInset } from './safeArea.js';
 import { NON_ROOM_ORIENTATION, preferredDeviceOrientation } from './deviceOrientation.js';
 import type { DeviceOrientation } from './deviceOrientation.js';
 import { isNativeHost } from '../platform/nativeHost.js';
-import { lockOrientation } from '../platform/orientationLock.js';
+import { lockOrientation, unlockOrientation } from '../platform/orientationLock.js';
+import { deviceClass } from './deviceGate.js';
 
 /**
  * The last answer — kept so that a room which cannot be measured for a frame holds the
@@ -98,6 +100,12 @@ function currentWant(): DeviceOrientation {
  */
 export function syncOrientationLock(): void {
   if (!isNativeHost()) return;
+  // This also runs before touch chrome is initialized at boot; do not use its cache.
+  if (deviceClass(window) === 'phone') {
+    want = null;
+    unlockOrientation();
+    return;
+  }
   want = currentWant();
   lockOrientation(want);
 }

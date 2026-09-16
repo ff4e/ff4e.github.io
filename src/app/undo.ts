@@ -41,8 +41,11 @@
  * reached the save, one at a time, exactly as if the player had never left.
  */
 import { activeScript, clearUndoHistory, cutscene, engine, loadmode, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
-import { restore } from './movement.js';
+import { focusRestoredFish, restore } from './movement.js';
 import { atRest } from './roomGates.js';
+import { continuePhoneRoom } from './phoneViewport.js';
+import { phoneUndoFocus } from './phoneUndoFocus.js';
+import { phoneUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 import { inSolvemode } from './solveMode.js';
 import { decodeUndoHistory, encodeUndoHistory, shareSnapshot, undoTargetIndex } from '../core/undoStack.js';
@@ -152,6 +155,7 @@ export function canUndo(): boolean {
  */
 export function undoMove(): boolean {
   if (!canUndo()) return false;
+  const focusBeforeUndo = phoneUi() && engine ? { rec: engine.srecord, active: engine.active } : null;
   let idx = undoTargetIndex(undoHistory, engine?.srecord ?? '');
   // Fall back down the history until the replay actually lands where the point says.
   //
@@ -177,8 +181,16 @@ export function undoMove(): boolean {
     // rewind would play the room's whole record back at load speed on every press, which
     // is unusable at the rate a player taps undo. This is the first non-test caller of
     // that branch; the load and the demo both take the animated one.
+    const previousRoom = room;
     restore(target.rec, target.snapshot, false, false);
-    if (engine?.srecord === target.rec && room?.anyFishDead === false) return true;
+    if (previousRoom && room) continuePhoneRoom(previousRoom, room);
+    if (engine?.srecord === target.rec && room?.anyFishDead === false) {
+      if (focusBeforeUndo) {
+        const which = phoneUndoFocus(focusBeforeUndo.rec, target.rec, focusBeforeUndo.active, room.alive);
+        if (which) focusRestoredFish(which);
+      }
+      return true;
+    }
     undoDiverged++;
     idx--;
   }

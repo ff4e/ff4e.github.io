@@ -28,14 +28,15 @@
  * by its comment and by play.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { initOrientationLock, lockOrientation, resetOrientationLockForTest } from '../src/platform/orientationLock.js';
+import { initOrientationLock, lockOrientation, resetOrientationLockForTest, unlockOrientation } from '../src/platform/orientationLock.js';
 
 const lock = vi.fn(() => Promise.resolve());
+const unlock = vi.fn(() => Promise.resolve());
 
 vi.mock('@capacitor/screen-orientation', () => ({
   ScreenOrientation: {
     lock: (...args: unknown[]) => lock(...args),
-    unlock: () => Promise.resolve(),
+    unlock: () => unlock(),
   },
 }));
 
@@ -59,6 +60,8 @@ beforeEach(() => {
   resetOrientationLockForTest();
   lock.mockClear();
   lock.mockImplementation(() => Promise.resolve());
+  unlock.mockClear();
+  unlock.mockImplementation(() => Promise.resolve());
   setScreenOrientation('landscape-primary');
 });
 
@@ -73,9 +76,11 @@ describe('on the web', () => {
     initOrientationLock();
     lockOrientation('landscape');
     lockOrientation('portrait');
+    unlockOrientation();
     await settle();
     // Not "did not rotate" — did not even resolve the module.
     expect(lock).not.toHaveBeenCalled();
+    expect(unlock).not.toHaveBeenCalled();
   });
 });
 
@@ -89,6 +94,38 @@ describe('on the native host', () => {
   it('locks portrait as portrait, never upside-down', () => {
     lockOrientation('portrait');
     expect(lock).toHaveBeenCalledWith({ orientation: 'portrait' });
+  });
+
+  it('unlocks once, does not re-issue it each frame, and can release an existing lock', async () => {
+    unlockOrientation();
+    unlockOrientation();
+    await settle();
+    expect(unlock).toHaveBeenCalledTimes(1);
+    expect(lock).not.toHaveBeenCalled();
+    lockOrientation('portrait');
+    unlockOrientation();
+    unlockOrientation();
+    await settle();
+    expect(lock).toHaveBeenCalledTimes(1);
+    expect(unlock).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs and throttles an unlock failure, then retries rather than keeping the lock', async () => {
+    const now = vi.spyOn(Date, 'now').mockReturnValue(0);
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = new Error('no window scene');
+    unlock.mockRejectedValueOnce(error);
+    unlockOrientation();
+    await settle();
+    expect(warning).toHaveBeenCalledWith('[orientation] Could not apply orientation:', 'unlocked', error);
+    for (let frame = 0; frame < 60; frame++) unlockOrientation();
+    expect(unlock).toHaveBeenCalledTimes(1);
+    now.mockReturnValue(1000);
+    unlockOrientation();
+    await settle();
+    expect(unlock).toHaveBeenCalledTimes(2);
+    warning.mockRestore();
+    now.mockRestore();
   });
 
   it('asks for the landscape the phone is already at', () => {
@@ -162,6 +199,16 @@ describe('on the native host', () => {
 });
 
 describe('before the plugin has loaded', () => {
+  it('remembers a phone unlock and supersedes an earlier orientation request', async () => {
+    setProtocol('capacitor:');
+    lockOrientation('landscape');
+    unlockOrientation();
+    expect(unlock).not.toHaveBeenCalled();
+    await settle();
+    expect(unlock).toHaveBeenCalledTimes(1);
+    expect(lock).not.toHaveBeenCalled();
+  });
+
   it('does not stall the frame, and still applies once the plugin lands', async () => {
     setProtocol('capacitor:');
     // The first tick of the session, mid-import — no `await` after init. This is not a

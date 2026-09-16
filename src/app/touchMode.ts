@@ -12,6 +12,8 @@
  * series rests on — the mouse-and-keyboard game cannot change under anyone — so it is one
  * predicate, in one place, and every touch feature asks it rather than re-deriving
  * something similar.
+ * Phone-specific presentation uses phoneModeActive alongside it; the existing
+ * phone/tablet classification, not viewport orientation, decides that narrower gate.
  *
  * ── Why there is an override, and why it is not a player setting ─────────────
  * The touch UI is otherwise unreachable from a development machine: a desktop browser has
@@ -105,4 +107,9 @@ export function touchModeActive(win: TouchWindow): boolean {
   if (o === 'on') return true;
   if (o === 'off') return false;
   return deviceClass(win) !== 'desktop';
+}
+
+/** Phone-only presentation; forcing touch on a desktop still previews the tablet UI. */
+export function phoneModeActive(win: TouchWindow): boolean {
+  return touchModeActive(win) && deviceClass(win) === 'phone';
 }

@@ -9,6 +9,7 @@ const state = {
   helpOpen: false,
   loading: false,
   touch: true,
+  phone: false,
   options: false,
   tetris: false,
 };
@@ -20,7 +21,7 @@ vi.mock('../src/app/gameState.js', () => ({
 }));
 vi.mock('../src/app/screenState.js', () => ({ ui: state }));
 vi.mock('../src/app/framePacing.js', () => ({ get roomLoading() { return state.loading; } }));
-vi.mock('../src/app/touchButtons.js', () => ({ touchUi: () => state.touch }));
+vi.mock('../src/app/touchButtons.js', () => ({ touchUi: () => state.touch, phoneUi: () => state.phone }));
 vi.mock('../src/app/touchOptions.js', () => ({ touchOptionsOpen: () => state.options }));
 vi.mock('../src/app/cheats.js', () => ({ tetrisModal: () => state.tetris }));
 const wrap = { appendChild: vi.fn() };
@@ -35,6 +36,8 @@ const overlay = {
 };
 const save = { offsetWidth: 52, classList: { add: vi.fn(), remove: vi.fn() } };
 const load = { offsetWidth: 52, classList: { add: vi.fn(), remove: vi.fn() } };
+const more = { offsetWidth: 44, classList: { add: vi.fn(), remove: vi.fn() } };
+const getElementById = vi.fn((id: string) => id === 'phone-more' ? more : null);
 const querySelector = vi.fn((selector: string) =>
   selector === '#touchbar [data-region="12"]' ? save :
     selector === '#touchbar [data-region="13"]' ? load : null);
@@ -45,9 +48,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   Object.assign(state, {
     room: {}, showmode: null, cutscene: null, replaymode: null,
-    screen: 'room', helpOpen: false, loading: false, touch: true, options: false, tetris: false,
+    screen: 'room', helpOpen: false, loading: false, touch: true, phone: false, options: false, tetris: false,
   });
-  vi.stubGlobal('document', { createElement, querySelector, hidden: false });
+  vi.stubGlobal('document', { createElement, querySelector, getElementById, hidden: false });
   vi.spyOn(performance, 'now').mockReturnValue(100);
 });
 afterEach(() => {
@@ -57,6 +60,14 @@ afterEach(() => {
 });
 
 describe('tutorial dialogue hints', () => {
+  it.each(['help2', 'help7', 'help11'])('%s highlights the overflow door on a phone', (name) => {
+    state.phone = true;
+    showDialogueHint(name, 3000);
+    expect(more.classList.add).toHaveBeenCalledExactlyOnceWith('dialogue-hint-pulse');
+    expect(querySelector).not.toHaveBeenCalled();
+    clearDialogueHint();
+    expect(more.classList.remove).toHaveBeenCalledExactlyOnceWith('dialogue-hint-pulse');
+  });
   it('creates one decorative gesture for the exact movement line', () => {
     showDialogueHint('1st-v-navod1', 6000);
     expect(createElement).toHaveBeenCalledExactlyOnceWith('div');

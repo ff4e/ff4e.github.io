@@ -13,7 +13,7 @@ import { fishBusy } from './roomGates.js';
 import { ui } from './screenState.js';
 import { Dir } from '../core/dir.js';
 import { stepsOf } from '../core/record.js';
-import type { RecordStep } from '../core/record.js';
+import type { RecordStep, Which } from '../core/record.js';
 import { ITEM_WALL } from '../core/room.js';
 import type { ScriptSnapshot } from '../core/script.js';
 import { hapticBlocked } from '../platform/haptics.js';
@@ -223,6 +223,13 @@ export function restore(
   // dialogue the fish have already spoken (the original re-derives these during a
   // suppressed load replay; buildRoom reset them, so re-apply the saved snapshot).
   if (snapshot && activeScript) activeScript.s.applySnapshot(snapshot);
+  host.setInfo();
+}
+
+/** Select after an instant restore without adding a new gameplay animation. */
+export function focusRestoredFish(which: Which): void {
+  if (!room || !engine || !room.alive[which]) return;
+  engine.active = which;
   host.setInfo();
 }
 
