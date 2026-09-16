@@ -52,6 +52,7 @@ export function tryStep(which: 'little' | 'big', dir: number): 'moving' | 'turni
 // exit`), and only movement keys repeat (action keys stay one-shot). `heldState` mirrors
 // KeyRoom: 0 idle, 1 pressed, 2 held (repeating), 3 released.
 let heldKey: string | null = null;
+let heldToken: object | null = null;
 let heldSys = false; // arrow keys are kdo:=sys → move whichever fish is active at dispatch
 let heldWhich: 'little' | 'big' = 'little';
 let heldDir: number = Dir.no;
@@ -67,6 +68,18 @@ export function heldKeyState(): number {
   return heldState;
 }
 
+/** Identity of the accepted press, including a released tap awaiting its one dispatch. */
+export function heldMoveToken(): object | null {
+  return heldToken;
+}
+
+/** Cancel only this press; a newer or unrelated input must survive. */
+export function cancelHeldMove(token: object): boolean {
+  if (token !== heldToken) return false;
+  clearHeldKey();
+  return true;
+}
+
 /**
  * FormKeyUp (Uovl.pas:1006): 1→3 (guarantee one dispatch for a tap), otherwise →0.
  * Ignores a keyup for anything other than the key currently held.
@@ -79,6 +92,7 @@ export function releaseHeldKey(code: string): void {
 
 export function clearHeldKey(): void {
   heldKey = null;
+  heldToken = null;
   heldState = 0;
   heldDir = Dir.no;
 }
@@ -89,6 +103,7 @@ export function beginHeldMove(code: string, sys: boolean, which: 'little' | 'big
   if (heldState === 1 || heldState === 2) return; // a key is already held
   if (engine) engine.swim = null; // a key press cancels any click-to-swim (most-recent input wins)
   heldKey = code;
+  heldToken = {};
   heldSys = sys;
   heldWhich = which;
   heldDir = dir;
@@ -111,7 +126,10 @@ export function dispatchHeldMove(): void {
   const which = heldSys ? engine.active : heldWhich;
   const release = heldState === 3;
   heldState = release ? 0 : 2;
-  if (release) heldKey = null;
+  if (release) {
+    heldKey = null;
+    heldToken = null;
+  }
   if (fishBusy(which)) return; // dropped while the fish is talking (kdo:=0)
   engine.swim = null;
   engine.active = which;

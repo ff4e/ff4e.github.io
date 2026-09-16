@@ -54,6 +54,8 @@ Move two fingers together to look around the zoomed room; scale and pan follow t
 gesture's centre, clamped to the room edges. Releasing one finger freezes inspection
 until the other lifts, so it cannot accidentally move or switch a fish. After both lift,
 the camera pauses for 350ms, then eases back to the active fish while keeping the chosen zoom.
+A pinch cancels its own pending swipe, not a separately held keyboard key; ordinary
+one-finger flicks still commit their move.
 Pinching past either zoom limit gives a small resisted stretch that settles back on
 release; the selected range stays 1x-3x.
 **Every room entry resets to 1x.** Zoom is never automatically carried to another room.
