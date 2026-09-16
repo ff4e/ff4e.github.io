@@ -112,6 +112,7 @@ import { phoneMenuOpen } from './phoneControls.js';
 import { touchOptionsOpen } from './touchOptions.js';
 import { ui } from './screenState.js';
 import { Dir } from '../core/dir.js';
+import { cancelHeldMove, heldMoveToken } from './movement.js';
 
 /**
  * How far a finger travels before it is a swipe rather than a tap, in CSS px.
@@ -157,6 +158,7 @@ let anchorX = 0;
 let anchorY = 0;
 /** The arrow this gesture became, once it passed the threshold. Null while it is a tap. */
 let arrow: string | null = null;
+let swipeMove: object | null = null;
 /** See the note on click-to-swim above: one emulated `mousedown` to eat. */
 let swallowMouse = false;
 
@@ -190,7 +192,7 @@ function onSurface(target: EventTarget | null): boolean {
 
 /** End the gesture: release a held arrow, or deliver the tap it turned out to be. */
 function endGesture(): void {
-  if (arrow) sendKey('keyup', arrow);
+  if (arrow) releaseArrow();
   else {
     sendKey('keydown', TAP_KEY);
     sendKey('keyup', TAP_KEY);
@@ -198,6 +200,13 @@ function endGesture(): void {
   swallowMouse = true;
   tracking = null;
   arrow = null;
+}
+
+function releaseArrow(): void {
+  if (arrow && (!gesturePhone || (swipeMove !== null && heldMoveToken() === swipeMove))) {
+    sendKey('keyup', arrow);
+  }
+  swipeMove = null;
 }
 
 /**
@@ -209,7 +218,12 @@ function endGesture(): void {
  * layer refuse every later gesture, which is a wedge with nothing to release it.
  */
 function abandonGesture(): void {
-  if (arrow) sendKey('keyup', arrow);
+  // A normal keyup preserves an unprocessed tap. Cancellation must discard our press
+  // first, and must not release a physical key whose ignored swipe never owned it.
+  if (arrow && (!gesturePhone || (swipeMove !== null && cancelHeldMove(swipeMove)))) {
+    sendKey('keyup', arrow);
+  }
+  swipeMove = null;
   tracking = null;
   arrow = null;
 }
@@ -258,6 +272,7 @@ export function initTouchSwipe(): void {
     anchorX = e.clientX;
     anchorY = e.clientY;
     arrow = null;
+    swipeMove = null;
     // The spec's own way to stop the compatibility mouse events, and it has to be here:
     // by `pointerup` the browser has already decided.
     e.preventDefault();
@@ -325,9 +340,15 @@ export function initTouchSwipe(): void {
     if (next === arrow) return;
     // Release before pressing. `beginHeldMove` ignores a second input while one is held,
     // so a turn has to look like a player letting go of one arrow and taking the next.
-    if (arrow) sendKey('keyup', arrow);
+    if (arrow) releaseArrow();
     arrow = next;
+    const previousMove = gesturePhone ? heldMoveToken() : null;
     sendKey('keydown', next);
+    if (gesturePhone) {
+      const currentMove = heldMoveToken();
+      // Ignored keydowns leave the token unchanged: they do not grant this swipe ownership.
+      swipeMove = currentMove !== previousMove ? currentMove : null;
+    }
   });
 
   for (const type of ['pointerup', 'pointercancel'] as const) {

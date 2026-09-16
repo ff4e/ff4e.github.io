@@ -135,9 +135,16 @@ const animatedPinch = async (ratio, target) => {
 };
 const pointerStream = (events) => p.evaluate((events) => {
   const stage = document.querySelector('.stage');
-  for (const [type, id, x = 400] of events) stage.dispatchEvent(new PointerEvent(type, {
-    pointerType: 'touch', pointerId: id, clientX: x, clientY: 180, bubbles: true, cancelable: true,
-  }));
+  const heldStates = [];
+  for (const [type, id, x = 400] of events) {
+    stage.dispatchEvent(new PointerEvent(type, {
+      pointerType: 'touch', pointerId: id, clientX: x, clientY: 180, bubbles: true, cancelable: true,
+    }));
+    heldStates.push(window.__ff.throttleInfo().heldState);
+  }
+  return {
+    heldStates, count: window.__ff.count(), hash: window.__ff.posHash(), moves: window.__ff.moves(),
+  };
 }, events);
 const subtitle = () => p.evaluate(() => {
   const host = document.getElementById('domsubs');
@@ -352,10 +359,19 @@ try {
   await p.evaluate(() => { window.phoneKeys = []; });
   await pointerStream([['pointerdown', 41], ['pointercancel', 41]]);
   expect(await p.evaluate(() => window.phoneKeys.length === 0), 'cancelled phone touch never becomes a tap');
-  await pointerStream([['pointerdown', 41], ['pointermove', 41, 450], ['pointerdown', 42, 550]]);
-  expect(await p.evaluate(() => ![1, 2].includes(window.__ff.throttleInfo().heldState)),
-    'a second finger releases the held swipe');
+  const takeover = await pointerStream([['pointerdown', 41], ['pointermove', 41, 450], ['pointerdown', 42, 550]]);
+  expect(takeover.heldStates[1] === 1 && takeover.heldStates[2] === 0,
+    'pinch takeover cancels an unprocessed swipe instead of leaving a released move queued');
+  await p.waitForFunction((n) => window.__ff.count() > n && window.__ff.phase() === 'idle', takeover.count);
+  expect(await p.evaluate((before) => window.__ff.moves() === before.moves &&
+    window.__ff.posHash() === before.hash, takeover),
+  'the next logic tick dispatches no fish move while both inspection fingers remain down');
   await pointerStream([['pointerup', 41], ['pointerup', 42, 550]]);
+  await p.keyboard.down('ArrowRight');
+  const physicalStates = await pointerStream([['pointerdown', 61], ['pointermove', 61, 450], ['pointerdown', 62, 550]]);
+  expect([1, 2].includes(physicalStates.heldStates[2]), 'pinch cancellation preserves a physical hold of the same arrow');
+  await pointerStream([['pointerup', 61], ['pointerup', 62, 550]]);
+  await p.keyboard.up('ArrowRight');
 
   await enter(5);
   await p.waitForFunction(() => window.__ff.phase() === 'idle');
