@@ -1,6 +1,8 @@
 /**
  * Measurement: which way should the phone be HELD for each room — and how often does that
  * disagree with landscape?
+ * Historical phone fixtures now diagnose the retained tablet/bar-budget policy only.
+ * Phones rotate freely; this report no longer chooses an orientation for them.
  *
  * The sibling of `tools/measure-touchbar-edge.mjs`, one level up. That tool asks which
  * EDGE the touch bar should take within a landscape viewport; this asks which ORIENTATION

@@ -36,12 +36,40 @@ press of `E` away.
 
 **Touch tutorial hints** are another deliberate visual addition: the first room's
 cursor-key/Space dialogue illustrates horizontal and vertical swipes followed by a tap,
-and the second room's F2/F3 narration pulses the touch bar's Save/Load buttons. They
+and the second room's F2/F3 narration pulses the touch bar's Save/Load buttons (the
+More button on phones, where those actions live in the overflow). They
 repeat with those lines, expire automatically, and never intercept input or change
 the dialogue. Desktop and silent solution replays show no hints; reduced-motion mode
 uses a static illustration and button highlight instead.
 The swipe/tap animation gets at least 2.5 seconds even when voice audio is unavailable;
 another line or a screen change still interrupts it without changing dialogue timing.
+
+**Phone layout:** Map is in the upper-left corner, Undo in the lower-right, and More
+in the upper-right opens Load, Save, Options and Restart. These controls overlay the
+room without reserving a bar, with at least 24 CSS pixels of clearance from rounded
+screen edges as well as the cutout/home-indicator insets. Pinch continuously to choose
+any zoom from 1x (the full room) to 3x. Zoom remains available only when a standard-view
+cell is smaller than 20 CSS pixels.
+Move two fingers together to look around the zoomed room; scale and pan follow the
+gesture's centre, clamped to the room edges. Releasing one finger freezes inspection
+until the other lifts, so it cannot accidentally move or switch a fish. After both lift,
+the camera pauses for 350ms, then eases back to the active fish while keeping the chosen zoom.
+Pinching past either zoom limit gives a small resisted stretch that settles back on
+release; the selected range stays 1x-3x.
+**Every room entry resets to 1x.** Zoom is never automatically carried to another room.
+Undo keeps the chosen zoom and selects the fish whose most recent move was reversed,
+so the camera follows that fish to its restored position.
+Changing graphics or briefly opening help in the same room preserves its chosen zoom.
+On iPhone, orientation is the player's choice throughout the app: rooms, the map and
+movies no longer force portrait or landscape. Wide rooms can be played in portrait;
+rotation preserves zoom while the room remains eligible. If it becomes ineligible,
+the camera returns to 1x and stays there until the player pinches again.
+Enhanced/AI subtitles stay at the screen bottom, clear of the home indicator and Undo.
+Their font is always 20 CSS pixels, independent of room size, orientation, zoom, and
+graphics tier; long captions wrap instead of shrinking.
+Classic retains its original baked-in room subtitles. **iPad and desktop keep their
+existing layouts and orientation behavior**, and iPad does not get pinch zoom. Desktop `?touch=on` still previews
+the tablet controls; use phone device emulation to preview the phone layout.
 
 **Done** means all 72 rooms playable end to end, the dialogue and voices in place, and every known
 deviation from the original either fixed or written down in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).

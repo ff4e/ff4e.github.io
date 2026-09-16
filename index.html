@@ -568,6 +568,35 @@
       /* Edge's native dark focus ring paints over the border. Keep keyboard focus
          visible outside it, including after a tutorial pulse ends. */
       .tbtn:focus-visible { outline: 2px solid #aee; outline-offset: 2px; }
+      /* Phone controls overlay the glass; only the tablet sets data-touchbar. */
+      #phone-controls {
+        --phone-top: max(24px, calc(var(--sa-top) + 8px));
+        --phone-right: max(24px, calc(var(--sa-right) + 8px));
+        --phone-bottom: max(24px, calc(var(--sa-bottom) + 8px));
+        --phone-left: max(24px, calc(var(--sa-left) + 8px));
+        position: fixed; inset: 0; z-index: 120; pointer-events: none;
+      }
+      #phone-controls[hidden], #phone-menu[hidden] { display: none; }
+      #phone-controls button { pointer-events: auto; }
+      #phone-controls > .tbtn {
+        position: absolute; min-width: 44px; min-height: 44px; width: 44px; height: 44px;
+        padding: 8px; background: #18262eb8;
+      }
+      /* Un-mirrored native insets can be zero beside a rounded corner. Keep a floor. */
+      #phone-map { top: var(--phone-top); left: var(--phone-left); }
+      #phone-more { top: var(--phone-top); right: var(--phone-right); }
+      #phone-undo { bottom: var(--phone-bottom); right: var(--phone-right); }
+      #phone-menu {
+        position: absolute; top: calc(var(--phone-top) + 52px); right: var(--phone-right);
+        display: grid; gap: 4px; padding: 6px; border-radius: 12px; background: #10161af2;
+        box-sizing: border-box;
+        max-height: calc(100dvh - var(--phone-top) - var(--phone-bottom) - 104px);
+        overflow-y: auto; pointer-events: auto;
+      }
+      #phone-menu .tbtn { min-width: 100px; min-height: 44px; font-size: 13px; }
+      html[data-phone-room] #stagebox { width: 100%; }
+      html[data-phone-room] #stagebox > div { flex-shrink: 0; }
+      .phone-subtitles { z-index: 110; }
       /* ── Centring the room on the SCREEN, not on what the bar left over ──
          The margin above reserves the bar's space by shrinking `.stage`'s own box, and
          `.stage` centres its content inside THAT box — so "centred" meant centred in
@@ -1014,7 +1043,7 @@
          `data-region` is a Uovl panel region and is dispatched through the SAME
          `panelAction` table the mouse uses — see that file for why nothing here calls
          saveGame()/showMap() directly. No direction buttons and no Swap (touch swipes to
-         move and taps to swap), no Undo (it does not exist yet). Restart IS here: the
+         move and taps to swap). Undo and Restart remain reachable: the
          faithful panel is hidden in touch mode and Backspace is its only other door.
          The icons are inline SVG rather than fetched: this bar exists on connections that
          have just been asked for 600 MB of artwork. -->
@@ -1043,6 +1072,23 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3.5V9h-5.5"/></svg>
         <span>Restart</span>
       </button>
+    </div>
+    <div id="phone-controls" hidden>
+      <button id="phone-map" class="tbtn" type="button" data-region="14" aria-label="Back to the map">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z"/><path d="M9 3v15M15 6v15"/></svg>
+      </button>
+      <button id="phone-undo" class="tbtn" type="button" data-region="24" aria-label="Take back one move">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13a8 8 0 1 1 3 6.24"/><path d="M4 4v6h6"/></svg>
+      </button>
+      <button id="phone-more" class="tbtn" type="button" aria-label="More room controls" aria-expanded="false" aria-controls="phone-menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+      </button>
+      <div id="phone-menu" role="group" aria-label="Room controls" hidden>
+        <button class="tbtn" type="button" data-region="13">Load</button>
+        <button class="tbtn" type="button" data-region="12">Save</button>
+        <button class="tbtn" type="button" data-region="16">Options</button>
+        <button class="tbtn" type="button" data-region="15">Restart</button>
+      </div>
     </div>
     <div id="info"></div>
     <!-- The touch Options: the panel's Options face as plain HTML, because that face's

@@ -104,8 +104,12 @@
  * stale flag, and the only event that can still be swallowed is one arriving between a
  * `pointerup` and the next press — which is exactly the compatibility event.
  */
-import { cutscene } from './gameState.js';
-import { touchUi } from './touchButtons.js';
+import { cutscene, room } from './gameState.js';
+import { phoneUi, touchUi } from './touchButtons.js';
+import { TouchPinch } from './touchPinch.js';
+import { beginPhoneGesture, cancelPhoneGesture, endPhoneGesture, movePhoneGesture } from './phoneViewport.js';
+import { phoneMenuOpen } from './phoneControls.js';
+import { touchOptionsOpen } from './touchOptions.js';
 import { ui } from './screenState.js';
 import { Dir } from '../core/dir.js';
 
@@ -141,9 +145,13 @@ const ARROW_FOR: Record<number, string> = {
 /** Swap the active fish (akce_switch) — what a tap is delivered as. */
 const TAP_KEY = 'Space';
 
-/** The pointer being followed, or null between gestures. One at a time: a second finger
- *  is ignored rather than fighting the first, which is also what the held machine does. */
+/** The swipe pointer. Phones hand it to the pinch recognizer on a second finger;
+ *  tablets retain their original single-pointer behavior. */
 let tracking: number | null = null;
+const pinch = new TouchPinch();
+let gestureRoom: typeof room = null;
+let gestureViewport = '';
+let gesturePhone = false;
 /** Where the current direction was last committed — see "the anchor trails the finger". */
 let anchorX = 0;
 let anchorY = 0;
@@ -165,7 +173,8 @@ function armed(): boolean {
   // Not during the briefcase demo or the help pages: both are still `screen === 'room'`
   // and both are dismissed by a TAP today. Leaving them out here leaves that untouched,
   // rather than swallowing the tap that skips them.
-  return touchUi() && ui.screen === 'room' && !ui.helpOpen && !cutscene;
+  return touchUi() && ui.screen === 'room' && !ui.helpOpen && !cutscene &&
+    !(phoneUi() && (phoneMenuOpen() || touchOptionsOpen()));
 }
 
 /** Did this gesture start on the play area rather than on a control? See the file note. */
@@ -205,6 +214,21 @@ function abandonGesture(): void {
   arrow = null;
 }
 
+function cancelGestures(): void {
+  abandonGesture();
+  cancelPhoneGesture();
+  pinch.reset();
+  gesturePhone = false;
+}
+
+/** Cancel phone gestures at screen/room/orientation boundaries, not after their next move. */
+export function syncTouchSwipe(): void {
+  if (!gesturePhone) return;
+  if (tracking === null && !pinch.active) return;
+  if (!phoneUi() || !armed() || room !== gestureRoom ||
+    `${window.innerWidth},${window.innerHeight}` !== gestureViewport) cancelGestures();
+}
+
 /**
  * Arm the gestures. Called once from `main.ts` at boot, whatever the device is — the
  * listeners leave on their first line off touch, and attaching them lazily would mean a
@@ -216,7 +240,20 @@ export function initTouchSwipe(): void {
     // See the note on click-to-swim for the two taps this was measured to be eating.
     swallowMouse = false;
     if (e.pointerType === 'mouse') return; // a finger only — see the file note
-    if (!armed() || tracking !== null || !onSurface(e.target)) return;
+    if (!armed() || !onSurface(e.target)) return;
+    if (phoneUi()) {
+      const start = pinch.down(e.pointerId, e.clientX, e.clientY);
+      if (pinch.active) {
+        abandonGesture();
+        if (start) beginPhoneGesture(start);
+        e.preventDefault();
+        return;
+      }
+    }
+    if (tracking !== null) return;
+    gestureRoom = room;
+    gesturePhone = phoneUi();
+    gestureViewport = `${window.innerWidth},${window.innerHeight}`;
     tracking = e.pointerId;
     anchorX = e.clientX;
     anchorY = e.clientY;
@@ -257,6 +294,16 @@ export function initTouchSwipe(): void {
   );
 
   window.addEventListener('pointermove', (e) => {
+    if (e.pointerType === 'mouse') return;
+    syncTouchSwipe();
+    if (phoneUi()) {
+      const sample = pinch.move(e.pointerId, e.clientX, e.clientY);
+      if (pinch.active) {
+        if (sample) movePhoneGesture(sample);
+        e.preventDefault();
+        return;
+      }
+    }
     if (e.pointerId !== tracking) return;
     const dx = e.clientX - anchorX;
     const dy = e.clientY - anchorY;
@@ -285,16 +332,29 @@ export function initTouchSwipe(): void {
 
   for (const type of ['pointerup', 'pointercancel'] as const) {
     window.addEventListener(type, (e) => {
+      if (e.pointerType === 'mouse') return;
+      syncTouchSwipe();
+      if (phoneUi() && pinch.up(e.pointerId)) {
+        if (!pinch.active) endPhoneGesture();
+        swallowMouse = true;
+        e.preventDefault();
+        return;
+      }
       if (e.pointerId !== tracking) return;
+      if (phoneUi() && type === 'pointercancel') {
+        abandonGesture();
+        swallowMouse = true;
+        return;
+      }
       endGesture();
     });
   }
 
   // The two ways a drag ends without a `pointerup`, mirroring what `main.ts` already does
   // for a held KEY at the same two moments.
-  window.addEventListener('blur', abandonGesture);
+  window.addEventListener('blur', cancelGestures);
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) abandonGesture();
+    if (document.hidden) cancelGestures();
   });
 
   // Capturing, and on `window`, so it runs before the room's own `mousedown` handler and

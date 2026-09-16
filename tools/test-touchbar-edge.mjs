@@ -1,6 +1,8 @@
 /**
  * End-to-end check on the touch bar's edge: does the browser do what
  * `src/app/touchBarEdge.ts` predicts?
+ * This exercises the retained tablet bar through desktop `?touch=on`, including
+ * historical phone-sized fixtures. Real phones now use the overlay-layout probe.
  *
  * The pure function decides the edge by laying the room out twice with `layout.ts`'s
  * functions and keeping whichever shows more of it. `tools/measure-touchbar-edge.mjs`

@@ -64,7 +64,9 @@ export function initBoot(h: BootHost): void {
 
 /** Run the boot sequence. Awaited once, from `main.ts`. */
 export async function runBoot(): Promise<void> {
-  // Which way to hold the phone, decided before anything is drawn. The loading overlay
+  // Phones now unlock here; the historical forced-rotation rationale below remains
+  // the tablet policy. Which way to hold the device is decided before anything is drawn.
+  // The loading overlay
   // and the first-run audio gate are non-room screens like any other and take
   // `NON_ROOM_ORIENTATION`, so there is no reason to make them wait: left to the frame
   // loop's first tick they came up portrait and turned about two seconds later (measured

@@ -7,7 +7,7 @@ import { wrap } from './dom.js';
 import { cutscene, replaymode, room, showmode } from './gameState.js';
 import { roomLoading } from './framePacing.js';
 import { ui } from './screenState.js';
-import { touchUi } from './touchButtons.js';
+import { phoneUi, touchUi } from './touchButtons.js';
 import { touchOptionsOpen } from './touchOptions.js';
 import { tetrisModal } from './cheats.js';
 import { TOUCH_REGIONS } from './keyTables.js';
@@ -77,7 +77,9 @@ export function showDialogueHint(name: string, durationMs: number): void {
     overlay.innerHTML = GESTURE;
     wrap.appendChild(overlay);
   } else {
-    button = document.querySelector<HTMLElement>(`#touchbar [data-region="${TOUCH_REGIONS[hint]}"]`);
+    // Teach the door to the hidden Save/Load controls without opening a menu over play.
+    button = phoneUi() ? document.getElementById('phone-more') :
+      document.querySelector<HTMLElement>(`#touchbar [data-region="${TOUCH_REGIONS[hint]}"]`);
     if (!button) throw new Error(`Missing tutorial ${hint} button`);
     // Restart even if the very same line is spoken twice before the next paint.
     void button.offsetWidth;

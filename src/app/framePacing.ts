@@ -43,6 +43,7 @@ import { glAiFailed, glFailed } from './glPlumbing.js';
 import { mapLaunching } from './roomLaunch.js';
 import { O_NORMAL, ui } from './screenState.js';
 import type { IntroPlayer } from './intro.js';
+import { phoneCameraMoving } from './phoneViewport.js';
 
 /**
  * The eight names this module still needs from `main.ts`, and nothing more.
@@ -334,6 +335,7 @@ export function loopThrottleOk(): boolean {
   if (ui.screen === 'room') {
     return (
       !forceRoomRedraw &&
+      !phoneCameraMoving() &&
       !roomAnimating() &&
       // A vector subtitle waving in / scrolling animates BETWEEN logic ticks, so it
       // needs the full rAF rate for the ~1.5s it takes to settle (it only repaints

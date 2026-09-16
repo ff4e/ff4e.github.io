@@ -14,6 +14,7 @@ import { describe, it, expect } from 'vitest';
 import { afterEach } from 'vitest';
 import {
   readTouchOverride,
+  phoneModeActive,
   resetTouchSession,
   touchModeActive,
   writeTouchOverride,
@@ -52,6 +53,17 @@ function win(
 const PHONE = { width: 390, height: 844 };
 const TABLET = { width: 820, height: 1180 };
 const DESKTOP = { width: 2560, height: 1440 };
+
+describe('phone-only presentation', () => {
+  it('requires a phone, not merely touch mode or a narrow desktop window', () => {
+    expect(phoneModeActive(win([COARSE], PHONE))).toBe(true);
+    expect(phoneModeActive(win([COARSE], TABLET))).toBe(false);
+    expect(phoneModeActive(win([COARSE]))).toBe(false);
+    expect(phoneModeActive(win([FINE], PHONE, { search: '?touch=on' }))).toBe(false);
+    expect(phoneModeActive(win([FINE], DESKTOP, { search: '?touch=on' }))).toBe(false);
+    expect(phoneModeActive(win([COARSE], PHONE, { search: '?touch=off' }))).toBe(false);
+  });
+});
 
 describe('touchModeActive — the device decides', () => {
   it('is on for a phone and for a tablet', () => {

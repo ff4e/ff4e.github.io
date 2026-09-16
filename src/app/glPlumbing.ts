@@ -232,6 +232,7 @@ export function drawGpu(
   art: ArtSource,
   opts: RenderOptions,
   useVecSubs: boolean,
+  zoom = 1,
 ): boolean {
   const gl = glCompositor();
   if (!gl || !room) return false;
@@ -240,7 +241,7 @@ export function drawGpu(
     renderRoomInto(gl, room, art, opts);
     if (gl.unsupported) return false; // defensive: an un-ported primitive → CPU this frame
     if (!useVecSubs) subs?.draw(gl, opts.count ?? 0); // baked subtitles via GPU setIndex
-    presentToGlCanvas(gl, geom);
+    presentToGlCanvas(gl, geom, zoom);
     return true;
   } catch (e) {
     glFailed = true;
@@ -256,7 +257,7 @@ export function drawGpu(
  * built, when the GPU cannot hold this room's ×S buffer, when a primitive could not run,
  * or when a GL call throws (which disables this backend for the session). Never throws.
  */
-export function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame): boolean {
+export function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame, zoom = 1): boolean {
   const comp = glAiCompositor();
   if (!comp || !host.aiRoom) return false;
   try {
@@ -267,7 +268,7 @@ export function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame): boolean 
     if (!comp.begin(geom.backingW, geom.backingH)) return false;
     host.aiRoom.drawInto(comp, r, f);
     if (comp.unsupported) return false;
-    presentToGlCanvas(comp, geom);
+    presentToGlCanvas(comp, geom, zoom);
     return true;
   } catch (e) {
     glAiFailed = true;
@@ -283,11 +284,11 @@ export function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame): boolean 
  * #screen, so it must match that box exactly rather than recompute it. Shared by both
  * GPU paths: the compositors differ entirely, the presentation does not.
  */
-function presentToGlCanvas(comp: { present(w: number, h: number): void }, geom: RoomGeometry): void {
+function presentToGlCanvas(comp: { present(w: number, h: number): void }, geom: RoomGeometry, zoom: number): void {
   const dpr = window.devicePixelRatio || 1;
   const { cssW, cssH } = geom;
-  const bw = Math.round(cssW * dpr);
-  const bh = Math.round(cssH * dpr);
+  const bw = Math.round(cssW * dpr * zoom);
+  const bh = Math.round(cssH * dpr * zoom);
   if (glCanvas.width !== bw || glCanvas.height !== bh) {
     glCanvas.width = bw;
     glCanvas.height = bh;
@@ -394,4 +395,3 @@ export function glParityCompare(art: ArtSource): Record<string, unknown> | null 
     }
   }
 }
-

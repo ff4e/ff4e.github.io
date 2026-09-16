@@ -22,6 +22,8 @@ import { drawCutscene } from './cutscene.js';
 import { drawCredits, drawLegImage } from './mapNav.js';
 import { syncLoadingUi } from './loadingUi.js';
 import { syncTouchButtons } from './touchButtons.js';
+import { syncPhoneViewport } from './phoneViewport.js';
+import { syncTouchSwipe } from './touchSwipe.js';
 import { syncOrientationLock } from './orientationSync.js';
 import { syncTouchOptions } from './touchOptions.js';
 import { syncDialogueHint } from './dialogueHints.js';
@@ -170,6 +172,8 @@ export function loop(now: number): void {
   // carrying the parchment has actually been painted, because drawMap() is what sets
   // `painted` (UMain.pas:1489-1493 — the paint sets daRealyRun, Spust runs after it).
   tickMapLaunch();
+  syncTouchSwipe();
+  syncPhoneViewport(now);
   if (ui.helpOpen || ui.screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
   // The help overlay's close button, derived here for the same reason the layers below
   // are: nothing that paints #screen can take a sibling element down, and `drawHelp` only
@@ -311,8 +315,7 @@ export function loop(now: number): void {
   syncTouchButtons();
   syncTouchOptions();
   syncDialogueHint(now);
-  // Which way the phone should be HELD, a layer above which edge the bar takes — native
-  // app only, and a no-op in every browser (src/app/orientationSync.ts).
+  // Native phones stay unlocked; tablets retain the room-based orientation policy.
   syncOrientationLock();
   updatePerfHud(now);
   scheduleNextFrame();

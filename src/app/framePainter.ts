@@ -32,6 +32,7 @@ import {
   subFontWeight,
 } from './stageState.js';
 import { ui } from './screenState.js';
+import { phoneRenderZoom } from './phoneViewport.js';
 
 /**
  * The two names this module needs from `main.ts`: which sprite frame each fish is
@@ -144,7 +145,7 @@ export function draw(): void {
     // is the same sub-tick fraction `slide` above is derived from, and it is read-only:
     // no game state, timing or logic depends on it here.
     const aiFrameState: AiRoomFrame = { count, alpha, slide, fishAnim };
-    const aiGpu = renderer === 'webgl' && !glAiFailed && drawAiGpu(geom, room, aiFrameState);
+    const aiGpu = renderer === 'webgl' && !glAiFailed && drawAiGpu(geom, room, aiFrameState, phoneRenderZoom());
     setLastRoomBackend(aiGpu ? 'webgl' : 'cpu');
     // On the GPU path #screen is only the flow anchor: it still carries the room's CSS
     // box (everything stacked over the room is positioned against it) but keeps a NATIVE
@@ -176,7 +177,7 @@ export function draw(): void {
   // are applied by the CPU compositor only, so they force that path — same reason
   // aiRoomRenderActive() bails on them.
   const wantGpu = renderer === 'webgl' && !glFailed && !frameEffectsActive();
-  const gpuOk = wantGpu && drawGpu(geom, art, opts, useVecSubs);
+  const gpuOk = wantGpu && drawGpu(geom, art, opts, useVecSubs, phoneRenderZoom());
   setLastRoomBackend(gpuOk ? 'webgl' : 'cpu'); // the backend that ACTUALLY painted this frame (for the HUD)
   // #screen (the 2D canvas) is the flow anchor for the wrap that also holds the
   // absolutely-positioned #screen-gl canvas and the #domsubs subtitle layer, and sits
@@ -206,7 +207,7 @@ export function draw(): void {
     canvas.style.transform = xform;
   }
   }
-  // The DOM subtitle layer, which rides the shake/shove transform this frame computed.
+  // Tablet/desktop subtitles ride this transform; phone subtitles detach in subtitleDom.
   updateRoomSubtitles(useVecSubs, xform);
 }
 

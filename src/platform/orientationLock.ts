@@ -1,5 +1,5 @@
 /**
- * The native app's orientation lock — the one call that removes the choice.
+ * The native app's orientation policy: phones unlock, tablets retain room-based locks.
  *
  * ── What this is for ────────────────────────────────────────────────────────
  * The rooms run from MIKRO's 360x210 to UTES's 780x225, and a couple are taller than
@@ -55,9 +55,9 @@
  * controller's own `supportedInterfaceOrientations`, which Capacitor already derives from
  * `supportedOrientations`.
  *
- * ── Failure, and why it is swallowed ────────────────────────────────────────
- * Every call is fire-and-forget and every failure is swallowed, exactly as in
- * `haptics.ts`. A lock that does not apply leaves the player holding the phone the way
+ * ── Failure, and why it does not interrupt play ─────────────────────────────
+ * Every call is fire-and-forget; rejected requests are logged and retried at most once
+ * per second. A lock that does not apply leaves the player holding the phone the way
  * they were already holding it, which is the status quo the website lives in
  * permanently. Interrupting a game over that would be worse than the thing it reports.
  */
@@ -66,10 +66,10 @@ import { isNativeHost } from './nativeHost.js';
 
 type ScreenOrientationModule = typeof import('@capacitor/screen-orientation');
 
-/** The two families this app locks to. Structurally `DeviceOrientation`, deliberately
+/** The two locked families plus player-controlled rotation, deliberately
  * spelled out rather than imported: `src/app/` may reach into `src/platform/`, and a type
  * import the other way would be the first thread of the reverse. */
-type Want = 'portrait' | 'landscape';
+type Want = 'portrait' | 'landscape' | 'unlocked';
 
 /** The plugin's own `OrientationLockType`, reached without naming the package at runtime. */
 type LockType = Parameters<ScreenOrientationModule['ScreenOrientation']['lock']>[0]['orientation'];
@@ -183,7 +183,7 @@ export function initOrientationLock(): void {
  * If the API is missing, `'landscape'` is the answer, which is the plugin's own default
  * and costs at most one 180-degree turn on a device we have no orientation reading for.
  */
-function typeFor(want: Want): LockType {
+function typeFor(want: Exclude<Want, 'unlocked'>): LockType {
   if (want === 'portrait') return 'portrait';
   const type = typeof screen !== 'undefined' ? screen.orientation?.type : undefined;
   return type === 'landscape-secondary' ? 'landscape-secondary' : 'landscape';
@@ -202,10 +202,14 @@ function apply(): void {
   retryWant = null;
   const want = desired;
   locked = want;
-  void mod.ScreenOrientation.lock({ orientation: typeFor(want) }).catch(() => {
+  const request = want === 'unlocked'
+    ? mod.ScreenOrientation.unlock()
+    : mod.ScreenOrientation.lock({ orientation: typeFor(want) });
+  void request.catch((error: unknown) => {
     // Not applied, so not remembered — a later frame's decision tries again. Guarded so a
     // stale rejection cannot erase a lock that has since been re-issued.
     if (locked !== want) return;
+    console.warn('[orientation] Could not apply orientation:', want, error);
     locked = null;
     retryWant = want;
     retryAfter = Date.now() + RETRY_MS;
@@ -221,11 +225,20 @@ function apply(): void {
  * does — the caller must NOT keep its own "already asked" latch, or a request made
  * before the plugin loaded would be the only one ever made.
  */
-export function lockOrientation(want: Want): void {
+function requestOrientation(want: Want): void {
   if (!isNativeHost()) return;
   desired = want;
   ensure();
   apply();
+}
+
+export function lockOrientation(want: Exclude<Want, 'unlocked'>): void {
+  requestOrientation(want);
+}
+
+/** Restore all app-supported orientations without choosing one for the player. */
+export function unlockOrientation(): void {
+  requestOrientation('unlocked');
 }
 
 /** Test seam: forget the loaded plugin and the standing lock. */

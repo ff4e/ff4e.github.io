@@ -63,6 +63,19 @@ describe('the touch bar markup', () => {
     expect(inMarkup).toEqual(inTable);
   });
 
+  describe('phone controls markup', () => {
+    it('keeps the three corners and maps every overflow verb to the existing dispatch table', () => {
+      const start = html.indexOf('<div id="phone-controls"');
+      const markup = html.slice(start, html.indexOf('<div id="info"', start));
+      expect(markup).toMatch(/id="phone-map"[^>]*data-region="14"/);
+      expect(markup).toMatch(/id="phone-undo"[^>]*data-region="24"/);
+      expect(markup).toMatch(/id="phone-more"[^>]*aria-controls="phone-menu"/);
+      const items = [...markup.matchAll(/data-region="(\d+)">([^<]+)<\/button>/g)]
+        .map((m) => [m[2], Number(m[1])]);
+      expect(items).toEqual([['Load', 13], ['Save', 12], ['Options', 16], ['Restart', 15]]);
+    });
+  });
+
   it('gives every button the region its own label describes', () => {
     // The transposition case: both 12 and 13 are valid, so only the pairing catches it.
     const want: Record<string, number> = {
