@@ -105,6 +105,8 @@ touch bar rather than the phone badge; desktop keeps its original panel.
 Its two bundled pictures reuse the resting AI fish art consistently across graphics tiers.
 Browser DevTools phone emulation uses this same UI without native-host or preview
 flags. Changing touch capability or emulated screen size updates the UI after boot.
+Mode changes relayout the stage and faithful panel even without a window resize,
+and dismiss incompatible Options UI rather than leaving an invisible modal.
 
 **Done** means all 72 rooms playable end to end, the dialogue and voices in place, and every known
 deviation from the original either fixed or written down in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).

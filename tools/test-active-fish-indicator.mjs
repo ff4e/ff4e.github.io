@@ -200,10 +200,77 @@ try {
       !document.documentElement.hasAttribute('data-native-menu'));
     await d.locator('#active-fish-indicator').waitFor({ state: 'hidden' });
   }
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 402, height: 874, deviceScaleFactor: 1, mobile: false, screenWidth: 402, screenHeight: 874,
+  });
+  // Deliver the setup resize before measuring pointer-only changes. Metrics and
+  // layout reads can update before the browser dispatches their resize event.
+  await d.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await d.waitForFunction(() => {
+    const panel = document.getElementById('panel').getBoundingClientRect();
+    const stage = parseFloat(document.getElementById('stagebox').style.maxWidth);
+    return innerWidth === 402 && innerHeight === 874 && panel.width > 2 && panel.height > 2 &&
+      stage > 0 && stage < innerWidth;
+  });
+  const panelLayout = () => d.evaluate(() => {
+    const panel = document.getElementById('panel').getBoundingClientRect();
+    return {
+      panelW: panel.width, panelH: panel.height,
+      stageW: parseFloat(document.getElementById('stagebox').style.maxWidth),
+      viewportW: innerWidth, viewportH: innerHeight,
+    };
+  });
+  const desktopLayout = await panelLayout();
+  await d.evaluate(() => {
+    window.touchModeResizeCount = 0;
+    window.addEventListener('resize', () => window.touchModeResizeCount++);
+  });
+  for (let i = 0; i < 2; i++) {
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+    await d.locator('#active-fish-indicator').waitFor({ state: 'visible' });
+    const phoneLayout = await panelLayout();
+    assert.equal(phoneLayout.stageW, desktopLayout.viewportW,
+      'a pointer-only phone transition returns the whole stage width to the game');
+    assert.equal(phoneLayout.panelW, 0, 'phone mode hides the faithful panel');
+    await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+    await d.locator('#active-fish-indicator').waitFor({ state: 'hidden' });
+    assert.deepEqual(await panelLayout(), desktopLayout,
+      'a pointer-only desktop transition restores usable panel dimensions and stage allocation');
+  }
+  assert.equal(await d.evaluate(() => window.touchModeResizeCount), 0,
+    'the layout transitions did not rely on a window resize');
+
+  await d.evaluate(() => window.__ff.panelAction(14));
+  await d.waitForFunction(() => window.__ff.screen() === 'map' && window.__ff.mapPresented());
+  assert.equal(await d.evaluate(() => window.__ff.mapCorner(620, 470)), 'options',
+    'the tested map pixel belongs to the real Options corner');
+  const clickMapOptions = async () => {
+    const box = await d.locator('#screen').boundingBox();
+    assert(box, 'the map is visible');
+    await d.mouse.click(box.x + box.width * 620 / 640, box.y + box.height * 470 / 480);
+  };
+  await clickMapOptions();
+  await d.waitForFunction(() => window.__ff.mapOverlay() === 'options');
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
+  await d.waitForFunction(() => document.documentElement.hasAttribute('data-touch') &&
+    window.__ff.mapOverlay() === 'none' && window.__ff.panelOstav() === 0);
+  await d.locator('#panelcol').waitFor({ state: 'hidden' });
+  assert(await d.locator('#touchopts').isHidden(), 'the obsolete desktop modal is dismissed, not stranded');
+  await clickMapOptions();
+  await d.locator('#touchopts').waitFor({ state: 'visible' });
+  assert.equal(await d.evaluate(() => window.__ff.mapOverlay()), 'none',
+    'real map clicks still open touch Options after the mode switch, without Escape');
+  await cdp.send('Emulation.setTouchEmulationEnabled', { enabled: false });
+  await d.locator('#touchopts').waitFor({ state: 'hidden' });
+  await clickMapOptions();
+  await d.waitForFunction(() => window.__ff.mapOverlay() === 'options');
+  await d.locator('#panelcol').waitFor({ state: 'visible' });
+  await d.keyboard.press('Escape');
+  await d.waitForFunction(() => window.__ff.mapOverlay() === 'none');
   await desktop.close();
 
   assert.deepEqual(errors, [], 'page must not report errors');
-  console.log('  ok   browser defaults, live phone/desktop emulation, 9 corner layouts, taps, exit, Undo and menus');
+  console.log('  ok   browser defaults, live phone/desktop emulation, fixed-viewport relayout, modal cleanup, 9 corner layouts, taps, exit, Undo and menus');
   await context.close();
   passed = true;
 } catch (e) {

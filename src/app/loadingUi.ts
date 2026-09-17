@@ -258,7 +258,7 @@ export function relayout(): void {
   // viewport by 22-93px depending on the room, then by 7px once the panel went, and now by
   // none — the 7 were the MIN_STAGE_SCALE floor, which no longer overruns the width.
   // Asked of `touchUi()` rather than worked out here — one predicate, one place
-  // (touchMode.ts) — and the dev-bar override calls this straight after flipping it, so
+  // (touchMode.ts) — and the shared mode handler calls this straight after flipping it, so
   // switching modes resizes the game immediately.
   setStage(computeStageLayout(availW, availH, settings.fitMode, !touchUi()));
   // The box HUGS its content horizontally rather than being pinned to the full stage

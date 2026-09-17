@@ -58,6 +58,12 @@ waits for the previous caption glyph to disconnect after a rotation.
 It also toggles browser
 device metrics and touch emulation after desktop boot, checking phone activation,
 new icons, desktop restoration and no duplicate badge across repeated toggles.
+Pointer-only transitions at a fixed viewport must return the full stage width to
+phone gameplay and restore the desktop panel's original usable dimensions, without
+a resize event. Real map-corner clicks verify that changing mode with Options open
+does not leave an invisible modal or require Escape to recover.
+`touchButtons.test.ts` covers initialization ordering, effective mode changes,
+faithful Options cleanup, and preserving open Options/credits when appropriate.
 `FF_FISH_EVIDENCE=<directory>` saves screenshots. This is a browser layout test;
 check native appearance on a phone before release.
 

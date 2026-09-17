@@ -1,4 +1,5 @@
 /**
+ * Touch-control markup and effective presentation transitions.
  * The touch bar's markup agrees with the region table (src/app/touchButtons.ts).
  *
  * This exists because the bar is driven by `data-region` attributes read straight from
@@ -17,12 +18,33 @@
  * undo — so nothing else in the repo would notice if the markup sent 4 (little fish left)
  * instead. That is the transposition case again, one digit further out.
  */
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 // From `keyTables.ts`, not `touchButtons.ts`: the latter reaches the DOM through
 // `loadingUi.ts`, and this suite runs in node with no document.
 import { TOUCH_REGIONS } from '../src/app/keyTables.js';
+import { O_NORMAL, O_OPTIONS, O_SC_DOWN } from '../src/app/screenState.js';
+
+const mode = vi.hoisted(() => ({ active: false, phone: false }));
+vi.mock('../src/app/touchMode.js', () => ({
+  touchModeActive: () => mode.active,
+  phoneModeActive: () => mode.phone,
+}));
+vi.mock('../src/app/loadingUi.js', () => ({ relayout: vi.fn() }));
+vi.mock('../src/app/mapNav.js', () => ({ closeMapOverlay: vi.fn() }));
+vi.mock('../src/app/phoneControls.js', () => ({
+  initPhoneControls: vi.fn(), syncPhoneControls: vi.fn(),
+}));
+vi.mock('../src/app/nativeMenu.js', () => ({
+  setNativeMenuEnabled: vi.fn(), syncNativeMenu: vi.fn(),
+}));
+vi.mock('../src/app/gameState.js', () => ({ room: null }));
+vi.mock('../src/app/playerSettings.js', () => ({ settings: { fitMode: 'medium' } }));
+vi.mock('../src/render/renderRoom.js', () => ({ roomScreenSize: vi.fn() }));
+vi.mock('../src/app/framePacing.js', () => ({ roomLoading: false }));
+vi.mock('../src/app/safeArea.js', () => ({ safeAreaInset: () => 0 }));
+vi.mock('../src/platform/nativeHost.js', () => ({ isNativeHost: () => false }));
 
 const html = readFileSync(join(import.meta.dirname, '..', 'index.html'), 'utf8');
 
@@ -52,7 +74,7 @@ function buttons(): Array<[string, number]> {
   return out;
 }
 
-describe('the touch bar markup', () => {
+describe('touch controls', () => {
   it('sends exactly the regions in TOUCH_REGIONS, and no others', () => {
     const inMarkup = buttons()
       .map(([, r]) => r)
@@ -61,6 +83,101 @@ describe('the touch bar markup', () => {
       .map(Number)
       .sort((a, b) => a - b);
     expect(inMarkup).toEqual(inTable);
+  });
+
+  describe('effective touch-mode transitions', () => {
+    let touch: typeof import('../src/app/touchButtons.js');
+    let ui: typeof import('../src/app/screenState.js')['ui'];
+    let relayout: typeof import('../src/app/loadingUi.js')['relayout'];
+    let closeMapOverlay: typeof import('../src/app/mapNav.js')['closeMapOverlay'];
+    const initialize = () => touch.initTouchButtons({ panelAction: vi.fn() });
+
+    beforeEach(async () => {
+      vi.resetModules();
+      vi.clearAllMocks();
+      Object.assign(mode, { active: false, phone: false });
+      vi.stubGlobal('window', {
+        matchMedia: () => ({ addEventListener: vi.fn() }),
+        addEventListener: vi.fn(),
+      });
+      vi.stubGlobal('document', {
+        documentElement: { toggleAttribute: vi.fn() },
+        querySelectorAll: () => [],
+      });
+      touch = await import('../src/app/touchButtons.js');
+      ({ ui } = await import('../src/app/screenState.js'));
+      ({ relayout } = await import('../src/app/loadingUi.js'));
+      ({ closeMapOverlay } = await import('../src/app/mapNav.js'));
+    });
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('sets initial mode flags without calling post-initialization layout or modal handlers', () => {
+      mode.active = mode.phone = true;
+      touch.refreshTouchMode();
+      initialize();
+      expect(touch.touchUi()).toBe(true);
+      expect(touch.phoneUi()).toBe(true);
+      expect(relayout).not.toHaveBeenCalled();
+      expect(closeMapOverlay).not.toHaveBeenCalled();
+    });
+
+    it('relayouts once per effective phone, tablet or desktop transition', () => {
+      initialize();
+      mode.active = mode.phone = true;
+      touch.refreshTouchMode();
+      expect(relayout).toHaveBeenCalledTimes(1);
+      touch.refreshTouchMode();
+      expect(relayout).toHaveBeenCalledTimes(1);
+      mode.phone = false;
+      touch.refreshTouchMode();
+      expect(relayout).toHaveBeenCalledTimes(2);
+      mode.active = false;
+      touch.refreshTouchMode();
+      expect(relayout).toHaveBeenCalledTimes(3);
+      expect(touch.touchUi()).toBe(false);
+    });
+
+    it('closes desktop map Options before laying out the touch presentation', () => {
+      initialize();
+      ui.mapOverlay = 'options';
+      ui.ostav = O_OPTIONS;
+      mode.active = mode.phone = true;
+      touch.refreshTouchMode();
+      expect(closeMapOverlay).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(closeMapOverlay).mock.invocationCallOrder[0])
+        .toBeLessThan(vi.mocked(relayout).mock.invocationCallOrder[0]!);
+    });
+
+    it('unwinds the faithful in-room Options face on a mode change', () => {
+      initialize();
+      ui.ostav = O_OPTIONS;
+      mode.active = mode.phone = true;
+      touch.refreshTouchMode();
+      expect(ui.ostav).toBe(O_SC_DOWN);
+      expect(closeMapOverlay).not.toHaveBeenCalled();
+    });
+
+    it('leaves open Options alone when a resize does not change the effective mode', () => {
+      initialize();
+      ui.mapOverlay = 'options';
+      ui.ostav = O_OPTIONS;
+      touch.refreshTouchMode();
+      expect(ui.mapOverlay).toBe('options');
+      expect(ui.ostav).toBe(O_OPTIONS);
+      expect(closeMapOverlay).not.toHaveBeenCalled();
+      expect(relayout).not.toHaveBeenCalled();
+    });
+
+    it('does not dismiss the credits overlay on a mode change', () => {
+      initialize();
+      ui.mapOverlay = 'credits';
+      ui.ostav = O_NORMAL;
+      mode.active = mode.phone = true;
+      touch.refreshTouchMode();
+      expect(ui.mapOverlay).toBe('credits');
+      expect(closeMapOverlay).not.toHaveBeenCalled();
+      expect(relayout).toHaveBeenCalledTimes(1);
+    });
   });
 
   describe('phone controls markup', () => {
