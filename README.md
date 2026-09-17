@@ -46,14 +46,16 @@ another line or a screen change still interrupts it without changing dialogue ti
 
 **Phone layout:** Map is in the upper-left corner, Undo in the lower-right, and More
 in the upper-right opens Load, Save, Options and Restart. These controls overlay the
-room without reserving a bar: 56 CSS pixel targets, 32px icons and a 16px rounded-edge
-margin. In landscape viewports at least 390px tall, the corner buttons use the space
+room without reserving a bar: 56 CSS pixel targets and 32px icons. Landscape controls
+have a 24px minimum edge margin in the native app (16px in the browser), retaining
+larger top/bottom safe-area insets. In landscape viewports at least 390px tall, the corner buttons use the space
 above/below the island instead of inheriting its full side inset; the expanded menu
 still clears it. In portrait at widths of at least 390px, Map and More sit beside the
-island in the top safe-area band, with an 8px top minimum and 24px side margins to
-clear the rounded glass. Narrower portraits and shorter landscapes retain full
+island in the top safe-area band, with a 24px top minimum in the native app (8px in
+the browser) and 24px side margins. Narrower portraits and shorter landscapes retain full
 cutout insets. The menu stays below the top cutout. On the wider portraits, Undo
-aligns with More at a 24px side margin and sits 8px above the bottom, beside rather
+aligns with More at a 24px side margin and sits 24px above the bottom in the native
+app (8px in the browser), beside rather
 than above the centered home indicator. Other layouts keep their home-indicator
 inset. Pinch continuously to choose
 any zoom from 1x (the full room) to 3x. Zoom remains available only when a standard-view
@@ -83,8 +85,10 @@ the tablet controls; use phone device emulation to preview the phone layout.
 
 **Native menu appearance:** The iOS phone/tablet controls use translucent slate
 surfaces and hand-drawn rustic symbols colored from the room's static wall art.
-The light Options panel retains original stone texture and blue lettering. This is an appearance-only skin:
-target sizes, safe-area spacing, control order and native inputs are unchanged.
+The light Options panel retains original stone texture and blue lettering.
+Target sizes, control order and native inputs are unchanged. Native phone
+controls have extra corner clearance: 24px top/bottom on wider portraits and
+24px minimum landscape edge margins for the squarer rustic button corners.
 Browser touch controls and the faithful desktop panel retain their existing appearance.
 Room accents are precomputed from static wall art and stay fixed through animation
 and developer graphics-tier switches. No runtime asset request or pixel sampling is needed.

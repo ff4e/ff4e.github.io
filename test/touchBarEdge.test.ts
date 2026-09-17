@@ -242,7 +242,10 @@ describe('the bar footprint in index.html and the constants here', () => {
    * the documentation rather than on the rules.
    */
   const rules = (() => {
-    const start = html.search(/@media\s*\(orientation:\s*landscape\)\s*\{/);
+    // Phone landscape rules are independent of the tablet bar's footprint.
+    const start = html.search(
+      /@media\s*\(orientation:\s*landscape\)\s*\{\s*html:not\(\[data-touchbar-edge=['"]top['"]\]\)/,
+    );
     const end = html.indexOf('@media (orientation: portrait)', start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);

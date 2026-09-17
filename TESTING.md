@@ -24,9 +24,16 @@ CONTRIBUTING.md for how much checking a given change actually needs, and for the
 `KNOWN_FLAKY` retry rule.
 
 `test-native-menu.mjs` pairs the native skin on/off on the same phone/tablet DOM:
-seven viewport/safe-area configurations, exact control geometry and browser-pixel
+phone/tablet viewport and safe-area configurations, exact control geometry and browser-pixel
 restoration, volume/radio dispatch, keyboard focus, reduced motion, forced colors,
-and stable warm/green room accents. It enables the native-menu controller through
+and stable warm/green room accents. The only paired geometry exceptions are the
+explicit native phone insets: 24px top/bottom on wider portraits, 24px minimum
+landscape margins, and the corresponding reduction in overflow-menu height.
+Both landscape cutout sides, zero insets and compact scrolling menus are covered.
+The probe measures
+the actual rustic corner radius, requires at least 8px of modeled curved-glass
+clearance, and retains the island/home-indicator spacing and reachable overflow.
+It enables the native-menu controller through
 `__ff.previewNativeMenu()`, not a simulated Capacitor bridge. Run against an
 isolated dev server with `FF_UI_PORT=<port> node tools/test-native-menu.mjs`;
 `FF_NATIVE_EVIDENCE=<directory>` saves before/after screenshots.
