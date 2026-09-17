@@ -159,6 +159,7 @@ const subtitle = () => p.evaluate(() => {
 });
 const captionMetrics = async (text) => {
   const loop = await p.evaluate((text) => {
+    window.previousCaptionGlyph = document.querySelector('#domsubs .subtitle-glyph');
     window.__ff.clearSubtitles();
     window.__ff.pushSubtitle(text, 'M');
     return window.__ff.throttleInfo().loops;
@@ -166,6 +167,7 @@ const captionMetrics = async (text) => {
   await p.waitForFunction(({ loop, ink }) => {
     const glyphs = [...document.querySelectorAll('#domsubs .subtitle-glyph')];
     return window.__ff.throttleInfo().loops > loop &&
+      !window.previousCaptionGlyph?.isConnected &&
       glyphs.map((g) => g.lastElementChild.textContent).join('').includes(ink);
   }, { loop, ink: text.replaceAll(' ', '') });
   return p.evaluate((ink) => {
@@ -178,6 +180,11 @@ const captionMetrics = async (text) => {
     const box = host.getBoundingClientRect();
     const rects = glyphs.map((g) => g.getBoundingClientRect());
     const rows = [...host.children].map((row) => row.getBoundingClientRect());
+    const wordsPerLine = new Map();
+    for (const word of host.querySelectorAll('.subtitle-word')) {
+      const y = Math.round(word.getBoundingClientRect().top);
+      wordsPerLine.set(y, (wordsPerLine.get(y) ?? 0) + 1);
+    }
     return {
       fonts: [...new Set(glyphs.map((g) => getComputedStyle(g).fontSize))],
       height: rects[0]?.height,
@@ -187,6 +194,11 @@ const captionMetrics = async (text) => {
         r.top >= box.top && r.bottom <= box.bottom),
       wrapped: [...host.children].some((row) =>
         new Set([...row.querySelectorAll('.subtitle-glyph')].map((g) => Math.round(g.getBoundingClientRect().top))).size > 1),
+      visualLines: new Set(rects.map((r) => Math.round(r.top))).size,
+      wordsPerLine: [...wordsPerLine.values()],
+      waveStarts: [...new Set(glyphs.map((g) =>
+        new DOMMatrix(g.getAnimations()[0].effect.getKeyframes()[0].transform).m42))],
+      waveDelays: glyphs.map((g) => g.getAnimations()[0]?.effect.getTiming().delay),
       separateRows: rows.every((r, i) => !i || r.top >= rows[i - 1].bottom),
       wholeWords: [...host.querySelectorAll('.subtitle-word')].every((word) =>
         new Set([...word.children].map((g) => Math.round(g.getBoundingClientRect().top))).size === 1),
@@ -613,8 +625,8 @@ try {
       viewport: innerHeight,
     };
   });
-  expect(glyphs.visible && glyphs.viewport - glyphs.bottom < 80,
-    'settled subtitle glyphs are readable and unclipped near the screen bottom');
+  expect(glyphs.visible && glyphs.viewport - glyphs.bottom < 120,
+    'settled portrait subtitle glyphs are readable and unclipped above the Undo row');
   if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/iphone-portrait.png` });
   const shortCaption = 'Clear captions.';
   const longCaption = 'Readable captions keep the same size while the player inspects a room, even when a longer sentence wraps across several lines.';
@@ -638,6 +650,88 @@ try {
   expect(enhancedLong.complete && enhancedLong.inside && enhancedLong.wrapped &&
     enhancedLong.fonts[0] === '20px' && near(enhancedLong.height, aiShort.height, 0.1),
   'enhanced and AI phone captions have the same fixed size, without the AI shrink');
+
+  // The reported KUFRIK caption used to wrap twice: once at the game's bitmap width,
+  // then independently within each row in a phone column only 250px wide.
+  await enter(1);
+  await p.setViewportSize({ width: 402, height: 874 });
+  const tutorialCaption = 'Můžeš nás ovládat kurzorovými šipkami a mezerníkem mezi námi přepínat.';
+  const tutorial = await captionMetrics(tutorialCaption);
+  expect(tutorial.complete && tutorial.inside && tutorial.wholeWords && tutorial.visualLines <= 3,
+    `portrait tutorial flows as at most three complete lines, not five fragments (${tutorial.visualLines})`);
+  expect(tutorial.wordsPerLine.every((n) => n >= 2),
+    'portrait tutorial balances its lines without leaving a single-word tail');
+  expect(tutorial.waveStarts.length === 1 && tutorial.waveStarts[0] === 6,
+    `every wrapped source row uses the same gentle downward wave (${tutorial.waveStarts})`);
+  expect(tutorial.waveDelays.every((delay, i, all) => !i || delay > all[i - 1]) &&
+    tutorial.waveDelays.at(-1) - tutorial.waveDelays[0] <= 800,
+  'the phone wave follows reading order across bitmap row breaks within an 800ms reveal');
+  expect(await p.evaluate(() => {
+    const host = document.getElementById('domsubs');
+    const box = host.getBoundingClientRect();
+    const undo = document.getElementById('phone-undo').getBoundingClientRect();
+    const message = host.firstElementChild;
+    return box.left === 16 && box.width === innerWidth - 32 && box.bottom <= undo.top - 8 &&
+      host.children.length === 1 && message.children.length > 1;
+  }), 'portrait uses the safe screen width above Undo and flows source rows inside one message');
+  if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/iphone-tutorial-captions.png` });
+
+  // Other room dialogue can push the whole message up while we wait. Its internal
+  // positions must not change when one of its own source rows expires.
+  await p.evaluate(() => {
+    window.expiringCaption = [...document.querySelectorAll('#domsubs .subtitle-glyph')].map(glyph => {
+      const message = glyph.closest('[data-subtitle-block]');
+      const box = glyph.getBoundingClientRect(), origin = message.getBoundingClientRect();
+      return { glyph, message, x: box.x - origin.x, y: box.y - origin.y, wave: glyph.getAnimations()[0] };
+    });
+  });
+  await p.waitForFunction(() => window.expiringCaption.some(({ glyph }) =>
+    !glyph.isConnected || getComputedStyle(glyph).visibility === 'hidden'));
+  const expiryMetrics = await p.evaluate(() => {
+    const visualRows = new Map();
+    for (const { glyph, y } of window.expiringCaption) {
+      const key = Math.round(y), row = visualRows.get(key) ?? [];
+      row.push(glyph.isConnected && getComputedStyle(glyph).visibility !== 'hidden');
+      visualRows.set(key, row);
+    }
+    const survivors = window.expiringCaption.filter(({ glyph }) =>
+      glyph.isConnected && getComputedStyle(glyph).visibility !== 'hidden');
+    const moved = survivors.map(({ glyph, message, x, y }) => {
+      const now = glyph.getBoundingClientRect(), origin = message.getBoundingClientRect();
+      return { text: glyph.lastElementChild.textContent, dx: now.x - origin.x - x, dy: now.y - origin.y - y };
+    }).filter(({ dx, dy }) => Math.abs(dx) >= 0.1 || Math.abs(dy) >= 0.1);
+    return { survivors: survivors.length, moved,
+      wholeRows: [...visualRows.values()].every(row => row.every(Boolean) || row.every(visible => !visible)),
+      sameWaves: survivors.every(({ glyph, wave }) => glyph.getAnimations()[0] === wave),
+      states: survivors.map(({ wave }) => wave.playState),
+    };
+  });
+  const still = expiryMetrics.survivors > 0 && expiryMetrics.wholeRows && expiryMetrics.moved.length === 0 &&
+    expiryMetrics.sameWaves && expiryMetrics.states.every(state => state === 'finished');
+  expect(still, 'whole displayed lines expire together without moving or replaying surviving text');
+  if (!still) console.log('expiry metrics:', JSON.stringify(expiryMetrics));
+  await captionMetrics(tutorialCaption);
+  await p.evaluate(() => {
+    window.captionGlyphs = [...document.querySelectorAll('#domsubs .subtitle-glyph')];
+    window.captionWaves = window.captionGlyphs.map((g) => g.getAnimations()[0]);
+  });
+  await p.setViewportSize({ width: 320, height: 568 });
+  await p.waitForFunction(() => parseFloat(document.getElementById('domsubs')?.style.width) <= 288);
+  expect(await p.evaluate(() => window.captionGlyphs.every((g, i) =>
+    g.isConnected && g.getAnimations()[0] === window.captionWaves[i])),
+  'phone reflow preserves glyphs and their compositor animations instead of restarting them');
+  const narrowTutorial = await captionMetrics(tutorialCaption);
+  expect(narrowTutorial.complete && narrowTutorial.inside && narrowTutorial.wholeWords &&
+    narrowTutorial.fonts[0] === '20px' && narrowTutorial.visualLines <= 4,
+  'a narrow portrait keeps all words readable without inheriting the bitmap row breaks');
+  await p.evaluate(() => {
+    window.__ff.clearSubtitles();
+    window.__ff.pushSubtitle('Echo.', 'M');
+    window.__ff.pushSubtitle('Echo.', 'M');
+  });
+  await p.waitForFunction(() => document.querySelectorAll('#domsubs .subtitle-glyph').length === 10);
+  expect(await p.evaluate(() => document.getElementById('domsubs').children.length === 2),
+    'two identical phone messages on the same tick remain separate blocks');
   await p.evaluate(() => {
     document.documentElement.style.removeProperty('--sa-top');
     document.documentElement.style.removeProperty('--sa-bottom');
