@@ -290,3 +290,14 @@ change that could touch them:
 - **the safe area** on a notched phone, in both orientations, entering a room directly
   rather than rotating into it. Rotating republishes the insets and hides the bug class
   that `SafeAreaBridgeViewController` exists to fix, so rotation is not a test.
+- **phone corner controls**: Map, More and Undo have 56px targets and 32px icons.
+  In each landscape direction, confirm the 16px corner placement clears both the
+  physical housing and rounded glass; open More and reach all four actions without
+  overlapping the housing or Undo. Short landscapes (under 390px tall) retain full
+  side insets. In portrait >=390px wide, Map and More sit beside the island with
+  24px side margins; check their rounded corners and that the menu opens below the
+  cutout. Undo sits 8px above the bottom at the same 24px side margin; confirm
+  its rounded outline and taps stay clear of the glass and centered home indicator.
+  Narrower portraits retain the below-cutout fallback. Browser coverage
+  models a 200px landscape / 214px portrait central housing envelope, not the
+  device's actual cutout, so this check still needs hardware.

@@ -46,8 +46,16 @@ another line or a screen change still interrupts it without changing dialogue ti
 
 **Phone layout:** Map is in the upper-left corner, Undo in the lower-right, and More
 in the upper-right opens Load, Save, Options and Restart. These controls overlay the
-room without reserving a bar, with at least 24 CSS pixels of clearance from rounded
-screen edges as well as the cutout/home-indicator insets. Pinch continuously to choose
+room without reserving a bar: 56 CSS pixel targets, 32px icons and a 16px rounded-edge
+margin. In landscape viewports at least 390px tall, the corner buttons use the space
+above/below the island instead of inheriting its full side inset; the expanded menu
+still clears it. In portrait at widths of at least 390px, Map and More sit beside the
+island in the top safe-area band, with an 8px top minimum and 24px side margins to
+clear the rounded glass. Narrower portraits and shorter landscapes retain full
+cutout insets. The menu stays below the top cutout. On the wider portraits, Undo
+aligns with More at a 24px side margin and sits 8px above the bottom, beside rather
+than above the centered home indicator. Other layouts keep their home-indicator
+inset. Pinch continuously to choose
 any zoom from 1x (the full room) to 3x. Zoom remains available only when a standard-view
 cell is smaller than 20 CSS pixels.
 Move two fingers together to look around the zoomed room; scale and pan follow the

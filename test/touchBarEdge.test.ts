@@ -235,14 +235,14 @@ describe('the bar footprint in index.html and the constants here', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
   /**
-   * Every rule inside `@media (orientation: landscape)`, as selector + body.
+   * Every rule inside the tablet's `@media (orientation: landscape)`, as selector + body.
    *
    * Comments are stripped first: the block's own prose quotes both numbers ("the 72px the
    * left bar takes", "66px a top bar takes"), and counting those would make this pass on
    * the documentation rather than on the rules.
    */
   const rules = (() => {
-    const start = html.indexOf('@media (orientation: landscape)');
+    const start = html.search(/@media\s*\(orientation:\s*landscape\)\s*\{/);
     const end = html.indexOf('@media (orientation: portrait)', start);
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
