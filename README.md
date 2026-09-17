@@ -83,6 +83,10 @@ Classic retains its original baked-in room subtitles. **iPad and desktop keep th
 existing layouts and orientation behavior**, and iPad does not get pinch zoom. Desktop `?touch=on` still previews
 the tablet controls; use phone device emulation to preview the phone layout.
 
+**Tablet toolbar:** Map, Save, Load, Restart, Options, Undo, in that order.
+Undo occupies the end of the bar and Restart the fourth slot, both across the top
+and down the left edge. Phone controls and the desktop panel are unchanged.
+
 **Touch menu appearance:** Phone/tablet controls in browsers and the native app use translucent slate
 surfaces and hand-drawn rustic symbols colored from the room's static wall art.
 The light Options panel retains original stone texture and blue lettering.

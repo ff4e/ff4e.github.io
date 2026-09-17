@@ -75,6 +75,17 @@ function buttons(): Array<[string, number]> {
 }
 
 describe('touch controls', () => {
+  it('puts Restart fourth and Undo last in the tablet visual and keyboard order', () => {
+    expect(buttons()).toEqual([
+      ['Map', 14],
+      ['Save', 12],
+      ['Load', 13],
+      ['Restart', 15],
+      ['Options', 16],
+      ['Undo', 24],
+    ]);
+  });
+
   it('sends exactly the regions in TOUCH_REGIONS, and no others', () => {
     const inMarkup = buttons()
       .map(([, r]) => r)
