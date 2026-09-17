@@ -1100,7 +1100,7 @@ function panelAction(region: number, panelX = 0): void {
     case 2:
     case 3:
     case 4: // little fish up/down/left/right (region == Dir value)
-      if (idle() && engine && !fishBusy('little')) {
+      if (idle() && engine && room?.alive.little && !fishBusy('little')) {
         engine.swim = null;
         engine.active = 'little';
         tryStep('little', region);
@@ -1113,7 +1113,7 @@ function panelAction(region: number, panelX = 0): void {
     case 7:
     case 8:
     case 9: // big fish up/down/left/right (Dir = region - 5)
-      if (idle() && engine && !fishBusy('big')) {
+      if (idle() && engine && room?.alive.big && !fishBusy('big')) {
         engine.swim = null;
         engine.active = 'big';
         tryStep('big', region - 5);

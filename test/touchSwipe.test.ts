@@ -4,7 +4,7 @@ import { Dir } from '../src/core/dir.js';
 const state = vi.hoisted(() => ({
   phone: true,
   blockedKey: null as string | null,
-  room: {},
+  room: { alive: { little: true, big: true } },
   engine: {
     active: 'little' as 'little' | 'big',
     swim: null,
@@ -73,7 +73,7 @@ beforeEach(() => {
   clearHeldKey();
   state.phone = true;
   state.blockedKey = null;
-  state.room = {};
+  state.room = { alive: { little: true, big: true } };
   state.engine.active = 'little';
   win = Object.assign(new EventTarget(), { innerWidth: 852, innerHeight: 393 });
   vi.stubGlobal('window', win);
@@ -102,6 +102,33 @@ afterEach(() => {
   win.dispatchEvent(new Event('blur'));
   clearHeldKey();
   vi.unstubAllGlobals();
+});
+
+describe('held input after a fish exits', () => {
+  it.each(['little', 'big'] as const)('does not reselect the departed %s fish', (which) => {
+    const other = which === 'little' ? 'big' : 'little';
+    beginHeldMove('KeyL', false, which, Dir.right);
+    dispatchHeldMove();
+    state.engine.press.mockClear();
+    state.room.alive[which] = false;
+    state.engine.active = other;
+
+    dispatchHeldMove();
+    expect(state.engine.active).toBe(other);
+    expect(state.engine.press).not.toHaveBeenCalled();
+  });
+
+  it('directs a held arrow or swipe to the newly active fish', () => {
+    beginHeldMove('ArrowRight', true, 'little', Dir.right);
+    dispatchHeldMove();
+    state.engine.press.mockClear();
+    state.room.alive.little = false;
+    state.engine.active = 'big';
+
+    dispatchHeldMove();
+    expect(state.engine.press).toHaveBeenCalledWith('big', Dir.right);
+    expect(state.engine.active).toBe('big');
+  });
 });
 
 describe('phone swipe cancellation', () => {
