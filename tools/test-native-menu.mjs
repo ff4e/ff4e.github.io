@@ -1,5 +1,5 @@
 /**
- * Native skin: paired geometry on the SAME live controls, browser isolation,
+ * Native skin: paired geometry (with explicit phone insets), browser isolation,
  * native-input operation, focus and reduced motion. No simulator claim: the
  * native-menu controller is enabled explicitly, without mocking a Capacitor bridge.
  * FF_NATIVE_EVIDENCE saves comparison screenshots.
@@ -35,6 +35,7 @@ const geometry = (p) => p.evaluate(() => [...document.querySelectorAll(
   const s = getComputedStyle(el);
   return {
     element: el.id || el.getAttribute('data-region') || el.tagName,
+    control: el.closest('#phone-map, #phone-more, #phone-undo, #phone-menu')?.id ?? null,
     x: r.x, y: r.y, w: r.width, h: r.height,
     scrollWidth: el.scrollWidth, scrollHeight: el.scrollHeight,
     fontSize: s.fontSize, lineHeight: s.lineHeight, gap: s.gap, padding: s.padding, margin: s.margin,
@@ -44,7 +45,7 @@ const geometry = (p) => p.evaluate(() => [...document.querySelectorAll(
 const save = async (p, name) => {
   if (evidence) await p.screenshot({ path: join(evidence, `${name}.png`) });
 };
-async function pair(p, name) {
+async function pair(p, name, c) {
   // The tablet's edge decision and stage resize can span several throttled frames.
   await p.evaluate(() => { window.nativeMenuLayoutSample = { key: '', since: performance.now() }; });
   await p.waitForFunction(() => {
@@ -62,16 +63,83 @@ async function pair(p, name) {
   await save(p, `${name}-before`);
   await native(p, true);
   const after = await geometry(p);
-  assert.deepEqual(after, before, `${name}: skin changed layout or hit behavior`);
+  const insetPortrait = c.phone && c.height > c.width && c.width >= 390;
+  const insetLandscape = c.phone && c.width > c.height;
+  const oldTop = insetPortrait ? Math.max(8, (c.insets[0] - 56) / 2) : Math.max(16, c.insets[0] + 8);
+  const newTop = insetPortrait ? Math.max(24, (c.insets[0] - 56) / 2) : Math.max(24, c.insets[0] + 8);
+  const oldBottom = insetPortrait ? 8 : Math.max(16, c.insets[2] + 8);
+  const newBottom = insetPortrait ? 24 : Math.max(24, c.insets[2] + 8);
+  const side = (floor, inset) => c.height >= 390 ? floor : Math.max(floor, inset + 8);
+  const leftShift = insetLandscape ? side(24, c.insets[3]) - side(16, c.insets[3]) : 0;
+  const rightShift = insetLandscape ? side(16, c.insets[1]) - side(24, c.insets[1]) : 0;
+  const menuShift = insetLandscape
+    ? Math.max(side(16, c.insets[1]), c.insets[1] + 8) - Math.max(side(24, c.insets[1]), c.insets[1] + 8) : 0;
+  const newMenuTop = Math.max(c.insets[0] + 8, newTop + 64);
+  const shifts = {
+    'phone-map': { x: leftShift, y: newTop - oldTop },
+    'phone-more': { x: rightShift, y: newTop - oldTop },
+    'phone-undo': { x: rightShift, y: oldBottom - newBottom },
+    'phone-menu': { x: menuShift, y: newMenuTop - Math.max(c.insets[0] + 8, oldTop + 64) },
+  };
+  const expected = before.map(item => {
+    if (!(insetPortrait || insetLandscape) || item.w === 0 || item.h === 0 || !item.control) return item;
+    const shift = shifts[item.control];
+    // The scrollable menu loses only the space reserved for the larger edge insets.
+    const h = item.element === 'phone-menu'
+      ? Math.min(item.scrollHeight, c.height - newMenuTop - newBottom - 64) : item.h;
+    return { ...item, x: item.x + shift.x, y: item.y + shift.y, h };
+  });
+  assert.deepEqual(after, expected, `${name}: unexpected layout or hit behavior change`);
   await save(p, `${name}-after`);
-  results.push({ name, elements: after.length, geometryIdentical: true });
+  results.push({ name, elements: after.length, geometryMatched: true, insetPortrait, insetLandscape });
+}
+async function phoneClearance(p, c) {
+  const portrait = c.height > c.width;
+  if (!c.phone || (portrait && c.width < 390)) return;
+  const [map, more, undo] = await p.evaluate(() =>
+    ['phone-map', 'phone-more', 'phone-undo'].map(id => {
+      const el = document.getElementById(id);
+      return { ...el.getBoundingClientRect().toJSON(),
+        radius: parseFloat(getComputedStyle(el).borderTopLeftRadius) };
+    }));
+  // Use the painted native radius, not the browser skin's rounder 14px corners.
+  const clearance = (x, y, radius) =>
+    64 - Math.hypot(Math.max(0, 64 - x - radius), Math.max(0, 64 - y - radius)) - radius;
+  const gaps = [clearance(map.left, map.top, map.radius),
+    clearance(c.width - more.right, more.top, more.radius),
+    clearance(c.width - undo.right, c.height - undo.bottom, undo.radius)];
+  assert(gaps.every(gap => gap >= 8), `${c.name}: rustic corners need 8px of curved-glass clearance: ${gaps}`);
+  if (portrait) {
+    assert(map.top < Math.max(c.insets[0], 47), `${c.name}: top row must stay beside, not below, the housing`);
+    assert(map.right + 8 <= c.width / 2 - 107 && more.left - 8 >= c.width / 2 + 107,
+      `${c.name}: preserve 8px beside the modeled 214px housing`);
+    assert(undo.left - 8 >= c.width / 2 + 107, `${c.name}: keep Undo beside the home indicator`);
+  } else {
+    assert(undo.bottom <= c.height - c.insets[2] - 8, `${c.name}: preserve the bottom safe area`);
+    for (const side of [1, 3].filter(side => c.insets[side] > 0)) {
+      const left = side === 3 ? 0 : c.width - c.insets[1];
+      const right = side === 3 ? c.insets[3] : c.width;
+      assert([map, more, undo].every(b => b.right + 8 <= left || b.left - 8 >= right ||
+        b.bottom + 8 <= c.height / 2 - 100 || b.top - 8 >= c.height / 2 + 100),
+      `${c.name}: preserve 8px around the modeled 200px landscape housing`);
+    }
+  }
+  results.push({ name: c.name, curvedGlassClearance: gaps });
 }
 const cases = [
   { name: 'phone-portrait', phone: true, width: 393, height: 852, insets: [62, 0, 34, 0] },
+  { name: 'phone-notch-portrait', phone: true, width: 390, height: 844, insets: [47, 0, 34, 0] },
+  { name: 'phone-zero-insets-portrait', phone: true, width: 390, height: 844, insets: [0, 0, 0, 0] },
+  { name: 'phone-tall-inset-portrait', phone: true, width: 414, height: 896, insets: [96, 0, 34, 0] },
+  { name: 'phone-wide-portrait', phone: true, width: 440, height: 956, insets: [62, 0, 34, 0] },
   { name: 'phone-landscape-left', phone: true, width: 852, height: 393, insets: [0, 0, 21, 62] },
   { name: 'phone-landscape-right', phone: true, width: 852, height: 393, insets: [0, 62, 21, 0] },
+  { name: 'phone-notch-landscape', phone: true, width: 844, height: 390, insets: [0, 47, 21, 0] },
+  { name: 'phone-zero-insets-landscape', phone: true, width: 852, height: 393, insets: [0, 0, 0, 0] },
   { name: 'phone-small-portrait', phone: true, width: 375, height: 667, insets: [20, 0, 0, 0] },
   { name: 'phone-short-landscape', phone: true, width: 667, height: 375, insets: [0, 44, 21, 0] },
+  { name: 'phone-short-landscape-left', phone: true, width: 667, height: 375, insets: [0, 0, 21, 44] },
+  { name: 'phone-compact-landscape', phone: true, width: 568, height: 320, insets: [0, 0, 0, 0] },
   { name: 'tablet-portrait', phone: false, width: 834, height: 1194, insets: [24, 0, 20, 0] },
   { name: 'tablet-landscape', phone: false, width: 1194, height: 834, insets: [24, 0, 20, 0] },
 ];
@@ -119,19 +187,26 @@ try {
         const g = window.__ff.roomGeom();
         return g && Math.abs(document.getElementById('screen').clientWidth - g.cssW) <= 1;
       });
-      await pair(p, `${c.name}-controls`);
+      await pair(p, `${c.name}-controls`, c);
+      await phoneClearance(p, c);
       if (phone) {
         await p.click('#phone-more');
-        await pair(p, `${c.name}-menu`);
+        await pair(p, `${c.name}-menu`, c);
+        const bounds = await p.evaluate(() => ({
+          menu: document.getElementById('phone-menu').getBoundingClientRect().toJSON(),
+          more: document.getElementById('phone-more').getBoundingClientRect().toJSON(),
+          undo: document.getElementById('phone-undo').getBoundingClientRect().toJSON(),
+        }));
+        assert(bounds.menu.top >= Math.max(c.insets[0] + 8, bounds.more.bottom + 8) &&
+          bounds.menu.bottom <= bounds.undo.top - 8, `${c.name}: overflow clears both corner controls`);
+        for (const button of await p.locator('#phone-menu button').all()) await button.tap({ trial: true });
         await p.click('#phone-menu [data-region="16"]');
       } else {
         await p.click('#touchbar [data-region="16"]');
       }
       await p.waitForFunction((phone) => !document.getElementById('touchopts').hidden &&
         (!phone || document.getElementById('phone-controls').hidden), phone);
-      await pair(p, `${c.name}-options`);
-      const end = await p.locator('#topt-close').boundingBox();
-      assert(end && end.y >= 0 && end.y + end.height <= c.height, `${c.name}: Done must stay reachable`);
+      await pair(p, `${c.name}-options`, c);
       await native(p, false);
       const originalPixels = await p.locator('#touchopts').screenshot();
       await native(p, true);
@@ -145,6 +220,7 @@ try {
       await native(p, true);
       assert.equal(await p.locator('#topt-close').evaluate((el) => getComputedStyle(el).borderColor),
         'rgb(121, 101, 55)', 'Done uses the selected C accent, not the browser teal border');
+      await p.locator('#topt-effect').scrollIntoViewIfNeeded();
       const range = await p.locator('#topt-effect').boundingBox();
       assert(range, 'volume range must be visible');
       await p.locator('#topt-effect').evaluate((el) => {
@@ -160,6 +236,9 @@ try {
       assert.equal(await p.evaluate(() => window.__ff.subtitleMode()), 'cz', 'Czech remains selectable');
       await p.locator('#touchopts input[value="en"]').check();
       assert.equal(await p.evaluate(() => window.__ff.subtitleMode()), 'en', 'native radios still dispatch');
+      await p.locator('#topt-close').scrollIntoViewIfNeeded();
+      const end = await p.locator('#topt-close').boundingBox();
+      assert(end && end.y >= 0 && end.y + end.height <= c.height, `${c.name}: Done must stay reachable`);
       const resting = await p.locator('#topt-close').evaluate((el) => getComputedStyle(el).boxShadow);
       await p.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
       await p.mouse.down();
@@ -174,7 +253,7 @@ try {
       await p.keyboard.press('Enter');
       await p.waitForFunction(() => document.getElementById('touchopts').hidden);
       await p.waitForFunction((phone) => !document.getElementById(phone ? 'phone-controls' : 'touchbar').hidden, phone);
-      console.log(`  ok   ${c.name}: identical geometry, browser pixels, input and focus`);
+      console.log(`  ok   ${c.name}: expected geometry, browser pixels, input and focus`);
     }
     await p.emulateMedia({ reducedMotion: 'reduce' });
     const control = phone ? '#phone-map' : '#touchbar .tbtn';

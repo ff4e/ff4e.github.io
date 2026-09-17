@@ -583,6 +583,15 @@ try {
     return map.left === 24 && map.top === 8 && more.right === innerWidth - 24 &&
       undo.right === more.right && undo.bottom === innerHeight - 8;
   }), 'portrait Map and More sit beside the island and Undo sits low beside the home indicator');
+  await p.evaluate(() => window.__ff.previewNativeMenu());
+  expect(await p.evaluate(() => {
+    const map = document.getElementById('phone-map').getBoundingClientRect();
+    const more = document.getElementById('phone-more').getBoundingClientRect();
+    const undo = document.getElementById('phone-undo').getBoundingClientRect();
+    return map.left === 24 && map.top === 24 && more.top === 24 &&
+      more.right === innerWidth - 24 && undo.right === more.right &&
+      undo.bottom === innerHeight - 24 && map.width === 56 && undo.height === 56;
+  }), 'native portrait controls gain corner clearance without shrinking targets or moving toward the island');
   await p.evaluate(() => window.__ff.talk('little'));
   await p.waitForFunction(() => document.getElementById('domsubs')?.children.length > 0);
   expect((await subtitle()).detached, 'AI portrait subtitles are also detached');
@@ -639,6 +648,14 @@ try {
   expect(await p.locator('#domsubs').count() === 0, 'classic keeps baked room subtitles, not the detached layer');
   await p.setViewportSize({ width: 852, height: 393 });
   await enter(2);
+  expect(await p.evaluate(() => {
+    const map = document.getElementById('phone-map').getBoundingClientRect();
+    const more = document.getElementById('phone-more').getBoundingClientRect();
+    const undo = document.getElementById('phone-undo').getBoundingClientRect();
+    return map.left === 24 && map.top === 24 && more.right === innerWidth - 24 &&
+      undo.right === more.right && undo.bottom === innerHeight - 24 &&
+      map.width === 56 && undo.height === 56;
+  }), 'rotating back to native landscape keeps 24px corner margins and full-sized targets');
   await p.evaluate(() => window.__ff.speakLine('help2'));
   expect(await p.locator('#phone-more.dialogue-hint-pulse').count() === 1 &&
     await p.locator('#phone-menu').isHidden(), 'Save tutorial highlights More without opening the menu');
