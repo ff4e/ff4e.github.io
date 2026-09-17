@@ -6,6 +6,8 @@
 import { reloadApp, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
+  expect((await p.evaluate(() => window.__ff.subtitleMode())) === 'en', 'English subtitles by default');
+  expect((await p.evaluate(() => window.__ff.titDef())) === 'en', 'titles and help default to English too');
   await selectRoom(p, 7); // enter UTES
   await p.waitForFunction(() => window.__ff && window.__ff.hasPanel && window.__ff.hasPanel());
   await tickSleep(p, 3);
@@ -44,6 +46,7 @@ await withApp(async ({ p, expect }) => {
   // Subtitle buttons switch / turn off subtitles (obltitcz/eng/no).
   await p.evaluate(() => window.__ff.panelAction(22)); // off
   expect((await p.evaluate(() => window.__ff.subtitleMode())) === 'off', 'subtitles OFF');
+  expect((await p.evaluate(() => window.__ff.titDef())) === 'en', 'turning subtitles off retains English');
   await p.evaluate(() => window.__ff.panelAction(20)); // czech
   expect((await p.evaluate(() => window.__ff.subtitleMode())) === 'cz', 'subtitles CZ');
   await p.evaluate(() => window.__ff.panelAction(21)); // english
