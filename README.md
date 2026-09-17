@@ -47,15 +47,14 @@ another line or a screen change still interrupts it without changing dialogue ti
 **Phone layout:** Map is in the upper-left corner, Undo in the lower-right, and More
 in the upper-right opens Load, Save, Options and Restart. These controls overlay the
 room without reserving a bar: 56 CSS pixel targets and 32px icons. Landscape controls
-have a 24px minimum edge margin in the native app (16px in the browser), retaining
+have a 24px minimum edge margin in browsers and the native app, retaining
 larger top/bottom safe-area insets. In landscape viewports at least 390px tall, the corner buttons use the space
 above/below the island instead of inheriting its full side inset; the expanded menu
 still clears it. In portrait at widths of at least 390px, Map and More sit beside the
-island in the top safe-area band, with a 24px top minimum in the native app (8px in
-the browser) and 24px side margins. Narrower portraits and shorter landscapes retain full
+island in the top safe-area band, with a 24px top minimum and 24px side margins.
+Narrower portraits and shorter landscapes retain full
 cutout insets. The menu stays below the top cutout. On the wider portraits, Undo
-aligns with More at a 24px side margin and sits 24px above the bottom in the native
-app (8px in the browser), beside rather
+aligns with More at a 24px side margin and sits 24px above the bottom, beside rather
 than above the centered home indicator. Other layouts keep their home-indicator
 inset. Pinch continuously to choose
 any zoom from 1x (the full room) to 3x. Zoom remains available only when a standard-view
@@ -76,22 +75,38 @@ On iPhone, orientation is the player's choice throughout the app: rooms, the map
 movies no longer force portrait or landscape. Wide rooms can be played in portrait;
 rotation preserves zoom while the room remains eligible. If it becomes ineligible,
 the camera returns to 1x and stays there until the player pinches again.
-Enhanced/AI subtitles stay at the screen bottom, clear of the home indicator and Undo.
+Enhanced/AI subtitles stay screen-fixed: portrait captions use the safe screen width
+above the bottom button row, while landscape captions retain side gutters beside it.
 Their font is always 20 CSS pixels, independent of room size, orientation, zoom, and
 graphics tier; long captions wrap instead of shrinking.
 Classic retains its original baked-in room subtitles. **iPad and desktop keep their
 existing layouts and orientation behavior**, and iPad does not get pinch zoom. Desktop `?touch=on` still previews
 the tablet controls; use phone device emulation to preview the phone layout.
 
-**Native menu appearance:** The iOS phone/tablet controls use translucent slate
+**Touch menu appearance:** Phone/tablet controls in browsers and the native app use translucent slate
 surfaces and hand-drawn rustic symbols colored from the room's static wall art.
 The light Options panel retains original stone texture and blue lettering.
-Target sizes, control order and native inputs are unchanged. Native phone
+Target sizes, control order and native inputs are unchanged. Phone
 controls have extra corner clearance: 24px top/bottom on wider portraits and
 24px minimum landscape edge margins for the squarer rustic button corners.
-Browser touch controls and the faithful desktop panel retain their existing appearance.
+The faithful desktop panel retains its original appearance.
 Room accents are precomputed from static wall art and stay fixed through animation
 and developer graphics-tier switches. No runtime asset request or pixel sampling is needed.
+
+**Active fish on phones:** A small orange/blue fish picture identifies the
+current selection, including changes after an exit or Undo. It is display-only;
+tap/swipe controls are unchanged. It uses the same 56px shell, 32px icon box,
+room-colored surface and corner spacing as the other controls, aligned with Map
+on the left and Undo along the bottom. Tapping its picture passes through to the
+same screen-tap fish switch used elsewhere. Captions clear it vertically in portrait
+and through a side gutter in landscape. It never attaches to or extends the Dynamic Island.
+The badge hides in menus, help, loading, replays and cutscenes. Tablets keep their
+touch bar rather than the phone badge; desktop keeps its original panel.
+Its two bundled pictures reuse the resting AI fish art consistently across graphics tiers.
+Browser DevTools phone emulation uses this same UI without native-host or preview
+flags. Changing touch capability or emulated screen size updates the UI after boot.
+Mode changes relayout the stage and faithful panel even without a window resize,
+and dismiss incompatible Options UI rather than leaving an invisible modal.
 
 **Done** means all 72 rooms playable end to end, the dialogue and voices in place, and every known
 deviation from the original either fixed or written down in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).

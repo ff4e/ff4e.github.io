@@ -84,6 +84,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `phoneZoom.ts` | | Continuous per-room zoom, temporary two-finger inspection, eased fish-follow and bounded render-resolution buckets. |
 | `phoneViewport.ts` | | Phone camera transforms, viewport-relative gesture coordinates and active-fish following. |
 | `phoneUndoFocus.ts` | | Choose the available fish whose move was undone, without mistaking replay consequences for moves. |
+| `activeFishIndicator.ts` | | Phone-browser/native fish picture, derived from the engine selection; hidden outside live play. |
 | `phoneSubtitleLayout.ts` | | Fixed-size phone captions: message-level word wrapping, stable expiry slots and arrival-only compositor scrolling. |
 | `phoneSubtitleExpiry.ts` | | Retain source text and retire whole displayed phone lines without moving surviving glyphs. |
 | `phoneSubtitleWave.ts` | | Phone message wave: stable reading-order phases across source-row expiry and bounded reveal time. |
@@ -114,8 +115,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
-| `touchButtons.ts` | 1.3 k | The in-room touch bar: six buttons, every one dispatched through the panel's own `panelAction` table. |
-| `nativeMenu.ts` | | Native-only rustic symbols and fixed room accents, precomputed from static wall art. |
+| `touchButtons.ts` | | Shared touch/phone mode transitions, stage relayout and Options cleanup; tablet buttons dispatch through the panel's own `panelAction` table. |
+| `nativeMenu.ts` | | Shared touch/native rustic symbols and fixed room accents, enabled by device mode. |
 | `touchBarEdge.ts` | 7.2 k | Which edge the touch bar takes in landscape: the room laid out both ways, keeping whichever shows more of it. |
 | `deviceOrientation.ts` | 1.4 k | Native tablet orientation policy: compare landscape and portrait with the existing bar budget. Phones and browsers keep player-controlled rotation. |
 | `orientationSync.ts` | 0.8 k | Native phones rotate freely; tablets retain per-screen orientation locks. A no-op in every browser. |

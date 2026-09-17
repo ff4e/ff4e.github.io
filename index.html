@@ -600,9 +600,11 @@
         html[data-native-menu] #phone-controls { --phone-left: 24px; --phone-right: 24px; }
       }
       /* Un-mirrored native insets can be zero beside a rounded corner. Keep a floor. */
-      #phone-map { top: var(--phone-top); left: var(--phone-left); }
+      #phone-map { top: var(--phone-top); }
+      #phone-map, #active-fish-indicator { left: var(--phone-left); }
       #phone-more { top: var(--phone-top); right: var(--phone-right); }
-      #phone-undo { bottom: var(--phone-bottom); right: var(--phone-right); }
+      #phone-undo { right: var(--phone-right); }
+      #phone-undo, #active-fish-indicator { bottom: var(--phone-bottom); }
       #phone-menu {
         --menu-top: max(calc(var(--sa-top) + 8px), calc(var(--phone-top) + var(--phone-size) + 8px));
         position: absolute; top: var(--menu-top);
@@ -620,9 +622,9 @@
           --phone-top: max(8px, calc((var(--sa-top) - var(--phone-size)) / 2));
           --phone-bottom: 8px;
         }
-        #phone-map { left: max(24px, calc(var(--sa-left) + 8px)); }
+        #phone-map, #active-fish-indicator { left: max(24px, calc(var(--sa-left) + 8px)); }
         #phone-more, #phone-menu, #phone-undo { right: max(24px, calc(var(--sa-right) + 8px)); }
-        /* The native skin's squarer corners need air, not just an unclipped edge.
+        /* The shared skin's squarer corners need air, not just an unclipped edge.
            Keep the row beside the housing and preserve its central clearance. */
         html[data-native-menu] #phone-controls {
           --phone-top: max(24px, calc((var(--sa-top) - var(--phone-size)) / 2));
@@ -944,6 +946,7 @@
       body.dev #perfhud { display: block; }
     </style>
     <link rel="stylesheet" href="/src/styles/nativeMenu.css" />
+    <link rel="stylesheet" href="/src/styles/activeFishIndicator.css" />
   </head>
   <body>
     <div id="perfhud"></div>

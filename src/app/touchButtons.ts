@@ -57,11 +57,12 @@ import { roomScreenSize } from '../render/renderRoom.js';
 import { TOUCH_REGIONS } from './keyTables.js';
 import { phoneModeActive, touchModeActive } from './touchMode.js';
 import { initPhoneControls, syncPhoneControls } from './phoneControls.js';
-import { ui } from './screenState.js';
+import { O_NORMAL, O_SC_DOWN, ui } from './screenState.js';
+import { closeMapOverlay } from './mapNav.js';
 import { roomLoading } from './framePacing.js';
 import { safeAreaInset } from './safeArea.js';
 import { isNativeHost } from '../platform/nativeHost.js';
-import { initNativeMenu, syncNativeMenu } from './nativeMenu.js';
+import { setNativeMenuEnabled, syncNativeMenu } from './nativeMenu.js';
 
 export { TOUCH_REGIONS };
 
@@ -74,6 +75,7 @@ export interface TouchButtonsHost {
 let host!: TouchButtonsHost;
 let active = false;
 let phone = false;
+let initialized = false;
 /**
  * Last visibility written to the DOM, so a steady bar is not rewritten every frame.
  *
@@ -158,7 +160,8 @@ export function initTouchButtons(h: TouchButtonsHost): void {
   host = h;
   refreshTouchMode();
   initPhoneControls(h);
-  if (isNativeHost()) initNativeMenu();
+  window.matchMedia('(any-pointer: coarse)').addEventListener('change', refreshTouchMode);
+  window.addEventListener('resize', refreshTouchMode);
   for (const el of document.querySelectorAll<HTMLElement>('#touchbar [data-region]')) {
     const region = Number(el.dataset.region);
     if (!Number.isFinite(region)) continue;
@@ -180,14 +183,29 @@ export function initTouchButtons(h: TouchButtonsHost): void {
     if (focused instanceof HTMLElement && focused.matches('#touchbar [data-region]') &&
       e.target instanceof Node && !focused.contains(e.target)) focused.blur();
   }, true);
+  initialized = true;
 }
 
-/** Re-read whether touch mode is on. Called at boot and by the dev-bar override. */
+/** Re-read touch mode at boot, on device-emulation changes and for the dev override. */
 export function refreshTouchMode(): void {
-  active = typeof window !== 'undefined' && touchModeActive(window);
-  phone = active && phoneModeActive(window);
+  const nextActive = typeof window !== 'undefined' && touchModeActive(window);
+  const nextPhone = nextActive && phoneModeActive(window);
+  const changed = nextActive !== active || nextPhone !== phone;
+  active = nextActive;
+  phone = nextPhone;
   document.documentElement.toggleAttribute('data-touch', active);
   document.documentElement.toggleAttribute('data-phone', phone);
+  setNativeMenuEnabled(active || isNativeHost());
+  if (!initialized || !changed) return;
+  // Put the FAITHFUL Options face back to a known state on the way through. Turning
+  // touch on while it is open would strand it: the hand-over in `togglePanelOptions`
+  // returns before the branch that scrolls it back down, so nothing could close it
+  // until the next room load. Device changes and the dev override share this cleanup.
+  if (ui.mapOverlay === 'options') closeMapOverlay();
+  else if (ui.ostav !== O_NORMAL) ui.ostav = O_SC_DOWN;
+  // Phone/desktop changes leave the tablet bar hidden, so its sync cannot relayout
+  // for us. relayout also wakes the renderer to apply panel sizing and visibility.
+  relayout();
 }
 
 /** Is the touch UI on? Read by the rest of the touch series and by the dev bar. */

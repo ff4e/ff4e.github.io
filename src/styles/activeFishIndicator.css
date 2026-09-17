@@ -1,0 +1,12 @@
+/* Bottom-left display; corner spacing is shared with Map and Undo. */
+#active-fish-indicator {
+  box-sizing: border-box;
+  pointer-events: none;
+}
+#active-fish-indicator[hidden], #active-fish-indicator img[hidden] { display: none; }
+#active-fish-indicator img {
+  width: 32px;
+  height: 32px;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px #000c);
+}

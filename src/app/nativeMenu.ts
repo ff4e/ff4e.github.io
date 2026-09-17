@@ -8,19 +8,33 @@ import { fatalShown } from './loadingUi.js';
 import { ui } from './screenState.js';
 
 let enabled = false;
+let iconsApplied = false;
 let lastRoom = 0;
 let lastTier = '';
 const colorKeys = ['glass', 'edge', 'popup', 'pressed', 'symbol', 'highlight', 'shade', 'detail', 'outline'] as const;
 
-/** Called only by the native boot path (or explicitly by the browser UI probe). */
+/** Shared touch/native appearance; the preview hook can also enable it explicitly. */
 export function initNativeMenu(): void {
-  applyRusticIcons(document);
+  if (!iconsApplied) {
+    applyRusticIcons(document);
+    iconsApplied = true;
+  }
   document.documentElement.setAttribute('data-native-menu', '');
   enabled = true;
   syncNativeMenu();
 }
 
-/** No work in browsers; native accents use the reviewed, static room palette. */
+/** Device emulation can be enabled or disabled after the page has already booted. */
+export function setNativeMenuEnabled(want: boolean): void {
+  if (want === enabled) return;
+  if (want) initNativeMenu();
+  else {
+    enabled = false;
+    document.documentElement.removeAttribute('data-native-menu');
+  }
+}
+
+/** Active touch/native accents use the reviewed, static room palette. */
 export function syncNativeMenu(): void {
   if (!enabled || curNum === 0 || ui.screen !== 'room' || roomLoading || roomArtPending() || fatalShown()) return;
   if (curNum === lastRoom && graphics === lastTier) return;

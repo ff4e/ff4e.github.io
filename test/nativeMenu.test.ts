@@ -16,21 +16,23 @@ vi.mock('../src/platform/nativeMenuIcons.js', () => ({ applyRusticIcons: vi.fn()
 let menu: typeof import('../src/app/nativeMenu.js');
 let root: {
   setAttribute: ReturnType<typeof vi.fn>;
+  removeAttribute: ReturnType<typeof vi.fn>;
   style: { setProperty: ReturnType<typeof vi.fn>; removeProperty: ReturnType<typeof vi.fn> };
   dataset: Record<string, string>;
 };
 beforeEach(async () => {
   vi.resetModules();
+  vi.clearAllMocks();
   Object.assign(state, { num: 0, tier: 'ai', loading: false, pending: false, fatal: false });
   state.ui.screen = 'room';
-  root = { setAttribute: vi.fn(), style: { setProperty: vi.fn(), removeProperty: vi.fn() }, dataset: {} };
+  root = { setAttribute: vi.fn(), removeAttribute: vi.fn(), style: { setProperty: vi.fn(), removeProperty: vi.fn() }, dataset: {} };
   vi.stubGlobal('document', { documentElement: root });
   menu = await import('../src/app/nativeMenu.js');
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('native menu lifecycle', () => {
-  it('does no work until the native initializer is called', () => {
+describe('shared touch/native menu lifecycle', () => {
+  it('does no work until the touch/native initializer is called', () => {
     state.num = 6;
     menu.syncNativeMenu();
     expect(root.setAttribute).not.toHaveBeenCalled();
@@ -81,5 +83,21 @@ describe('native menu lifecycle', () => {
     menu.initNativeMenu();
     state.num = 73;
     expect(() => menu.syncNativeMenu()).toThrow('Missing native menu palette for room 73');
+  });
+  it('disables the skin for desktop and restores it without replacing icons again', async () => {
+    const { applyRusticIcons } = await import('../src/platform/nativeMenuIcons.js');
+    state.num = 6;
+    menu.setNativeMenuEnabled(true);
+    menu.setNativeMenuEnabled(true);
+    expect(applyRusticIcons).toHaveBeenCalledTimes(1);
+    menu.setNativeMenuEnabled(false);
+    expect(root.removeAttribute).toHaveBeenCalledWith('data-native-menu');
+    root.style.setProperty.mockClear();
+    state.num = 44;
+    menu.syncNativeMenu();
+    expect(root.style.setProperty).not.toHaveBeenCalled();
+    menu.setNativeMenuEnabled(true);
+    expect(root.dataset.nativeMenuHue).toBe('146');
+    expect(applyRusticIcons).toHaveBeenCalledTimes(1);
   });
 });

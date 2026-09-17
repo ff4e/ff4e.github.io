@@ -23,18 +23,19 @@ change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a ga
 CONTRIBUTING.md for how much checking a given change actually needs, and for the
 `KNOWN_FLAKY` retry rule.
 
-`test-native-menu.mjs` pairs the native skin on/off on the same phone/tablet DOM:
-phone/tablet viewport and safe-area configurations, exact control geometry and browser-pixel
+`test-native-menu.mjs` checks default skin/icon activation in phone/tablet browsers,
+then pairs the shared skin on/off on the same DOM: 15 viewport/safe-area
+configurations, exact control geometry and unskinned-pixel
 restoration, volume/radio dispatch, keyboard focus, reduced motion, forced colors,
 and stable warm/green room accents. The only paired geometry exceptions are the
-explicit native phone insets: 24px top/bottom on wider portraits, 24px minimum
+explicit shared phone insets: 24px top/bottom on wider portraits, 24px minimum
 landscape margins, and the corresponding reduction in overflow-menu height.
 Both landscape cutout sides, zero insets and compact scrolling menus are covered.
-The probe measures
+The indicator follows the same inset shifts as Map and Undo. The probe measures
 the actual rustic corner radius, requires at least 8px of modeled curved-glass
 clearance, and retains the island/home-indicator spacing and reachable overflow.
-It enables the native-menu controller through
-`__ff.previewNativeMenu()`, not a simulated Capacitor bridge. Run against an
+`__ff.previewNativeMenu()` is used only for the
+paint comparison, not for browser activation. Run against an
 isolated dev server with `FF_UI_PORT=<port> node tools/test-native-menu.mjs`;
 `FF_NATIVE_EVIDENCE=<directory>` saves before/after screenshots.
 `nativeMenuPalette.test.ts` covers palette extraction and neutral scenery. Physical
@@ -44,6 +45,27 @@ the original `panel.ffp`, regenerated with `npx tsx tools/build-native-menu-art.
 `FF_UI_PORT=<dev-port> node --import tsx tools/build-native-menu-palette.mjs`
 checks all 72 fixed accents against static AI wall artwork; `--write` regenerates
 `src/data/nativeMenuHues.ts` for visual review after an artwork change.
+
+`activeFishIndicator.test.ts` covers selection handover and
+visibility without changing engine state. `test-active-fish-indicator.mjs` uses
+normal browser boot, with no native-host mock or preview initializer:
+both fish pictures, swaps, Undo, rotation, bottom-left placement, subtitle/control
+clearance, menu hiding and real taps on the badge and play area. All nine
+viewport/inset cases must match the other corner buttons' computed appearance,
+icon size and alignment, and have no housing connector. Captions must keep an 8px
+gap above the indicator in portrait or beside it in landscape; each measurement
+waits for the previous caption glyph to disconnect after a rotation.
+It also toggles browser
+device metrics and touch emulation after desktop boot, checking phone activation,
+new icons, desktop restoration and no duplicate badge across repeated toggles.
+Pointer-only transitions at a fixed viewport must return the full stage width to
+phone gameplay and restore the desktop panel's original usable dimensions, without
+a resize event. Real map-corner clicks verify that changing mode with Options open
+does not leave an invisible modal or require Escape to recover.
+`touchButtons.test.ts` covers initialization ordering, effective mode changes,
+faithful Options cleanup, and preserving open Options/credits when appropriate.
+`FF_FISH_EVIDENCE=<directory>` saves screenshots. This is a browser layout test;
+check native appearance on a phone before release.
 
 `test-tier-recovery.mjs` checks failed-asset cache eviction with an explicit
 same-page tier request. Re-entering from a held map launch can join the existing
@@ -321,13 +343,15 @@ change that could touch them:
   rather than rotating into it. Rotating republishes the insets and hides the bug class
   that `SafeAreaBridgeViewController` exists to fix, so rotation is not a test.
 - **phone corner controls**: Map, More and Undo have 56px targets and 32px icons.
-  In each landscape direction, confirm the 16px corner placement clears both the
+  The bottom-left fish indicator shares their size and appearance; taps on its
+  picture must still use the ordinary screen-tap fish switch.
+  In each landscape direction, confirm the 24px minimum corner placement clears both the
   physical housing and rounded glass; open More and reach all four actions without
   overlapping the housing or Undo. Short landscapes (under 390px tall) retain full
   side insets. In portrait >=390px wide, Map and More sit beside the island with
-  24px side margins; check their rounded corners and that the menu opens below the
-  cutout. Undo sits 8px above the bottom at the same 24px side margin; confirm
-  its rounded outline and taps stay clear of the glass and centered home indicator.
+  24px minimum top and side margins; check their rounded corners and that the menu opens below the
+  cutout. Undo and the fish indicator sit 24px above the bottom at 24px side margins;
+  confirm their rounded outlines stay clear of the glass and centered home indicator.
   Narrower portraits retain the below-cutout fallback. Browser coverage
   models a 200px landscape / 214px portrait central housing envelope, not the
   device's actual cutout, so this check still needs hardware.

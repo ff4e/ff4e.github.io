@@ -116,6 +116,7 @@ export async function checkDialogueHints(p, expect) {
       window.__ff.speakLine('help1', 'little');
       const target = document.querySelector(`#touchbar [data-region="${region}"]`);
       const border = getComputedStyle(target).border;
+      const restingShadow = getComputedStyle(target).boxShadow;
       window.__ff.speakLine(name);
       const lit = [...document.querySelectorAll('.dialogue-hint-pulse')];
       const button = lit[0];
@@ -123,20 +124,20 @@ export async function checkDialogueHints(p, expect) {
       if (!animation) return { target: false, visibleChange: false, sameBox: false };
       animation.pause();
       animation.currentTime = 0;
-      const base = getComputedStyle(button).backgroundColor;
+      const base = getComputedStyle(button).boxShadow;
       const size = button.getBoundingClientRect();
       animation.currentTime = 600;
-      const bright = getComputedStyle(button).backgroundColor;
+      const bright = getComputedStyle(button).boxShadow;
       const end = button.getBoundingClientRect();
       window.__ff.speakLine('help1', 'little');
       const restored = getComputedStyle(button);
       return {
         target: lit.length === 1 && button.dataset.region === region,
-        visibleChange: base !== bright,
+        visibleChange: base !== bright && bright.includes('0px 0px 0px 3px'),
         sameBox: size.width === end.width && size.height === end.height,
         focusRestored: button.matches(':focus-visible') && restored.border === border &&
-          restored.boxShadow === 'none' && restored.outlineStyle === 'solid' &&
-          restored.outlineColor === 'rgb(170, 238, 238)' && restored.outlineOffset === '2px',
+          restored.boxShadow === restingShadow && restored.outlineStyle === 'solid' &&
+          restored.outlineColor === 'rgb(240, 238, 229)' && restored.outlineOffset === '2px',
       };
     }, { name, region });
     expect(pulse.target && pulse.visibleChange && pulse.sameBox, `${name} visibly pulses only button ${region}, without changing layout`);
@@ -175,7 +176,7 @@ export async function checkDialogueHints(p, expect) {
     window.__ff.speakLine('help2');
     const el = document.querySelector('.dialogue-hint-pulse');
     return el && getComputedStyle(el).animationName === 'none' &&
-      el.getAnimations().length === 0 && getComputedStyle(el).boxShadow !== 'none';
+      el.getAnimations().length === 0 && getComputedStyle(el).boxShadow.includes('0px 0px 0px 3px');
   });
   expect(staticPulse, 'reduced motion keeps a static button highlight');
   await p.emulateMedia({ reducedMotion: 'no-preference' });

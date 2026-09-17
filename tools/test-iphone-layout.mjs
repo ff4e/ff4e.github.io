@@ -253,18 +253,19 @@ try {
       return ids.map((id) => {
         const button = document.getElementById(id);
         const svg = button.querySelector('svg').getBoundingClientRect();
-        return { ...button.getBoundingClientRect().toJSON(), iconW: svg.width, iconH: svg.height };
+        return { ...button.getBoundingClientRect().toJSON(), iconW: svg.width, iconH: svg.height,
+          radius: parseFloat(getComputedStyle(button).borderTopLeftRadius) };
       });
     });
     const [map, more, undo] = layout;
     const corners = width > height && height >= 390;
     const portraitCorners = height > width && width >= 390;
-    const sideFloor = portraitCorners ? 24 : 16;
-    expect(map.left === (corners ? 16 : Math.max(sideFloor, left + 8)) &&
-      more.right === width - (corners ? 16 : Math.max(sideFloor, right + 8)) &&
+    const edgeFloor = portraitCorners || width > height ? 24 : 16;
+    expect(map.left === (corners ? 24 : Math.max(edgeFloor, left + 8)) &&
+      more.right === width - (corners ? 24 : Math.max(edgeFloor, right + 8)) &&
       undo.right === more.right &&
-      map.top === (portraitCorners ? Math.max(8, (top - 56) / 2) : Math.max(16, top + 8)) &&
-      undo.bottom === height - (portraitCorners ? 8 : Math.max(16, bottom + 8)),
+      map.top === (portraitCorners ? Math.max(24, (top - 56) / 2) : Math.max(edgeFloor, top + 8)) &&
+      undo.bottom === height - (portraitCorners ? 24 : Math.max(edgeFloor, bottom + 8)),
     `${width}x${height}: ${portraitCorners ? 'beside-island row' : corners ? 'edge corners' : 'full safe-area fallback'} places all three controls`);
     expect(layout.every((b) => b.width === 56 && b.height === 56 && b.iconW === 32 && b.iconH === 32 &&
       b.left >= 0 && b.right <= width && b.top >= 0 && b.bottom <= height),
@@ -284,9 +285,10 @@ try {
       expect(map.right + 8 <= width / 2 - 107 && more.left - 8 >= width / 2 + 107,
         `${width}x${height}: top buttons leave 8px beside a modeled 214px central housing`);
       // Rounded button ink must remain within a 64px rounded display corner.
-      const inside = (x, y) => Math.hypot(64 - x - 14, 64 - y - 14) + 14 <= 64;
-      expect(inside(map.left, map.top) && inside(width - more.right, more.top) &&
-        inside(width - undo.right, height - undo.bottom),
+      const inside = (x, y, radius) =>
+        Math.hypot(Math.max(0, 64 - x - radius), Math.max(0, 64 - y - radius)) + radius <= 64;
+      expect(inside(map.left, map.top, map.radius) && inside(width - more.right, more.top, more.radius) &&
+        inside(width - undo.right, height - undo.bottom, undo.radius),
         `${width}x${height}: all corner buttons still clear the curved glass`);
       expect(undo.left - 8 >= width / 2 + 107,
         `${width}x${height}: low Undo stays beside a modeled 214px home-indicator area`);
@@ -312,16 +314,16 @@ try {
     const box = (id) => document.getElementById(id).getBoundingClientRect().toJSON();
     return { map: box('phone-map'), more: box('phone-more'), undo: box('phone-undo') };
   });
-  expect(corners.map.x === 16 && corners.map.y === 18 && corners.more.right === 836 &&
-    corners.undo.right === 836 && corners.undo.bottom === 351 &&
-    corners.undo.width === 56 && corners.undo.height === 56, '56px corner targets use 16px side margins without losing vertical safe areas');
+  expect(corners.map.x === 24 && corners.map.y === 24 && corners.more.right === 828 &&
+    corners.undo.right === 828 && corners.undo.bottom === 351 &&
+    corners.undo.width === 56 && corners.undo.height === 56, '56px corner targets use 24px side margins without losing vertical safe areas');
   await p.locator('#phone-more').tap();
   expect(await p.locator('#phone-menu').isVisible(), 'More opens the four-action menu');
   expect(await p.locator('#phone-menu').evaluate((el) => {
     const menu = el.getBoundingClientRect();
     const more = document.getElementById('phone-more').getBoundingClientRect();
     const undo = document.getElementById('phone-undo').getBoundingClientRect();
-    return menu.right === innerWidth - 20 && menu.top >= more.bottom + 8 && menu.bottom <= undo.top - 8;
+    return menu.right === innerWidth - 24 && menu.top >= more.bottom + 8 && menu.bottom <= undo.top - 8;
   }), 'overflow retains the full side inset and stays between the larger More and Undo buttons');
   await p.evaluate(() => { window.phoneKeys = []; });
   await p.touchscreen.tap(400, 200);
@@ -592,18 +594,10 @@ try {
     const map = document.getElementById('phone-map').getBoundingClientRect();
     const more = document.getElementById('phone-more').getBoundingClientRect();
     const undo = document.getElementById('phone-undo').getBoundingClientRect();
-    return map.left === 24 && map.top === 8 && more.right === innerWidth - 24 &&
-      undo.right === more.right && undo.bottom === innerHeight - 8;
-  }), 'portrait Map and More sit beside the island and Undo sits low beside the home indicator');
-  await p.evaluate(() => window.__ff.previewNativeMenu());
-  expect(await p.evaluate(() => {
-    const map = document.getElementById('phone-map').getBoundingClientRect();
-    const more = document.getElementById('phone-more').getBoundingClientRect();
-    const undo = document.getElementById('phone-undo').getBoundingClientRect();
     return map.left === 24 && map.top === 24 && more.top === 24 &&
       more.right === innerWidth - 24 && undo.right === more.right &&
       undo.bottom === innerHeight - 24 && map.width === 56 && undo.height === 56;
-  }), 'native portrait controls gain corner clearance without shrinking targets or moving toward the island');
+  }), 'phone browsers get the shared portrait clearance without preview hooks or smaller targets');
   await p.evaluate(() => window.__ff.talk('little'));
   await p.waitForFunction(() => document.getElementById('domsubs')?.children.length > 0);
   expect((await subtitle()).detached, 'AI portrait subtitles are also detached');
@@ -749,7 +743,7 @@ try {
     return map.left === 24 && map.top === 24 && more.right === innerWidth - 24 &&
       undo.right === more.right && undo.bottom === innerHeight - 24 &&
       map.width === 56 && undo.height === 56;
-  }), 'rotating back to native landscape keeps 24px corner margins and full-sized targets');
+  }), 'rotating back to shared landscape keeps 24px corner margins and full-sized targets');
   await p.evaluate(() => window.__ff.speakLine('help2'));
   expect(await p.locator('#phone-more.dialogue-hint-pulse').count() === 1 &&
     await p.locator('#phone-menu').isHidden(), 'Save tutorial highlights More without opening the menu');
