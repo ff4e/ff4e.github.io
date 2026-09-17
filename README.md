@@ -81,6 +81,14 @@ Classic retains its original baked-in room subtitles. **iPad and desktop keep th
 existing layouts and orientation behavior**, and iPad does not get pinch zoom. Desktop `?touch=on` still previews
 the tablet controls; use phone device emulation to preview the phone layout.
 
+**Native menu appearance:** The iOS phone/tablet controls use translucent slate
+surfaces and hand-drawn rustic symbols colored from the room's static wall art.
+The light Options panel retains original stone texture and blue lettering. This is an appearance-only skin:
+target sizes, safe-area spacing, control order and native inputs are unchanged.
+Browser touch controls and the faithful desktop panel retain their existing appearance.
+Room accents are precomputed from static wall art and stay fixed through animation
+and developer graphics-tier switches. No runtime asset request or pixel sampling is needed.
+
 **Done** means all 72 rooms playable end to end, the dialogue and voices in place, and every known
 deviation from the original either fixed or written down in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md).
 

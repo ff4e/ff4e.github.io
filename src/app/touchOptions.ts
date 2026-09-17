@@ -11,8 +11,9 @@
  *
  * So this is native `<input type=range>` and native radios: they come with the platform's
  * own touch handling, its accessibility and its drag behaviour, none of which is worth
- * reimplementing on a canvas. It is not styled to look like the game (Martin's decision,
- * 2026-08-26) — a half-imitation would read as a bug rather than as the settings screen.
+ * reimplementing on a canvas. The native shell uses light stone and blue lettering
+ * (styles/nativeMenu.css); browser players keep the plain touch skin.
+ * This is paint only: the HTML geometry, native inputs and dispatch stay the same.
  *
  * The canvas Options face is untouched and stays exactly as it was for mouse players.
  * The two are never both reachable: `togglePanelOptions` and `openMapOptions` — the only

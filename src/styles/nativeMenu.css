@@ -1,0 +1,119 @@
+/* Native paint only; geometry and input stay in index.html. Button surfaces are
+   a single translucent color, with fully opaque symbols and labels. */
+html[data-native-menu] {
+  --menu-glass: rgb(23 29 34 / 45%);
+  --menu-pressed: rgb(46 59 64 / 70%);
+  --menu-ink: #f0eee5;
+  --menu-edge: #d0d7ce6b;
+  --menu-bevel: inset 0 1px #fff3, inset 0 -1px #0005;
+  --menu-radius: 8px;
+  --menu-popup: rgb(25 32 36 / 86%);
+  --menu-backdrop: #c7cbc6;
+  --menu-text: #202d3e;
+  --menu-muted: #354b60;
+  --menu-accent: #796537;
+  --menu-title: #182947;
+  --menu-title-shadow: 0 1px #ffffe5;
+  --menu-option-border: #69746999;
+  --menu-option-fill: rgb(211 216 207 / 45%);
+}
+html[data-native-menu] .tbtn,
+html[data-native-menu] #phone-controls > .tbtn {
+  background: var(--menu-glass);
+  color: var(--menu-ink);
+  border-color: var(--menu-edge);
+  border-radius: var(--menu-radius);
+  box-shadow: var(--menu-bevel);
+  text-shadow: 0 1px 2px #000;
+}
+html[data-native-menu] .tbtn svg {
+  color: var(--menu-symbol, var(--menu-ink));
+  stroke: currentColor;
+  stroke-width: 2;
+  filter: drop-shadow(0 1px 1px #000c);
+}
+html[data-native-menu] #phone-more svg circle { fill: currentColor; }
+html[data-native-menu] .tbtn:active,
+html[data-native-menu] #phone-controls > .tbtn:active,
+html[data-native-menu] #phone-more[aria-expanded='true'] {
+  background: var(--menu-pressed);
+  border-color: var(--menu-ink);
+  box-shadow: inset 0 1px 3px #0007;
+}
+html[data-native-menu] .tbtn:focus-visible {
+  outline: 2px solid var(--menu-ink);
+  outline-offset: 2px;
+}
+html[data-native-menu] #touchbar { background: #0d191966; backdrop-filter: none; }
+html[data-native-menu] #phone-menu {
+  background: var(--menu-popup);
+  border-radius: var(--menu-radius);
+  box-shadow: inset 0 0 0 1px var(--menu-edge);
+}
+html[data-native-menu] #touchopts {
+  color: var(--menu-text);
+  background: linear-gradient(#d3d7d1e8, #bcc5bfe8), url('/native-menu/stone.png') #c7cbc6;
+}
+html[data-native-menu] .topts-card h1 {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-style: italic;
+  color: var(--menu-title);
+  text-shadow: var(--menu-title-shadow);
+}
+html[data-native-menu] .topts-row output { color: var(--menu-muted); }
+html[data-native-menu] .topts-row input[type='range'],
+html[data-native-menu] .topts-subs input {
+  accent-color: var(--menu-accent);
+  color-scheme: light;
+}
+html[data-native-menu] .topts-subs {
+  background: var(--menu-option-fill);
+  border-color: var(--menu-option-border);
+  border-radius: var(--menu-radius);
+}
+html[data-native-menu] .topts-buttons :is(button, a),
+html[data-native-menu] #topt-close {
+  background: var(--menu-option-fill);
+  color: var(--menu-text);
+  border-color: var(--menu-option-border);
+  border-radius: var(--menu-radius);
+  box-shadow: var(--menu-bevel);
+}
+html[data-native-menu] #topt-close { border-color: var(--menu-accent); }
+html[data-native-menu] .topts-buttons :is(button, a):active,
+html[data-native-menu] #topt-close:active { box-shadow: inset 0 1px 3px #0007; }
+html[data-native-menu] #touchopts :is(input, button, a):focus-visible {
+  outline: 2px solid var(--menu-accent);
+  outline-offset: 2px;
+}
+html[data-native-menu] .tbtn.dialogue-hint-pulse,
+html[data-native-menu] #phone-controls > .tbtn.dialogue-hint-pulse {
+  animation-name: native-menu-hint;
+}
+@keyframes native-menu-hint {
+  0%, 100% { box-shadow: var(--menu-bevel); }
+  50% { box-shadow: var(--menu-bevel), 0 0 0 3px var(--menu-symbol, var(--menu-ink)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-native-menu] .tbtn.dialogue-hint-pulse,
+  html[data-native-menu] #phone-controls > .tbtn.dialogue-hint-pulse {
+    animation: none;
+    box-shadow: var(--menu-bevel), 0 0 0 3px var(--menu-symbol, var(--menu-ink));
+  }
+}
+@media (forced-colors: active) {
+  html[data-native-menu] {
+    --menu-symbol: ButtonText !important;
+    --menu-highlight: ButtonText !important;
+    --menu-shade: ButtonFace !important;
+    --menu-detail: ButtonText !important;
+    --menu-outline: ButtonText !important;
+    --menu-glass: ButtonFace !important;
+    --menu-ink: ButtonText !important;
+    --menu-edge: ButtonText !important;
+  }
+  html[data-native-menu] .tbtn svg { filter: none; }
+  html[data-native-menu] #touchopts { background: Canvas; color: CanvasText; }
+  html[data-native-menu] .tbtn:focus-visible,
+  html[data-native-menu] #touchopts :is(input, button, a):focus-visible { outline-color: Highlight; }
+}

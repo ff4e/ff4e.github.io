@@ -43,6 +43,7 @@ import { AudioEngine } from '../audio/audio.js';
 import type { ChatterState } from '../core/chatter.js';
 import { Dir } from '../core/dir.js';
 import { MLUVI_PRIOR } from './keyTables.js';
+import { initNativeMenu } from './nativeMenu.js';
 import { HookSystem } from '../core/hooks.js';
 import { lengthOfRecord } from '../core/record.js';
 import type { RecordStep } from '../core/record.js';
@@ -348,6 +349,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     heads: () => ({ little: host.fishFrameFor('little').headFrame, big: host.fishFrameFor('big').headFrame }),
     music: () => host.audio.currentMusic,
     graphics: () => host.graphics,
+    previewNativeMenu: () => initNativeMenu(),
     setGraphics: (m: GraphicsLevel) => host.setGraphics(m),
     // The movie URL that would be played for the active graphics level right now
     // (reflects the `ai` upscale once its HEAD probe has resolved). Debug/test only.

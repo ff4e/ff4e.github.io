@@ -60,6 +60,8 @@ import { initPhoneControls, syncPhoneControls } from './phoneControls.js';
 import { ui } from './screenState.js';
 import { roomLoading } from './framePacing.js';
 import { safeAreaInset } from './safeArea.js';
+import { isNativeHost } from '../platform/nativeHost.js';
+import { initNativeMenu, syncNativeMenu } from './nativeMenu.js';
 
 export { TOUCH_REGIONS };
 
@@ -156,6 +158,7 @@ export function initTouchButtons(h: TouchButtonsHost): void {
   host = h;
   refreshTouchMode();
   initPhoneControls(h);
+  if (isNativeHost()) initNativeMenu();
   for (const el of document.querySelectorAll<HTMLElement>('#touchbar [data-region]')) {
     const region = Number(el.dataset.region);
     if (!Number.isFinite(region)) continue;
@@ -203,6 +206,7 @@ export function phoneUi(): boolean {
  */
 export function syncTouchButtons(): void {
   syncPhoneControls();
+  syncNativeMenu();
   const want = active && !phone && ui.screen === 'room';
   let changed = false;
   if (want !== up) {

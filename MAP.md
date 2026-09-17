@@ -113,6 +113,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
 | `touchButtons.ts` | 1.3 k | The in-room touch bar: six buttons, every one dispatched through the panel's own `panelAction` table. |
+| `nativeMenu.ts` | | Native-only rustic symbols and fixed room accents, precomputed from static wall art. |
 | `touchBarEdge.ts` | 7.2 k | Which edge the touch bar takes in landscape: the room laid out both ways, keeping whichever shows more of it. |
 | `deviceOrientation.ts` | 1.4 k | Native tablet orientation policy: compare landscape and portrait with the existing bar budget. Phones and browsers keep player-controlled rotation. |
 | `orientationSync.ts` | 0.8 k | Native phones rotate freely; tablets retain per-screen orientation locks. A no-op in every browser. |
