@@ -38,6 +38,11 @@ the original `panel.ffp`, regenerated with `npx tsx tools/build-native-menu-art.
 checks all 72 fixed accents against static AI wall artwork; `--write` regenerates
 `src/data/nativeMenuHues.ts` for visual review after an artwork change.
 
+`test-tier-recovery.mjs` checks failed-asset cache eviction with an explicit
+same-page tier request. Re-entering from a held map launch can join the existing
+launch without reaching the loader, so it is not a cache oracle. Reload recovery
+is checked separately, and the fatal screen must remain visible until reload.
+
 `typecheck`, the unit suite and `vite build` also run in CI on every push
 (`.github/workflows/checks.yml`). The browser probes do not — not for lack of data
 (`public/data/` is committed) but because the suite takes ~6 minutes and the `test-gl-*`
