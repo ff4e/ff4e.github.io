@@ -4,6 +4,7 @@ import { ui } from './screenState.js';
 import { room } from './gameState.js';
 import { touchOptionsOpen } from './touchOptions.js';
 import { wake } from './frameClock.js';
+import { initActiveFishIndicator, syncActiveFishIndicator } from './activeFishIndicator.js';
 
 let controls: HTMLElement;
 let more: HTMLButtonElement;
@@ -74,7 +75,9 @@ export function initPhoneControls(host: TouchButtonsHost): void {
 
 export function syncPhoneControls(): void {
   const want = phoneUi() && ui.screen === 'room' && !ui.helpOpen && !touchOptionsOpen();
+  if (want) initActiveFishIndicator();
   if (expanded && (!want || owner !== room)) setExpanded(false);
   owner = room;
   if (controls.hidden === want) controls.hidden = !want;
+  syncActiveFishIndicator(want && !expanded);
 }

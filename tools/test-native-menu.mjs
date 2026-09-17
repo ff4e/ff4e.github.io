@@ -1,7 +1,7 @@
 /**
- * Native skin: paired geometry (with explicit phone insets), browser isolation,
- * native-input operation, focus and reduced motion. No simulator claim: the
- * native-menu controller is enabled explicitly, without mocking a Capacitor bridge.
+ * Shared touch skin: browser-default activation, paired geometry with phone insets on the
+ * SAME live controls, native-input operation, focus and reduced motion.
+ * The diagnostic hook toggles paint for comparisons, never for initial activation.
  * FF_NATIVE_EVIDENCE saves comparison screenshots.
  */
 import assert from 'node:assert/strict';
@@ -16,16 +16,10 @@ if (evidence) mkdirSync(evidence, { recursive: true });
 const results = [];
 const errors = [];
 const native = (p, on) => p.evaluate((on) => {
-  const svgs = [...document.querySelectorAll('.tbtn svg')];
-  window.nativeMenuOriginalSvgs ??= svgs.map(svg => svg.innerHTML);
   if (on) {
     window.__ff.previewNativeMenu();
   } else {
     document.documentElement.removeAttribute('data-native-menu');
-    svgs.forEach((svg, i) => {
-      svg.innerHTML = window.nativeMenuOriginalSvgs[i];
-      delete svg.dataset.menuIcon;
-    });
   }
 }, on);
 const geometry = (p) => p.evaluate(() => [...document.querySelectorAll(
@@ -35,7 +29,7 @@ const geometry = (p) => p.evaluate(() => [...document.querySelectorAll(
   const s = getComputedStyle(el);
   return {
     element: el.id || el.getAttribute('data-region') || el.tagName,
-    control: el.closest('#phone-map, #phone-more, #phone-undo, #phone-menu')?.id ?? null,
+    control: el.closest('#phone-map, #phone-more, #phone-undo, #phone-menu, #active-fish-indicator')?.id ?? null,
     x: r.x, y: r.y, w: r.width, h: r.height,
     scrollWidth: el.scrollWidth, scrollHeight: el.scrollHeight,
     fontSize: s.fontSize, lineHeight: s.lineHeight, gap: s.gap, padding: s.padding, margin: s.margin,
@@ -79,6 +73,7 @@ async function pair(p, name, c) {
     'phone-map': { x: leftShift, y: newTop - oldTop },
     'phone-more': { x: rightShift, y: newTop - oldTop },
     'phone-undo': { x: rightShift, y: oldBottom - newBottom },
+    'active-fish-indicator': { x: leftShift, y: oldBottom - newBottom },
     'phone-menu': { x: menuShift, y: newMenuTop - Math.max(c.insets[0] + 8, oldTop + 64) },
   };
   const expected = before.map(item => {
@@ -96,30 +91,32 @@ async function pair(p, name, c) {
 async function phoneClearance(p, c) {
   const portrait = c.height > c.width;
   if (!c.phone || (portrait && c.width < 390)) return;
-  const [map, more, undo] = await p.evaluate(() =>
-    ['phone-map', 'phone-more', 'phone-undo'].map(id => {
+  const [map, more, undo, badge] = await p.evaluate(() =>
+    ['phone-map', 'phone-more', 'phone-undo', 'active-fish-indicator'].map(id => {
       const el = document.getElementById(id);
       return { ...el.getBoundingClientRect().toJSON(),
         radius: parseFloat(getComputedStyle(el).borderTopLeftRadius) };
     }));
-  // Use the painted native radius, not the browser skin's rounder 14px corners.
+  // Use the painted rustic radius, not the unskinned controls' rounder 14px corners.
   const clearance = (x, y, radius) =>
     64 - Math.hypot(Math.max(0, 64 - x - radius), Math.max(0, 64 - y - radius)) - radius;
   const gaps = [clearance(map.left, map.top, map.radius),
     clearance(c.width - more.right, more.top, more.radius),
-    clearance(c.width - undo.right, c.height - undo.bottom, undo.radius)];
+    clearance(c.width - undo.right, c.height - undo.bottom, undo.radius),
+    clearance(badge.left, c.height - badge.bottom, badge.radius)];
   assert(gaps.every(gap => gap >= 8), `${c.name}: rustic corners need 8px of curved-glass clearance: ${gaps}`);
   if (portrait) {
     assert(map.top < Math.max(c.insets[0], 47), `${c.name}: top row must stay beside, not below, the housing`);
     assert(map.right + 8 <= c.width / 2 - 107 && more.left - 8 >= c.width / 2 + 107,
       `${c.name}: preserve 8px beside the modeled 214px housing`);
     assert(undo.left - 8 >= c.width / 2 + 107, `${c.name}: keep Undo beside the home indicator`);
+    assert(badge.right + 8 <= c.width / 2 - 107, `${c.name}: keep the fish beside the home indicator`);
   } else {
     assert(undo.bottom <= c.height - c.insets[2] - 8, `${c.name}: preserve the bottom safe area`);
     for (const side of [1, 3].filter(side => c.insets[side] > 0)) {
       const left = side === 3 ? 0 : c.width - c.insets[1];
       const right = side === 3 ? c.insets[3] : c.width;
-      assert([map, more, undo].every(b => b.right + 8 <= left || b.left - 8 >= right ||
+      assert([map, more, undo, badge].every(b => b.right + 8 <= left || b.left - 8 >= right ||
         b.bottom + 8 <= c.height / 2 - 100 || b.top - 8 >= c.height / 2 + 100),
       `${c.name}: preserve 8px around the modeled 200px landscape housing`);
     }
@@ -163,10 +160,13 @@ try {
     await p.goto(base, { waitUntil: 'domcontentloaded' });
     await appReady(p);
     assert.equal(await p.evaluate(() => document.documentElement.hasAttribute('data-native-menu')),
-      false, 'a browser must not activate the native skin');
+      true, 'phone/tablet browsers activate the shared skin without a preview hook');
+    assert.equal(await p.evaluate(() => [...document.querySelectorAll('.tbtn svg')]
+      .every(svg => !!svg.dataset.menuIcon)), true, 'new icons are installed by normal browser boot');
     await p.evaluate(() => window.__ff.enterRoomAwait(7));
     await p.waitForFunction(() => !window.__ff.roomLoading() && document.getElementById('loading').hidden);
     await p.waitForFunction((phone) => !document.getElementById(phone ? 'phone-controls' : 'touchbar').hidden, phone);
+    if (phone) await p.locator('#active-fish-indicator').waitFor({ state: 'visible' });
     // Pure paint must remain scoped even after CSS bundling. Keyframes are not selectors.
     assert.equal(await p.evaluate(() => {
       const walk = (rules) => [...rules].every((rule) => {
@@ -176,7 +176,7 @@ try {
         return rule instanceof CSSMediaRule ? walk(rule.cssRules) : true;
       });
       return [...document.styleSheets].every((sheet) => walk(sheet.cssRules));
-    }), true, 'stone rules must stay native-only');
+    }), true, 'stone rules stay scoped to the enabled touch/native skin');
     for (const c of cases.filter((c) => c.phone === phone)) {
       await p.setViewportSize({ width: c.width, height: c.height });
       await p.evaluate((insets) => {
@@ -216,10 +216,10 @@ try {
       assert(!originalPixels.equals(nativePixels), 'the skin must visibly change Options');
       await native(p, false);
       assert(originalPixels.equals(await p.locator('#touchopts').screenshot()),
-        'removing the native skin must restore browser pixels exactly');
+        'temporarily disabling the skin must restore the unskinned pixels exactly');
       await native(p, true);
       assert.equal(await p.locator('#topt-close').evaluate((el) => getComputedStyle(el).borderColor),
-        'rgb(121, 101, 55)', 'Done uses the selected C accent, not the browser teal border');
+        'rgb(121, 101, 55)', 'Done uses the shared C accent rather than the unskinned teal border');
       await p.locator('#topt-effect').scrollIntoViewIfNeeded();
       const range = await p.locator('#topt-effect').boundingBox();
       assert(range, 'volume range must be visible');

@@ -1,4 +1,4 @@
-/* Native paint only; geometry and input stay in index.html. Button surfaces are
+/* Shared touch/native paint; geometry and input stay in index.html. Button surfaces are
    a single translucent color, with fully opaque symbols and labels. */
 html[data-native-menu] {
   --menu-glass: rgb(23 29 34 / 45%);

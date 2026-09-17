@@ -61,7 +61,7 @@ import { ui } from './screenState.js';
 import { roomLoading } from './framePacing.js';
 import { safeAreaInset } from './safeArea.js';
 import { isNativeHost } from '../platform/nativeHost.js';
-import { initNativeMenu, syncNativeMenu } from './nativeMenu.js';
+import { setNativeMenuEnabled, syncNativeMenu } from './nativeMenu.js';
 
 export { TOUCH_REGIONS };
 
@@ -158,7 +158,8 @@ export function initTouchButtons(h: TouchButtonsHost): void {
   host = h;
   refreshTouchMode();
   initPhoneControls(h);
-  if (isNativeHost()) initNativeMenu();
+  window.matchMedia('(any-pointer: coarse)').addEventListener('change', refreshTouchMode);
+  window.addEventListener('resize', refreshTouchMode);
   for (const el of document.querySelectorAll<HTMLElement>('#touchbar [data-region]')) {
     const region = Number(el.dataset.region);
     if (!Number.isFinite(region)) continue;
@@ -182,12 +183,13 @@ export function initTouchButtons(h: TouchButtonsHost): void {
   }, true);
 }
 
-/** Re-read whether touch mode is on. Called at boot and by the dev-bar override. */
+/** Re-read touch mode at boot, on device-emulation changes and for the dev override. */
 export function refreshTouchMode(): void {
   active = typeof window !== 'undefined' && touchModeActive(window);
   phone = active && phoneModeActive(window);
   document.documentElement.toggleAttribute('data-touch', active);
   document.documentElement.toggleAttribute('data-phone', phone);
+  setNativeMenuEnabled(active || isNativeHost());
 }
 
 /** Is the touch UI on? Read by the rest of the touch series and by the dev bar. */

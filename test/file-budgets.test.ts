@@ -149,7 +149,8 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // without waiting through the whole tutorial. lastLine's existing shape is unchanged.
   // Two lines wire the native-menu preview hook to its separate controller, allowing
   // production-bundle UI probes without pretending a browser is a Capacitor host.
-  ['src/app/debugHooks.ts', 1662],
+  // Two more lines give the active-fish controller the same explicit preview seam.
+  ['src/app/debugHooks.ts', 1664],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
