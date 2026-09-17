@@ -43,11 +43,16 @@ const barState = (p) =>
   p.evaluate(() => {
     const bar = document.getElementById('touchbar');
     const stage = document.querySelector('.stage');
+    const buttons = bar ? [...bar.querySelectorAll('[data-region]')] : [];
+    const visual = buttons.map((el) => ({ region: el.dataset.region, rect: el.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.width > 0 && rect.height > 0)
+      .sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left);
     return {
       mode: document.documentElement.hasAttribute('data-touch'),
       reserving: document.documentElement.hasAttribute('data-touchbar'),
       visible: bar !== null && !bar.hidden,
-      buttons: bar ? [...bar.querySelectorAll('[data-region]')].map((b) => b.dataset.region) : [],
+      buttons: buttons.map((b) => b.dataset.region),
+      visualButtons: visual.map(({ region }) => region).join(','),
       marginLeft: stage ? getComputedStyle(stage).marginLeft : '',
       marginTop: stage ? getComputedStyle(stage).marginTop : '',
       stageW: stage ? stage.clientWidth : 0,
@@ -312,9 +317,11 @@ try {
   const inRoom = await barState(p);
   expect(inRoom.visible, 'in a room: the bar is up');
   expect(
-    inRoom.buttons.join(',') === '14,12,13,24,16,15',
-    `the six buttons send map/save/load/undo/options/restart (${inRoom.buttons.join(',')})`,
+    inRoom.buttons.join(',') === '14,12,13,15,16,24',
+    `the six buttons send map/save/load/restart/options/undo (${inRoom.buttons.join(',')})`,
   );
+  expect(inRoom.visualButtons === '14,12,13,15,16,24',
+    'landscape left bar: Restart is fourth and Undo is last');
   // It reserves space rather than floating over the room: the stage is measured with
   // clientWidth, so a margin is the only thing that both moves the bar out of the way
   // and tells the layout about it.
@@ -501,6 +508,8 @@ try {
   // check above: the bar is on the TOP edge here, so the height it costs is a
   // `margin-top`, and the landscape `margin-left` must be gone with its media query.
   const portraitBar = await barState(p);
+  expect(portraitBar.visualButtons === '14,12,13,15,16,24',
+    'portrait top bar: Restart is fourth and Undo is last');
   expect(
     portraitBar.marginTop === '54px' && portraitBar.marginLeft === '0px',
     `portrait: the bar reserves its height from the top (margin-top ${portraitBar.marginTop}, margin-left ${portraitBar.marginLeft})`,
@@ -949,6 +958,8 @@ try {
   await enter(player, 7); // UTES, the widest room in the game
   await settleEdge(player, 'top');
   const wideBar = await barState(player);
+  expect(wideBar.visualButtons === '14,12,13,15,16,24',
+    'landscape top bar: Restart is fourth and Undo is last');
   expect(
     wideBar.marginTop === '54px' && wideBar.marginLeft === '0px',
     `landscape, very wide room: the SAME viewport puts the bar on top (margin-top ${wideBar.marginTop}, margin-left ${wideBar.marginLeft})`,

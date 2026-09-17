@@ -23,6 +23,10 @@ change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a ga
 CONTRIBUTING.md for how much checking a given change actually needs, and for the
 `KNOWN_FLAKY` retry rule.
 
+`touchButtons.test.ts` pins the tablet order: Map, Save, Load, Restart, Options, Undo.
+`test-touchbar.mjs` checks rendered order in portrait and both landscape bar positions,
+as well as Undo/Restart effects; phone markup and corner controls remain separately covered.
+
 `test-native-menu.mjs` checks default skin/icon activation in phone/tablet browsers,
 then pairs the shared skin on/off on the same DOM: 15 viewport/safe-area
 configurations, exact control geometry and unskinned-pixel

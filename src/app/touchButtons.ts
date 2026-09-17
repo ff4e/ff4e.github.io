@@ -6,7 +6,7 @@
  * neither the space reservation nor the edge selector runs on that path.
  *
  * ── What they are, and what they deliberately are not ────────────────────────
- * Map, Save, Load, Undo, Options, Restart — the panel's whole-room verbs, and nothing
+ * Map, Save, Load, Restart, Options, Undo — the panel's whole-room verbs, and nothing
  * else. The panel's direction buttons (regions 1-4 and 6-9) have no counterpart here on
  * purpose: touch drives the fish by swipe, which is a separate layer.
  *
