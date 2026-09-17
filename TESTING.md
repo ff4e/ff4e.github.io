@@ -331,3 +331,20 @@ change that could touch them:
   Narrower portraits retain the below-cutout fallback. Browser coverage
   models a 200px landscape / 214px portrait central housing envelope, not the
   device's actual cutout, so this check still needs hardware.
+- **portrait captions** in KUFRIK: the Czech movement tutorial should flow across the
+  safe screen width above Undo in balanced lines, rather than five short fragments
+  in a narrow column or a single-word tail.
+  Rotate with the caption visible: landscape stays beside Undo; the font stays 20px
+  in enhanced/AI, words remain complete, and the original bitmap row breaks do not
+  force additional phone lines. Classic and tablet/desktop captions are unchanged.
+  Portrait captions use 16px side margins (or larger safe-area insets); a 402px
+  viewport provides 370px for text. The gentle wave follows reading order across
+  source-row breaks, without changing direction or clipping at the bottom. Rotate
+  mid-wave: phone glyphs reflow without replaying their entrance. New messages and
+  partial expiry must not restart the surviving glyphs. Check a long Czech line,
+  an overlong word, and a cutscene in both enhanced and AI.
+  Let a multiline caption expire from the top: the remaining words must stay at
+  exactly the same positions, with no rebalancing, sliding or new wave. Each
+  displayed line must disappear as a whole, never leave half a sentence behind.
+  Change fonts during partial expiry: complete surviving lines must still be
+  present. A newly arriving message may scroll the existing stack upwards.

@@ -42,8 +42,11 @@ import { wrap } from './dom.js';
 import { phoneUi } from './touchButtons.js';
 import { safeAreaInset } from './safeArea.js';
 import {
-  PHONE_SUBTITLE_FONT_PX, animatePhoneSubtitleRows, phoneSubtitlePositions, phoneSubtitleWordFlow,
+  PHONE_SUBTITLE_FONT_PX, animatePhoneSubtitleRows, phoneSubtitleMessage,
+  phoneSubtitlePositions, phoneSubtitleWordFlow,
 } from './phoneSubtitleLayout.js';
+import { PHONE_SUBTITLE_WAVE_PX, syncPhoneSubtitleWaves, type PhoneSubtitleWave } from './phoneSubtitleWave.js';
+import { retainPhoneSubtitleRows, syncPhoneSubtitleExpiry, type PhoneSubtitleLine } from './phoneSubtitleExpiry.js';
 import { aiSubScale } from './introOverlay.js';
 import { graphics } from './renderSettings.js';
 import type { SubtitleSystem } from '../render/subtitles.js';
@@ -52,10 +55,10 @@ import type { SubtitleSystem } from '../render/subtitles.js';
 const TICKS_PER_SEC = 12.5;
 /** Keyframes sampled along the damped cosine. Enough that the curve reads as smooth. */
 const WAVE_KEYFRAMES = 24;
+const WAVE_STEP_MS = 1000 / (VECTOR_GEOM.wavePerTick * TICKS_PER_SEC);
 
-interface DomLine {
+interface DomLine extends PhoneSubtitleLine {
   el: HTMLDivElement;
-  spans: HTMLSpanElement[];
   /** Last vertical position written, to skip no-op style writes. */
   y: number;
   /**
@@ -92,6 +95,7 @@ interface Layer {
    * engine had two rows and the player saw one.
    */
   lines: Map<number, DomLine>;
+  phoneWaves: Map<number, PhoneSubtitleWave>;
   /** Font the measurements below were taken at; a change rebuilds the glyph boxes. */
   lastFont: string;
   /**
@@ -112,7 +116,7 @@ interface Layer {
   boxHeight: number;
 }
 
-const newLayer = (): Layer => ({ host: null, lines: new Map(), lastFont: '', lastFitW: 0, lastXform: '', baselineInset: 0, boxHeight: 0 });
+const newLayer = (): Layer => ({ host: null, lines: new Map(), phoneWaves: new Map(), lastFont: '', lastFitW: 0, lastXform: '', baselineInset: 0, boxHeight: 0 });
 const layers: Record<SubOwner, Layer> = { room: newLayer(), cut: newLayer() };
 /** The element id each layer's host carries, so a probe can find it. */
 const HOST_ID: Record<SubOwner, string> = { room: 'domsubs', cut: 'domsubs-cut' };
@@ -135,6 +139,7 @@ export function clearDomSubtitles(owner?: SubOwner): void {
   if (!L.host && L.lines.size === 0) return;
   for (const l of L.lines.values()) l.el.remove();
   L.lines.clear();
+  L.phoneWaves.clear();
   if (L.host) {
     L.host.remove();
     L.host = null;
@@ -223,13 +228,17 @@ export function syncDomSubtitles(
   const { w: screenW, h: screenH } = sys.vectorScreen;
   const detached = phoneUi();
   const parent = detached ? document.body : wrap;
-  // Leave a symmetric gutter for the corner Undo target; the baseline remains at
-  // the screen bottom, above the home indicator, regardless of room size or zoom.
+  // Portrait has room above Undo, not beside it: reserve its row instead of narrowing
+  // every caption by two button widths. Landscape keeps the low, side-gutter layout.
   // 64px clears the phone's 56px button plus the 8px gap (pinned by test-iphone-layout).
-  const gutter = detached ? 64 + Math.max(24, safeAreaInset('--sa-left') + 8, safeAreaInset('--sa-right') + 8) : 0;
+  const portrait = detached && window.innerHeight > window.innerWidth;
+  const gutter = detached ? (portrait ? 0 : 64) +
+    Math.max(portrait ? 16 : 24, safeAreaInset('--sa-left') + 8, safeAreaInset('--sa-right') + 8) : 0;
+  const bottom = detached ? (portrait ? Math.max(24, safeAreaInset('--sa-bottom') + 8) + 64 :
+    safeAreaInset('--sa-bottom') + 8) : 0;
   if (detached) {
     cssW = Math.max(1, window.innerWidth - 2 * gutter);
-    cssH = Math.max(1, window.innerHeight - safeAreaInset('--sa-top') - safeAreaInset('--sa-bottom') - 8);
+    cssH = Math.max(1, window.innerHeight - safeAreaInset('--sa-top') - bottom);
     boxScale = 1;
   }
   let host = L.host;
@@ -250,7 +259,7 @@ export function syncDomSubtitles(
   host.style.position = detached ? 'fixed' : 'absolute';
   host.style.left = detached ? `${gutter}px` : '0';
   host.style.top = detached ? 'auto' : '0';
-  host.style.bottom = detached ? 'calc(var(--sa-bottom) + 8px)' : '';
+  host.style.bottom = detached ? `${bottom}px` : '';
   host.style.borderWidth = detached ? '0' : '1px';
   host.style.width = `${cssW}px`;
   host.style.height = `${cssH}px`;
@@ -259,7 +268,7 @@ export function syncDomSubtitles(
     host.style.flexDirection = detached ? 'column' : '';
     host.style.justifyContent = detached ? 'flex-end' : '';
     host.style.rowGap = detached ? '4px' : '';
-    host.style.paddingBottom = detached ? '4px' : '';
+    host.style.paddingBottom = detached ? `${PHONE_SUBTITLE_WAVE_PX + 2}px` : '';
     host.style.boxSizing = detached ? 'border-box' : '';
   }
   // The `ai` tier draws its subtitles smaller, shrunk about the bottom edge of the game
@@ -290,20 +299,27 @@ export function syncDomSubtitles(
   // The width a row is fitted inside. Not the same thing as the font any more, so it is
   // watched on its own — see `Layer.lastFitW`.
   const fitW = fitScreenW(detached ? cssW : screenW, boxScale, textScale);
-  if (font !== L.lastFont || fitW !== L.lastFitW || modeChanged) {
+  const activeRows = sys.debugLines();
+  const lines = detached ? retainPhoneSubtitleRows(activeRows, L.lines.values()) : activeRows;
+  const want = new Set(activeRows.map(row => row.id));
+  let expiryChanged = font !== L.lastFont || fitW !== L.lastFitW || modeChanged;
+  if (font !== L.lastFont || (!detached && fitW !== L.lastFitW) || modeChanged) {
     // The baseline pair depends only on the font, so a budget change does not pay for a
     // second forced layout.
     if (font !== L.lastFont) ({ inset: L.baselineInset, height: L.boxHeight } = measureBaseline(font));
     L.lastFont = font;
-    L.lastFitW = fitW;
-    // Glyph boxes are laid out for the old size; rebuild them.
-    for (const l of L.lines.values()) l.el.remove();
+    // Rebuild for new typography or attached fit. Phone width changes only reflow
+    // the existing glyphs, preserving compositor time across rotation.
+    host.replaceChildren();
     L.lines.clear();
   }
+  L.lastFitW = fitW;
 
-  const lines = sys.debugLines();
-  const flowChanged = detached && (lines.length !== L.lines.size || lines.some((t) => !L.lines.has(t.id)));
-  const previousRows = flowChanged ? phoneSubtitlePositions([...L.lines.values()].map((l) => l.el)) : null;
+  // Track offsets even when attached, so switching presentation after a partial
+  // expiry cannot mistake the remaining source row for the start of the message.
+  syncPhoneSubtitleWaves(L.phoneWaves, activeRows, WAVE_STEP_MS);
+  const addingRows = detached && activeRows.some((t) => !L.lines.has(t.id));
+  const previousRows = addingRows ? phoneSubtitlePositions(host.children) : null;
   // ONE fit per message, not one per row.
   //
   // Fitting means shrinking the font rather than wrapping or overflowing: a row that
@@ -353,9 +369,7 @@ export function syncDomSubtitles(
     if (cur === undefined || f < cur) blockFit.set(block, f);
   }
 
-  const want = new Set<number>();
   for (const t of lines) {
-    want.add(t.id);
     let line = L.lines.get(t.id);
     const fit = line ? line.fit : blockFit.get(t.block)!;
     // A scalable font's baseline inset and line-box height scale with its size, so the
@@ -408,9 +422,13 @@ export function syncDomSubtitles(
       const ageMs = ((count - t.startcount) / TICKS_PER_SEC) * 1000;
       // The wave is a distance the glyph travels, so it rides the TEXT's scale — the
       // amplitude has to grow and shrink with the glyphs it moves, not with the room.
-      const ampCss = lineAnchor(t.ys, screenH).amp * textScale;
+      // Bitmap rows can begin below the room (negative amplitude). Those coordinates
+      // have no meaning in phone word flow and would reverse the wave mid-sentence.
+      const ampCss = detached ? PHONE_SUBTITLE_WAVE_PX : lineAnchor(t.ys, screenH).amp * textScale;
       const frames = waveFrames(ampCss);
-      const stepMs = 1000 / (VECTOR_GEOM.wavePerTick * TICKS_PER_SEC);
+      const phoneWave = detached ? L.phoneWaves.get(t.block)! : null;
+      const offset = phoneWave ? phoneWave.offsets.get(t.id)! : 0;
+      const stepMs = phoneWave?.stepMs ?? WAVE_STEP_MS;
       const durMs = (VECTOR_GEOM.waveLen / VECTOR_GEOM.wavePerTick / TICKS_PER_SEC) * 1000;
       [...t.obsah].forEach((ch, i) => {
         // Two layers per glyph so the outline sits behind the fill in every engine.
@@ -419,6 +437,7 @@ export function syncDomSubtitles(
         sp.className = 'subtitle-glyph';
         sp.style.cssText =
           `position:relative;display:inline-block;opacity:0;will-change:transform;` +
+          (detached ? 'line-height:normal;' : '') +
           // Per-character advances, as PisStringF lays them out one glyph at a time:
           // kerning and ligatures would shift the letters against that.
           `font-kerning:none;font-variant-ligatures:none;-webkit-font-smoothing:antialiased`;
@@ -441,10 +460,11 @@ export function syncDomSubtitles(
         // steps -- PisStringF counts characters from 1. This used to start at `i`, one
         // step (16ms) early per glyph, which is exactly the kind of drift that having
         // two copies of the rule produces and sharing one removes.
-        sp.animate(frames, { duration: durMs, delay: (i + 1) * stepMs - ageMs, fill: 'forwards', easing: 'linear' });
+        sp.animate(frames, { duration: durMs, delay: (offset + i + 1) * stepMs - ageMs, fill: 'forwards', easing: 'linear' });
       });
-      host.appendChild(el);
-      line = { el, spans, y, fit };
+      const lineParent = detached ? phoneSubtitleMessage(host, t.block, lineFont) : host;
+      lineParent.appendChild(el);
+      line = { el, spans, source: t, expired: false, y, fit };
       L.lines.set(t.id, line);
     }
     // The scroll: the only thing written per tick, and a transform, so the compositor
@@ -456,8 +476,16 @@ export function syncDomSubtitles(
   }
   for (const [id, l] of L.lines) {
     if (want.has(id)) continue;
+    if (detached && L.phoneWaves.has(l.source.block)) {
+      if (!l.expired) expiryChanged = true;
+      l.expired = true;
+      continue;
+    }
+    const parent = l.el.parentElement;
     l.el.remove();
+    if (detached && parent?.childElementCount === 0) parent.remove();
     L.lines.delete(id);
   }
+  if (detached && expiryChanged) syncPhoneSubtitleExpiry(L.lines.values());
   if (previousRows) animatePhoneSubtitleRows(previousRows);
 }

@@ -1,13 +1,28 @@
 /** Phone captions keep a screen-sized font; words wrap instead of shrinking the glyphs. */
 export const PHONE_SUBTITLE_FONT_PX = 20;
 
+/** Source rows retain their lifetimes, but share one wrapping context and message wave. */
+export function phoneSubtitleMessage(host: HTMLDivElement, block: number, font: string): HTMLDivElement {
+  const existing = host.querySelector<HTMLDivElement>(`[data-subtitle-block="${block}"]`);
+  if (existing) return existing;
+  const message = document.createElement('div');
+  message.dataset.subtitleBlock = String(block);
+  message.style.cssText =
+    `flex:0 0 auto;padding:0 2px;box-sizing:border-box;text-align:center;white-space:normal;text-wrap:balance;font:${font}`;
+  host.appendChild(message);
+  return message;
+}
+
 export function phoneSubtitleWordFlow(row: HTMLDivElement): (glyph: HTMLSpanElement, ch: string) => void {
   row.style.position = 'relative';
-  row.style.flex = '0 0 auto';
+  row.style.display = 'inline';
   row.style.whiteSpace = 'normal';
+  row.style.lineHeight = '1.5';
   row.style.transition = 'none';
-  row.style.padding = '0 2px';
-  row.style.boxSizing = 'border-box';
+  row.style.transform = '';
+  row.style.willChange = '';
+  // Restore the space consumed by the engine's bitmap wrap; leading whitespace collapses.
+  row.append(' ');
   let word: HTMLSpanElement | null = null;
   return (glyph, ch) => {
     if (ch === ' ') {
@@ -26,12 +41,12 @@ export function phoneSubtitleWordFlow(row: HTMLDivElement): (glyph: HTMLSpanElem
   };
 }
 
-export function phoneSubtitlePositions(rows: Iterable<HTMLElement>): Map<HTMLElement, number> {
+export function phoneSubtitlePositions(rows: Iterable<Element>): Map<Element, number> {
   return new Map([...rows].map((row) => [row, row.getBoundingClientRect().top]));
 }
 
-/** Keep the existing one-tick scroll, even when a source row becomes several visual rows. */
-export function animatePhoneSubtitleRows(previous: Map<HTMLElement, number>): void {
+/** Scroll existing messages only when new text arrives, never when old text expires. */
+export function animatePhoneSubtitleRows(previous: Map<Element, number>): void {
   for (const [row, top] of previous) {
     if (!row.isConnected) continue;
     for (const animation of row.getAnimations()) animation.cancel();

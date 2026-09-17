@@ -84,7 +84,9 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `phoneZoom.ts` | | Continuous per-room zoom, temporary two-finger inspection, eased fish-follow and bounded render-resolution buckets. |
 | `phoneViewport.ts` | | Phone camera transforms, viewport-relative gesture coordinates and active-fish following. |
 | `phoneUndoFocus.ts` | | Choose the available fish whose move was undone, without mistaking replay consequences for moves. |
-| `phoneSubtitleLayout.ts` | | Fixed-size phone caption word wrapping and compositor scrolling for variable-height rows. |
+| `phoneSubtitleLayout.ts` | | Fixed-size phone captions: message-level word wrapping, stable expiry slots and arrival-only compositor scrolling. |
+| `phoneSubtitleExpiry.ts` | | Retain source text and retire whole displayed phone lines without moving surviving glyphs. |
+| `phoneSubtitleWave.ts` | | Phone message wave: stable reading-order phases across source-row expiry and bounded reveal time. |
 | `touchPinch.ts` | | Continuous two-finger scale/centroid samples and gameplay suppression until all fingers lift. |
 | `dom.ts` | 1.3 k | The element handles and their 2D contexts. |
 | `helpDom.ts` | 2.4 k | The control-help pages (`Help.pas`) as a document: builds `src/data/helpText.ts` into DOM over #screen and scales it to the stage box. |
