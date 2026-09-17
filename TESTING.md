@@ -23,6 +23,26 @@ change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a ga
 CONTRIBUTING.md for how much checking a given change actually needs, and for the
 `KNOWN_FLAKY` retry rule.
 
+`test-native-menu.mjs` pairs the native skin on/off on the same phone/tablet DOM:
+seven viewport/safe-area configurations, exact control geometry and browser-pixel
+restoration, volume/radio dispatch, keyboard focus, reduced motion, forced colors,
+and stable warm/green room accents. It enables the native-menu controller through
+`__ff.previewNativeMenu()`, not a simulated Capacitor bridge. Run against an
+isolated dev server with `FF_UI_PORT=<port> node tools/test-native-menu.mjs`;
+`FF_NATIVE_EVIDENCE=<directory>` saves before/after screenshots.
+`nativeMenuPalette.test.ts` covers palette extraction and neutral scenery. Physical
+iOS appearance remains a device check. The texture is a small crop of
+the original `panel.ffp`, regenerated with `npx tsx tools/build-native-menu-art.ts`;
+`nativeMenuArt.test.ts` compares every shipped pixel to that source.
+`FF_UI_PORT=<dev-port> node --import tsx tools/build-native-menu-palette.mjs`
+checks all 72 fixed accents against static AI wall artwork; `--write` regenerates
+`src/data/nativeMenuHues.ts` for visual review after an artwork change.
+
+`test-tier-recovery.mjs` checks failed-asset cache eviction with an explicit
+same-page tier request. Re-entering from a held map launch can join the existing
+launch without reaching the loader, so it is not a cache oracle. Reload recovery
+is checked separately, and the fatal screen must remain visible until reload.
+
 `typecheck`, the unit suite and `vite build` also run in CI on every push
 (`.github/workflows/checks.yml`). The browser probes do not — not for lack of data
 (`public/data/` is committed) but because the suite takes ~6 minutes and the `test-gl-*`

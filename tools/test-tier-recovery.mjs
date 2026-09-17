@@ -11,11 +11,9 @@
  * either: the game stops on its one failure screen, whose only exit is a reload.
  *
  * So what this file owns is the pair. That a blip STOPS the game rather than quietly
- * degrading it, and that the failure is not REMEMBERED — which, with recovery-in-place
- * gone, is now measured the way a player would: reload, and the room is fine. That is a
- * weaker-looking assertion than the old "Try again" one and is actually the same claim,
- * because a remembered failure survives in the module-level caches this bug was about,
- * not on disk.
+ * degrading it, and that the failure is not REMEMBERED. A same-page developer tier
+ * request checks the module-level cache; a separate reload checks the player's exit.
+ * A reload alone cannot prove cache eviction, because it erases the cache anyway.
  *
  * The cause was a cache that remembered a failure it had learned nothing from.
  * `loadAiRoom` caught every error — including a transient `fetch` failure — and resolved
@@ -51,7 +49,7 @@ const SCHODY = 5; // the room the blip hits
  * sees it.
  *
  * What is left here is the case retry cannot fix: an outage that outlasts the budget.
- * The art really does fail, the room really is drawn one tier down, and the question is
+ * The art really does fail, the room is held behind the failure screen, and the question is
  * whether the app can ever get back — which is what this file has always been about.
  * ATTEMPTS is deliberately budget + 1 so the load fails even if the budget grows by one;
  * everything after is served normally, so anything still broken is the app remembering.
@@ -129,6 +127,13 @@ await withApp(
     // === AI tier ===============================================================
     await outage(p, `**/enhanced-ai/SCHODY/ai.json`);
     await p.evaluate(() => window.__ff.setGraphics('ai'));
+    // Pin the map-launch route rather than racing the first completed map frame.
+    await p.waitForFunction(() => window.__ff.screen() === 'map' &&
+      window.__ff.mapPresented() && !window.__ff.mapArtPending());
+    let manifestRequests = 0;
+    p.on('request', (request) => {
+      if (request.url().endsWith('/enhanced-ai/SCHODY/ai.json')) manifestRequests++;
+    });
     await enterExpectingFailure(p, SCHODY);
 
     expect(
@@ -167,17 +172,21 @@ await withApp(
     // for the room again. A cache entry written on failure is still there and would hand
     // back the same empty result.
     //
-    // `enterRoomAwait` rather than a click: the fatal screen is opaque and covers the
-    // dev bar, correctly — the player is being told the session is over. The hook is not
-    // blocked by it, and what is under test is the loader, not the overlay.
+    // A second `enterRoomAwait` can join the failed map launch without asking the
+    // loader anything: beginMapLaunch ignores a second click while the first launch
+    // is held. That made this assertion depend on whether boot's map had painted.
+    // The explicit tier setter asks ensureAiRoom again without clearing its cache.
+    // This developer hook tests the loader beneath the fatal screen, not a new
+    // player-facing recovery path; the screen still only offers Reload.
     await p.unrouteAll({ behavior: 'ignoreErrors' });
-    await p.evaluate(() => {
-      void window.__ff.enterRoomAwait(5).catch(() => {});
-    });
+    const failedRequests = manifestRequests;
+    await p.evaluate(() => window.__ff.setGraphics('ai'));
     const forgot = await p
       .waitForFunction(() => window.__ff.aiRoomLoaded(), null, { timeout: budget(15000) })
       .then(() => true, () => false);
     expect(forgot, 'the failure was not remembered: asking again on the SAME page loads the art');
+    expect(manifestRequests > failedRequests, 'the same-page retry makes a fresh manifest request');
+    expect(await p.evaluate(() => window.__ff.fatalShown()), 'the player still sees the failure screen until reload');
 
     // Only now the reload, which is what the screen offers the player.
     await p.unrouteAll({ behavior: 'ignoreErrors' });
