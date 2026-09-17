@@ -122,6 +122,11 @@ Czech and English, music, the world map and its record panel, saves, the origina
 Tetris minigame, and the intro and ending movies. The solvability net replays 70 of the 72 rooms on
 every push.
 
+New players start with **English subtitles**; titles, room-name plaques and help use
+the same language. Options still offers Czech, English or subtitles off, and saved
+choices are preserved across updates. Voice recordings remain Czech, with no voice
+language selector.
+
 What is left is polish and the known divergences — [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) is the honest
 list. [`HISTORY.md`](HISTORY.md) has the milestone log, if you want the order it was all built in.
 

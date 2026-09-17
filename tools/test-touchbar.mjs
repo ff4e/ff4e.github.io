@@ -583,6 +583,8 @@ try {
     (await p.evaluate(() => document.getElementById('topt-music-val').textContent)) === '64',
     'and the number beside it is the level, not the index',
   );
+  await p.click('#touchopts input[value="cz"]');
+  await p.waitForFunction(() => window.__ff.subtitleMode() === 'cz');
   await p.click('#touchopts input[value="en"]');
   await p.waitForFunction(() => window.__ff.subtitleMode() === 'en');
   expect(true, 'the subtitle radios set the subtitle mode');

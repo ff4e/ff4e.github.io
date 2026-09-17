@@ -230,6 +230,10 @@ try {
       assert.equal(await p.evaluate(() => window.__ff.volumes().effect), 0, 'range starts away from the tap');
       await p.touchscreen.tap(range.x + range.width / 2, range.y + range.height / 2);
       assert.equal(await p.evaluate(() => window.__ff.volumes().effect), 6, 'native range taps still dispatch');
+      assert.equal(await p.locator('#touchopts input[value="en"]').isChecked(), true,
+        'English subtitles are selected on first open and retained on reopen');
+      await p.locator('#touchopts input[value="cz"]').check();
+      assert.equal(await p.evaluate(() => window.__ff.subtitleMode()), 'cz', 'Czech remains selectable');
       await p.locator('#touchopts input[value="en"]').check();
       assert.equal(await p.evaluate(() => window.__ff.subtitleMode()), 'en', 'native radios still dispatch');
       await p.locator('#topt-close').scrollIntoViewIfNeeded();

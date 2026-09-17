@@ -82,10 +82,10 @@ describe('settings volume model (Uovl.pas Volumes / tahlo)', () => {
 });
 
 describe('settings persistence', () => {
-  it('defaults to Czech subtitles with a matching Czech tit_def', () => {
+  it('defaults to English subtitles with a matching English tit_def', () => {
     const s = defaultSettings();
-    expect(s.subtitles).toBe('cz');
-    expect(s.titDef).toBe('cz');
+    expect(s.subtitles).toBe('en');
+    expect(s.titDef).toBe('en');
     expect(s.volume).toEqual({ ...DEFAULT_INDEX });
     expect(s.introSeen).toBe(false); // fresh install auto-plays the intro once
   });
@@ -114,6 +114,30 @@ describe('settings persistence', () => {
     expect(loadSettings()).toEqual(defaultSettings());
   });
 
+  it('uses English when stored options have no language preference', () => {
+    localStorage.setItem(
+      'ff.options',
+      JSON.stringify({ introSeen: true, volume: { effect: 3, voice: 8, music: 0 } }),
+    );
+    expect(loadSettings()).toEqual({
+      volume: { effect: 3, voice: 8, music: 0 },
+      subtitles: 'en',
+      titDef: 'en',
+      introSeen: true,
+      fitMode: 'medium',
+    });
+  });
+
+  it.each([
+    ['cz', 'cz'],
+    ['en', 'en'],
+    ['off', 'cz'],
+    ['off', 'en'],
+  ] as const)('preserves saved %s subtitles and %s tit_def', (subtitles, titDef) => {
+    localStorage.setItem('ff.options', JSON.stringify({ subtitles, titDef }));
+    expect(loadSettings()).toMatchObject({ subtitles, titDef });
+  });
+
   it('sanitizes out-of-range indices and unknown subtitle modes', () => {
     localStorage.setItem(
       'ff.options',
@@ -121,7 +145,7 @@ describe('settings persistence', () => {
     );
     const loaded = loadSettings();
     expect(loaded.volume).toEqual({ effect: 12, voice: 0, music: 5 });
-    expect(loaded.subtitles).toBe('cz'); // unknown -> default
-    expect(loaded.titDef).toBe('cz'); // unknown -> default
+    expect(loaded.subtitles).toBe('en'); // unknown -> default
+    expect(loaded.titDef).toBe('en'); // unknown -> default
   });
 });

@@ -130,6 +130,7 @@ export function dispatchHeldMove(): void {
     heldKey = null;
     heldToken = null;
   }
+  if (!room.alive[which]) return; // a held fish-specific key must not reselect an exited fish
   if (fishBusy(which)) return; // dropped while the fish is talking (kdo:=0)
   engine.swim = null;
   engine.active = which;

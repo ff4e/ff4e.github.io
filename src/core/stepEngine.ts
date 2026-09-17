@@ -149,6 +149,13 @@ export class StepEngine {
     this.activeAnimFish = which;
   }
 
+  /** Live exits and instant replays hand control to the fish still in play. */
+  private exitFish(which: Which): void {
+    this.room.exitFish(which);
+    const other: Which = which === 'little' ? 'big' : 'little';
+    if (this.active === which && this.room.alive[other]) this.active = other;
+  }
+
   /**
    * Apply one recorded move instantly (no animation): the same deterministic turn/
    * push/settle/exit logic as the live path, used for undo/load re-simulation.
@@ -167,7 +174,7 @@ export class StepEngine {
     room.fallToRest(); // settle gravity fully, instantly
     const edge = room.gspec === 9 ? null : room.checkEdges();
     if (edge && !room.won) {
-      room.exitFish(edge.which);
+      this.exitFish(edge.which);
       if (edge.dir === Dir.left) room.facingRight[edge.which] = false;
       else if (edge.dir === Dir.right) room.facingRight[edge.which] = true;
     }
@@ -332,7 +339,7 @@ export class StepEngine {
         const which = this.exiting.which;
         const idx = which === 'little' ? room.littleIdx : room.bigIdx;
         room.items[idx]!.dir = Dir.no;
-        room.exitFish(which);
+        this.exitFish(which);
         const other: Which = which === 'little' ? 'big' : 'little';
         const cheer = exitCheer(
           which,

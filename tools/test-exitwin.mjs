@@ -15,10 +15,20 @@ await withApp(async ({ p, expect }) => {
   // Send the little fish out of the left edge (wait for idle first — forceExit is a
   // no-op unless the engine is idle, main.ts:4338).
   await p.waitForFunction(() => window.__ff.phase() === 'idle');
-  await p.evaluate(() => window.__ff.forceExit('little', 3));
+  await p.evaluate(() => {
+    window.__ff.forceExit('little', 3);
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', bubbles: true }));
+  });
   await p.waitForFunction(() => window.__ff.state().venku.little);
+  await tickSleep(p, 2);
+  await p.keyboard.up('KeyL');
   expect(await p.evaluate(() => window.__ff.state().venku.little), 'little fish exited');
   expect(!(await p.evaluate(() => window.__ff.state().won)), 'not won with one fish still in');
+  expect(await p.evaluate(() => window.__ff.state().active === 'big'), 'big fish becomes active despite a held little-fish key');
+  await p.evaluate(() => {
+    for (const region of [1, 2, 3, 4]) window.__ff.panelAction(region);
+  });
+  expect(await p.evaluate(() => window.__ff.state().active === 'big'), 'little-fish panel arrows cannot undo the handover');
 
   // Send the big fish out too -> the room is solved.
   await p.waitForFunction(() => window.__ff.phase() === 'idle');
@@ -63,4 +73,17 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.clearSubtitles());
   await p.waitForFunction(() => window.__ff.screen() === 'map').catch(() => {});
   expect(await p.evaluate(() => window.__ff.screen() === 'map'), 'returns to the map once the exit line finishes');
+
+  await selectRoom(p, 7);
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
+  await p.evaluate(() => window.__ff.panelAction(10));
+  await p.waitForFunction(() => window.__ff.phase() === 'idle');
+  expect(await p.evaluate(() => window.__ff.state().active === 'big'), 'big fish selected before exiting first');
+  await p.evaluate(() => window.__ff.forceExit('big', 3));
+  await p.waitForFunction(() => window.__ff.state().venku.big);
+  expect(await p.evaluate(() => window.__ff.state().active === 'little'), 'little fish becomes active when big exits first');
+  await p.evaluate(() => {
+    for (const region of [6, 7, 8, 9]) window.__ff.panelAction(region);
+  });
+  expect(await p.evaluate(() => window.__ff.state().active === 'little'), 'big-fish panel arrows cannot undo the handover');
 });

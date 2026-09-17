@@ -102,14 +102,14 @@ export interface Settings {
 
 const STORAGE_KEY = 'ff.options';
 
-/** The port's factory defaults (subtitles default to Czech — the port's choice —
+/** The port's factory defaults (subtitles default to English — the port's choice —
  *  and tit_def matches, so the titles/plaques/help and subtitles start as one
  *  consistent language). */
 export function defaultSettings(): Settings {
   return {
     volume: { ...DEFAULT_INDEX },
-    subtitles: 'cz',
-    titDef: 'cz',
+    subtitles: 'en',
+    titDef: 'en',
     introSeen: false,
     fitMode: 'medium',
   };

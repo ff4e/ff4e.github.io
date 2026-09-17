@@ -222,7 +222,9 @@ assertions.
   interpreter, the **physics/mechanics** (movement, pushing, the light/heavy push rules, gravity/falling,
   stacking, **crushing/death** — heavy-on-fish, a box falling onto a fish, a box shoved sideways onto the
   fish, a fish stepping down under its carried box; and the counter-cases that must *not* crush — plus
-  exit/win incl. swimming to the edge — via synthetic rooms in `test/roomBuilder.ts`), the world-map
+  exit/win incl. swimming to the edge — via synthetic rooms in `test/roomBuilder.ts`), automatic
+  selection of the remaining fish after animated and instant-replay exits (`test/exit-selection.test.ts`),
+  held-input handover without reselecting an exited fish (`test/touchSwipe.test.ts`), the world-map
   **`updatuj_soutez` progression** (linear unlock, branch enable, cheat-solve still unlocks), the **`FArray`
   grid query** + the **SCHODY** slug state machine (water/solid/push → distinct frames), the **KNIHOVNA**
   global arrays (`roompole` rotation + `globpole` crystals), the `universal` agent, `.dir`-driven doors and
@@ -234,7 +236,8 @@ assertions.
   (menu music, `KillSnd` + dialogue-clear on leaving), per-room music, the fixed-timestep clock + dialogue
   pacing, lip-sync heads, save/restart determinism, the faithful **input map** (arrow keys move the active
   fish, Space swaps, 1/2 select, right-click steps toward the cursor, click-select is silent), **exit/win**
-  (both fish out → solved → recorded in the progression), the **cheat codes** (the `X`-armed entry machine and
+  (first fish out → remaining fish active, stale fish-specific controls ignored;
+  both fish out → solved → recorded in the progression), the **cheat codes** (the `X`-armed entry machine and
   every code, typed on the real keyboard — including `xwemaketherulez` returning to the map with the room
   recorded as cheat-solved and its successor still unlocked), the **Tetris minigame** (launch from a room and
   the map, its own clock, the room frozen underneath, the controls, the persistent hiscore), **save gating**
