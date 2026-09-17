@@ -215,6 +215,80 @@ try {
   expect(chrome.phone && chrome.tabletHidden && !chrome.reserved &&
     chrome.margins.every((m) => m === '0px') && chrome.buttons === 3,
   'phone has exactly three overlay corners and reserves no bar space');
+  for (const [width, height, top, right, bottom, left] of [
+    [852, 393, 0, 0, 20, 62],
+    [874, 402, 0, 62, 20, 0],
+    [956, 440, 0, 0, 20, 62],
+    [844, 390, 0, 47, 21, 0],
+    [812, 375, 0, 50, 21, 0],
+    [568, 320, 0, 0, 0, 0],
+    [393, 852, 62, 0, 34, 0],
+    [402, 874, 62, 0, 34, 0],
+    [390, 844, 47, 0, 34, 0],
+    [390, 844, 0, 0, 0, 0],
+    [414, 896, 96, 0, 34, 0],
+    [375, 812, 50, 0, 34, 0],
+    [320, 568, 0, 0, 0, 0],
+  ]) {
+    await p.setViewportSize({ width, height });
+    await p.evaluate(({ top, right, bottom, left }) => {
+      for (const [side, value] of Object.entries({ top, right, bottom, left })) {
+        document.documentElement.style.setProperty(`--sa-${side}`, `${value}px`);
+      }
+    }, { top, right, bottom, left });
+    const layout = await p.evaluate(() => {
+      const ids = ['phone-map', 'phone-more', 'phone-undo'];
+      return ids.map((id) => {
+        const button = document.getElementById(id);
+        const svg = button.querySelector('svg').getBoundingClientRect();
+        return { ...button.getBoundingClientRect().toJSON(), iconW: svg.width, iconH: svg.height };
+      });
+    });
+    const [map, more, undo] = layout;
+    const corners = width > height && height >= 390;
+    const portraitCorners = height > width && width >= 390;
+    const sideFloor = portraitCorners ? 24 : 16;
+    expect(map.left === (corners ? 16 : Math.max(sideFloor, left + 8)) &&
+      more.right === width - (corners ? 16 : Math.max(sideFloor, right + 8)) &&
+      undo.right === more.right &&
+      map.top === (portraitCorners ? Math.max(8, (top - 56) / 2) : Math.max(16, top + 8)) &&
+      undo.bottom === height - (portraitCorners ? 8 : Math.max(16, bottom + 8)),
+    `${width}x${height}: ${portraitCorners ? 'beside-island row' : corners ? 'edge corners' : 'full safe-area fallback'} places all three controls`);
+    expect(layout.every((b) => b.width === 56 && b.height === 56 && b.iconW === 32 && b.iconH === 32 &&
+      b.left >= 0 && b.right <= width && b.top >= 0 && b.bottom <= height),
+    `${width}x${height}: all targets are 56px with unclipped 32px icons`);
+    // A conservative 200px central housing envelope. Browser emulation cannot prove
+    // physical device occlusion; the native-device check remains a release gate.
+    if (width > height && (left || right)) {
+      const housing = {
+        left: left ? 0 : width - right, right: left ? left : width,
+        top: height / 2 - 100, bottom: height / 2 + 100,
+      };
+      expect(layout.every((b) => b.right <= housing.left || b.left >= housing.right ||
+        b.bottom <= housing.top || b.top >= housing.bottom),
+      `${width}x${height}: corners avoid the modeled housing on the ${left ? 'left' : 'right'}`);
+    }
+    if (portraitCorners) {
+      expect(map.right + 8 <= width / 2 - 107 && more.left - 8 >= width / 2 + 107,
+        `${width}x${height}: top buttons leave 8px beside a modeled 214px central housing`);
+      // Rounded button ink must remain within a 64px rounded display corner.
+      const inside = (x, y) => Math.hypot(64 - x - 14, 64 - y - 14) + 14 <= 64;
+      expect(inside(map.left, map.top) && inside(width - more.right, more.top) &&
+        inside(width - undo.right, height - undo.bottom),
+        `${width}x${height}: all corner buttons still clear the curved glass`);
+      expect(undo.left - 8 >= width / 2 + 107,
+        `${width}x${height}: low Undo stays beside a modeled 214px home-indicator area`);
+    }
+    await p.locator('#phone-more').tap();
+    const menu = await p.locator('#phone-menu').boundingBox();
+    expect(menu && menu.x >= left + 8 && menu.x + menu.width <= width - Math.max(16, right + 8) &&
+      menu.y >= Math.max(top + 8, more.bottom + 8) && menu.y + menu.height <= undo.top - 8,
+    `${width}x${height}: the menu clears the top/side insets and both larger buttons`);
+    for (const button of await p.locator('#phone-menu button').all()) await button.tap({ trial: true });
+    expect(true, `${width}x${height}: every overflow action remains reachable, including when scrolling`);
+    await p.keyboard.press('Escape');
+  }
+  await p.setViewportSize({ width: 852, height: 393 });
   await p.evaluate(() => {
     const s = document.documentElement.style;
     s.setProperty('--sa-left', '62px');
@@ -226,17 +300,17 @@ try {
     const box = (id) => document.getElementById(id).getBoundingClientRect().toJSON();
     return { map: box('phone-map'), more: box('phone-more'), undo: box('phone-undo') };
   });
-  expect(corners.map.x === 70 && corners.map.y === 24 && corners.more.right === 828 &&
-    corners.undo.right === 828 && corners.undo.bottom === 351 &&
-    corners.undo.width >= 44 && corners.undo.height >= 44, '44px corner targets clear safe areas and keep a 24px edge floor');
+  expect(corners.map.x === 16 && corners.map.y === 18 && corners.more.right === 836 &&
+    corners.undo.right === 836 && corners.undo.bottom === 351 &&
+    corners.undo.width === 56 && corners.undo.height === 56, '56px corner targets use 16px side margins without losing vertical safe areas');
   await p.locator('#phone-more').tap();
   expect(await p.locator('#phone-menu').isVisible(), 'More opens the four-action menu');
   expect(await p.locator('#phone-menu').evaluate((el) => {
     const menu = el.getBoundingClientRect();
     const more = document.getElementById('phone-more').getBoundingClientRect();
     const undo = document.getElementById('phone-undo').getBoundingClientRect();
-    return menu.right === more.right && menu.top >= more.bottom + 8 && menu.bottom <= undo.top - 8;
-  }), 'overflow follows the inset More button and stays clear of Undo');
+    return menu.right === innerWidth - 20 && menu.top >= more.bottom + 8 && menu.bottom <= undo.top - 8;
+  }), 'overflow retains the full side inset and stays between the larger More and Undo buttons');
   await p.evaluate(() => { window.phoneKeys = []; });
   await p.touchscreen.tap(400, 200);
   expect(await p.locator('#phone-menu').isHidden() &&
@@ -296,14 +370,19 @@ try {
   await captionMetrics('A fresh caption for the safe-area layout check.');
   await p.waitForFunction(() => {
     const host = document.getElementById('domsubs');
-    return host && Math.abs(host.getBoundingClientRect().width - (innerWidth - 152)) < 1;
+    return host && Math.abs(host.getBoundingClientRect().width - (innerWidth - 176)) < 1;
   });
   expect(await p.evaluate(() => {
     const more = document.getElementById('phone-more').getBoundingClientRect();
     const undo = document.getElementById('phone-undo').getBoundingClientRect();
     const subtitles = document.getElementById('domsubs').getBoundingClientRect();
-    const radius = 64;
-    const inside = (x, y) => Math.hypot(radius - x, radius - y) <= radius;
+    const radius = 64, buttonRadius = 14;
+    // The button itself is rounded; its transparent bounding-box corner is not ink.
+    const inside = (x, y) => [0, 15, 30, 45, 60, 75, 90].every((degrees) => {
+      const a = degrees * Math.PI / 180;
+      return Math.hypot(radius - x - buttonRadius + buttonRadius * Math.cos(a),
+        radius - y - buttonRadius + buttonRadius * Math.sin(a)) <= radius;
+    });
     return inside(innerWidth - more.right, more.top) && inside(innerWidth - undo.right, innerHeight - undo.bottom) &&
       subtitles.right <= undo.left - 8;
   }), 'zero cutout insets still clear rounded corners and keep subtitles out of Undo');
@@ -501,9 +580,9 @@ try {
     const map = document.getElementById('phone-map').getBoundingClientRect();
     const more = document.getElementById('phone-more').getBoundingClientRect();
     const undo = document.getElementById('phone-undo').getBoundingClientRect();
-    return map.left === 24 && map.top === 70 && more.right === innerWidth - 24 &&
-      undo.right === innerWidth - 24 && undo.bottom === innerHeight - 42;
-  }), 'wide-room portrait play retains the rounded-corner clearance');
+    return map.left === 24 && map.top === 8 && more.right === innerWidth - 24 &&
+      undo.right === more.right && undo.bottom === innerHeight - 8;
+  }), 'portrait Map and More sit beside the island and Undo sits low beside the home indicator');
   await p.evaluate(() => window.__ff.talk('little'));
   await p.waitForFunction(() => document.getElementById('domsubs')?.children.length > 0);
   expect((await subtitle()).detached, 'AI portrait subtitles are also detached');

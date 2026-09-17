@@ -570,30 +570,50 @@
       .tbtn:focus-visible { outline: 2px solid #aee; outline-offset: 2px; }
       /* Phone controls overlay the glass; only the tablet sets data-touchbar. */
       #phone-controls {
-        --phone-top: max(24px, calc(var(--sa-top) + 8px));
-        --phone-right: max(24px, calc(var(--sa-right) + 8px));
-        --phone-bottom: max(24px, calc(var(--sa-bottom) + 8px));
-        --phone-left: max(24px, calc(var(--sa-left) + 8px));
+        --phone-size: 56px;
+        --phone-top: max(16px, calc(var(--sa-top) + 8px));
+        --phone-right: max(16px, calc(var(--sa-right) + 8px));
+        --phone-bottom: max(16px, calc(var(--sa-bottom) + 8px));
+        --phone-left: max(16px, calc(var(--sa-left) + 8px));
         position: fixed; inset: 0; z-index: 120; pointer-events: none;
       }
       #phone-controls[hidden], #phone-menu[hidden] { display: none; }
       #phone-controls button { pointer-events: auto; }
       #phone-controls > .tbtn {
-        position: absolute; min-width: 44px; min-height: 44px; width: 44px; height: 44px;
-        padding: 8px; background: #18262eb8;
+        position: absolute; min-width: var(--phone-size); min-height: var(--phone-size);
+        width: var(--phone-size); height: var(--phone-size);
+        padding: 8px; border-radius: 14px; background: #18262eb8;
+      }
+      #phone-controls > .tbtn svg { width: 32px; height: 32px; }
+      /* Landscape corners sit above/below the island, not beside it. Short landscape
+         viewports retain full side clearance because their corners crowd the cutout. */
+      @media (orientation: landscape) and (min-height: 390px) {
+        #phone-controls { --phone-left: 16px; --phone-right: 16px; }
       }
       /* Un-mirrored native insets can be zero beside a rounded corner. Keep a floor. */
       #phone-map { top: var(--phone-top); left: var(--phone-left); }
       #phone-more { top: var(--phone-top); right: var(--phone-right); }
       #phone-undo { bottom: var(--phone-bottom); right: var(--phone-right); }
       #phone-menu {
-        position: absolute; top: calc(var(--phone-top) + 52px); right: var(--phone-right);
+        --menu-top: max(calc(var(--sa-top) + 8px), calc(var(--phone-top) + var(--phone-size) + 8px));
+        position: absolute; top: var(--menu-top);
+        right: max(var(--phone-right), calc(var(--sa-right) + 8px));
         display: grid; gap: 4px; padding: 6px; border-radius: 12px; background: #10161af2;
         box-sizing: border-box;
-        max-height: calc(100dvh - var(--phone-top) - var(--phone-bottom) - 104px);
+        max-height: calc(100dvh - var(--menu-top) - var(--phone-bottom) - var(--phone-size) - 8px);
         overflow-y: auto; pointer-events: auto;
       }
       #phone-menu .tbtn { min-width: 100px; min-height: 44px; font-size: 13px; }
+      /* Beside the portrait housing, keep 24px for the curved glass and a 214px
+         central cutout budget. Narrower phones keep the below-cutout fallback. */
+      @media (orientation: portrait) and (min-width: 390px) {
+        #phone-controls {
+          --phone-top: max(8px, calc((var(--sa-top) - var(--phone-size)) / 2));
+          --phone-bottom: 8px;
+        }
+        #phone-map { left: max(24px, calc(var(--sa-left) + 8px)); }
+        #phone-more, #phone-menu, #phone-undo { right: max(24px, calc(var(--sa-right) + 8px)); }
+      }
       html[data-phone-room] #stagebox { width: 100%; }
       html[data-phone-room] #stagebox > div { flex-shrink: 0; }
       .phone-subtitles { z-index: 110; }

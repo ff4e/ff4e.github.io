@@ -225,7 +225,8 @@ export function syncDomSubtitles(
   const parent = detached ? document.body : wrap;
   // Leave a symmetric gutter for the corner Undo target; the baseline remains at
   // the screen bottom, above the home indicator, regardless of room size or zoom.
-  const gutter = detached ? 52 + Math.max(24, safeAreaInset('--sa-left') + 8, safeAreaInset('--sa-right') + 8) : 0;
+  // 64px clears the phone's 56px button plus the 8px gap (pinned by test-iphone-layout).
+  const gutter = detached ? 64 + Math.max(24, safeAreaInset('--sa-left') + 8, safeAreaInset('--sa-right') + 8) : 0;
   if (detached) {
     cssW = Math.max(1, window.innerWidth - 2 * gutter);
     cssH = Math.max(1, window.innerHeight - safeAreaInset('--sa-top') - safeAreaInset('--sa-bottom') - 8);
