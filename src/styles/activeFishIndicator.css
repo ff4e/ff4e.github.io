@@ -1,7 +1,7 @@
-/* Bottom-left display; corner spacing is shared with Map and Undo. */
+/* Phone: bottom-left. Tablet: the upper-left end of either toolbar orientation. */
 #active-fish-indicator {
   box-sizing: border-box;
-  pointer-events: none;
+  pointer-events: auto;
 }
 #active-fish-indicator[hidden], #active-fish-indicator img[hidden] { display: none; }
 #active-fish-indicator img {
@@ -9,4 +9,41 @@
   height: 32px;
   object-fit: contain;
   filter: drop-shadow(0 1px 1px #000c);
+}
+#touchbar > #active-fish-indicator {
+  position: absolute;
+  width: 52px;
+  height: 48px;
+  left: max(var(--sa-left), var(--bar-lead));
+  top: calc(var(--sa-top) + 3px);
+}
+@media (orientation: landscape) {
+  html:not([data-touchbar-edge='top']) #touchbar > #active-fish-indicator {
+    top: max(16px, calc(var(--sa-top) + 8px));
+  }
+}
+
+/* Split windows can keep tablet mode with too little room for an absolute corner.
+   Fit all seven targets in flow instead; full-size tablet geometry stays unchanged.
+   Seven 52px widths / 48px heights consume 364px / 336px before gaps. */
+@media (max-width: 600px) {
+  #touchbar {
+    padding-inline: max(4px, var(--sa-left)) max(4px, var(--sa-right));
+    gap: clamp(0px, calc((100vw - max(4px, var(--sa-left)) - max(4px, var(--sa-right)) - 364px) / 6), 6px);
+  }
+  #touchbar > .tbtn { width: 52px; min-width: 44px; padding-inline: 2px; }
+  #touchbar > #active-fish-indicator { position: static; order: -1; margin-right: auto; }
+}
+@media (orientation: landscape) and (max-height: 600px) {
+  html:not([data-touchbar-edge='top']) #touchbar {
+    padding-left: max(var(--sa-left), var(--bar-lead));
+    padding-block: max(4px, var(--sa-top)) max(4px, var(--sa-bottom));
+    gap: clamp(0px, calc((100vh - max(4px, var(--sa-top)) - max(4px, var(--sa-bottom)) - 336px) / 6), 6px);
+  }
+  html:not([data-touchbar-edge='top']) #touchbar > .tbtn {
+    width: 52px; height: 48px; min-height: 44px;
+  }
+  html:not([data-touchbar-edge='top']) #touchbar > #active-fish-indicator {
+    position: static; order: -1; margin: 0 0 auto;
+  }
 }

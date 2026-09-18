@@ -179,6 +179,12 @@ function armed(): boolean {
     !(phoneUi() && (phoneMenuOpen() || touchOptionsOpen()));
 }
 
+/** The indicator button and room taps share the keyboard router's fish-switch guards. */
+export function switchFishFromTouch(): void {
+  sendKey('keydown', TAP_KEY);
+  sendKey('keyup', TAP_KEY);
+}
+
 /** Did this gesture start on the play area rather than on a control? See the file note. */
 function onSurface(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
@@ -193,10 +199,7 @@ function onSurface(target: EventTarget | null): boolean {
 /** End the gesture: release a held arrow, or deliver the tap it turned out to be. */
 function endGesture(): void {
   if (arrow) releaseArrow();
-  else {
-    sendKey('keydown', TAP_KEY);
-    sendKey('keyup', TAP_KEY);
-  }
+  else switchFishFromTouch();
   swallowMouse = true;
   tracking = null;
   arrow = null;

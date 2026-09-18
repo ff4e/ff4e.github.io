@@ -51,7 +51,10 @@ checks all 72 fixed accents against static AI wall artwork; `--write` regenerate
 `src/data/nativeMenuHues.ts` for visual review after an artwork change.
 
 `activeFishIndicator.test.ts` covers selection handover and
-visibility without changing engine state. `test-active-fish-indicator.mjs` uses
+visibility without changing engine state, plus idempotent phone/tablet reparenting.
+Button activation delegates to the room-tap action, releases pointer focus and
+retains keyboard focus. `touchSwipe.test.ts` pins the shared Space down/up pair.
+`test-active-fish-indicator.mjs` uses
 normal browser boot, with no native-host mock or preview initializer:
 both fish pictures, swaps, Undo, rotation, bottom-left placement, subtitle/control
 clearance, menu hiding and real taps on the badge and play area. All nine
@@ -66,10 +69,19 @@ Pointer-only transitions at a fixed viewport must return the full stage width to
 phone gameplay and restore the desktop panel's original usable dimensions, without
 a resize event. Real map-corner clicks verify that changing mode with Options open
 does not leave an invisible modal or require Escape to recover.
+Its tablet helper covers portrait and both landscape bar edges, safe-area insets,
+room-colored 52x48px shells with 32px fish art, and at least 8px clearance from
+all six unchanged buttons on full-size tablets. Compact-window cases retain a
+tablet-sized physical screen, require non-overlapping safe-area-cleared 44px
+targets, and exercise Map and fish-button taps. It checks swaps, exit handover, Options/map hiding and
+repeated live tablet/phone transitions using the same DOM badge and selection.
+Both layouts exercise real taps, mouse clicks and Enter/Space activation, requiring
+one switch, no movement and appropriate focus retention. An exited partner cannot
+be selected by the button.
 `touchButtons.test.ts` covers initialization ordering, effective mode changes,
-faithful Options cleanup, and preserving open Options/credits when appropriate.
+indicator routing/visibility, faithful Options cleanup, and preserving open Options/credits when appropriate.
 `FF_FISH_EVIDENCE=<directory>` saves screenshots. This is a browser layout test;
-check native appearance on a phone before release.
+check native appearance on a phone and tablet before release.
 
 `test-tier-recovery.mjs` checks failed-asset cache eviction with an explicit
 same-page tier request. Re-entering from a held map launch can join the existing

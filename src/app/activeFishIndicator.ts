@@ -7,20 +7,38 @@ import { cutscene, engine, loadmode, replaymode, room, showmode } from './gameSt
 import { fatalShown, showFatal } from './loadingUi.js';
 import { roomEntryHeld } from './roomLoad.js';
 import { inSolvemode } from './solveMode.js';
+import { switchFishFromTouch } from './touchSwipe.js';
 
-let badge: HTMLElement | null = null;
+let badge: HTMLButtonElement | null = null;
 let pictures: Record<'little' | 'big', HTMLImageElement>;
 
-/** Shared phone UI, in browsers and the native app; safe to call on mode changes. */
-export function initActiveFishIndicator(): void {
-  if (badge) return;
-  const controls = document.getElementById('phone-controls');
-  if (!controls) throw new Error('Active fish indicator requires phone controls');
-  badge = document.createElement('div');
+/** One switch button shared by the phone corners and tablet bar, including live mode changes. */
+export function initActiveFishIndicator(controlsId: 'phone-controls' | 'touchbar' = 'phone-controls'): void {
+  const controls = document.getElementById(controlsId);
+  if (!controls) throw new Error(`Active fish indicator requires ${controlsId}`);
+  if (badge) {
+    if (badge.parentElement !== controls) controls.append(badge);
+    return;
+  }
+  const button = document.createElement('button');
+  badge = button;
+  button.type = 'button';
   badge.id = 'active-fish-indicator';
   badge.className = 'tbtn';
   badge.hidden = true;
-  badge.setAttribute('role', 'img');
+  button.title = 'Switch fish';
+  button.addEventListener('click', (e) => {
+    if (button.hidden) return;
+    const keepFocus = e.detail === 0 && document.activeElement === button;
+    // Phone controls reserve Space/Enter while focused. Let the shared tap's
+    // synthetic Space through, then restore keyboard focus after activation.
+    button.blur();
+    switchFishFromTouch();
+    if (keepFocus) button.focus({ preventScroll: true });
+  });
+  button.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' || e.code === 'Enter') e.stopPropagation();
+  });
   const picture = (source: string): HTMLImageElement => {
     const img = document.createElement('img');
     img.alt = '';
@@ -48,7 +66,9 @@ export function syncActiveFishIndicator(controlsVisible: boolean): void {
   if (!want || !active) return;
   if (badge.dataset.fish !== active) {
     badge.dataset.fish = active;
-    badge.setAttribute('aria-label', active === 'little' ? 'Active fish: small orange fish' : 'Active fish: big blue fish');
+    badge.setAttribute('aria-label', active === 'little'
+      ? 'Active fish: small orange fish. Switch fish'
+      : 'Active fish: big blue fish. Switch fish');
     pictures.little.hidden = active !== 'little';
     pictures.big.hidden = active !== 'big';
   }

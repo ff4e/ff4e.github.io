@@ -26,7 +26,7 @@ import { join } from 'node:path';
 import { TOUCH_REGIONS } from '../src/app/keyTables.js';
 import { O_NORMAL, O_OPTIONS, O_SC_DOWN } from '../src/app/screenState.js';
 
-const mode = vi.hoisted(() => ({ active: false, phone: false }));
+const mode = vi.hoisted(() => ({ active: false, phone: false, options: false, menu: false }));
 vi.mock('../src/app/touchMode.js', () => ({
   touchModeActive: () => mode.active,
   phoneModeActive: () => mode.phone,
@@ -34,8 +34,12 @@ vi.mock('../src/app/touchMode.js', () => ({
 vi.mock('../src/app/loadingUi.js', () => ({ relayout: vi.fn() }));
 vi.mock('../src/app/mapNav.js', () => ({ closeMapOverlay: vi.fn() }));
 vi.mock('../src/app/phoneControls.js', () => ({
-  initPhoneControls: vi.fn(), syncPhoneControls: vi.fn(),
+  initPhoneControls: vi.fn(), syncPhoneControls: vi.fn(), phoneMenuOpen: () => mode.menu,
 }));
+vi.mock('../src/app/activeFishIndicator.js', () => ({
+  initActiveFishIndicator: vi.fn(), syncActiveFishIndicator: vi.fn(),
+}));
+vi.mock('../src/app/touchOptions.js', () => ({ touchOptionsOpen: () => mode.options }));
 vi.mock('../src/app/nativeMenu.js', () => ({
   setNativeMenuEnabled: vi.fn(), syncNativeMenu: vi.fn(),
 }));
@@ -106,7 +110,7 @@ describe('touch controls', () => {
     beforeEach(async () => {
       vi.resetModules();
       vi.clearAllMocks();
-      Object.assign(mode, { active: false, phone: false });
+      Object.assign(mode, { active: false, phone: false, options: false, menu: false });
       vi.stubGlobal('window', {
         matchMedia: () => ({ addEventListener: vi.fn() }),
         addEventListener: vi.fn(),
@@ -114,6 +118,7 @@ describe('touch controls', () => {
       vi.stubGlobal('document', {
         documentElement: { toggleAttribute: vi.fn() },
         querySelectorAll: () => [],
+        getElementById: () => ({ hidden: true }),
       });
       touch = await import('../src/app/touchButtons.js');
       ({ ui } = await import('../src/app/screenState.js'));
@@ -188,6 +193,48 @@ describe('touch controls', () => {
       expect(ui.mapOverlay).toBe('credits');
       expect(closeMapOverlay).not.toHaveBeenCalled();
       expect(relayout).toHaveBeenCalledTimes(1);
+    });
+
+    it('routes the indicator to the current touch controls and hides it on desktop', async () => {
+      const { initActiveFishIndicator, syncActiveFishIndicator } = await import('../src/app/activeFishIndicator.js');
+      initialize();
+      ui.screen = 'room';
+      mode.active = true;
+      touch.refreshTouchMode();
+      touch.syncTouchButtons();
+      expect(initActiveFishIndicator).toHaveBeenLastCalledWith('touchbar');
+      expect(syncActiveFishIndicator).toHaveBeenLastCalledWith(true);
+      mode.phone = true;
+      touch.refreshTouchMode();
+      touch.syncTouchButtons();
+      expect(initActiveFishIndicator).toHaveBeenLastCalledWith('phone-controls');
+      expect(syncActiveFishIndicator).toHaveBeenLastCalledWith(true);
+      mode.active = false;
+      touch.refreshTouchMode();
+      touch.syncTouchButtons();
+      expect(syncActiveFishIndicator).toHaveBeenLastCalledWith(false);
+    });
+
+    it.each([false, true])('hides the indicator outside live gameplay (phone=%s)', async (phone) => {
+      const { syncActiveFishIndicator } = await import('../src/app/activeFishIndicator.js');
+      Object.assign(mode, { active: true, phone });
+      initialize();
+      ui.screen = 'room';
+      ui.helpOpen = true;
+      touch.syncTouchButtons();
+      expect(syncActiveFishIndicator).toHaveBeenLastCalledWith(false);
+      ui.helpOpen = false;
+      mode.options = true;
+      touch.syncTouchButtons();
+      expect(syncActiveFishIndicator).toHaveBeenLastCalledWith(false);
+      mode.options = false;
+      mode.menu = true;
+      touch.syncTouchButtons();
+      expect(syncActiveFishIndicator).toHaveBeenLastCalledWith(!phone);
+      mode.menu = false;
+      ui.screen = 'map';
+      touch.syncTouchButtons();
+      expect(syncActiveFishIndicator).toHaveBeenLastCalledWith(false);
     });
   });
 

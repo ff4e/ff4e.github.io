@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { appReady, exitProbe, launchBrowser, WAIT_BACKSTOP } from './ui-lib.mjs';
+import { checkFishSwitchButton, checkTabletFishIndicator } from './ui-tablet-fish-indicator.mjs';
 
 const browser = await launchBrowser();
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
@@ -95,7 +96,7 @@ try {
         map: rect(map), undo: rect(undo), buttonIcon: rect(undo.querySelector('svg')),
         badgeStyle: appearance(el), buttonStyle: appearance(undo),
         captions: rect(document.getElementById('domsubs')),
-        controls: [...document.querySelectorAll('#phone-controls > button')].map(rect),
+        controls: [...document.querySelectorAll('#phone-controls > button:not(#active-fish-indicator)')].map(rect),
         loaded: image.complete && image.naturalWidth > 0,
         hit: !!document.elementFromPoint(rect(el).x + 28, rect(el).y + 28)?.closest('#active-fish-indicator'),
         connector: getComputedStyle(el, '::before').content,
@@ -117,7 +118,7 @@ try {
     `${c.name}: captions keep an 8px gap above the button row or inside the side gutter`);
     assert(g.controls.every(r => g.badge.right <= r.x || g.badge.x >= r.right ||
       g.badge.bottom <= r.y || g.badge.y >= r.bottom), `${c.name}: badge must not cover a control`);
-    assert.equal(g.hit, false, `${c.name}: badge must not intercept gestures`);
+    assert.equal(g.hit, true, `${c.name}: fish picture is a reachable switch button`);
     await save(c.name);
   }
   await p.setViewportSize({ width: 874, height: 402 });
@@ -129,7 +130,7 @@ try {
   await p.waitForFunction(() => window.__ff.phase() === 'idle');
   const before = await p.evaluate(() => window.__ff.state().active);
   const target = await badge.boundingBox();
-  assert(target, 'indicator is visible for the tap-through check');
+  assert(target, 'indicator is visible for the fish-switch check');
   await p.touchscreen.tap(target.x + target.width / 2, target.y + target.height / 2);
   await waitFish(before === 'little' ? 'big' : 'little');
   const pictureA = await p.locator('#active-fish-indicator img:not([hidden])').screenshot();
@@ -138,6 +139,7 @@ try {
   await waitFish(before);
   const pictureB = await p.locator('#active-fish-indicator img:not([hidden])').screenshot();
   assert(!pictureA.equals(pictureB), 'switching fish must visibly change the picture');
+  await checkFishSwitchButton(p, badge);
   await p.click('#phone-more');
   await badge.waitFor({ state: 'hidden' });
   await p.click('#phone-menu [data-region="16"]');
@@ -164,6 +166,8 @@ try {
   await waitFish('little');
   await p.click('#phone-map');
   await badge.waitFor({ state: 'hidden' });
+
+  await checkTabletFishIndicator(browser, base, evidence, errors);
 
   const desktop = await browser.newContext({
     viewport: { width: 1280, height: 800 }, screen: { width: 1280, height: 800 },
@@ -270,7 +274,7 @@ try {
   await desktop.close();
 
   assert.deepEqual(errors, [], 'page must not report errors');
-  console.log('  ok   browser defaults, live phone/desktop emulation, fixed-viewport relayout, modal cleanup, 9 corner layouts, taps, exit, Undo and menus');
+  console.log('  ok   phone/tablet browser defaults, both tablet bar edges, live mode changes, fixed-viewport relayout, modal cleanup, 9 phone corners, taps, exit, Undo and menus');
   await context.close();
   passed = true;
 } catch (e) {
