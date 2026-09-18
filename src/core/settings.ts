@@ -102,14 +102,13 @@ export interface Settings {
 
 const STORAGE_KEY = 'ff.options';
 
-/** The port's factory defaults (subtitles default to English — the port's choice —
- *  and tit_def matches, so the titles/plaques/help and subtitles start as one
- *  consistent language). */
-export function defaultSettings(): Settings {
+/** Czech devices need no translation of the Czech voices; other devices use English. */
+export function defaultSettings(language = 'en'): Settings {
+  const czech = /^cs(?:-|$)/i.test(language);
   return {
     volume: { ...DEFAULT_INDEX },
-    subtitles: 'en',
-    titDef: 'en',
+    subtitles: czech ? 'off' : 'en',
+    titDef: czech ? 'cz' : 'en',
     introSeen: false,
     fitMode: 'medium',
   };
@@ -122,8 +121,8 @@ function isBusRecord(v: unknown): v is Record<VolumeBus, number> {
 }
 
 /** Load persisted settings from localStorage, falling back to defaults. */
-export function loadSettings(): Settings {
-  const s = defaultSettings();
+export function loadSettings(language?: string): Settings {
+  const s = defaultSettings(language);
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return s;
@@ -135,6 +134,7 @@ export function loadSettings(): Settings {
     }
     if (j.subtitles === 'cz' || j.subtitles === 'en' || j.subtitles === 'off') {
       s.subtitles = j.subtitles;
+      if (j.subtitles !== 'off') s.titDef = j.subtitles;
     }
     if (j.titDef === 'cz' || j.titDef === 'en') s.titDef = j.titDef;
     if (typeof j.introSeen === 'boolean') s.introSeen = j.introSeen;

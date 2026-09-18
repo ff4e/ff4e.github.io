@@ -4,6 +4,7 @@
  */
 import { chromium } from 'playwright';
 import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
+import { checkZoomHints, checkZoomHintsAfterReload } from './ui-zoom-hints.mjs';
 
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 const browser = await chromium.launch();
@@ -794,6 +795,7 @@ try {
   expect(await p.locator('#domsubs').count() === 0, 'classic keeps baked room subtitles, not the detached layer');
   await p.setViewportSize({ width: 852, height: 393 });
   await enter(2);
+  await checkZoomHints(p, expect, { enter, pinch, waitZoom });
   expect(await p.evaluate(() => {
     const map = document.getElementById('phone-map').getBoundingClientRect();
     const more = document.getElementById('phone-more').getBoundingClientRect();
@@ -820,6 +822,7 @@ try {
   await waitZoom(1.375);
   await p.reload({ waitUntil: 'domcontentloaded' });
   await p.waitForFunction(() => window.__ff);
+  await checkZoomHintsAfterReload(p, expect, enter);
   await enter(7);
   expect(await scale() === 1, 'relaunch resets the zoom preference');
   expect(errors.length === 0, `no page errors (${errors.join('; ')})`);
