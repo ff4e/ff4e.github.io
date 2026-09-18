@@ -24,7 +24,7 @@
  * tests, and test-aisubs measures the rendered text for size, bottom anchoring and
  * centring. The bitmap path is still byte-exact, and is what `classic` draws.
  * On phones the vector hosts are fixed to the screen, outside the room's camera
- * transform. Their fit budget and bottom anchor come from the safe viewport instead.
+ * transform. Portrait uses the safe viewport; landscape anchors to the physical bottom.
  */
 import {
   VECTOR_GEOM,
@@ -234,8 +234,9 @@ export function syncDomSubtitles(
   const portrait = detached && window.innerHeight > window.innerWidth;
   const gutter = detached ? (portrait ? 0 : 64) +
     Math.max(portrait ? 16 : 24, safeAreaInset('--sa-left') + 8, safeAreaInset('--sa-right') + 8) : 0;
-  const bottom = detached ? (portrait ? Math.max(24, safeAreaInset('--sa-bottom') + 8) + 64 :
-    safeAreaInset('--sa-bottom')) : 0;
+  // Landscape intentionally uses the home-indicator area; padding below clears the
+  // wave/outline. Adding the native bottom inset here lifts settled text another 20px.
+  const bottom = portrait ? Math.max(24, safeAreaInset('--sa-bottom') + 8) + 64 : 0;
   if (detached) {
     cssW = Math.max(1, window.innerWidth - 2 * gutter);
     cssH = Math.max(1, window.innerHeight - safeAreaInset('--sa-top') - bottom);
@@ -271,7 +272,7 @@ export function syncDomSubtitles(
     host.style.display = detached ? 'flex' : '';
     host.style.flexDirection = detached ? 'column' : '';
     host.style.justifyContent = detached ? 'flex-end' : '';
-    // This padding alone clears the wave and outline above the safe bottom edge.
+    // Clears the wave/outline above the host edge, including the physical landscape bottom.
     host.style.paddingBottom = detached ? `${PHONE_SUBTITLE_WAVE_PX + 2}px` : '';
     host.style.boxSizing = detached ? 'border-box' : '';
   }

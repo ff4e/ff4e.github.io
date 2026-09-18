@@ -378,8 +378,12 @@ change that could touch them:
   in enhanced/AI, words remain complete, and the original bitmap row breaks do not
   force additional phone lines. Classic and tablet/desktop captions are unchanged.
   Landscape uses a compact 26px line pitch and 2px message gap, with the resting
-  glyph boxes about 9px above the safe bottom edge; the wave and outline must not
-  clip even with zero bottom inset. Portrait retains its 30px pitch, 4px message
+  glyph boxes about 9px (7px including the outline) above the physical bottom edge,
+  independent of the home-indicator inset. The iPhone layout probe measures this
+  with 0px, 20px and 34px bottom insets, both housing sides, and AI rotation back
+  to portrait. The wave and outline must not clip. The home bar can briefly overlap
+  landscape captions when visible; using its reserved area is intentional.
+  Portrait retains its 30px pitch, 4px message
   gap and clearance above the button row. Rotation changes spacing without
   rebuilding the glyphs or restarting their waves.
   Portrait captions use 16px side margins (or larger safe-area insets); a 402px
