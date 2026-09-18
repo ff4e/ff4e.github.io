@@ -157,6 +157,7 @@ const subtitle = () => p.evaluate(() => {
     scale: host ? new DOMMatrix(getComputedStyle(host).transform).a : null,
   };
 });
+const longCaption = 'Readable captions keep the same size while the player inspects a room, even when a longer sentence wraps across several lines.';
 const captionMetrics = async (text) => {
   const loop = await p.evaluate((text) => {
     window.previousCaptionGlyph = document.querySelector('#domsubs .subtitle-glyph');
@@ -179,6 +180,7 @@ const captionMetrics = async (text) => {
     const glyphs = all.slice(start, start + [...ink].length);
     const box = host.getBoundingClientRect();
     const rects = glyphs.map((g) => g.getBoundingClientRect());
+    const lineTops = [...new Set(rects.map((r) => r.top))].sort((a, b) => a - b);
     const rows = [...host.children].map((row) => row.getBoundingClientRect());
     const wordsPerLine = new Map();
     for (const word of host.querySelectorAll('.subtitle-word')) {
@@ -188,10 +190,20 @@ const captionMetrics = async (text) => {
     return {
       fonts: [...new Set(glyphs.map((g) => getComputedStyle(g).fontSize))],
       height: rects[0]?.height,
+      bottomGap: innerHeight - Math.max(...rects.map((r) => r.bottom)),
+      linePitches: lineTops.slice(1).map((top, i) => top - lineTops[i]),
+      messageGap: parseFloat(getComputedStyle(host).rowGap),
       scale: new DOMMatrix(getComputedStyle(host).transform).a,
       complete: start >= 0 && glyphs.length === [...ink].length,
       inside: rects.every((r) => r.left >= box.left && r.right <= box.right &&
         r.top >= box.top && r.bottom <= box.bottom),
+      waveInside: glyphs.every((g, i) => {
+        const stroke = parseFloat(getComputedStyle(g.firstElementChild).webkitTextStrokeWidth) / 2;
+        return g.getAnimations()[0].effect.getKeyframes().every((frame) => {
+          const dy = new DOMMatrix(frame.transform).m42;
+          return rects[i].top + dy - stroke >= box.top && rects[i].bottom + dy + stroke <= box.bottom;
+        });
+      }),
       wrapped: [...host.children].some((row) =>
         new Set([...row.querySelectorAll('.subtitle-glyph')].map((g) => Math.round(g.getBoundingClientRect().top))).size > 1),
       visualLines: new Set(rects.map((r) => Math.round(r.top))).size,
@@ -366,7 +378,7 @@ try {
   await p.evaluate(() => window.__ff.talk('little'));
   await p.waitForFunction(() => document.getElementById('domsubs')?.children.length > 0);
   const zoomedSub = await subtitle();
-  expect(zoomedSub.detached && Math.abs(zoomedSub.bottom - 351) < 1,
+  expect(zoomedSub.detached && Math.abs(zoomedSub.bottom - 359) < 1,
     'enhanced subtitles sit at the screen bottom above the home indicator');
   expect(zoomedSub.scale === 1 && zoomedSub.sizes.length === 1 && zoomedSub.sizes[0] === '20px',
     'enhanced phone captions use a true screen-sized 20px font');
@@ -377,11 +389,19 @@ try {
   'subtitle position, width and font do not change with camera zoom');
   await pinch(0.5);
   await waitZoom(1);
+  const landscapeCaption = await captionMetrics(longCaption);
+  expect(landscapeCaption.complete && landscapeCaption.inside && landscapeCaption.waveInside &&
+    landscapeCaption.linePitches.length > 0 && landscapeCaption.linePitches.every((pitch) => near(pitch, 26)) &&
+    landscapeCaption.bottomGap >= 42 && landscapeCaption.bottomGap <= 46 && landscapeCaption.messageGap === 2,
+  `landscape captions use 26px lines near the safe bottom edge (${landscapeCaption.bottomGap}px bottom gap)`);
+  if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/iphone-landscape-captions.png` });
 
   await p.evaluate(() => {
     for (const name of ['left', 'right', 'top', 'bottom']) document.documentElement.style.removeProperty(`--sa-${name}`);
   });
-  await captionMetrics('A fresh caption for the safe-area layout check.');
+  const edgeCaption = await captionMetrics('A fresh caption for the safe-area layout check.');
+  expect(edgeCaption.bottomGap >= 8 && edgeCaption.bottomGap <= 12 && edgeCaption.waveInside,
+    `zero-inset landscape keeps the full wave and outline inside the screen (${edgeCaption.bottomGap}px bottom gap)`);
   await p.waitForFunction(() => {
     const host = document.getElementById('domsubs');
     return host && Math.abs(host.getBoundingClientRect().width - (innerWidth - 176)) < 1;
@@ -623,9 +643,11 @@ try {
     'settled portrait subtitle glyphs are readable and unclipped above the Undo row');
   if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/iphone-portrait.png` });
   const shortCaption = 'Clear captions.';
-  const longCaption = 'Readable captions keep the same size while the player inspects a room, even when a longer sentence wraps across several lines.';
   const aiShort = await captionMetrics(shortCaption);
   const aiLong = await captionMetrics(longCaption);
+  expect(aiLong.linePitches.length > 0 && aiLong.linePitches.every((pitch) => near(pitch, 30)) &&
+    aiLong.messageGap === 4,
+  'portrait retains its 30px line pitch and 4px message spacing');
   if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/iphone-wrapped-captions.png` });
   const longWord = await captionMetrics('SupercalifragilisticexpialidociousSupercalifragilisticexpialidocious');
   expect([aiShort, aiLong, longWord].every((m) => m.complete && m.inside && m.separateRows &&
@@ -718,6 +740,21 @@ try {
   expect(narrowTutorial.complete && narrowTutorial.inside && narrowTutorial.wholeWords &&
     narrowTutorial.fonts[0] === '20px' && narrowTutorial.visualLines <= 4,
   'a narrow portrait keeps all words readable without inheriting the bitmap row breaks');
+  await p.evaluate(() => {
+    window.captionGlyphs = [...document.querySelectorAll('#domsubs .subtitle-glyph')];
+    window.captionWaves = window.captionGlyphs.map((g) => g.getAnimations()[0]);
+  });
+  for (const [width, height, lineHeight, gap] of [[852, 393, '26px', '2px'], [320, 568, '30px', '4px']]) {
+    await p.setViewportSize({ width, height });
+    await p.waitForFunction(({ lineHeight, gap }) => {
+      const host = document.getElementById('domsubs');
+      const row = host?.querySelector('[data-subtitle-block] > div');
+      return row && getComputedStyle(row).lineHeight === lineHeight && getComputedStyle(host).rowGap === gap;
+    }, { lineHeight, gap });
+    expect(await p.evaluate(() => window.captionGlyphs.every((g, i) =>
+      g.isConnected && g.getAnimations()[0] === window.captionWaves[i])),
+    `rotation to ${width}x${height} updates subtitle spacing without rebuilding glyphs or waves`);
+  }
   await p.evaluate(() => {
     window.__ff.clearSubtitles();
     window.__ff.pushSubtitle('Echo.', 'M');

@@ -77,6 +77,8 @@ rotation preserves zoom while the room remains eligible. If it becomes ineligibl
 the camera returns to 1x and stays there until the player pinches again.
 Enhanced/AI subtitles stay screen-fixed: portrait captions use the safe screen width
 above the bottom button row, while landscape captions retain side gutters beside it.
+Landscape captions sit close to the safe bottom edge, with a tighter 26px line pitch
+and 2px gap between messages; portrait keeps its 30px pitch and 4px message gap.
 Their font is always 20 CSS pixels, independent of room size, orientation, zoom, and
 graphics tier; long captions wrap instead of shrinking.
 Classic retains its original baked-in room subtitles. **iPad and desktop keep their

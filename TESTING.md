@@ -365,6 +365,11 @@ change that could touch them:
   Rotate with the caption visible: landscape stays beside Undo; the font stays 20px
   in enhanced/AI, words remain complete, and the original bitmap row breaks do not
   force additional phone lines. Classic and tablet/desktop captions are unchanged.
+  Landscape uses a compact 26px line pitch and 2px message gap, with the resting
+  glyph boxes about 9px above the safe bottom edge; the wave and outline must not
+  clip even with zero bottom inset. Portrait retains its 30px pitch, 4px message
+  gap and clearance above the button row. Rotation changes spacing without
+  rebuilding the glyphs or restarting their waves.
   Portrait captions use 16px side margins (or larger safe-area insets); a 402px
   viewport provides 370px for text. The gentle wave follows reading order across
   source-row breaks, without changing direction or clipping at the bottom. Rotate

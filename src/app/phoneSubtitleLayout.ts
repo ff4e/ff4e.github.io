@@ -17,7 +17,7 @@ export function phoneSubtitleWordFlow(row: HTMLDivElement): (glyph: HTMLSpanElem
   row.style.position = 'relative';
   row.style.display = 'inline';
   row.style.whiteSpace = 'normal';
-  row.style.lineHeight = '1.5';
+  row.style.lineHeight = 'var(--phone-subtitle-line-height, 1.5)';
   row.style.transition = 'none';
   row.style.transform = '';
   row.style.willChange = '';

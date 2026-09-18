@@ -235,7 +235,7 @@ export function syncDomSubtitles(
   const gutter = detached ? (portrait ? 0 : 64) +
     Math.max(portrait ? 16 : 24, safeAreaInset('--sa-left') + 8, safeAreaInset('--sa-right') + 8) : 0;
   const bottom = detached ? (portrait ? Math.max(24, safeAreaInset('--sa-bottom') + 8) + 64 :
-    safeAreaInset('--sa-bottom') + 8) : 0;
+    safeAreaInset('--sa-bottom')) : 0;
   if (detached) {
     cssW = Math.max(1, window.innerWidth - 2 * gutter);
     cssH = Math.max(1, window.innerHeight - safeAreaInset('--sa-top') - bottom);
@@ -255,6 +255,9 @@ export function syncDomSubtitles(
   }
   if (host.parentElement !== parent) parent.appendChild(host);
   const modeChanged = host.classList.contains('phone-subtitles') !== detached;
+  const lineHeight = detached && !portrait ? '1.3' : '1.5';
+  const spacingChanged = host.style.getPropertyValue('--phone-subtitle-line-height') !== lineHeight;
+  host.style.setProperty('--phone-subtitle-line-height', lineHeight);
   host.classList.toggle('phone-subtitles', detached);
   host.style.position = detached ? 'fixed' : 'absolute';
   host.style.left = detached ? `${gutter}px` : '0';
@@ -263,11 +266,12 @@ export function syncDomSubtitles(
   host.style.borderWidth = detached ? '0' : '1px';
   host.style.width = `${cssW}px`;
   host.style.height = `${cssH}px`;
+  host.style.rowGap = detached ? (portrait ? '4px' : '2px') : '';
   if (modeChanged) {
     host.style.display = detached ? 'flex' : '';
     host.style.flexDirection = detached ? 'column' : '';
     host.style.justifyContent = detached ? 'flex-end' : '';
-    host.style.rowGap = detached ? '4px' : '';
+    // This padding alone clears the wave and outline above the safe bottom edge.
     host.style.paddingBottom = detached ? `${PHONE_SUBTITLE_WAVE_PX + 2}px` : '';
     host.style.boxSizing = detached ? 'border-box' : '';
   }
@@ -302,7 +306,7 @@ export function syncDomSubtitles(
   const activeRows = sys.debugLines();
   const lines = detached ? retainPhoneSubtitleRows(activeRows, L.lines.values()) : activeRows;
   const want = new Set(activeRows.map(row => row.id));
-  let expiryChanged = font !== L.lastFont || fitW !== L.lastFitW || modeChanged;
+  let expiryChanged = font !== L.lastFont || fitW !== L.lastFitW || modeChanged || spacingChanged;
   if (font !== L.lastFont || (!detached && fitW !== L.lastFitW) || modeChanged) {
     // The baseline pair depends only on the font, so a budget change does not pay for a
     // second forced layout.
