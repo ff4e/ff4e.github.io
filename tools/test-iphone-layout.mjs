@@ -191,6 +191,8 @@ const captionMetrics = async (text) => {
       fonts: [...new Set(glyphs.map((g) => getComputedStyle(g).fontSize))],
       height: rects[0]?.height,
       bottomGap: innerHeight - Math.max(...rects.map((r) => r.bottom)),
+      outlinedBottomGap: innerHeight - Math.max(...rects.map((r, i) =>
+        r.bottom + parseFloat(getComputedStyle(glyphs[i].firstElementChild).webkitTextStrokeWidth) / 2)),
       linePitches: lineTops.slice(1).map((top, i) => top - lineTops[i]),
       messageGap: parseFloat(getComputedStyle(host).rowGap),
       scale: new DOMMatrix(getComputedStyle(host).transform).a,
@@ -378,8 +380,8 @@ try {
   await p.evaluate(() => window.__ff.talk('little'));
   await p.waitForFunction(() => document.getElementById('domsubs')?.children.length > 0);
   const zoomedSub = await subtitle();
-  expect(zoomedSub.detached && Math.abs(zoomedSub.bottom - 359) < 1,
-    'enhanced subtitles sit at the screen bottom above the home indicator');
+  expect(zoomedSub.detached && Math.abs(zoomedSub.bottom - 393) < 1,
+    'enhanced landscape subtitles anchor to the physical bottom, not the home-indicator inset');
   expect(zoomedSub.scale === 1 && zoomedSub.sizes.length === 1 && zoomedSub.sizes[0] === '20px',
     'enhanced phone captions use a true screen-sized 20px font');
   await animatedPinch(0.8, 1.1);
@@ -392,16 +394,30 @@ try {
   const landscapeCaption = await captionMetrics(longCaption);
   expect(landscapeCaption.complete && landscapeCaption.inside && landscapeCaption.waveInside &&
     landscapeCaption.linePitches.length > 0 && landscapeCaption.linePitches.every((pitch) => near(pitch, 26)) &&
-    landscapeCaption.bottomGap >= 42 && landscapeCaption.bottomGap <= 46 && landscapeCaption.messageGap === 2,
-  `landscape captions use 26px lines near the safe bottom edge (${landscapeCaption.bottomGap}px bottom gap)`);
+    landscapeCaption.outlinedBottomGap >= 6 && landscapeCaption.outlinedBottomGap <= 9 && landscapeCaption.messageGap === 2,
+  `landscape captions use 26px lines near the physical bottom (${landscapeCaption.outlinedBottomGap}px outlined gap)`);
   if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/iphone-landscape-captions.png` });
+
+  for (const [left, right] of [[62, 0], [0, 62]]) {
+    await p.evaluate(({ left, right }) => {
+      const s = document.documentElement.style;
+      s.setProperty('--sa-left', `${left}px`);
+      s.setProperty('--sa-right', `${right}px`);
+      s.setProperty('--sa-top', '0px');
+      s.setProperty('--sa-bottom', '20px');
+    }, { left, right });
+    const nativeCaption = await captionMetrics(longCaption);
+    expect(nativeCaption.complete && nativeCaption.inside && nativeCaption.waveInside &&
+      near(nativeCaption.outlinedBottomGap, landscapeCaption.outlinedBottomGap),
+    `native landscape ${left ? 'left' : 'right'} housing keeps the same physical-edge gap with a 20px home inset`);
+  }
 
   await p.evaluate(() => {
     for (const name of ['left', 'right', 'top', 'bottom']) document.documentElement.style.removeProperty(`--sa-${name}`);
   });
   const edgeCaption = await captionMetrics('A fresh caption for the safe-area layout check.');
-  expect(edgeCaption.bottomGap >= 8 && edgeCaption.bottomGap <= 12 && edgeCaption.waveInside,
-    `zero-inset landscape keeps the full wave and outline inside the screen (${edgeCaption.bottomGap}px bottom gap)`);
+  expect(edgeCaption.outlinedBottomGap >= 6 && edgeCaption.outlinedBottomGap <= 9 && edgeCaption.waveInside,
+    `zero-inset landscape keeps the full wave and outline inside the screen (${edgeCaption.outlinedBottomGap}px outlined gap)`);
   await p.waitForFunction(() => {
     const host = document.getElementById('domsubs');
     return host && Math.abs(host.getBoundingClientRect().width - (innerWidth - 176)) < 1;
@@ -740,20 +756,25 @@ try {
   expect(narrowTutorial.complete && narrowTutorial.inside && narrowTutorial.wholeWords &&
     narrowTutorial.fonts[0] === '20px' && narrowTutorial.visualLines <= 4,
   'a narrow portrait keeps all words readable without inheriting the bitmap row breaks');
+  await p.evaluate(() => window.__ff.setGraphics('ai'));
+  await p.waitForFunction(() => (window.__ff.paintedRoomSig() || '').includes('|ai|'));
+  await captionMetrics(tutorialCaption);
   await p.evaluate(() => {
     window.captionGlyphs = [...document.querySelectorAll('#domsubs .subtitle-glyph')];
     window.captionWaves = window.captionGlyphs.map((g) => g.getAnimations()[0]);
   });
   for (const [width, height, lineHeight, gap] of [[852, 393, '26px', '2px'], [320, 568, '30px', '4px']]) {
     await p.setViewportSize({ width, height });
-    await p.waitForFunction(({ lineHeight, gap }) => {
+    await p.waitForFunction(({ lineHeight, gap, height }) => {
       const host = document.getElementById('domsubs');
       const row = host?.querySelector('[data-subtitle-block] > div');
-      return row && getComputedStyle(row).lineHeight === lineHeight && getComputedStyle(host).rowGap === gap;
-    }, { lineHeight, gap });
+      const bottom = height === 393 ? height : height - 106;
+      return row && getComputedStyle(row).lineHeight === lineHeight && getComputedStyle(host).rowGap === gap &&
+        Math.abs(host.getBoundingClientRect().bottom - bottom) < 1;
+    }, { lineHeight, gap, height });
     expect(await p.evaluate(() => window.captionGlyphs.every((g, i) =>
       g.isConnected && g.getAnimations()[0] === window.captionWaves[i])),
-    `rotation to ${width}x${height} updates subtitle spacing without rebuilding glyphs or waves`);
+    `AI rotation to ${width}x${height} updates spacing and bottom anchoring without rebuilding glyphs or waves`);
   }
   await p.evaluate(() => {
     window.__ff.clearSubtitles();
