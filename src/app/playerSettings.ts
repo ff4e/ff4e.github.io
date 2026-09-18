@@ -17,6 +17,7 @@
 import { silentFilm } from './cheats.js';
 import { activeScript } from './gameState.js';
 import { audio } from './audioEngine.js';
+import { deviceClass } from './deviceGate.js';
 import {
   VOLUMES,
   busMultiplier,
@@ -111,5 +112,5 @@ export function applyVolumeSettings(): void {
 /** Hand this module its view of the game and load the persisted options. */
 export function initPlayerSettings(h: PlayerSettingsHost): void {
   host = h;
-  settings = loadSettings();
+  settings = loadSettings(deviceClass(window) === 'desktop' ? undefined : navigator.language);
 }

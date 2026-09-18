@@ -90,6 +90,26 @@ describe('settings persistence', () => {
     expect(s.introSeen).toBe(false); // fresh install auto-plays the intro once
   });
 
+  it.each(['cs', 'cs-CZ', 'cs-SK', 'CS-cz'])('defaults %s to subtitles off with Czech UI', (language) => {
+    expect(defaultSettings(language)).toMatchObject({ subtitles: 'off', titDef: 'cz' });
+    expect(loadSettings(language)).toEqual(defaultSettings(language));
+  });
+
+  it.each(['en', 'en-US', 'sk-SK', 'de-DE', 'fr', '', 'csharp', 'cz'])(
+    'defaults non-Czech or unknown language %s to English', (language) => {
+      expect(defaultSettings(language)).toMatchObject({ subtitles: 'en', titDef: 'en' });
+    },
+  );
+
+  it('uses the device default for partial or corrupt options without losing unrelated settings', () => {
+    localStorage.setItem('ff.options', JSON.stringify({ introSeen: true, fitMode: 'large' }));
+    expect(loadSettings('cs-CZ')).toMatchObject({
+      subtitles: 'off', titDef: 'cz', introSeen: true, fitMode: 'large',
+    });
+    localStorage.setItem('ff.options', '{broken');
+    expect(loadSettings('cs-CZ')).toEqual(defaultSettings('cs-CZ'));
+  });
+
   it('round-trips through localStorage', () => {
     const s: Settings = {
       volume: { effect: 3, voice: 8, music: 0 },
@@ -135,7 +155,23 @@ describe('settings persistence', () => {
     ['off', 'en'],
   ] as const)('preserves saved %s subtitles and %s tit_def', (subtitles, titDef) => {
     localStorage.setItem('ff.options', JSON.stringify({ subtitles, titDef }));
-    expect(loadSettings()).toMatchObject({ subtitles, titDef });
+    for (const language of ['cs-CZ', 'en-US', 'de-DE']) {
+      expect(loadSettings(language)).toMatchObject({ subtitles, titDef });
+    }
+  });
+
+  it.each([['cs-CZ', 'en'], ['en-US', 'cz']] as const)(
+    '%s device recovers missing tit_def from saved %s subtitles', (language, subtitles) => {
+      localStorage.setItem('ff.options', JSON.stringify({ subtitles }));
+      expect(loadSettings(language)).toMatchObject({ subtitles, titDef: subtitles });
+    },
+  );
+
+  it('does not overwrite saved settings when loading another device language', () => {
+    const saved = { subtitles: 'off', titDef: 'en', introSeen: true };
+    localStorage.setItem('ff.options', JSON.stringify(saved));
+    loadSettings('cs-CZ');
+    expect(JSON.parse(localStorage.getItem('ff.options')!)).toEqual(saved);
   });
 
   it('sanitizes out-of-range indices and unknown subtitle modes', () => {

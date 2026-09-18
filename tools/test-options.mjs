@@ -4,6 +4,7 @@
  * cz/en/off buttons, the help overlay, and cross-reload persistence.
  */
 import { reloadApp, selectRoom, tickSleep, withApp } from './ui-lib.mjs';
+import { checkDeviceLanguageDefaults } from './ui-device-language.mjs';
 
 await withApp(async ({ p, expect }) => {
   expect((await p.evaluate(() => window.__ff.subtitleMode())) === 'en', 'English subtitles by default');
@@ -211,4 +212,5 @@ await withApp(async ({ p, expect }) => {
     (await p.evaluate(() => window.__ff.screen())) === 'map',
     'closing Help returns to the plain map (Options was closed)',
   );
+  await checkDeviceLanguageDefaults(p, expect);
 });

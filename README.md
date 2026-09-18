@@ -43,6 +43,11 @@ the dialogue. Desktop and silent solution replays show no hints; reduced-motion 
 uses a static illustration and button highlight instead.
 The swipe/tap animation gets at least 2.5 seconds even when voice audio is unavailable;
 another line or a screen change still interrupts it without changing dialogue timing.
+Phones also show a five-second, pointer-transparent **pinch-to-zoom illustration**
+the first time rooms 2 and 3 are ready to play, once per room across app launches.
+It waits for loading and zoom eligibility, stays screen-sized while zooming, and
+clears on menus, help, replays or leaving the room. Reduced motion uses a static
+two-finger illustration. Tablets and desktops do not show a gesture they cannot use.
 
 **Phone layout:** Map is in the upper-left corner, Undo in the lower-right, and More
 in the upper-right opens Load, Save, Options and Restart. These controls overlay the
@@ -151,10 +156,12 @@ Czech and English, music, the world map and its record panel, saves, the origina
 Tetris minigame, and the intro and ending movies. The solvability net replays 70 of the 72 rooms on
 every push.
 
-New players start with **English subtitles**; titles, room-name plaques and help use
-the same language. Options still offers Czech, English or subtitles off, and saved
-choices are preserved across updates. Voice recordings remain Czech, with no voice
-language selector.
+On phones and tablets, new players with a **Czech device language** start with
+**subtitles off** and Czech titles, room-name plaques and help. Other device
+languages default to English subtitles and UI text; desktop defaults stay English.
+Options still offers Czech, English or subtitles off, and saved choices are
+preserved across updates and device-language changes. Voice recordings remain
+Czech, with no voice-language selector.
 
 What is left is polish and the known divergences — [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) is the honest
 list. [`HISTORY.md`](HISTORY.md) has the milestone log, if you want the order it was all built in.
