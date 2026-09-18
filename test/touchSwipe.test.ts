@@ -34,7 +34,7 @@ vi.mock('../src/app/phoneViewport.js', () => ({
 import {
   beginHeldMove, clearHeldKey, dispatchHeldMove, heldKeyState, initMovement, releaseHeldKey,
 } from '../src/app/movement.js';
-import { initTouchSwipe, syncTouchSwipe } from '../src/app/touchSwipe.js';
+import { initTouchSwipe, switchFishFromTouch, syncTouchSwipe } from '../src/app/touchSwipe.js';
 
 class Surface {
   closest(selector: string): Surface | null { return selector === '.stage' ? this : null; }
@@ -102,6 +102,23 @@ afterEach(() => {
   win.dispatchEvent(new Event('blur'));
   clearHeldKey();
   vi.unstubAllGlobals();
+});
+
+describe('shared touch fish switch', () => {
+  it.each([false, true])('dispatches exactly the room tap key pair (phone=%s)', (phone) => {
+    state.phone = phone;
+    const keys: string[] = [];
+    for (const type of ['keydown', 'keyup']) win.addEventListener(type, event => {
+      if (!(event instanceof KeyEvent)) throw new Error('Expected a keyboard event');
+      keys.push(`${event.type}:${event.code}`);
+    });
+    switchFishFromTouch();
+    expect(keys).toEqual(['keydown:Space', 'keyup:Space']);
+    keys.length = 0;
+    pointer('pointerdown', 1);
+    pointer('pointerup', 1);
+    expect(keys).toEqual(['keydown:Space', 'keyup:Space']);
+  });
 });
 
 describe('held input after a fish exits', () => {

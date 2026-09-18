@@ -15,11 +15,11 @@
  * `undo.ts` for the verb. On desktop it is the `-` key; the faithful canvas panel has no
  * room for it and is a separate question.
  *
- * **Swap (region 11) was here and is not any more.** The gesture layer makes a tap on the
+ * **Swap (region 11) is not among these six buttons.** The gesture layer makes a tap on the
  * play area swap the fish (`touchSwipe.ts`), which is both quicker than reaching for the
  * bar and where a player's hand already is, so the button was redundant rather than
  * missing (Martin's call, 2026-08-28). The verb is untouched — `panelAction(11)` and the
- * Space key still do it.
+ * Space key still do it. The corner fish indicator now offers the same tap action.
  *
  * **Restart (region 15) took its place**, and only because retiring the faithful panel
  * left it with nowhere else to go: its two doors were that panel and the `Backspace` key,
@@ -56,7 +56,9 @@ import { settings } from './playerSettings.js';
 import { roomScreenSize } from '../render/renderRoom.js';
 import { TOUCH_REGIONS } from './keyTables.js';
 import { phoneModeActive, touchModeActive } from './touchMode.js';
-import { initPhoneControls, syncPhoneControls } from './phoneControls.js';
+import { initPhoneControls, phoneMenuOpen, syncPhoneControls } from './phoneControls.js';
+import { initActiveFishIndicator, syncActiveFishIndicator } from './activeFishIndicator.js';
+import { touchOptionsOpen } from './touchOptions.js';
 import { O_NORMAL, O_SC_DOWN, ui } from './screenState.js';
 import { closeMapOverlay } from './mapNav.js';
 import { roomLoading } from './framePacing.js';
@@ -180,7 +182,7 @@ export function initTouchButtons(h: TouchButtonsHost): void {
   // normal focus hand-off. Release only OUR button, before those handlers run.
   window.addEventListener('pointerdown', (e) => {
     const focused = document.activeElement;
-    if (focused instanceof HTMLElement && focused.matches('#touchbar [data-region]') &&
+    if (focused instanceof HTMLElement && focused.matches('#touchbar button') &&
       e.target instanceof Node && !focused.contains(e.target)) focused.blur();
   }, true);
   initialized = true;
@@ -225,6 +227,10 @@ export function phoneUi(): boolean {
 export function syncTouchButtons(): void {
   syncPhoneControls();
   syncNativeMenu();
+  const showFish = active && ui.screen === 'room' && !ui.helpOpen &&
+    !touchOptionsOpen() && !(phone && phoneMenuOpen());
+  if (showFish) initActiveFishIndicator(phone ? 'phone-controls' : 'touchbar');
+  syncActiveFishIndicator(showFish);
   const want = active && !phone && ui.screen === 'room';
   let changed = false;
   if (want !== up) {

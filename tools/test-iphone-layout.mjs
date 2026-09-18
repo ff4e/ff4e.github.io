@@ -237,8 +237,8 @@ try {
     };
   });
   expect(chrome.phone && chrome.tabletHidden && !chrome.reserved &&
-    chrome.margins.every((m) => m === '0px') && chrome.buttons === 3,
-  'phone has exactly three overlay corners and reserves no bar space');
+    chrome.margins.every((m) => m === '0px') && chrome.buttons === 4,
+  'phone has four overlay buttons including the fish switch and reserves no bar space');
   for (const [width, height, top, right, bottom, left] of [
     [852, 393, 0, 0, 20, 62],
     [874, 402, 0, 62, 20, 0],

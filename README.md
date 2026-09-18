@@ -99,15 +99,20 @@ The faithful desktop panel retains its original appearance.
 Room accents are precomputed from static wall art and stay fixed through animation
 and developer graphics-tier switches. No runtime asset request or pixel sampling is needed.
 
-**Active fish on phones:** A small orange/blue fish picture identifies the
-current selection, including changes after an exit or Undo. It is display-only;
-tap/swipe controls are unchanged. It uses the same 56px shell, 32px icon box,
+**Active fish on touch devices:** A small orange/blue fish picture identifies the
+current selection, including changes after an exit or Undo. Tap or click it to
+switch fish, exactly like tapping the room; keyboard Enter/Space also activate it.
+Room tap/swipe controls are unchanged. On phones, it uses the same 56px shell, 32px icon box,
 room-colored surface and corner spacing as the other controls, aligned with Map
-on the left and Undo along the bottom. Tapping its picture passes through to the
-same screen-tap fish switch used elsewhere. Captions clear it vertically in portrait
+on the left and Undo along the bottom. Its button uses the same guarded fish-switch
+action as room taps. Captions clear it vertically in portrait
 and through a side gutter in landscape. It never attaches to or extends the Dynamic Island.
 The badge hides in menus, help, loading, replays and cutscenes. Tablets keep their
-touch bar rather than the phone badge; desktop keeps its original panel.
+touch bar, with the same picture in a 52x48px shell at its upper-left corner,
+whether the bar runs across the top or down the left. The six buttons keep their
+existing positions and order on full-size tablets. Compact tablet windows fit the
+fish button before them, keeping every target at least 44px without overlap.
+Desktop keeps its original panel.
 Its two bundled pictures reuse the resting AI fish art consistently across graphics tiers.
 Browser DevTools phone emulation uses this same UI without native-host or preview
 flags. Changing touch capability or emulated screen size updates the UI after boot.
