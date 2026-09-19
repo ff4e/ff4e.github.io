@@ -49,9 +49,30 @@ async function visit(contextOpts) {
   const p = await ctx.newPage();
   const errs = [];
   p.on('pageerror', (e) => errs.push(e.message));
+  let releaseScripts;
+  const scriptsReady = new Promise((resolve) => { releaseScripts = resolve; });
   try {
     p.setDefaultTimeout(WAIT_BACKSTOP);
-    await p.goto(URL, { waitUntil: 'domcontentloaded' });
+    await p.route('**/*', async (route) => {
+      if (route.request().resourceType() === 'script') await scriptsReady;
+      await route.continue();
+    });
+    await p.goto(URL, { waitUntil: 'commit' });
+    await p.locator('#loading .spinner').waitFor({ state: 'visible' });
+    const startup = await p.evaluate(() => {
+      const loading = document.getElementById('loading');
+      const spinner = loading.querySelector('.spinner');
+      const rect = spinner.getBoundingClientRect();
+      return {
+        text: loading.innerText.trim(),
+        visibleChildren: [...loading.children].filter((el) => el.getClientRects().length > 0).length,
+        spinning: getComputedStyle(spinner).animationName === 'spin',
+        centered: Math.abs(rect.x + rect.width / 2 - innerWidth / 2) <= 1 &&
+          Math.abs(rect.y + rect.height / 2 - innerHeight / 2) <= 1,
+        accessible: loading.getAttribute('role') === 'status' && loading.getAttribute('aria-label') === 'Loading',
+      };
+    });
+    releaseScripts();
     await p.waitForFunction(
       () => window.__ff !== undefined || document.getElementById('fatal')?.hidden === false,
     );
@@ -89,7 +110,28 @@ async function visit(contextOpts) {
       // the document flag `touchMode.ts` writes, the way the touch probes read it.
       touch: document.documentElement.hasAttribute('data-touch'),
       phone: document.documentElement.hasAttribute('data-phone'),
+      startText: document.getElementById('intro-start').textContent,
     }));
+    let skipText = null;
+    let skippedToMap = false;
+    if (dom.booted) {
+      const activate = async (selector) => {
+        if (contextOpts.hasTouch) await p.locator(selector).tap();
+        else await p.locator(selector).click();
+      };
+      await activate('#intro-start');
+      await p.locator('#intro-hint').waitFor({ state: 'visible' });
+      skipText = await p.locator('#intro-hint').innerText();
+      for (let movie = 0; movie < 2; movie++) {
+        await p.waitForFunction(() => {
+          const video = document.getElementById('intro-video');
+          return !video.paused && video.currentTime > 0;
+        });
+        await activate('#intro-video');
+      }
+      await p.waitForFunction(() => window.__ff.screen() === 'map');
+      skippedToMap = await p.evaluate(() => window.__ff.introSeen() && !window.__ff.introPlaying());
+    }
     let undoUnchanged = null;
     if (dom.booted && !dom.phone) {
       // Keep the first-run boot checks above; use a playable session for this negative control.
@@ -112,8 +154,9 @@ async function visit(contextOpts) {
       undoUnchanged = await p.evaluate(() => window.__ff.state().active === 'big' &&
         window.__ff.undo() && window.__ff.state().active === 'little');
     }
-    return { ...dom, errs, undoUnchanged };
+    return { ...dom, startup, skipText, skippedToMap, errs, undoUnchanged };
   } finally {
+    releaseScripts();
     await b.close();
   }
 }
@@ -205,6 +248,21 @@ try {
   expect(desktop.touch === false, `desktop: touch mode is off (${desktop.touch})`);
   expect(desktop.phone === false, 'desktop: the phone-only presentation gate is off');
   expect(desktop.undoUnchanged === true, 'desktop: existing Undo selection is unchanged by the phone policy');
+  for (const [name, result, touch] of [
+    ['phone', phone, true], ['sideways phone', landscape, true],
+    ['tablet', tablet, true], ['desktop', desktop, false],
+  ]) {
+    expect(result.startup.text === '' && result.startup.visibleChildren === 1,
+      `${name}: initial loading has only the spinner, with no visible text`);
+    expect(result.startup.spinning && result.startup.centered,
+      `${name}: the initial spinner animates in the center of the viewport`);
+    expect(result.startup.accessible, `${name}: spinner-only loading retains an accessible status`);
+    expect(result.startText === (touch ? '▶ Tap to start' : '▶ Click to start'),
+      `${name}: the start button matches the input device`);
+    expect(result.skipText === (touch ? 'Tap to skip' : 'click / Esc to skip'),
+      `${name}: the skip hint matches the input device`);
+    expect(result.skippedToMap, `${name}: real start and skip gestures still reach the map`);
+  }
 } catch (e) {
   ok = false;
   console.log('  FAIL threw: ' + (e?.message ?? e));

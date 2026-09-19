@@ -107,16 +107,14 @@ await withApp(
       visible: window.__ff.loadingVisible(),
       painted: window.__ff.mapPresented(),
       msg: document.getElementById('loading-msg').textContent,
-      titled: !document.getElementById('loading').classList.contains('inroom'),
+      text: document.getElementById('loading').innerText.trim(),
+      spinner: document.querySelector('#loading .spinner').getBoundingClientRect().width,
     }));
     expect(held.widths.length === 0, `nothing is presented while the map's art loads (saw ${JSON.stringify(held.widths)})`);
     expect(!held.painted, 'the map has not been painted yet');
     expect(held.visible, 'the loading overlay covers the wait');
-    expect(/world map/i.test(held.msg ?? ''), `the overlay says what is being waited for (got "${held.msg}")`);
-    // On THIS path the overlay is boot's own, still up — so it keeps boot's title and
-    // attribution. (A wait arrived at mid-game re-shows it stripped down, as a room
-    // entry does; section 4 covers that.)
-    expect(held.titled, 'boot straight to the map keeps the boot splash, because it never came down');
+    expect(/world map/i.test(held.msg ?? ''), `the map wait retains its contextual message (got "${held.msg}")`);
+    expect(held.text === '' && held.spinner > 0, 'boot straight to the map stays spinner-only until the map is ready');
     // The point of folding this into boot rather than arming it on a delay: the boot
     // overlay is already up, so it must simply stay up. A [true, false, true] here is
     // the map blinking the loading screen off and back on, which is what a naive
@@ -205,11 +203,11 @@ await withApp(
     await p.waitForFunction(() => window.__ff.loadingVisible());
     const rearmed = await p.evaluate(() => ({
       msg: document.getElementById('loading-msg').textContent,
-      stripped: document.getElementById('loading').classList.contains('inroom'),
+      text: document.getElementById('loading').innerText.trim(),
       widths: [...window.__map.widths],
     }));
     expect(/world map/i.test(rearmed.msg ?? ''), `returning to the wait re-labels the overlay (got "${rearmed.msg}")`);
-    expect(rearmed.stripped, 'a wait arrived at mid-game shows the stripped-down overlay, not the boot splash');
+    expect(rearmed.text === 'Loading the world map…', 'a mid-game wait still displays its contextual loading message');
     expect(
       rearmed.widths.length === 1 && rearmed.widths[0] === 640,
       `the AI map is withheld again on return to the tier (${JSON.stringify(rearmed.widths)})`,

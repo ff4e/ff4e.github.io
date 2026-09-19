@@ -901,9 +901,8 @@
       .fb-btn:hover { background: #244; }
       .fb-btn.ghost { background: none; border-color: #3a3a4a; }
       .fb-btn.ghost:hover { background: #22222e; }
-      /* Re-used for room entry after boot: the title and the attribution belong to
-         the boot splash, and would read as "the game restarted" mid-play. */
-      #loading.inroom h1, #loading.inroom #loading-credit { display: none; }
+      /* Startup is spinner-only; later waits retain their contextual message. */
+      #loading:not(.inroom) #loading-msg { display: none; }
       .overlay h1 { margin: 0; font: 600 26px/1.2 system-ui, sans-serif; letter-spacing: 0.5px; }
       .overlay p { margin: 0; max-width: 34em; opacity: 0.85; }
       .spinner {
@@ -912,8 +911,6 @@
       }
       @keyframes spin { to { transform: rotate(360deg); } }
       #loading-msg { opacity: 0.7; font: 13px/1.4 system-ui, sans-serif; min-height: 1.4em; }
-      #loading-credit { opacity: 0.45; font: 11px/1.5 system-ui, sans-serif; max-width: 30em; }
-      #loading-credit a { color: inherit; }
       .btn {
         padding: 12px 26px; font: 600 16px/1 system-ui, sans-serif;
         color: #cdd; background: #1a2a2a; border: 1px solid #3a5a5a; border-radius: 8px; cursor: pointer;
@@ -952,14 +949,9 @@
     <div id="perfhud"></div>
     <!-- Shown immediately (the module is deferred), so the player never sees a blank
          page while the game assets fetch. Hidden by the app once boot completes. -->
-    <div id="loading" class="overlay">
-      <h1>Fish Fillets 4ever</h1>
-      <div class="spinner"></div>
+    <div id="loading" class="overlay" role="status" aria-label="Loading">
+      <div class="spinner" aria-hidden="true"></div>
       <div id="loading-msg">Loading…</div>
-      <div id="loading-credit">
-        A fan port of ALTAR's 1998 <em>Fish Fillets</em>, released by ALTAR under the GPL in 2002.
-        Not affiliated with ALTAR interactive.
-      </div>
     </div>
     <!-- The one player-facing failure screen. Raised for a boot failure AND, since the
          art tiers and the room's own assets stopped recovering in place, for any load

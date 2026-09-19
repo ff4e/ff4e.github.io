@@ -13,6 +13,7 @@ await withApp(async ({ p, expect }) => {
   expect(await p.evaluate(() => window.__ff.screen()) === 'intro', 'first run boots into the intro');
   expect(await p.evaluate(() => window.__ff.introPlaying()), 'intro is active on first run');
   expect(await p.evaluate(() => window.__ff.introSeen()) === false, 'introSeen is false before the intro is watched');
+  expect(await p.locator('#intro-start').innerText() === '▶ Click to start', 'desktop keeps the click-to-start prompt');
 
   // Intro video sizing (v1.0.3): the <video> must fill the viewport and letterbox
   // via object-fit:contain. The pre-fix CSS used only max-width/max-height:100v*,
@@ -66,6 +67,7 @@ await withApp(async ({ p, expect }) => {
   // Click "Click to start" to begin, then skip through the movies (logo → intro) to
   // the map — now that playback has begun, skipping advances as usual.
   await p.click('#intro-start');
+  expect(await p.locator('#intro-hint').innerText() === 'click / Esc to skip', 'desktop keeps the click / Esc skip hint');
   await p.waitForFunction(() => !window.__ff.introSeen() && window.__ff.screen() === 'intro');
   await p.evaluate(() => window.__ff.skipIntro()); // skip the logo → intro
   await p.evaluate(() => window.__ff.skipIntro()); // skip the intro → map

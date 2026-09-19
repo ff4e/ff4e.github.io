@@ -19,7 +19,7 @@ import { loadingEl } from './dom.js';
 import { initFeedback } from './feedback.js';
 import { startFrames } from './frameClock.js';
 import { engine, setFont } from './gameState.js';
-import { maybeShowWebglNote, setLoadingMsg } from './loadingUi.js';
+import { maybeShowWebglNote } from './loadingUi.js';
 import { ensureDeskyData } from './mapDraw.js';
 import { playFirstRunIntro, startMenuMusic } from './mapNav.js';
 import { graphics, renderer } from './renderSettings.js';
@@ -77,7 +77,6 @@ export async function runBoot(): Promise<void> {
   initOrientationLock();
   syncOrientationLock();
   setFont(await FontData.load('/data/Intro'));
-  setLoadingMsg('Loading fonts…');
   // Enhanced subtitle fonts — all bundled + OFL/GPL so they render identically on every
   // platform. Mulish/Manrope/Jost are variable (weight axis 100-900); FFSubtitle is the
   // original FreeSans Bold (the FFNG subtitle face).
@@ -111,7 +110,6 @@ export async function runBoot(): Promise<void> {
     setSubFontReady(true);
   }
   // Control-panel overlay graphic (TOvl / panel.ffp).
-  setLoadingMsg('Loading graphics…');
   const panelUrl = '/data/Menu/panel.ffp';
   ui.panel = parseFfp(await requiredBytes(panelUrl, 'the control panel', 'mustHave'));
   // World map assets (mapa-0/mapa-1/maska + node sprites n0..n4).
@@ -134,7 +132,6 @@ export async function runBoot(): Promise<void> {
   }
   await ensureDeskyData();
 
-  setLoadingMsg('Loading sound…');
   // The persistent global packages, in the order the original loads them: x00 effects,
   // x03 ambient chatter (the "ob-*" idle lines, StdKecej / vyber_hlasku) and x02 death
   // commentary (the "smrt-*" lines, StdSmrt). 2.4 MB — it was 8.3 before the speech
@@ -154,7 +151,6 @@ export async function runBoot(): Promise<void> {
   for (const [id, what] of GLOBAL_PKGS) {
     await requireSoundPkg(id, `/data/Title/${id}.fft`, voiceUrl(id), what);
   }
-  setLoadingMsg('Loading the world…');
   await loadRoom(7);
   // The two lines the 1998 release referenced but shipped without (public/restored/,
   // built by tools/build-restored-sounds.ts) — `pyr-m-nudi` and `jes-v-potvora2`. A

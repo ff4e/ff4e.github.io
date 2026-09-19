@@ -7,18 +7,20 @@
  * advancing logo→intro→caller.
  *
  * Browsers gate audio behind a user gesture, so a first-run auto-play (before
- * any interaction) shows a "click to start" splash first — the click both
+ * any interaction) shows a start splash first — the gesture both
  * unlocks audio and begins playback, guaranteeing the intro has sound.
  */
+import { touchModeActive } from './touchMode.js';
+
 export interface IntroElements {
   /** Full-screen overlay container (shown during playback, hidden otherwise). */
   layer: HTMLElement;
   video: HTMLVideoElement;
-  /** "Click to start" splash button (first-run audio gate). */
+  /** Start splash button (first-run audio gate), labeled for the input mode. */
   startBtn: HTMLElement;
   /** Title cover shown behind the splash; hidden once a movie starts. */
   cover: HTMLElement;
-  /** "click / Esc to skip" hint, shown once playback begins. */
+  /** Input-mode-specific skip hint, shown once playback begins. */
   hint: HTMLElement;
 }
 
@@ -58,6 +60,9 @@ export class IntroPlayer {
    * from the map, where the click itself is the gesture).
    */
   start(resolvers: Array<() => string>, onDone: () => void, gated: boolean): void {
+    const touch = touchModeActive(window);
+    this.els.startBtn.textContent = touch ? '▶ Tap to start' : '▶ Click to start';
+    this.els.hint.textContent = touch ? 'Tap to skip' : 'click / Esc to skip';
     this.queue = resolvers.slice();
     this.onDone = onDone;
     this.active = true;

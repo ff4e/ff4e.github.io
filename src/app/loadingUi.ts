@@ -71,8 +71,7 @@ export function beginRoomLoadingUi(num: number): void {
   roomLoadingSince = performance.now();
   const desc = ROOMS[num - 1];
   setLoadingMsg(desc ? `Loading ${subLang() === 'cz' ? desc.cz : desc.en}…` : 'Loading…');
-  // The boot splash's title and attribution would read as a restart mid-game; the
-  // spinner and the room name are the parts that belong to a room entry.
+  // Unlike the spinner-only startup, a room entry names what is being loaded.
   loadingEl.classList.add('inroom');
 }
 
@@ -126,10 +125,8 @@ export function syncLoadingUi(now: number): void {
     // present something the player is not being taken to.
     mapLoadingDueAt = now + (mapPresented ? LOADING_DELAY_MS : 0);
     setLoadingMsg('Loading the world map…');
-    // The boot splash's title and attribution belong to boot — so keep them in the one
-    // case where this IS boot still running: the overlay never came down between boot
-    // and the map's first frame. Every other arm is a spinner being (re)shown mid-game,
-    // where the splash would read as a restart, exactly as a room entry's does.
+    // Keep startup spinner-only until the map's first frame. An overlay re-shown
+    // mid-game explains the wait, just like a room entry.
     if (loadingEl.hidden) loadingEl.classList.add('inroom');
   }
   if (!creditsWaiting) creditsLoadingDueAt = 0;
