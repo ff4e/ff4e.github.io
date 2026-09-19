@@ -23,7 +23,12 @@ change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a ga
 CONTRIBUTING.md for how much checking a given change actually needs, and for the
 `KNOWN_FLAKY` retry rule.
 
-`test-phone-boots.mjs` checks spinner-only startup before scripts run, centered and
+`test-marketing.mjs` covers the production About page, responsive layout, links,
+no-JavaScript content, and the temporary iPhone/iPad browser redirect before any game
+bundle, game data or save writes. `browserAvailability.test.ts` pins the device policy,
+including desktop-mode iPadOS and the native `capacitor:` exemption.
+
+`test-phone-boots.mjs` uses a supported Android user agent and checks spinner-only startup before scripts run, centered and
 accessible, plus touch-specific start/skip labels and real intro gestures on phones
 in both orientations, tablets and desktops. `test-intro.mjs` retains the desktop
 wording checks; `test-map-loading.mjs` covers spinner-only startup through the initial

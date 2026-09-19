@@ -828,7 +828,7 @@
       #feedbar[hidden] { display: none; }
       #feedbar:hover, #feedbar:focus-within { opacity: 1; }
       #feedbar-build { opacity: 0.7; font-variant-numeric: tabular-nums; }
-      #feedbar button {
+      #feedbar button, #feedbar a {
         background: none;
         border: none;
         border-bottom: 1px dotted #667;
@@ -836,8 +836,9 @@
         font: inherit;
         padding: 0;
         cursor: pointer;
+        text-decoration: none;
       }
-      #feedbar button:hover { color: #9dd; border-bottom-color: #9dd; }
+      #feedbar button:hover, #feedbar a:hover { color: #9dd; border-bottom-color: #9dd; }
       /* The feedback form. A real <dialog>, so the browser gives us the modal backdrop,
          the focus trap and Esc-to-close; the game's keyboard is blocked while it is up
          (main.ts checks isOpen()), because every letter key otherwise drives a fish or
@@ -1066,6 +1067,7 @@
         <div id="feedbar" hidden>
           <span id="feedbar-build"></span>
           <button id="feedback-open" type="button">Send feedback</button>
+          <a id="about-link" href="/about.html" target="_blank" rel="noopener" hidden>About</a>
         </div>
       </div>
     </div>
@@ -1187,6 +1189,6 @@
         <p id="feedback-status" role="status" aria-live="polite"></p>
       </div>
     </dialog>
-    <script type="module" src="/src/app/main.ts"></script>
+    <script type="module" src="/src/entry.ts"></script>
   </body>
 </html>

@@ -75,7 +75,11 @@ export default defineConfig({
     __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
   },
   server: { host: '127.0.0.1', port: 5173 },
-  build: { copyPublicDir: false, target: 'es2022' },
+  build: {
+    copyPublicDir: false,
+    target: 'es2022',
+    rollupOptions: { input: { game: 'index.html', about: 'about.html' } },
+  },
   // The unit suite runs against a seeded Math.random so a failure always means a real
   // defect, never a 1-in-100 draw (see test/rng.ts). The game itself is untouched.
   //
