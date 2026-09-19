@@ -23,6 +23,12 @@ change can break; a filtered run prints `PARTIAL RUN` and is explicitly not a ga
 CONTRIBUTING.md for how much checking a given change actually needs, and for the
 `KNOWN_FLAKY` retry rule.
 
+`test-phone-boots.mjs` checks spinner-only startup before scripts run, centered and
+accessible, plus touch-specific start/skip labels and real intro gestures on phones
+in both orientations, tablets and desktops. `test-intro.mjs` retains the desktop
+wording checks; `test-map-loading.mjs` covers spinner-only startup through the initial
+map-art wait and contextual loading messages on later waits.
+
 `touchButtons.test.ts` pins the tablet order: Map, Save, Load, Restart, Options, Undo.
 `test-touchbar.mjs` checks rendered order in portrait and both landscape bar positions,
 as well as Undo/Restart effects; phone markup and corner controls remain separately covered.
