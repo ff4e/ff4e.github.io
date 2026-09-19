@@ -1,5 +1,8 @@
 /**
  * Device class: what KIND of device is playing, and nothing more.
+ * The temporary iPhone/iPad website pause is a separate availability decision in
+ * `src/platform/browserAvailability.ts`, applied by `src/entry.ts` before game import.
+ * It does not change these layout rules or block the native app.
  *
  * WHAT THIS ANSWERS, AND WHAT IT NO LONGER DOES
  *

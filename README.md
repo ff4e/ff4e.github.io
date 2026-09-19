@@ -7,6 +7,11 @@ you move two talking fish around a room without dropping anything on either of t
 
 No install, no account, no plugin. It runs in a desktop browser.
 
+Learn about the project and its platforms at **<https://ff4e.github.io/about.html>**.
+The iPhone and iPad app is currently in testing, not yet on the App Store.
+Browser play on iPhone and iPad is temporarily paused: those visitors see the
+project page instead. The native app, desktop browsers and Android remain playable.
+
 ![The world map](docs/screenshots/world-map.jpg)
 
 ![Mr. Cheops' House, one of the 72 rooms](docs/screenshots/room-pyramida.jpg)

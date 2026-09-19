@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>About Fish Fillets 4ever</title>
+    <meta name="description" content="Two talking fish, 72 underwater puzzles. A faithful port of the 1998 Fish Fillets: play in your desktop browser, with an iPhone and iPad app coming soon." />
+    <meta name="theme-color" content="#0b1c25" />
+    <link rel="canonical" href="https://ff4e.github.io/about.html" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Fish Fillets 4ever" />
+    <meta property="og:title" content="Fish Fillets 4ever — two fish, one way out" />
+    <meta property="og:description" content="Rediscover 72 underwater puzzles in a faithful port of the 1998 classic. Play in your desktop browser. Coming soon to iPhone and iPad." />
+    <meta property="og:url" content="https://ff4e.github.io/about.html" />
+    <meta property="og:image" content="https://ff4e.github.io/og-card.jpg" />
+    <meta property="og:image:alt" content="Fish Fillets: two fish in an underwater puzzle, beside the original control panel." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="/src/site/about.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header wrap">
+      <a class="brand" href="/about.html" aria-label="Fish Fillets 4ever home">
+        <img src="/apple-touch-icon.png" width="40" height="40" alt="" />
+        Fish Fillets <span>4ever</span>
+      </a>
+      <nav aria-label="Main">
+        <a href="#project">The project</a>
+        <a href="#play">Where to play</a>
+      </nav>
+    </header>
+
+    <main id="main" class="wrap">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow">An underwater puzzle classic, kept alive</p>
+          <h1 id="hero-title">Two fish.<br />One way out.</h1>
+          <p class="intro">A big fish. A small fish. And a room full of things you really
+            shouldn't drop on either of them.</p>
+          <p>Explore a wonderfully strange underwater world, push your way through
+            clever puzzles, and listen to two unlikely partners talk their way into trouble.</p>
+          <div class="actions">
+            <a class="button" href="/" data-browser-play hidden>Play in your browser <span aria-hidden="true">&rarr;</span></a>
+            <a class="text-link" href="#ios">Coming to iPhone &amp; iPad <span aria-hidden="true">&searr;</span></a>
+          </div>
+        </div>
+        <figure class="hero-art">
+          <img src="/docs/screenshots/room-pyramida.jpg" width="1100" height="594"
+            alt="The two fish explore an Egyptian pyramid filled with sliding blocks and narrow passages." fetchpriority="high" />
+          <figcaption>Mr. Cheops' House <span>One of 72 rooms to figure out</span></figcaption>
+        </figure>
+      </section>
+
+      <section id="project" class="project" aria-labelledby="project-title">
+        <div>
+          <p class="eyebrow">Old puzzles. New waters.</p>
+          <h2 id="project-title">The same game.<br />A new way to dive in.</h2>
+        </div>
+        <div class="project-copy">
+          <p><strong>Fish Fillets 4ever</strong> is an independent, open-source port of
+            <em>Fish Fillets</em>, created by ALTAR in 1998. The original Delphi source
+            is translated into a modern engine, keeping the puzzles, physics, and
+            peculiar sense of humor intact.</p>
+          <p>Keep the classic look, or choose enhanced and AI-upscaled artwork.
+            The scenery gets a fresh coat of paint; the challenge stays the same.</p>
+          <p>Ported using <strong>TypeScript</strong>, with <strong>WebGL</strong> rendering.
+            <a href="https://github.com/ff4e/ff4e.github.io">Explore the source on GitHub</a>.</p>
+        </div>
+      </section>
+
+      <div class="features" aria-label="Game features">
+        <p><strong>72 rooms</strong><span>One big underwater adventure</span></p>
+        <p><strong>Two very different fish</strong><span>Find a way out together</span></p>
+        <p><strong>Czech voices</strong><span>English &amp; Czech subtitles</span></p>
+      </div>
+
+      <section id="play" class="play" aria-labelledby="play-title">
+        <p class="eyebrow">Choose your waters</p>
+        <h2 id="play-title">Where to play</h2>
+        <div class="platforms">
+          <article id="browser" class="platform" aria-labelledby="browser-title">
+            <p class="status">Available on desktop</p>
+            <h3 id="browser-title">In your browser</h3>
+            <p>Jump straight into the game on your computer.
+              No install, no account, no plugin. Your progress stays in your browser.</p>
+            <p id="browser-paused" class="notice" role="status" hidden>
+              Browser play is temporarily unavailable on this iPhone or iPad.
+              You can still play on a computer. The native iPhone and iPad app is
+              currently in testing.
+            </p>
+            <a class="button" href="/" data-browser-play hidden>Play now <span aria-hidden="true">&rarr;</span></a>
+            <p class="fine-print">Browser play on iPhone and iPad is temporarily paused.</p>
+            <noscript><p class="notice">The browser game needs JavaScript enabled. This page does not.</p></noscript>
+          </article>
+          <article id="ios" class="platform" aria-labelledby="ios-title">
+            <p class="status upcoming">Coming soon</p>
+            <h3 id="ios-title">On iPhone &amp; iPad</h3>
+            <p>The same underwater adventure, with touch controls designed for
+              your phone or tablet. Swipe to swim, tap to switch fish, and take
+              the puzzles with you.</p>
+            <p class="testing-note">Currently in testing.</p>
+            <p class="fine-print">Not yet available on the App Store. A download link will appear here when it is released.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer wrap">
+      <p>Made for the love of a classic.<br /><span>Original game by ALTAR. Independent port, GPL-2.0-or-later.</span></p>
+      <nav aria-label="Project links">
+        <a href="https://github.com/ff4e/ff4e.github.io">Source code</a>
+        <a href="https://github.com/ff4e/ff4e.github.io/blob/main/CREDITS.md">Credits</a>
+        <a href="/privacy.html">Privacy</a>
+      </nav>
+    </footer>
+    <script type="module" src="/src/site/about.ts"></script>
+  </body>
+</html>

@@ -1,12 +1,15 @@
 /**
- * UI test: a phone boots the game like everyone else.
+ * UI test: a supported phone browser boots with the existing touch UI.
  *
  * This probe is the inverse of the one it replaces. `test-desktop-only.mjs` asserted that
  * a phone was REFUSED before any art was fetched, back when the port had only the
- * original's keyboard and mouse schemes. The touch scheme exists now, the refusal is gone
+ * original's keyboard and mouse schemes. The touch scheme exists now, that refusal is gone
  * (Martin's decision, 2026-08-28), and what needs watching is the opposite invariant: a
  * phone-shaped context reaches a booted game, with no notice, no override and nothing
- * left in the page that could ever put a phone back behind a wall.
+ * left in the game that could put all phone layouts back behind a wall.
+ * iPhone/iPad BROWSERS are temporarily paused separately at the entry point; that
+ * availability policy is covered by test-marketing.mjs. This uses an Android UA so
+ * the original touch/intro/rotation assertions keep exercising a supported browser.
  *
  * Worth a browser rather than a unit test, and for the same reason the refusal was: the
  * rule is read from `matchMedia` and `screen` in a real page, and the failure this is
@@ -167,14 +170,14 @@ const expect = (cond, msg) => {
   console.log(`  ${cond ? 'ok  ' : 'FAIL'} ${msg}`);
 };
 
-/** An iPhone 15-ish: touch-only, phone-sized, and held the "wrong" way round. */
+/** A phone-sized touch browser, held the "wrong" way round. */
 const PHONE = {
   viewport: { width: 390, height: 844 },
   screen: { width: 390, height: 844 },
   hasTouch: true,
   isMobile: true,
   userAgent:
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36',
 };
 
 try {

@@ -59,3 +59,12 @@ symlink) and writes `.nojekyll` before the Pages artifact is uploaded. Optional
 secret (→ `VITE_CF_BEACON_TOKEN`) is set; otherwise analytics is a no-op (see
 `src/platform/analytics.ts`). The build stamps `__APP_VERSION__` / `__BUILD_HASH__` /
 `__BUILD_DATE__` (logged to the console at boot).
+
+Vite builds two HTML entry points: the game at `/` and the project page at
+`/about.html`. `src/entry.ts` checks the temporary iPhone/iPad browser pause before
+dynamically importing the game. Both pages use `src/platform/browserAvailability.ts`;
+set its `IOS_BROWSER_PAUSED` switch to `false` when browser play is restored, and
+update the static availability copy and tests in the same change. The `capacitor:`
+native host is always exempt. Device detection is best-effort (iOS user agents,
+plus a touch-capable Mac signature for desktop-mode iPadOS), not an access-control
+boundary; layout classification in `deviceGate.ts` stays unchanged.
