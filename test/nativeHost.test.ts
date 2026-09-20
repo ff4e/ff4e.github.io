@@ -113,3 +113,25 @@ describe('NATIVE_SCHEME', () => {
     expect(`${pinned}:`).toBe(NATIVE_SCHEME);
   });
 });
+
+describe('iOS app identity', () => {
+  it('keeps the Home Screen name recognizable and the policy consistent', () => {
+    const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
+    const name = /<key>CFBundleDisplayName<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1];
+    expect(name).toBe('Fish Fillets');
+    const policy = readFileSync(new URL('../public/privacy.html', import.meta.url), 'utf8');
+    expect(policy).toContain(`shown as <strong>${name}</strong> on iOS`);
+  });
+
+  it('preserves the shipping bundle ID in Capacitor and both native configurations', () => {
+    const config = readFileSync(new URL('../capacitor.config.ts', import.meta.url), 'utf8');
+    expect(/^\s*appId:\s*'([^']+)'/m.exec(config)?.[1]).toBe('io.github.ff4e.fishfillets4ever');
+    const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
+    expect(/<key>CFBundleIdentifier<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1])
+      .toBe('$(PRODUCT_BUNDLE_IDENTIFIER)');
+    const project = readFileSync(new URL('../ios/App/App.xcodeproj/project.pbxproj', import.meta.url), 'utf8');
+    const identifiers = [...project.matchAll(/^\s*PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/gm)]
+      .map((match) => match[1]);
+    expect(identifiers).toEqual(['io.github.ff4e.fishfillets4ever', 'io.github.ff4e.fishfillets4ever']);
+  });
+});
