@@ -168,10 +168,11 @@ Options still offers Czech, English or subtitles off, and saved choices are
 preserved across updates and device-language changes. Voice recordings remain
 Czech, with no voice-language selector.
 
-The iOS bundle declares English (`en`) and Czech (`cs`) through
-`CFBundleLocalizations` in `ios/App/App/Info.plist`, while retaining English as
-the Base localization's development language. The game manages its translations
-itself rather than using language-specific `.lproj` resources. This declaration
+The iOS bundle declares Czech (`cs`) and English (`en`) through
+`CFBundleLocalizations` in `ios/App/App/Info.plist`, with Czech as the native
+Base development language in both the plist and Xcode project. The game manages
+its translations itself rather than using language-specific `.lproj` resources.
+The device-language defaults and saved subtitle choices above are unchanged. This declaration
 supplies the App Store's supported-language metadata; translating the store
 description alone does not. See [Apple's localization guidance](https://developer.apple.com/library/archive/qa/qa1828/_index.html).
 
