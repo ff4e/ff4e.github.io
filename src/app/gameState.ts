@@ -128,14 +128,31 @@ export function setLinesSpoken(v: number): void {
 export function setLastLine(v: { name: string; count: number } | null): void {
   lastLine = v;
 }
+/**
+ * The history of an attempt that ended with both fish out of play and the room
+ * auto-restarting, kept so undo can take the death back — see `undo.ts`, "How long a
+ * history lives". Null whenever there is no such attempt to return to.
+ */
+export let deadAttempt: { rec: string; snapshot: ScriptSnapshot | null }[] | null = null;
+
 /** Start a fresh undo history: a room change, or the player's own Restart. */
 export function clearUndoHistory(): void {
   undoHistory.length = 0;
+  deadAttempt = null;
 }
 /** Replace the history wholesale — a load, restoring the saved attempt's own points. */
 export function setUndoHistory(points: readonly { rec: string; snapshot: ScriptSnapshot | null }[]): void {
   undoHistory.length = 0;
+  deadAttempt = null;
   for (const p of points) undoHistory.push(p); // a loop, not a spread: a long attempt is thousands
+}
+/** A death auto-restart: start a fresh history, but keep the ended attempt's behind it. */
+export function retireUndoHistory(): void {
+  deadAttempt = undoHistory.splice(0);
+}
+/** The player has moved on from the restart's start position: the ended attempt is gone. */
+export function dropDeadAttempt(): void {
+  deadAttempt = null;
 }
 
 // ── Per-fish tick state ─────────────────────────────────────────────────────

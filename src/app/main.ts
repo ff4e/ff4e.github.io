@@ -679,9 +679,9 @@ function buildRoom(carryPole = false): void {
   // like roompole above, because TRoom.Init clears them in the very same block
   // (URoom.pas:1430-1433), while TRoom.Restart leaves them alone.
   if (!carryPole) resetRoomScopedCheats();
-  // A room CHANGE starts a fresh undo history — one of the three places that mean a fresh
-  // attempt, with `restartRoom` and the death auto-restarts. Not keyed on the rebuild
-  // itself: `restore` (a load, and undo) rebuilds too and must keep its history.
+  // A room CHANGE starts a fresh undo history, as do `restartRoom` and the death auto-restarts
+  // (which keep the ended attempt behind it). Not keyed on the rebuild itself: `restore` (a
+  // load, and undo) rebuilds too and must keep its history.
   if (!carryPole) clearUndoHistory();
   // Re-apply whatever survived (a restart), onto the freshly built Room.
   applySpriteCheats();
