@@ -19,6 +19,7 @@
  *   npm run release:web -- 1.0.39                 # full release
  *   npm run release:web -- 1.0.39 --skip-gate     # skip the local test gate
  *   npm run release:web -- --verify-only          # only re-check the live site
+ *   npm run release:web -- --current              # latest tag vs. what's actually live
  *
  * Requires: `gh` authenticated as the personal account, a clean `main` worktree,
  * `FF_UI_JOBS=4` is set for you (see AGENTS.md — the default job count produces
@@ -57,10 +58,35 @@ function verifyLive() {
   return version;
 }
 
+/**
+ * The latest released version, from the source of truth for "released": the
+ * `v*` tags actually pushed to origin — not the local `package.json` version,
+ * which a half-finished `npm version` bump could have already changed without
+ * a push, and not just the newest local tag, which could be stale against a
+ * teammate's release. Fetches tags first so this is never answered from a
+ * cache.
+ */
+function latestTag() {
+  sh('git fetch --tags --quiet');
+  const tag = sh(`git tag --list "v*" --sort=-v:refname`).split('\n').find(Boolean);
+  if (!tag) die('no v* tags found — has this repo ever been released?');
+  return tag.replace(/^v/, '');
+}
+
 const args = process.argv.slice(2);
 const verifyOnly = args.includes('--verify-only');
+const current = args.includes('--current');
 const skipGate = args.includes('--skip-gate');
 const versionArg = args.find((a) => /^\d+\.\d+\.\d+$/.test(a));
+
+if (current) {
+  const tagged = latestTag();
+  const live = verifyLive();
+  console.log(`latest tag: v${tagged}`);
+  console.log(`live version: v${live}`);
+  console.log(tagged === live ? '✅ live matches the latest tag' : '⚠️  live does NOT match the latest tag (deploy in progress, or stuck)');
+  process.exit(0);
+}
 
 if (verifyOnly) {
   const live = verifyLive();

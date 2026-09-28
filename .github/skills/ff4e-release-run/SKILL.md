@@ -1,6 +1,6 @@
 ---
 name: ff4e-release-run
-description: Release Fish Fillets 4ever to web or TestFlight, or run it in the iOS Simulator/on a connected iPhone/iPad, using the repo's tools/*.mjs scripts instead of re-deriving the steps. Use for "release ff4e", "ship a new web/TestFlight build", "run ff4e in the simulator", or "install ff4e on my phone".
+description: Release Fish Fillets 4ever to web or TestFlight, run it in the iOS Simulator/on a connected iPhone/iPad, check the latest released version, or launch the web build locally in a browser — using the repo's tools/*.mjs scripts instead of re-deriving the steps. Use for "release ff4e", "ship a new web/TestFlight build", "what version is live", "run ff4e locally/in the simulator", or "install ff4e on my phone".
 ---
 
 # Fish Fillets 4ever — release/run automation
@@ -14,7 +14,35 @@ exist to replace.
 export PATH="$HOME/.nvm/versions/node/v22.12.0/bin:/usr/local/bin:$PATH"   # Node 22 pinned
 ```
 
-## 1. Release to web
+## 0. Check the latest released version
+
+```bash
+npm run release:web -- --current       # latest v* tag vs. what's actually live
+npm run release:web -- --verify-only    # just the live version (no tag comparison)
+```
+
+`tools/release-web.mjs --current`. Fetches tags first (never answered from a stale
+local cache) and reports both the newest pushed `v*` tag and the live deployed
+version, flagging a mismatch (a deploy in progress, or stuck). This is the number
+to check before picking the next release's `MAJOR.MINOR.PATCH`.
+
+## 1. Run the web build locally in a browser
+
+```bash
+npm run dev            # Vite dev server on a free port; prints the URL
+npm run dev:open        # same, and opens it in the default browser automatically
+npm run dev -- --port 5199   # name a port (still --strictPort; never moves silently)
+```
+
+`tools/dev-server.mjs`. Always asks the kernel for a free port rather than assuming
+5173 — this repo is normally checked out as a dozen-plus git worktrees, several of
+which may already have a dev server up, and a probe/harness pointed at the wrong
+one reports confident nonsense (that has happened here — see `AGENTS.md`). Also
+prints direct links to the dev-only tool pages under `tools/*.html` (map viewers,
+comparison tools, etc). Verified working (2026-09-28): server came up, served
+`200` on its printed URL, and `--open` invoked the OS's default-browser opener.
+
+## 2. Release to web
 
 ```bash
 npm run release:web -- 1.0.NN              # tag, push, watch deploy.yml, verify live
@@ -31,7 +59,7 @@ something to retry silently.
 run it when explicitly asked to release/ship/publish — never as part of building or
 testing other automation.
 
-## 2. Release for iOS (TestFlight)
+## 3. Release for iOS (TestFlight)
 
 ```bash
 npm run release:testflight -- --build N              # archive only — safe, local
@@ -49,7 +77,7 @@ same as web release. Without `--upload` the script only produces a local
 `.xcarchive` (safe, reversible, nothing leaves the Mac) — use that alone to validate
 a change before asking whether to actually ship it.
 
-## 3. Run in the iOS Simulator
+## 4. Run in the iOS Simulator
 
 ```bash
 npm run run:sim                              # build + boot + install + launch
@@ -63,7 +91,7 @@ already-booted simulator so repeat runs in one session don't keep rebooting.
 Verified working end-to-end (2026-09-28): build, install, launch all succeeded and
 `simctl launch` returned a live PID.
 
-## 4. Run on a locally connected iPhone/iPad
+## 5. Run on a locally connected iPhone/iPad
 
 ```bash
 npm run build:device                 # build web assets, then build + install

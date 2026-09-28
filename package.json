@@ -9,6 +9,7 @@
     "dump-ffr": "tsx tools/dump-ffr.ts",
     "render-room": "tsx tools/render-room.ts",
     "dev": "node tools/dev-server.mjs",
+    "dev:open": "node tools/dev-server.mjs -- --open",
     "build": "vite build",
     "build:ios": "npm run build && node tools/stage-pages-assets.mjs && cap sync ios",
     "build:device": "node tools/device-build.mjs",
