@@ -115,6 +115,19 @@ describe('NATIVE_SCHEME', () => {
 });
 
 describe('iOS app identity', () => {
+  it('declares Czech and English with Czech as the native Base development language', () => {
+    const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
+    const localizations = /<key>CFBundleLocalizations<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(plist)?.[1] ?? '';
+    const languages = [...localizations.matchAll(/<string>([^<]+)<\/string>/g)].map((match) => match[1]);
+    expect(languages).toEqual(['cs', 'en']);
+    expect(/<key>CFBundleDevelopmentRegion<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1])
+      .toBe('cs');
+    const project = readFileSync(new URL('../ios/App/App.xcodeproj/project.pbxproj', import.meta.url), 'utf8');
+    expect(/^\s*developmentRegion = ([^;]+);/m.exec(project)?.[1]).toBe('cs');
+    const regions = /knownRegions = \(([\s\S]*?)\);/.exec(project)?.[1] ?? '';
+    expect(regions.split(',').map((region) => region.trim()).filter(Boolean)).toEqual(['cs', 'en', 'Base']);
+  });
+
   it('keeps the Home Screen name recognizable and the policy consistent', () => {
     const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
     const name = /<key>CFBundleDisplayName<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1];
