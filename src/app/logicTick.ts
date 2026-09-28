@@ -9,7 +9,7 @@
 import { audio } from './audioEngine.js';
 import { tickFrameEffects } from './cheats.js';
 import { advanceReplay, advanceShowmode, cutsceneCaption, disposeAiKufr, inReplay } from './cutscene.js';
-import { activeScript, blink, chatter, clearUndoHistory, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, room, roomDepth, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
+import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, retireUndoHistory, room, roomDepth, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
 import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
@@ -203,7 +203,10 @@ export function step(): boolean {
     if (!room.alive[engine.active] && room.alive[other]) engine.active = other;
     if (!room.alive.little && !room.alive.big && !room.won && eroded && !showmode) {
       setPokus(pokus + 1); // another attempt
-      clearUndoHistory(); // a fresh attempt, like Restart: there is nothing behind it to undo
+      // A fresh attempt, but NOT thrown away like Restart's: the player did not choose
+      // this one, and with both fish gone at once there was no moment to press undo in
+      // before it came. Kept behind the new history so the fatal move can be taken back.
+      retireUndoHistory();
       host.buildRoom(true);
       return true;
     }
@@ -275,7 +278,7 @@ export function step(): boolean {
       engine.phase === 'idle'
     ) {
       setPokus(pokus + 1);
-      clearUndoHistory(); // same as the crush restart above
+      retireUndoHistory(); // same as the crush restart above
       host.buildRoom(true);
       return true;
     }

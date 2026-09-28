@@ -34,13 +34,32 @@
  * covers the numpad's `-` for free.
  *
  * ── How long a history lives ─────────────────────────────────────────────────
- * Exactly one attempt. It is cleared where a fresh attempt begins — a room change,
- * `restartRoom`, and either death auto-restart — and kept everywhere else. A SAVE carries
+ * Exactly one attempt. It is cleared where a fresh attempt begins — a room change and
+ * `restartRoom` — and kept everywhere else. A SAVE carries
  * it (`encodeUndoHistory`, written by `saveGame`), so a load resumes the attempt rather
  * than only its final position: undo after an F3 steps back through the moves that
  * reached the save, one at a time, exactly as if the player had never left.
+ *
+ * The death auto-restarts are the one fresh attempt that keeps the old one behind it
+ * (`deadAttempt`). Once neither fish is left in play, the room erodes the skeletons and
+ * restarts by itself (URoom.pas:24337), about a second later. When both fish go at once —
+ * one crush, or the last fish dying after the other swam out — a history cleared there
+ * left the player nothing to press undo on: the fatal move was exactly the one they could
+ * not take back. So the ended attempt stays one press away while the new one is still at
+ * its start: undo there goes back to the ended attempt's newest point, and that attempt
+ * continues from it as if the restart had not happened. The first move of the new attempt
+ * drops it — by then the player has chosen the restart. The restart itself stays: it is
+ * the original's.
+ *
+ * The newest point is the position before the FIRST death, not the last one, because the
+ * sampler banks nothing while a fish is dead. For a simultaneous death that is the position
+ * before the fatal move. When the deaths came one after the other — a lone survivor played
+ * on and then died too — it is the position before the first fish died, and the survivor's
+ * moves since are not recoverable. That is the point undo already returns to while one fish
+ * is dead and the record has run past it (`undoTargetIndex`, "adrift"), so the restart does
+ * not move where undo lands.
  */
-import { activeScript, clearUndoHistory, cutscene, engine, loadmode, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
+import { activeScript, clearUndoHistory, cutscene, deadAttempt, dropDeadAttempt, engine, loadmode, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
 import { focusRestoredFish, restore } from './movement.js';
 import { atRest } from './roomGates.js';
 import { continuePhoneRoom } from './phoneViewport.js';
@@ -117,8 +136,9 @@ export function sampleUndoPoint(): void {
     clearUndoHistory();
   }
   if (loadmode || cutscene) return;
-  if (room.anyFishDead || room.won || engine.won) return;
   const rec = engine.srecord;
+  if (deadAttempt && rec !== '') dropDeadAttempt(); // moved on from a death restart's start
+  if (room.anyFishDead || room.won || engine.won) return;
   const top = undoHistory[undoHistory.length - 1];
   if (top && top.rec === rec) return; // nothing has happened since the last point
   const snapshot = activeScript?.s.snapshot() ?? null;
@@ -135,7 +155,25 @@ export function sampleUndoPoint(): void {
  * make a move, no hint; undo it, hint appears. Same shape as `saveExists()` beside it.
  */
 export function undoAvailable(): boolean {
-  return engine !== null && undoTargetIndex(undoHistory, engine.srecord) >= 0;
+  if (engine === null) return false;
+  return undoTargetIndex(undoHistory, engine.srecord) >= 0 || resumesDeadAttempt();
+}
+
+/**
+ * Would a press go back into the attempt a death auto-restart ended? Only from the new
+ * attempt's start: `deadAttempt` is dropped on its first move, and before then the new
+ * history has nothing of its own to undo. The dead attempt's newest point is the position
+ * before the fatal move — the sampler banks nothing once a fish is dead — so its target is
+ * that point, unless the fatal move was the first one and it IS this start.
+ */
+function resumesDeadAttempt(): boolean {
+  return (
+    deadAttempt !== null &&
+    engine !== null &&
+    engine.srecord === '' &&
+    undoTargetIndex(undoHistory, '') < 0 &&
+    undoTargetIndex(deadAttempt, '') >= 0
+  );
 }
 
 /** Is there a position to go back to, and is the room in a state to accept the command? */
@@ -156,6 +194,9 @@ export function canUndo(): boolean {
 export function undoMove(): boolean {
   if (!canUndo()) return false;
   const focusBeforeUndo = phoneUi() && engine ? { rec: engine.srecord, active: engine.active } : null;
+  // Back into the attempt the death restart ended: it becomes the history again, and the
+  // loop below lands on its newest point exactly as it would on a death without a restart.
+  if (resumesDeadAttempt()) setUndoHistory(deadAttempt!);
   let idx = undoTargetIndex(undoHistory, engine?.srecord ?? '');
   // Fall back down the history until the replay actually lands where the point says.
   //

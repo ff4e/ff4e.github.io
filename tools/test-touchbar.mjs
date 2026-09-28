@@ -707,6 +707,56 @@ try {
   await p.waitForFunction(() => !window.__ff.state().dead);
   expect(true, 'Undo brings the dead fish back — the move that killed it is taken back');
 
+  // ── Both fish at once. The room then restarts BY ITSELF once the skeletons erode
+  // (URoom.pas:24337), about a second later, so there is no dead position to press undo
+  // on. The ended attempt is kept behind the new one instead: undo from the fresh start
+  // goes back to where the fish died, and the first move of the new attempt drops it.
+  const moveOnce = async () => {
+    for (const dir of [3, 4, 1, 2]) {
+      const before = await p.evaluate(() => window.__ff.moves());
+      await p.evaluate((d) => window.__ff.press('little', d), dir);
+      await p.waitForFunction(() => window.__ff.phase() === 'idle');
+      if ((await p.evaluate(() => window.__ff.moves())) > before) return true;
+    }
+    return false;
+  };
+  expect(await moveOnce(), 'a move first, so the attempt that dies has something to go back to');
+  await p.waitForFunction(() => window.__ff.canUndo());
+  const bothDeadAt = await p.evaluate(() => window.__ff.posHash());
+  const bothDeadPokus = await p.evaluate(() => window.__ff.script().pokus);
+  await p.evaluate(() => {
+    window.__ff.killFish('little');
+    window.__ff.killFish('big');
+  });
+  await p.waitForFunction(
+    (n) => window.__ff.script().pokus === n + 1 && !window.__ff.state().dead && window.__ff.phase() === 'idle',
+    bothDeadPokus,
+  );
+  expect(
+    (await p.evaluate(() => [window.__ff.moves(), window.__ff.canUndo()])).join() === '0,true',
+    'after both fish die the room auto-restarts, and undo is offered from its start',
+  );
+  await tap(p, 24);
+  await p.waitForFunction((h) => window.__ff.posHash() === h && !window.__ff.state().dead, bothDeadAt);
+  expect(true, 'Undo after the auto-restart returns to the position the fish died in');
+  await p.evaluate(() => {
+    window.__ff.killFish('little');
+    window.__ff.killFish('big');
+  });
+  await p.waitForFunction(
+    (n) => window.__ff.script().pokus === n + 2 && !window.__ff.state().dead && window.__ff.phase() === 'idle',
+    bothDeadPokus,
+  );
+  const freshStart = await p.evaluate(() => window.__ff.posHash());
+  expect(await moveOnce(), 'then a move in the new attempt');
+  await p.waitForFunction(() => window.__ff.canUndo());
+  await tap(p, 24);
+  await p.waitForFunction((h) => window.__ff.posHash() === h && window.__ff.moves() === 0, freshStart);
+  expect(
+    !(await p.evaluate(() => window.__ff.canUndo())),
+    'but a move in the new attempt drops the ended one: undo stops at the fresh start',
+  );
+
   // ── Restart (region 15): the room goes back to a fresh attempt. It is on the bar ONLY
   // because retiring the faithful panel took away its last touch-reachable door — its
   // other one is the Backspace key, which a phone does not have (touchButtons.ts). It is
