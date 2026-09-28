@@ -83,7 +83,17 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // boot order is the one thing this file is for.
   // 2 254 -> 2 256 for tutorial hints: one import and one scriptTalk notification,
   // after its silent-replay guard. The illustration and lifecycle live in dialogueHints.ts.
-  ['src/app/main.ts', 2256],
+  //
+  // 2 256 -> 2 267 for the KUFRIK demonstration's panel guard, and it is one line of code
+  // plus ten of reasoning. The line belongs in `panelAction` and nowhere else: that table
+  // IS what a panel press means, and gating it there covers the touch bar as well as the
+  // mouse, where a guard in the panel's own mousedown would have covered one of the two
+  // and invited a second copy. What the comment records is why the range stops at 13 —
+  // regions 14 and 15 END the demonstration, so blocking them would have taken away the
+  // panel's only way out of a 1 605-action recording. That is the part that is expensive
+  // to rediscover, and it is a sentence about this file's dispatch table, not about the
+  // demo, which is `cutscene.ts`.
+  ['src/app/main.ts', 2267],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

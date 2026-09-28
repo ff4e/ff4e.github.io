@@ -80,6 +80,50 @@ async function checkShowmode({ p, expect }, mode, pulses) {
   expect(await p.evaluate(() => window.__ff.showmodeState().active), 'arrow key did not disrupt the demo');
   console.log('player input blocked during demo');
 
+  if (mode === 'off') {
+    // The control panel (visible only in desktop mode) is a second, separate input
+    // path into the same fish keys: a real click on its "little fish up" button
+    // (region 1, OBLMYSI [75,197] r20) must be just as inert as the keyboard while
+    // the demonstration plays, not only the ignored-region checks above.
+    const before = await p.evaluate(() => window.__ff.fishCell('little'));
+    const idxBefore = await p.evaluate(() => window.__ff.showmodeState().idx);
+    const panelBox = await p.evaluate(() => {
+      const r = document.getElementById('panel').getBoundingClientRect();
+      return { left: r.left, top: r.top, width: r.width, height: r.height };
+    });
+    await p.mouse.click(panelBox.left + (panelBox.width * 75) / 155, panelBox.top + (panelBox.height * 197) / 395);
+    await p.waitForFunction((i) => window.__ff.showmodeState().idx > i, idxBefore); // let a replay tick pass
+    const after = await p.evaluate(() => window.__ff.fishCell('little'));
+    expect(await p.evaluate(() => window.__ff.showmodeState().active), 'a panel click did not disrupt the demo');
+    expect(
+      after.x === before.x && after.y === before.y,
+      `a panel button click did not move the fish during the demonstration (${before.x},${before.y} -> ${after.x},${after.y})`,
+    );
+    console.log('control panel input blocked during demo');
+
+    // The other half of that rule, and the reason the guard stops at region 13: the
+    // panel's Restart (15, OBLMYSI rect x0-99 y372-392) and Map (14) both call
+    // endShowmode(), so they are the panel's counterpart to Backspace and Escape.
+    // Blocking the whole panel would have left a 1 605-action recording with no way out
+    // for a mouse-only player. Clicked for real, like the blocked button above, then the
+    // demo is re-armed so the Backspace assertion below still has one to end.
+    await p.mouse.click(panelBox.left + (panelBox.width * 50) / 155, panelBox.top + (panelBox.height * 382) / 395);
+    // Bounded, and the timeout is swallowed so the `expect` below is what reports a
+    // failure. An unbounded wait here turned "the guard was widened to the whole panel"
+    // into a 60 s Playwright timeout instead of a one-line verdict naming the rule.
+    await p
+      .waitForFunction(() => !window.__ff.showmodeState().active, null, { timeout: budget(5000) })
+      .catch(() => {});
+    expect(
+      !(await p.evaluate(() => window.__ff.showmodeState().active)),
+      'the panel Restart button still ends the demonstration (the escape hatch stays live)',
+    );
+    console.log('panel restart still escapes the demo');
+
+    await p.evaluate(() => window.__ff.forceShowmode());
+    await p.waitForFunction(() => window.__ff.showmodeState().active);
+  }
+
   await p.keyboard.press('Backspace');
   await p.waitForFunction(() => !window.__ff.showmodeState().active && !window.__ff.showmodeState().flag);
   expect(!(await p.evaluate(() => window.__ff.showmodeState().active)), 'Backspace ended the demonstration');

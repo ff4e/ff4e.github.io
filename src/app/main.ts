@@ -1095,6 +1095,17 @@ function panelAction(region: number, panelX = 0): void {
   // cases, below their `idle()`/`fishBusy` guards, so a player driving the fish entirely
   // from the on-screen panel stopped counting as awake the moment a fish started talking.
   hracNespi();
+  // Regions 1-13 drive the fish or the save slots, and during the KUFRIK demonstration
+  // they are inert — the bug this closes was the panel's direction buttons moving a fish
+  // mid-demo, the one input path that never checked (the keyboard and the room image both
+  // did). Save/load are in the range deliberately: `atRest()` holds between two replayed
+  // moves, so the slot was writable mid-recording. 14/15 (map/restart) stay live BECAUSE
+  // they end the demonstration — `showMap` and `restartRoom` each call `endShowmode()`,
+  // making them the panel's counterpart to the keyboard's Escape and Backspace, which sit
+  // above its own showmode guard for exactly that reason. 16-23 are the options face,
+  // which the replay does not care about. Gated here rather than in the panel's mousedown
+  // so the touch bar dispatches through the same rule (touchButtons.ts sends 12-15).
+  if (region <= 13 && inShowmode()) return;
   switch (region) {
     case 1:
     case 2:
