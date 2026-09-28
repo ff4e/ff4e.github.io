@@ -115,6 +115,15 @@ describe('NATIVE_SCHEME', () => {
 });
 
 describe('iOS app identity', () => {
+  it('declares English and Czech for the game-managed localizations with an English fallback', () => {
+    const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
+    const localizations = /<key>CFBundleLocalizations<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(plist)?.[1] ?? '';
+    const languages = [...localizations.matchAll(/<string>([^<]+)<\/string>/g)].map((match) => match[1]);
+    expect(languages).toEqual(['en', 'cs']);
+    expect(/<key>CFBundleDevelopmentRegion<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1])
+      .toBe('en');
+  });
+
   it('keeps the Home Screen name recognizable and the policy consistent', () => {
     const plist = readFileSync(new URL('../ios/App/App/Info.plist', import.meta.url), 'utf8');
     const name = /<key>CFBundleDisplayName<\/key>\s*<string>([^<]+)<\/string>/.exec(plist)?.[1];

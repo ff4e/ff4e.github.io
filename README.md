@@ -168,6 +168,13 @@ Options still offers Czech, English or subtitles off, and saved choices are
 preserved across updates and device-language changes. Voice recordings remain
 Czech, with no voice-language selector.
 
+The iOS bundle declares English (`en`) and Czech (`cs`) through
+`CFBundleLocalizations` in `ios/App/App/Info.plist`, while retaining English as
+the Base localization's development language. The game manages its translations
+itself rather than using language-specific `.lproj` resources. This declaration
+supplies the App Store's supported-language metadata; translating the store
+description alone does not. See [Apple's localization guidance](https://developer.apple.com/library/archive/qa/qa1828/_index.html).
+
 What is left is polish and the known divergences — [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) is the honest
 list. [`HISTORY.md`](HISTORY.md) has the milestone log, if you want the order it was all built in.
 
