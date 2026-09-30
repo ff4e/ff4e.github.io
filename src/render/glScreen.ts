@@ -40,6 +40,7 @@ import {
   nearestClamp,
   setRectUniform,
   uniformLocations,
+  type PresentWindow,
   type Uni,
 } from './glCommon.js';
 
@@ -1020,12 +1021,17 @@ export class GlScreen implements TruecolorTarget {
    * Present the composited offscreen frame to the canvas (upscaled, DPR-correct).
    * `smooth` swaps the FBO texture filter to LINEAR for a bilinear upscale (the
    * cutscene); the default NEAREST keeps room art pixel-crisp like the CPU path.
+   *
+   * `sub` presents only that window (top-down px) of a canvasW×canvasH present into a
+   * canvas of the window's size: the viewport is the full present, shifted so the window
+   * lands at the origin, which makes every drawn pixel the one the full present draws.
    */
-  present(canvasW: number, canvasH: number, smooth = false): void {
+  present(canvasW: number, canvasH: number, smooth = false, sub: PresentWindow | null = null): void {
     const gl = this.gl;
     if (!this.cur) return;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, canvasW, canvasH);
+    if (sub) gl.viewport(-sub.x, sub.y + sub.h - canvasH, canvasW, canvasH);
+    else gl.viewport(0, 0, canvasW, canvasH);
     gl.useProgram(this.presentProg);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.cur.rgbaTex);

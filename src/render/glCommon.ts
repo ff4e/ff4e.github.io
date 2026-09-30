@@ -60,6 +60,14 @@ export function linkProgram(
   return p;
 }
 
+/** A window (top-down px) of a larger present, drawn into a canvas of the window's size. */
+export interface PresentWindow {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** Uniform-location cache for one program (getUniformLocation is slow to call in loops). */
 export type Uni = Record<string, WebGLUniformLocation | null>;
 

@@ -432,3 +432,81 @@ describe('per-room continuous camera', () => {
     }
   });
 });
+
+describe('spring-damped follow', () => {
+  const steps = (s: ReturnType<typeof setup>, frames: number, changes: (i: number) => Partial<CameraFrame> = () => ({})) => {
+    const xs: number[] = [];
+    for (let i = 0; i < frames; i++) {
+      s.tick(changes(i));
+      xs.push(s.camera.x);
+    }
+    return xs;
+  };
+  const deltas = (xs: number[], from: number) => xs.map((x, i) => x - (i ? xs[i - 1]! : from));
+
+  it('eases into a fish swap instead of leaping on its first frame, and never overshoots', () => {
+    const s = setup({ subject: 'little' });
+    s.zoom(2);
+    const start = s.camera.x;
+    const target = cameraAxis(780, 852, 100, 2);
+    const xs = steps(s, 90, () => ({ subject: 'big', fishX: 100 }));
+    const d = deltas(xs, start).map(Math.abs);
+    const peak = d.indexOf(Math.max(...d));
+    expect(peak).toBeGreaterThan(2);
+    expect(d[0]!).toBeLessThan(d[peak]! / 3);
+    // Speed changes by bounded steps: no frame jumps from rest to full speed.
+    for (let i = 1; i < d.length; i++) expect(Math.abs(d[i]! - d[i - 1]!)).toBeLessThan(d[peak]! / 3);
+    expect(target).toBeGreaterThan(start);
+    for (const x of xs) expect(x).toBeLessThanOrEqual(target + 1e-9);
+    expect(s.camera.x).toBe(target);
+    expect(s.camera.moving).toBe(false);
+  });
+
+  it('the former ease leapt: a swap now moves far less on its first frame than a 130ms ease would', () => {
+    const s = setup({ subject: 'little' });
+    s.zoom(2);
+    const start = s.camera.x;
+    const target = cameraAxis(780, 852, 100, 2);
+    s.tick({ subject: 'big', fishX: 100 });
+    const oldFirstStep = Math.abs(target - start) * (1 - Math.exp(-16 / 130));
+    expect(Math.abs(s.camera.x - start)).toBeLessThan(oldFirstStep / 5);
+  });
+
+  it('tracks a steadily moving fish at its own speed, then glides to rest without a jolt', () => {
+    const s = setup({ subject: 'little' });
+    s.zoom(2);
+    const speed = 1.5; // fish px per 16ms frame, about a fish on the slowest tier
+    let fish = 200;
+    const start = s.camera.x;
+    const xs = steps(s, 150, (i) => ({ fishX: i < 90 ? (fish += speed) : fish }));
+    const d = deltas(xs, start);
+    // Steady state: the camera moves exactly as fast as the fish (x is -zoom * fish).
+    for (let i = 70; i < 90; i++) expect(d[i]!).toBeCloseTo(-speed * 2, 3);
+    // Stopping decelerates over several frames rather than dropping to zero at once.
+    expect(Math.abs(d[90]!)).toBeGreaterThan(speed);
+    // (The last frame may add the sub-0.1px settle snap.)
+    for (let i = 91; i < 150; i++) expect(Math.abs(d[i]!)).toBeLessThanOrEqual(Math.abs(d[i - 1]!) + 0.15);
+    for (const x of xs.slice(90)) expect(x).toBeGreaterThanOrEqual(cameraAxis(780, 852, fish, 2) - 1e-9);
+    s.settle();
+    expect(s.camera.x).toBe(cameraAxis(780, 852, fish, 2));
+    expect(s.camera.moving).toBe(false);
+  });
+
+  it('stops dead at a room edge instead of carrying velocity into it', () => {
+    const s = setup({ subject: 'little' });
+    s.zoom(2);
+    const limit = (780 * 2 - 852) / 2;
+    const xs = steps(s, 120, () => ({ subject: 'big', fishX: -400 }));
+    for (const x of xs) expect(x).toBeLessThanOrEqual(limit + 1e-9);
+    expect(s.camera.x).toBe(limit);
+    expect(s.camera.moving).toBe(false);
+  });
+
+  it('does not treat the first frame or an unchanged subject as a swap', () => {
+    const a = setup(), b = setup({ subject: 'little' });
+    for (const s of [a, b]) s.zoom(2);
+    const xa = steps(a, 40, () => ({ fishX: 100 }));
+    const xb = steps(b, 40, () => ({ fishX: 100, subject: 'little' }));
+    expect(xb).toEqual(xa);
+  });
+});
