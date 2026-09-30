@@ -118,7 +118,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `keyTables.ts` | 0.6 k | Which key moves which fish, the minigame's key map, which panel region each touch button sends, and two constants the room scripts read. |
 | **Screens** | | |
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
-| `mapDraw.ts` | 3.8 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
+| `mapDraw.ts` | 4.0 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
+| `mapInfoZoom.ts` | 1.4 k | The record panel enlarged 1.5x on a phone, lifted off the map it was baked onto, and the zoom-aware button hit test the pointer routers use. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
 | `touchButtons.ts` | | Shared touch/phone mode transitions, stage relayout and Options cleanup; tablet buttons dispatch through the panel's own `panelAction` table. |
 | `nativeMenu.ts` | | Shared touch/native rustic symbols and fixed room accents, enabled by device mode. |
@@ -191,7 +192,7 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `glCommon.ts` | 1.1 k | The WebGL2 plumbing both of the above share. |
 | **Screens and chrome** | | |
 | `worldMap.ts` | 2.3 k | The branch map (`UMain.pas PaintBox1Paint`). |
-| `mapInfo.ts` | 2.1 k | The map's record info panel (krokoměr). |
+| `mapInfo.ts` | 3.7 k | The map's record info panel (krokoměr), and the geometry + cutout for drawing it enlarged on a phone. |
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |
 | `creditsAsset.ts` | 0.9 k | Loads a credits image (lossless WebP, 19.7x smaller than the BMP) and rebuilds its palette indices, so `credits.ts` stays index-exact and unchanged. Throws on a colour outside the palette rather than mis-indexing it. |

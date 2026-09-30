@@ -847,6 +847,35 @@ try {
   await waitZoom(1);
   await p.locator('#phone-controls').waitFor({ state: 'hidden' });
   expect(await p.locator('#phone-controls').isHidden(), 'map navigation removes camera and corner controls');
+  // The record panel is drawn INFO_PHONE_ZOOM (src/render/mapInfo.ts) times its size on
+  // a phone, about its centre, and taps must land on the buttons where they are DRAWN.
+  // Both targets below are on an enlarged button but OFF every faithful one, so each
+  // check fails if the hit test ignores the zoom. Keep ZOOM in step with that constant.
+  const ZOOM = 1.5;
+  const drawn = (x, y) => [ // mapInfo.ts infoPanelOrigin + scale; panel 268x186 at (193,141)
+    Math.round(193 + 268 * (1 - ZOOM) / 2) + (x - 193) * ZOOM,
+    Math.round(141 + 186 * (1 - ZOOM) / 2) + (y - 141) * ZOOM,
+  ];
+  const tapMap = async ([mx, my]) => {
+    const r = await p.evaluate(() => document.getElementById('screen').getBoundingClientRect().toJSON());
+    await p.touchscreen.tap(r.left + mx * r.width / 640, r.top + my * r.height / 480);
+  };
+  // Replay (x 301-344) near the bottom of its icon (y 222-268): drawn below the faithful
+  // icon band. Room 1 has no best record, so Replay is disabled — a hit keeps the panel
+  // open, where a miss would close it.
+  await p.evaluate(() => { window.__ff.markSolved(1); window.__ff.openMapInfo(1); });
+  expect(await p.evaluate(() => window.__ff.bestRecord(1)) === null, 'room 1 has no best record, so Replay is disabled');
+  const replayLow = drawn(322, 264);
+  expect(replayLow[1] >= 268, `the Replay target (${replayLow}) is off the faithful icon band`);
+  await tapMap(replayLow);
+  await p.waitForTimeout(150);
+  expect(await p.evaluate(() => window.__ff.mapInfoRoom()) === 1, 'tapping the enlarged, disabled Replay keeps the panel open');
+  // Run (x 258-301) at its left edge: drawn left of the faithful Run.
+  const runLeft = drawn(262, 245);
+  expect(runLeft[0] < 258, `the Run target (${runLeft}) is off the faithful icons`);
+  await tapMap(runLeft);
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.roomNum() === 1);
+  expect(true, 'tapping the enlarged Run where the faithful panel has no button launches the room');
   await enter(7);
   await waitZoom(1);
   await pinch(1.375);
