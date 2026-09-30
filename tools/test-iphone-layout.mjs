@@ -95,6 +95,22 @@ const pinch = async (ratio) => {
   await touch('touchMove', [[2, g.points[1][1] + 25, g.points[1][2]]]);
   await touch('touchEnd', []);
 };
+// The GL present covers only the visible window of a zoomed room (phoneGlCrop.ts), so
+// every frame must still cover everything of the room the stage shows.
+const glCoversView = () => p.evaluate(() => {
+  const gl = document.getElementById('screen-gl');
+  if (gl.style.display === 'none') return true;
+  const zoom = new DOMMatrix(getComputedStyle(gl.parentElement).transform).a || 1;
+  const inset = (r) => ({ left: r.left + zoom, top: r.top + zoom, right: r.right - zoom, bottom: r.bottom - zoom });
+  const g = inset(gl.getBoundingClientRect());
+  const room = inset(document.getElementById('screen').getBoundingClientRect());
+  const view = document.getElementById('stagebox').getBoundingClientRect();
+  const need = {
+    left: Math.max(room.left, view.left), right: Math.min(room.right, view.right),
+    top: Math.max(room.top, view.top), bottom: Math.min(room.bottom, view.bottom),
+  };
+  return g.left <= need.left + 1 && g.top <= need.top + 1 && g.right >= need.right - 1 && g.bottom >= need.bottom - 1;
+});
 const animatedPinch = async (ratio, target) => {
   const before = await scale();
   const out = target > before;
@@ -106,9 +122,18 @@ const animatedPinch = async (ratio, target) => {
       const screen = document.getElementById('screen');
       const room = screen.getBoundingClientRect();
       const viewport = document.getElementById('stagebox').getBoundingClientRect();
+      const gl = document.getElementById('screen-gl');
+      const z = new DOMMatrix(getComputedStyle(screen.parentElement).transform).a || 1;
+      const gr = gl.getBoundingClientRect();
+      const need = {
+        left: Math.max(room.left + z, viewport.left), right: Math.min(room.right - z, viewport.right),
+        top: Math.max(room.top + z, viewport.top), bottom: Math.min(room.bottom - z, viewport.bottom),
+      };
       window.phoneZoomSamples.push({
         zoom: new DOMMatrix(getComputedStyle(screen.parentElement).transform).a,
-        buffer: document.getElementById('screen-gl')?.width,
+        buffer: gl?.width,
+        glCovers: gl.style.display === 'none' || (gr.left + z <= need.left + 1 && gr.top + z <= need.top + 1 &&
+          gr.right - z >= need.right - 1 && gr.bottom - z >= need.bottom - 1),
         bounded: (room.width <= viewport.width || (room.left <= viewport.left + 2 && room.right >= viewport.right - 2)) &&
           (room.height <= viewport.height || (room.top <= viewport.top + 2 && room.bottom >= viewport.bottom - 2)),
       });
@@ -131,6 +156,7 @@ const animatedPinch = async (ratio, target) => {
   `zoom ${out ? 'in' : 'out'} animates through multiple monotonic intermediate frames`);
   if (!smooth) console.log('zoom samples:', frames.filter((f, i) => !i || f.zoom !== frames[i - 1].zoom));
   expect(frames.every((f) => f.bounded), 'animated camera never exposes a panned room edge');
+  expect(frames.every((f) => f.glCovers), 'the cropped WebGL present covers the visible room on every frame');
   expect(new Set(frames.map((f) => f.buffer)).size <= 2,
     'zoom does not resize the WebGL backing store every animation frame');
 };
@@ -561,6 +587,7 @@ try {
   const heldPose = await pose();
   expect(near(heldPose.zoom, 2.2) && near(heldPose.x, followPose.x + dx, 1) &&
     near(heldPose.y, followPose.y + dy, 1), 'two fingers pan the zoomed room without changing zoom');
+  expect(await glCoversView(), 'the cropped WebGL present follows an inspection pan');
   await touch('touchEnd', [inspection.points[0]]);
   await touch('touchMove', [[2, inspection.points[1][1] + 30, inspection.points[1][2] - 20]]);
   await waitStill();
@@ -595,6 +622,7 @@ try {
   await touch('touchEnd', []);
   await waitZoom(3);
   expect(near(await scale(), 3), 'upper overshoot settles back to 3x on release');
+  expect(await glCoversView(), 'the cropped WebGL present covers the view at 3x');
   const lowerBounce = await beginTouch();
   await moveTouch(lowerBounce, 0.25);
   await p.waitForFunction(() =>
@@ -613,9 +641,16 @@ try {
   const gpu = await p.evaluate(() => {
     const gl = document.getElementById('screen-gl');
     const g = window.__ff.roomGeom();
-    return { actual: gl.width, wanted: Math.round(g.cssW * devicePixelRatio * 2.5) };
+    return {
+      density: gl.width / parseFloat(gl.style.width), wanted: devicePixelRatio * 2.5,
+      pixels: gl.width * gl.height,
+      full: Math.round(g.cssW * devicePixelRatio * 2.5) * Math.round(g.cssH * devicePixelRatio * 2.5),
+    };
   });
-  expect(gpu.actual === gpu.wanted, 'WebGL uses a stable 2.5x backing bucket for the arbitrary 2.2x view');
+  expect(near(gpu.density, gpu.wanted, 0.01), 'WebGL uses a stable 2.5x backing bucket for the arbitrary 2.2x view');
+  expect(gpu.pixels < gpu.full * 0.6,
+    `the zoomed WebGL present is cropped to the view (${(gpu.pixels / 1e6).toFixed(1)} of ${(gpu.full / 1e6).toFixed(1)} MP)`);
+  expect(await glCoversView(), 'the cropped AI-tier WebGL present covers the visible room');
   if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/iphone-landscape.png` });
   await p.evaluate(() => window.__ff.setRenderer('cpu'));
   await p.waitForFunction(() => !window.__ff.glActive());

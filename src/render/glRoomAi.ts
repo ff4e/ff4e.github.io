@@ -29,6 +29,7 @@ import {
   nearestClamp,
   setRectUniform,
   uniformLocations,
+  type PresentWindow,
   type Uni,
 } from './glCommon.js';
 import { RIPPLE_GPU_SLOTS, activeRipples, aiImagePatch, aiImageRevision, wobblePhase } from './aiTarget.js';
@@ -222,11 +223,12 @@ const PRESENT_FS = `#version 300 es
 precision highp float;
 uniform sampler2D uTex;
 uniform vec2 uSize;       // destination size in px
+uniform vec2 uOrigin;     // where this canvas sits in that destination (bottom-up px)
 uniform vec2 uFootprint;  // source texels covered by one destination pixel, normalised
 uniform int uTaps;
 out vec4 frag;
 void main() {
-  vec2 uv = gl_FragCoord.xy / uSize;
+  vec2 uv = (gl_FragCoord.xy + uOrigin) / uSize;
   uv.y = 1.0 - uv.y;
   float n = float(uTaps);
   vec3 acc = vec3(0.0);
@@ -330,7 +332,7 @@ export class GlAiScreen implements AiTarget {
     this.spriteUni = uniformLocations(gl, this.spriteProg, ['uSprite', 'uX', 'uY', 'uW', 'uMirror', 'uRect']);
     this.disintUni = uniformLocations(gl, this.disintProg, ['uSprite', 'uRand', 'uX', 'uY', 'uScale', 'uNativeW', 'uRozpad', 'uRect']);
     this.mirrorUni = uniformLocations(gl, this.mirrorProg, ['uSrc', 'uMask', 'uRx0', 'uRx1', 'uRy0', 'uRy1', 'uDx0', 'uDx1', 'uK', 'uMX', 'uMY', 'uMW', 'uMH']);
-    this.presentUni = uniformLocations(gl, this.presentProg, ['uTex', 'uSize', 'uFootprint', 'uTaps']);
+    this.presentUni = uniformLocations(gl, this.presentProg, ['uTex', 'uSize', 'uOrigin', 'uFootprint', 'uTaps']);
 
     this.fsVao = makeFullscreenVao(gl);
     this.rectVao = makeRectVao(gl);
@@ -725,8 +727,12 @@ export class GlAiScreen implements AiTarget {
     this.cur = dst; // the rope, drawn after the mirror, must land on the reflected buffer
   }
 
-  /** Present the composited ×S frame to the canvas, box-filtered (see PRESENT_FS). */
-  present(canvasW: number, canvasH: number): void {
+  /**
+   * Present the composited ×S frame to the canvas, box-filtered (see PRESENT_FS).
+   * `sub` presents only that window (top-down px) of the canvasW×canvasH present, into a
+   * canvas of the window's size; the pixels are the ones the full present draws there.
+   */
+  present(canvasW: number, canvasH: number, sub: PresentWindow | null = null): void {
     const gl = this.gl;
     if (!this.cur) return;
     const rx = this.fboW / canvasW;
@@ -737,11 +743,12 @@ export class GlAiScreen implements AiTarget {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.cur.tex);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, canvasW, canvasH);
+    gl.viewport(0, 0, sub ? sub.w : canvasW, sub ? sub.h : canvasH);
     gl.disable(gl.BLEND);
     gl.useProgram(this.presentProg);
     gl.uniform1i(this.presentUni.uTex!, 0);
     gl.uniform2f(this.presentUni.uSize!, canvasW, canvasH);
+    gl.uniform2f(this.presentUni.uOrigin!, sub ? sub.x : 0, sub ? canvasH - sub.y - sub.h : 0);
     gl.uniform2f(this.presentUni.uFootprint!, rx / this.fboW, ry / this.fboH);
     gl.uniform1i(this.presentUni.uTaps!, taps);
     this.drawFullscreen();

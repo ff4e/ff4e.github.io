@@ -35,6 +35,7 @@ import { cheatFishSprites } from './cheats.js';
 import { glCanvas } from './dom.js';
 import { count, room, subs } from './gameState.js';
 import type { RoomGeometry } from './layout.js';
+import { glPlacement, type GlCrop, type GlPlacement } from './phoneGlCrop.js';
 
 /** What this module needs to see of the running game. All read-only. */
 /**
@@ -148,7 +149,10 @@ function lazyCompositor<T>(what: string, build: (gl: WebGL2RenderingContext) => 
       if (tried) return comp;
       tried = true;
       if (!webgl2Available()) return null;
-      const gl = glCanvas.getContext('webgl2');
+      // Every draw to this canvas is one full-screen present of an offscreen composite,
+      // so the default 4x MSAA and depth buffers change no pixel — they only cost memory
+      // and a resolve per frame, and both scale with the phone camera's render zoom.
+      const gl = glCanvas.getContext('webgl2', { antialias: false, depth: false });
       if (!gl) return null;
       try {
         comp = build(gl);
@@ -233,6 +237,7 @@ export function drawGpu(
   opts: RenderOptions,
   useVecSubs: boolean,
   zoom = 1,
+  crop: GlCrop | null = null,
 ): boolean {
   const gl = glCompositor();
   if (!gl || !room) return false;
@@ -241,7 +246,7 @@ export function drawGpu(
     renderRoomInto(gl, room, art, opts);
     if (gl.unsupported) return false; // defensive: an un-ported primitive → CPU this frame
     if (!useVecSubs) subs?.draw(gl, opts.count ?? 0); // baked subtitles via GPU setIndex
-    presentToGlCanvas(gl, geom, zoom);
+    presentToGlCanvas((w, h, sub) => gl.present(w, h, false, sub), geom, zoom, crop);
     return true;
   } catch (e) {
     glFailed = true;
@@ -257,7 +262,9 @@ export function drawGpu(
  * built, when the GPU cannot hold this room's ×S buffer, when a primitive could not run,
  * or when a GL call throws (which disables this backend for the session). Never throws.
  */
-export function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame, zoom = 1): boolean {
+export function drawAiGpu(
+  geom: RoomGeometry, r: Room, f: AiRoomFrame, zoom = 1, crop: GlCrop | null = null,
+): boolean {
   const comp = glAiCompositor();
   if (!comp || !host.aiRoom) return false;
   try {
@@ -268,7 +275,7 @@ export function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame, zoom = 1)
     if (!comp.begin(geom.backingW, geom.backingH)) return false;
     host.aiRoom.drawInto(comp, r, f);
     if (comp.unsupported) return false;
-    presentToGlCanvas(comp, geom, zoom);
+    presentToGlCanvas((w, h, sub) => comp.present(w, h, sub), geom, zoom, crop);
     return true;
   } catch (e) {
     glAiFailed = true;
@@ -283,19 +290,27 @@ export function drawAiGpu(geom: RoomGeometry, r: Room, f: AiRoomFrame, zoom = 1)
  * The room's box comes from roomGeometry — the GL canvas is an overlay stacked on
  * #screen, so it must match that box exactly rather than recompute it. Shared by both
  * GPU paths: the compositors differ entirely, the presentation does not.
+ *
+ * With a phone `crop` the canvas covers only that window of the box, and the present
+ * draws the same pixels the full-size present would have drawn there (phoneGlCrop.ts).
  */
-function presentToGlCanvas(comp: { present(w: number, h: number): void }, geom: RoomGeometry, zoom: number): void {
+function presentToGlCanvas(
+  present: (w: number, h: number, sub: GlPlacement | null) => void,
+  geom: RoomGeometry, zoom: number, crop: GlCrop | null,
+): void {
   const dpr = window.devicePixelRatio || 1;
   const { cssW, cssH } = geom;
-  const bw = Math.round(cssW * dpr * zoom);
-  const bh = Math.round(cssH * dpr * zoom);
-  if (glCanvas.width !== bw || glCanvas.height !== bh) {
-    glCanvas.width = bw;
-    glCanvas.height = bh;
+  const s = dpr * zoom;
+  const p = glPlacement(cssW, cssH, s, crop);
+  if (glCanvas.width !== p.w || glCanvas.height !== p.h) {
+    glCanvas.width = p.w;
+    glCanvas.height = p.h;
   }
-  glCanvas.style.width = `${cssW}px`;
-  glCanvas.style.height = `${cssH}px`;
-  comp.present(bw, bh);
+  glCanvas.style.left = crop ? `${p.x / s}px` : '0';
+  glCanvas.style.top = crop ? `${p.y / s}px` : '0';
+  glCanvas.style.width = crop ? `${p.w / s}px` : `${cssW}px`;
+  glCanvas.style.height = crop ? `${p.h / s}px` : `${cssH}px`;
+  present(p.fullW, p.fullH, crop ? p : null);
 }
 
 /**

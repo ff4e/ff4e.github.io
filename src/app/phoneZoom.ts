@@ -4,7 +4,19 @@ import type { PinchSample } from './touchPinch.js';
 
 export const PHONE_ZOOM_CELL_PX = 20;
 export const MAX_PHONE_ZOOM = 3;
-export const CAMERA_EASE_MS = 130;
+/**
+ * The pan follows the fish on a critically damped spring (rates in 1/s), not a plain
+ * exponential ease. An ease starts at full speed the instant its target moves — at 130 ms
+ * a 300 px fish swap went from rest to ~2 300 px/s in one frame — and every start and stop
+ * of the fish was passed straight through as a kink in the camera's speed. The spring keeps
+ * velocity continuous, so it accelerates into a move and glides out of it.
+ *
+ * FOLLOW trails a steadily moving fish by 2/rate = ~140 ms, about the former ease's 130 ms.
+ * TRAVEL is softer, for a jump of the target itself (swapping fish, Undo, the return from
+ * an inspection): ~90 % of the way in ~0.4 s, with no overshoot from rest.
+ */
+export const FOLLOW_RATE = 14;
+export const TRAVEL_RATE = 9;
 export const GESTURE_EASE_MS = 45;
 export const PHONE_RECENTER_DELAY_MS = 350;
 export const PHONE_ZOOM_OVERSHOOT = 0.08;
@@ -38,6 +50,17 @@ function boundAxis(value: number, roomSize: number, viewport: number, zoom: numb
   return limit === 0 ? 0 : Math.max(-limit, Math.min(limit, value));
 }
 
+/** Exact critically damped step toward a target held still for `dt` seconds. */
+function springAxis(p: number, v: number, target: number, rate: number, dt: number): [number, number] {
+  const d = p - target;
+  const k = (v + rate * d) * dt;
+  const e = Math.exp(-rate * dt);
+  return [target + (d + k) * e, (v - rate * k) * e];
+}
+
+/** Below this (px/s), and within 0.1 px of its target, an axis counts as settled. */
+const SETTLE_SPEED = 2;
+
 export interface CameraFrame {
   owner: object;
   width: number;
@@ -47,6 +70,8 @@ export interface CameraFrame {
   scale: number;
   fishX: number;
   fishY: number;
+  /** Which fish is followed; a change is a swap, which glides at TRAVEL_RATE. */
+  subject?: string;
   now: number;
 }
 
@@ -80,6 +105,11 @@ export class PhoneCamera {
   x = 0;
   y = 0;
   moving = false;
+  /** Pan velocity in px/s, carried between frames so the motion never kinks. */
+  private vx = 0;
+  private vy = 0;
+  private travel = false;
+  private subject: string | undefined = undefined;
   private owner: object | null = null;
   private frame: CameraFrame | null = null;
   private suspended = true;
@@ -95,6 +125,7 @@ export class PhoneCamera {
     if (this.owner !== previous) return;
     this.cancelGesture();
     this.owner = next;
+    this.travel = true; // the fish may have jumped back several cells
     if (this.frame) this.frame = { ...this.frame, owner: next };
   }
 
@@ -106,6 +137,8 @@ export class PhoneCamera {
     this.zoom = 1;
     this.renderZoom = 1;
     this.x = this.y = 0;
+    this.vx = this.vy = 0;
+    this.travel = false;
     this.moving = false;
   }
 
@@ -113,6 +146,7 @@ export class PhoneCamera {
   hold(): void {
     this.cancelGesture();
     this.frame = null;
+    this.vx = this.vy = 0;
     this.moving = false;
   }
 
@@ -182,13 +216,20 @@ export class PhoneCamera {
       this.frame.width !== f.width || this.frame.height !== f.height)) {
       this.cancelGesture();
     }
+    if (f.subject !== this.subject) {
+      if (this.subject !== undefined) this.travel = true;
+      this.subject = f.subject;
+    }
     this.frame = f;
     if (!roomBenefitsFromZoom(f.scale)) {
       this.targetZoom = 1;
       this.inspection = null;
       this.released = null;
     }
-    if (this.released && f.now >= this.released.until) this.released = null;
+    if (this.released && f.now >= this.released.until) {
+      this.released = null;
+      this.travel = true;
+    }
     // Both fingers emit separate pointer events. Consume their latest combined sample
     // once per frame, not once per finger (which would turn a pan at max zoom into zoom-out).
     this.applyGesture(f);
@@ -207,11 +248,33 @@ export class PhoneCamera {
     const y = this.zoom <= 1 ? 0 : held
       ? boundAxis(held.y, f.height, f.viewportH, this.zoom)
       : cameraAxis(f.height, f.viewportH, f.fishY, this.zoom);
-    const panEase = this.suspended ? 1 : 1 - Math.exp(-dt / (held ? GESTURE_EASE_MS : CAMERA_EASE_MS));
-    this.x = boundAxis(this.x + (x - this.x) * panEase, f.width, f.viewportW, this.zoom);
-    this.y = boundAxis(this.y + (y - this.y) * panEase, f.height, f.viewportH, this.zoom);
-    if (Math.abs(x - this.x) < 0.1) this.x = x;
-    if (Math.abs(y - this.y) < 0.1) this.y = y;
+    const px = this.x, py = this.y;
+    if (this.suspended) {
+      this.x = x;
+      this.y = y;
+    } else if (held) {
+      const ease = 1 - Math.exp(-dt / GESTURE_EASE_MS);
+      this.x = boundAxis(this.x + (x - this.x) * ease, f.width, f.viewportW, this.zoom);
+      this.y = boundAxis(this.y + (y - this.y) * ease, f.height, f.viewportH, this.zoom);
+    } else {
+      const rate = this.travel ? TRAVEL_RATE : FOLLOW_RATE;
+      const s = dt / 1000;
+      const [sx, svx] = springAxis(this.x, this.vx, x, rate, s);
+      const [sy, svy] = springAxis(this.y, this.vy, y, rate, s);
+      this.x = boundAxis(sx, f.width, f.viewportW, this.zoom);
+      this.y = boundAxis(sy, f.height, f.viewportH, this.zoom);
+      // A clamped axis has stopped against the room's edge; it must not keep pushing.
+      this.vx = this.x === sx ? svx : 0;
+      this.vy = this.y === sy ? svy : 0;
+    }
+    if (this.suspended || held) {
+      // Whatever takes over next starts at the speed the camera is actually moving.
+      this.vx = !this.suspended && dt > 0 ? (this.x - px) * 1000 / dt : 0;
+      this.vy = !this.suspended && dt > 0 ? (this.y - py) * 1000 / dt : 0;
+    }
+    if (Math.abs(x - this.x) < 0.1 && Math.abs(this.vx) < SETTLE_SPEED) { this.x = x; this.vx = 0; }
+    if (Math.abs(y - this.y) < 0.1 && Math.abs(this.vy) < SETTLE_SPEED) { this.y = y; this.vy = 0; }
+    if (this.x === x && this.y === y) this.travel = false;
     // Elastic feedback is compositor-only: it must not allocate beyond the 3x budget.
     const needed = Math.max(1, Math.min(MAX_PHONE_ZOOM, Math.ceil(Math.max(this.zoom, zoomTarget) * 2) / 2));
     if (this.inspection || this.zoom !== zoomTarget) {
@@ -219,7 +282,8 @@ export class PhoneCamera {
     } else {
       this.renderZoom = needed;
     }
-    this.moving = this.released !== null || this.zoom !== zoomTarget || this.x !== x || this.y !== y;
+    this.moving = this.released !== null || this.zoom !== zoomTarget || this.x !== x || this.y !== y ||
+      this.vx !== 0 || this.vy !== 0;
     this.lastTime = f.now;
     this.suspended = false;
   }

@@ -84,8 +84,9 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `deviceGate.ts` | 1.4 k | What kind of device this is — desktop, phone or tablet — from the pointer and the screen's short side. Read by touch mode. |
 | `touchMode.ts` | 0.9 k | Whether the game is being played by touch, and the dev override that lets a desktop pretend it is. |
 | `phoneControls.ts` | | Phone-only corner controls and the Load/Save/Options/Restart overflow. |
-| `phoneZoom.ts` | | Continuous per-room zoom, temporary two-finger inspection, eased fish-follow and bounded render-resolution buckets. |
+| `phoneZoom.ts` | | Continuous per-room zoom, temporary two-finger inspection, spring-damped fish-follow and bounded render-resolution buckets. |
 | `phoneViewport.ts` | | Phone camera transforms, viewport-relative gesture coordinates and active-fish following. |
+| `phoneGlCrop.ts` | | Which window of a zoomed room #screen-gl presents, snapped to the full present's pixels. |
 | `phoneUndoFocus.ts` | | Choose the available fish whose move was undone, without mistaking replay consequences for moves. |
 | `activeFishIndicator.ts` | | Shared phone/tablet fish-switch button showing the engine selection; hidden outside live play. |
 | `buttonHaptics.ts` | | Which presses tick on the native iPhone: one delegated listener for every HTML button; the canvas map buttons call `hapticTap` from `main.ts`. |

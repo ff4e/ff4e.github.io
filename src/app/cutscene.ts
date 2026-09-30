@@ -568,6 +568,7 @@ export function drawCutscene(): void {
           glCanvas.width = bw;
           glCanvas.height = bh;
         }
+        glCanvas.style.left = glCanvas.style.top = '0'; // a zoomed room may have left a crop offset
         glCanvas.style.width = `${cssW}px`;
         glCanvas.style.height = `${cssH}px`;
         glCanvas.style.transform = '';
