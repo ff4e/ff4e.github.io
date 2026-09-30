@@ -36,7 +36,7 @@ import {
 import { SubtitleSystem } from '../render/subtitles.js';
 import { type FishSprites } from '../render/enhancedArtSource.js';
 import { MAP_W, MAP_H } from '../render/worldMap.js';
-import { hitInfoButton } from '../render/mapInfo.js';
+import { hitZoomedInfoButton } from './mapInfoZoom.js';
 import { hapticTap } from '../platform/haptics.js';
 import { requiredAsset, requiredJson } from '../render/assetFetch.js';
 import { framesIdle, wake } from './frameClock.js';
@@ -1782,7 +1782,7 @@ function clickMapAt(mx: number, my: number): void {
   // click; anywhere else closes it (daCancel, UMain.pas:1612/1626).
   if (ui.mapInfoRoom !== null) {
     const room = ui.mapInfoRoom;
-    const btn = hitInfoButton(mx, my);
+    const btn = hitZoomedInfoButton(mx, my);
     if (btn === 'run') {
       hapticTap();
       closeMapInfo();
@@ -1844,7 +1844,7 @@ canvas.addEventListener('mousemove', (e) => {
   const { mx, my } = mapCoords(e);
   // Record panel open: hover the Run/Replay/Cancel buttons (dAkce, UMain.pas:1626).
   if (ui.mapInfoRoom !== null) {
-    const btn = hitInfoButton(mx, my);
+    const btn = hitZoomedInfoButton(mx, my);
     if (btn !== ui.mapInfoHover) {
       ui.mapInfoHover = btn;
       ui.mapSig = null; // the highlighted icon changed — repaint

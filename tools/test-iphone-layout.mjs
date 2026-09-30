@@ -847,6 +847,22 @@ try {
   await waitZoom(1);
   await p.locator('#phone-controls').waitFor({ state: 'hidden' });
   expect(await p.locator('#phone-controls').isHidden(), 'map navigation removes camera and corner controls');
+  // The record panel is drawn 1.5x on a phone (INFO_PHONE_ZOOM), and taps must land on
+  // the buttons where they are DRAWN. Map-space targets for that zoom: (385,251) is the
+  // enlarged Cancel; (227,251) is the enlarged Run's left edge, which on the faithful
+  // panel is off it entirely — so only a zoom-aware hit test launches from there.
+  const tapMap = async (mx, my) => {
+    const r = await p.evaluate(() => document.getElementById('screen').getBoundingClientRect().toJSON());
+    await p.touchscreen.tap(r.left + (mx + 0.5) * r.width / 640, r.top + (my + 0.5) * r.height / 480);
+  };
+  await p.evaluate(() => { window.__ff.markSolved(1); window.__ff.openMapInfo(1); });
+  await tapMap(385, 251);
+  await p.waitForFunction(() => window.__ff.mapInfoRoom() === null);
+  expect(await p.evaluate(() => window.__ff.screen()) === 'map', 'tapping the enlarged Cancel closes the record panel');
+  await p.evaluate(() => window.__ff.openMapInfo(1));
+  await tapMap(227, 251);
+  await p.waitForFunction(() => window.__ff.screen() === 'room' && window.__ff.roomNum() === 1);
+  expect(true, 'tapping the enlarged Run where the faithful panel has no button launches the room');
   await enter(7);
   await waitZoom(1);
   await pinch(1.375);

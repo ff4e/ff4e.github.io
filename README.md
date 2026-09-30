@@ -98,6 +98,12 @@ Classic retains its original baked-in room subtitles. **iPad and desktop keep th
 existing layouts and orientation behavior**, and iPad does not get pinch zoom. Desktop `?touch=on` still previews
 the tablet controls; use phone device emulation to preview the phone layout.
 
+**Record panel on phones:** The world map's record panel — the best-move odometer
+with Run, Replay and Cancel — is drawn 1.5x on phones, so the count reads at about
+24x30pt and each button is about 54pt, above the 44pt touch minimum. Only the device
+is enlarged, lifted off the map it was baked onto; its art, digit roll and buttons
+are otherwise the original's. Tablets and desktop keep the original 1:1 panel.
+
 **Tablet toolbar:** Map, Save, Load, Restart, Options, Undo, in that order.
 Undo occupies the end of the bar and Restart the fourth slot, both across the top
 and down the left edge. Phone controls and the desktop panel are unchanged.
