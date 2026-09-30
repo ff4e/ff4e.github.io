@@ -129,6 +129,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `zoomHint.ts` | | First-entry phone pinch illustrations in rooms 2 and 3; persists each room independently and follows live-play/loading/zoom eligibility. |
 | `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
+| `cutsceneClose.ts` | | The briefcase demo's ✕: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |

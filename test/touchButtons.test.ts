@@ -26,7 +26,7 @@ import { join } from 'node:path';
 import { TOUCH_REGIONS } from '../src/app/keyTables.js';
 import { O_NORMAL, O_OPTIONS, O_SC_DOWN } from '../src/app/screenState.js';
 
-const mode = vi.hoisted(() => ({ active: false, phone: false, options: false, menu: false }));
+const mode = vi.hoisted(() => ({ active: false, phone: false, options: false, menu: false, cutscene: null as object | null }));
 vi.mock('../src/app/touchMode.js', () => ({
   touchModeActive: () => mode.active,
   phoneModeActive: () => mode.phone,
@@ -43,7 +43,7 @@ vi.mock('../src/app/touchOptions.js', () => ({ touchOptionsOpen: () => mode.opti
 vi.mock('../src/app/nativeMenu.js', () => ({
   setNativeMenuEnabled: vi.fn(), syncNativeMenu: vi.fn(),
 }));
-vi.mock('../src/app/gameState.js', () => ({ room: null }));
+vi.mock('../src/app/gameState.js', () => ({ room: null, get cutscene() { return mode.cutscene; } }));
 vi.mock('../src/app/playerSettings.js', () => ({ settings: { fitMode: 'medium' } }));
 vi.mock('../src/render/renderRoom.js', () => ({ roomScreenSize: vi.fn() }));
 vi.mock('../src/app/framePacing.js', () => ({ roomLoading: false }));
@@ -110,7 +110,7 @@ describe('touch controls', () => {
     beforeEach(async () => {
       vi.resetModules();
       vi.clearAllMocks();
-      Object.assign(mode, { active: false, phone: false, options: false, menu: false });
+      Object.assign(mode, { active: false, phone: false, options: false, menu: false, cutscene: null });
       vi.stubGlobal('window', {
         matchMedia: () => ({ addEventListener: vi.fn() }),
         addEventListener: vi.fn(),
@@ -235,6 +235,22 @@ describe('touch controls', () => {
       ui.screen = 'map';
       touch.syncTouchButtons();
       expect(syncActiveFishIndicator).toHaveBeenLastCalledWith(false);
+    });
+    it('takes the tablet bar down for the briefcase demo and puts it back after', () => {
+      const bar = { hidden: true };
+      vi.stubGlobal('document', { ...document, getElementById: () => bar });
+      mode.active = true;
+      initialize();
+      ui.screen = 'room';
+      ui.helpOpen = false;
+      touch.syncTouchButtons();
+      expect(bar.hidden).toBe(false);
+      mode.cutscene = {};
+      touch.syncTouchButtons();
+      expect(bar.hidden).toBe(true);
+      mode.cutscene = null;
+      touch.syncTouchButtons();
+      expect(bar.hidden).toBe(false);
     });
   });
 

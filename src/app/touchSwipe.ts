@@ -172,9 +172,10 @@ function sendKey(type: 'keydown' | 'keyup', code: string): void {
 
 /** Is a gesture on the play area a command right now? */
 function armed(): boolean {
-  // Not during the briefcase demo or the help pages: both are still `screen === 'room'`
-  // and both are dismissed by a TAP today. Leaving them out here leaves that untouched,
-  // rather than swallowing the tap that skips them.
+  // Not during the briefcase demo or the help pages: both are still `screen === 'room'`.
+  // A tap dismisses the help, and must not also be read as a command; the demo takes no
+  // taps at all (its ✕ button skips it, cutsceneClose.ts), and a gesture must not drive
+  // a fish under it.
   return touchUi() && ui.screen === 'room' && !ui.helpOpen && !cutscene &&
     !(phoneUi() && (phoneMenuOpen() || touchOptionsOpen()));
 }

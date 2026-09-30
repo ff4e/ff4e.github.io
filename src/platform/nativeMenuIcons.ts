@@ -3,6 +3,8 @@ import iconSource from '../styles/nativeMenuIcons.svg?raw';
 const regions: Readonly<Record<string, string>> = {
   14: 'map', 24: 'undo', 12: 'save', 13: 'load', 16: 'options', 15: 'restart',
 };
+/** Buttons that dispatch no panel region. */
+const buttons: Readonly<Record<string, string>> = { 'phone-more': 'more', 'cutscene-close': 'close' };
 let library: Document | null = null;
 
 /** Replace only the artwork; keep button dispatch, SVG boxes and accessible names. */
@@ -13,7 +15,7 @@ export function applyRusticIcons(doc: Document): void {
   }
   for (const svg of doc.querySelectorAll<SVGSVGElement>('.tbtn svg')) {
     const button = svg.closest('button');
-    const name = button?.id === 'phone-more' ? 'more' : regions[button?.dataset.region ?? ''];
+    const name = buttons[button?.id ?? ''] ?? regions[button?.dataset.region ?? ''];
     const symbol = name ? library.getElementById(name) : null;
     if (!symbol || !name) throw new Error(`Missing native menu symbol for ${button?.id}`);
     const copy = doc.importNode(symbol, true);

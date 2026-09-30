@@ -120,6 +120,7 @@ import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDr
 import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { initTouchButtons } from './touchButtons.js';
+import { initCutsceneClose } from './cutsceneClose.js';
 import { initTouchOptions } from './touchOptions.js';
 import { initTouchSwipe } from './touchSwipe.js';
 import { showDialogueHint } from './dialogueHints.js';
@@ -840,6 +841,7 @@ initCutscene({
     return swapActive;
   },
 });
+initCutsceneClose();
 
 //#region Room load wiring | anchors: initRoomLoad | Hands `roomLoad.ts` the three names it needs. Fetching a room, arming its voices and starting its music are in that module.
 initRoomLoad({
@@ -1686,10 +1688,9 @@ canvas.addEventListener('mousedown', (e) => {
     else helpScreens.next(helpPageCount(subLang()));
     return;
   }
-  // A click skips the briefcase demo (zrus_kufr).
+  // A click does NOT skip the briefcase demo: its ✕ button does (cutsceneClose.ts).
   if (cutscene) {
     e.preventDefault();
-    skipCutscene();
     return;
   }
   // A click dismisses the leg-completion story page (PaintBox1MouseDown → zrus_obrazek,
