@@ -1,5 +1,6 @@
 /**
- * Taptic feedback for the three moments the game already treats as significant.
+ * Taptic feedback for the three moments the game already treats as significant, and a
+ * tick for every button press.
  *
  * ── Why this exists ─────────────────────────────────────────────────────────
  * The game is a grid puzzle whose whole input vocabulary is "push in a direction".
@@ -12,6 +13,14 @@
  * website that does something the website cannot. That is a side effect, not the
  * reason; a haptic added only to satisfy a reviewer would fire somewhere that did
  * not need it, and be more annoying than absent.
+ *
+ * ── Why button presses tick, and why it is a different pattern ──────────────
+ * Martin asked for it: on the phone, a button press should answer under the thumb the
+ * way the rest of iOS does. It uses the SELECTION generator, not an impact, so that it
+ * cannot be mistaken for `hapticBlocked` — a press of Undo right after a push into a wall
+ * must not feel like a second wall. The selection tick is also the one iOS itself plays
+ * for plain UI controls (switches, pickers), which is exactly what these are. Which
+ * presses count is decided in `src/app/buttonHaptics.ts`, not here.
  *
  * ── Why nothing here is imported eagerly ────────────────────────────────────
  * `src/` is shared with the website and, before this file, imported nothing from
@@ -59,6 +68,10 @@ function ensure(): void {
   load = import('@capacitor/haptics')
     .then((m) => {
       mod = m;
+      // `selectionChanged` is a no-op on iOS unless a selection has been started: the
+      // plugin only creates its UISelectionFeedbackGenerator in `selectionStart`. It is
+      // started once, here, and never ended, so every button press is one bridge call.
+      void m.Haptics.selectionStart().catch(() => undefined);
     })
     .catch(() => {
       mod = null;
@@ -97,6 +110,14 @@ export function hapticSolved(): void {
   ensure();
   if (!mod) return;
   void mod.Haptics.notification({ type: mod.NotificationType.Success }).catch(() => undefined);
+}
+
+/** A button was pressed: the selection tick, lighter than any impact. */
+export function hapticTap(): void {
+  if (!isNativeHost()) return;
+  ensure();
+  if (!mod) return;
+  void mod.Haptics.selectionChanged().catch(() => undefined);
 }
 
 /** Test seam: forget the loaded plugin so a case can observe the load path again. */

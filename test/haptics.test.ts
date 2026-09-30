@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { hapticBlocked, hapticDeath, hapticSolved, initHaptics, resetHapticsForTest } from '../src/platform/haptics.js';
+import { hapticBlocked, hapticDeath, hapticSolved, hapticTap, initHaptics, resetHapticsForTest } from '../src/platform/haptics.js';
 
 /**
  * The two properties of the haptics layer that are worth pinning.
@@ -14,7 +14,9 @@ import { hapticBlocked, hapticDeath, hapticSolved, initHaptics, resetHapticsForT
  *
  * The second is the mapping: which of the three moments plays which pattern. Getting
  * Success and Error the wrong way round is invisible to every other check we have, and on
- * a device it is worse than no haptics at all.
+ * a device it is worse than no haptics at all. The same goes for a button press: it must
+ * be the selection tick, never the impact that means "blocked", and the selection must
+ * have been started or iOS plays nothing at all.
  *
  * What is NOT here is the once-per-hold latch in `movement.ts` — the thing that stops a
  * thumb parked against a wall from buzzing sixty times. It needs a live engine and room to
@@ -23,11 +25,15 @@ import { hapticBlocked, hapticDeath, hapticSolved, initHaptics, resetHapticsForT
 
 const impact = vi.fn(() => Promise.resolve());
 const notification = vi.fn(() => Promise.resolve());
+const selectionStart = vi.fn(() => Promise.resolve());
+const selectionChanged = vi.fn(() => Promise.resolve());
 
 vi.mock('@capacitor/haptics', () => ({
   Haptics: {
     impact: (...args: unknown[]) => impact(...args),
     notification: (...args: unknown[]) => notification(...args),
+    selectionStart: () => selectionStart(),
+    selectionChanged: () => selectionChanged(),
   },
   ImpactStyle: { Light: 'LIGHT', Medium: 'MEDIUM', Heavy: 'HEAVY' },
   NotificationType: { Success: 'SUCCESS', Warning: 'WARNING', Error: 'ERROR' },
@@ -44,6 +50,8 @@ beforeEach(() => {
   resetHapticsForTest();
   impact.mockClear();
   notification.mockClear();
+  selectionStart.mockClear();
+  selectionChanged.mockClear();
 });
 
 afterEach(() => {
@@ -57,10 +65,13 @@ describe('on the web', () => {
     hapticBlocked();
     hapticDeath();
     hapticSolved();
+    hapticTap();
     await settle();
     // Not "did not vibrate" — did not even resolve the module.
     expect(impact).not.toHaveBeenCalled();
     expect(notification).not.toHaveBeenCalled();
+    expect(selectionStart).not.toHaveBeenCalled();
+    expect(selectionChanged).not.toHaveBeenCalled();
   });
 });
 
@@ -83,6 +94,16 @@ describe('on the native host', () => {
     hapticSolved();
     expect(notification).toHaveBeenLastCalledWith({ type: 'SUCCESS' });
     expect(impact).not.toHaveBeenCalled();
+  });
+
+  it('ticks a button press with the selection generator, started once at load', () => {
+    expect(selectionStart).toHaveBeenCalledTimes(1);
+    hapticTap();
+    hapticTap();
+    expect(selectionChanged).toHaveBeenCalledTimes(2);
+    expect(selectionStart).toHaveBeenCalledTimes(1);
+    expect(impact).not.toHaveBeenCalled(); // a press must never feel like a wall
+    expect(notification).not.toHaveBeenCalled();
   });
 
   it('swallows a plugin that rejects', async () => {

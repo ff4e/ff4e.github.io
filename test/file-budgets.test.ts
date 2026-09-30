@@ -97,7 +97,13 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // 2 267 -> 2 268 for the briefcase demo's ✕: one import and one boot-time arming call,
   // less the mousedown's skip (a click on the room no longer ends the demo). The button,
   // its visibility and its reasoning live in `cutsceneClose.ts`.
-  ['src/app/main.ts', 2268],
+  //
+  // 2 268 -> 2 275 for a haptic tick on the world map's buttons: one import, five calls
+  // and a named corner in `clickMapAt`. The HTML buttons tick from one listener in `buttonHaptics.ts`, but the
+  // map's corners, room nodes and record-panel icons are pixels, and only this hit-test
+  // knows a press landed on one — or that it was inert (Exit, Replay with no record) and
+  // must stay silent. Moving the test out would mean a second copy of the hit-test.
+  ['src/app/main.ts', 2275],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

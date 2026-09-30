@@ -37,6 +37,7 @@ import { SubtitleSystem } from '../render/subtitles.js';
 import { type FishSprites } from '../render/enhancedArtSource.js';
 import { MAP_W, MAP_H } from '../render/worldMap.js';
 import { hitInfoButton } from '../render/mapInfo.js';
+import { hapticTap } from '../platform/haptics.js';
 import { requiredAsset, requiredJson } from '../render/assetFetch.js';
 import { framesIdle, wake } from './frameClock.js';
 import { depthOfRoom, branchOfRoom } from '../data/world.js';
@@ -1783,6 +1784,7 @@ function clickMapAt(mx: number, my: number): void {
     const room = ui.mapInfoRoom;
     const btn = hitInfoButton(mx, my);
     if (btn === 'run') {
+      hapticTap();
       closeMapInfo();
       // Delphi: Run on a solved depth-15 room shows the leg story page first, then
       // launches once dismissed (daClickAndRun, UMain.pas:958→966).
@@ -1792,6 +1794,7 @@ function clickMapAt(mx: number, my: number): void {
     } else if (btn === 'replay') {
       const rec = bestRecord(room);
       if (rec !== undefined) {
+        hapticTap();
         closeMapInfo();
         // Same story-page-first deferral for Replay (daReplay, UMain.pas:1030).
         const leg = solved.has(room) && depthOfRoom(room) === 15 ? branchOfRoom(room) : 0;
@@ -1800,19 +1803,23 @@ function clickMapAt(mx: number, my: number): void {
       }
       // no stored record → Replay is disabled; ignore the click (panel stays open)
     } else {
+      if (btn === 'cancel') hapticTap(); // a click off the panel pressed no button
       closeMapInfo(); // Cancel button, or a click off the panel
     }
     return;
   }
   const room = ui.worldMap.hitTest(mx, my, solved, cheated);
   if (room) {
+    hapticTap();
     // A genuinely solved (or cheated) room opens the record panel instead of
     // launching immediately (daInfo, UMain.pas:1611); unsolved rooms launch.
     if (solved.has(room) || cheated.has(room)) openMapInfo(room);
     else void enterRoom(room);
     return;
   }
-  dispatchMapCorner(ui.worldMap.cornerAction(mx, my));
+  const corner = ui.worldMap.cornerAction(mx, my);
+  if (corner && corner !== 'exit') hapticTap(); // Exit is unwired (mapNav.ts), so it is silent
+  dispatchMapCorner(corner);
 }
 
 
