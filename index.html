@@ -756,13 +756,14 @@
       }
       .topts-subs input { width: 20px; height: 20px; accent-color: #6cc; }
       .topts-buttons { display: flex; gap: 10px; }
-      .topts-buttons button {
+      .topts-buttons button, .topts-buttons a {
         flex: 1 1 0; min-height: 46px;
         color: #bdd; background: #18262e; border: 1px solid #35555f; border-radius: 10px;
         font: 600 14px/1 system-ui, sans-serif;
         -webkit-tap-highlight-color: transparent; touch-action: manipulation;
       }
-      .topts-buttons button:active { background: #24414c; border-color: #6cc; }
+      .topts-buttons a { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; }
+      .topts-buttons button:active, .topts-buttons a:active { background: #24414c; border-color: #6cc; }
       #topt-close { background: #24414c; border-color: #6cc; }
       /* A phone in landscape is the shape this screen has to fit, and it is the tight
          one: ~390px of height, against a card that wants 406. Compacted rather than
@@ -775,7 +776,7 @@
         .topts-row input[type='range'] { height: 28px; }
         .topts-subs { padding: 2px 12px 6px; }
         .topts-subs label { min-height: 40px; }
-        .topts-buttons button { min-height: 42px; }
+        .topts-buttons button, .topts-buttons a { min-height: 42px; }
       }
       /* Feedback strip: the player's only way to reach the author, and the only piece
          of modern chrome anywhere near the game. It hangs directly under the control
@@ -829,6 +830,7 @@
         text-decoration: none;
       }
       #feedbar button:hover, #feedbar a:hover { color: #9dd; border-bottom-color: #9dd; }
+      #feedback .privacy-link { color: #9dd; }
       /* The feedback form. A real <dialog>, so the browser gives us the modal backdrop,
          the focus trap and Esc-to-close; the game's keyboard is blocked while it is up
          (main.ts checks isOpen()), because every letter key otherwise drives a fish or
@@ -1057,6 +1059,7 @@
         <div id="feedbar" hidden>
           <span id="feedbar-build"></span>
           <button id="feedback-open" type="button">Send feedback</button>
+          <a id="feedbar-privacy" href="https://ff4e.github.io/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
           <a id="about-link" href="/about.html" target="_blank" rel="noopener" hidden>About</a>
         </div>
       </div>
@@ -1149,6 +1152,7 @@
         </fieldset>
         <div class="topts-buttons">
           <button id="topt-help" type="button">Help</button>
+          <a id="topt-privacy" href="https://ff4e.github.io/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
           <button id="topt-close" type="button">Done</button>
         </div>
       </div>
@@ -1177,6 +1181,7 @@
           <button id="feedback-close" class="fb-btn ghost" type="button">Close</button>
         </div>
         <p id="feedback-status" role="status" aria-live="polite"></p>
+        <p><a id="feedback-privacy" class="privacy-link" href="https://ff4e.github.io/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a> (opens in your browser)</p>
       </div>
     </dialog>
     <script type="module" src="/src/entry.ts"></script>
