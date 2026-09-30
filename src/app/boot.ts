@@ -77,6 +77,10 @@ export async function runBoot(): Promise<void> {
   // calls return immediately in a browser.
   initOrientationLock();
   syncOrientationLock();
+  // Same reason, same place: the buttons a player can press before the room is up — the
+  // first-run Tap to start, a load note, the fatal screen's Reload — tick like the rest.
+  initHaptics(); // warm the Taptic plugin on the native host; no-op in a browser
+  initButtonHaptics(); // a tick for every button press; the tick itself is native-only
   setFont(await FontData.load('/data/Intro'));
   // Enhanced subtitle fonts — all bundled + OFL/GPL so they render identically on every
   // platform. Mulish/Manrope/Jost are variable (weight axis 100-900); FFSubtitle is the
@@ -189,8 +193,6 @@ export async function runBoot(): Promise<void> {
   setBooted(true);
   console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
   initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
-  initHaptics(); // warm the Taptic plugin on the native host; no-op in a browser
-  initButtonHaptics(); // a tick for every button press, on the native host only
   // The feedback form. Reads the live game state only when the player opens it — there is
   // no collection before that, and nothing is ever sent without a click (see feedback.ts).
   ui.feedback = initFeedback({
