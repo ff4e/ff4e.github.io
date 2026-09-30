@@ -2,6 +2,13 @@
  * The game's layout, plus where it puts things — the one model `tools/layout-lab.html`
  * draws. DEV ONLY.
  *
+ * **PROBABLY OUTDATED for touch mode (2026-09-29).** The tablet buttons no longer reserve
+ * space: the room is laid out on the whole viewport and centred, and the buttons float over
+ * it (`src/app/touchBarEdge.ts`, `touchBarPlacement`). The touch-mode placement described
+ * below — the `.stage` margin, #126's spacers, the reserve's cutout cost — models the old
+ * bar. `verify-layout-lab.mjs` is not in any gate, so nothing flags the drift. Update the
+ * lab before trusting its touch numbers; desktop and TV placement are unaffected.
+ *
  * It brings **no scaling maths of its own**, and that is the entire point:
  * `computeStageLayout` and `contentScale` are imported from `src/app/layout.ts` and called
  * exactly as `relayout()` calls them, so a number the lab shows is a number the game has.

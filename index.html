@@ -56,10 +56,11 @@
         --sa-right: env(safe-area-inset-right, 0px);
         --sa-bottom: env(safe-area-inset-bottom, 0px);
         --sa-left: env(safe-area-inset-left, 0px);
-        /* What the bar actually reserves: its own buttons, plus whatever it has to clear
-           on that edge. Everything that has to agree with the bar's size — the stage
-           margin and the centring spacers' clamp — reads these, so the inset can never be
-           added in one place and forgotten in another.
+        /* The bar's footprint: its own buttons, plus whatever it has to clear on that
+           edge. The room no longer gives this up — the buttons float over it (see
+           `#touchbar` below) — but the bar's box is still this size, and
+           `app/touchBarEdge.ts` still prices both edges with it, so it is stated once here
+           and read everywhere rather than repeated.
 
            Both are `clearance + button + 6px`, the 6px being the breathing room between
            the buttons and the room. The top edge spells that 54 = 48 + 6 and takes its
@@ -95,13 +96,18 @@
            what was left) put the buttons 76px in against an island whose visible edge is
            near 48px — a gap wide enough to read as a mistake, which is how it was found.
 
-           14px rather than 8px because that is what shipped and was verified on device:
-           8px of padding plus 6px of centring slack. The buttons are left-aligned now, so
-           the whole lead has to be stated here.
+           It was 14px (8px of padding plus 6px of centring slack, verified on device)
+           while phones used this bar. They no longer do — phones have their own corner
+           controls — and on a tablet the column is centred on a tall edge, nowhere near a
+           corner, so the lead is now 3px: the same distance the top row keeps from its
+           edge (54 = 3 + 48 + 3), and 11px less of the room covered (Martin, 2026-09-29:
+           "when the buttons are on the side they could be closer to the edge"). The one
+           thing that does sit in a corner, the fish indicator, keeps the old 14px as
+           `--corner-lead` (src/styles/activeFishIndicator.css).
 
-           Either way it is spent INSIDE `--bar-w`, so the bar's footprint and what `.stage`
-           reserves for it never move. */
-        --bar-lead: 14px;
+           Either way it is spent INSIDE `--bar-w`, so the bar's footprint never moves. */
+        --bar-lead: 3px;
+        --corner-lead: 14px;
       }
       html, body { height: 100%; }
       /* No double-tap zoom. It is reachable on any touch device, and it is close to
@@ -501,20 +507,22 @@
         .creature i { animation: none; }
       }
       /* ── The touch controls ───────────────────────────────────────────────
-         A bar of five thumb-sized buttons, down the left in landscape and along
+         A column of thumb-sized buttons, down the left in landscape and along
          the top in portrait, shown only in touch mode and only in a room.
 
-         It RESERVES its space rather than floating over the game, and it does so
-         with a MARGIN on .stage rather than padding — `relayout()` measures the
-         stage with `clientWidth`, which includes padding and excludes margin, so
-         padding would have shrunk the bar's neighbour on screen without telling
-         the layout about it, and the room would have been scaled to a box wider
-         than it had.
+         The buttons FLOAT over the room, like the phone's corner controls. They used
+         to sit on a bar that reserved its space — a margin on `.stage`, so the room
+         was scaled into what the bar left — and that reserve made some rooms smaller
+         than the screen could show them. Martin (2026-09-29): keep the top-vs-side
+         placement, drop the bar, let the buttons overlap the room. So `#touchbar` is
+         now an invisible box that only positions them: no background, and
+         `pointer-events: none` so a swipe that starts between two buttons reaches the
+         room underneath (`touchSwipe.ts`) instead of dying on empty bar.
 
          Both attributes come from src/app/touchButtons.ts: `data-touch` is the
          mode (fixed for the session), `data-touchbar` is the bar actually being
-         up (a room, not the map). Which EDGE it sits on is pure CSS: a media
-         query already knows the orientation, so nothing in JS has to. */
+         up (a room, not the map). Which EDGE it sits on is CSS in portrait and
+         `data-touchbar-edge` in landscape (see below). */
       #touchbar {
         position: fixed;
         z-index: 120;
@@ -522,20 +530,19 @@
         align-items: center;
         justify-content: center;
         gap: 6px;
-        background: #10161acc;
-        backdrop-filter: blur(2px);
+        pointer-events: none;
         /* `--bar-w`/`--bar-h` are the bar's WHOLE footprint — its buttons plus the cutout
-           it has to clear — and the same value is what `.stage` reserves and what the
-           centring spacers clamp against. The cutout is spent as padding INSIDE that box,
-           so the box has to measure the way the reserve does.
+           it has to clear. The cutout is spent as padding INSIDE that box, so the box has
+           to measure the way the footprint does.
            Without this the bar is `content-box`: the padding is added ON TOP of the width,
-           the bar comes out one whole inset wider than the space reserved for it, and it
-           covers that much of the room's left edge (measured: 196px of bar against a 134px
-           reserve, in landscape on an iPhone 17 Pro). A browser cannot see it — every inset
-           is 0 there, so the padding is 0 and the two agree by accident. */
+           and the bar comes out one whole inset wider than its footprint (measured: 196px
+           of bar against a 134px footprint, in landscape on an iPhone 17 Pro). A browser
+           cannot see it — every inset is 0 there, so the padding is 0 and the two agree by
+           accident. */
         box-sizing: border-box;
       }
       #touchbar[hidden] { display: none; }
+      #touchbar > .tbtn { pointer-events: auto; }
       .tbtn {
         display: flex; flex-direction: column; align-items: center; justify-content: center;
         gap: 3px;
@@ -634,46 +641,18 @@
       html[data-phone-room] #stagebox { width: 100%; }
       html[data-phone-room] #stagebox > div { flex-shrink: 0; }
       .phone-subtitles { z-index: 110; }
-      /* ── Centring the room on the SCREEN, not on what the bar left over ──
-         The margin above reserves the bar's space by shrinking `.stage`'s own box, and
-         `.stage` centres its content inside THAT box — so "centred" meant centred in
-         [barWidth, viewport], which puts the room half a bar's width off true centre
-         (+36px landscape, +33px portrait; measured, and exactly what a player sees).
-         The room should sit on the viewport's centre, and only be pushed off it when
-         there is not enough room to clear the bar as well:
-
-             nearEdge = max(barSize, (viewport - roomSize) / 2)
-
-         That is a one-sided clamp, which `justify-content`/`align-items` cannot express
-         — they always centre within the box they are given. A pair of flex SPACERS can:
-         two `flex: 1 1 0` items split the free space evenly (which is what centring is),
-         a `min-*` on the near one is the clamp, and a negative margin of one whole bar on
-         that same spacer is what shifts the split from the shrunk box back onto the
-         viewport. The three together resolve to exactly `-min(barSize/2, slack/2)` — the
-         full half-bar correction while there is slack, tapering to nothing when the room
-         has to hug the bar. Deliberately CSS and not a computed offset in `relayout()`:
-         the box hugs its content, and a room change never reaches `relayout()` (see the
-         comment there), so a JS number would go stale on the next room.
-
-         The two orientations clamp on DIFFERENT elements, because that is where the
-         slack physically is. Landscape: the box hugs the room horizontally, so the room's
-         own left gap IS `.stage`'s. Portrait: the box is given the height outright and
-         letterboxes the room INSIDE it, so `.stage` has next to no vertical slack and the
-         correction has to happen in `#stagebox`, around the room itself.
-
-         `flex: 1 0 auto` on `#stagebox` makes the box fill the height it is centred in.
-         It was added to close a gap that no longer exists: `relayout()` used to size the
-         box `2 * STAGE_EDGE * scale` SHORTER than the stage, `.stage` re-centred that
-         shorter box, and once the clamp bound, the leftover half-shortfall landed the room
-         up to 12px BELOW the bar instead of against it (measured 4.2-7.5px on squat
-         portrait viewports). The reserve is CSS px taken off the viewport now and the box
-         IS the content's area (layout.ts), so there is no shortfall left to leave behind.
-         The rule stays because "fill the height you are centred in" is still what this
-         branch wants to say, and it is what keeps the clamp's formula true if the reserve
-         is ever raised again — for a TV's title-safe inset, say. */
+      /* ── Where the buttons sit ──
+         The bar used to reserve its space, which needed a margin on `.stage` and a pair of
+         flex spacers (#126) to put the room back on the SCREEN's centre rather than the
+         centre of what the bar left over. The buttons float now, so the room has the whole
+         viewport and `.stage`'s own centring is already the screen's. The room is never
+         moved off the buttons (Martin, 2026-09-29): when they would cover it, they change
+         EDGE instead, and when no edge has room beside it they move in by `--bar-inset` to
+         sit wholly ON the room, never half on it (`app/touchBarEdge.ts`). Only their
+         placement is here. */
       @media (orientation: landscape) {
         html:not([data-touchbar-edge='top']) #touchbar {
-          top: 0; left: 0; bottom: 0; width: var(--bar-w); flex-direction: column;
+          top: 0; left: var(--bar-inset, 0px); bottom: 0; width: var(--bar-w); flex-direction: column;
           /* Left-aligned, not centred: the lead below is the whole distance from the screen
              edge to the buttons, so centring would silently add half the leftover on top of
              it and undo the `max()`. The slack sits on the RIGHT instead, between the
@@ -681,57 +660,37 @@
           align-items: flex-start;
           padding-left: max(var(--sa-left), var(--bar-lead)); padding-bottom: var(--sa-bottom);
         }
-        html[data-touchbar]:not([data-touchbar-edge='top']) .stage { margin-left: var(--bar-w); }
-        html[data-touchbar]:not([data-touchbar-edge='top']) .stage::before {
-          content: ''; flex: 1 1 0; min-width: var(--bar-w); margin-left: calc(-1 * var(--bar-w));
-        }
-        html[data-touchbar]:not([data-touchbar-edge='top']) .stage::after { content: ''; flex: 1 1 0; }
-        /* ── The same bar, along the TOP, while still in landscape ──
-           A room much wider than the viewport is WIDTH-bound, so the 72px the left bar
-           takes come off the axis that decides its scale, while the 54px a top bar takes
-           come off the axis that had slack. `app/touchBarEdge.ts` lays the room out both
-           ways every frame and sets `data-touchbar-edge` to whichever shows more of it —
-           on a phone that is the widest rooms only (UTES gains ~10% and crosses 1:1), on
-           a near-square foldable it is most of them.
+        /* ── The same buttons, along the TOP, while still in landscape ──
+           A room much wider than the viewport is WIDTH-bound, so it fills the screen's
+           width and leaves its slack above and below — which is where the buttons cover
+           least of it. `app/touchBarEdge.ts` prices the room both ways every frame and
+           sets `data-touchbar-edge` to whichever edge the room can spare — on a phone
+           that is the widest rooms only, on a near-square foldable it is most of them.
 
            Deliberately NOT a media query: the answer depends on which ROOM is loaded, and
-           CSS cannot see that. This is the one part of the touch bar's placement that JS
-           decides, which is why the rules above are scoped to the attribute's absence
+           CSS cannot see that. This is the one part of the buttons' placement that JS
+           decides, which is why the rule above is scoped to the attribute's absence
            rather than being overridden here — an override would have to undo the width
-           clamp as well as apply the height one, and the two clamps are easy to leave
-           half-applied.
+           as well as apply the height, and the two are easy to leave half-applied.
 
-           The body of this branch is the PORTRAIT rule, verbatim: same edge, same 54px,
-           same reason the clamp moves to `#stagebox` (the box is given the height outright
-           and letterboxes the room inside it, so `.stage` has no vertical slack to correct
-           on). Keeping them identical is the point — the centring fix (#126) then cannot
-           regress on one edge while holding on the other. */
+           The body of this branch is the PORTRAIT rule, verbatim: same edge, same 54px.
+           Keeping them identical is the point — the two top bars cannot drift apart. */
         html[data-touchbar-edge='top'] #touchbar {
-          top: 0; left: 0; right: 0; bottom: auto;
+          top: var(--bar-inset, 0px); left: 0; right: 0; bottom: auto;
           width: auto; height: var(--bar-h); padding-top: var(--sa-top); flex-direction: row;
         }
-        html[data-touchbar][data-touchbar-edge='top'] .stage {
-          margin-top: var(--bar-h); flex-direction: column;
-        }
-        html[data-touchbar][data-touchbar-edge='top'] #stagebox { flex: 1 0 auto; flex-direction: column; }
-        html[data-touchbar][data-touchbar-edge='top'] #stagebox::before {
-          content: ''; flex: 1 1 0; min-height: var(--bar-h); margin-top: calc(-1 * var(--bar-h));
-        }
-        html[data-touchbar][data-touchbar-edge='top'] #stagebox::after { content: ''; flex: 1 1 0; }
       }
+      /* Portrait: along the top, unless `app/touchBarEdge.ts` found a room the top buttons
+         would cover and the left ones would not (VRAK on an iPad) — then down the left,
+         with the landscape left rule's body verbatim. `left` is the only value that moves
+         them here; an absent or stale 'top' attribute leaves the default. */
       @media (orientation: portrait) {
-        #touchbar { left: 0; right: 0; top: 0; height: var(--bar-h); padding-top: var(--sa-top); flex-direction: row; }
-        html[data-touchbar] .stage { margin-top: var(--bar-h); }
-        /* `#stagebox` is the row's only visible child in touch mode (`#panelcol` is
-           `display: none`), and `wrap` is the box's only in-flow child — so turning both
-           main axes vertical costs nothing, lets the box grow to the full height, and
-           lets the same two spacers work on it. */
-        html[data-touchbar] .stage { flex-direction: column; }
-        html[data-touchbar] #stagebox { flex: 1 0 auto; flex-direction: column; }
-        html[data-touchbar] #stagebox::before {
-          content: ''; flex: 1 1 0; min-height: var(--bar-h); margin-top: calc(-1 * var(--bar-h));
+        html:not([data-touchbar-edge='left']) #touchbar { left: 0; right: 0; top: var(--bar-inset, 0px); height: var(--bar-h); padding-top: var(--sa-top); flex-direction: row; }
+        html[data-touchbar-edge='left'] #touchbar {
+          top: 0; left: var(--bar-inset, 0px); bottom: 0; width: var(--bar-w); flex-direction: column;
+          align-items: flex-start;
+          padding-left: max(var(--sa-left), var(--bar-lead)); padding-bottom: var(--sa-bottom);
         }
-        html[data-touchbar] #stagebox::after { content: ''; flex: 1 1 0; }
       }
       /* ── The touch Options ────────────────────────────────────────────────
          Plain HTML controls over the same settings the panel's Options face

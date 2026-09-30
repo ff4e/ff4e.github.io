@@ -12,13 +12,15 @@
  *
  * For each room/viewport it asserts three things:
  *   1. the edge the page chose is the edge the pure function predicts,
- *   2. `.stage` really is the viewport minus THAT edge's bar,
- *   3. the room's rendered scale is the one the model computed for it.
+ *   2. `.stage` is the WHOLE viewport — the buttons float over the room and reserve
+ *      nothing, whichever edge they are on (2026-09-29; it used to be the viewport minus
+ *      that edge's bar),
+ *   3. the room's rendered scale is the one the model computes for the whole viewport.
  *
- * (3) is what would catch the CSS and the JS drifting apart — a rule that moved the bar
- * without moving the space it reserves would still satisfy (1). `tools/test-touchbar.mjs`
- * owns the behavioural assertions (margins, centring, no overlap); this one owns the claim
- * that the offline measurement is describing the real thing.
+ * (2) and (3) are what would catch a reserve creeping back — a stylesheet rule that gave
+ * the bar space again would still satisfy (1). `tools/test-touchbar.mjs` owns the
+ * behavioural assertions (buttons, centring); this one owns the claim that the offline
+ * measurement is describing the real thing.
  *
  * ── Why this is `test-` and not `verify-` ────────────────────────────────────
  * `tools/run-ui-tests.mjs` discovers `test-*.mjs` and nothing else, so under its old name
@@ -30,14 +32,15 @@
  * ── The housing cases ────────────────────────────────────────────────────────
  * Chromium reports no safe-area insets, so the browser cases below are all the no-cutout
  * world — which is honest for a browser and useless for the iOS shell, where the island is
- * 62px and the left edge costs 120 instead of 72. Those cases set `--sa-left` on the root
- * by hand at the phone's FULL-BLEED size (874x402, not Safari's 756x352) and re-assert all
- * three claims, which is the only place any of this is checked against a rendering engine.
+ * 62px and the left edge is priced at 120 instead of 72. Those cases set `--sa-left` on the
+ * root by hand at the phone's FULL-BLEED size (874x402, not Safari's 756x352) and re-assert
+ * all three claims, which is the only place any of this is checked against a rendering
+ * engine.
  *
  * Usage: FF_UI_PORT=<port> npx tsx tools/test-touchbar-edge.mjs
  */
 import { computeStageLayout, contentScale } from '../src/app/layout.ts';
-import { preferredTouchBarEdge, TOUCHBAR_H, TOUCHBAR_LEAD, touchBarLeftW } from '../src/app/touchBarEdge.ts';
+import { touchBarEdgeFor, TOUCHBAR_LEAD } from '../src/app/touchBarEdge.ts';
 import { appReady, exitProbe, launchBrowser, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { LAB_ROOMS } from './layoutLabRooms.ts';
 
@@ -46,7 +49,9 @@ const BASE = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 /**
  * Rooms chosen to land on both landscape edges: UTES is the widest room in the game
  * (780x225) and DRAKAR the widest of the big ones (795x435), while KOSTE (540x495) is an
- * ordinary shape. Portrait is included to show the media query still owns it.
+ * ordinary shape. Portrait keeps the top for an ordinary room, and VRAK (315x555) is the
+ * room whose top buttons an iPad in portrait would sit over and whose left ones it would
+ * not, so it moves them to the left (`touchBarEdgeFor`).
  *
  * `inset` is the display cutout in css px — 0 everywhere a browser is being modelled,
  * because a browser has already subtracted it. The last two are the native iOS shell at
@@ -58,7 +63,8 @@ const CASES = [
   { room: 17, w: 1180, h: 820, inset: 0, note: 'tablet landscape, wide room' },
   { room: 6, w: 1180, h: 820, inset: 0, note: 'tablet landscape, ordinary room' },
   { room: 17, w: 1040, h: 860, inset: 0, note: 'foldable, near square' },
-  { room: 17, w: 393, h: 852, inset: 0, note: 'portrait — the media query still owns this' },
+  { room: 17, w: 393, h: 852, inset: 0, note: 'portrait, ordinary room' },
+  { room: 4, w: 834, h: 1194, inset: 0, note: 'iPad portrait, VRAK: only the top buttons would cover it' },
   { room: 7, w: 874, h: 402, inset: 62, note: 'iPhone 17 native, island, very wide room' },
   { room: 6, w: 874, h: 402, inset: 62, note: 'iPhone 17 native, island, ordinary room' },
 ];
@@ -140,24 +146,20 @@ for (const c of CASES) {
       scale: g.scale,
       stageW: stage.clientWidth,
       stageH: stage.clientHeight,
-      edge: document.documentElement.getAttribute('data-touchbar-edge') ?? 'left',
+      edge:
+        document.documentElement.getAttribute('data-touchbar-edge') ??
+        (window.innerWidth > window.innerHeight ? 'left' : 'top'),
     };
   });
 
-  // Portrait belongs to the media query and the attribute is inert there, so the expected
-  // edge is 'top' by the stylesheet rather than by the comparison.
   const landscape = c.w > c.h;
-  // Landscape, so the island is on a SIDE: it feeds `clearLeft` and leaves `insetTop` at 0.
+  // The island cases are landscape, so it is on a SIDE: it feeds `clearLeft` and leaves
+  // `insetTop` at 0.
   const clearLeft = Math.max(c.inset, TOUCHBAR_LEAD);
-  const want = landscape
-    ? preferredTouchBarEdge(real.nativeW, real.nativeH, c.w, c.h, 'fill', 1, 0, clearLeft)
-    : 'top';
-  // `touchBarLeftW()`, not `TOUCHBAR_W`: the left edge's footprint is the bar's content
-  // PLUS the clearance it holds off the display corner, and only the first of those is the
-  // constant. The clearance is a FLOOR under the cutout, never added to it — 72 with no
-  // housing, 120 against a 62px island, not 134.
-  const availW = want === 'left' ? c.w - touchBarLeftW(c.inset) : c.w;
-  const availH = want === 'top' ? c.h - TOUCHBAR_H : c.h;
+  const want = touchBarEdgeFor(real.nativeW, real.nativeH, c.w, c.h, 'fill', 1, 0, clearLeft);
+  // The buttons float over the room, so the room has the whole viewport on either edge.
+  const availW = c.w;
+  const availH = c.h;
   const l = computeStageLayout(availW, availH, 'fill', false);
   const predicted = contentScale(real.nativeW, real.nativeH, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx);
 
@@ -165,12 +167,10 @@ for (const c of CASES) {
     `\n${c.note}  ${c.w}x${c.h}${c.inset ? ` cutout ${c.inset}` : ''}  room ${real.nativeW}x${real.nativeH}` +
       `  -> bar ${want}${landscape ? '' : ' (portrait)'}`,
   );
-  if (landscape) {
-    expect(real.edge === want, `the page put the bar on the predicted edge (${real.edge})`);
-  }
+  expect(real.edge === want, `the page put the bar on the predicted edge (${real.edge})`);
   expect(
     real.stageW === availW && real.stageH === availH,
-    `the stage is the viewport minus that bar (${real.stageW}x${real.stageH}, expected ${availW}x${availH})`,
+    `the stage is the whole viewport — the bar reserves nothing (${real.stageW}x${real.stageH}, expected ${availW}x${availH})`,
   );
   expect(
     Math.abs(predicted - real.scale) < 1e-6,

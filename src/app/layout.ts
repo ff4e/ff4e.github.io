@@ -382,7 +382,7 @@ export interface StageLayout {
  * possible — the object-size reference, and nothing else.
  *
  * `availW`/`availH` are the area the game has AFTER the furniture and the margins are off;
- * `relayout()` measures `.stage`, whose margin already reserves the touch bar.
+ * `relayout()` measures `.stage`. The touch buttons float over the room and reserve nothing.
  *
  * `panel` false drops the panel's footprint from that fit — see `sideFootprint`.
  *

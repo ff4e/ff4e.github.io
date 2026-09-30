@@ -21,6 +21,17 @@
  * second calculation with buttons on side and take the button position for which the area
  * is higher."
  *
+ * ── What the answer means now that the buttons float ─────────────────────────
+ * Since 2026-09-29 the bar reserves nothing: the room is laid out on the whole viewport
+ * and the buttons are drawn over it (Martin: "keep the current logic of positioning the
+ * buttons (top vs side) but lets not use the bar anymore and let the buttons to overlap
+ * the room"). The rule below is unchanged, and it still PRICES each edge as if the bar
+ * took its footprint off the viewport — which is now a proxy for "which edge does the
+ * room spare". An edge whose reserve would cost the room nothing is one where the room
+ * leaves letterbox slack at least a bar deep, so the buttons land in that slack instead of
+ * on the level; when both edges would cost something, the cheaper one is the one where
+ * the buttons cover the thinner strip of it.
+ *
  * ── The second half this rule used to need, and no longer does ───────────────
  * It once had a whole-room test ranked ABOVE the area comparison. That existed because
  * `MIN_STAGE_SCALE`'s floor fed a stage box that could be bigger than the viewport, so on a
@@ -73,19 +84,6 @@ import type { FitMode } from './layout.js';
 
 /**
  * The bar's footprint, in CSS px, and the ONE thing here that is duplicated from
- * `index.html`. Both numbers are the bar's real size in the stylesheet (72px wide down the
- * left, 54px tall along the top); this module has to know them because it is pricing the
- * two layouts before either is applied, and CSS cannot be asked.
- *
- * `test/touchBarEdge.test.ts` reads the stylesheet and asserts that every px length in the
- * landscape branch is the constant for that branch's axis, which is what keeps the pair
- * honest in BOTH directions — changing the CSS alone, changing a constant alone, or
- * updating the bar's own size while forgetting #126's centring clamp are all caught.
- * (`tools/test-touchbar.mjs` pins the rendered margins too, but against string literals,
- * so on its own it would not notice a constant moving.)
- */
-/**
- * The bar's footprint, in CSS px, and the ONE thing here that is duplicated from
  * `index.html`. This module has to know it because it is pricing the two layouts before
  * either is applied, and CSS cannot be asked.
  *
@@ -95,10 +93,9 @@ import type { FitMode } from './layout.js';
  *
  * `test/touchBarEdge.test.ts` reads the stylesheet and asserts that every px length in the
  * landscape branch is the constant for that branch's axis, which is what keeps the pair
- * honest in BOTH directions — changing the CSS alone, changing a constant alone, or
- * updating the bar's own size while forgetting #126's centring clamp are all caught.
- * (`tools/test-touchbar.mjs` pins the rendered margins too, but against string literals,
- * so on its own it would not notice a constant moving.)
+ * honest in BOTH directions — changing the CSS alone or changing a constant alone is
+ * caught. (`tools/test-touchbar.mjs` pins the rendered bar width too, but against the
+ * stylesheet's own formula, so on its own it would not notice a constant moving.)
  */
 export const TOUCHBAR_W = 58;
 export const TOUCHBAR_H = 54;
@@ -111,10 +108,14 @@ export const TOUCHBAR_H = 54;
  * `index.html`). It is a FLOOR under the housing inset, never added to it, so the left
  * edge costs `TOUCHBAR_W + max(inset, TOUCHBAR_LEAD)`.
  *
+ * 3px since 2026-09-29, down from 14: only tablets use this bar now, and their column is
+ * centred along the edge, far from a corner. 3 is the distance the top row keeps from its
+ * own edge, so both edges hold the buttons equally close.
+ *
  * The top edge has no equivalent: its buttons are centred along an edge whose corners are
  * far away, so nothing there needs holding off.
  */
-export const TOUCHBAR_LEAD = 14;
+export const TOUCHBAR_LEAD = 3;
 
 /**
  * The left edge's WHOLE footprint — what `.stage` gives up, and what `--bar-w` resolves
@@ -145,8 +146,8 @@ export type TouchBarEdge = 'left' | 'top';
  * How much of a `roomW`x`roomH` room is actually on screen, in CSS px², if the game is
  * given an `availW`x`availH` area.
  *
- * `availW`/`availH` are what `relayout()` will measure once the bar is placed — the
- * viewport minus that bar — so this runs the real pipeline: `computeStageLayout` for the
+ * `availW`/`availH` are the viewport minus a candidate bar reserve (see the header for why
+ * a reserve is still what is priced), so this runs the real pipeline: `computeStageLayout` for the
  * stage scale and the elastic box, then `contentScale` for the room inside it. `panel` is
  * false because touch mode hides the side column, which is also what forces the fit mode
  * to `fill` (`effectiveFitMode`), so `dpr` never reaches a crisp-integer branch here.
@@ -229,4 +230,105 @@ export function preferredTouchBarEdge(
   const top = roomOn(roomW, roomH, viewportW, viewportH - TOUCHBAR_H - insetTop, mode, dpr);
   const left = roomOn(roomW, roomH, viewportW - TOUCHBAR_W - clearLeft, viewportH, mode, dpr);
   return top >= left ? 'top' : 'left';
+}
+
+/**
+ * The breathing room inside each footprint (54 = 48 + 6, 58 = 52 + 6 — see `TOUCHBAR_H`):
+ * the part of it with no button in it. A gap that is short of the footprint by no more than
+ * the room-side share of this still keeps every button off the room, so it counts as
+ * fitting — otherwise POCITAC on a 13" iPad (53px of gap, buttons ending at 51) would have
+ * them moved 53px onto a room they never touched. The top row is centred in its footprint,
+ * so half of it is on the room's side; the left column is left-aligned, so all of it is.
+ */
+const BUTTON_BREATHING = 6;
+
+/**
+ * How much of the room the buttons on each edge cover, in CSS px deep.
+ *
+ * The room is drawn for the WHOLE viewport — the buttons reserve nothing — and centred on
+ * it, never moved off them (Martin, 2026-09-29), so its size and position do not depend on
+ * the edge. The buttons are never left half on the room and half on the letterbox either
+ * ("better have buttons fully covered than covered partially"): if the gap between the room
+ * and an edge holds their whole footprint they sit in it and cover nothing; if it does not,
+ * they move in to the room's edge (`touchBarPlacement`) and cover their whole footprint.
+ * So each edge covers either 0 or its footprint, and `gap` is where the room starts.
+ */
+export function buttonOverlap(
+  roomW: number,
+  roomH: number,
+  viewportW: number,
+  viewportH: number,
+  mode: FitMode,
+  dpr = 1,
+  insetTop = 0,
+  clearLeft = TOUCHBAR_LEAD,
+): { top: number; left: number; gapTop: number; gapLeft: number } {
+  if (!(roomW > 0) || !(roomH > 0) || !(viewportW > 0) || !(viewportH > 0)) {
+    return { top: 0, left: 0, gapTop: 0, gapLeft: 0 };
+  }
+  const l = computeStageLayout(viewportW, viewportH, mode, false);
+  const s = contentScale(roomW, roomH, l.scale, l.mode, dpr, l.availW, l.availH, l.maxCellPx);
+  const gapLeft = Math.max(0, (viewportW - s * roomW) / 2);
+  const gapTop = Math.max(0, (viewportH - s * roomH) / 2);
+  const footTop = TOUCHBAR_H + insetTop;
+  const footLeft = TOUCHBAR_W + clearLeft;
+  return {
+    top: gapTop >= footTop - BUTTON_BREATHING / 2 ? 0 : footTop,
+    left: gapLeft >= footLeft - BUTTON_BREATHING ? 0 : footLeft,
+    gapTop,
+    gapLeft,
+  };
+}
+
+/**
+ * Where the buttons go, in EITHER orientation: the edge, and how far in from it.
+ *
+ * The edge: start from the one the stylesheet has always used — `preferredTouchBarEdge` in
+ * landscape, the top in portrait — and move to the other only when it covers LESS of the
+ * room (Martin, 2026-09-29: "if the overlap is just partial then move the buttons to the
+ * top or vice versa"). An edge that covers nothing always beats one that covers something,
+ * and when both cover, the shallower footprint wins — the top's 54px over the left's 61.
+ *
+ * `inset`: 0 when the buttons fit beside the room. When they do not, it is the gap between
+ * the screen edge and the room, rounded up, so the buttons start ON the room rather than
+ * straddling its edge — TRUHLA on a 13" iPad left ~40px each side, and the left buttons sat
+ * half on it. A gap under a pixel is no gap.
+ *
+ * Measured on iPads, room centred: portrait covers nothing (VRAK's buttons go left); in
+ * landscape 32-40 of the 72 rooms have no edge the buttons fit beside, and those now get the
+ * top strip, fully over the room.
+ */
+export function touchBarPlacement(
+  roomW: number,
+  roomH: number,
+  viewportW: number,
+  viewportH: number,
+  mode: FitMode,
+  dpr = 1,
+  insetTop = 0,
+  clearLeft = TOUCHBAR_LEAD,
+): { edge: TouchBarEdge; inset: number } {
+  const usual: TouchBarEdge =
+    viewportW > viewportH
+      ? preferredTouchBarEdge(roomW, roomH, viewportW, viewportH, mode, dpr, insetTop, clearLeft)
+      : 'top';
+  const other: TouchBarEdge = usual === 'top' ? 'left' : 'top';
+  const o = buttonOverlap(roomW, roomH, viewportW, viewportH, mode, dpr, insetTop, clearLeft);
+  const edge = o[other] < o[usual] ? other : usual;
+  const gap = edge === 'top' ? o.gapTop : o.gapLeft;
+  return { edge, inset: o[edge] > 0 && gap >= 1 ? Math.ceil(gap) : 0 };
+}
+
+/** Just the edge of `touchBarPlacement` — what the probes and unit tests compare. */
+export function touchBarEdgeFor(
+  roomW: number,
+  roomH: number,
+  viewportW: number,
+  viewportH: number,
+  mode: FitMode,
+  dpr = 1,
+  insetTop = 0,
+  clearLeft = TOUCHBAR_LEAD,
+): TouchBarEdge {
+  return touchBarPlacement(roomW, roomH, viewportW, viewportH, mode, dpr, insetTop, clearLeft).edge;
 }

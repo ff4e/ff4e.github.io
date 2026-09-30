@@ -16,7 +16,10 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { computeStageLayout, contentScale } from '../src/app/layout.js';
 import {
+  buttonOverlap,
   preferredTouchBarEdge,
+  touchBarEdgeFor,
+  touchBarPlacement,
   visibleRoomArea,
   TOUCHBAR_H,
   TOUCHBAR_LEAD,
@@ -221,15 +224,14 @@ describe('visibleRoomArea', () => {
  * The bar's footprint is stated twice — as CSS in `index.html`, which places the bar, and
  * as `TOUCHBAR_W`/`TOUCHBAR_H` here, which PRICE the two placements before either is
  * applied. They have to agree, and nothing else in the suite can notice if they stop:
- * `tools/test-touchbar.mjs` pins the rendered margins against string literals, so it
+ * `tools/test-touchbar.mjs` pins the rendered buttons against string literals, so it
  * catches a CSS change but not a change to the constants, and `test-touchbar-edge.mjs`
  * (which would catch both) needs a browser and is not part of the suite.
  *
  * So this reads the stylesheet. Every px length inside the landscape branch has to BE the
- * bar's size on that branch's axis — the width rule, the stage margin, and the two halves
- * of #126's centring clamp (`min-width` and the negative margin that shifts the split back
- * onto the viewport) are all the same number, and a change that updated one of them and
- * not the others would be a real bug even if the constants were left alone.
+ * bar's size on that branch's axis. The bar no longer reserves space (the buttons float
+ * over the room), so the only rule left spending it is the bar's own box — but the pricing
+ * in `touchBarEdge.ts` still has to price the box the stylesheet actually draws.
  */
 describe('the bar footprint in index.html and the constants here', () => {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
@@ -337,16 +339,16 @@ describe('the bar footprint in index.html and the constants here', () => {
     return m === null ? null : { px: Number(m[1]), inset: m[2], lead: m[3] };
   };
 
-  /** `--bar-lead: 14px;` -> 14 */
+  /** `--bar-lead: 3px;` -> 3 */
   const leadPx = () => {
     const m = /--bar-lead:\s*(\d+)px/.exec(root);
     return m === null ? null : Number(m[1]);
   };
 
   it('agrees on the left bar in every rule that spends its width', () => {
-    // The bar's own width, `.stage`'s margin, and both halves of #126's centring clamp
-    // (`min-width` and the negative margin that shifts the split back onto the viewport).
-    expect(varRefs(false).length).toBeGreaterThanOrEqual(4);
+    // The bar's own width. There used to be four — `.stage`'s margin and both halves of
+    // #126's centring clamp spent it too — until the buttons stopped reserving space.
+    expect(varRefs(false).length).toBeGreaterThanOrEqual(1);
     expect(lengthsOf(false)).toEqual([]);
     expect(leftDef()).toEqual({ px: TOUCHBAR_W, inset: '--sa-left', lead: '--bar-lead' });
   });
@@ -360,7 +362,7 @@ describe('the bar footprint in index.html and the constants here', () => {
   });
 
   it('agrees on the top bar in every rule that spends its height', () => {
-    expect(varRefs(true).length).toBeGreaterThanOrEqual(4);
+    expect(varRefs(true).length).toBeGreaterThanOrEqual(1);
     expect(lengthsOf(true)).toEqual([]);
     expect(topDef()).toEqual({ px: TOUCHBAR_H, inset: '--sa-top' });
   });
@@ -387,7 +389,78 @@ describe('the bar footprint in index.html and the constants here', () => {
     // `calc(58px + max(var(--sa-left), var(--bar-lead)))`, resolved by hand at two insets.
     expect(touchBarLeftW(0)).toEqual(def.px + Math.max(0, lead));
     expect(touchBarLeftW(62)).toEqual(def.px + Math.max(62, lead));
-    // The no-housing case is the old flat width, which is why nothing on the web moved.
-    expect(touchBarLeftW()).toEqual(72);
+    // The no-housing case: 58 + the 3px lead (it was 72 with the old 14px lead).
+    expect(touchBarLeftW()).toEqual(61);
+  });
+});
+
+/**
+ * The buttons float and the room stays centred, so the only thing the edge changes is how
+ * much of the room they sit over. `touchBarEdgeFor` keeps the usual edge and swaps only
+ * when the other one covers less.
+ */
+describe('which edge covers the least of the room', () => {
+  const VRAK: [number, number] = [21 * 15, 37 * 15];
+  const KOSTE: [number, number] = [36 * 15, 33 * 15];
+  const UTES: [number, number] = [52 * 15, 15 * 15];
+  const SPUNT: [number, number] = [50 * 15, 35 * 15];
+  const IPAD11_PORTRAIT: [number, number] = [834, 1194];
+  const IPAD11_LANDSCAPE: [number, number] = [1194, 834];
+
+  it('covers nothing where the footprint fits beside the room, and all of it where not', () => {
+    // KOSTE at 1100x620 is 676 wide: 212px each side, no height to spare.
+    const o = buttonOverlap(...KOSTE, 1100, 620, 'fill');
+    expect(o.left).toBe(0);
+    expect(o.top).toBe(TOUCHBAR_H);
+    expect(o.gapLeft).toBeCloseTo(212, 0);
+  });
+
+  it('never leaves the buttons half on the room: they move in to its edge', () => {
+    // TRUHLA (585x465) on a 13" iPad: ~43px either side, less than the left's 61, and no
+    // height at all. Both edges cover it; the top covers the shallower strip, from the
+    // screen edge, because the room already starts there.
+    const TRUHLA: [number, number] = [39 * 15, 31 * 15];
+    expect(touchBarPlacement(...TRUHLA, 1366, 1024, 'fill')).toEqual({ edge: 'top', inset: 0 });
+    // Portrait 320x360 with KOSTE: 33.5px above and below, less than the top's 54, and no
+    // width either. Top again, moved in 34px so it starts on the room, not across its edge.
+    expect(touchBarPlacement(...KOSTE, 320, 360, 'fill')).toEqual({ edge: 'top', inset: 34 });
+  });
+
+  it('keeps the buttons at the screen edge when they fit beside the room', () => {
+    expect(touchBarPlacement(...KOSTE, 1100, 620, 'fill')).toEqual({ edge: 'left', inset: 0 });
+  });
+
+  it('keeps the usual edge when neither covers the room, or it covers less', () => {
+    expect(touchBarEdgeFor(...KOSTE, 1100, 620, 'fill')).toBe('left');
+    expect(touchBarEdgeFor(...UTES, 1100, 620, 'fill')).toBe('top');
+  });
+
+  it('moves the portrait buttons to the left when only the top ones would cover the room', () => {
+    const o = buttonOverlap(...VRAK, ...IPAD11_PORTRAIT, 'fill');
+    expect(o.top).toBeGreaterThan(0);
+    expect(o.left).toBe(0);
+    expect(touchBarEdgeFor(...VRAK, ...IPAD11_PORTRAIT, 'fill')).toBe('left');
+    // An ordinary portrait room keeps the top.
+    expect(touchBarEdgeFor(...KOSTE, ...IPAD11_PORTRAIT, 'fill')).toBe('top');
+  });
+
+  it('swaps a landscape edge when the other clears the room', () => {
+    // WC (345x330) on an 11" iPad: the usual top edge covers it, the left does not.
+    const WC: [number, number] = [23 * 15, 22 * 15];
+    expect(preferredTouchBarEdge(...WC, ...IPAD11_LANDSCAPE, 'fill')).toBe('top');
+    expect(buttonOverlap(...WC, ...IPAD11_LANDSCAPE, 'fill').left).toBe(0);
+    expect(touchBarEdgeFor(...WC, ...IPAD11_LANDSCAPE, 'fill')).toBe('left');
+  });
+
+  it('swaps a landscape edge to the shallower strip when both cover the room', () => {
+    expect(preferredTouchBarEdge(...SPUNT, ...IPAD11_LANDSCAPE, 'fill')).toBe('left');
+    const o = buttonOverlap(...SPUNT, ...IPAD11_LANDSCAPE, 'fill');
+    expect(o.top).toBeGreaterThan(0);
+    expect(o.top).toBeLessThan(o.left);
+    expect(touchBarEdgeFor(...SPUNT, ...IPAD11_LANDSCAPE, 'fill')).toBe('top');
+  });
+
+  it('has no opinion about a room it cannot measure', () => {
+    expect(buttonOverlap(0, 100, 1100, 620, 'fill')).toEqual({ top: 0, left: 0, gapTop: 0, gapLeft: 0 });
   });
 });

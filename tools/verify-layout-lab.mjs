@@ -1,6 +1,9 @@
 /**
  * End-to-end check: does `tools/layoutPlaced.ts` really describe the running game?
  *
+ * **Probably outdated for touch mode (2026-09-29)** — see the note at the top of
+ * `tools/layoutPlaced.ts`: the tablet buttons no longer reserve space.
+ *
  * The layout lab renders the shipped model beside a candidate, and every conclusion drawn
  * from it rests on the left-hand side being the truth. `layoutPlaced.ts` calls
  * `src/app/layout.ts`'s own functions, so the SCALING cannot drift — but the PLACEMENT

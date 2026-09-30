@@ -47,7 +47,10 @@ others are small enough to read.
   `layoutPlaced.ts` is `src/app/layout.ts` plus the placement the stylesheet does,
   `layoutModel.ts` is the request/result vocabulary they share, `sweep-layout.mjs` runs six
   layout properties over millions of (room, viewport) pairs, and `verify-layout-lab.mjs` pins
-  the placement against a real browser.
+  the placement against a real browser. **Probably outdated for touch mode (2026-09-29):**
+  it still models the touch bar as a reserve on `.stage`, while the tablet buttons now float
+  over a centred, full-viewport room (`src/app/touchBarEdge.ts`). Not in any gate, so update
+  it before trusting its touch numbers. `measure-touchbar-edge.mjs` has the same problem.
 - **`test/`** — the unit and integration suites; **`test/ui/`** the browser probes. See
   [`TESTING.md`](TESTING.md).
 
@@ -117,7 +120,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
 | `touchButtons.ts` | | Shared touch/phone mode transitions, stage relayout and Options cleanup; tablet buttons dispatch through the panel's own `panelAction` table. |
 | `nativeMenu.ts` | | Shared touch/native rustic symbols and fixed room accents, enabled by device mode. |
-| `touchBarEdge.ts` | 7.2 k | Which edge the touch bar takes in landscape: the room laid out both ways, keeping whichever shows more of it. |
+| `touchBarEdge.ts` | 7.2 k | Where the floating tablet buttons go, in either orientation: the usual edge unless the other covers less of the centred room, and moved in to the room's edge rather than left straddling it. |
 | `deviceOrientation.ts` | 1.4 k | Native tablet orientation policy: compare landscape and portrait with the existing bar budget. Phones and browsers keep player-controlled rotation. |
 | `orientationSync.ts` | 0.8 k | Native phones rotate freely; tablets retain per-screen orientation locks. A no-op in every browser. |
 | `safeArea.ts` | 0.5 k | How big the display cutout is, read back from the `--sa-*` custom properties — the one place that knows their names. |
