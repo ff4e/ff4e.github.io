@@ -90,8 +90,8 @@ describe('settings persistence', () => {
     expect(s.introSeen).toBe(false); // fresh install auto-plays the intro once
   });
 
-  it.each(['cs', 'cs-CZ', 'cs-SK', 'CS-cz'])('defaults %s to subtitles off with Czech UI', (language) => {
-    expect(defaultSettings(language)).toMatchObject({ subtitles: 'off', titDef: 'cz' });
+  it.each(['cs', 'cs-CZ', 'cs-SK', 'CS-cz'])('defaults %s to Czech subtitles and UI', (language) => {
+    expect(defaultSettings(language)).toMatchObject({ subtitles: 'cz', titDef: 'cz' });
     expect(loadSettings(language)).toEqual(defaultSettings(language));
   });
 
@@ -104,7 +104,7 @@ describe('settings persistence', () => {
   it('uses the device default for partial or corrupt options without losing unrelated settings', () => {
     localStorage.setItem('ff.options', JSON.stringify({ introSeen: true, fitMode: 'large' }));
     expect(loadSettings('cs-CZ')).toMatchObject({
-      subtitles: 'off', titDef: 'cz', introSeen: true, fitMode: 'large',
+      subtitles: 'cz', titDef: 'cz', introSeen: true, fitMode: 'large',
     });
     localStorage.setItem('ff.options', '{broken');
     expect(loadSettings('cs-CZ')).toEqual(defaultSettings('cs-CZ'));

@@ -4,8 +4,8 @@ import { gotoApp, reloadApp } from './ui-lib.mjs';
 export async function checkDeviceLanguageDefaults(parent, expect) {
   const browser = parent.context().browser();
   for (const [kind, language, expected, titDef] of [
-    ['phone', 'cs-CZ', 'off', 'cz'],
-    ['tablet', 'cs-CZ', 'off', 'cz'],
+    ['phone', 'cs-CZ', 'cz', 'cz'],
+    ['tablet', 'cs-CZ', 'cz', 'cz'],
     ['phone', 'fr-FR', 'en', 'en'],
     ['desktop', 'cs-CZ', 'en', 'en'],
   ]) {
