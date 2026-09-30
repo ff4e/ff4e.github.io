@@ -1,8 +1,9 @@
 /* Shared touch/native paint; geometry and input stay in index.html. Button surfaces are
-   a single translucent color, with fully opaque symbols and labels. */
+   a single translucent color, with fully opaque symbols and labels. The surface alphas
+   match `menuPalette()` in src/platform/nativeMenuPalette.ts, which explains them. */
 html[data-native-menu] {
-  --menu-glass: rgb(23 29 34 / 45%);
-  --menu-pressed: rgb(46 59 64 / 70%);
+  --menu-glass: rgb(23 29 34 / 80%);
+  --menu-pressed: rgb(46 59 64 / 88%);
   --menu-ink: #f0eee5;
   --menu-edge: #d0d7ce6b;
   --menu-bevel: inset 0 1px #fff3, inset 0 -1px #0005;

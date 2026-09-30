@@ -10,7 +10,7 @@ describe('native room menu palette', () => {
     for (const pixels of [rgba(), rgba(120, 120, 120, 255), rgba(255, 0, 0, 0)]) {
       expect(roomTone(pixels)).toMatchObject({
         hue: null, symbol: null, highlight: null, shade: null, detail: null, outline: null,
-        glass: 'rgb(23 29 34 / 45%)',
+        glass: 'rgb(23 29 34 / 80%)', pressed: 'rgb(46 59 64 / 88%)',
       });
     }
   });
@@ -21,7 +21,8 @@ describe('native room menu palette', () => {
       [rgba(40, 160, 80, 255), 140],
     ] as const) {
       expect(roomTone(color)).toMatchObject({
-        hue, symbol: `hsl(${hue} 58% 72%)`, glass: `hsl(${hue} 28% 13% / 45%)`,
+        hue, symbol: `hsl(${hue} 58% 72%)`, glass: `hsl(${hue} 28% 13% / 80%)`,
+        pressed: `hsl(${hue} 24% 24% / 88%)`,
         highlight: `hsl(${hue} 42% 88%)`, outline: `hsl(${hue} 30% 16%)`,
       });
     }

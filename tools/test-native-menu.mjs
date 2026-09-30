@@ -284,7 +284,7 @@ try {
     const cool = await paletteFor(44);
     assert.equal(cool.hue, '146');
     assert.equal(cool.symbol, 'rgb(142, 225, 178)');
-    assert(cool.glass.endsWith(', 0.45)'), 'glass stays translucent');
+    assert(cool.glass.endsWith(', 0.8)'), 'glass stays translucent but mostly opaque over room art');
     assert.deepEqual(await paletteFor(6), warm, 'room palette is stable on revisits');
     await p.emulateMedia({ forcedColors: 'active' });
     assert.notEqual(await p.locator('#phone-map svg').evaluate(el => getComputedStyle(el).color),
