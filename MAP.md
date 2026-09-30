@@ -88,6 +88,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `phoneViewport.ts` | | Phone camera transforms, viewport-relative gesture coordinates and active-fish following. |
 | `phoneUndoFocus.ts` | | Choose the available fish whose move was undone, without mistaking replay consequences for moves. |
 | `activeFishIndicator.ts` | | Shared phone/tablet fish-switch button showing the engine selection; hidden outside live play. |
+| `buttonHaptics.ts` | | Which presses tick on the native iPhone: one delegated listener for every HTML button; the canvas map buttons call `hapticTap` from `main.ts`. |
 | `phoneSubtitleLayout.ts` | | Fixed-size phone captions: message-level word wrapping, stable expiry slots and arrival-only compositor scrolling. |
 | `phoneSubtitleExpiry.ts` | | Retain source text and retire whole displayed phone lines without moving surviving glyphs. |
 | `phoneSubtitleWave.ts` | | Phone message wave: stable reading-order phases across source-row expiry and bounded reveal time. |
