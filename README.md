@@ -162,7 +162,7 @@ Tetris minigame, and the intro and ending movies. The solvability net replays 70
 every push.
 
 On phones and tablets, new players with a **Czech device language** start with
-**subtitles off** and Czech titles, room-name plaques and help. Other device
+**Czech subtitles** and Czech titles, room-name plaques and help. Other device
 languages default to English subtitles and UI text; desktop defaults stay English.
 Options still offers Czech, English or subtitles off, and saved choices are
 preserved across updates and device-language changes. Voice recordings remain

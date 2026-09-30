@@ -102,12 +102,12 @@ export interface Settings {
 
 const STORAGE_KEY = 'ff.options';
 
-/** Czech devices need no translation of the Czech voices; other devices use English. */
+/** Czech devices default to Czech subtitles; other devices use English. */
 export function defaultSettings(language = 'en'): Settings {
   const czech = /^cs(?:-|$)/i.test(language);
   return {
     volume: { ...DEFAULT_INDEX },
-    subtitles: czech ? 'off' : 'en',
+    subtitles: czech ? 'cz' : 'en',
     titDef: czech ? 'cz' : 'en',
     introSeen: false,
     fitMode: 'medium',
