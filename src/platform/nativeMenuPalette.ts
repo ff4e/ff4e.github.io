@@ -45,22 +45,32 @@ export function roomTone(rgba: Uint8Array | Uint8ClampedArray): NativeMenuPalett
   return menuPalette(hue);
 }
 
+/**
+ * Surface opacity, the same in every room. It was 45%, and where the buttons float over the
+ * room (measured 2026-09-30: the whole bar in 30 of the 72 rooms on an 11-inch iPad in
+ * landscape, the phone corners in a few wide rooms) bright or busy art showed through
+ * strongly enough to swallow the symbols. 80% still lets the room tint the button. Pressed
+ * stays above rest, so a tap never uncovers more of the art than the button showed before.
+ */
+const GLASS = '80%';
+const PRESSED = '88%';
+
 export function menuPalette(hue: number | null): NativeMenuPalette {
   if (hue !== null && (!Number.isInteger(hue) || hue < 0 || hue >= 360)) {
     throw new RangeError('Native menu hue must be an integer in [0, 360)');
   }
   if (hue === null) return {
     hue: null,
-    glass: 'rgb(23 29 34 / 45%)', edge: '#d0d7ce6b',
-    popup: 'rgb(25 32 36 / 86%)', pressed: 'rgb(46 59 64 / 70%)',
+    glass: `rgb(23 29 34 / ${GLASS})`, edge: '#d0d7ce6b',
+    popup: 'rgb(25 32 36 / 86%)', pressed: `rgb(46 59 64 / ${PRESSED})`,
     symbol: null, highlight: null, shade: null, detail: null, outline: null,
   };
   return {
     hue,
-    glass: `hsl(${hue} 28% 13% / 45%)`,
+    glass: `hsl(${hue} 28% 13% / ${GLASS})`,
     edge: `hsl(${hue} 28% 74% / 42%)`,
     popup: `hsl(${hue} 18% 12% / 86%)`,
-    pressed: `hsl(${hue} 24% 24% / 70%)`,
+    pressed: `hsl(${hue} 24% 24% / ${PRESSED})`,
     symbol: `hsl(${hue} 58% 72%)`,
     highlight: `hsl(${hue} 42% 88%)`,
     shade: `hsl(${hue} 38% 47%)`,
