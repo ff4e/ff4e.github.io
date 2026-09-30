@@ -44,7 +44,6 @@ html[data-native-menu] .tbtn:focus-visible {
   outline: 2px solid var(--menu-ink);
   outline-offset: 2px;
 }
-html[data-native-menu] #touchbar { background: #0d191966; backdrop-filter: none; }
 html[data-native-menu] #phone-menu {
   background: var(--menu-popup);
   border-radius: var(--menu-radius);

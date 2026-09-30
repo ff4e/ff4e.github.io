@@ -43,13 +43,19 @@
  *
  * ── Shown only in a room, and only in touch mode ─────────────────────────────
  * Derived per frame, like `loadingUi.ts` and `touchOptions.ts` — `ui.screen` changes
- * from half a dozen places and none of them should have to know about a button bar. The
- * bar reserves real space rather than floating over the game (`.stage` gets a margin
- * while it is up, so `relayout()` measures the smaller area), which is why a change of
- * visibility has to relayout: the room is scaled into what is left.
+ * from half a dozen places and none of them should have to know about a button bar.
+ *
+ * The buttons FLOAT over the room (Martin, 2026-09-29). They used to sit on a bar that
+ * reserved real space — `.stage` got a margin while it was up, so the room was scaled into
+ * what was left — and that reserve shrank up to a third of the rooms by as much as ~7% on
+ * an iPad in landscape. The bar is now an invisible positioning box (`index.html`), so
+ * neither its visibility nor its edge changes the room's size or position: the room stays
+ * centred, and the buttons change EDGE rather than the room moving (Martin, 2026-09-29).
+ * The `relayout()` below is kept anyway: it is one call per change, not per frame, and it
+ * also wakes the renderer.
  */
 import { relayout } from './loadingUi.js';
-import { preferredTouchBarEdge, TOUCHBAR_LEAD } from './touchBarEdge.js';
+import { touchBarPlacement, TOUCHBAR_LEAD } from './touchBarEdge.js';
 import type { TouchBarEdge } from './touchBarEdge.js';
 import { room } from './gameState.js';
 import { settings } from './playerSettings.js';
@@ -89,23 +95,32 @@ let up = false;
 /**
  * Last edge written to the DOM, so a steady room is not rewritten every frame.
  *
- * `'left'` because that is what the stylesheet does with the attribute absent, which makes
- * the desktop and portrait cases free: `want` never moves off it and nothing is written.
+ * `null` until the first decision: with the attribute absent the stylesheet falls back to
+ * its orientation default — the left in landscape, the top in portrait — so nothing has
+ * to be written for a room that never gets an opinion.
  */
-let edge: TouchBarEdge = 'left';
+let edge: TouchBarEdge | null = null;
+
+/** Last `--bar-inset` written, in CSS px; 0 is also what the stylesheet assumes unset. */
+let barInset = 0;
 
 /**
- * Put the bar on the edge that shows more of the current room, and say whether that
- * changed.
+ * Put the buttons on the edge where they cover the least of the current room, and say
+ * whether that changed.
  *
  * Derived per frame rather than pushed, for the reason `rotatePrompt.ts` was (see
  * `touchBarEdge.ts`): the viewport, the screen and the room all change from places that
- * should not have to know a button bar exists, and one missed push would leave the room
- * scaled for an edge the bar is no longer on. A room that has not changed costs two
- * `computeStageLayout` calls and no DOM access.
+ * should not have to know a button bar exists, and one missed push would leave the buttons
+ * over the part of the room it can least spare. A room that has not changed costs a few
+ * `computeStageLayout` calls and no DOM access beyond the insets.
  *
- * Portrait is left alone: it has its own media query, and the attribute is only read
- * inside the landscape one, so a value written here would be inert there anyway.
+ * Both orientations: portrait used to be the stylesheet's alone (always the top), but a
+ * room the top buttons would cover and the left ones would not — VRAK on an iPad — now
+ * moves them to the left there too (`touchBarPlacement`).
+ *
+ * The INSET beside it moves the buttons in from the screen edge to the room's edge when
+ * they cannot fit beside the room, so they sit wholly on it rather than half on it. It is
+ * a custom property on the bar, not layout: the room does not move for it.
  */
 function syncEdge(): boolean {
   // While a room is loading, `gameState.room` is still the PREVIOUS one but `ui.screen` is
@@ -113,35 +128,29 @@ function syncEdge(): boolean {
   // frames first, which is a different room's shape and answers 'top' where KOSTE answers
   // 'left'. The bar would jump to the top edge and back within ~30ms on every room change.
   // The room that is not on screen yet has no say in where the buttons go.
-  if (roomLoading) return false;
-  const vw = window.innerWidth;
-  const vh = window.innerHeight;
-  let want: TouchBarEdge = 'left';
-  // Portrait has its own media query and the attribute is only read inside the landscape
-  // one, so there is nothing to decide there.
-  if (room && vw > vh) {
-    const { w, h } = roomScreenSize(room);
-    // A room that cannot be measured has no opinion, and must not be allowed to express
-    // one through the tie-break: `preferredTouchBarEdge` resolves a tie to 'top', which is
-    // right for a room that genuinely does not care and wrong for a 0x0 one.
-    if (w > 0 && h > 0) {
-      want = preferredTouchBarEdge(
-        w,
-        h,
-        vw,
-        vh,
-        settings.fitMode,
-        window.devicePixelRatio || 1,
-        safeAreaInset('--sa-top'),
-        // What the LEFT edge has to clear, which is not the housing alone: the buttons
-        // start after `max(housing, lead)` (see `--bar-lead` in index.html), so pricing the
-        // housing on its own would under-price the left edge on any phone whose housing is
-        // on the far side — every one of them, in one of the two landscapes.
-        Math.max(safeAreaInset('--sa-left'), TOUCHBAR_LEAD),
-      );
-    } else {
-      return false;
-    }
+  if (roomLoading || !room) return false;
+  const { w, h } = roomScreenSize(room);
+  // A room that cannot be measured has no opinion, and must not be allowed to express
+  // one through the tie-break: `preferredTouchBarEdge` resolves a tie to 'top', which is
+  // right for a room that genuinely does not care and wrong for a 0x0 one.
+  if (!(w > 0 && h > 0)) return false;
+  const { edge: want, inset } = touchBarPlacement(
+    w,
+    h,
+    window.innerWidth,
+    window.innerHeight,
+    settings.fitMode,
+    window.devicePixelRatio || 1,
+    safeAreaInset('--sa-top'),
+    // What the LEFT edge has to clear, which is not the housing alone: the buttons
+    // start after `max(housing, lead)` (see `--bar-lead` in index.html), so pricing the
+    // housing on its own would under-price the left edge on any phone whose housing is
+    // on the far side — every one of them, in one of the two landscapes.
+    Math.max(safeAreaInset('--sa-left'), TOUCHBAR_LEAD),
+  );
+  if (inset !== barInset) {
+    barInset = inset;
+    document.getElementById('touchbar')?.style.setProperty('--bar-inset', `${inset}px`);
   }
   if (want === edge) return false;
   edge = want;
@@ -231,24 +240,26 @@ export function syncTouchButtons(): void {
     !touchOptionsOpen() && !(phone && phoneMenuOpen());
   if (showFish) initActiveFishIndicator(phone ? 'phone-controls' : 'touchbar');
   syncActiveFishIndicator(showFish);
-  const want = active && !phone && ui.screen === 'room';
+  // Not over the help pages: they fill the stage the room was centred in, and the buttons
+  // float, so they would sit across the page's edge (the room-based placement cannot see
+  // it). The phone controls and the fish indicator already step aside for help the same way.
+  const want = active && !phone && ui.screen === 'room' && !ui.helpOpen;
   let changed = false;
   if (want !== up) {
     up = want;
     const bar = document.getElementById('touchbar');
     if (bar) bar.hidden = !want;
-    // The attribute the stylesheet hangs the stage's margin off — the bar reserves space
-    // rather than covering the room, so this changes how much room there is to draw in.
+    // Read by probes and by the stylesheet's edge rules; it no longer changes the room's
+    // size, because the buttons float over the room instead of reserving space.
     document.documentElement.toggleAttribute('data-touchbar', want);
     changed = true;
   }
-  // Which EDGE it reserves that space on depends on the ROOM as well as the viewport, and
-  // a room change never reaches `relayout()` (see the comment there) — so it is derived
-  // here, per frame, beside the visibility. Only while the bar is up: off-screen the
-  // attribute is inert, and recomputing it on the map would move the bar under the player
-  // on the way back in.
+  // Which EDGE the buttons sit on depends on the ROOM as well as the viewport, and a room
+  // change never reaches `relayout()` (see the comment there) — so it is derived here,
+  // per frame, beside the visibility. Only while the bar is up: off-screen the attribute
+  // is inert, and recomputing it on the map would move the bar under the player on the
+  // way back in.
   if (want && syncEdge()) changed = true;
-  // One relayout for both: the room is scaled into what the bar leaves, so either change
-  // invalidates it, and doing it twice in a frame would just repeat the work.
+  // One relayout for both, and doing it twice in a frame would just repeat the work.
   if (changed) relayout();
 }

@@ -104,7 +104,10 @@ export async function checkTabletFishIndicator(browser, base, evidence, errors) 
       assert.deepEqual(g.buttons, g.withoutBadge, `${c.name}: indicator does not shift the six buttons`);
       assert.deepEqual(g.regions, ['14', '12', '13', '15', '16', '24'], `${c.name}: button order unchanged`);
       assert(g.loaded && g.picture.w === 32 && g.picture.h === 32, `${c.name}: real 32px fish art`);
-      assert.equal(g.badge.x, Math.max(14, c.insets[3]), `${c.name}: left corner follows bar/safe-area lead`);
+      // Along the top the indicator sits in the display's rounded corner and keeps the 14px
+      // corner lead; down the side it lines up with the button column's 3px bar lead.
+      assert.equal(g.badge.x, Math.max(c.edge === 'top' ? 14 : 3, c.insets[3]),
+        `${c.name}: left corner follows bar/safe-area lead`);
       assert.equal(g.badge.y, c.edge === 'top' ? c.insets[0] + 3 : Math.max(16, c.insets[0] + 8),
         `${c.name}: top corner clears the safe area`);
       assert(g.badge.x >= g.bar.x && g.badge.y >= g.bar.y &&

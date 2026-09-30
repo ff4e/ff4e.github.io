@@ -5,8 +5,9 @@
  * The rule for whether touch mode is on is pinned in the unit suite
  * (test/touchMode.test.ts). What only a browser can show is everything these two modules
  * are actually made of: that each button reaches the RIGHT verb, that the bar comes and
- * goes with the screen, that it reserves its space instead of covering the room, and
- * that the two doors into the faithful Options face lead somewhere else in touch mode.
+ * goes with the screen, that its buttons float over the room without reserving any of the
+ * room's space, and that the two doors into the faithful Options face lead somewhere else
+ * in touch mode.
  *
  * The buttons and the Options controls are asserted by their EFFECT — the map appears,
  * the effects bus moves, the active fish changes — rather than by spying on
@@ -26,6 +27,7 @@
 import { chromium } from 'playwright';
 import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkDialogueHints } from './ui-dialogue-hints.mjs';
+import { touchBarEdgeFor, touchBarLeftW } from '../src/app/touchBarEdge.ts';
 
 const BASE = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 
@@ -56,7 +58,21 @@ const barState = (p) =>
       marginLeft: stage ? getComputedStyle(stage).marginLeft : '',
       marginTop: stage ? getComputedStyle(stage).marginTop : '',
       stageW: stage ? stage.clientWidth : 0,
+      stageH: stage ? stage.clientHeight : 0,
       viewW: window.innerWidth,
+      viewH: window.innerHeight,
+      // The bar's own box: where it sits, and that it is only a positioning box — no paint
+      // of its own and no hit-testing, so a swipe between two buttons reaches the room.
+      bar: bar && !bar.hidden ? (() => {
+        const r = bar.getBoundingClientRect();
+        const cs = getComputedStyle(bar);
+        return {
+          left: Math.round(r.left), top: Math.round(r.top),
+          w: Math.round(r.width), h: Math.round(r.height),
+          bg: cs.backgroundColor, pe: cs.pointerEvents,
+          buttonPe: [...new Set(buttons.map((b) => getComputedStyle(b).pointerEvents))].join(','),
+        };
+      })() : null,
     };
   });
 
@@ -99,7 +115,17 @@ const roomCentre = (p) =>
   p.evaluate(() => {
     const el = document.getElementById('screen');
     const r = el.getBoundingClientRect();
-    const bar = document.getElementById('touchbar').getBoundingClientRect();
+    // The BUTTONS' extent (and the fish indicator's), not the bar's box: the box carries a
+    // few px of breathing room that may lie over the room without any button on it.
+    const rects = [...document.getElementById('touchbar').children]
+      .map((c) => c.getBoundingClientRect())
+      .filter((b) => b.width > 0 && b.height > 0);
+    const bar = {
+      left: Math.min(...rects.map((b) => b.left)),
+      top: Math.min(...rects.map((b) => b.top)),
+      right: Math.max(...rects.map((b) => b.right)),
+      bottom: Math.max(...rects.map((b) => b.bottom)),
+    };
     const left = r.left + el.clientLeft;
     const top = r.top + el.clientTop;
     return {
@@ -109,6 +135,8 @@ const roomCentre = (p) =>
       top: Math.round(top),
       right: Math.round(left + el.clientWidth),
       bottom: Math.round(top + el.clientHeight),
+      barLeft: Math.round(bar.left),
+      barTop: Math.round(bar.top),
       barRight: Math.round(bar.right),
       barBottom: Math.round(bar.bottom),
       viewW: window.innerWidth,
@@ -159,15 +187,16 @@ const settle = (p, want) =>
  * `roomGeom()` is what `relayout()` computed and the canvas takes it in the room's draw,
  * so they agree only once both have caught up — the same idiom as `settleRoom`.
  *
- * The attribute is absent until the edge first moves off its default, so a missing one
- * reads as 'left'.
+ * The attribute is absent until the first decision, so a missing one reads as the
+ * stylesheet's orientation default: the left in landscape, the top in portrait.
  */
 const settleEdge = (p, want) =>
   p.waitForFunction((w) => {
     const g = window.__ff.roomGeom();
     const el = document.getElementById('screen');
     return (
-      (document.documentElement.getAttribute('data-touchbar-edge') ?? 'left') === w &&
+      (document.documentElement.getAttribute('data-touchbar-edge') ??
+        (window.innerWidth > window.innerHeight ? 'left' : 'top')) === w &&
       g !== null &&
       Math.abs(el.clientWidth - g.cssW) <= 1 &&
       Math.abs(el.clientHeight - g.cssH) <= 1
@@ -322,25 +351,36 @@ try {
   );
   expect(inRoom.visualButtons === '14,12,13,15,16,24',
     'landscape left bar: Restart is fourth and Undo is last');
-  // It reserves space rather than floating over the room: the stage is measured with
-  // clientWidth, so a margin is the only thing that both moves the bar out of the way
-  // and tells the layout about it.
+  // The buttons FLOAT over the room (Martin, 2026-09-29): the stage keeps the whole
+  // viewport, and the bar is an invisible box that only positions the buttons — no fill,
+  // and no hit-testing of its own, so a swipe that starts between two buttons still reaches
+  // the room. It used to reserve its width with a margin on `.stage`.
   expect(
-    inRoom.marginLeft === '72px' && inRoom.stageW <= inRoom.viewW - 72,
-    `the bar reserves its width from the stage (margin ${inRoom.marginLeft}, stage ${inRoom.stageW} of ${inRoom.viewW})`,
+    inRoom.marginLeft === '0px' && inRoom.marginTop === '0px' && inRoom.stageW === inRoom.viewW,
+    `the bar reserves nothing from the stage (margin ${inRoom.marginLeft}/${inRoom.marginTop}, stage ${inRoom.stageW} of ${inRoom.viewW})`,
+  );
+  expect(
+    inRoom.bar !== null && inRoom.bar.bg === 'rgba(0, 0, 0, 0)' && inRoom.bar.pe === 'none' &&
+      inRoom.bar.buttonPe === 'auto',
+    `the bar is a see-through, click-through box and only its buttons take taps (bg ${inRoom.bar?.bg}, bar ${inRoom.bar?.pe}, buttons ${inRoom.bar?.buttonPe})`,
+  );
+  expect(
+    inRoom.bar !== null && inRoom.bar.left === 0 && inRoom.bar.top === 0 && inRoom.bar.h === inRoom.viewH,
+    `landscape: the buttons sit down the left edge (${inRoom.bar?.left},${inRoom.bar?.top} ${inRoom.bar?.w}x${inRoom.bar?.h})`,
   );
 
   // ── The display cutout, supplied. On a phone the native shell measures it and writes
   // it into `--sa-*` (ios/App/App/SafeAreaBridgeViewController.swift); the bar's footprint
-  // is `72px + var(--sa-left)` and it spends the inset as padding INSIDE that box, so its
-  // rendered width and the stage's reserve are the same number by construction.
+  // is `58px + max(var(--sa-left), var(--bar-lead))` and it spends the inset as padding
+  // INSIDE that box, so its rendered width is that footprint by construction.
   //
   // A browser reports every inset as 0, which makes the whole mechanism invisible here —
   // and that blind spot hid a real bug: `#touchbar` was `content-box`, so the padding was
-  // added ON TOP of the width, the bar came out one whole inset wider than the space
-  // reserved for it, and it covered that much of the room's left edge (196px of bar
-  // against a 134px reserve, on an iPhone 17 Pro in landscape). Nothing in the suite could
-  // see it, because with a 0 inset the padding is 0 and the two agree by accident.
+  // added ON TOP of the width and the bar came out one whole inset wider than its footprint
+  // (196px of bar against a 134px footprint, on an iPhone 17 Pro in landscape). Nothing in
+  // the suite could see it, because with a 0 inset the padding is 0 and the two agree by
+  // accident. The footprint is still what `touchBarEdge.ts` prices the left edge at, so the
+  // two have to keep agreeing even though the room no longer gives that width up.
   //
   // So set the same variable the shell sets, and assert they still agree with it non-zero.
   //
@@ -358,18 +398,20 @@ try {
   // 0 is included because it is the OTHER landscape on any of them — the housing is on the
   // far side, so nothing pushes the bar in and `--bar-lead` takes over.
   const INSETS = [0, 47, 62, 68];
-  const cutouts = await p.evaluate((insets) => {
+  const cutouts = await p.evaluate(({ insets, footprints }) => {
     const root = document.documentElement;
     const lead = Number.parseFloat(getComputedStyle(root).getPropertyValue('--bar-lead'));
     const out = insets.map((inset) => {
       root.style.setProperty('--sa-left', `${inset}px`);
       const bar = document.getElementById('touchbar').getBoundingClientRect();
+      const footprint = footprints[insets.indexOf(inset)];
       const reserve = Number.parseFloat(getComputedStyle(document.querySelector('.stage')).marginLeft);
       const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
       const buttonRight = Math.max(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().right));
       return {
         inset,
         barW: Math.round(bar.width),
+        footprint,
         reserve,
         buttonLeft: Math.round(buttonLeft),
         trailing: Math.round(bar.right - buttonRight),
@@ -377,14 +419,14 @@ try {
     });
     root.style.removeProperty('--sa-left');
     return { lead, out };
-  }, INSETS);
+  }, { insets: INSETS, footprints: INSETS.map((i) => touchBarLeftW(i)) });
 
-  // The bar's footprint and the room's reserve are the same number at every inset — the
-  // box-sizing bug made them differ by one whole inset, and only a non-zero one shows it.
-  const mismatched = cutouts.out.filter((c) => c.barW !== c.reserve);
+  // The bar is its footprint at every inset — the box-sizing bug made it one whole inset
+  // wider, and only a non-zero one shows it — and the room gives none of it up.
+  const mismatched = cutouts.out.filter((c) => c.barW !== c.footprint || c.reserve !== 0);
   expect(
     mismatched.length === 0,
-    `every cutout grows the bar and its reserve by the same amount (${cutouts.out.map((c) => `${c.inset}->${c.barW}/${c.reserve}`).join(' ')})`,
+    `every cutout grows the bar by exactly its footprint, and the stage reserves none of it (${cutouts.out.map((c) => `${c.inset}->${c.barW}/${c.footprint} reserve ${c.reserve}`).join(' ')})`,
   );
   // And the rule the buttons follow: start AT the housing, or at the lead when there is no
   // housing on this side — `max()`, never a sum, and never centred in the leftover. Held off
@@ -414,59 +456,32 @@ try {
   );
 
   // ── And the ROOM's half of the same cutout. Everything above measures the BAR — its
-  // width, its buttons, its reserve — which is where the box-sizing bug was, and none of it
-  // looks at what the room does with the space that is left. Those are different failures:
-  // a bar that is the right width and a room that ignores it still overlap.
+  // width, its buttons — and none of it looks at what the room does. The room must not
+  // care: the buttons float, so an island that pushes them further in must neither
+  // shrink the room nor move it off the screen's centre. (When the bar reserved its
+  // width, this was where "the room starts clear of the bar" was asserted; that is
+  // deliberately no longer true — the buttons may overlap the room.)
   //
   // Left as a separate pass at a real inset rather than folded into the loop above, because
   // it needs the layout to have SETTLED at that inset — the loop sets four values inside one
   // `evaluate` and reads the bar back synchronously, which is fine for CSS box geometry and
   // useless for a canvas that resizes on a frame.
   //
-  // 62 is the Dynamic Island, the most common of the three and the one that shipped wrong.
-  //
-  // What is NOT asserted here, deliberately: that the island makes the room smaller. It
-  // does not, at this viewport or almost any other. 1100x620 leaves the stage 1028x476, so
-  // a room is height-bound and 48 more css px off the WIDTH changes its scale by nothing;
-  // swept offline over all 63 room shapes at the native 874x402 a 62px island shrinks
-  // exactly 2 of them, because a phone in landscape is ~2.17 aspect and the cutout is on
-  // the short side. An assertion that the room shrinks would be false on every room this
-  // probe could reasonably use, and rigging a case where it is true would be testing the
-  // rigging.
-  //
-  // What IS asserted is the shape of the failure that actually shipped: 196px of bar
-  // against a 134px reserve, i.e. the two halves disagreeing about how wide the housing
-  // makes the bar. In room terms that is an overlap, so the assertions are about where the
-  // room's edges land — clear of the bar, on screen, and still centred on the SCREEN
-  // rather than on the leftover. All three hold at inset 0 too; the island is what makes
-  // them capable of failing separately.
-  const wasBar = await barState(p);
+  // 62 is the Dynamic Island, the most common of the three.
+  await settled(p);
+  const bare = await rowState(p);
   await p.evaluate(() => document.documentElement.style.setProperty('--sa-left', '62px'));
   await p.waitForFunction(
-    () => getComputedStyle(document.querySelector('.stage')).marginLeft === '120px',
+    (w) => Math.round(document.getElementById('touchbar').getBoundingClientRect().width) === w,
+    touchBarLeftW(62),
   );
   await settled(p);
   const housed = await rowState(p);
   const housedBar = await barState(p);
-  const reserve = Number.parseFloat(housedBar.marginLeft);
   expect(
-    housedBar.marginLeft === '120px' && wasBar.marginLeft === '72px',
-    `the island widens the reserve by exactly itself (${wasBar.marginLeft} -> ${housedBar.marginLeft})`,
+    housedBar.marginLeft === '0px' && housed.left === bare.left && housed.right === bare.right,
+    `with a 62px island the room does not move (${bare.left}..${bare.right} -> ${housed.left}..${housed.right}, margin ${housedBar.marginLeft})`,
   );
-  // An OVERLAP assertion, not a width one, so it fails for any way the bar and the room can
-  // be made to disagree and not only the way they did.
-  expect(
-    housed.left >= reserve - 0.5,
-    `with a 62px island the room starts clear of the bar (row at ${housed.left}, bar reserves ${housedBar.marginLeft})`,
-  );
-  expect(
-    housed.right <= housed.viewW + 0.5,
-    `and the island does not push the room off the far edge (${housed.left}..${housed.right} of ${housed.viewW})`,
-  );
-  // The room's centre is the SCREEN's, not the centre of what the bar left over — the same
-  // rule the landscape cases above assert, and it has to survive the island too. It is the
-  // half of the pair that "clear of the bar" cannot check on its own: a room shoved right
-  // to escape a too-wide reserve is clear of the bar and still wrong.
   const housedOff = Math.round((housed.left + housed.right) / 2 - housed.viewW / 2);
   expect(
     Math.abs(housedOff) <= 1,
@@ -474,7 +489,8 @@ try {
   );
   await p.evaluate(() => document.documentElement.style.removeProperty('--sa-left'));
   await p.waitForFunction(
-    () => getComputedStyle(document.querySelector('.stage')).marginLeft === '72px',
+    (w) => Math.round(document.getElementById('touchbar').getBoundingClientRect().width) === w,
+    touchBarLeftW(0),
   );
   await settled(p);
 
@@ -504,15 +520,18 @@ try {
     portrait.left >= 0 && portrait.right <= portrait.viewW,
     `portrait phone width: this room's row fits the viewport (${portrait.left}..${portrait.right} of ${portrait.viewW})`,
   );
-  // The portrait half of the same reservation, asserted for parity with the landscape
-  // check above: the bar is on the TOP edge here, so the height it costs is a
-  // `margin-top`, and the landscape `margin-left` must be gone with its media query.
+  // The portrait half of the same rule, asserted for parity with the landscape check
+  // above: the buttons are along the TOP edge here, and they cost the room no height.
   const portraitBar = await barState(p);
   expect(portraitBar.visualButtons === '14,12,13,15,16,24',
     'portrait top bar: Restart is fourth and Undo is last');
   expect(
-    portraitBar.marginTop === '54px' && portraitBar.marginLeft === '0px',
-    `portrait: the bar reserves its height from the top (margin-top ${portraitBar.marginTop}, margin-left ${portraitBar.marginLeft})`,
+    portraitBar.marginTop === '0px' && portraitBar.marginLeft === '0px',
+    `portrait: the bar reserves no height either (margin-top ${portraitBar.marginTop}, margin-left ${portraitBar.marginLeft})`,
+  );
+  expect(
+    portraitBar.bar !== null && portraitBar.bar.top === 0 && portraitBar.bar.w === portraitBar.viewW,
+    `portrait: the buttons sit along the top edge (${portraitBar.bar?.left},${portraitBar.bar?.top} ${portraitBar.bar?.w}x${portraitBar.bar?.h})`,
   );
   // ── Six buttons in a portrait ROW, at the narrowest width this game is willing to be
   // played at. Landscape stacks them in a 72px column and has the whole height to spend,
@@ -606,8 +625,12 @@ try {
     !(await p.evaluate(() => document.documentElement.hasAttribute('data-touchopts'))),
     'Help opens the help pages and closes the Options over them',
   );
+  // The floating buttons step aside for the help pages too, and come back after.
+  await settle(p, false);
+  expect(!(await barState(p)).visible, 'the buttons are hidden while help is open');
   await p.keyboard.press('Escape');
   await p.waitForFunction(() => !window.__ff.helpOpen());
+  await settle(p, true);
 
   await tap(p, 16);
   await p.waitForFunction(() => document.documentElement.hasAttribute('data-touchopts'));
@@ -858,7 +881,7 @@ try {
   expect(!onMap.visible, 'Map leaves the room, and the bar comes down with it');
   expect(
     onMap.marginLeft === '0px',
-    `the map gets its width back (${onMap.marginLeft})`,
+    `and the map has no margin either (${onMap.marginLeft})`,
   );
   // ── The map's own Options corner is the SECOND door into the faithful face, and it
   // has to hand over too — otherwise the panel column floats over the map on a phone
@@ -884,7 +907,7 @@ try {
   await settle(p, false);
   const off = await barState(p);
   expect(!off.visible, 'the dev-bar control turns the touch UI off, over a ?touch=on URL');
-  expect(off.marginLeft === '0px', `and the stage gets its width back (${off.marginLeft})`);
+  expect(off.marginLeft === '0px', `and the stage has no margin (${off.marginLeft})`);
   const offRow = await rowState(p);
   expect(offRow.panel, 'and the faithful panel comes back with it');
   await p.selectOption('#touchmode', 'on');
@@ -904,14 +927,14 @@ try {
   await p.waitForFunction(() => !window.__ff.optionsOpen());
   expect(true, 'switching to touch closes the canvas options face behind it');
 
-  // ── The room is centred on the SCREEN, not on what the bar left over ─────────────
-  // The bar reserves its space with a margin on `.stage`, and `.stage` centres its
-  // content inside its OWN box — so before this was fixed "centred" meant centred in
-  // [barWidth, viewport], and the room sat half a bar's width off true centre: +36px in
-  // landscape, +33px in portrait, independent of the room. What is wanted is
-  // `nearEdge = max(barSize, (viewport - roomSize) / 2)` — the screen's centre, given up
-  // only as far as it takes to clear the bar — so both halves of that max are asserted,
-  // on both axes. See the flex-spacer rules in index.html for how the clamp is expressed.
+  // ── The room is centred on the SCREEN, always ──────────────────────────────────
+  // When the bar reserved its space (a margin on `.stage`), "centred" meant centred in
+  // [barWidth, viewport] until #126 added flex spacers to clamp it back. The buttons float
+  // now, so the stage IS the viewport and the room is centred on it, whatever the buttons
+  // do — they change EDGE when they would cover the room (`touchBarEdgeFor`), and the room
+  // is never moved off them (Martin, 2026-09-29: "do not try to move the room off the
+  // center anymore"). Asserted on both axes, in both orientations, at viewports where the
+  // room has slack to spare and where it fills an axis.
   //
   // Runs after the dev-bar checks on this page, because it needs the dev chrome
   // GONE: `#devbar` and `#info` are in-flow siblings of `.stage`, so while they
@@ -925,84 +948,89 @@ try {
   await p.waitForFunction(() => !document.body.classList.contains('dev'));
   const player = p;
 
-  // 900x800 is width-bound (828 of usable width against 800 native px), so the room fills
-  // everything the bar left and there is nowhere to take a centring gap from. The bar
-  // wins — that is the one thing allowed to beat true centring — but by exactly the width
-  // it needs and no more. First, because dropping the dev chrome resizes nothing on its
-  // own and `settleRoom` needs a viewport that actually moves.
+  /**
+   * The edge the model picks for the room and viewport on screen now, waited for; then the
+   * room centred on both axes and wholly on screen. Returns the edge and the room's rect.
+   */
+  const centredWithPredictedEdge = async (label) => {
+    const g = await player.evaluate(() => {
+      const r = window.__ff.roomGeom();
+      return { w: r.nativeW, h: r.nativeH, vw: window.innerWidth, vh: window.innerHeight };
+    });
+    const want = touchBarEdgeFor(g.w, g.h, g.vw, g.vh, 'fill');
+    await settleEdge(player, want);
+    const r = await roomCentre(player);
+    expect(
+      Math.abs(r.dx) <= 1 && Math.abs(r.dy) <= 1,
+      `${label}: the room's centre is the screen's (off by ${r.dx},${r.dy}px of ${r.viewW}x${r.viewH}; buttons ${want})`,
+    );
+    expect(
+      r.left >= 0 && r.top >= 0 && r.right <= r.viewW && r.bottom <= r.viewH,
+      `${label}: and the whole room is on screen (${r.left},${r.top}..${r.right},${r.bottom} of ${r.viewW}x${r.viewH})`,
+    );
+    // Never half on the room ("better have buttons fully covered than covered partially"):
+    // the bar ends before the room starts, or starts where the room does or further in.
+    const [near, barNear, barFar] = want === 'left'
+      ? [r.left, r.barLeft, r.barRight]
+      : [r.top, r.barTop, r.barBottom];
+    expect(
+      barFar <= near + 1 || barNear >= near - 1,
+      `${label}: the buttons are wholly beside the room or wholly on it, never across its edge (room from ${near}, bar ${barNear}..${barFar})`,
+    );
+    return { want, r };
+  };
+
+  // 900x800: KOSTE fills the height and leaves 13.5px each side, so neither edge's buttons
+  // fit beside it and either would cover its whole footprint — 61px on the left, 54px on
+  // top. The shallower strip wins: they move to the top. First, because dropping the dev chrome resizes
+  // nothing on its own and `settleRoom` needs a viewport that actually moves.
   await settleRoom(player, 900, 800);
-  const tight = await roomCentre(player);
-  expect(
-    tight.left >= tight.barRight,
-    `landscape tight: the bar wins over centring (room left ${tight.left}, bar right ${tight.barRight})`,
-  );
-  expect(
-    tight.left <= tight.barRight + 1 && tight.right <= tight.viewW,
-    `landscape tight: and takes no more than it must (${tight.left}..${tight.right} of ${tight.viewW})`,
-  );
+  const tight = await centredWithPredictedEdge('landscape tight');
+  expect(tight.want === 'top', `landscape tight: the buttons swap to the edge that covers less (${tight.want})`);
 
-  // Slack on both sides — the reported case, and the one where the clamp must NOT bind.
+  // Slack on both sides, more than a bar each: the usual left edge, nothing covered.
   await settleRoom(player, 1100, 620);
-  const wide = await roomCentre(player);
+  const wide = await centredWithPredictedEdge('landscape');
   expect(
-    Math.abs(wide.dx) <= 1,
-    `landscape: the room's centre is the screen's (off by ${wide.dx}px of ${wide.viewW})`,
-  );
-  expect(
-    wide.left >= wide.barRight,
-    `landscape: and the bar still does not overlap it (room left ${wide.left}, bar right ${wide.barRight})`,
+    wide.want === 'left' && wide.r.left >= wide.r.barRight,
+    `landscape: the usual left edge, clear of the room (room left ${wide.r.left}, bar right ${wide.r.barRight})`,
   );
 
-  // The portrait half. A different element carries it — the box is handed the whole
-  // height and letterboxes the room inside it, so the vertical slack is in `#stagebox`,
-  // not in `.stage` — which is exactly why it needs a probe of its own rather than being
-  // assumed to follow from the landscape one.
   await settleRoom(player, 393, 852);
-  const tall = await roomCentre(player);
-  expect(
-    Math.abs(tall.dy) <= 1,
-    `portrait: the room's centre is the screen's (off by ${tall.dy}px of ${tall.viewH})`,
-  );
-  expect(
-    tall.top >= tall.barBottom,
-    `portrait: and the bar still does not overlap it (room top ${tall.top}, bar bottom ${tall.barBottom})`,
-  );
+  const tall = await centredWithPredictedEdge('portrait');
+  expect(tall.want === 'top', `portrait: an ordinary room keeps the top (${tall.want})`);
 
-  // Portrait's tight case takes a viewport small enough that the room fills the height it
-  // is left (320x360: 294px of it against a 284px-tall room, less than one bar of slack).
-  // Same rule as landscape — the bar is the one thing that outranks the centre — and the
-  // same upper bound, which is the half that bites: the box is sized SHORTER than the
-  // stage and `.stage` re-centres it, so without `#stagebox` growing to fill the height
-  // the room settles `STAGE_EDGE * scale` below the bar rather than against it.
+  // 320x360: 33.5px above and below against 54px buttons, and no width to spare at all —
+  // covered either way, less on the top. The room stays put and the buttons move down
+  // onto it, rather than sitting across its top edge.
   await settleRoom(player, 320, 360);
-  const squat = await roomCentre(player);
+  const squat = await centredWithPredictedEdge('portrait tight');
   expect(
-    squat.top >= squat.barBottom,
-    `portrait tight: the bar wins over centring (room top ${squat.top}, bar bottom ${squat.barBottom})`,
-  );
-  expect(
-    squat.top <= squat.barBottom + 1 && squat.bottom <= squat.viewH,
-    `portrait tight: and takes no more than it must (${squat.top}..${squat.bottom} of ${squat.viewH})`,
+    squat.want === 'top' && squat.r.barTop > 0 && squat.r.barTop >= squat.r.top - 1,
+    `portrait tight: the buttons move in onto the room (room top ${squat.r.top}, bar top ${squat.r.barTop})`,
   );
 
-  // ── The third combination: which EDGE the bar takes in LANDSCAPE, per room ──
+  // ── The third combination: which EDGE the buttons take in LANDSCAPE, per room ──
   //
-  // The two above are orientation-only, and a media query is enough for them. This one is
-  // not: at ONE landscape viewport, a room much wider than the screen puts the bar along
-  // the top and an ordinary room leaves it down the left. Asserted as a pair at a single
+  // At ONE landscape viewport, a room much wider than the screen puts the buttons along
+  // the top and an ordinary room leaves them down the left. Asserted as a pair at a single
   // size, because that IS the claim — the edge tracks the room, and CSS cannot see which
   // room is loaded (`src/app/touchBarEdge.ts`).
   //
   // 1100x620 is 1.77:1. KOSTE 540x495 is 1.09:1, flatter than the screen, so it is
-  // height-bound and the 72px left bar comes out of the width it was not using. UTES
-  // 780x225 is 3.47:1, wider than the screen, so it is width-bound and the same 72px come
-  // straight off the axis that decides its scale — while 54px off the height do not.
+  // height-bound and leaves its slack at the sides. UTES 780x225 is 3.47:1, wider than the
+  // screen, so it is width-bound and leaves its slack above and below.
   await settleRoom(player, 1100, 620);
   await settleEdge(player, 'left');
   const flatBar = await barState(player);
   expect(
-    flatBar.marginLeft === '72px' && flatBar.marginTop === '0px',
-    `landscape, ordinary room: the bar stays down the left (margin-left ${flatBar.marginLeft}, margin-top ${flatBar.marginTop})`,
+    flatBar.bar !== null && flatBar.bar.left === 0 && flatBar.bar.h === flatBar.viewH,
+    `landscape, ordinary room: the buttons stay down the left (${flatBar.bar?.left},${flatBar.bar?.top} ${flatBar.bar?.w}x${flatBar.bar?.h})`,
+  );
+  const flatRoom = await roomCentre(player);
+  expect(
+    flatRoom.left >= flatRoom.barRight,
+    `landscape, ordinary room: and they land in the room's side slack, not on it (room left ${flatRoom.left}, bar right ${flatRoom.barRight})`,
   );
 
   await enter(player, 7); // UTES, the widest room in the game
@@ -1011,63 +1039,43 @@ try {
   expect(wideBar.visualButtons === '14,12,13,15,16,24',
     'landscape top bar: Restart is fourth and Undo is last');
   expect(
-    wideBar.marginTop === '54px' && wideBar.marginLeft === '0px',
-    `landscape, very wide room: the SAME viewport puts the bar on top (margin-top ${wideBar.marginTop}, margin-left ${wideBar.marginLeft})`,
+    wideBar.bar !== null && wideBar.bar.top === 0 && wideBar.bar.w === wideBar.viewW,
+    `landscape, very wide room: the SAME viewport puts the buttons on top (${wideBar.bar?.left},${wideBar.bar?.top} ${wideBar.bar?.w}x${wideBar.bar?.h})`,
   );
-  // The centring clamp (#126) has to hold on the new edge exactly as it does on the other
-  // two — this is the regression that would otherwise go unnoticed, since the clamp moves
-  // to a different element here (`#stagebox`, as in portrait) than it uses for the left
-  // bar (`.stage`).
-  const wideRoom = await roomCentre(player);
-  expect(
-    Math.abs(wideRoom.dx) <= 1,
-    `landscape top bar: the room's centre is still the screen's (off by ${wideRoom.dx}px of ${wideRoom.viewW})`,
-  );
+  const wideRoom = (await centredWithPredictedEdge('landscape top bar')).r;
   expect(
     wideRoom.top >= wideRoom.barBottom,
-    `landscape top bar: and the bar does not overlap it (room top ${wideRoom.top}, bar bottom ${wideRoom.barBottom})`,
-  );
-  // The edge is chosen by comparing VISIBLE area, so the winner can never be an edge that
-  // cuts the room off — the thing a scale comparison alone would have got wrong.
-  expect(
-    wideRoom.bottom <= wideRoom.viewH && wideRoom.left >= 0 && wideRoom.right <= wideRoom.viewW,
-    `landscape top bar: and the room is not clipped by it (${wideRoom.left}..${wideRoom.right} of ${wideRoom.viewW}, bottom ${wideRoom.bottom} of ${wideRoom.viewH})`,
+    `landscape top bar: and the buttons land in the room's top slack, not on it (room top ${wideRoom.top}, bar bottom ${wideRoom.barBottom})`,
   );
 
-  // And back, without the viewport moving at all: a room change alone moves the bar, which
-  // is the whole reason this cannot live in `relayout()` (a room change never reaches it).
+  // And back, without the viewport moving at all: a room change alone moves the buttons,
+  // which is the whole reason this cannot live in `relayout()` (a room change never
+  // reaches it).
   await enter(player, 6);
   await settleEdge(player, 'left');
   const backBar = await barState(player);
   expect(
-    backBar.marginLeft === '72px' && backBar.marginTop === '0px',
-    `landscape: leaving the wide room puts the bar back on the left (margin-left ${backBar.marginLeft})`,
+    backBar.bar !== null && backBar.bar.left === 0 && backBar.bar.h === backBar.viewH,
+    `landscape: leaving the wide room puts the buttons back on the left (${backBar.bar?.left},${backBar.bar?.top} ${backBar.bar?.w}x${backBar.bar?.h})`,
   );
 
   // ── A cut room never wins, however much of it survives the cut ──
   //
   // 669x280 with ZRC (555x225), found by Martin 2026-08-31. It USED to be short enough that
   // MIN_STAGE_SCALE's floor overflowed the height once the top bar had taken its share, so
-  // the room was drawn 266px tall into 214px and 52px of the level was not on screen — and
-  // the surviving part was still LARGER than the whole room is with the bar on the left
-  // (140,598 px2 against 138,740), so a plain "bigger wins" comparison moved the bar onto
-  // the cut layout. `layout.ts`'s rework bounds the content by its area, so nothing is cut
-  // at this viewport any more and the plain comparison reaches the same answer on its own.
-  // Kept because the ANSWER is what matters and it must not change: the bar belongs on the
-  // left here, whichever half of the rule is doing the work.
+  // the room was drawn 266px tall into 214px and 52px of the level was not on screen.
+  // `layout.ts`'s rework bounds the content by its area, and the buttons no longer take
+  // any, so nothing can be cut here — asserted, because that is what the case is for.
+  //
+  // Which edge it gets changed with the floating buttons: ZRC fills the width exactly and
+  // leaves 4.5px above and below, so neither edge's buttons fit beside it. The top's 54px
+  // strip is shallower than the left's 61, so they go on top — moved in the 4.5px to start
+  // on the room (Martin 2026-09-29).
   await enter(player, 9);
-  await settleEdge(player, 'top'); // roomy window: the top edge is bigger and cuts nothing
+  await settleEdge(player, 'top'); // roomy window: the top edge covers nothing
   await settleRoom(player, 669, 280);
-  await settleEdge(player, 'left');
-  const cut = await roomCentre(player);
-  expect(
-    cut.top >= 0 && cut.bottom <= cut.viewH,
-    `short viewport: the whole room is on screen vertically (${cut.top}..${cut.bottom} of ${cut.viewH})`,
-  );
-  expect(
-    cut.left >= cut.barRight && cut.right <= cut.viewW,
-    `short viewport: and horizontally, clear of the bar (${cut.left}..${cut.right} of ${cut.viewW}, bar right ${cut.barRight})`,
-  );
+  const cut = await centredWithPredictedEdge('short viewport');
+  expect(cut.want === 'top', `short viewport: the buttons take the shallower cover (${cut.want})`);
 
   // Hint checks enter tutorial rooms and save games; keep them after every original
   // assertion so the boot map, options and save/load checks retain their own setup.

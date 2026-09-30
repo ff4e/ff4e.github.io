@@ -2,6 +2,11 @@
  * Measurement: which EDGE should the touch bar occupy in landscape — the left (today) or
  * the top?
  *
+ * **PROBABLY OUTDATED (2026-09-29).** It prices each edge as a reserve taken off the
+ * viewport, but the tablet buttons no longer reserve anything: the room is centred on the
+ * whole viewport and the buttons float over it, placed by `touchBarPlacement` in
+ * `src/app/touchBarEdge.ts`. Its numbers describe the old bar, not the game.
+ *
  * Scratch tool for `fish_fillets_touchbar_room_aware_edge`. It brings NO scaling maths of
  * its own: it calls `layout.ts`'s `computeStageLayout` / `contentScale` exactly as the
  * running game does in touch mode (`panel = false`, so the mode resolves to `fill`), once

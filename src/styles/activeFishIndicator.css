@@ -10,15 +10,26 @@
   object-fit: contain;
   filter: drop-shadow(0 1px 1px #000c);
 }
+/* With the buttons along the top, the indicator is 3px from the top edge, right in the
+   display's rounded corner, so it keeps `--corner-lead` (14px) from the side. With them
+   down the side it lines up with their column (`--bar-lead`, 3px) and drops to 16px from
+   the top, where an iPad's ~18-21px corner curve is already inside 3px of the edge. */
 #touchbar > #active-fish-indicator {
   position: absolute;
   width: 52px;
   height: 48px;
-  left: max(var(--sa-left), var(--bar-lead));
+  left: max(var(--sa-left), var(--corner-lead));
   top: calc(var(--sa-top) + 3px);
 }
 @media (orientation: landscape) {
   html:not([data-touchbar-edge='top']) #touchbar > #active-fish-indicator {
+    left: max(var(--sa-left), var(--bar-lead));
+    top: max(16px, calc(var(--sa-top) + 8px));
+  }
+}
+@media (orientation: portrait) {
+  html[data-touchbar-edge='left'] #touchbar > #active-fish-indicator {
+    left: max(var(--sa-left), var(--bar-lead));
     top: max(16px, calc(var(--sa-top) + 8px));
   }
 }

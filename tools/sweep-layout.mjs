@@ -1,6 +1,9 @@
 /**
  * Sweep: do the layout properties actually HOLD? — DEV ONLY.
  *
+ * **Probably outdated for touch mode (2026-09-29)** — see the note at the top of
+ * `tools/layoutPlaced.ts`: the tablet buttons no longer reserve space.
+ *
  * The companion to `tools/layout-lab.html`, and the two catch different things. The lab is
  * for the eye, which is the method that found both of the defects this task exists for.
  * This is for the cases the eye will never reach: every room against a grid of viewports,
