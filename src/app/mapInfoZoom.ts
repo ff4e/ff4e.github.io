@@ -55,6 +55,8 @@ function makeCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: Can
 }
 
 let infoLayer: ReturnType<typeof makeCanvas> | null = null;
+/** The layer's pixels, reused: the panel repaints every frame of its ~2.7 s digit roll. */
+let infoPixels: Uint8ClampedArray<ArrayBuffer> | null = null;
 
 /**
  * The enlarged panel on the faithful (640×480) map, or — `digitsOnly` — just its
@@ -73,7 +75,9 @@ export function drawZoomedInfoPanel(
 ): void {
   const assets = ui.infoPanelAssets;
   if (!assets) return;
-  const layer = new Uint8ClampedArray(MAP_W * MAP_H * 4);
+  infoPixels ??= new Uint8ClampedArray(MAP_W * MAP_H * 4);
+  const layer = infoPixels;
+  layer.fill(0);
   if (digitsOnly) {
     drawInfoDigits(layer, MAP_W, MAP_H, assets.cisla, count, ui.mapInfoFaze);
   } else {

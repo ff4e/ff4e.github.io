@@ -125,6 +125,9 @@ export function drawMap(): void {
   const infoFazeKey = Math.min(ui.mapInfoFaze, INFO_SETTLE_FAZE);
   const infoZoom = infoPanelZoom();
   const zoomed = infoZoom !== 1;
+  // The phone's enlarged panel is drawn after the shared overlay layer, so the minigame
+  // (modal over everything on the map) is drawn after it again (drawLateMinigame).
+  const zoomedPanel = zoomed && ui.mapInfoRoom !== null;
   const sig =
     `${useAi ? 'ai' : 'n'}|${pulse % 6}|${Math.min(depth, ui.worldMap.maxDepth + 1)}|${ui.mapHoverCorner ?? ''}|${host.solved.size}|${host.cheated.size}|${host.cheated.size ? 1 : 0}` +
     `|${ui.mapInfoRoom ?? ''}|${ui.mapInfoHover ?? ''}|${infoFazeKey}|${ui.mapHoverRoom ?? ''}|${mapLaunching() ?? ''}|${infoZoom}`;
@@ -179,7 +182,7 @@ export function drawMap(): void {
       ctx.drawImage(plaque.bmp, plaque.x * AI_MAP_SCALE, plaque.y * AI_MAP_SCALE);
     }
     const overlay = new Uint8ClampedArray(MAP_W * MAP_H * 4); // transparent; only drawn cells become opaque
-    if (drawMapOverlays(overlay, true, plaque !== null, zoomed)) {
+    if (drawMapOverlays(overlay, true, plaque !== null, zoomedPanel)) {
       if (!ui.mapOverlayCanvas) {
         ui.mapOverlayCanvas = document.createElement('canvas');
         ui.mapOverlayCanvas.width = MAP_W;
@@ -190,7 +193,10 @@ export function drawMap(): void {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(ui.mapOverlayCanvas, 0, 0, cw, ch);
     }
-    if (panelOpen && zoomed) drawZoomedInfoPanel(AI_MAP_SCALE, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, true);
+    if (zoomedPanel) {
+      drawZoomedInfoPanel(AI_MAP_SCALE, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, true);
+      drawLateMinigame(AI_MAP_SCALE);
+    }
     // Last, over the plaque: Delphi draws the plaque and then the parchment
     // (UMain.pas:1484 then :1489), and the two rectangles overlap.
     if (launching) {
@@ -200,13 +206,35 @@ export function drawMap(): void {
     return;
   }
   const rgba = ui.worldMap.render(host.solved, pulse, depth, host.cheated, ui.mapHoverCorner, !unlit, !unlit);
-  drawMapOverlays(rgba, false, false, zoomed);
+  drawMapOverlays(rgba, false, false, zoomedPanel);
   if (launching) {
     blitParchment(rgba);
     markParchmentPainted(); // daRun -> daRealyRun: the load may now start
   }
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
-  if (panelOpen && zoomed) drawZoomedInfoPanel(1, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, false);
+  if (zoomedPanel) {
+    drawZoomedInfoPanel(1, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, false);
+    drawLateMinigame(1);
+  }
+}
+
+/**
+ * The minigame, over a panel that was drawn enlarged after the overlay layer it
+ * normally rides (see `skipPanel`), so the layering stays plaque → panel → minigame.
+ */
+function drawLateMinigame(scale: number): void {
+  if (!tetris || !tetrisArt) return;
+  const layer = new Uint8ClampedArray(MAP_W * MAP_H * 4);
+  blitTetris(layer, MAP_W, MAP_H);
+  if (!ui.mapOverlayCanvas) {
+    ui.mapOverlayCanvas = document.createElement('canvas');
+    ui.mapOverlayCanvas.width = MAP_W;
+    ui.mapOverlayCanvas.height = MAP_H;
+    ui.mapOverlayCtx = ui.mapOverlayCanvas.getContext('2d');
+  }
+  ui.mapOverlayCtx!.putImageData(new ImageData(layer, MAP_W, MAP_H), 0, 0);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(ui.mapOverlayCanvas, 0, 0, MAP_W * scale, MAP_H * scale);
 }
 
 /**
@@ -216,8 +244,9 @@ export function drawMap(): void {
  * hovered room node; the record panel (krokoměr) is drawn when a room panel is open.
  * `aiDigitsOnly` (the AI path) draws only the panel's odometer digits, not its bg/icon
  * artwork — that is drawn straight on the hi-res ctx from the AI bitmaps instead.
- * `skipPanel` leaves the record panel out entirely: the phone's enlarged panel is drawn
- * after this layer, by `drawZoomedInfoPanel`.
+ * `skipPanel` leaves the record panel out entirely, and the minigame with it: the phone's
+ * enlarged panel is drawn after this layer, by `drawZoomedInfoPanel`, and the minigame
+ * after that, by `drawLateMinigame`.
  * Returns whether anything was drawn.
  */
 /**
@@ -334,7 +363,7 @@ export function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, s
   // The Tetris minigame overlays the map when the cheat opens it. It goes through
   // this shared overlay buffer so BOTH map paths get it — the AI path scales the
   // buffer up like the plaque/digits rather than needing its own hi-res blit.
-  if (tetris && tetrisArt) {
+  if (tetris && tetrisArt && !skipPanel) {
     blitTetris(rgba, MAP_W, MAP_H);
     drew = true;
   }
