@@ -9,7 +9,7 @@
  *
  * The room controls stand aside for the demo in touch mode (touchButtons.ts,
  * phoneControls.ts), so in touch mode this is the only button on screen — it takes the
- * phone's top-right corner, where its "more" button sits in a room.
+ * phone's top-left corner, where its Map button sits in a room.
  */
 import { cutsceneClose } from './dom.js';
 import { skipCutscene } from './cutscene.js';

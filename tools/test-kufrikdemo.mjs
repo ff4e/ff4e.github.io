@@ -30,9 +30,9 @@ await withApp(async ({ p, expect }) => {
     const b = document.getElementById('cutscene-close');
     const r = b.getBoundingClientRect();
     const s = document.getElementById('screen').getBoundingClientRect();
-    return { shown: !b.hidden && r.width > 0, topRight: Math.abs(r.right + 8 - s.right) <= 2 && Math.abs(r.top - 8 - s.top) <= 2 };
+    return { shown: !b.hidden && r.width > 0, topLeft: Math.abs(r.left - 8 - s.left) <= 2 && Math.abs(r.top - 8 - s.top) <= 2 };
   });
-  expect(deskX.shown && deskX.topRight, `the demo shows its ✕ on the stage's top-right corner (${JSON.stringify(deskX)})`);
+  expect(deskX.shown && deskX.topLeft, `the demo shows its ✕ on the stage's top-left corner (${JSON.stringify(deskX)})`);
   await p.click('#cutscene-close');
   await p.waitForFunction(() => !window.__ff.cutsceneActive()).catch(() => {});
   expect(!(await p.evaluate(() => window.__ff.cutsceneActive())), 'the ✕ skips the demo');
@@ -218,7 +218,7 @@ await withApp(async ({ p, expect }) => {
 
   // ── touch mode (the dev override: a tablet on this 1200x640 desktop context) ──
   //
-  // The room controls stand aside for the demo, and the ✕ takes the screen's top-right
+  // The room controls stand aside for the demo, and the ✕ takes the screen's top-left
   // corner at a thumb's size. The phone corners' half is pinned in test/cutsceneClose.test.ts.
   await p.evaluate(() => {
     const sel = document.getElementById('touchmode');
@@ -236,14 +236,14 @@ await withApp(async ({ p, expect }) => {
       shown: !b.hidden,
       icon: b.querySelector('svg')?.dataset.menuIcon ?? '',
       w: Math.round(r.width),
-      right: Math.round(innerWidth - r.right),
+      left: Math.round(r.left),
       top: Math.round(r.top),
     };
   });
   expect(touchX.touch && touchX.barHidden, `touch: the room buttons stand aside for the demo (${JSON.stringify(touchX)})`);
   expect(
-    touchX.shown && touchX.icon === 'close' && touchX.w >= 44 && touchX.right >= 8 && touchX.right <= 32 && touchX.top >= 8 && touchX.top <= 32,
-    `touch: a thumb-sized rustic ✕ sits in the screen's top-right corner (${JSON.stringify(touchX)})`,
+    touchX.shown && touchX.icon === 'close' && touchX.w >= 44 && touchX.left >= 8 && touchX.left <= 32 && touchX.top >= 8 && touchX.top <= 32,
+    `touch: a thumb-sized rustic ✕ sits in the screen's top-left corner (${JSON.stringify(touchX)})`,
   );
   await p.click('#cutscene-close');
   await p.waitForFunction(() => !window.__ff.cutsceneActive()).catch(() => {});

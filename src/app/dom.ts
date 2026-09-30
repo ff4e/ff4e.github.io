@@ -63,7 +63,7 @@ helpClose.textContent = '✕';
 helpClose.hidden = true;
 helpClose.setAttribute('aria-label', 'Close help');
 /**
- * Close button for the briefcase demo (KUFRIK), top-right of the stage — or of the screen,
+ * Close button for the briefcase demo (KUFRIK), top-left of the stage — or of the screen,
  * in touch mode. Behaviour and the reason it exists: cutsceneClose.ts.
  *
  * A `.tbtn` so the touch/native skin paints it like the room controls it stands in for;
