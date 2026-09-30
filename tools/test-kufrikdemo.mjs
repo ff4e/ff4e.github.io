@@ -1,7 +1,7 @@
 /**
  * UI test: the briefcase demo (KUFRIK) — skip + music. The 'kufrik' music starts
  * with the demo and *persists* after it ends (InitKufrDemo/DoneKufrDemo), and the
- * demo is skippable by clicking or pressing Escape (zrus_kufr).
+ * demo is skipped by its ✕ button or Escape (zrus_kufr) — not by a click on the room.
  */
 import { tickSleep, waitRoom, waitTicks, withApp } from './ui-lib.mjs';
 
@@ -19,13 +19,25 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction(() => window.__ff.music() === 'kufrik').catch(() => {});
   expect((await p.evaluate(() => window.__ff.music())) === 'kufrik', "the 'kufrik' music plays during the demo");
 
-  // 2) A click skips the demo, and the music keeps playing afterward.
+  // 2) A click on the room does NOT skip the demo (Martin, 2026-09-30); its ✕ button does,
+  // and the music keeps playing afterward.
   await p.evaluate(() =>
     document.getElementById('screen').dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true })),
   );
-  await p.waitForFunction(() => !window.__ff.cutsceneActive()).catch(() => {});
-  expect(!(await p.evaluate(() => window.__ff.cutsceneActive())), 'clicking skips the demo');
   await tickSleep(p, 4);
+  expect(await p.evaluate(() => window.__ff.cutsceneActive()), 'clicking the room does not skip the demo');
+  const deskX = await p.evaluate(() => {
+    const b = document.getElementById('cutscene-close');
+    const r = b.getBoundingClientRect();
+    const s = document.getElementById('screen').getBoundingClientRect();
+    return { shown: !b.hidden && r.width > 0, topRight: Math.abs(r.right + 8 - s.right) <= 2 && Math.abs(r.top - 8 - s.top) <= 2 };
+  });
+  expect(deskX.shown && deskX.topRight, `the demo shows its ✕ on the stage's top-right corner (${JSON.stringify(deskX)})`);
+  await p.click('#cutscene-close');
+  await p.waitForFunction(() => !window.__ff.cutsceneActive()).catch(() => {});
+  expect(!(await p.evaluate(() => window.__ff.cutsceneActive())), 'the ✕ skips the demo');
+  await tickSleep(p, 4);
+  expect(await p.evaluate(() => document.getElementById('cutscene-close').hidden), 'the ✕ goes with the demo');
   expect((await p.evaluate(() => window.__ff.music())) === 'kufrik', 'the music keeps playing after the demo is skipped');
 
   // 3) Escape also skips the demo.
@@ -125,7 +137,7 @@ await withApp(async ({ p, expect }) => {
   // Leaving the ROOM with a cutscene still live. The draw dispatch tests the map / intro
   // / story-page branches BEFORE the cutscene one, so on that path drawCutscene() never
   // runs and the captions have no owner to take them down. Every ordinary way out
-  // (Escape, clicking the stage) calls skipCutscene() first, so this is the narrow case
+  // (Escape, its ✕ button) calls skipCutscene() first, so this is the narrow case
   // the loop's own guard has to cover rather than the cutscene's draw path.
   await startDemo();
   await p.waitForFunction(() => window.__ff.cutSubsActive());
@@ -203,4 +215,41 @@ await withApp(async ({ p, expect }) => {
     `frames listed as original are never requested (${marked.length} listed, ${leaked.length} requested anyway)`,
   );
   await p.evaluate(() => window.__ff.skipCutscene());
+
+  // ── touch mode (the dev override: a tablet on this 1200x640 desktop context) ──
+  //
+  // The room controls stand aside for the demo, and the ✕ takes the screen's top-right
+  // corner at a thumb's size. The phone corners' half is pinned in test/cutsceneClose.test.ts.
+  await p.evaluate(() => {
+    const sel = document.getElementById('touchmode');
+    sel.value = 'on';
+    sel.dispatchEvent(new Event('change'));
+  });
+  await startDemo();
+  await tickSleep(p, 2);
+  const touchX = await p.evaluate(() => {
+    const b = document.getElementById('cutscene-close');
+    const r = b.getBoundingClientRect();
+    return {
+      touch: document.documentElement.hasAttribute('data-touch'),
+      barHidden: document.getElementById('touchbar').hidden,
+      shown: !b.hidden,
+      icon: b.querySelector('svg')?.dataset.menuIcon ?? '',
+      w: Math.round(r.width),
+      right: Math.round(innerWidth - r.right),
+      top: Math.round(r.top),
+    };
+  });
+  expect(touchX.touch && touchX.barHidden, `touch: the room buttons stand aside for the demo (${JSON.stringify(touchX)})`);
+  expect(
+    touchX.shown && touchX.icon === 'close' && touchX.w >= 44 && touchX.right >= 8 && touchX.right <= 32 && touchX.top >= 8 && touchX.top <= 32,
+    `touch: a thumb-sized rustic ✕ sits in the screen's top-right corner (${JSON.stringify(touchX)})`,
+  );
+  await p.click('#cutscene-close');
+  await p.waitForFunction(() => !window.__ff.cutsceneActive()).catch(() => {});
+  await tickSleep(p, 2);
+  expect(
+    await p.evaluate(() => !window.__ff.cutsceneActive() && !document.getElementById('touchbar').hidden),
+    'touch: the ✕ skips the demo and the room buttons come back',
+  );
 });

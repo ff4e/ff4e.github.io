@@ -93,7 +93,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // panel's only way out of a 1 605-action recording. That is the part that is expensive
   // to rediscover, and it is a sentence about this file's dispatch table, not about the
   // demo, which is `cutscene.ts`.
-  ['src/app/main.ts', 2267],
+  //
+  // 2 267 -> 2 268 for the briefcase demo's ✕: one import and one boot-time arming call,
+  // less the mousedown's skip (a click on the room no longer ends the demo). The button,
+  // its visibility and its reasoning live in `cutsceneClose.ts`.
+  ['src/app/main.ts', 2268],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

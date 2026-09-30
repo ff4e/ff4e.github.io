@@ -1,7 +1,7 @@
 /** Phone corner controls. The tablet bar and its reserved-space layout stay separate. */
 import { phoneUi, type TouchButtonsHost } from './touchButtons.js';
 import { ui } from './screenState.js';
-import { room } from './gameState.js';
+import { cutscene, room } from './gameState.js';
 import { touchOptionsOpen } from './touchOptions.js';
 import { wake } from './frameClock.js';
 
@@ -73,7 +73,8 @@ export function initPhoneControls(host: TouchButtonsHost): void {
 }
 
 export function syncPhoneControls(): void {
-  const want = phoneUi() && ui.screen === 'room' && !ui.helpOpen && !touchOptionsOpen();
+  // Not during the briefcase demo: its ✕ takes this corner (cutsceneClose.ts).
+  const want = phoneUi() && ui.screen === 'room' && !ui.helpOpen && !touchOptionsOpen() && !cutscene;
   if (expanded && (!want || owner !== room)) setExpanded(false);
   owner = room;
   if (controls.hidden === want) controls.hidden = !want;

@@ -310,6 +310,37 @@
         border-radius: 4px;
       }
       #help-close:hover { background: rgba(40, 40, 56, 0.9); color: #fff; }
+      /* The briefcase demo's ✕ (src/app/cutsceneClose.ts). A `.tbtn`, so it needs its own
+         [hidden] rule — `.tbtn` sets `display: flex`, which beats the UA's. On the desktop
+         it sits on the stage's top-right corner at the help close's size; in touch mode it
+         takes the phone "more" button's corner of the SCREEN at the phone controls' size,
+         because the stage can run under a housing there and every other control is down. */
+      #cutscene-close {
+        position: absolute; top: 8px; right: 8px; z-index: 60;
+        min-width: 30px; min-height: 30px; width: 30px; height: 30px; padding: 0;
+        border-radius: 4px; cursor: pointer;
+      }
+      #cutscene-close[hidden] { display: none; }
+      #cutscene-close svg { width: 16px; height: 16px; }
+      html:not([data-touch]) #cutscene-close:hover { background: #24414c; color: #fff; }
+      html[data-touch] #cutscene-close {
+        position: fixed; z-index: 120;
+        top: max(16px, calc(var(--sa-top) + 8px));
+        right: max(16px, calc(var(--sa-right) + 8px));
+        min-width: 56px; min-height: 56px; width: 56px; height: 56px; padding: 8px;
+        border-radius: var(--menu-radius, 14px);
+      }
+      html[data-touch] #cutscene-close svg { width: 32px; height: 32px; }
+      @media (orientation: landscape) {
+        html[data-touch][data-native-menu] #cutscene-close {
+          top: max(24px, calc(var(--sa-top) + 8px));
+          right: max(24px, calc(var(--sa-right) + 8px));
+        }
+      }
+      @media (orientation: landscape) and (min-height: 390px) {
+        html[data-touch] #cutscene-close { right: 16px; }
+        html[data-touch][data-native-menu] #cutscene-close { right: 24px; }
+      }
       /* The panel column: the control panel with the feedback strip hanging under it.
          The strip is `position: absolute` so it contributes NOTHING to the column's
          size — the stage layout is computed from the panel's 155×395 and must stay
