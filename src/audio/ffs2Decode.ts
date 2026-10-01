@@ -92,83 +92,6 @@ export function trimToSamples(ctx: BaseAudioContext, buf: AudioBuffer, samples: 
   return out;
 }
 
-/**
- * How many `decodeAudioData` calls `decodeFfs2` lets run at once.
- *
- * Found on an Xbox Series X: x03 (55 segments) decoded ENTIRELY in parallel threw
- * `EncodingError: Unable to decode audio data` on a segment that ffprobe reports as a
- * completely ordinary AAC-LC/22050 Hz MP4 (probe_score 100) — so the file is not the
- * problem. Console hardware media pipelines cap how many decoder sessions can be open at
- * once, far below a package's segment count or a room's ~24, and WebView2 reports hitting
- * that cap as the same generic error a corrupt file would give.
- *
- * Bounding at 6 did NOT stop the failures — it only moved which segment hit them (first
- * `ob-m-naveky`, then with a single retry added, `ob-v-jit0` a little further into the
- * same package) — so this is fully serial until proven otherwise. One decode session
- * open at a time is the only way left to tell a true hardware cap from load-dependent
- * flakiness; it costs nothing measurable on a desktop/mobile browser either way (see the
- * module comment on cost).
- */
-const MAX_CONCURRENT_DECODES = 1;
-
-/** How many times `decodeAudioData` is attempted before a segment is given up on. */
-const MAX_DECODE_ATTEMPTS = 3;
-
-/** Resolves after `ms`, for backing off between a failed decode and its retry. */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * A ~50 ms silent AAC-LC/22050 Hz mono MP4, built with the exact `ffmpeg` flags
- * `tools/stage-voices.ts` uses for every real segment (`-c:a aac -b:a 48k -ac 1
- * -movflags +faststart`), so it exercises the identical decode path.
- *
- * Found on an Xbox Series X: neither bounding concurrency to 1 nor retrying a failing
- * segment 3 times with backoff nor decoding off a throwaway `OfflineAudioContext`
- * stopped a specific segment from failing — the SAME segment, byte-for-byte identical
- * across two builds that changed how and where the decode ran, which ffprobe confirms
- * is an ordinary file. That is what "the very first `decodeAudioData` call of the
- * process, whichever segment it happens to land on, fails every time no matter which
- * context or how many retries" looks like — a one-time cost paid once per process, not
- * per segment. So pay it here, on a segment nothing in the game depends on, before the
- * real queue starts.
- */
-const WARMUP_AAC_B64 =
-  'AAAAHGZ0eXBNNEEgAAACAE00QSBpc29taXNvMgAAAtZtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAAMgABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACJXRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAAMgAAAAAAAAAAAAAAAQEAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAADIAAAQAAAEAAAAAAZ1tZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAFYiAAAITlXEAAAAAAAtaGRscgAAAAAAAAAAc291bgAAAAAAAAAAAAAAAFNvdW5kSGFuZGxlcgAAAAFIbWluZgAAABBzbWhkAAAAAAAAAAAAAAAkZGluZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAAEMc3RibAAAAGpzdHNkAAAAAAAAAAEAAABabXA0YQAAAAAAAAABAAAAAAAAAAAAAQAQAAAAAFYiAAAAAAA2ZXNkcwAAAAADgICAJQABAASAgIAXQBUAAAAAALuAAAAD4wWAgIAFE4hW5QAGgICAAQIAAAAgc3R0cwAAAAAAAAACAAAAAgAABAAAAAABAAAATgAAABxzdHNjAAAAAAAAAAEAAAABAAAAAwAAAAEAAAAUc3RzegAAAAAAAAAEAAAAAwAAABRzdGNvAAAAAAAAAAEAAAMCAAAAGnNncGQBAAAAcm9sbAAAAAIAAAAB//8AAAAcc2JncAAAAAByb2xsAAAAAQAAAAMAAAABAAAAPXVkdGEAAAA1bWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAIaWxzdAAAAAhmcmVlAAAAFG1kYXQBGCAHARggBwEYIAc=';
-
-let decoderWarmedUp = false;
-
-/**
- * Pay the one-time cold-decoder tax on `WARMUP_AAC_B64` instead of on a real segment.
- * Any outcome ends the warm-up — only whether a call was MADE is believed to matter, not
- * whether it succeeded, so a failure here is swallowed rather than surfaced.
- */
-async function warmUpDecoderOnce(ctx: BaseAudioContext): Promise<void> {
-  if (decoderWarmedUp) return;
-  decoderWarmedUp = true;
-  try {
-    const bin = atob(WARMUP_AAC_B64);
-    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
-    await ctx.decodeAudioData(bytes.buffer);
-  } catch {
-    // Deliberately ignored — see the function comment.
-  }
-}
-
-/** Run `fn` over `items`, at most `limit` in flight at once. */
-async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
-  let next = 0;
-  const worker = async (): Promise<void> => {
-    for (;;) {
-      const i = next++;
-      if (i >= items.length) return;
-      await fn(items[i]!);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-}
-
 /** Decode every segment of a staged package, keyed by the sound name that asks for it. */
 export async function decodeFfs2(
   ctx: BaseAudioContext,
@@ -181,67 +104,39 @@ export async function decodeFfs2(
   // every lip-sync and every TALKING_MEZ_SEC wrong by that ratio, silently.
   if (index.rate !== FFS_SAMPLE_RATE) throw new Error(`sound package is ${index.rate} Hz, expected ${FFS_SAMPLE_RATE}`);
   const out = new Map<string, AudioBuffer>();
-  // Boot decodes every global package (`requireSoundPkg`, boot.ts) before the first user
-  // gesture resumes `ctx` (audio.ts: "silent until the first user gesture unlocks
-  // audio") — so on an Xbox Series X, every one of these early `decodeAudioData` calls
-  // runs against an AudioContext whose hardware output session has never been opened.
-  // Lazily hand decoding to a throwaway `OfflineAudioContext` at the same rate instead:
-  // it never touches an output device, so it cannot be blocked on one not being ready
-  // yet, and a decoded `AudioBuffer` is plain data — nothing about playing it later
-  // through `ctx` depends on which context decoded it.
-  let decodeCtx: BaseAudioContext | undefined;
-  // Up to MAX_CONCURRENT_DECODES at once: each `decodeAudioData` is native and off the
-  // main thread, and a room holds ~24 of them, so this is not free to make fully serial
-  // on a desktop/mobile browser — but it currently IS 1 (see MAX_CONCURRENT_DECODES) on
-  // the one console that has shown a decoder cap.
-  await mapLimit([...entries.values()], MAX_CONCURRENT_DECODES, async (e) => {
-    // An empty record is legitimate; a record with no segment is not. The two used to
-    // share one `return`, which fails OPEN in the worst way this codebase knows: `has()`,
-    // `hasPackaged()`, `entry()` and `duration()` all read `entries`, so the sound still
-    // reports as present and the right length, and only `buffer()` comes back null — the
-    // line plays silently, the subtitle shows, and the dialogue advances over it. That is
-    // "a room played through mute with nothing said", which the asset tiers exist to make
-    // impossible. `parseFfs2` throws on every other structural disagreement; so does this.
-    if (e.delka <= 0) return;
-    const seg = index.segments.get(e.zvuk);
-    if (!seg) throw new Error(`sound package has no segment for ${e.name} (zvuk=${e.zvuk})`);
-    // `slice`, not `subarray`: `decodeAudioData` DETACHES the ArrayBuffer it is given
-    // (even on failure), which for a view onto the package would take every other
-    // segment with it — and is also why a retry below needs a fresh slice, not the one
-    // already handed to the failed call.
-    const slice = (): ArrayBuffer =>
-      body.buffer.slice(body.byteOffset + seg.offset, body.byteOffset + seg.offset + seg.length) as ArrayBuffer;
-    decodeCtx ??=
-      typeof OfflineAudioContext !== 'undefined' ? new OfflineAudioContext(1, 1, ctx.sampleRate) : ctx;
-    await warmUpDecoderOnce(decodeCtx);
-    // Found on an Xbox Series X: `decodeAudioData` threw `EncodingError: Unable to
-    // decode audio data` on segments ffprobe reports as completely ordinary AAC-LC/22050
-    // Hz MP4s (probe_score 100) — so the file is not the problem. One retry fixed the
-    // FIRST failure seen (the very first decode of the session, immediately after
-    // `ensureCtx()` creates the AudioContext), but a later run hit the same error on a
-    // SECOND, different segment further into the same package that the one retry did not
-    // recover — so this is flakiness in the console's decoder, not a single cold-start
-    // race, and gets a short backoff and up to two retries rather than an immediate one,
-    // on top of (not instead of) decoding off the live, not-yet-resumed context above.
-    let decoded: AudioBuffer | undefined;
-    let lastErr: unknown;
-    for (let attempt = 1; attempt <= MAX_DECODE_ATTEMPTS; attempt++) {
+  // In parallel: each `decodeAudioData` is native and off the main thread, and a room
+  // holds ~24 of them. Serial would be ~24 round trips through the event loop for no
+  // gain, inside a room entry the player is waiting on.
+  await Promise.all(
+    [...entries.values()].map(async (e) => {
+      // An empty record is legitimate; a record with no segment is not. The two used to
+      // share one `return`, which fails OPEN in the worst way this codebase knows: `has()`,
+      // `hasPackaged()`, `entry()` and `duration()` all read `entries`, so the sound still
+      // reports as present and the right length, and only `buffer()` comes back null — the
+      // line plays silently, the subtitle shows, and the dialogue advances over it. That is
+      // "a room played through mute with nothing said", which the asset tiers exist to make
+      // impossible. `parseFfs2` throws on every other structural disagreement; so does this.
+      if (e.delka <= 0) return;
+      const seg = index.segments.get(e.zvuk);
+      if (!seg) throw new Error(`sound package has no segment for ${e.name} (zvuk=${e.zvuk})`);
+      // `slice`, not `subarray`: `decodeAudioData` DETACHES the ArrayBuffer it is given,
+      // which for a view onto the package would take every other segment with it.
+      const ab = body.buffer.slice(
+        body.byteOffset + seg.offset,
+        body.byteOffset + seg.offset + seg.length,
+      ) as ArrayBuffer;
+      let decoded: AudioBuffer;
       try {
-        decoded = await decodeCtx.decodeAudioData(slice());
-        break;
+        decoded = await ctx.decodeAudioData(ab);
       } catch (err) {
-        lastErr = err;
-        if (attempt < MAX_DECODE_ATTEMPTS) await delay(50 * attempt);
+        // Bare, this throws `EncodingError: Unable to decode audio data` with no way to
+        // tell which of a package's ~dozens of segments it was — exactly the failure
+        // mode `decodeAsset` (src/render/assetFetch.ts) exists to prevent for images.
+        // Name it the same way.
+        throw new Error(`segment ${e.name} (zvuk=${e.zvuk}, ${seg.length}B) failed to decode: ${String(err)}`);
       }
-    }
-    if (!decoded) {
-      // Bare, this throws `EncodingError: Unable to decode audio data` with no way to
-      // tell which of a package's ~dozens of segments it was — exactly the failure
-      // mode `decodeAsset` (src/render/assetFetch.ts) exists to prevent for images.
-      // Name it the same way.
-      throw new Error(`segment ${e.name} (zvuk=${e.zvuk}, ${seg.length}B) failed to decode: ${String(lastErr)}`);
-    }
-    out.set(e.name, trimToSamples(ctx, decoded, e.delka));
-  });
+      out.set(e.name, trimToSamples(ctx, decoded, e.delka));
+    }),
+  );
   return out;
 }
