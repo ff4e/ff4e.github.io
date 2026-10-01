@@ -31,6 +31,7 @@
  * `padOptions.ts`).
  */
 import { DirRepeat, pollPad, type PadDir, type PadSnapshot } from '../platform/gamepad.js';
+import { initHostGamepad } from '../platform/hostGamepad.js';
 import { intro } from './introOverlay.js';
 import { ui } from './screenState.js';
 import { touchOptionsOpen } from './touchOptions.js';
@@ -56,6 +57,9 @@ let host!: PadInputHost;
 
 export function initPadInput(h: PadInputHost): void {
   host = h;
+  // On the console the controller arrives from the native shell, not the browser's own
+  // Gamepad API (see hostGamepad.ts). A no-op in any ordinary browser.
+  initHostGamepad();
 }
 
 // ── Synthetic keys ────────────────────────────────────────────────────────────
