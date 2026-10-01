@@ -538,6 +538,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // World-map record info panel + best-solution replay (for UI probes).
     mapInfoRoom: () => ui.mapInfoRoom,
     mapInfoHover: () => ui.mapInfoHover,
+    mapSelectRoom: () => ui.mapSelectRoom, // a controller's map selection (mapSelect.ts)
     mapInfoFaze: () => ui.mapInfoFaze,
     deskyLang: () => ui.deskyLang, // language of the currently loaded room-name plaques
     openMapInfo: (n: number) => host.openMapInfo(n),

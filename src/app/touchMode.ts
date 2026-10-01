@@ -103,6 +103,10 @@ export function writeTouchOverride(win: TouchWindow, v: TouchOverride): void {
 
 /** Should the game show its touch controls? */
 export function touchModeActive(win: TouchWindow): boolean {
+  // A TV is played from the sofa with a controller, but it is laid out as a TABLET: no
+  // faithful panel, the room centred and filling the screen, the plain-HTML Options. See
+  // `tvModeActive` below for why it rides this predicate rather than a parallel one.
+  if (tvModeActive(win)) return true;
   const o = readTouchOverride(win);
   if (o === 'on') return true;
   if (o === 'off') return false;
@@ -111,5 +115,63 @@ export function touchModeActive(win: TouchWindow): boolean {
 
 /** Phone-only presentation; forcing touch on a desktop still previews the tablet UI. */
 export function phoneModeActive(win: TouchWindow): boolean {
-  return touchModeActive(win) && deviceClass(win) === 'phone';
+  return touchModeActive(win) && !tvModeActive(win) && deviceClass(win) === 'phone';
+}
+
+/**
+ * ── TV mode: the Xbox build, and a desktop pretending to be one ──────────────
+ *
+ * A console is played with a controller from across the room. Nothing about that is a
+ * touch screen, but everything the tablet already decided still holds for it: the
+ * faithful panel's buttons are no use without a mouse, the room should fill the screen,
+ * and the panel's Options face is better as plain HTML controls. So TV mode is the tablet
+ * UI with its input swapped — `touchModeActive` is true on a TV, and the few tablet-only
+ * pieces (the floating buttons, swipe hints, the fish-switch button) ask this predicate to
+ * stand aside for a legend of the controller's buttons instead.
+ *
+ * Decided, in order, by:
+ *  1. the build — `VITE_TARGET=xbox` is the console package, which is never anything else;
+ *  2. the URL — `?tv`, `?tv=on`, `?tv=off`, the dev override a probe can boot into;
+ *  3. storage — `ff.tv`, the same override remembered;
+ *  4. the browser engine — the Xbox WebView says so in its user agent.
+ *
+ * The user-agent test is the one place this codebase sniffs one, and it is safe for the
+ * reason `deviceGate.ts` rejects the practice elsewhere: it is not guessing a form factor
+ * from a string that lies about it, it is recognising one platform that names itself.
+ */
+export type TvWindow = TouchWindow & { navigator?: { userAgent?: string } };
+
+/** Where the dev override is persisted, beside `ff.touch`. */
+export const TV_KEY = 'ff.tv';
+
+/** URL form: bare `?tv` or `?tv=on` turns it on, `?tv=off` forces it off. */
+export const TV_PARAM = 'tv';
+
+/** Is this the console build? Read once; Vite inlines the value at build time. */
+function xboxBuild(): boolean {
+  try {
+    return import.meta.env.VITE_TARGET === 'xbox';
+  } catch {
+    return false; // no import.meta.env outside Vite
+  }
+}
+
+/** Should the game present itself for a TV and a controller? */
+export function tvModeActive(win: TvWindow): boolean {
+  if (xboxBuild()) return true;
+  try {
+    const params = new URLSearchParams(win.location?.search ?? '');
+    if (params.has(TV_PARAM)) return params.get(TV_PARAM) !== 'off';
+  } catch {
+    // A malformed query string decides nothing; fall through.
+  }
+  try {
+    const v = win.localStorage?.getItem(TV_KEY);
+    if (v === 'on') return true;
+    if (v === 'off') return false;
+  } catch {
+    // Storage disabled: fall through to the engine's own answer.
+  }
+  const ua = win.navigator?.userAgent ?? (typeof navigator !== 'undefined' ? navigator.userAgent : '');
+  return /\bXbox\b/i.test(ua);
 }

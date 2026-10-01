@@ -1,0 +1,79 @@
+/* The controller UI (src/app/padLegend.ts, padInput.ts, padOptions.ts). TV mode only. */
+
+/* ── The legend: what each controller button does, where the tablet has buttons ──
+   Positioned exactly as #touchbar is (index.html), down the left or along the top,
+   whichever covers less of the room — `padLegend.ts` asks the same `touchBarPlacement`.
+   It is a legend, not a set of targets, so nothing in it takes a pointer. */
+#padlegend {
+  position: fixed;
+  /* Over the touch Options (150), which is a full-screen sheet, and under the prompt. */
+  z-index: 155;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+  box-sizing: border-box;
+}
+#padlegend[hidden] { display: none; }
+html:not([data-padlegend-edge='top']) #padlegend {
+  top: 0; bottom: 0; left: var(--legend-inset, 0px);
+  width: var(--bar-w); flex-direction: column; align-items: flex-start;
+  padding-left: max(var(--sa-left), var(--bar-lead));
+}
+html[data-padlegend-edge='top'] #padlegend {
+  top: var(--legend-inset, 0px); left: 0; right: 0;
+  height: var(--bar-h); flex-direction: row;
+}
+.pl-item {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 4px;
+  min-width: 52px; min-height: 46px;
+  padding: 5px 3px;
+  box-sizing: border-box;
+  color: #cde; background: #10181ecc; border: 1px solid #35555f; border-radius: 10px;
+  font: 600 10px/1 system-ui, sans-serif; letter-spacing: 0.3px;
+  user-select: none;
+}
+.pl-glyphs { display: flex; gap: 2px; }
+.pl-item.dialogue-hint-pulse { animation: dialogue-hint-pulse 1.2s ease-in-out infinite; }
+
+/* The buttons themselves, in the controller's own colours. Letters, not artwork. */
+.pg {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 1px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  color: #fff; background: #3a4148;
+  font: 700 11px/1 system-ui, sans-serif;
+}
+.pg-a { background: #3d9a1f; }
+.pg-b { background: #c62a2a; }
+.pg-x { background: #2266c4; }
+.pg-y { background: #d6a00c; color: #111; }
+.pg-lb, .pg-rb { border-radius: 5px; padding: 0 4px; font-size: 9px; }
+.pg-ls, .pg-rs, .pg-dpad { background: transparent; border: 2px solid #9ab; font-size: 8px; }
+
+/* ── Ⓐ to confirm ── */
+#pad-confirm {
+  position: fixed; inset: 0; z-index: 160;
+  display: flex; align-items: center; justify-content: center;
+  background: #000a;
+}
+#pad-confirm[hidden] { display: none; }
+#pad-confirm .pc-card {
+  padding: 24px 36px;
+  color: #eef; background: #18262e; border: 1px solid #6cc; border-radius: 14px;
+  font: 600 24px/1.3 system-ui, sans-serif; text-align: center;
+}
+#pad-confirm .pc-keys {
+  display: flex; gap: 22px; justify-content: center; align-items: center;
+  margin-top: 16px; font-size: 18px;
+}
+#pad-confirm .pc-keys .pg { min-width: 28px; height: 28px; border-radius: 14px; font-size: 15px; margin-right: 6px; }
+
+/* ── The touch Options, as a controller sees it (padOptions.ts) ── */
+#touchopts .pad-focus { outline: 3px solid #7ee6ff; outline-offset: 4px; border-radius: 8px; }
+html[data-tv] #topt-privacy { display: none; }
+/* The briefcase demo's ✕ is a pointer's way out; Ⓑ is the controller's (legend). */
+html[data-tv] #cutscene-close { display: none; }

@@ -10,4 +10,6 @@ interface ImportMetaEnv {
   /** Cloudflare Web Analytics beacon token; when set, the cookieless beacon loads
    *  in a production build. Absent in dev and in token-less builds. */
   readonly VITE_CF_BEACON_TOKEN?: string;
+  /** `xbox` for the console package (src/app/touchMode.ts `tvModeActive`); unset on the web. */
+  readonly VITE_TARGET?: string;
 }

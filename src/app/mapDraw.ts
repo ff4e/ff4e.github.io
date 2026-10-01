@@ -13,6 +13,7 @@ import { assetCoolingDown, decodeAsset, isTransient, requiredBlob, requiredBytes
 import { DESKA_X_OFFSET, DESKA_Y_OFFSET, blitDeska, parseDesky } from '../data/desky.js';
 import { INFO_SETTLE_FAZE, applyInfoZoom, drawInfoDigits, drawInfoPanel, drawInfoPanelArtAi } from '../render/mapInfo.js';
 import { MAP_H, MAP_W } from '../render/worldMap.js';
+import { nodeCenter } from '../render/mapSelection.js';
 import { aiWorldMap, mapPresented, setMapPresented } from './art.js';
 import { blitParchment, blitParchmentAi, mapLaunching, markParchmentPainted } from './roomLaunch.js';
 import { blitTetris, tetris, tetrisArt, tetrisTick } from './cheats.js';
@@ -130,7 +131,7 @@ export function drawMap(): void {
   const zoomedPanel = zoomed && ui.mapInfoRoom !== null;
   const sig =
     `${useAi ? 'ai' : 'n'}|${pulse % 6}|${Math.min(depth, ui.worldMap.maxDepth + 1)}|${ui.mapHoverCorner ?? ''}|${host.solved.size}|${host.cheated.size}|${host.cheated.size ? 1 : 0}` +
-    `|${ui.mapInfoRoom ?? ''}|${ui.mapInfoHover ?? ''}|${infoFazeKey}|${ui.mapHoverRoom ?? ''}|${mapLaunching() ?? ''}|${infoZoom}`;
+    `|${ui.mapInfoRoom ?? ''}|${ui.mapInfoHover ?? ''}|${infoFazeKey}|${ui.mapHoverRoom ?? ''}|${mapLaunching() ?? ''}|${infoZoom}|${ui.mapSelectRoom ?? ''}`;
   // The minigame is modal over the map too (UMain.pas:1764), and animates, so its
   // frame counter joins the cache key.
   const sigT = tetris ? `|ttr${tetrisTick}` : '';
@@ -193,6 +194,7 @@ export function drawMap(): void {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(ui.mapOverlayCanvas, 0, 0, cw, ch);
     }
+    if (!unlit) drawSelectRing(AI_MAP_SCALE);
     if (zoomedPanel) {
       drawZoomedInfoPanel(AI_MAP_SCALE, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, true);
       drawLateMinigame(AI_MAP_SCALE);
@@ -212,10 +214,31 @@ export function drawMap(): void {
     markParchmentPainted(); // daRun -> daRealyRun: the load may now start
   }
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
+  if (!unlit) drawSelectRing(1);
   if (zoomedPanel) {
     drawZoomedInfoPanel(1, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, false);
     drawLateMinigame(1);
   }
+}
+
+/**
+ * The ring round the room node a controller has selected (`mapSelect.ts`). A pointer
+ * has its cursor to show where it is; a controller has only this. Drawn on the 2D
+ * context after the map itself, so one call serves both art tiers at their own scale,
+ * and only while nodes are shown at all (not under the record panel or a launch).
+ */
+function drawSelectRing(scale: number): void {
+  if (ui.mapSelectRoom === null) return;
+  const { x, y } = nodeCenter(ui.mapSelectRoom);
+  ctx.save();
+  ctx.strokeStyle = 'rgb(120, 230, 255)';
+  ctx.lineWidth = 2.5 * scale;
+  ctx.shadowColor = 'rgba(120, 230, 255, 0.9)';
+  ctx.shadowBlur = 6 * scale;
+  ctx.beginPath();
+  ctx.arc((x + 0.5) * scale, (y + 0.5) * scale, 15 * scale, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
 }
 
 /**

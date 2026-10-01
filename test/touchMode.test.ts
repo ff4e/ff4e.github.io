@@ -17,9 +17,12 @@ import {
   phoneModeActive,
   resetTouchSession,
   touchModeActive,
+  tvModeActive,
   writeTouchOverride,
   TOUCH_KEY,
+  TV_KEY,
   type TouchWindow,
+  type TvWindow,
 } from '../src/app/touchMode.js';
 
 // `writeTouchOverride` sets a module-level session slot that outlives a single test.
@@ -169,5 +172,47 @@ describe('the dev-bar choice, made during a session', () => {
     expect(touchModeActive(w)).toBe(false);
     resetTouchSession(); // what a fresh page load does
     expect(touchModeActive(w)).toBe(true);
+  });
+});
+
+describe('tvModeActive — the console, and the desktop pretending to be one', () => {
+  const XBOX_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; Xbox; Xbox Series X) AppleWebKit/537.36 Edg/120';
+  function tv(extra: { search?: string; stored?: string; ua?: string; matching?: string[] } = {}): TvWindow {
+    return {
+      matchMedia: ((q: string) => ({ matches: (extra.matching ?? [FINE]).includes(q) })) as Window['matchMedia'],
+      screen: DESKTOP,
+      location: { search: extra.search ?? '' },
+      localStorage: { getItem: (k: string) => (k === TV_KEY ? (extra.stored ?? null) : null), setItem: () => {} },
+      navigator: { userAgent: extra.ua ?? 'Mozilla/5.0 (Macintosh) Chrome/130' },
+    };
+  }
+
+  it('is off for an ordinary desktop browser', () => {
+    expect(tvModeActive(tv())).toBe(false);
+    expect(touchModeActive(tv())).toBe(false);
+  });
+
+  it('recognises the Xbox WebView by the platform it names', () => {
+    expect(tvModeActive(tv({ ua: XBOX_UA }))).toBe(true);
+  });
+
+  it('takes the URL first, then storage, over the engine', () => {
+    expect(tvModeActive(tv({ search: '?tv' }))).toBe(true);
+    expect(tvModeActive(tv({ search: '?tv=on' }))).toBe(true);
+    expect(tvModeActive(tv({ search: '?tv=off', ua: XBOX_UA }))).toBe(false);
+    expect(tvModeActive(tv({ stored: 'on' }))).toBe(true);
+    expect(tvModeActive(tv({ stored: 'off', ua: XBOX_UA }))).toBe(false);
+    expect(tvModeActive(tv({ search: '?tv=on', stored: 'off' }))).toBe(true);
+  });
+
+  it('is laid out as a tablet, never as a phone', () => {
+    // The tablet UI is what a TV derives from: touch mode is on, so the faithful panel
+    // is gone and the room fills the screen.
+    expect(touchModeActive(tv({ search: '?tv' }))).toBe(true);
+    // Even a touch override cannot take a TV back to the mouse game.
+    expect(touchModeActive(tv({ search: '?tv&touch=off' }))).toBe(true);
+    // A phone-sized coarse device forced into TV mode is still not presented as a phone.
+    const phoneTv: TvWindow = { ...tv({ search: '?tv', matching: [COARSE] }), screen: PHONE };
+    expect(phoneModeActive(phoneTv)).toBe(false);
   });
 });

@@ -108,6 +108,13 @@ are otherwise the original's. Tablets and desktop keep the original 1:1 panel.
 Undo occupies the end of the bar and Restart the fourth slot, both across the top
 and down the left edge. Phone controls and the desktop panel are unchanged.
 
+**TV / controller (Xbox):** a TV is laid out as a tablet and played with a controller. The
+tablet toolbar becomes a legend of the controller's buttons on the same edge. Left stick (or
+d-pad) moves the little fish, right stick the big one; B is the map, Y undo, LB/RB save/load
+and X restart (each confirmed with A), Menu opens Options. On the map the stick moves a
+selection ring and A opens it. It is on in the Xbox build (`VITE_TARGET=xbox`) and the Xbox
+WebView; desktop `?tv` previews it, and the dev bar's **Sim pad** drives it with no controller.
+
 **Touch menu appearance:** Phone/tablet controls in browsers and the native app use translucent slate
 surfaces and hand-drawn rustic symbols colored from the room's static wall art.
 The light Options panel retains original stone texture and blue lettering.

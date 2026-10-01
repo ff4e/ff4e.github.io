@@ -21,7 +21,7 @@ import { isFitMode } from './layout.js';
 import { devSolveRoom } from './cheats.js';
 import { setSolveSpeed, solveStatus } from './solveMode.js';
 import { solutionFor } from '../rooms/index.js';
-import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, solveRoomBtn, solveSpeedSelect, touchSelect, aiBrightnessInput, aiContrastInput, aiFilterOut, aiFilterReset, aiSaturateInput } from './dom.js';
+import { fitSelect, graphicsSelect, idleDirtyToggle, rendererSelect, select, simPadToggle, solveRoomBtn, solveSpeedSelect, touchSelect, aiBrightnessInput, aiContrastInput, aiFilterOut, aiFilterReset, aiSaturateInput } from './dom.js';
 import { registerAiFilterControls, resetAiFilter, setAiFilter, type AiFilterKey } from './aiFilter.js';
 import { relayout } from './loadingUi.js';
 import { ui } from './screenState.js';
@@ -30,6 +30,8 @@ import { refreshTouchMode } from './touchButtons.js';
 import { readTouchOverride, writeTouchOverride } from './touchMode.js';
 import { saveSettings } from '../core/settings.js';
 import {
+  applySimPad,
+  SIMPAD_KEY,
   graphics,
   devEnabled,
   renderOnDirty,
@@ -145,6 +147,24 @@ export function initDevBar(h: DevBarHost): void {
       writeTouchOverride(window, v === 'on' || v === 'off' ? v : 'auto');
       refreshTouchMode();
     });
+  }
+  if (simPadToggle) {
+    const el = simPadToggle;
+    try {
+      el.checked = localStorage.getItem(SIMPAD_KEY) === '1';
+    } catch {
+      // Storage disabled: starts unticked.
+    }
+    el.addEventListener('change', () => {
+      try {
+        localStorage.setItem(SIMPAD_KEY, el.checked ? '1' : '0');
+      } catch {
+        // Storage disabled: nothing to remember it in, and nothing to show it from.
+      }
+      applySimPad();
+      el.blur();
+    });
+    applySimPad();
   }
   if (idleDirtyToggle) {
     const el = idleDirtyToggle;
