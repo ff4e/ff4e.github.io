@@ -92,6 +92,34 @@ export function trimToSamples(ctx: BaseAudioContext, buf: AudioBuffer, samples: 
   return out;
 }
 
+/**
+ * How many `decodeAudioData` calls `decodeFfs2` lets run at once.
+ *
+ * Found on an Xbox Series X: x03 (55 segments) decoded ENTIRELY in parallel threw
+ * `EncodingError: Unable to decode audio data` on a segment that ffprobe reports as a
+ * completely ordinary AAC-LC/22050 Hz MP4 (probe_score 100) — so the file is not the
+ * problem. Console hardware media pipelines cap how many decoder sessions can be open at
+ * once, far below a package's segment count or a room's ~24, and WebView2 reports hitting
+ * that cap as the same generic error a corrupt file would give. A bound this small is
+ * still plenty of parallelism over the 3-8 ms a decode actually costs (see the module
+ * comment), and costs nothing measurable on a desktop/mobile browser, which has no such
+ * cap to hit.
+ */
+const MAX_CONCURRENT_DECODES = 6;
+
+/** Run `fn` over `items`, at most `limit` in flight at once. */
+async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      await fn(items[i]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
 /** Decode every segment of a staged package, keyed by the sound name that asks for it. */
 export async function decodeFfs2(
   ctx: BaseAudioContext,
@@ -104,39 +132,39 @@ export async function decodeFfs2(
   // every lip-sync and every TALKING_MEZ_SEC wrong by that ratio, silently.
   if (index.rate !== FFS_SAMPLE_RATE) throw new Error(`sound package is ${index.rate} Hz, expected ${FFS_SAMPLE_RATE}`);
   const out = new Map<string, AudioBuffer>();
-  // In parallel: each `decodeAudioData` is native and off the main thread, and a room
-  // holds ~24 of them. Serial would be ~24 round trips through the event loop for no
-  // gain, inside a room entry the player is waiting on.
-  await Promise.all(
-    [...entries.values()].map(async (e) => {
-      // An empty record is legitimate; a record with no segment is not. The two used to
-      // share one `return`, which fails OPEN in the worst way this codebase knows: `has()`,
-      // `hasPackaged()`, `entry()` and `duration()` all read `entries`, so the sound still
-      // reports as present and the right length, and only `buffer()` comes back null — the
-      // line plays silently, the subtitle shows, and the dialogue advances over it. That is
-      // "a room played through mute with nothing said", which the asset tiers exist to make
-      // impossible. `parseFfs2` throws on every other structural disagreement; so does this.
-      if (e.delka <= 0) return;
-      const seg = index.segments.get(e.zvuk);
-      if (!seg) throw new Error(`sound package has no segment for ${e.name} (zvuk=${e.zvuk})`);
-      // `slice`, not `subarray`: `decodeAudioData` DETACHES the ArrayBuffer it is given,
-      // which for a view onto the package would take every other segment with it.
-      const ab = body.buffer.slice(
-        body.byteOffset + seg.offset,
-        body.byteOffset + seg.offset + seg.length,
-      ) as ArrayBuffer;
-      let decoded: AudioBuffer;
-      try {
-        decoded = await ctx.decodeAudioData(ab);
-      } catch (err) {
-        // Bare, this throws `EncodingError: Unable to decode audio data` with no way to
-        // tell which of a package's ~dozens of segments it was — exactly the failure
-        // mode `decodeAsset` (src/render/assetFetch.ts) exists to prevent for images.
-        // Name it the same way.
-        throw new Error(`segment ${e.name} (zvuk=${e.zvuk}, ${seg.length}B) failed to decode: ${String(err)}`);
-      }
-      out.set(e.name, trimToSamples(ctx, decoded, e.delka));
-    }),
-  );
+  // In parallel, up to MAX_CONCURRENT_DECODES at once: each `decodeAudioData` is native
+  // and off the main thread, and a room holds ~24 of them. Fully serial would be ~24
+  // round trips through the event loop for no gain, inside a room entry the player is
+  // waiting on — but fully unbounded can ask a console for more decoder sessions than it
+  // has (see MAX_CONCURRENT_DECODES).
+  await mapLimit([...entries.values()], MAX_CONCURRENT_DECODES, async (e) => {
+    // An empty record is legitimate; a record with no segment is not. The two used to
+    // share one `return`, which fails OPEN in the worst way this codebase knows: `has()`,
+    // `hasPackaged()`, `entry()` and `duration()` all read `entries`, so the sound still
+    // reports as present and the right length, and only `buffer()` comes back null — the
+    // line plays silently, the subtitle shows, and the dialogue advances over it. That is
+    // "a room played through mute with nothing said", which the asset tiers exist to make
+    // impossible. `parseFfs2` throws on every other structural disagreement; so does this.
+    if (e.delka <= 0) return;
+    const seg = index.segments.get(e.zvuk);
+    if (!seg) throw new Error(`sound package has no segment for ${e.name} (zvuk=${e.zvuk})`);
+    // `slice`, not `subarray`: `decodeAudioData` DETACHES the ArrayBuffer it is given,
+    // which for a view onto the package would take every other segment with it.
+    const ab = body.buffer.slice(
+      body.byteOffset + seg.offset,
+      body.byteOffset + seg.offset + seg.length,
+    ) as ArrayBuffer;
+    let decoded: AudioBuffer;
+    try {
+      decoded = await ctx.decodeAudioData(ab);
+    } catch (err) {
+      // Bare, this throws `EncodingError: Unable to decode audio data` with no way to
+      // tell which of a package's ~dozens of segments it was — exactly the failure
+      // mode `decodeAsset` (src/render/assetFetch.ts) exists to prevent for images.
+      // Name it the same way.
+      throw new Error(`segment ${e.name} (zvuk=${e.zvuk}, ${seg.length}B) failed to decode: ${String(err)}`);
+    }
+    out.set(e.name, trimToSamples(ctx, decoded, e.delka));
+  });
   return out;
 }
