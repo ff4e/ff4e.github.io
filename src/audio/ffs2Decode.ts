@@ -144,6 +144,15 @@ export async function decodeFfs2(
   // every lip-sync and every TALKING_MEZ_SEC wrong by that ratio, silently.
   if (index.rate !== FFS_SAMPLE_RATE) throw new Error(`sound package is ${index.rate} Hz, expected ${FFS_SAMPLE_RATE}`);
   const out = new Map<string, AudioBuffer>();
+  // Boot decodes every global package (`requireSoundPkg`, boot.ts) before the first user
+  // gesture resumes `ctx` (audio.ts: "silent until the first user gesture unlocks
+  // audio") — so on an Xbox Series X, every one of these early `decodeAudioData` calls
+  // runs against an AudioContext whose hardware output session has never been opened.
+  // Lazily hand decoding to a throwaway `OfflineAudioContext` at the same rate instead:
+  // it never touches an output device, so it cannot be blocked on one not being ready
+  // yet, and a decoded `AudioBuffer` is plain data — nothing about playing it later
+  // through `ctx` depends on which context decoded it.
+  let decodeCtx: BaseAudioContext | undefined;
   // Up to MAX_CONCURRENT_DECODES at once: each `decodeAudioData` is native and off the
   // main thread, and a room holds ~24 of them, so this is not free to make fully serial
   // on a desktop/mobile browser — but it currently IS 1 (see MAX_CONCURRENT_DECODES) on
@@ -165,6 +174,8 @@ export async function decodeFfs2(
     // already handed to the failed call.
     const slice = (): ArrayBuffer =>
       body.buffer.slice(body.byteOffset + seg.offset, body.byteOffset + seg.offset + seg.length) as ArrayBuffer;
+    decodeCtx ??=
+      typeof OfflineAudioContext !== 'undefined' ? new OfflineAudioContext(1, 1, ctx.sampleRate) : ctx;
     // Found on an Xbox Series X: `decodeAudioData` threw `EncodingError: Unable to
     // decode audio data` on segments ffprobe reports as completely ordinary AAC-LC/22050
     // Hz MP4s (probe_score 100) — so the file is not the problem. One retry fixed the
@@ -172,12 +183,13 @@ export async function decodeFfs2(
     // `ensureCtx()` creates the AudioContext), but a later run hit the same error on a
     // SECOND, different segment further into the same package that the one retry did not
     // recover — so this is flakiness in the console's decoder, not a single cold-start
-    // race, and gets a short backoff and up to two retries rather than an immediate one.
+    // race, and gets a short backoff and up to two retries rather than an immediate one,
+    // on top of (not instead of) decoding off the live, not-yet-resumed context above.
     let decoded: AudioBuffer | undefined;
     let lastErr: unknown;
     for (let attempt = 1; attempt <= MAX_DECODE_ATTEMPTS; attempt++) {
       try {
-        decoded = await ctx.decodeAudioData(slice());
+        decoded = await decodeCtx.decodeAudioData(slice());
         break;
       } catch (err) {
         lastErr = err;
