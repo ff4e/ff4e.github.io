@@ -62,12 +62,14 @@ jobs:
         run: |
           $v = (Get-Content package.json -Raw | ConvertFrom-Json).version + '.0'
           # Only the package Identity's own Version (preceded by whitespace, so never
-          # MinVersion / MaxVersionTested) and the two assembly attributes.
+          # MinVersion / MaxVersionTested) and the two assembly attributes. -creplace, not
+          # -replace: PowerShell matches case-INsensitively by default, and the XML
+          # declaration's own `version="1.0"` would match too.
           $m = 'xbox\Ff4eXbox\Package.appxmanifest'
-          (Get-Content $m -Raw) -replace '(?<=\sVersion=")[\d.]+(?=")', $v | Set-Content $m -NoNewline
+          (Get-Content $m -Raw) -creplace '(?<=\sVersion=")[\d.]+(?=")', $v | Set-Content $m -NoNewline
           $a = 'xbox\Ff4eXbox\Properties\AssemblyInfo.cs'
-          (Get-Content $a -Raw) -replace '(?<=Version\(")[\d.]+(?="\))', $v | Set-Content $a -NoNewline
-          Select-String -Path $m -Pattern '\sVersion="' | ForEach-Object { Write-Host $_.Line.Trim() }
+          (Get-Content $a -Raw) -creplace '(?<=Version\(")[\d.]+(?="\))', $v | Set-Content $a -NoNewline
+          Select-String -Path $m -Pattern '\sVersion="' -CaseSensitive | ForEach-Object { Write-Host $_.Line.Trim() }
           Write-Host "Package version: $v"
 
       - name: Add MSBuild to PATH
