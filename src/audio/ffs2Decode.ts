@@ -148,21 +148,32 @@ export async function decodeFfs2(
     if (e.delka <= 0) return;
     const seg = index.segments.get(e.zvuk);
     if (!seg) throw new Error(`sound package has no segment for ${e.name} (zvuk=${e.zvuk})`);
-    // `slice`, not `subarray`: `decodeAudioData` DETACHES the ArrayBuffer it is given,
-    // which for a view onto the package would take every other segment with it.
-    const ab = body.buffer.slice(
-      body.byteOffset + seg.offset,
-      body.byteOffset + seg.offset + seg.length,
-    ) as ArrayBuffer;
+    // `slice`, not `subarray`: `decodeAudioData` DETACHES the ArrayBuffer it is given
+    // (even on failure), which for a view onto the package would take every other
+    // segment with it — and is also why a retry below needs a fresh slice, not the one
+    // already handed to the failed call.
+    const slice = (): ArrayBuffer =>
+      body.buffer.slice(body.byteOffset + seg.offset, body.byteOffset + seg.offset + seg.length) as ArrayBuffer;
     let decoded: AudioBuffer;
     try {
-      decoded = await ctx.decodeAudioData(ab);
+      decoded = await ctx.decodeAudioData(slice());
     } catch (err) {
-      // Bare, this throws `EncodingError: Unable to decode audio data` with no way to
-      // tell which of a package's ~dozens of segments it was — exactly the failure
-      // mode `decodeAsset` (src/render/assetFetch.ts) exists to prevent for images.
-      // Name it the same way.
-      throw new Error(`segment ${e.name} (zvuk=${e.zvuk}, ${seg.length}B) failed to decode: ${String(err)}`);
+      // Found on an Xbox Series X: the very FIRST `decodeAudioData` call of a session —
+      // immediately after `ensureCtx()` creates the AudioContext — threw this on a
+      // segment ffprobe reports as a completely ordinary AAC-LC/22050 Hz MP4
+      // (probe_score 100), while every later call on the same console, same package,
+      // same build succeeded. That is a cold decoder racing its own session setup, not a
+      // bad file or too much concurrency — so one retry, which gives the underlying
+      // media pipeline the extra tick it needed, is the fix rather than a guess.
+      try {
+        decoded = await ctx.decodeAudioData(slice());
+      } catch {
+        // Bare, this throws `EncodingError: Unable to decode audio data` with no way to
+        // tell which of a package's ~dozens of segments it was — exactly the failure
+        // mode `decodeAsset` (src/render/assetFetch.ts) exists to prevent for images.
+        // Name it the same way.
+        throw new Error(`segment ${e.name} (zvuk=${e.zvuk}, ${seg.length}B) failed to decode: ${String(err)}`);
+      }
     }
     out.set(e.name, trimToSamples(ctx, decoded, e.delka));
   });
