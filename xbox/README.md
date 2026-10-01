@@ -1,6 +1,6 @@
 # Fish Fillets 4ever — Xbox (UWP + WebView2)
 
-A fully **self-contained** console build: the entire game (HTML, JS bundle and ~350 MB of
+A fully **self-contained** console build: the entire game (HTML, JS bundle and ~590 MB of
 game data) ships **inside the MSIX** and is served to WebView2 from a local virtual host.
 The app never touches the network.
 
@@ -39,6 +39,11 @@ The console also gets `--autoplay-policy=no-user-gesture-required` (`MainPage.xa
 controller press is not a user gesture to Chromium, so without it the intro movies and the
 sound would wait for a click that a console cannot give.
 
+The console plays the **1998 audio originals** (`.ffs` voices, `.wav` music), not the AAC
+tier the site ships: its WebView2 cannot decode AAC through `decodeAudioData`, and boot
+fails on the first voice package (`src/audio/audioTier.ts`). `tools/stage-xbox-wwwroot.mjs`
+puts the originals in place of the `.ffs2`/`.m4a` files, which is most of the package's size.
+
 ### Why not PWABuilder?
 
 PWABuilder's Xbox target is [blocked](https://github.com/pwa-builder/PWABuilder/issues/2479)
@@ -68,7 +73,7 @@ Locally on a Windows box, the equivalent is:
 $env:VITE_TARGET = "xbox"
 npm ci; npm run build
 node tools/stage-pages-assets.mjs      # public/ (incl. game data) -> dist/
-node tools/stage-xbox-wwwroot.mjs      # dist/ -> xbox/Ff4eXbox/wwwroot/
+node tools/stage-xbox-wwwroot.mjs      # dist/ -> xbox/Ff4eXbox/wwwroot/, AAC audio -> originals
 msbuild xbox\Ff4eXbox.sln /t:Restore /p:Configuration=Release /p:Platform=x64
 msbuild xbox\Ff4eXbox.sln /p:Configuration=Release /p:Platform=x64 /p:AppxBundle=Never /p:UapAppxPackageBuildMode=SideloadOnly
 ```

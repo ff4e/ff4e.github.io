@@ -55,6 +55,7 @@
  * is not `FFS_SAMPLE_RATE` would make every `duration()` wrong by that ratio, silently,
  * so the loader refuses it instead.
  */
+import { playsOriginals } from './audioTier.js';
 
 /** The extension of a staged package. See `tools/stage-voices.ts`. */
 export const FFS2_EXT = 'ffs2';
@@ -91,9 +92,13 @@ export function isRawPkg(id: string): boolean {
  * (`musicUrl`), and a future change of container should have one place to edit.
  *
  * `dir` because the restored package does not live under `/data/Sound`.
+ *
+ * The console build fetches the `.ffs` for EVERY package: it cannot decode AAC
+ * (`audioTier.ts`). The engine tells the two forms apart by their bytes, so nothing
+ * downstream of this URL has to know.
  */
 export function voiceUrl(id: string, dir = '/data/Sound'): string {
-  return `${dir}/${id}.${isRawPkg(id) ? 'ffs' : FFS2_EXT}`;
+  return `${dir}/${id}.${isRawPkg(id) || playsOriginals() ? 'ffs' : FFS2_EXT}`;
 }
 
 /** One sound's encoded body inside a package. */
