@@ -21,6 +21,7 @@
  * would make `art.ts` and this file a circular pair. One direction is enough.
  */
 import { retargetArtForTier } from './art.js';
+import { setVirtualGamepadEnabled } from '../platform/virtualGamepad.js';
 import { setAiFilterTier } from './aiFilter.js';
 import { graphicsSelect, idleDirtyToggle, rendererSelect } from './dom.js';
 import { setForceRoomRedraw } from './framePacing.js';
@@ -82,6 +83,24 @@ export function setDevEnabled(v: boolean): void {
   devEnabled = v;
   localStorage.setItem('ff.devEnabled', v ? '1' : '0');
   document.body.classList.toggle('dev', v);
+  applySimPad(); // the on-screen controller is dev chrome: it leaves with the pane
+}
+
+/** Where the dev bar's "Sim pad" checkbox is remembered. */
+export const SIMPAD_KEY = 'ff.simpad';
+
+/**
+ * Show the dev-only on-screen controller (`platform/virtualGamepad.ts`) when, and only
+ * when, the dev pane is on AND its checkbox is ticked — so a player can never surface it.
+ */
+export function applySimPad(): void {
+  let on = false;
+  try {
+    on = devEnabled && localStorage.getItem(SIMPAD_KEY) === '1';
+  } catch {
+    // Storage disabled: no sim pad.
+  }
+  setVirtualGamepadEnabled(on);
 }
 
 /**

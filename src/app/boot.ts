@@ -226,8 +226,18 @@ export async function runBoot(): Promise<void> {
     audio.resume();
     if (ui.screen === 'map') startMenuMusic();
   };
-  window.addEventListener('pointerdown', unlockAudio, { once: true });
-  window.addEventListener('keydown', unlockAudio, { once: true });
+  // Once per event type, and only for a REAL event. The controller and the swipe layer
+  // send synthetic keys (padInput.ts, touchSwipe.ts), which are no user gesture: letting
+  // the first of them use this up would leave the real one that can unlock with nothing
+  // to unlock. The controller asks for the unlock itself (padInput.ts).
+  for (const type of ['pointerdown', 'keydown'] as const) {
+    const once = (e: Event): void => {
+      if (!e.isTrusted) return;
+      window.removeEventListener(type, once);
+      unlockAudio();
+    };
+    window.addEventListener(type, once);
+  }
 
   // Surviving the app switcher, on all three triggers it takes.
   //

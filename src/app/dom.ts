@@ -87,6 +87,7 @@ export const feedbar = document.getElementById('feedbar') as HTMLElement | null;
 export const select = document.getElementById('room') as HTMLSelectElement;
 export const fitSelect = document.getElementById('fitmode') as HTMLSelectElement | null;
 export const touchSelect = document.getElementById('touchmode') as HTMLSelectElement | null;
+export const simPadToggle = document.getElementById('simpad') as HTMLInputElement | null;
 export const rendererSelect = document.getElementById('renderer') as HTMLSelectElement | null;
 export const graphicsSelect = document.getElementById('graphics') as HTMLSelectElement | null;
 export const idleDirtyToggle = document.getElementById('idledirty') as HTMLInputElement | null;

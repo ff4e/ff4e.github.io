@@ -118,6 +118,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `keyTables.ts` | 0.6 k | Which key moves which fish, the minigame's key map, which panel region each touch button sends, and two constants the room scripts read. |
 | **Screens** | | |
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
+| `mapSelect.ts` | | The map with a controller: one selected node or corner, moved by the stick, opened with Ⓐ — what a click would do. Also what the record panel's Run / Replay / Cancel do, for the pointer and the controller alike. |
 | `mapDraw.ts` | 4.0 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `mapInfoZoom.ts` | 1.4 k | The record panel enlarged 1.5x on a phone, lifted off the map it was baked onto, and the zoom-aware button hit test the pointer routers use. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
@@ -131,6 +132,10 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `dialogueHints.ts` | 1.0 k | Touch-only swipe/tap illustration and Save/Load pulses triggered by tutorial dialogue, with expiry and screen/demo lifecycle cleanup. Styled by `src/styles/dialogueHints.css`. |
 | `zoomHint.ts` | | First-entry phone pinch illustrations in rooms 2 and 3; persists each room independently and follows live-play/loading/zoom eligibility. |
 | `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
+| **Controller (TV / Xbox)** | | TV mode is the tablet UI with a controller: `tvModeActive` in `touchMode.ts`, `tvUi()` in `touchButtons.ts`. |
+| `padInput.ts` | | The controller, polled each frame and routed by screen: sticks and most buttons become the keyboard's own synthetic keys; Save / Load / Restart ask Ⓐ to confirm. |
+| `padLegend.ts` | | On a TV, the legend of which button does what, placed where the tablet's buttons go; also builds the confirm prompt. Styled by `src/styles/pad.css`. |
+| `padOptions.ts` | | The touch Options worked by a controller: a highlight over the same HTML controls, changed through their own listeners. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `cutsceneClose.ts` | | The briefcase demo's ✕: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
@@ -192,6 +197,7 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `glCommon.ts` | 1.1 k | The WebGL2 plumbing both of the above share. |
 | **Screens and chrome** | | |
 | `worldMap.ts` | 2.3 k | The branch map (`UMain.pas PaintBox1Paint`). |
+| `mapSelection.ts` | | Where a controller's map selection can go — the clickable nodes and corners — and which one a push lands on. |
 | `mapInfo.ts` | 3.7 k | The map's record info panel (krokoměr), and the geometry + cutout for drawing it enlarged on a phone. |
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |

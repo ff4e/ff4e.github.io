@@ -103,6 +103,9 @@ export const ui = {
   mapInfoFaze: 0,
   mapInfoOpenAt: 0, // timestamp of openMapInfo, so the odometer rolls on wall-clock time
   mapHoverRoom: null as number | null,
+  // The room node a CONTROLLER has selected on the map (mapSelect.ts), which draws a ring
+  // round it — a pointer has its cursor, a controller has nothing else to show where it is.
+  mapSelectRoom: null as number | null,
   // Info-panel bitmaps (loaded at boot); the name-plaque data reloads on a language
   // change (typdesek<>tit_def, UMain.pas:1437).
   infoPanelAssets: null as InfoPanelAssets | null,

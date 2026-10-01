@@ -26,10 +26,11 @@ import { join } from 'node:path';
 import { TOUCH_REGIONS } from '../src/app/keyTables.js';
 import { O_NORMAL, O_OPTIONS, O_SC_DOWN } from '../src/app/screenState.js';
 
-const mode = vi.hoisted(() => ({ active: false, phone: false, options: false, menu: false, cutscene: null as object | null }));
+const mode = vi.hoisted(() => ({ active: false, phone: false, tv: false, options: false, menu: false, cutscene: null as object | null }));
 vi.mock('../src/app/touchMode.js', () => ({
   touchModeActive: () => mode.active,
   phoneModeActive: () => mode.phone,
+  tvModeActive: () => mode.tv,
 }));
 vi.mock('../src/app/loadingUi.js', () => ({ relayout: vi.fn() }));
 vi.mock('../src/app/mapNav.js', () => ({ closeMapOverlay: vi.fn() }));
@@ -110,7 +111,7 @@ describe('touch controls', () => {
     beforeEach(async () => {
       vi.resetModules();
       vi.clearAllMocks();
-      Object.assign(mode, { active: false, phone: false, options: false, menu: false, cutscene: null });
+      Object.assign(mode, { active: false, phone: false, tv: false, options: false, menu: false, cutscene: null });
       vi.stubGlobal('window', {
         matchMedia: () => ({ addEventListener: vi.fn() }),
         addEventListener: vi.fn(),
@@ -251,6 +252,20 @@ describe('touch controls', () => {
       mode.cutscene = null;
       touch.syncTouchButtons();
       expect(bar.hidden).toBe(false);
+    });
+
+    it('keeps the tablet bar down on a TV, which has a legend instead', () => {
+      const bar = { hidden: true };
+      vi.stubGlobal('document', { ...document, getElementById: () => bar });
+      mode.active = true;
+      mode.tv = true;
+      initialize();
+      ui.screen = 'room';
+      ui.helpOpen = false;
+      touch.syncTouchButtons();
+      expect(touch.touchUi()).toBe(true);
+      expect(touch.tvUi()).toBe(true);
+      expect(bar.hidden).toBe(true);
     });
   });
 

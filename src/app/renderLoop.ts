@@ -28,6 +28,8 @@ import { syncTouchSwipe } from './touchSwipe.js';
 import { syncOrientationLock } from './orientationSync.js';
 import { syncTouchOptions } from './touchOptions.js';
 import { syncDialogueHint } from './dialogueHints.js';
+import { pollPadInput } from './padInput.js';
+import { syncPadLegend } from './padLegend.js';
 import { syncZoomHint } from './zoomHint.js';
 import { drawMap } from './mapDraw.js';
 import { drawHelp, drawPanel, tickPanelScroll } from './panel.js';
@@ -66,6 +68,10 @@ export function loop(now: number): void {
   const dt = now - lastTime;
   setAcc(acc + dt);
   setLastTime(now);
+  // The controller is polled, not evented, so it is read here — first, so a press acts on
+  // the frame it was seen in. The loop keeps running (throttled) while idle, and a press
+  // wakes it (padInput.ts). No pad, no cost beyond one getGamepads().
+  pollPadInput(now);
   tickPanelScroll(dt); // advance the options open/close animation (independent of game logic)
   // Drop a backlog (slow/backgrounded frame) instead of fast-forwarding: like
   // Jedeme, we run at most one step per frame and never batch-catch-up, so under
@@ -317,6 +323,7 @@ export function loop(now: number): void {
   // they depend on. Both leave immediately on anything that is not touch.
   syncTouchButtons();
   syncTouchOptions();
+  syncPadLegend();
   syncDialogueHint(now);
   syncZoomHint(now);
   // Native phones stay unlocked; tablets retain the room-based orientation policy.

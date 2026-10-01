@@ -10,6 +10,7 @@ const state = {
   loading: false,
   touch: true,
   phone: false,
+  tv: false,
   options: false,
   tetris: false,
 };
@@ -21,7 +22,7 @@ vi.mock('../src/app/gameState.js', () => ({
 }));
 vi.mock('../src/app/screenState.js', () => ({ ui: state }));
 vi.mock('../src/app/framePacing.js', () => ({ get roomLoading() { return state.loading; } }));
-vi.mock('../src/app/touchButtons.js', () => ({ touchUi: () => state.touch, phoneUi: () => state.phone }));
+vi.mock('../src/app/touchButtons.js', () => ({ touchUi: () => state.touch, phoneUi: () => state.phone, tvUi: () => state.tv }));
 vi.mock('../src/app/touchOptions.js', () => ({ touchOptionsOpen: () => state.options }));
 vi.mock('../src/app/cheats.js', () => ({ tetrisModal: () => state.tetris }));
 const wrap = { appendChild: vi.fn() };
@@ -38,9 +39,11 @@ const save = { offsetWidth: 52, classList: { add: vi.fn(), remove: vi.fn() } };
 const load = { offsetWidth: 52, classList: { add: vi.fn(), remove: vi.fn() } };
 const more = { offsetWidth: 44, classList: { add: vi.fn(), remove: vi.fn() } };
 const getElementById = vi.fn((id: string) => id === 'phone-more' ? more : null);
+const legendSave = { offsetWidth: 52, classList: { add: vi.fn(), remove: vi.fn() } };
 const querySelector = vi.fn((selector: string) =>
   selector === '#touchbar [data-region="12"]' ? save :
-    selector === '#touchbar [data-region="13"]' ? load : null);
+    selector === '#touchbar [data-region="13"]' ? load :
+      selector === '#padlegend [data-region="12"]' ? legendSave : null);
 const createElement = vi.fn(() => overlay);
 
 beforeEach(() => {
@@ -48,7 +51,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   Object.assign(state, {
     room: {}, showmode: null, cutscene: null, replaymode: null,
-    screen: 'room', helpOpen: false, loading: false, touch: true, phone: false, options: false, tetris: false,
+    screen: 'room', helpOpen: false, loading: false, touch: true, phone: false, tv: false, options: false, tetris: false,
   });
   vi.stubGlobal('document', { createElement, querySelector, getElementById, hidden: false });
   vi.spyOn(performance, 'now').mockReturnValue(100);
@@ -60,6 +63,18 @@ afterEach(() => {
 });
 
 describe('tutorial dialogue hints', () => {
+  it('on a TV, teaches Save on the legend and has no swipe to teach', () => {
+    state.tv = true;
+    showDialogueHint('help2', 3000);
+    expect(legendSave.classList.add).toHaveBeenCalledExactlyOnceWith('dialogue-hint-pulse');
+    expect(save.classList.add).not.toHaveBeenCalled();
+    clearDialogueHint();
+    showDialogueHint('1st-v-navod1', 6000);
+    expect(createElement).not.toHaveBeenCalled();
+    // A legend that is not showing the room's verbs is no reason to crash the room.
+    expect(() => showDialogueHint('help7', 3000)).not.toThrow();
+  });
+
   it.each(['help2', 'help7', 'help11'])('%s highlights the overflow door on a phone', (name) => {
     state.phone = true;
     showDialogueHint(name, 3000);

@@ -10,7 +10,7 @@
  * any interaction) shows a start splash first — the gesture both
  * unlocks audio and begins playback, guaranteeing the intro has sound.
  */
-import { touchModeActive } from './touchMode.js';
+import { touchModeActive, tvModeActive } from './touchMode.js';
 
 export interface IntroElements {
   /** Full-screen overlay container (shown during playback, hidden otherwise). */
@@ -60,9 +60,12 @@ export class IntroPlayer {
    * from the map, where the click itself is the gesture).
    */
   start(resolvers: Array<() => string>, onDone: () => void, gated: boolean): void {
-    const touch = touchModeActive(window);
-    this.els.startBtn.textContent = touch ? '▶ Tap to start' : '▶ Click to start';
-    this.els.hint.textContent = touch ? 'Tap to skip' : 'click / Esc to skip';
+    // A TV is touch-mode for layout, but there is no finger to tap with: name the
+    // controller's buttons instead (padInput.ts: Ⓐ starts, any button skips).
+    const tv = tvModeActive(window);
+    const touch = !tv && touchModeActive(window);
+    this.els.startBtn.textContent = tv ? '▶ Press Ⓐ to start' : touch ? '▶ Tap to start' : '▶ Click to start';
+    this.els.hint.textContent = tv ? 'Press any button to skip' : touch ? 'Tap to skip' : 'click / Esc to skip';
     this.queue = resolvers.slice();
     this.onDone = onDone;
     this.active = true;
@@ -77,6 +80,18 @@ export class IntroPlayer {
       this.els.hint.hidden = false;
       this.playCurrent();
     }
+  }
+
+  /**
+   * The controller's equivalent of clicking the start button: begin playback from the
+   * gated splash. Returns false when there is no splash up, so the caller can fall back
+   * to `skip()`. Without it a controller is stuck on the very first screen for ever —
+   * `skip()` is deliberately inert there, and the button only answers a pointer.
+   */
+  confirmStart(): boolean {
+    if (!this.active || !this.gated) return false;
+    this.beginPlayback();
+    return true;
   }
 
   /** Dismiss the splash and begin the first movie. */

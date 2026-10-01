@@ -61,7 +61,7 @@ import { cutscene, room } from './gameState.js';
 import { settings } from './playerSettings.js';
 import { roomScreenSize } from '../render/renderRoom.js';
 import { TOUCH_REGIONS } from './keyTables.js';
-import { phoneModeActive, touchModeActive } from './touchMode.js';
+import { phoneModeActive, touchModeActive, tvModeActive } from './touchMode.js';
 import { initPhoneControls, phoneMenuOpen, syncPhoneControls } from './phoneControls.js';
 import { initActiveFishIndicator, syncActiveFishIndicator } from './activeFishIndicator.js';
 import { touchOptionsOpen } from './touchOptions.js';
@@ -83,6 +83,7 @@ export interface TouchButtonsHost {
 let host!: TouchButtonsHost;
 let active = false;
 let phone = false;
+let tv = false;
 let initialized = false;
 /**
  * Last visibility written to the DOM, so a steady bar is not rewritten every frame.
@@ -201,11 +202,14 @@ export function initTouchButtons(h: TouchButtonsHost): void {
 export function refreshTouchMode(): void {
   const nextActive = typeof window !== 'undefined' && touchModeActive(window);
   const nextPhone = nextActive && phoneModeActive(window);
-  const changed = nextActive !== active || nextPhone !== phone;
+  const nextTv = nextActive && tvModeActive(window);
+  const changed = nextActive !== active || nextPhone !== phone || nextTv !== tv;
   active = nextActive;
   phone = nextPhone;
+  tv = nextTv;
   document.documentElement.toggleAttribute('data-touch', active);
   document.documentElement.toggleAttribute('data-phone', phone);
+  document.documentElement.toggleAttribute('data-tv', tv);
   setNativeMenuEnabled(active || isNativeHost());
   if (!initialized || !changed) return;
   // Put the FAITHFUL Options face back to a known state on the way through. Turning
@@ -229,6 +233,15 @@ export function phoneUi(): boolean {
 }
 
 /**
+ * Is this the TV UI — the tablet's layout, driven by a controller (`touchMode.ts`)? The
+ * tablet-only pieces that a controller cannot use stand aside for it: the buttons below
+ * (the legend in `padLegend.ts` replaces them), the fish-switch button and the swipe hint.
+ */
+export function tvUi(): boolean {
+  return tv;
+}
+
+/**
  * Put the bar up in a room and take it down everywhere else.
  *
  * Called from the frame loop beside `syncLoadingUi`. A desktop leaves on the first line.
@@ -236,7 +249,7 @@ export function phoneUi(): boolean {
 export function syncTouchButtons(): void {
   syncPhoneControls();
   syncNativeMenu();
-  const showFish = active && ui.screen === 'room' && !ui.helpOpen &&
+  const showFish = active && !tv && ui.screen === 'room' && !ui.helpOpen &&
     !touchOptionsOpen() && !(phone && phoneMenuOpen());
   if (showFish) initActiveFishIndicator(phone ? 'phone-controls' : 'touchbar');
   syncActiveFishIndicator(showFish);
@@ -245,7 +258,7 @@ export function syncTouchButtons(): void {
   // it). The phone controls and the fish indicator already step aside for help the same way.
   // Nor over the briefcase demo, where nothing on the bar applies and its ✕ is the one
   // control (cutsceneClose.ts); the phone controls stand aside for it too.
-  const want = active && !phone && ui.screen === 'room' && !ui.helpOpen && !cutscene;
+  const want = active && !phone && !tv && ui.screen === 'room' && !ui.helpOpen && !cutscene;
   let changed = false;
   if (want !== up) {
     up = want;

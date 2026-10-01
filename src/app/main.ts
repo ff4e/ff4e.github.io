@@ -123,6 +123,9 @@ import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from '
 import { initTouchButtons } from './touchButtons.js';
 import { initCutsceneClose } from './cutsceneClose.js';
 import { initTouchOptions } from './touchOptions.js';
+import { initPadInput } from './padInput.js';
+import { initPadLegend } from './padLegend.js';
+import { activateInfoButton, initMapSelect } from './mapSelect.js';
 import { initTouchSwipe } from './touchSwipe.js';
 import { showDialogueHint } from './dialogueHints.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
@@ -995,6 +998,11 @@ const touchHost = {
 initTouchButtons(touchHost);
 initTouchOptions(touchHost);
 initTouchSwipe();
+// The controller, for a TV: like the gestures, mostly synthetic keys to the router in this
+// file, else the verbs the touch bar and a click on the map reach (padInput, mapSelect).
+initPadLegend();
+initPadInput({ panelAction, saveExists });
+initMapSelect({ solved, cheated, bestRecord, enterRoom });
 
 //#region Map drawing wiring | anchors: initMapDraw | Hands `mapDraw.ts` the four names it needs, all of them the persisted record the map is a view of. The drawing is in that module.
 initMapDraw({
@@ -1781,31 +1789,7 @@ function clickMapAt(mx: number, my: number): void {
   // Record info panel open (InfoMode>0): its Run/Replay/Cancel buttons take the
   // click; anywhere else closes it (daCancel, UMain.pas:1612/1626).
   if (ui.mapInfoRoom !== null) {
-    const room = ui.mapInfoRoom;
-    const btn = hitZoomedInfoButton(mx, my);
-    if (btn === 'run') {
-      hapticTap();
-      closeMapInfo();
-      // Delphi: Run on a solved depth-15 room shows the leg story page first, then
-      // launches once dismissed (daClickAndRun, UMain.pas:958→966).
-      const leg = solved.has(room) && depthOfRoom(room) === 15 ? branchOfRoom(room) : 0;
-      if (leg >= 1 && leg <= 8) void showLegImage(leg, { room });
-      else void enterRoom(room); // daRealyRun: play the room
-    } else if (btn === 'replay') {
-      const rec = bestRecord(room);
-      if (rec !== undefined) {
-        hapticTap();
-        closeMapInfo();
-        // Same story-page-first deferral for Replay (daReplay, UMain.pas:1030).
-        const leg = solved.has(room) && depthOfRoom(room) === 15 ? branchOfRoom(room) : 0;
-        if (leg >= 1 && leg <= 8) void showLegImage(leg, { room, replay: rec });
-        else void enterRoom(room, rec); // daReplay: animate the best solution
-      }
-      // no stored record → Replay is disabled; ignore the click (panel stays open)
-    } else {
-      if (btn === 'cancel') hapticTap(); // a click off the panel pressed no button
-      closeMapInfo(); // Cancel button, or a click off the panel
-    }
+    activateInfoButton(ui.mapInfoRoom, hitZoomedInfoButton(mx, my));
     return;
   }
   const room = ui.worldMap.hitTest(mx, my, solved, cheated);
