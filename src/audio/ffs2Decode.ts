@@ -119,6 +119,43 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * A ~50 ms silent AAC-LC/22050 Hz mono MP4, built with the exact `ffmpeg` flags
+ * `tools/stage-voices.ts` uses for every real segment (`-c:a aac -b:a 48k -ac 1
+ * -movflags +faststart`), so it exercises the identical decode path.
+ *
+ * Found on an Xbox Series X: neither bounding concurrency to 1 nor retrying a failing
+ * segment 3 times with backoff nor decoding off a throwaway `OfflineAudioContext`
+ * stopped a specific segment from failing — the SAME segment, byte-for-byte identical
+ * across two builds that changed how and where the decode ran, which ffprobe confirms
+ * is an ordinary file. That is what "the very first `decodeAudioData` call of the
+ * process, whichever segment it happens to land on, fails every time no matter which
+ * context or how many retries" looks like — a one-time cost paid once per process, not
+ * per segment. So pay it here, on a segment nothing in the game depends on, before the
+ * real queue starts.
+ */
+const WARMUP_AAC_B64 =
+  'AAAAHGZ0eXBNNEEgAAACAE00QSBpc29taXNvMgAAAtZtb292AAAAbG12aGQAAAAAAAAAAAAAAAAAAAPoAAAAMgABAAABAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAACJXRyYWsAAABcdGtoZAAAAAMAAAAAAAAAAAAAAAEAAAAAAAAAMgAAAAAAAAAAAAAAAQEAAAAAAQAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAACRlZHRzAAAAHGVsc3QAAAAAAAAAAQAAADIAAAQAAAEAAAAAAZ1tZGlhAAAAIG1kaGQAAAAAAAAAAAAAAAAAAFYiAAAITlXEAAAAAAAtaGRscgAAAAAAAAAAc291bgAAAAAAAAAAAAAAAFNvdW5kSGFuZGxlcgAAAAFIbWluZgAAABBzbWhkAAAAAAAAAAAAAAAkZGluZgAAABxkcmVmAAAAAAAAAAEAAAAMdXJsIAAAAAEAAAEMc3RibAAAAGpzdHNkAAAAAAAAAAEAAABabXA0YQAAAAAAAAABAAAAAAAAAAAAAQAQAAAAAFYiAAAAAAA2ZXNkcwAAAAADgICAJQABAASAgIAXQBUAAAAAALuAAAAD4wWAgIAFE4hW5QAGgICAAQIAAAAgc3R0cwAAAAAAAAACAAAAAgAABAAAAAABAAAATgAAABxzdHNjAAAAAAAAAAEAAAABAAAAAwAAAAEAAAAUc3RzegAAAAAAAAAEAAAAAwAAABRzdGNvAAAAAAAAAAEAAAMCAAAAGnNncGQBAAAAcm9sbAAAAAIAAAAB//8AAAAcc2JncAAAAAByb2xsAAAAAQAAAAMAAAABAAAAPXVkdGEAAAA1bWV0YQAAAAAAAAAhaGRscgAAAAAAAAAAbWRpcmFwcGwAAAAAAAAAAAAAAAAIaWxzdAAAAAhmcmVlAAAAFG1kYXQBGCAHARggBwEYIAc=';
+
+let decoderWarmedUp = false;
+
+/**
+ * Pay the one-time cold-decoder tax on `WARMUP_AAC_B64` instead of on a real segment.
+ * Any outcome ends the warm-up — only whether a call was MADE is believed to matter, not
+ * whether it succeeded, so a failure here is swallowed rather than surfaced.
+ */
+async function warmUpDecoderOnce(ctx: BaseAudioContext): Promise<void> {
+  if (decoderWarmedUp) return;
+  decoderWarmedUp = true;
+  try {
+    const bin = atob(WARMUP_AAC_B64);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    await ctx.decodeAudioData(bytes.buffer);
+  } catch {
+    // Deliberately ignored — see the function comment.
+  }
+}
+
 /** Run `fn` over `items`, at most `limit` in flight at once. */
 async function mapLimit<T>(items: readonly T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
   let next = 0;
@@ -176,6 +213,7 @@ export async function decodeFfs2(
       body.buffer.slice(body.byteOffset + seg.offset, body.byteOffset + seg.offset + seg.length) as ArrayBuffer;
     decodeCtx ??=
       typeof OfflineAudioContext !== 'undefined' ? new OfflineAudioContext(1, 1, ctx.sampleRate) : ctx;
+    await warmUpDecoderOnce(decodeCtx);
     // Found on an Xbox Series X: `decodeAudioData` threw `EncodingError: Unable to
     // decode audio data` on segments ffprobe reports as completely ordinary AAC-LC/22050
     // Hz MP4s (probe_score 100) — so the file is not the problem. One retry fixed the
