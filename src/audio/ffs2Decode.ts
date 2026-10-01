@@ -125,7 +125,17 @@ export async function decodeFfs2(
         body.byteOffset + seg.offset,
         body.byteOffset + seg.offset + seg.length,
       ) as ArrayBuffer;
-      out.set(e.name, trimToSamples(ctx, await ctx.decodeAudioData(ab), e.delka));
+      let decoded: AudioBuffer;
+      try {
+        decoded = await ctx.decodeAudioData(ab);
+      } catch (err) {
+        // Bare, this throws `EncodingError: Unable to decode audio data` with no way to
+        // tell which of a package's ~dozens of segments it was — exactly the failure
+        // mode `decodeAsset` (src/render/assetFetch.ts) exists to prevent for images.
+        // Name it the same way.
+        throw new Error(`segment ${e.name} (zvuk=${e.zvuk}, ${seg.length}B) failed to decode: ${String(err)}`);
+      }
+      out.set(e.name, trimToSamples(ctx, decoded, e.delka));
     }),
   );
   return out;
