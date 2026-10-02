@@ -26,11 +26,12 @@
  * Save, Load and Restart each ask first: they are one press away, under a thumb, and each
  * throws something away. Undo does not ask, because it can itself be undone by playing on.
  *
- * Elsewhere: any button starts / skips the intro, closes the credits and the story page;
+ * Elsewhere: any button starts / skips the intro and closes the story page; Ⓑ closes the credits;
  * Ⓑ skips the briefcase demo; the map and Options have their own modules (`mapSelect.ts`,
  * `padOptions.ts`).
  */
 import { DirRepeat, pollPad, type PadDir, type PadSnapshot } from '../platform/gamepad.js';
+import { initHostGamepad } from '../platform/hostGamepad.js';
 import { intro } from './introOverlay.js';
 import { ui } from './screenState.js';
 import { touchOptionsOpen } from './touchOptions.js';
@@ -56,6 +57,9 @@ let host!: PadInputHost;
 
 export function initPadInput(h: PadInputHost): void {
   host = h;
+  // On the console the controller arrives from the native shell, not the browser's own
+  // Gamepad API (see hostGamepad.ts). A no-op in any ordinary browser.
+  initHostGamepad();
 }
 
 // ── Synthetic keys ────────────────────────────────────────────────────────────
@@ -184,8 +188,10 @@ function route(pad: PadSnapshot, now: number): void {
     if (pad.anyPressed && !intro.confirmStart()) intro.skip();
     return;
   }
+  // Only Ⓑ leaves the credits, and the legend says so: on a pad, Ⓐ is "go on", and the
+  // credits have nowhere to go on to.
   if (ui.mapOverlay === 'credits') {
-    if (pad.anyPressed) closeMapOverlay();
+    if (pad.pressed('b')) closeMapOverlay();
     return;
   }
   if (ui.screen === 'legimage') {

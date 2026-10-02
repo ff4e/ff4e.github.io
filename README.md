@@ -114,6 +114,7 @@ d-pad) moves the little fish, right stick the big one; B is the map, Y undo, LB/
 and X restart (each confirmed with A), Menu opens Options. On the map the stick moves a
 selection ring and A opens it. It is on in the Xbox build (`VITE_TARGET=xbox`) and the Xbox
 WebView; desktop `?tv` previews it, and the dev bar's **Sim pad** drives it with no controller.
+The console package itself (UWP + WebView2, built by CI) is described in `xbox/README.md`.
 
 **Touch menu appearance:** Phone/tablet controls in browsers and the native app use translucent slate
 surfaces and hand-drawn rustic symbols colored from the room's static wall art.

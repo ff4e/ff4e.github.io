@@ -5,7 +5,7 @@
  * logic; `navigator.getGamepads` is mocked. No engine/game refs (platform layer).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { pollPad, type PadButton } from '../src/platform/gamepad.js';
+import { isGamepadKey, pollPad, type PadButton } from '../src/platform/gamepad.js';
 
 type BtnLike = { pressed: boolean; value: number };
 
@@ -144,5 +144,20 @@ describe('pollPad under a permissions policy that forbids the gamepad', () => {
     });
     expect(() => pollPad()).not.toThrow();
     expect(pollPad().connected).toBe(false);
+  });
+});
+
+describe('isGamepadKey', () => {
+  it('recognises the keydowns a WebView2 makes of controller buttons', () => {
+    expect(isGamepadKey({ key: 'Unidentified', keyCode: 0xc3 })).toBe(true); // VK_GAMEPAD_A
+    expect(isGamepadKey({ key: 'Unidentified', keyCode: 0xda })).toBe(true); // ..._RIGHT_THUMBSTICK_LEFT
+    expect(isGamepadKey({ key: 'GamepadRightShoulder', keyCode: 0 })).toBe(true);
+  });
+
+  it('leaves real keys alone, including the arrows the help pages with', () => {
+    expect(isGamepadKey({ key: 'ArrowRight', keyCode: 39 })).toBe(false);
+    expect(isGamepadKey({ key: 'Escape', keyCode: 27 })).toBe(false);
+    expect(isGamepadKey({ key: 'w', keyCode: 87 })).toBe(false);
+    expect(isGamepadKey({ key: "'", keyCode: 0xde })).toBe(false); // just past the range
   });
 });

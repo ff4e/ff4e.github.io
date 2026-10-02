@@ -1,3 +1,5 @@
+import { playsOriginals } from './audioTier.js';
+
 /**
  * Room-music table: maps a room's `cHud` index (RoomDesc.cHud, "Hudba" = music)
  * to its Music/ track and loop point. This reproduces the `hudbas` remapping in
@@ -89,9 +91,11 @@ export const MUSIC_EXT = 'm4a';
  * script-cue bridge in `main.ts` (twice), the cutscene and two map screens each built the
  * same string, so the compression change would have had to find all of them and a future
  * one still would.
+ *
+ * The console build fetches the `.wav` original: it cannot decode AAC (`audioTier.ts`).
  */
 export function musicUrl(name: string): string {
-  return `/data/Music/${name}.${MUSIC_EXT}`;
+  return `/data/Music/${name}.${playsOriginals() ? 'wav' : MUSIC_EXT}`;
 }
 
 /**

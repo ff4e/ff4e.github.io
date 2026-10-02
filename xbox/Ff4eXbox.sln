@@ -1,0 +1,23 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Ff4eXbox", "Ff4eXbox\Ff4eXbox.csproj", "{4F2C7A61-91D5-4E0B-9E33-2C7B8F1A5D10}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4F2C7A61-91D5-4E0B-9E33-2C7B8F1A5D10}.Debug|x64.ActiveCfg = Debug|x64
+		{4F2C7A61-91D5-4E0B-9E33-2C7B8F1A5D10}.Debug|x64.Build.0 = Debug|x64
+		{4F2C7A61-91D5-4E0B-9E33-2C7B8F1A5D10}.Debug|x64.Deploy.0 = Debug|x64
+		{4F2C7A61-91D5-4E0B-9E33-2C7B8F1A5D10}.Release|x64.ActiveCfg = Release|x64
+		{4F2C7A61-91D5-4E0B-9E33-2C7B8F1A5D10}.Release|x64.Build.0 = Release|x64
+		{4F2C7A61-91D5-4E0B-9E33-2C7B8F1A5D10}.Release|x64.Deploy.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

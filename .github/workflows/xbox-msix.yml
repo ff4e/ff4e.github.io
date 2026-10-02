@@ -1,0 +1,154 @@
+# Build the Xbox (UWP + WebView2) sideload package.
+#
+# Produces a fully self-contained MSIX: the whole game — index.html, the JS bundle and
+# ~350 MB of game data — ships inside the package and is served to WebView2 from a local
+# virtual host, so the console app never touches the network.
+#
+# Run it from the Actions tab (workflow_dispatch); it also runs on xbox-v* tags.
+# Download the "ff4e-xbox-msix" artifact, then sideload it via the Xbox Device Portal —
+# see xbox/README.md for the full on-console runbook.
+#
+# The package is signed with a throwaway self-signed certificate generated per run
+# (subject CN=FF4E, matching Package.appxmanifest). That is all Dev Mode needs; a Store
+# submission would use the identity assigned by Partner Center instead.
+name: Build Xbox MSIX
+
+on:
+  workflow_dispatch:
+  push:
+    # A workflow_dispatch button only appears once the file is on the default branch, so
+    # the branch trigger is what builds the package while it is being brought up on an
+    # `xbox-*` branch, and every fix pushed there gets a package automatically.
+    branches: ['xbox-*']
+    tags: ['xbox-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Pinned rather than windows-latest: this needs the Visual Studio "Universal Windows
+    # Platform development" workload, which is present on the 2022 image. If the image is
+    # ever retired, move to the newest image that still carries the UWP workload.
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the web app (Xbox target)
+        # VITE_TARGET=xbox turns TV mode on for good (src/app/touchMode.ts tvModeActive).
+        env:
+          VITE_TARGET: xbox
+        run: npm run build
+
+      - name: Stage runtime assets into dist/
+        run: node tools/stage-pages-assets.mjs
+
+      - name: Stage the web app into the package (wwwroot)
+        run: node tools/stage-xbox-wwwroot.mjs
+
+      - name: Version the package from package.json
+        # One version for the web build and the console package: x.y.z -> x.y.z.0 in the
+        # manifest and the assembly, so the package name tools/xdeploy.sh expects follows.
+        shell: pwsh
+        run: |
+          $v = (Get-Content package.json -Raw | ConvertFrom-Json).version + '.0'
+          # Only the package Identity's own Version (preceded by whitespace, so never
+          # MinVersion / MaxVersionTested) and the two assembly attributes. -creplace, not
+          # -replace: PowerShell matches case-INsensitively by default, and the XML
+          # declaration's own `version="1.0"` would match too.
+          $m = 'xbox\Ff4eXbox\Package.appxmanifest'
+          (Get-Content $m -Raw) -creplace '(?<=\sVersion=")[\d.]+(?=")', $v | Set-Content $m -NoNewline
+          $a = 'xbox\Ff4eXbox\Properties\AssemblyInfo.cs'
+          (Get-Content $a -Raw) -creplace '(?<=Version\(")[\d.]+(?="\))', $v | Set-Content $a -NoNewline
+          Select-String -Path $m -Pattern '\sVersion="' -CaseSensitive | ForEach-Object { Write-Host $_.Line.Trim() }
+          Write-Host "Package version: $v"
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Create the self-signed signing certificate
+        shell: pwsh
+        run: |
+          # Subject MUST match Package.appxmanifest's Publisher attribute exactly,
+          # otherwise packaging fails with "the publisher does not match the certificate".
+          $cert = New-SelfSignedCertificate `
+            -Type Custom `
+            -Subject "CN=FF4E" `
+            -KeyUsage DigitalSignature `
+            -FriendlyName "FF4E sideload signing" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -TextExtension @("2.5.29.37={text}1.3.6.1.5.5.7.3.3", "2.5.29.19={text}")
+          $pwd = ConvertTo-SecureString -String "${{ github.run_id }}-ff4e" -Force -AsPlainText
+          Export-PfxCertificate -Cert $cert -FilePath "$env:RUNNER_TEMP\ff4e.pfx" -Password $pwd | Out-Null
+          # The public certificate is shipped next to the package: the console must trust
+          # it before the MSIX will install.
+          Export-Certificate -Cert $cert -FilePath "$env:RUNNER_TEMP\ff4e.cer" | Out-Null
+          Write-Host "Certificate thumbprint: $($cert.Thumbprint)"
+
+      - name: Restore NuGet packages
+        run: msbuild xbox\Ff4eXbox.sln /t:Restore /p:Configuration=Release /p:Platform=x64
+
+      - name: Build and package
+        run: >
+          msbuild xbox\Ff4eXbox.sln
+          /p:Configuration=Release
+          /p:Platform=x64
+          /p:AppxBundle=Never
+          /p:UapAppxPackageBuildMode=SideloadOnly
+          /p:AppxPackageSigningEnabled=true
+          /p:PackageCertificateKeyFile=$env:RUNNER_TEMP\ff4e.pfx
+          /p:PackageCertificatePassword=${{ github.run_id }}-ff4e
+          /m
+
+      - name: Collect the package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          $pkg = Get-ChildItem -Path xbox -Recurse -Include *.msix, *.appx |
+                 Where-Object { $_.DirectoryName -notmatch 'Dependencies' } |
+                 Sort-Object Length -Descending |
+                 Select-Object -First 1
+          if (-not $pkg) { Write-Error "No .msix/.appx produced — check the build log."; exit 1 }
+          Copy-Item $pkg.FullName out\
+          Copy-Item "$env:RUNNER_TEMP\ff4e.cer" out\
+          Write-Host "Package: $($pkg.Name)  ($([math]::Round($pkg.Length/1MB,1)) MB)"
+
+          # Framework dependencies (WinUI 2 / WebView2, .NET Native, VCLibs). A console
+          # does NOT have these preinstalled, and without them the app installs fine but
+          # dies on the splash screen because it cannot resolve them at activation, so
+          # they must be shipped and installed alongside the package.
+          New-Item -ItemType Directory -Force -Path out\Dependencies | Out-Null
+          $deps = Get-ChildItem -Path xbox -Recurse -Include *.appx, *.msix |
+                  Where-Object { $_.DirectoryName -match 'Dependencies' -and $_.DirectoryName -match 'x64|arm64|\\Dependencies$' } |
+                  Where-Object { $_.DirectoryName -notmatch 'arm' }
+          foreach ($d in $deps) { Copy-Item $d.FullName out\Dependencies\ -Force }
+          $names = (Get-ChildItem out\Dependencies | Select-Object -ExpandProperty Name) -join ', '
+          Write-Host "Dependencies collected: $(@(Get-ChildItem out\Dependencies).Count) -> $names"
+
+          # The app's declared dependencies, so the log shows at a glance whether any
+          # required framework is missing from the folder above.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg.FullName)
+          $entry = $zip.GetEntry('AppxManifest.xml')
+          $sr = New-Object System.IO.StreamReader($entry.Open())
+          $xml = [xml]$sr.ReadToEnd()
+          $sr.Close(); $zip.Dispose()
+          Write-Host "Declared PackageDependency entries:"
+          foreach ($d in $xml.Package.Dependencies.PackageDependency) { Write-Host "  - $($d.Name) $($d.MinVersion)" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ff4e-xbox-msix
+          path: out/
+          retention-days: 14
+          # ~390 MB of already-compressed package: re-zipping buys nothing.
+          compression-level: 0

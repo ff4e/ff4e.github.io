@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Deploy the Xbox package to the console over the Device Portal REST API and read back
+# the app's own diagnostics. Everything the on-console iteration loop needs, in one call:
+#
+#   ./xdeploy.sh deploy   # uninstall + install + launch  (needs ~/Downloads/ff4e-xbox)
+#   ./xdeploy.sh launch   # just (re)launch
+#   ./xdeploy.sh log      # boot.log
+#   ./xdeploy.sh pad      # pad.log (native + in-page controller diagnostics)
+#   ./xdeploy.sh crash    # crash.log (survives relaunches, unlike boot.log)
+#   ./xdeploy.sh ps       # is it running?
+#   ./xdeploy.sh gamemode # register UWP content as a *game*: 5 GB + full GPU, not
+#                         #   1 GB + 45% (console-wide; survives redeploys)
+#
+# Needs, in the environment:
+#   XB    the console's Device Portal, e.g. https://<console-ip>:11443
+#   XDP   a file holding the Device Portal user:pass (mode 600); default /tmp/.xdp
+#   D     the unzipped CI artifact (.msix, .cer, Dependencies/); default ~/Downloads/ff4e-xbox
+# The package version is package.json's, as CI stamps it (xbox-msix.yml).
+set -uo pipefail
+
+: "${XB:?set XB to the console Device Portal, e.g. https://<console-ip>:11443}"
+CRED=$(cat "${XDP:-/tmp/.xdp}")
+D=${D:-$HOME/Downloads/ff4e-xbox}
+VER="$(node -p "require('$(dirname "$0")/../package.json').version").0"
+MSIX="Ff4eXbox_${VER}_x64.msix"
+# The suffix is the publisher hash of CN=FF4E, fixed for as long as the publisher is.
+FAMILY='FF4E.FishFillets4ever_02mpwfnn4k234'
+PFN="FF4E.FishFillets4ever_${VER}_x64__02mpwfnn4k234"
+CJ=/tmp/xdp-cookies.txt
+
+tok() {
+  rm -f "$CJ"
+  curl -sS -k -m 20 -c "$CJ" --user "$CRED" -o /dev/null "$XB/api/os/machinename"
+  awk '/CSRF-Token/{print $7}' "$CJ"
+}
+
+file() { # $1 = filename in LocalState
+  curl -sS -k -m 30 --user "$CRED" -G \
+    --data-urlencode "knownfolderid=LocalAppData" \
+    --data-urlencode "packagefullname=$PFN" \
+    --data-urlencode "path=\\LocalState" \
+    --data-urlencode "filename=$1" \
+    "$XB/api/filesystem/apps/file" 2>/dev/null
+}
+
+launch() {
+  local t aid pkg
+  t=$(tok)
+  aid=$(printf '%s!App' "$FAMILY" | base64)
+  pkg=$(printf '%s' "$FAMILY" | base64)
+  curl -sS -k -m 60 -b "$CJ" -H "X-CSRF-Token: $t" -H "Content-Length: 0" \
+    --user "$CRED" -X POST --data "" -o /dev/null -w "launch    HTTP %{http_code}\n" \
+    "$XB/api/taskmanager/app?appid=$aid&package=$pkg"
+}
+
+case "${1:-deploy}" in
+  deploy)
+    t=$(tok)
+    curl -sS -k -m 120 -b "$CJ" -H "X-CSRF-Token: $t" --user "$CRED" -X DELETE \
+      -o /dev/null -w "uninstall HTTP %{http_code}\n" \
+      "$XB/api/app/packagemanager/package?package=$PFN"
+    sleep 3
+    t=$(tok)
+    curl -sS -k --max-time 900 -b "$CJ" -H "X-CSRF-Token: $t" --user "$CRED" -X POST \
+      -o /dev/null -w "install   HTTP %{http_code}\n" \
+      "$XB/api/app/packagemanager/package?package=$MSIX" \
+      -F "$MSIX=@$D/$MSIX" \
+      -F "Microsoft.UI.Xaml.2.8.appx=@$D/Dependencies/Microsoft.UI.Xaml.2.8.appx" \
+      -F "Microsoft.NET.Native.Framework.2.2.appx=@$D/Dependencies/Microsoft.NET.Native.Framework.2.2.appx" \
+      -F "Microsoft.NET.Native.Runtime.2.2.appx=@$D/Dependencies/Microsoft.NET.Native.Runtime.2.2.appx" \
+      -F "Microsoft.VCLibs.x64.14.00.appx=@$D/Dependencies/Microsoft.VCLibs.x64.14.00.appx" \
+      -F "Microsoft.VCLibs.x64.14.00.Desktop.appx=@$D/Dependencies/Microsoft.VCLibs.x64.14.00.Desktop.appx" \
+      -F "ff4e.cer=@$D/ff4e.cer"
+    for _ in $(seq 1 60); do
+      r=$(curl -sS -k -m 20 --user "$CRED" "$XB/api/app/packagemanager/state" 2>/dev/null)
+      if echo "$r" | grep -q '"Success" : true'; then echo "deploy    ok"; break; fi
+      if echo "$r" | grep -qi '"Success" : false'; then echo "deploy    FAILED: $r"; exit 1; fi
+      sleep 5
+    done
+    launch
+    ;;
+  launch) launch ;;
+  log)    file boot.log ;;
+  pad)    file pad.log ;;
+  crash)  file crash.log ;;
+  gamemode)
+    t=$(tok)
+    # Xbox gives a UWP *app* 1 GB and 45% of the GPU, but a *game* 5 GB and all of it.
+    # This is a console setting rather than something the package can declare.
+    curl -sS -k -m 30 -b "$CJ" -H "X-CSRF-Token: $t" -H "Content-Type: application/json" \
+      --user "$CRED" -X PUT -d '{"Value":"true"}' -o /dev/null -w "gamemode  HTTP %{http_code}\n" \
+      "$XB/ext/settings/DefaultUWPContentTypeToGame"
+    curl -sS -k -m 20 --user "$CRED" "$XB/ext/settings" 2>/dev/null | python3 -c "
+import sys, json
+for x in json.load(sys.stdin).get('Settings', []):
+    if x.get('Name') == 'DefaultUWPContentTypeToGame':
+        print('DefaultUWPContentTypeToGame =', x.get('Value'))
+"
+    echo "(relaunch the app for the new allowance to apply)"
+    ;;
+  ps)
+    curl -sS -k -m 30 --user "$CRED" "$XB/api/resourcemanager/processes" 2>/dev/null | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+app = [p for p in d.get('Processes', []) if 'ff4e' in (p.get('ImageName') or '').lower()]
+wv = [p for p in d.get('Processes', []) if 'msedgewebview' in (p.get('ImageName') or '').lower()]
+print('Ff4eXbox.exe:', app[0]['ProcessId'] if app else 'NOT RUNNING', '| webview procs:', len(wv))
+"
+    ;;
+  *) echo "usage: $0 {deploy|launch|log|pad|crash|ps|gamemode}"; exit 2 ;;
+esac

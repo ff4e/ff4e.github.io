@@ -1,9 +1,11 @@
-// Build the iOS app icon and launch image from a vector reconstruction of the game's
-// title emblem, and write them straight into the Xcode asset catalog.
+// Build the iOS app icon and launch image, and the Xbox package's tiles and splash, from a
+// vector reconstruction of the game's title emblem, and write them straight into the Xcode
+// asset catalog and xbox/Ff4eXbox/Assets.
 //
 // Outputs (all committed, so a normal build needs neither Playwright nor this script):
 //   ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png   1024x1024, opaque
 //   ios/App/App/Assets.xcassets/Splash.imageset/splash-2732x2732.png    2732x2732, opaque
+//   xbox/Ff4eXbox/Assets/<name>.scale-<N>.png    the sizes Package.appxmanifest names, opaque
 //
 // ── Why a reconstruction rather than an image ─────────────────────────────────
 // The emblem exists in this repo only as artwork: `public/cover.webp` carries it inside a
@@ -43,7 +45,7 @@
 // Requires the repo's Playwright (a dev dependency already, for the UI suite).
 // Usage: `node tools/build-app-icon.mjs`
 import { chromium } from 'playwright';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -51,6 +53,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CATALOG = join(ROOT, 'ios', 'App', 'App', 'Assets.xcassets');
 const ICON = join(CATALOG, 'AppIcon.appiconset', 'AppIcon-512@2x.png');
 const SPLASH = join(CATALOG, 'Splash.imageset');
+const XBOX = join(ROOT, 'xbox', 'Ff4eXbox', 'Assets');
 
 // The mark's colour ramp, light to dark. Gold, sampled off the emblem capture: brightest at
 // the top of the ring (#fff37e), through #ffd119 on the flanks, to #e6a408 underneath.
@@ -167,12 +170,12 @@ const SEA_DEF = (seaR, seaY) => `
 
 // `seaR` is the reach of the background glow as a percentage of the canvas, `seaY` its
 // centre. The glow runs to the corners from above, the way light falls underwater.
-const iconDoc = (side, emblemSize, seaR, seaY) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}">
+const iconDoc = (w, h, emblemSize, seaR, seaY) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">
      <defs>${MARK_DEF}${SEA_DEF(seaR, seaY)}</defs>
-     <rect width="${side}" height="${side}" fill="#03070f"/>
-     <rect width="${side}" height="${side}" fill="url(#sea)"/>
-     ${emblem(emblemSize, side / 2, side / 2)}
+     <rect width="${w}" height="${h}" fill="#03070f"/>
+     <rect width="${w}" height="${h}" fill="url(#sea)"/>
+     ${emblem(emblemSize, w / 2, h / 2)}
    </svg>`;
 
 // ── The launch image ──────────────────────────────────────────────────────────
@@ -202,12 +205,37 @@ const iconDoc = (side, emblemSize, seaR, seaY) =>
 // screen's short side, either way up.
 const SPLASH_BG = '#101018'; // index.html: `body { background: #101018 }`
 
-const splashDoc = (side) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}">
+const splashDoc = (w, h, emblemSize) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">
      <defs>${MARK_DEF}</defs>
-     <rect width="${side}" height="${side}" fill="${SPLASH_BG}"/>
-     ${emblem(420, side / 2, side / 2)}
+     <rect width="${w}" height="${h}" fill="${SPLASH_BG}"/>
+     ${emblem(emblemSize, w / 2, h / 2)}
    </svg>`;
+
+// ── The Xbox package ──────────────────────────────────────────────────────────
+// The same two pictures at the sizes Package.appxmanifest names. The tiles are the icon,
+// its mark kept at the icon's share of the SHORT side (830/1024) so the wide tile is the
+// square one with more sea either side. The splash is the launch image: the system draws it
+// centred on the manifest's BackgroundColor, which is SPLASH_BG, so the edge is invisible;
+// the mark takes two-thirds of its height, as the art it replaces did.
+//
+// Each at several scales, which the manifest's plain `Assets\SplashScreen.png` resolves to by
+// MRT qualifier. Measured on an Xbox Series X with one unqualified file: the system drew the
+// splash at 620x300 PHYSICAL pixels — small and soft on a TV — while MainPage's held copy
+// of the same file came up at 200%, so the mark jumped in size at the handover. With a
+// scale-200 the system draws it at the size the held copy has. The splash also gets a
+// scale-400 for 4K; the tiles stop at 200, because the packager refuses a logo over
+// 200 KB (APPX3207) and the sea's gradient does not compress: Square310x310 at scale-400
+// was 585 KB.
+const ICON_SHARE = 830 / 1024;
+const MAX_XBOX_BYTES = 204800; // APPX3207
+const scaled = (name, w, h, doc, scales = [100, 200]) =>
+  scales.map((sc) => {
+    const [sw, sh] = [(w * sc) / 100, (h * sc) / 100];
+    return { path: join(XBOX, `${name}.scale-${sc}.png`), w: sw, h: sh, svg: () => doc(sw, sh) };
+  });
+const tile = (name, w, h) =>
+  scaled(name, w, h, (sw, sh) => iconDoc(sw, sh, Math.min(sw, sh) * ICON_SHARE, 78, 34));
 
 // One file serves every scale: the imageset is single-scale, because three copies of the
 // same square would be three copies of the same bytes.
@@ -216,27 +244,40 @@ const splashDoc = (side) =>
 const OUTPUTS = [
   {
     path: ICON,
-    side: 1024,
-    svg: (side) => iconDoc(side, 830, 78, 34),
+    w: 1024,
+    h: 1024,
+    svg: () => iconDoc(1024, 1024, 830, 78, 34),
   },
   {
     path: join(SPLASH, 'splash-2732x2732.png'),
-    side: 2732,
-    svg: splashDoc,
+    w: 2732,
+    h: 2732,
+    svg: () => splashDoc(2732, 2732, 420),
   },
+  ...tile('Square44x44Logo', 44, 44),
+  ...tile('StoreLogo', 50, 50),
+  ...tile('Square150x150Logo', 150, 150),
+  ...tile('Square310x310Logo', 310, 310),
+  ...tile('Wide310x150Logo', 310, 150),
+  ...scaled('SplashScreen', 620, 300, (sw, sh) => splashDoc(sw, sh, (190 * sh) / 300), [100, 200, 400]),
 ];
 
+mkdirSync(XBOX, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ deviceScaleFactor: 1 });
 console.log(`emblem ${GROW}x, tail clears the ring by ${tailClearance().toFixed(2)}`);
-for (const { path, side, svg } of OUTPUTS) {
-  await page.setViewportSize({ width: side, height: side });
+for (const { path, w, h, svg } of OUTPUTS) {
+  await page.setViewportSize({ width: w, height: h });
   await page.setContent(
-    `<style>html,body{margin:0;padding:0;background:#000}svg{display:block;width:${side}px;height:${side}px}</style>` +
-      svg(side),
+    `<style>html,body{margin:0;padding:0;background:#000}svg{display:block;width:${w}px;height:${h}px}</style>` +
+      svg(),
   );
   // No alpha anywhere: App Store Connect rejects an icon with a transparent channel.
-  writeFileSync(path, await page.screenshot({ omitBackground: false, type: 'png' }));
-  console.log(`wrote ${relative(ROOT, path)} (${side}x${side})`);
+  const png = await page.screenshot({ omitBackground: false, type: 'png' });
+  if (path.startsWith(XBOX) && png.length > MAX_XBOX_BYTES) {
+    throw new Error(`${relative(ROOT, path)} is ${png.length} bytes; the packager refuses over ${MAX_XBOX_BYTES} (APPX3207)`);
+  }
+  writeFileSync(path, png);
+  console.log(`wrote ${relative(ROOT, path)} (${w}x${h}, ${png.length} B)`);
 }
 await browser.close();

@@ -194,3 +194,23 @@ export class DirRepeat {
     this.held = null;
   }
 }
+
+/** Windows' VK_GAMEPAD_A .. VK_GAMEPAD_RIGHT_THUMBSTICK_LEFT (WinUser.h, 0xC3-0xDA). */
+const VK_GAMEPAD_FIRST = 0xc3;
+const VK_GAMEPAD_LAST = 0xda;
+
+/**
+ * Is this keydown a controller button the browser turned into a key, rather than a key?
+ *
+ * Found on an Xbox Series X: LB/RB closed the help instead of paging it, and Ⓐ closed the
+ * credits — yet the Gamepad-API path (`pollPad` → padInput.ts) pages the help and is told
+ * nothing about Ⓐ there, and does exactly that in a desktop browser. The keyboard handlers
+ * have "any key" rules from the original — any key closes the help (Help.pas:FormKeyDown)
+ * and the credits (UMain.pas FormKeyDown → DoneCredits) — and a WebView2 on Windows hands
+ * a focused page each controller button as a keydown with a VK_GAMEPAD_* code too. That
+ * second copy is what these rules saw. The controller has exactly one route into the game,
+ * and it is `pollPad`.
+ */
+export function isGamepadKey(e: { key: string; keyCode: number }): boolean {
+  return (e.keyCode >= VK_GAMEPAD_FIRST && e.keyCode <= VK_GAMEPAD_LAST) || e.key.startsWith('Gamepad');
+}

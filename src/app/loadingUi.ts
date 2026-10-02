@@ -322,8 +322,12 @@ export function initLoadingUi(): void {
   window.addEventListener('unhandledrejection', (ev) => {
     if (isAssetError(ev.reason)) reportAssetError(ev.reason);
     else if (!booted) {
-      console.error('boot failed:', describe(ev.reason));
-      showFatal();
+      const text = describe(ev.reason);
+      console.error('boot failed:', text);
+      // A platform with no devtools (the Xbox shell) has no other way to see this: the
+      // generic sentence is right for a failed asset fetch, but a boot exception is not
+      // that, and hiding its text behind console.error makes it unreadable there.
+      showFatal(`Startup failed: ${text}`);
     }
   });
   // The same triage for a thrown error, which is not the same channel: `runBoot()` is
@@ -334,8 +338,9 @@ export function initLoadingUi(): void {
   window.addEventListener('error', (ev) => {
     if (isAssetError(ev.error)) reportAssetError(ev.error);
     else if (!booted) {
-      console.error('boot failed:', describe(ev.error ?? ev.message));
-      showFatal();
+      const text = describe(ev.error ?? ev.message);
+      console.error('boot failed:', text);
+      showFatal(`Startup failed: ${text}`);
     }
   });
 }

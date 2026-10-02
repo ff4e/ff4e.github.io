@@ -5,8 +5,8 @@
  * probe pins is the part only a browser can show: that the tablet's pieces a controller
  * cannot use stand aside (the faithful panel, the floating buttons), that the legend
  * replaces them, and that every screen a player reaches can be worked from the pad alone —
- * the fish, the confirmed Save / Load / Restart, Undo, Options, the map and its record
- * panel.
+ * the fish, the confirmed Save / Load / Restart, Undo, Options, the help, the map and its
+ * record panel, the credits.
  *
  * The pad is a stub Standard Gamepad patched into `navigator.getGamepads()` before boot,
  * the same seam the dev sim-pad and the Xbox shell's bridge use, so the poller under test
@@ -223,6 +223,29 @@ try {
   const optsClosed = await p.evaluate(() => !document.documentElement.hasAttribute('data-touchopts'));
   expect(optsClosed, 'B closes Options');
 
+  // ── Help, from Options: LB/RB page it, and only Ⓑ closes it ─────────────────
+  await press(p, 'menu');
+  await p.waitForFunction(() => document.documentElement.hasAttribute('data-touchopts'));
+  await p.click('#topt-help');
+  await p.waitForFunction(() => window.__ff.helpOpen());
+  await polls(p);
+  const helpLegend = await legend(p);
+  expect(helpLegend?.join('|') === 'LBRBPage|BClose', `help legend (${helpLegend?.join(', ')})`);
+  await press(p, 'rb');
+  let help = await p.evaluate(() => [window.__ff.helpOpen(), window.__ff.helpPage()]);
+  expect(help[0] && help[1] === 1, `RB turns to the next help page (open=${help[0]}, page=${help[1]})`);
+  await press(p, 'lb');
+  help = await p.evaluate(() => [window.__ff.helpOpen(), window.__ff.helpPage()]);
+  expect(help[0] && help[1] === 0, `LB turns back (open=${help[0]}, page=${help[1]})`);
+  // What the Xbox WebView2 also sends for a controller button: a keydown with a
+  // VK_GAMEPAD_* code. The help closes on any key, so this must not count as one.
+  await p.evaluate(() =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'GamepadRightShoulder', keyCode: 0xc7, bubbles: true })),
+  );
+  expect(await p.evaluate(() => window.__ff.helpOpen()), 'a native controller keydown leaves the help open');
+  await press(p, 'b');
+  expect(!(await p.evaluate(() => window.__ff.helpOpen())), 'B closes the help');
+
   // ── Ⓑ leaves for the map, where a room is already selected ─────────────────
   await press(p, 'b');
   await p.waitForFunction(() => window.__ff.screen() === 'map');
@@ -258,6 +281,17 @@ try {
   await polls(p);
   const moved = await p.evaluate(() => [window.__ff.mapSelectRoom(), window.__ff.mapHover()]);
   expect(moved[0] !== first || moved[1] !== null, `the stick moved the selection (${moved})`);
+
+  // ── The credits: only Ⓑ leaves, and the legend shows only Ⓑ ─────────────────
+  await p.evaluate(() => window.__ff.openCredits());
+  await p.waitForFunction(() => window.__ff.mapOverlay() === 'credits');
+  await polls(p);
+  const creditsLegend = await legend(p);
+  expect(creditsLegend?.join('|') === 'BClose', `credits legend (${creditsLegend?.join(', ')})`);
+  await press(p, 'a');
+  expect((await p.evaluate(() => window.__ff.mapOverlay())) === 'credits', 'A does nothing on the credits');
+  await press(p, 'b');
+  expect((await p.evaluate(() => window.__ff.mapOverlay())) === 'none', 'B closes the credits');
 
   await p.context().close();
 
