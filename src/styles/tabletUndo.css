@@ -1,0 +1,26 @@
+/* Tablet Undo: pinned to the bottom-right corner, the way `#phone-undo` is on a phone
+   (Martin, 2026-10-02: "make the experience on ipad more similar to iphone"). It stays a
+   child of `#touchbar` so the bar's show/hide, click wiring, tutorial pulse and probes
+   all keep finding it there; `position: fixed` takes it out of the bar's flex flow, and
+   `#touchbar` has no transform, so it is placed against the viewport.
+
+   Icon-only at the phone's 56px with a 32px glyph, like `#phone-undo`. The `<span>` label
+   stays in the markup (test/touchButtons.test.ts reads the bar's labels) and the
+   accessible name is the button's `aria-label`.
+
+   `#touchbar > #touchbar-undo` outranks the split-window rules in activeFishIndicator.css
+   (`#touchbar > .tbtn`), which would otherwise size it back to the bar's 52x48. Paint is
+   left to `.tbtn`, so it matches the other tablet buttons in the browser and in the
+   native menu skin alike — and so is geometry: the skin changes no tablet geometry
+   (tools/test-native-menu.mjs), so there is no native-only corner offset here. */
+#touchbar > #touchbar-undo {
+  --undo-size: 56px;
+  position: fixed;
+  right: max(16px, calc(var(--sa-right) + 8px));
+  bottom: max(16px, calc(var(--sa-bottom) + 8px));
+  width: var(--undo-size); height: var(--undo-size);
+  min-width: var(--undo-size); min-height: var(--undo-size);
+  padding: 8px;
+}
+#touchbar > #touchbar-undo svg { width: 32px; height: 32px; }
+#touchbar > #touchbar-undo span { display: none; }

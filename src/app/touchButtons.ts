@@ -1,7 +1,9 @@
 /**
  * The in-room touch controls: six buttons, along whichever edge leaves more of the room
  * visible — the top in portrait, and in landscape the left or the top depending on the
- * room's shape (`touchBarEdge.ts` decides, per frame).
+ * room's shape (`touchBarEdge.ts` decides, per frame). Undo is the exception: it is still
+ * one of the bar's buttons, but pinned to the bottom-right corner as on a phone
+ * (`styles/tabletUndo.css`).
  * This remains the tablet bar. Phones use phoneControls.ts's corner overlays instead;
  * neither the space reservation nor the edge selector runs on that path.
  *

@@ -35,12 +35,13 @@
 }
 
 /* Split windows can keep tablet mode with too little room for an absolute corner.
-   Fit all seven targets in flow instead; full-size tablet geometry stays unchanged.
-   Seven 52px widths / 48px heights consume 364px / 336px before gaps. */
+   Fit the six in-flow targets (five buttons and this indicator; Undo is pinned to the
+   bottom-right corner, tabletUndo.css) instead; full-size tablet geometry stays unchanged.
+   Six 52px widths / 48px heights consume 312px / 288px before gaps. */
 @media (max-width: 600px) {
   #touchbar {
     padding-inline: max(4px, var(--sa-left)) max(4px, var(--sa-right));
-    gap: clamp(0px, calc((100vw - max(4px, var(--sa-left)) - max(4px, var(--sa-right)) - 364px) / 6), 6px);
+    gap: clamp(0px, calc((100vw - max(4px, var(--sa-left)) - max(4px, var(--sa-right)) - 312px) / 5), var(--bar-gap));
   }
   #touchbar > .tbtn { width: 52px; min-width: 44px; padding-inline: 2px; }
   #touchbar > #active-fish-indicator { position: static; order: -1; margin-right: auto; }
@@ -49,7 +50,7 @@
   html:not([data-touchbar-edge='top']) #touchbar {
     padding-left: max(var(--sa-left), var(--bar-lead));
     padding-block: max(4px, var(--sa-top)) max(4px, var(--sa-bottom));
-    gap: clamp(0px, calc((100vh - max(4px, var(--sa-top)) - max(4px, var(--sa-bottom)) - 336px) / 6), 6px);
+    gap: clamp(0px, calc((100vh - max(4px, var(--sa-top)) - max(4px, var(--sa-bottom)) - 288px) / 5), var(--bar-gap));
   }
   html:not([data-touchbar-edge='top']) #touchbar > .tbtn {
     width: 52px; height: 48px; min-height: 44px;
