@@ -560,7 +560,11 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        gap: 6px;
+        /* 16px, up from 6 (Martin, 2026-10-02: more space between the tablet's buttons).
+           A variable because the split-window fallbacks in activeFishIndicator.css shrink
+           it toward 0 and must not grow it past this. */
+        --bar-gap: 16px;
+        gap: var(--bar-gap);
         pointer-events: none;
         /* `--bar-w`/`--bar-h` are the bar's WHOLE footprint — its buttons plus the cutout
            it has to clear. The cutout is spent as padding INSIDE that box, so the box has
@@ -961,6 +965,7 @@
     </style>
     <link rel="stylesheet" href="/src/styles/nativeMenu.css" />
     <link rel="stylesheet" href="/src/styles/activeFishIndicator.css" />
+    <link rel="stylesheet" href="/src/styles/tabletUndo.css" />
   </head>
   <body>
     <div id="perfhud"></div>
@@ -1118,7 +1123,7 @@
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7h18M3 12h18M3 17h18"/><circle cx="8" cy="7" r="2.2"/><circle cx="15" cy="12" r="2.2"/><circle cx="10" cy="17" r="2.2"/></svg>
         <span>Options</span>
       </button>
-      <button class="tbtn" type="button" data-region="24" aria-label="Take back one move">
+      <button id="touchbar-undo" class="tbtn" type="button" data-region="24" aria-label="Take back one move">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13a8 8 0 1 1 3 6.24"/><path d="M4 4v6h6"/></svg>
         <span>Undo</span>
       </button>

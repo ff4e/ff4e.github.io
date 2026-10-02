@@ -117,7 +117,10 @@ const roomCentre = (p) =>
     const r = el.getBoundingClientRect();
     // The BUTTONS' extent (and the fish indicator's), not the bar's box: the box carries a
     // few px of breathing room that may lie over the room without any button on it.
+    // The edge buttons only: Undo is pinned to the bottom-right corner (tabletUndo.css),
+    // like the phone's, and is not part of the strip this measures.
     const rects = [...document.getElementById('touchbar').children]
+      .filter((c) => c.id !== 'touchbar-undo')
       .map((c) => c.getBoundingClientRect())
       .filter((b) => b.width > 0 && b.height > 0);
     const bar = {
@@ -406,8 +409,10 @@ try {
       const bar = document.getElementById('touchbar').getBoundingClientRect();
       const footprint = footprints[insets.indexOf(inset)];
       const reserve = Number.parseFloat(getComputedStyle(document.querySelector('.stage')).marginLeft);
-      const buttonLeft = Math.min(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().left));
-      const buttonRight = Math.max(...[...document.querySelectorAll('#touchbar [data-region]')].map((b) => b.getBoundingClientRect().right));
+      // The column only: Undo is pinned to the bottom-right corner, not part of it.
+      const column = [...document.querySelectorAll('#touchbar [data-region]:not(#touchbar-undo)')];
+      const buttonLeft = Math.min(...column.map((b) => b.getBoundingClientRect().left));
+      const buttonRight = Math.max(...column.map((b) => b.getBoundingClientRect().right));
       return {
         inset,
         barW: Math.round(bar.width),
@@ -536,11 +541,11 @@ try {
   // ── Six buttons in a portrait ROW, at the narrowest width this game is willing to be
   // played at. Landscape stacks them in a 72px column and has the whole height to spend,
   // so it cannot run out; portrait is the axis that can, and the bar neither wraps nor
-  // scrolls — `.tbtn` is floored at 56px wide with a 6px gap, so six of them need 366px
-  // before the sixth is pushed off the edge. 375 is an iPhone SE (deviceGate.ts's own
-  // device table), which leaves 9px. Asserted from the rendered rects rather than from
-  // that arithmetic, so a seventh button, a wider label or a padding change fails here
-  // instead of on somebody's phone.
+  // scrolls — below 600px the split-window rules in activeFishIndicator.css shrink the gap
+  // so the in-flow targets fit (Undo sits in the bottom-right corner, outside the row).
+  // 375 is an iPhone SE (deviceGate.ts's own device table). Asserted from the rendered
+  // rects rather than from that arithmetic, so a seventh button, a wider label or a
+  // padding change fails here instead of on somebody's phone.
   await p.setViewportSize({ width: 375, height: 812 });
   await settleBox(p, portrait.roomW);
   const narrow = await barFit(p);
