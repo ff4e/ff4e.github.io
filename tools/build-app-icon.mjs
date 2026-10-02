@@ -5,7 +5,7 @@
 // Outputs (all committed, so a normal build needs neither Playwright nor this script):
 //   ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png   1024x1024, opaque
 //   ios/App/App/Assets.xcassets/Splash.imageset/splash-2732x2732.png    2732x2732, opaque
-//   xbox/Ff4eXbox/Assets/*.png    the sizes Package.appxmanifest names, opaque
+//   xbox/Ff4eXbox/Assets/<name>.scale-{100,200,400}.png    the sizes Package.appxmanifest names, opaque
 //
 // ── Why a reconstruction rather than an image ─────────────────────────────────
 // The emblem exists in this repo only as artwork: `public/cover.webp` carries it inside a
@@ -45,7 +45,7 @@
 // Requires the repo's Playwright (a dev dependency already, for the UI suite).
 // Usage: `node tools/build-app-icon.mjs`
 import { chromium } from 'playwright';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -218,13 +218,21 @@ const splashDoc = (w, h, emblemSize) =>
 // square one with more sea either side. The splash is the launch image: the system draws it
 // centred on the manifest's BackgroundColor, which is SPLASH_BG, so the edge is invisible;
 // the mark takes two-thirds of its height, as the art it replaces did.
+//
+// Each at three scales, which the manifest's plain `Assets\SplashScreen.png` resolves to by
+// MRT qualifier. Measured on an Xbox Series X with one unqualified file: the system drew the
+// splash at 620x300 PHYSICAL pixels — small and soft on a TV — while MainPage's held copy
+// of the same file came up at 200%, so the mark jumped in size at the handover. With a
+// scale-200 the system draws it at the size the held copy has; scale-400 is for 4K.
 const ICON_SHARE = 830 / 1024;
-const tile = (name, w, h) => ({
-  path: join(XBOX, name),
-  w,
-  h,
-  svg: () => iconDoc(w, h, Math.min(w, h) * ICON_SHARE, 78, 34),
-});
+const SCALES = [100, 200, 400];
+const scaled = (name, w, h, doc) =>
+  SCALES.map((sc) => {
+    const [sw, sh] = [(w * sc) / 100, (h * sc) / 100];
+    return { path: join(XBOX, `${name}.scale-${sc}.png`), w: sw, h: sh, svg: () => doc(sw, sh) };
+  });
+const tile = (name, w, h) =>
+  scaled(name, w, h, (sw, sh) => iconDoc(sw, sh, Math.min(sw, sh) * ICON_SHARE, 78, 34));
 
 // One file serves every scale: the imageset is single-scale, because three copies of the
 // same square would be three copies of the same bytes.
@@ -243,19 +251,15 @@ const OUTPUTS = [
     h: 2732,
     svg: () => splashDoc(2732, 2732, 420),
   },
-  tile('Square44x44Logo.png', 44, 44),
-  tile('StoreLogo.png', 50, 50),
-  tile('Square150x150Logo.png', 150, 150),
-  tile('Square310x310Logo.png', 310, 310),
-  tile('Wide310x150Logo.png', 310, 150),
-  {
-    path: join(XBOX, 'SplashScreen.png'),
-    w: 620,
-    h: 300,
-    svg: () => splashDoc(620, 300, 190),
-  },
+  ...tile('Square44x44Logo', 44, 44),
+  ...tile('StoreLogo', 50, 50),
+  ...tile('Square150x150Logo', 150, 150),
+  ...tile('Square310x310Logo', 310, 310),
+  ...tile('Wide310x150Logo', 310, 150),
+  ...scaled('SplashScreen', 620, 300, (sw, sh) => splashDoc(sw, sh, (190 * sh) / 300)),
 ];
 
+mkdirSync(XBOX, { recursive: true });
 const browser = await chromium.launch();
 const page = await browser.newPage({ deviceScaleFactor: 1 });
 console.log(`emblem ${GROW}x, tail clears the ring by ${tailClearance().toFixed(2)}`);
