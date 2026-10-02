@@ -8,9 +8,10 @@ you move two talking fish around a room without dropping anything on either of t
 No install, no account, no plugin. It runs in a desktop browser.
 
 Learn about the project and its platforms at **<https://ff4e.github.io/about.html>**.
-The iPhone and iPad app is currently in testing, not yet on the App Store.
+The iPhone and iPad app is on the App Store: **<https://apps.apple.com/us/app/fish-fillets-forever/id6812738745>**.
 Browser play on iPhone and iPad is temporarily paused: those visitors see the
-project page instead. The native app, desktop browsers and Android remain playable.
+project page instead, with a link to the App Store (and a way to continue to the
+web version anyway). The native app, desktop browsers and Android remain playable.
 
 ![The world map](docs/screenshots/world-map.jpg)
 

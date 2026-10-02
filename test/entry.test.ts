@@ -27,6 +27,13 @@ describe('game entry', () => {
     expect(startGame).not.toHaveBeenCalled();
   });
 
+  it('boots an iPhone that has chosen to continue in the browser anyway', async () => {
+    vi.stubGlobal('localStorage', { getItem: (k: string) => k === 'ff.browserPlayOverride' ? '1' : null });
+    await import('../src/entry.js');
+    expect(startGame).toHaveBeenCalledOnce();
+    expect(replace).not.toHaveBeenCalled();
+  });
+
   it('boots the native iOS app directly and keeps the website link hidden', async () => {
     vi.stubGlobal('location', { protocol: 'capacitor:', replace });
     await import('../src/entry.js');
