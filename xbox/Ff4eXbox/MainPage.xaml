@@ -8,10 +8,12 @@
          code-behind so that a missing/broken WinUI 2 framework package surfaces as a
          readable message on this page instead of killing the app during XAML parse. -->
     <Grid x:Name="RootGrid">
-        <!-- The launch splash, held until the game page has loaded (OnNavigationCompleted).
-             The system takes its own splash down as soon as this window activates, which
-             left seconds of empty screen while the browser engine started. Placed over the
-             system's own rectangle in OnLoaded, so the handover does not move. -->
+        <!-- The launch splash, held until the game page is up (Reveal). The system takes its
+             own splash down as soon as this window activates, which left seconds of empty
+             screen while the browser engine started. Centred at its own size in effective
+             pixels, which is where the system draws it. Not placed from SplashScreen's
+             ImageLocation: on an Xbox Series X that rectangle came in physical pixels (200%)
+             and put the copy half off the bottom-right of the screen. -->
         <Image x:Name="Splash"
                Source="Assets/SplashScreen.png"
                Stretch="Fill"

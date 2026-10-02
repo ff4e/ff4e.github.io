@@ -6,7 +6,6 @@ using System.Threading.Tasks;
 using Windows.Gaming.Input;
 using Microsoft.Web.WebView2.Core;
 using Windows.ApplicationModel;
-using Windows.Foundation;
 using Windows.System.Display;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -93,14 +92,6 @@ namespace Ff4eXbox
         async void OnLoaded(object sender, RoutedEventArgs e)
         {
             Step("MainPage loaded");
-            if (App.SplashRect is Rect r && r.Width > 0 && r.Height > 0)
-            {
-                Splash.HorizontalAlignment = HorizontalAlignment.Left;
-                Splash.VerticalAlignment = VerticalAlignment.Top;
-                Splash.Margin = new Thickness(r.X, r.Y, 0, 0);
-                Splash.Width = r.Width;
-                Splash.Height = r.Height;
-            }
 
             // WinUI 2 resources, merged here rather than from App.xaml so that a missing or
             // unloadable Microsoft.UI.Xaml framework package produces a readable message
@@ -126,6 +117,9 @@ namespace Ff4eXbox
                     "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
                     "--autoplay-policy=no-user-gesture-required");
                 App.Log("autoplay policy relaxed");
+                // The browser surface is white until the page paints, which flashed between
+                // the splash and the game. The page's own background (index.html) instead.
+                Environment.SetEnvironmentVariable("WEBVIEW2_DEFAULT_BACKGROUND_COLOR", "FF101018");
             }
             catch (Exception ex)
             {
@@ -245,6 +239,14 @@ namespace Ff4eXbox
             try
             {
                 core.NavigationCompleted += OnNavigationCompleted;
+                core.ContentLoading += (s4, a4) => App.Log("content loading");
+                // The page's loading spinner is static markup with inline CSS, so it is on
+                // screen from here — seconds before `load`, which waits for the bundle.
+                core.DOMContentLoaded += (s5, a5) =>
+                {
+                    App.Log("DOMContentLoaded");
+                    Reveal();
+                };
                 core.ProcessFailed += (s2, a2) =>
                 {
                     Fail("WebView2 PROCESS FAILED: " + a2.ProcessFailedKind);
@@ -541,13 +543,17 @@ namespace Ff4eXbox
             _lastPadJson = null; // new document — re-send controller state to it
             _nextHeartbeat = 0;
             App.SaveLog();
+            Reveal();
+        }
+
+        /// <summary>Take down the splash and hand the screen (and the pad) to the game. Idempotent.</summary>
+        void Reveal()
+        {
+            if (_web == null || _web.Visibility == Visibility.Visible) return;
             StatusScroller.Visibility = Visibility.Collapsed;
             Splash.Visibility = Visibility.Collapsed;
-            if (_web != null)
-            {
-                _web.Visibility = Visibility.Visible;
-                _web.Focus(FocusState.Programmatic);
-            }
+            _web.Visibility = Visibility.Visible;
+            _web.Focus(FocusState.Programmatic);
         }
 
         void OnUnloaded(object sender, RoutedEventArgs e)
