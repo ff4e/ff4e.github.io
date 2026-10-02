@@ -38,6 +38,7 @@ import { type FishSprites } from '../render/enhancedArtSource.js';
 import { MAP_W, MAP_H } from '../render/worldMap.js';
 import { hitZoomedInfoButton } from './mapInfoZoom.js';
 import { hapticTap } from '../platform/haptics.js';
+import { isGamepadKey } from '../platform/gamepad.js';
 import { requiredAsset, requiredJson } from '../render/assetFetch.js';
 import { framesIdle, wake } from './frameClock.js';
 import { depthOfRoom, branchOfRoom } from '../data/world.js';
@@ -1362,6 +1363,8 @@ initRenderLoop({
 //#region Keyboard | anchors: keydown / keyup listeners | Every key binding, including cheats, dev keys and modal handling.
 window.addEventListener('keydown', (e) => {
   wake(); // return to 60fps immediately if the idle-loop throttle had us sleeping
+  // A controller button is read through the Gamepad API (padInput.ts), never as a key.
+  if (isGamepadKey(e)) return;
   // The feedback form owns the keyboard while it is up. It is a modal <dialog>, so the
   // browser already keeps pointer and focus out of the game — but a keydown inside it
   // still bubbles to window. The fish keys are letters (WASD/IJKL, Uovl.pas:744) and

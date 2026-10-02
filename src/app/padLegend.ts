@@ -32,7 +32,7 @@ import { MAP_H, MAP_W } from '../render/worldMap.js';
 
 type Glyph = 'a' | 'b' | 'x' | 'y' | 'lb' | 'rb' | 'menu' | 'view' | 'ls' | 'rs' | 'dpad';
 type Entry = { glyphs: Glyph[]; label: string; region?: number };
-type Context = 'room' | 'cutscene' | 'map' | 'mapinfo' | 'options' | 'help' | 'continue';
+type Context = 'room' | 'cutscene' | 'map' | 'mapinfo' | 'options' | 'help' | 'credits' | 'continue';
 
 const GLYPH_TEXT: Record<Glyph, string> = {
   a: 'A', b: 'B', x: 'X', y: 'Y', lb: 'LB', rb: 'RB', menu: '☰', view: '⧉', ls: 'L', rs: 'R', dpad: '✚',
@@ -70,6 +70,7 @@ export const LEGEND: Record<Context, Entry[]> = {
     { glyphs: ['lb', 'rb'], label: 'Page' },
     { glyphs: ['b'], label: 'Close' },
   ],
+  credits: [{ glyphs: ['b'], label: 'Close' }],
   continue: [{ glyphs: ['a'], label: 'Continue' }],
 };
 
@@ -117,7 +118,8 @@ function context(): Context | null {
   if (!tvUi() || intro.playing || ui.feedback?.isOpen() || tetrisModal() || padConfirmOpen()) return null;
   if (touchOptionsOpen()) return 'options';
   if (ui.helpOpen) return 'help';
-  if (ui.mapOverlay === 'credits' || ui.screen === 'legimage') return 'continue';
+  if (ui.mapOverlay === 'credits') return 'credits';
+  if (ui.screen === 'legimage') return 'continue';
   if (ui.screen === 'map') {
     if (mapLaunching() !== null) return null;
     return ui.mapInfoRoom !== null ? 'mapinfo' : 'map';
