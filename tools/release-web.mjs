@@ -102,7 +102,8 @@ if (dirty) die(`working tree is not clean:\n${dirty}`);
 const branch = sh('git rev-parse --abbrev-ref HEAD');
 if (branch !== 'main') die(`must release from main, not "${branch}".`);
 
-sh('git pull --ff-only', { stdio: 'inherit' });
+// execSync, not sh(): with stdio 'inherit' execSync returns null, and sh() calls .trim() on it.
+execSync('git pull --ff-only', { cwd: REPO, stdio: 'inherit' });
 
 if (!skipGate) {
   console.log('running local test gate (FF_UI_JOBS=4 npm run test:all)…');
@@ -116,7 +117,17 @@ execSync(`npm version ${versionArg} -m "Release v%s"`, { cwd: REPO, stdio: 'inhe
 execSync(`git push origin main && git push origin v${versionArg}`, { cwd: REPO, stdio: 'inherit' });
 
 console.log('watching deploy.yml…');
-const runId = sh(`gh run list --workflow=deploy.yml --limit 1 --json databaseId --jq '.[0].databaseId'`);
+// Wait for the run THIS tag triggered. Taking the newest run straight after the push can return the
+// previous release's finished run, because GitHub has not registered the new one yet.
+const tagSha = sh(`git rev-list -n 1 v${versionArg}`);
+let runId = '';
+for (let i = 0; i < 40 && !runId; i++) {
+  runId = sh(
+    `gh run list --workflow=deploy.yml --limit 10 --json databaseId,headSha --jq '.[] | select(.headSha == "${tagSha}") | .databaseId' | head -1`,
+  );
+  if (!runId) execSync('sleep 3');
+}
+if (!runId) die(`no deploy.yml run appeared for v${versionArg} (${tagSha}) within 2 minutes.`);
 execSync(`gh run watch ${runId} --exit-status`, { cwd: REPO, stdio: 'inherit' });
 
 const live = verifyLive();
