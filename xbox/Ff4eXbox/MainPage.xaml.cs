@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Windows.Gaming.Input;
 using Microsoft.Web.WebView2.Core;
 using Windows.ApplicationModel;
+using Windows.Foundation;
 using Windows.System.Display;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -65,6 +66,7 @@ namespace Ff4eXbox
                 string text;
                 lock (App.Boot) text = App.Boot.ToString();
                 StatusText.Text = text;
+                Splash.Visibility = Visibility.Collapsed;
                 StatusScroller.Visibility = Visibility.Visible;
                 if (_web != null) _web.Visibility = Visibility.Collapsed;
             }
@@ -91,6 +93,14 @@ namespace Ff4eXbox
         async void OnLoaded(object sender, RoutedEventArgs e)
         {
             Step("MainPage loaded");
+            if (App.SplashRect is Rect r && r.Width > 0 && r.Height > 0)
+            {
+                Splash.HorizontalAlignment = HorizontalAlignment.Left;
+                Splash.VerticalAlignment = VerticalAlignment.Top;
+                Splash.Margin = new Thickness(r.X, r.Y, 0, 0);
+                Splash.Width = r.Width;
+                Splash.Height = r.Height;
+            }
 
             // WinUI 2 resources, merged here rather than from App.xaml so that a missing or
             // unloadable Microsoft.UI.Xaml framework package produces a readable message
@@ -532,6 +542,7 @@ namespace Ff4eXbox
             _nextHeartbeat = 0;
             App.SaveLog();
             StatusScroller.Visibility = Visibility.Collapsed;
+            Splash.Visibility = Visibility.Collapsed;
             if (_web != null)
             {
                 _web.Visibility = Visibility.Visible;

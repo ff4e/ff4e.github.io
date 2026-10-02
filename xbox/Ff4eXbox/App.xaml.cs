@@ -1,8 +1,10 @@
 using System;
+using System.Diagnostics;
 using System.Text;
 using Windows.ApplicationModel;
 using Windows.ApplicationModel.Activation;
 using Windows.Storage;
+using Windows.Foundation;
 using Windows.UI.ViewManagement;
 using Windows.UI.Xaml;
 using Windows.UI.Xaml.Controls;
@@ -23,9 +25,19 @@ namespace Ff4eXbox
         /// <summary>Boot trace, shown on screen and written to the app's local folder.</summary>
         public static readonly StringBuilder Boot = new StringBuilder();
 
+        /// <summary>Started with the process, so every boot.log line says when it happened.</summary>
+        static readonly Stopwatch Clock = Stopwatch.StartNew();
+
+        /// <summary>
+        /// Where the system drew the launch splash, in window coordinates, so MainPage can
+        /// keep the same picture in the same place until the game page is up. Null if the
+        /// launch did not report one.
+        /// </summary>
+        public static Rect? SplashRect;
+
         public static void Log(string line)
         {
-            lock (Boot) Boot.AppendLine(line);
+            lock (Boot) Boot.AppendLine(Clock.ElapsedMilliseconds.ToString().PadLeft(6) + " ms  " + line);
         }
 
         /// <summary>
@@ -104,6 +116,14 @@ namespace Ff4eXbox
         protected override void OnLaunched(LaunchActivatedEventArgs e)
         {
             Log("OnLaunched");
+            try
+            {
+                if (e.SplashScreen != null) SplashRect = e.SplashScreen.ImageLocation;
+            }
+            catch (Exception ex)
+            {
+                Log("splash location (non-fatal): " + ex.Message);
+            }
             try
             {
                 // Draw edge to edge on a TV rather than inside the console's default

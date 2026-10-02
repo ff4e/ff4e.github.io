@@ -8,6 +8,17 @@
          code-behind so that a missing/broken WinUI 2 framework package surfaces as a
          readable message on this page instead of killing the app during XAML parse. -->
     <Grid x:Name="RootGrid">
+        <!-- The launch splash, held until the game page has loaded (OnNavigationCompleted).
+             The system takes its own splash down as soon as this window activates, which
+             left seconds of empty screen while the browser engine started. Placed over the
+             system's own rectangle in OnLoaded, so the handover does not move. -->
+        <Image x:Name="Splash"
+               Source="Assets/SplashScreen.png"
+               Stretch="Fill"
+               Width="620"
+               Height="300"
+               HorizontalAlignment="Center"
+               VerticalAlignment="Center" />
         <ScrollViewer x:Name="StatusScroller"
                       VerticalScrollBarVisibility="Auto"
                       Margin="90,60,90,60">

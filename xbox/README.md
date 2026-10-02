@@ -146,7 +146,7 @@ emulated mouse pointer.
 There is no debugger and no DevTools on the console, and the Xbox Device Portal has no log
 viewer, so the app reports on itself into its `LocalState` folder:
 
-- **`boot.log`** — every startup step, and the exact failure if it stops early. The same trace
+- **`boot.log`** — every startup step, timed in ms since launch, and the exact failure if it stops early. The same trace
   is put on screen only when startup fails; a normal launch goes straight to the game.
 - **`pad.log`** — refreshed each second: what `Windows.Gaming.Input` reports, the last raw
   reading, how many snapshots were posted, and what the *page* sees (`pads=`, `rx=`).
