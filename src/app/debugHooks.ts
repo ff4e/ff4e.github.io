@@ -109,6 +109,7 @@ import { helpPageCount } from './helpDom.js';
 import { helpScreens, ui } from './screenState.js';
 import { setSubFontReady, subFontReady } from './stageState.js';
 import { fatalShown, fatalText } from './loadingUi.js';
+import { checkGpuLoss, gpuLossArmed, wipeGpuLossSentinel } from './gpuLossRecovery.js';
 import { loadNoteShown, loadNoteText } from './loadNote.js';
 import { roomAudioPending } from './roomLoad.js';
 import { roomPreloadPending } from './roomPreload.js';
@@ -414,6 +415,9 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     roomPreloadPending: () => roomPreloadPending(),
     fatalShown: () => fatalShown(),
     fatalText: () => fatalText(),
+    // A probe cannot kill the GPU process, so it wipes the sentinel as that loss does.
+    gpuLossArmed: () => gpuLossArmed(),
+    simulateGpuLoss: () => (wipeGpuLossSentinel(), checkGpuLoss()),
     // The SHOULD-HAVE surface (src/app/loadNote.ts). Two hooks for the same reason the
     // fatal screen has two: the wording is chosen from the absent/failed taxonomy.
     loadNoteShown: () => loadNoteShown(),
