@@ -593,7 +593,17 @@
         /* A tap must not select the label, show a magnifier, or bounce the page. */
         -webkit-tap-highlight-color: transparent;
         -webkit-user-select: none; user-select: none;
-        touch-action: manipulation;
+        /* NOT `manipulation`: `touch-action` is the INTERSECTION of an element's own
+           value with every ancestor's up to the nearest scrolling box, not a simple
+           override, so `manipulation` here is normally cut down to `html[data-touch]
+           body`'s `none` anyway. `#phone-menu` breaks that chain — `overflow-y: auto`
+           makes it a scrolling box, which resets the computation to `auto` and lets a
+           `.tbtn` inside it keep its own `manipulation` verbatim. Two fingers on one of
+           these buttons there was free to pinch-zoom the whole WKWebView, and with
+           `scrollEnabled: false` (capacitor.config.ts) there was no way to pan back out.
+           A tap needs none of panning or zoom; `none` keeps it instant with neither, and
+           costs nothing on the buttons that were never inside a scrolling box. */
+        touch-action: none;
       }
       .tbtn svg {
         width: 22px; height: 22px;
@@ -651,6 +661,12 @@
         box-sizing: border-box;
         max-height: calc(100dvh - var(--menu-top) - var(--phone-bottom) - var(--phone-size) - 8px);
         overflow-y: auto; pointer-events: auto;
+        /* `overflow-y: auto` makes this a scrolling box, which resets the touch-action
+           computation (see the note on `.tbtn`). Its own 6px padding and 4px gaps
+           between buttons would otherwise default to `auto` — plain two-finger
+           pinch-zoom, on the one menu that is reachable with the whole options card
+           still a drag away. `pan-y` keeps the scroll this menu can actually need. */
+        touch-action: pan-y;
       }
       #phone-menu .tbtn { min-width: 100px; min-height: 44px; font-size: 13px; }
       /* Beside the portrait housing, keep 24px for the curved glass and a 214px
@@ -744,7 +760,12 @@
       .topts-row output { font: 600 13px/1.4 system-ui, sans-serif; color: #6cc; min-width: 2.2em; text-align: right; }
       .topts-row input[type='range'] {
         grid-column: 1 / -1;
-        width: 100%; height: 34px; accent-color: #6cc; touch-action: manipulation;
+        /* `pan-y`, matching `html[data-touch] .overlay`'s own value below: `touch-action`
+           is the INTERSECTION of an element's value with its ancestors' (see the note on
+           `.tbtn`), so this was already cut down to `pan-y` and was never a pinch-zoom
+           leak. Spelled out explicitly rather than left as `manipulation` so it reads as
+           the intended lock rather than an accident of the ancestor chain. */
+        width: 100%; height: 34px; accent-color: #6cc; touch-action: pan-y;
       }
       .topts-subs { border: 1px solid #35555f; border-radius: 10px; padding: 10px 12px; margin: 0; }
       .topts-subs legend { font: 600 13px/1 system-ui, sans-serif; padding: 0 6px; }
@@ -752,7 +773,9 @@
       .topts-subs label {
         display: flex; align-items: center; gap: 6px;
         min-height: 40px; font: 14px/1 system-ui, sans-serif;
-        -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+        /* `pan-y`, not left as `manipulation` — see the note on the slider above. Spelled
+           out so it reads as the intended lock rather than an accident of the chain. */
+        -webkit-tap-highlight-color: transparent; touch-action: pan-y;
       }
       .topts-subs input { width: 20px; height: 20px; accent-color: #6cc; }
       .topts-buttons { display: flex; gap: 10px; }
@@ -760,7 +783,8 @@
         flex: 1 1 0; min-height: 46px;
         color: #bdd; background: #18262e; border: 1px solid #35555f; border-radius: 10px;
         font: 600 14px/1 system-ui, sans-serif;
-        -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+        /* `pan-y`, not left as `manipulation` — see the note on the slider above. */
+        -webkit-tap-highlight-color: transparent; touch-action: pan-y;
       }
       .topts-buttons a { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; }
       .topts-buttons button:active, .topts-buttons a:active { background: #24414c; border-color: #6cc; }
