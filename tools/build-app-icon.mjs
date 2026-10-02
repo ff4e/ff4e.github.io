@@ -1,9 +1,11 @@
-// Build the iOS app icon and launch image from a vector reconstruction of the game's
-// title emblem, and write them straight into the Xcode asset catalog.
+// Build the iOS app icon and launch image, and the Xbox package's tiles and splash, from a
+// vector reconstruction of the game's title emblem, and write them straight into the Xcode
+// asset catalog and xbox/Ff4eXbox/Assets.
 //
 // Outputs (all committed, so a normal build needs neither Playwright nor this script):
 //   ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png   1024x1024, opaque
 //   ios/App/App/Assets.xcassets/Splash.imageset/splash-2732x2732.png    2732x2732, opaque
+//   xbox/Ff4eXbox/Assets/*.png    the sizes Package.appxmanifest names, opaque
 //
 // ── Why a reconstruction rather than an image ─────────────────────────────────
 // The emblem exists in this repo only as artwork: `public/cover.webp` carries it inside a
@@ -51,6 +53,7 @@ const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const CATALOG = join(ROOT, 'ios', 'App', 'App', 'Assets.xcassets');
 const ICON = join(CATALOG, 'AppIcon.appiconset', 'AppIcon-512@2x.png');
 const SPLASH = join(CATALOG, 'Splash.imageset');
+const XBOX = join(ROOT, 'xbox', 'Ff4eXbox', 'Assets');
 
 // The mark's colour ramp, light to dark. Gold, sampled off the emblem capture: brightest at
 // the top of the ring (#fff37e), through #ffd119 on the flanks, to #e6a408 underneath.
@@ -167,12 +170,12 @@ const SEA_DEF = (seaR, seaY) => `
 
 // `seaR` is the reach of the background glow as a percentage of the canvas, `seaY` its
 // centre. The glow runs to the corners from above, the way light falls underwater.
-const iconDoc = (side, emblemSize, seaR, seaY) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}">
+const iconDoc = (w, h, emblemSize, seaR, seaY) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">
      <defs>${MARK_DEF}${SEA_DEF(seaR, seaY)}</defs>
-     <rect width="${side}" height="${side}" fill="#03070f"/>
-     <rect width="${side}" height="${side}" fill="url(#sea)"/>
-     ${emblem(emblemSize, side / 2, side / 2)}
+     <rect width="${w}" height="${h}" fill="#03070f"/>
+     <rect width="${w}" height="${h}" fill="url(#sea)"/>
+     ${emblem(emblemSize, w / 2, h / 2)}
    </svg>`;
 
 // ── The launch image ──────────────────────────────────────────────────────────
@@ -202,12 +205,26 @@ const iconDoc = (side, emblemSize, seaR, seaY) =>
 // screen's short side, either way up.
 const SPLASH_BG = '#101018'; // index.html: `body { background: #101018 }`
 
-const splashDoc = (side) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${side} ${side}">
+const splashDoc = (w, h, emblemSize) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}">
      <defs>${MARK_DEF}</defs>
-     <rect width="${side}" height="${side}" fill="${SPLASH_BG}"/>
-     ${emblem(420, side / 2, side / 2)}
+     <rect width="${w}" height="${h}" fill="${SPLASH_BG}"/>
+     ${emblem(emblemSize, w / 2, h / 2)}
    </svg>`;
+
+// ── The Xbox package ──────────────────────────────────────────────────────────
+// The same two pictures at the sizes Package.appxmanifest names. The tiles are the icon,
+// its mark kept at the icon's share of the SHORT side (830/1024) so the wide tile is the
+// square one with more sea either side. The splash is the launch image: the system draws it
+// centred on the manifest's BackgroundColor, which is SPLASH_BG, so the edge is invisible;
+// the mark takes two-thirds of its height, as the art it replaces did.
+const ICON_SHARE = 830 / 1024;
+const tile = (name, w, h) => ({
+  path: join(XBOX, name),
+  w,
+  h,
+  svg: () => iconDoc(w, h, Math.min(w, h) * ICON_SHARE, 78, 34),
+});
 
 // One file serves every scale: the imageset is single-scale, because three copies of the
 // same square would be three copies of the same bytes.
@@ -216,27 +233,40 @@ const splashDoc = (side) =>
 const OUTPUTS = [
   {
     path: ICON,
-    side: 1024,
-    svg: (side) => iconDoc(side, 830, 78, 34),
+    w: 1024,
+    h: 1024,
+    svg: () => iconDoc(1024, 1024, 830, 78, 34),
   },
   {
     path: join(SPLASH, 'splash-2732x2732.png'),
-    side: 2732,
-    svg: splashDoc,
+    w: 2732,
+    h: 2732,
+    svg: () => splashDoc(2732, 2732, 420),
+  },
+  tile('Square44x44Logo.png', 44, 44),
+  tile('StoreLogo.png', 50, 50),
+  tile('Square150x150Logo.png', 150, 150),
+  tile('Square310x310Logo.png', 310, 310),
+  tile('Wide310x150Logo.png', 310, 150),
+  {
+    path: join(XBOX, 'SplashScreen.png'),
+    w: 620,
+    h: 300,
+    svg: () => splashDoc(620, 300, 190),
   },
 ];
 
 const browser = await chromium.launch();
 const page = await browser.newPage({ deviceScaleFactor: 1 });
 console.log(`emblem ${GROW}x, tail clears the ring by ${tailClearance().toFixed(2)}`);
-for (const { path, side, svg } of OUTPUTS) {
-  await page.setViewportSize({ width: side, height: side });
+for (const { path, w, h, svg } of OUTPUTS) {
+  await page.setViewportSize({ width: w, height: h });
   await page.setContent(
-    `<style>html,body{margin:0;padding:0;background:#000}svg{display:block;width:${side}px;height:${side}px}</style>` +
-      svg(side),
+    `<style>html,body{margin:0;padding:0;background:#000}svg{display:block;width:${w}px;height:${h}px}</style>` +
+      svg(),
   );
   // No alpha anywhere: App Store Connect rejects an icon with a transparent channel.
   writeFileSync(path, await page.screenshot({ omitBackground: false, type: 'png' }));
-  console.log(`wrote ${relative(ROOT, path)} (${side}x${side})`);
+  console.log(`wrote ${relative(ROOT, path)} (${w}x${h})`);
 }
 await browser.close();
