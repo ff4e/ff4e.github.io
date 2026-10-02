@@ -1946,10 +1946,13 @@ initDevBar({
   },
 });
 
-//#region Boot | anchors: initBoot, runBoot | Hands `boot.ts` the one name it needs, then runs the boot sequence. The sequence itself — fonts, graphics, the save store, the sound packages, room 7, the first frame — is in that module.
+//#region Boot | anchors: initBoot, runBoot | Hands `boot.ts` the two names it needs, then runs the boot sequence. The sequence itself — fonts, graphics, the save store, the sound packages, room 7, the first frame — is in that module.
 initBoot({
   get setInfo() {
     return setInfo;
+  },
+  get enterRoom() {
+    return enterRoom;
   },
 });
 await runBoot();

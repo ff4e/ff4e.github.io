@@ -103,7 +103,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // map's corners, room nodes and record-panel icons are pixels, and only this hit-test
   // knows a press landed on one — or that it was inert (Exit, Replay with no record) and
   // must stay silent. Moving the test out would mean a second copy of the hit-test.
-  ['src/app/main.ts', 2275],
+  //
+  // 2 275 -> 2 278 for one getter on boot's host: `enterRoom`, which a GPU-loss recovery
+  // reload needs in order to put the player back into their room (gpuLossRecovery.ts).
+  // Room entry lives here and nowhere else; the recovery itself is in its own modules.
+  ['src/app/main.ts', 2278],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
@@ -170,7 +174,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // Two lines wire the native-menu preview hook to its separate controller, allowing
   // production-bundle UI probes without pretending a browser is a Capacitor host.
   // Two more lines give the active-fish controller the same explicit preview seam.
-  ['src/app/debugHooks.ts', 1664],
+  // Four for the GPU-loss recovery: `gpuLossArmed` and `simulateGpuLoss`, which wipes the
+  // sentinel as a lost GPU process does, since no probe can kill the real one.
+  ['src/app/debugHooks.ts', 1668],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is

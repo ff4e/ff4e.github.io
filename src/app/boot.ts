@@ -17,6 +17,7 @@ import { beginMapArt, curNum, mapArtHolding } from './art.js';
 import { audio } from './audioEngine.js';
 import { loadingEl } from './dom.js';
 import { initFeedback } from './feedback.js';
+import { initGpuLossRecovery, resumeAfterGpuLoss, takeGpuLossResume } from './gpuLossRecovery.js';
 import { startFrames } from './frameClock.js';
 import { engine, setFont } from './gameState.js';
 import { maybeShowWebglNote } from './loadingUi.js';
@@ -44,11 +45,13 @@ import { webgl2Available } from '../render/glScreen.js';
 import { WorldMap } from '../render/worldMap.js';
 
 /**
- * The one name this module needs from `main.ts`: the info line under the room, which
- * boot refreshes once room 7 is up.
+ * The two names this module needs from `main.ts`: the info line under the room, which
+ * boot refreshes once room 7 is up, and room entry, for putting the player back into
+ * their room after a GPU-loss reload (gpuLossRecovery.ts).
  */
 export interface BootHost {
   readonly setInfo: () => void;
+  readonly enterRoom: (num: number) => Promise<void>;
 }
 
 let host!: BootHost;
@@ -175,7 +178,13 @@ export async function runBoot(): Promise<void> {
   // flip the persisted flag so later runs go straight to the map (the original's
   // START→NO first-run gate, UMain.pas:677-682). The intro is always replayable
   // from the map's top-left corner.
-  if (settings.introSeen) {
+  //
+  // Unless this boot is a recovery reload: then the player goes straight back into the
+  // room they were playing, ahead of both (gpuLossRecovery.ts).
+  const resume = takeGpuLossResume();
+  if (resume) {
+    resumeAfterGpuLoss(resume, host.enterRoom);
+  } else if (settings.introSeen) {
     ui.screen = 'map'; // the game opens on the world map
     ui.mapRevealStart = performance.now(); // animate the map in from the start
     // Start the `ai` tier's map art HERE rather than leaving it to the loop's first
@@ -191,6 +200,7 @@ export async function runBoot(): Promise<void> {
   // Boot complete — hide the loading overlay, stop treating errors as fatal, and
   // (if applicable) surface the software-renderer note.
   setBooted(true);
+  initGpuLossRecovery();
   console.info(`Fish Fillets 4ever v${__APP_VERSION__} (${__BUILD_HASH__} · ${__BUILD_DATE__})`);
   initAnalytics(); // web analytics (platform layer): no-op in dev / without a token
   // The feedback form. Reads the live game state only when the player opens it — there is

@@ -143,6 +143,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
 | `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
 | `glPlumbing.ts` | 4.2 k | The per-tier art sources and the two WebGL compositors. |
+| `gpuLossRecovery.ts` | | Detecting that the browser's GPU process was lost, which wipes every decoded image and canvas and leaves the game black, then reloading and putting the player back into their room. |
+| `gpuLoss.ts` | | The recovery's pure decisions: what a wiped sentinel looks like, the reload-loop cooldown, and the sessionStorage hand-over. |
 | `audioEngine.ts` | 0.3 k | Who owns the `AudioEngine`. |
 | `renderSettings.ts` | 2.0 k | What the game is drawn WITH — the four persisted choices: art tier, backend, idle-FPS saver, developer pane. |
 | `aiFilter.ts` | 2.5 k | The AI tier's colour look: three tunable channels written as CSS custom properties, clamped and persisted. |
