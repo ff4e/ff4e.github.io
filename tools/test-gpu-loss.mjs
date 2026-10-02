@@ -59,7 +59,12 @@ await withApp(async ({ p, expect }) => {
 
   // The loss.
   const reloaded = p.waitForEvent('load', { timeout: budget(5000) });
-  expect(await p.evaluate(() => window.__ff.simulateGpuLoss()), 'a wiped sentinel is detected');
+  // The check reloads the page it was called from, so under load the navigation can
+  // overtake the reply. A destroyed context is then the answer: the page did act.
+  const detected = await p
+    .evaluate(() => window.__ff.simulateGpuLoss())
+    .catch((e) => /context was destroyed|navigation/i.test(String(e?.message ?? e)));
+  expect(detected, 'a wiped sentinel is detected');
   await reloaded;
   await appReady(p);
   expect(await p.evaluate(() => window.__notReloaded === undefined), 'the page reloaded');
@@ -78,22 +83,35 @@ await withApp(async ({ p, expect }) => {
     pos: window.__ff.posHash(),
     active: window.__ff.state()?.active,
     left: sessionStorage.getItem('ff.gpuLossResume'),
+    at: sessionStorage.getItem('ff.gpuLossAt'),
   }));
   expect(after.room === KOSTE, `in room ${KOSTE} (${after.room})`);
   expect(after.pos === before.pos, 'with every object where it was');
   expect(after.undo === before.undo, `with the undo history (${after.undo} of ${before.undo})`);
   expect(after.active === 'big', 'with the same fish selected');
   expect(after.left === null, 'the hand-over is used once and removed');
+  expect(after.at !== null, 'the recovery is timestamped for the cooldown');
 
   // A second loss right after a recovery is not reloaded again: that is what keeps a
-  // loss that recurs from turning into a reload loop.
+  // loss that recurs from turning into a reload loop. The timestamp is renewed here, not
+  // trusted from the recovery above: under load the reload and resume alone can outlast
+  // the 30 s cooldown, and this step would then reload for a reason that is not a bug.
   await p.evaluate(() => {
     window.__notReloaded = true;
+    sessionStorage.setItem('ff.gpuLossAt', String(Date.now()));
   });
   expect(
     (await p.evaluate(() => window.__ff.simulateGpuLoss())) === false,
     'a second loss inside the cooldown is not acted on',
   );
-  await p.waitForTimeout(500);
+  // ...and it leaves the sentinel repainted and armed, rather than disarmed for the rest
+  // of the session: with the cooldown over, an ordinary return must find it intact. Had
+  // it stayed wiped, this return would reload.
+  await p.evaluate(() => {
+    sessionStorage.setItem('ff.gpuLossAt', String(Date.now() - 60_000));
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await p.waitForTimeout(1500);
   expect(await p.evaluate(() => window.__notReloaded === true), 'and the page stays');
+  expect(await p.evaluate(() => window.__ff.gpuLossArmed()), 'with the sentinel still armed');
 });

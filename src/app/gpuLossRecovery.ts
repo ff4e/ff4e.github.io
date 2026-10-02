@@ -29,7 +29,8 @@
  * reload lands on the map, which is where it would have gone anyway.
  *
  * A loss that recurs within `RECOVERY_COOLDOWN_MS` of the last recovery is logged rather
- * than reloaded again, so nothing here can turn into a reload loop.
+ * than reloaded again, so nothing here can turn into a reload loop. The sentinel is
+ * repainted and stays armed, so a loss after the cooldown is recovered as usual.
  *
  * Module scope is side-effect-free; `initGpuLossRecovery()` is called by boot.
  */
@@ -55,6 +56,11 @@ import type { ScriptSnapshot } from '../core/script.js';
 let sentinel: CanvasRenderingContext2D | null = null;
 let reloading = false;
 
+function paintSentinel(g: CanvasRenderingContext2D): void {
+  g.fillStyle = '#123456';
+  g.fillRect(0, 0, 1, 1);
+}
+
 function readSentinel(g: CanvasRenderingContext2D): Uint8ClampedArray | null {
   try {
     return g.getImageData(0, 0, 1, 1).data;
@@ -70,8 +76,7 @@ export function initGpuLossRecovery(): void {
   c.height = 1;
   const g = c.getContext('2d');
   if (!g) return;
-  g.fillStyle = '#123456';
-  g.fillRect(0, 0, 1, 1);
+  paintSentinel(g);
   // A browser whose canvas cannot be read back faithfully right now never will be, and
   // acting on its reads would reload for nothing. Such a page simply goes unwatched.
   if (readSentinel(g)?.[3] !== 255) return;
@@ -114,21 +119,42 @@ export function checkGpuLoss(): boolean {
   const now = Date.now();
   if (!mayRecover(now, lastAt)) {
     console.warn('[ff] the GPU process was lost again right after a recovery; not reloading a second time');
-    sentinel = null;
+    // Repainted rather than disarmed: the cooldown is what stops a loop, and a later
+    // loss, once it has passed, deserves the same recovery as the first.
+    paintSentinel(sentinel);
     return false;
   }
   try {
     sessionStorage.setItem(RECOVERED_AT_KEY, String(now));
-    const resume = captureResume();
-    if (resume) sessionStorage.setItem(RESUME_KEY, encodeResume(resume));
-    else sessionStorage.removeItem(RESUME_KEY);
   } catch {
-    /* storage unavailable: still reload, the picture matters more than the attempt */
+    /* storage unavailable: nothing to guard a loop with, but one reload is still right */
   }
+  storeResume(captureResume());
   console.warn('[ff] the GPU process was lost and took the decoded art with it; reloading');
   reloading = true;
   location.reload();
   return true;
+}
+
+/**
+ * Write the hand-over. If it will not fit, the undo history is what yields, as in
+ * `saveGame`: losing the history costs the player their undo, losing the hand-over costs
+ * them the room. With no storage at all the reload still happens, onto the map.
+ */
+function storeResume(resume: GpuLossResume | null): void {
+  try {
+    if (!resume) {
+      sessionStorage.removeItem(RESUME_KEY);
+      return;
+    }
+    try {
+      sessionStorage.setItem(RESUME_KEY, encodeResume(resume));
+    } catch {
+      sessionStorage.setItem(RESUME_KEY, encodeResume({ ...resume, undo: null }));
+    }
+  } catch {
+    /* storage unavailable */
+  }
 }
 
 /**
