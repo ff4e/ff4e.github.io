@@ -271,7 +271,12 @@ namespace Ff4eXbox
                     "if(d&&d.t==='pad'){window.__ffPad=d;window.__ffPadRx=(window.__ffPadRx||0)+1;" +
                     "window.__ffPadSeen=window.__ffPadSeen||{};" +
                     "for(var i=0;i<d.buttons.length;i++){if(d.buttons[i]>0.5)window.__ffPadSeen[i]=1;}}" +
-                    "});}");
+                    "});}" +
+                    // Every distinct keydown the PAGE gets, for pad.log: CoreWindow never
+                    // sees what the focused WebView2 consumes, so this is the only way to
+                    // tell whether controller buttons also arrive as keys (VK_GAMEPAD_*).
+                    "window.__ffKeysSeen={};window.addEventListener('keydown',function(e){" +
+                    "window.__ffKeysSeen[e.key+'/'+e.code+'/'+e.keyCode]=1;},true);");
                 t.Completed = (a, b2) => App.Log("pad receiver injected");
             }
             catch (Exception ex)
@@ -378,6 +383,7 @@ namespace Ff4eXbox
                             "btn=gp[i].buttons.map(function(b){return b.pressed?1:0}).join('');" +
                             "ax=gp[i].axes.map(function(a){return a.toFixed(2)}).join(',');}}}" +
                             "var seen=Object.keys(window.__ffPadSeen||{}).join(',')||'none';" +
+                            "var keys=Object.keys(window.__ffKeysSeen||{}).join(' ')||'none';" +
                             "var sp=document.getElementById('intro-start');" +
                             "var il=document.getElementById('intro-layer');" +
                             "var po=document.getElementById('touchopts');" +
@@ -385,7 +391,7 @@ namespace Ff4eXbox
                             "+' seenBtns='+seen" +
                             "+' splash='+(sp&&!sp.hidden?1:0)+' introLayer='+(il&&!il.hidden?1:0)" +
                             "+' options='+(po&&!po.hidden?1:0)" +
-                            "+' btns='+btn+' axes='+ax;" +
+                            "+' btns='+btn+' axes='+ax+' keys='+keys;" +
                             "}catch(e){return 'probe error: '+e.message}})()");
                         sb.AppendLine("page                 = " + probe);
                     }
