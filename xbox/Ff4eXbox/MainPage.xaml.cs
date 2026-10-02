@@ -74,7 +74,15 @@ namespace Ff4eXbox
             }
         }
 
-        void Step(string s)
+        /// <summary>
+        /// A boot milestone: into boot.log only. The trace used to scroll past on screen on
+        /// every launch until the game page loaded; now the player sees it only when
+        /// something goes wrong (<see cref="Fail"/>, and App's unhandled-exception handler).
+        /// </summary>
+        void Step(string s) => App.Log(s);
+
+        /// <summary>A fatal boot failure: log it and put the whole trace on screen.</summary>
+        void Fail(string s)
         {
             App.Log(s);
             ShowBootLog();
@@ -135,11 +143,14 @@ namespace Ff4eXbox
                     if (c != null) Start(c, "initialized event");
                 };
                 RootGrid.Children.Insert(0, _web);
+                // Hidden until the game page has loaded (OnNavigationCompleted), so the
+                // player never sees an empty browser surface.
+                _web.Visibility = Visibility.Collapsed;
                 Step("WebView2 control created");
             }
             catch (Exception ex)
             {
-                Step("Creating the WebView2 control FAILED:\n" + ex);
+                Fail("Creating the WebView2 control FAILED:\n" + ex);
                 App.SaveLog();
                 return;
             }
@@ -158,7 +169,7 @@ namespace Ff4eXbox
             {
                 // Most likely on a console: the WebView2 runtime is missing because the
                 // Xbox OS predates the 2310 (October 2023) update.
-                Step(
+                Fail(
                     "Starting the browser engine (WebView2) FAILED.\n" +
                     "Update the console to Xbox OS 2310 (October 2023) or newer.\n\n" + ex);
                 App.SaveLog();
@@ -177,7 +188,7 @@ namespace Ff4eXbox
             }
             if (!_started)
             {
-                Step("CoreWebView2 never became available — cannot map the game folder.");
+                Fail("CoreWebView2 never became available — cannot map the game folder.");
                 App.SaveLog();
             }
         }
@@ -216,7 +227,7 @@ namespace Ff4eXbox
             }
             catch (Exception ex)
             {
-                Step("Mapping the packaged game folder FAILED:\n" + ex);
+                Fail("Mapping the packaged game folder FAILED:\n" + ex);
                 App.SaveLog();
                 return;
             }
@@ -226,7 +237,7 @@ namespace Ff4eXbox
                 core.NavigationCompleted += OnNavigationCompleted;
                 core.ProcessFailed += (s2, a2) =>
                 {
-                    Step("WebView2 PROCESS FAILED: " + a2.ProcessFailedKind);
+                    Fail("WebView2 PROCESS FAILED: " + a2.ProcessFailedKind);
                     App.SaveLog();
                     // boot.log is rewritten on every launch, so a crash followed by a
                     // relaunch erases its own evidence. Append this to a file that is
@@ -294,7 +305,7 @@ namespace Ff4eXbox
             }
             catch (Exception ex)
             {
-                Step("Navigation FAILED: " + ex);
+                Fail("Navigation FAILED: " + ex);
                 App.SaveLog();
             }
         }
@@ -511,7 +522,7 @@ namespace Ff4eXbox
         {
             if (!args.IsSuccess)
             {
-                Step("Loading the game files FAILED. Status: " + args.WebErrorStatus);
+                Fail("Loading the game files FAILED. Status: " + args.WebErrorStatus);
                 App.SaveLog();
                 return;
             }
