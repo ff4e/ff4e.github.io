@@ -1,5 +1,25 @@
-import { describe, expect, it } from 'vitest';
-import { isBrowserPlayPaused } from '../src/platform/browserAvailability.js';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  browserPlayOverridden,
+  isBrowserPlayPaused,
+  setBrowserPlayOverride,
+} from '../src/platform/browserAvailability.js';
+
+/** A localStorage good enough for this module: it only ever gets/sets one key. */
+function fakeStorage(): Storage & { map: Map<string, string> } {
+  const map = new Map<string, string>();
+  return {
+    map,
+    getItem: (k: string) => map.get(k) ?? null,
+    setItem: (k: string, v: string) => void map.set(k, v),
+    removeItem: (k: string) => void map.delete(k),
+    clear: () => map.clear(),
+    key: () => null,
+    get length() {
+      return map.size;
+    },
+  } as Storage & { map: Map<string, string> };
+}
 
 const devices = [
   { name: 'iPhone Safari', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1', platform: 'iPhone', maxTouchPoints: 5, paused: true },
@@ -24,5 +44,28 @@ describe('temporary iPhone/iPad browser availability', () => {
 
   it.each(devices)('never blocks $name in the native app', (device) => {
     expect(isBrowserPlayPaused(device, 'capacitor:')).toBe(false);
+  });
+});
+
+describe('continuing to the web version anyway', () => {
+  afterEach(() => {
+    delete (globalThis as { localStorage?: Storage }).localStorage;
+  });
+
+  it('is not overridden without storage', () => {
+    expect(browserPlayOverridden()).toBe(false);
+    expect(() => setBrowserPlayOverride()).not.toThrow();
+  });
+
+  it('is not overridden until a visitor chooses to be', () => {
+    (globalThis as { localStorage?: Storage }).localStorage = fakeStorage();
+    expect(browserPlayOverridden()).toBe(false);
+  });
+
+  it('is remembered once set, across repeated reads', () => {
+    (globalThis as { localStorage?: Storage }).localStorage = fakeStorage();
+    setBrowserPlayOverride();
+    expect(browserPlayOverridden()).toBe(true);
+    expect(browserPlayOverridden()).toBe(true);
   });
 });

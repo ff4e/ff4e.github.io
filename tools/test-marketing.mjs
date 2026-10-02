@@ -32,8 +32,6 @@ async function layout(page, name) {
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
     `${name}: no horizontal overflow`);
   assert.equal(await page.locator('h1').count(), 1, `${name}: one main heading`);
-  assert.equal(await page.locator('a[href*="apps.apple.com"]').count(), 0,
-    `${name}: no premature App Store download link`);
   if (evidence) {
     mkdirSync(evidence, { recursive: true });
     await page.screenshot({ path: join(evidence, `${name}.png`), fullPage: true });
@@ -48,8 +46,9 @@ try {
   await page.locator('[data-browser-play]').first().waitFor({ state: 'visible' });
   await layout(page, 'desktop');
   assert(!requests.some(gameRequest), 'the marketing page does not load the game');
-  assert(await page.locator('#browser-paused').isHidden(), 'desktop has no blocked notice');
-  assert.match(await page.locator('#ios').innerText(), /Currently in testing/);
+  assert(await page.locator('#browser-continue-anyway-row').isHidden(), 'desktop has no escape-hatch link');
+  assert.equal(await page.locator('#ios a[href*="apps.apple.com/us/app/fish-fillets-forever/id6812738745"]').count(), 1,
+    'App Store download link present');
   assert.match(await page.locator('#project').innerText(), /TypeScript.*WebGL/);
   assert.equal(await page.locator('#project a').getAttribute('href'), 'https://github.com/ff4e/ff4e.github.io');
   assert.equal((await context.request.get(`${base}/privacy.html`)).status(), 200);
@@ -64,6 +63,35 @@ try {
   assert.equal(await page.locator('#about-link').evaluate((el) => el.hidden), false);
   assert(requests.some(gameRequest), 'positive control: game request detector sees an actual boot');
   await context.close();
+
+  {
+    // A Czech-language visitor is sent to the translation before anything paints.
+    const { context, page } = await pageFor({ locale: 'cs-CZ', viewport: { width: 1440, height: 1000 } });
+    await page.goto(`${base}/about.html#browser`);
+    await page.waitForURL(`${base}/about.cs.html#browser`);
+    await layout(page, 'czech-locale-redirect');
+    assert.match(await page.locator('#project').innerText(), /TypeScript.*WebGL/);
+    assert.equal(await page.locator('#ios a[href*="apps.apple.com/us/app/fish-fillets-forever/id6812738745"]').count(), 1,
+      'Czech page keeps the same App Store link');
+    // Switching back to English is remembered: a later visit to the English URL stays put.
+    await page.locator('[data-lang-switch="en"]').click();
+    await page.waitForURL(`${base}/about.html`);
+    await page.goto(`${base}/about.html`);
+    assert.equal(new URL(page.url()).pathname, '/about.html', 'the English choice persists across a later visit');
+    await context.close();
+  }
+
+  {
+    // The reverse switch (English page -> Czech) also works and is remembered.
+    const { context, page } = await pageFor({ locale: 'en-US', viewport: { width: 1440, height: 1000 } });
+    await page.goto(`${base}/about.html`);
+    await page.locator('[data-lang-switch="cs"]').click();
+    await page.waitForURL(`${base}/about.cs.html`);
+    await page.goto(`${base}/about.html`);
+    await page.waitForURL(`${base}/about.cs.html`);
+    assert.equal(new URL(page.url()).pathname, '/about.cs.html', 'the Czech choice persists across a later visit');
+    await context.close();
+  }
 
   for (const [name, userAgent, width, height, platform] of [
     ['iphone', iphone, 390, 844, 'iPhone'],
@@ -85,16 +113,39 @@ try {
     // Old bookmarks and touch overrides must not bypass the availability policy.
     await page.goto(`${base}/?touch=on#saved-room`);
     await page.waitForURL(`${base}/about.html#browser`);
-    await page.locator('#browser-paused').waitFor({ state: 'visible' });
-    assert.match(await page.locator('#browser-paused').innerText(), /temporarily unavailable/);
+    await page.locator('h1').waitFor({ state: 'visible' });
     assert.equal(await page.locator('[data-browser-play]:visible').count(), 0);
+    assert.equal(await page.locator('#browser-continue-anyway:visible').count(), 1,
+      `${name}: continue-anyway escape hatch is visible`);
     assert.equal(await page.evaluate(() => typeof window.__ff), 'undefined');
     assert.deepEqual(await page.evaluate(() => ({ ...localStorage })),
       { 'ff.availability-sentinel': 'keep-existing-save' }, `${name}: saves are untouched`);
     await layout(page, name);
     await page.reload();
-    await page.locator('#browser-paused').waitFor({ state: 'visible' });
+    await page.locator('h1').waitFor({ state: 'visible' });
     assert(!requests.some(gameRequest), `${name}: no game bundle, art, audio or save boot`);
+    await context.close();
+  }
+
+  {
+    // The one escape hatch: a deliberate click reaches the game, and is remembered.
+    const { context, page } = await pageFor({
+      userAgent: iphone, viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true,
+    });
+    await context.addInitScript((platform) => {
+      Object.defineProperty(navigator, 'platform', { value: platform, configurable: true });
+      Object.defineProperty(navigator, 'maxTouchPoints', { value: 5, configurable: true });
+    }, 'iPhone');
+    await page.goto(`${base}/about.html#browser`);
+    await page.locator('#browser-continue-anyway').waitFor({ state: 'visible' });
+    await page.locator('#browser-continue-anyway').click();
+    await appReady(page);
+    assert.equal(new URL(page.url()).pathname, '/', 'continue-anyway reaches the game');
+    assert.equal(await page.evaluate(() => localStorage.getItem('ff.browserPlayOverride')), '1');
+    // The choice outlives this click: a later visit boots the game without being redirected.
+    await page.goto(`${base}/`);
+    await appReady(page);
+    assert.equal(new URL(page.url()).pathname, '/', 'the override persists across a later visit');
     await context.close();
   }
 
@@ -118,7 +169,7 @@ try {
   await noJs.page.goto(`${base}/about.html`);
   assert(await noJs.page.locator('h1').isVisible(), 'no-JS project content stays readable');
   assert(await noJs.page.locator('noscript').isVisible(), 'no-JS visitor gets an honest requirement');
-  assert.match(await noJs.page.locator('#ios').innerText(), /Not yet available on the App Store/);
+  assert.match(await noJs.page.locator('#ios').innerText(), /Download on the App Store/);
   await layout(noJs.page, 'no-javascript-narrow');
   await noJs.context.close();
   assert.deepEqual(errors, [], 'no browser errors');

@@ -1,7 +1,7 @@
-import { isBrowserPlayPaused } from './platform/browserAvailability.js';
+import { browserPlayOverridden, isBrowserPlayPaused } from './platform/browserAvailability.js';
 import { isNativeHost } from './platform/nativeHost.js';
 
-if (isBrowserPlayPaused(navigator, location.protocol)) {
+if (isBrowserPlayPaused(navigator, location.protocol) && !browserPlayOverridden()) {
   location.replace('/about.html#browser');
 } else {
   const aboutLink = document.getElementById('about-link');

@@ -78,7 +78,7 @@ export default defineConfig({
   build: {
     copyPublicDir: false,
     target: 'es2022',
-    rollupOptions: { input: { game: 'index.html', about: 'about.html' } },
+    rollupOptions: { input: { game: 'index.html', about: 'about.html', aboutCs: 'about.cs.html' } },
   },
   // The unit suite runs against a seeded Math.random so a failure always means a real
   // defect, never a 1-in-100 draw (see test/rng.ts). The game itself is untouched.

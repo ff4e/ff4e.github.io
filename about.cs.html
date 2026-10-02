@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Locale redirect: if this visitor has deliberately switched to English before,
+         honour that choice instead of showing the Czech translation again. -->
+    <script>
+      (function () {
+        try {
+          if (localStorage.getItem('ff.aboutLang') === 'en') location.replace('/about.html' + location.hash);
+        } catch (e) {}
+      })();
+    </script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>O hře Fish Fillets 4ever</title>
+    <meta name="description" content="Dvě mluvící ryby, 72 podvodních hádanek. Věrný port hry Fish Fillets z roku 1998: hrajte v prohlížeči na počítači, nebo na iPhonu a iPadu z App Store." />
+    <meta name="theme-color" content="#0b1c25" />
+    <link rel="canonical" href="https://ff4e.github.io/about.cs.html" />
+    <link rel="alternate" hreflang="en" href="https://ff4e.github.io/about.html" />
+    <link rel="alternate" hreflang="cs" href="https://ff4e.github.io/about.cs.html" />
+    <link rel="alternate" hreflang="x-default" href="https://ff4e.github.io/about.html" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Fish Fillets 4ever" />
+    <meta property="og:title" content="Fish Fillets 4ever — dvě ryby, jedna cesta ven" />
+    <meta property="og:description" content="Objevte znovu 72 podvodních hádanek ve věrném portu klasiky z roku 1998. Hrajte v prohlížeči na počítači, nebo na iPhonu a iPadu z App Store." />
+    <meta property="og:url" content="https://ff4e.github.io/about.cs.html" />
+    <meta property="og:image" content="https://ff4e.github.io/og-card.jpg" />
+    <meta property="og:image:alt" content="Fish Fillets: dvě ryby v podvodní hádance, vedle původního ovládacího panelu." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="stylesheet" href="/src/site/about.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Přeskočit na obsah</a>
+
+    <main id="main" class="wrap">
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="title-row">
+          <img class="emblem" src="/app-icon.png" width="64" height="64" alt="" />
+          <h1 id="hero-title">Fish Fillets</h1>
+        </div>
+        <div id="project" class="project-copy">
+          <p><strong>Fish Fillets 4ever</strong> je nezávislý open-source port hry
+            <em>Fish Fillets</em> od studia ALTAR z roku 1998 — původní zdrojový kód
+            v Delphi, přepsaný do moderního enginu, při zachování hádanek i svérázného
+            humoru.</p>
+          <p>Portováno v <strong>TypeScriptu</strong>, s vykreslováním přes <strong>WebGL</strong>.
+            <a href="https://github.com/ff4e/ff4e.github.io">Prohlédněte si zdrojový kód na GitHubu</a>.</p>
+        </div>
+        <div class="actions">
+          <span id="ios" class="inline-cta"><a class="button" href="https://apps.apple.com/us/app/fish-fillets-forever/id6812738745">Stáhnout v App Store <span aria-hidden="true">&rarr;</span></a></span>
+          <a class="button" href="/" data-browser-play hidden>Hrát v prohlížeči <span aria-hidden="true">&rarr;</span></a>
+        </div>
+        <p id="browser-continue-anyway-row" hidden><a href="/" id="browser-continue-anyway">Přesto pokračovat do webové verze</a></p>
+        <noscript><p class="notice">Hra v prohlížeči vyžaduje JavaScript. Tato stránka ho nemá.</p></noscript>
+        <figure class="hero-art">
+          <img src="/docs/screenshots/room-pyramida.jpg" width="1600" height="879"
+            alt="Dvě ryby prozkoumávají egyptskou pyramidu plnou posuvných bloků a úzkých průchodů." fetchpriority="high" />
+          <figcaption>Dům pana Cheopse <span>Jedna ze 72 místností k vyřešení</span></figcaption>
+        </figure>
+      </section>
+    </main>
+
+    <footer class="site-footer wrap">
+      <img src="/app-icon.png" width="48" height="48" alt="Ikona aplikace Fish Fillets 4ever" />
+      <p class="lang-switch"><a href="/about.html" data-lang-switch="en">English</a></p>
+    </footer>
+    <script type="module" src="/src/site/about.ts"></script>
+  </body>
+</html>
