@@ -768,7 +768,9 @@
            is the INTERSECTION of an element's value with its ancestors' (see the note on
            `.tbtn`), so this was already cut down to `pan-y` and was never a pinch-zoom
            leak. Spelled out explicitly rather than left as `manipulation` so it reads as
-           the intended lock rather than an accident of the ancestor chain. */
+           the intended lock rather than an accident of the ancestor chain. `pan-x` here
+           would intersect with the overlay's `pan-y` to nothing, blocking the card's own
+           vertical scroll on every drag that starts on a slider. */
         width: 100%; height: 34px; accent-color: #6cc; touch-action: pan-y;
       }
       .topts-subs { border: 1px solid #35555f; border-radius: 10px; padding: 10px 12px; margin: 0; }
@@ -777,22 +779,32 @@
       .topts-subs label {
         display: flex; align-items: center; gap: 6px;
         min-height: 40px; font: 14px/1 system-ui, sans-serif;
-        /* `pan-y`, not left as `manipulation` — see the note on the slider above. Spelled
-           out so it reads as the intended lock rather than an accident of the chain. */
+        /* `pan-y`, not `none` — see the note on the slider above. `none` would block the
+           card's vertical scroll on any drag starting on a subtitle checkbox row. */
         -webkit-tap-highlight-color: transparent; touch-action: pan-y;
       }
       .topts-subs input { width: 20px; height: 20px; accent-color: #6cc; }
       .topts-buttons { display: flex; gap: 10px; }
-      .topts-buttons button, .topts-buttons a {
+      .topts-buttons button {
         flex: 1 1 0; min-height: 46px;
         color: #bdd; background: #18262e; border: 1px solid #35555f; border-radius: 10px;
         font: 600 14px/1 system-ui, sans-serif;
-        /* `pan-y`, not left as `manipulation` — see the note on the slider above. */
+        /* `pan-y`, not `none` — see the note on the slider above. */
         -webkit-tap-highlight-color: transparent; touch-action: pan-y;
       }
-      .topts-buttons a { display: flex; align-items: center; justify-content: center; text-align: center; text-decoration: none; }
-      .topts-buttons button:active, .topts-buttons a:active { background: #24414c; border-color: #6cc; }
+      .topts-buttons button:active { background: #24414c; border-color: #6cc; }
       #topt-close { background: #24414c; border-color: #6cc; }
+      /* The privacy link: required in-app (Apple App Review 5.1.1(i)), but not an action a
+         player takes to use the game, so it reads as a quiet text link rather than a third
+         button competing with Help/Done. Still clears the 40px touch-target floor. */
+      .topts-privacy {
+        align-self: center; min-height: 40px; display: flex; align-items: center;
+        color: #9dd; font: 600 13px/1 system-ui, sans-serif;
+        text-decoration: none; border-bottom: 1px dotted #667;
+        /* `pan-y`, not `none` — see the note on the slider above. */
+        -webkit-tap-highlight-color: transparent; touch-action: pan-y;
+      }
+      .topts-privacy:active { color: #cde; border-bottom-color: #9dd; }
       /* A phone in landscape is the shape this screen has to fit, and it is the tight
          one: ~390px of height, against a card that wants 406. Compacted rather than
          left to scroll, because the control that would fall below the fold is Done —
@@ -804,7 +816,8 @@
         .topts-row input[type='range'] { height: 28px; }
         .topts-subs { padding: 2px 12px 6px; }
         .topts-subs label { min-height: 40px; }
-        .topts-buttons button, .topts-buttons a { min-height: 42px; }
+        .topts-buttons button { min-height: 42px; }
+        .topts-privacy { min-height: 36px; }
       }
       /* Feedback strip: the player's only way to reach the author, and the only piece
          of modern chrome anywhere near the game. It hangs directly under the control
@@ -1181,9 +1194,9 @@
         </fieldset>
         <div class="topts-buttons">
           <button id="topt-help" type="button">Help</button>
-          <a id="topt-privacy" href="https://ff4e.github.io/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
           <button id="topt-close" type="button">Done</button>
         </div>
+        <a id="topt-privacy" class="topts-privacy" href="https://ff4e.github.io/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
       </div>
     </div>
     <dialog id="feedback" aria-labelledby="feedback-title">
