@@ -71,7 +71,7 @@ html[data-native-menu] .topts-subs {
   border-color: var(--menu-option-border);
   border-radius: var(--menu-radius);
 }
-html[data-native-menu] .topts-buttons :is(button, a),
+html[data-native-menu] .topts-buttons button,
 html[data-native-menu] #topt-close {
   background: var(--menu-option-fill);
   color: var(--menu-text);
@@ -80,8 +80,16 @@ html[data-native-menu] #topt-close {
   box-shadow: var(--menu-bevel);
 }
 html[data-native-menu] #topt-close { border-color: var(--menu-accent); }
-html[data-native-menu] .topts-buttons :is(button, a):active,
+html[data-native-menu] .topts-buttons button:active,
 html[data-native-menu] #topt-close:active { box-shadow: inset 0 1px 3px #0007; }
+html[data-native-menu] .topts-privacy {
+  color: var(--menu-muted);
+  border-bottom-color: var(--menu-option-border);
+}
+html[data-native-menu] .topts-privacy:active {
+  color: var(--menu-text);
+  border-bottom-color: var(--menu-accent);
+}
 html[data-native-menu] #touchopts :is(input, button, a):focus-visible {
   outline: 2px solid var(--menu-accent);
   outline-offset: 2px;
