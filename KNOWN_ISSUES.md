@@ -184,6 +184,34 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🟡 The fish repeated themselves more than in the original — fixed 2026-10-06
+
+Reported as "the same shout several times during a long solution". Most of that is the
+original's design: room scripts re-fire conversations on timers (BATHROOM every 40–120 s,
+KNIHOVNA cycling four talks through `roompole[1]`). Replaying the 70 committed solutions at
+a human pace gives ~1 600 lines with ~750 repeats, all of them `URoom.pas` behaviour. Four
+things on top of that were the port's:
+
+- **StdKecej chattered in solved rooms.** `if zaznamy.rooms[roomnumber].savy[prv].dat<>0 then exit`
+  (`URoom.pas:3357`) keeps the idle chatter off once a room has a first-solve record. Now
+  `ChatterState.roomSolved` (`src/core/chatter.ts`), set by `armChatter` (`logicTick.ts`).
+- **The no-repeat-last-three history was per room.** `poslhlasky` lives in `zaznamy`, the
+  records, not the room (`URoom.pas:3367/3372`); the port reset it on every entry, restart and
+  undo. It is now handed from timer to timer. Still a deviation: the original also keeps it
+  across sessions, the port only for the browser session.
+- **Undo rewound `roompole`.** The bank the original keeps across a restart so the fish do not
+  repeat themselves was restored from the undo point, so undo brought those lines back. Undo
+  now keeps the live one (`src/app/undo.ts`, "What it does NOT take back").
+- **Undo rewound the "already said" flags rooms keep in their Vars.** Those cannot be kept —
+  the same Vars hold puzzle state — so the state rewinds and only the OUTPUT is held back:
+  room-script lines heard after the undo point are muted, and the rewound script's first
+  conversation containing one is dropped, its `set` entries still applied
+  (`src/core/lineMute.ts`). Undoing 10 moves mid-solution and replaying them across 69 rooms:
+  re-heard lines 38 → 9, the 9 being lines the rooms repeat by design (the parrot, TRUP's
+  "au"); positions and refused moves identical with and without muting. Script state differs
+  only in dialogue-paced timers, as a conversation that took no time would leave it. Mutes
+  last for the attempt and are not saved, so undo after an F3 load can still repeat a line.
+
 ### 🟠 KUFRIK's first tutorial line ended in half a second of buzz — fixed 2026-08-16
 
 The last 0.47 s of `002/help1` — *"Teď na nic nesahej, jen se dívej…"*, the first thing the

@@ -75,6 +75,24 @@ describe('chatter timer (StdKecej)', () => {
       expect(st.poslhlasky).not.toBe(before);
     }
   });
+
+  it('stays silent in a room that already has a first-solve record (savy[prv])', () => {
+    const s = script();
+    const st = newChatter(s, TPS, 0, /*roomSolved*/ true);
+    expect(tickChatter(s, st, st.interval * 10, TPS, false)).toBe(false);
+    expect(s.isDialog()).toBe(false);
+  });
+
+  it('carries the last-three history into the next timer (zaznamy.poslhlasky is global)', () => {
+    const s = script();
+    // History: groups 1, 2, 3 (oldest in the low bits) — only 4..6 may come next.
+    const carried = 1 + 8 * 2 + 64 * 3;
+    for (let i = 0; i < 30; i++) {
+      const st = newChatter(s, TPS, carried);
+      tickChatter(s, st, st.interval, TPS, false);
+      expect(st.poslhlasky >> 6).toBeGreaterThanOrEqual(4);
+    }
+  });
 });
 
 describe('vyber_hlasku groups', () => {

@@ -12,6 +12,7 @@
 import type { Item, Room } from './room.js';
 import { Dir } from './dir.js';
 import { captureBank, type ScriptBank } from './scriptBank.js';
+import { dropMutedRun, type HeardLine } from './lineMute.js';
 
 /** natoceni facing codes (URoom.pas:420-421). */
 export const SMER_VLEVO = 1;
@@ -25,6 +26,8 @@ interface DialogEntry {
   zvuk: string;
   prior: number;
   promSet?: (val: number) => void;
+  tag?: number; // see QueuedLine (lineMute.ts)
+  batch?: number;
 }
 
 /** Plays a named voice + subtitle; returns how many frames it lasts. */
@@ -137,6 +140,14 @@ export class Script {
   readonly globpole: number[] = new Array<number>(1024).fill(0);
 
   private queue: DialogEntry[] = [];
+
+  /** Undo's muting of the room's own lines (`lineMute.ts`). `progTag` is the undo
+   *  history's length, set by the host before each tick; lines `prog()` queues carry it. */
+  progTag = 0;
+  mutedLines: Set<string> | null = null;
+  private heard: HeardLine[] = [];
+  private progRun = 0;
+  private inProg = false;
   private voiceEndCount = 0;
   private aktdialzvuk = 0;
   private lastprom: ((v: number) => void) | undefined;
@@ -529,7 +540,30 @@ export class Script {
 
   /** addd (URoom.pas:684): enqueue a delayed action; `set` writes via `promSet`. */
   addd(delay: number, zvuk: string, prior: number, promSet?: (v: number) => void): void {
-    this.queue.push(promSet ? { delay, zvuk, prior, promSet } : { delay, zvuk, prior });
+    const d: DialogEntry = promSet ? { delay, zvuk, prior, promSet } : { delay, zvuk, prior };
+    if (this.inProg) {
+      d.tag = this.progTag;
+      d.batch = this.progRun;
+    }
+    this.queue.push(d);
+  }
+
+  /** Bracket one `prog()` call, so `endProg` knows which entries that run queued. */
+  beginProg(): void {
+    this.progRun++;
+    this.inProg = true;
+  }
+
+  /** Drop this run's conversation if it holds a muted line (`dropMutedRun`). */
+  endProg(): void {
+    this.inProg = false;
+    if (!this.mutedLines?.size) return;
+    this.queue = dropMutedRun(this.queue, this.progRun, this.mutedLines, this.heard, (o, a) => this.setanim(o, a));
+  }
+
+  /** The room-script lines heard since the last call, oldest first. */
+  takeHeard(): HeardLine[] {
+    return this.heard.splice(0);
   }
   /** addm: the small fish speaks after `delay` frames. */
   addm(delay: number, name: string): void {
@@ -708,6 +742,7 @@ export class Script {
       if (this.sound.voicesReady && !this.sound.voicesReady()) return;
       this.aktdialzvuk = d.prior;
       this.voiceEndCount = count + this.talk(d.zvuk, d.prior);
+      if (d.tag !== undefined) this.heard.push({ name: d.zvuk, tag: d.tag });
       d.promSet?.(d.prior);
       this.lastprom = d.promSet;
     }

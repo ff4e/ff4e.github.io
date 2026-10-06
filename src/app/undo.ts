@@ -22,6 +22,25 @@
  * valuable use, and it is exactly the state saving forbids. Only `atRest()` and the
  * playback modes gate it (Martin's call, 2026-08-29).
  *
+ * ── What it does NOT take back: `roompole` ───────────────────────────────────
+ * A point's script snapshot rewinds the item Vars and `globpole` with the position, but
+ * the room keeps the `roompole` it has NOW. `roompole` is the bank the original keeps
+ * across `TRoom.Restart` (URoom.pas:1577) precisely so the fish do not repeat themselves
+ * from one attempt to the next — KNIHOVNA's rotating conversations, KUCHYNE's sword
+ * joke, ZAVAL's attempt counter — and so every room already copes with it running
+ * ahead of the position. Rewinding it here made undo, the gentler of the two, the one
+ * that brought those lines back. The visible consequence lands in PRAVIDLA: undoing the
+ * candle mistake now gets the same "try again, without our advice" as the restart the
+ * fish asked for, and the hints stop for the visit, as they would after that restart.
+ *
+ * Vars cannot be treated the same way. They mix "already said" flags with puzzle state
+ * and timers that must match the position, and writing any of them back would put the
+ * room in a state no play reaches. So the Vars rewind, the script is free to queue the
+ * line again, and only what the player HEARS is held back: every room-script line heard
+ * is banked on the newest point (`said`), an undo moves the ones its target predates into
+ * `mutedLines`, and the rebuilt script drops a conversation containing one of them, once
+ * (`Script.endProg`). Nothing is muted beyond the attempt, and a save does not carry it.
+ *
  * ── Why the key is matched on `e.key`, alone in this game ────────────────────
  * Every other keyboard binding here uses `e.code`, a PHYSICAL key position on a US
  * layout, and is right to: IJKL and WASD are chosen as shapes under the hands, so a Czech
@@ -59,7 +78,7 @@
  * is dead and the record has run past it (`undoTargetIndex`, "adrift"), so the restart does
  * not move where undo lands.
  */
-import { activeScript, clearUndoHistory, cutscene, deadAttempt, dropDeadAttempt, engine, loadmode, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
+import { activeScript, clearUndoHistory, cutscene, deadAttempt, dropDeadAttempt, engine, loadmode, mutedLines, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
 import { focusRestoredFish, restore } from './movement.js';
 import { atRest } from './roomGates.js';
 import { continuePhoneRoom } from './phoneViewport.js';
@@ -67,7 +86,7 @@ import { phoneUndoFocus } from './phoneUndoFocus.js';
 import { phoneUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 import { inSolvemode } from './solveMode.js';
-import { decodeUndoHistory, encodeUndoHistory, shareSnapshot, undoTargetIndex } from '../core/undoStack.js';
+import { decodeUndoHistory, encodeUndoHistory, shareSnapshot, takeUnsaid, undoTargetIndex } from '../core/undoStack.js';
 import type { UndoSaveData } from '../core/undoStack.js';
 
 /** Points that the replay failed to reproduce, for the probes. See `undoMove`. */
@@ -112,6 +131,7 @@ const SNAPSHOT_DEPTH = 120;
  */
 export function sampleUndoPoint(): void {
   if (!room || !engine || ui.screen !== 'room') return;
+  bankHeard();
   if (engine.phase !== 'idle') return; // mid-move: not a position to come back to
   // Something other than the player is driving the record: the KUFRIK demonstration, the
   // map's "Replay", or a dev solution run. Bank nothing while one plays — those are not
@@ -145,6 +165,13 @@ export function sampleUndoPoint(): void {
   undoHistory.push({ rec, snapshot: snapshot ? shareSnapshot(top?.snapshot ?? null, snapshot) : null });
   const drop = undoHistory.length - 1 - SNAPSHOT_DEPTH;
   if (drop >= 0 && undoHistory[drop]!.snapshot !== null) undoHistory[drop]!.snapshot = null;
+}
+
+/** File the room-script lines heard since the last tick under the newest point. */
+function bankHeard(): void {
+  const heard = activeScript?.s.takeHeard();
+  const top = undoHistory[undoHistory.length - 1];
+  if (heard?.length && top) (top.said ??= []).push(...heard);
 }
 
 /**
@@ -197,6 +224,11 @@ export function undoMove(): boolean {
   // Back into the attempt the death restart ended: it becomes the history again, and the
   // loop below lands on its newest point exactly as it would on a death without a restart.
   if (resumesDeadAttempt()) setUndoHistory(deadAttempt!);
+  // Taken before the first rebuild: `init()` runs on every rebuild and some rooms write
+  // `roompole` there (ZAVAL counts an attempt, KUCHYNE demotes its latch), and an undo is
+  // not an attempt. See "What it does NOT take back" above.
+  const livePole = activeScript ? [...activeScript.s.roompole] : null;
+  bankHeard();
   let idx = undoTargetIndex(undoHistory, engine?.srecord ?? '');
   // Fall back down the history until the replay actually lands where the point says.
   //
@@ -217,6 +249,7 @@ export function undoMove(): boolean {
     // Truncate FIRST: this both drops the position being left and leaves `target` on top,
     // so the history's "the newest point is where the player is" invariant holds again
     // and the next sample sees nothing new.
+    for (const name of takeUnsaid(undoHistory, idx)) mutedLines.add(name);
     undoHistory.length = idx + 1;
     // `animated: false` — the instant branch, matching FFNG's snap-back. An animated
     // rewind would play the room's whole record back at load speed on every press, which
@@ -224,6 +257,8 @@ export function undoMove(): boolean {
     // that branch; the load and the demo both take the animated one.
     const previousRoom = room;
     restore(target.rec, target.snapshot, false, false);
+    if (livePole && activeScript) activeScript.s.roompole.splice(0, livePole.length, ...livePole);
+    if (activeScript) activeScript.s.mutedLines = mutedLines;
     if (previousRoom && room) continuePhoneRoom(previousRoom, room);
     if (engine?.srecord === target.rec && room?.anyFishDead === false) {
       if (focusBeforeUndo) {

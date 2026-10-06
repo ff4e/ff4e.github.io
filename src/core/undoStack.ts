@@ -12,6 +12,7 @@
  * from costing megabytes, and how to fit one in a save slot are decisions that need no
  * browser — so they live here and are tested in milliseconds rather than through a probe.
  */
+import type { HeardLine } from './lineMute.js';
 import type { ScriptSnapshot } from './script.js';
 import { bankEntries, bankFromEntries, captureBank, sameBank, type ScriptBank } from './scriptBank.js';
 
@@ -23,6 +24,29 @@ import { bankEntries, bankFromEntries, captureBank, sameBank, type ScriptBank } 
 export interface UndoPoint {
   rec: string;
   snapshot: ScriptSnapshot | null;
+  /**
+   * Room-script lines heard while this was the newest point. Kept in memory only (a save
+   * does not carry them), and only as long as the attempt: they go when the point does.
+   */
+  said?: HeardLine[];
+}
+
+/**
+ * The lines an undo to `idx` un-says: those heard after point `idx` was banked, which its
+ * snapshot therefore predates. A line's tag is the history length when `prog()` queued it,
+ * so `tag > idx` means "queued after point idx existed". Lines heard later but queued
+ * earlier are left out — their flag is in the snapshot, so the script will not say them
+ * again. Removes what it returns from point `idx` (the caller drops the points above it).
+ */
+export function takeUnsaid(history: UndoPoint[], idx: number): string[] {
+  const out: string[] = [];
+  for (let i = Math.max(idx, 0); i < history.length; i++) {
+    const said = history[i]!.said;
+    if (!said) continue;
+    for (const h of said) if (h.tag > idx) out.push(h.name);
+    if (i === idx) history[i]!.said = said.filter((h) => h.tag <= idx);
+  }
+  return out;
 }
 
 /**

@@ -1583,6 +1583,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     screenShove: () => screenShoveX,
     screenOffset: () => (activeScript ? { ...activeScript.s.screenOffset } : { x: 0, y: 0 }),
     roompole: (i: number) => activeScript?.s.roompole[i] ?? 0,
+    setRoompole: (i: number, v: number) => void activeScript?.s.roompole.splice(i, 1, v),
     // KAJUTA1 screen-shove testing: arm gspec, and push the big fish a step (returns the
     // step result + resulting gspec/shove) so a probe can drive a wall-push deterministically.
     setGspec: (n: number) => {

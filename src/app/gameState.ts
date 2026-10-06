@@ -43,6 +43,7 @@ import type { Room } from '../core/room.js';
 import type { RoomScript, Script, ScriptSnapshot } from '../core/script.js';
 import type { StepEngine } from '../core/stepEngine.js';
 import type { SubtitleSystem } from '../render/subtitles.js';
+import type { UndoPoint } from '../core/undoStack.js';
 
 // ── The room ────────────────────────────────────────────────────────────────
 export let ffr: FfrRoom | null = null;
@@ -96,7 +97,13 @@ export let lastLine: { name: string; count: number } | null = null;
  * The state lives here rather than in `undo.ts` so `movement.ts` can clear it on a
  * restart without importing the module that imports `restore` from it.
  */
-export const undoHistory: { rec: string; snapshot: ScriptSnapshot | null }[] = [];
+export const undoHistory: UndoPoint[] = [];
+/**
+ * Room-script lines an undo has un-said and the rewound script has not yet tried to say
+ * again — see `Script.mutedLines`. Belongs to the live attempt, so it is emptied wherever
+ * the history is replaced: a room change, a restart, a load, a death auto-restart.
+ */
+export const mutedLines = new Set<string>();
 
 export function setActiveScript(v: { def: RoomScript; s: Script } | null): void {
   activeScript = v;
@@ -133,22 +140,25 @@ export function setLastLine(v: { name: string; count: number } | null): void {
  * auto-restarting, kept so undo can take the death back — see `undo.ts`, "How long a
  * history lives". Null whenever there is no such attempt to return to.
  */
-export let deadAttempt: { rec: string; snapshot: ScriptSnapshot | null }[] | null = null;
+export let deadAttempt: UndoPoint[] | null = null;
 
 /** Start a fresh undo history: a room change, or the player's own Restart. */
 export function clearUndoHistory(): void {
   undoHistory.length = 0;
+  mutedLines.clear();
   deadAttempt = null;
 }
 /** Replace the history wholesale — a load, restoring the saved attempt's own points. */
-export function setUndoHistory(points: readonly { rec: string; snapshot: ScriptSnapshot | null }[]): void {
+export function setUndoHistory(points: readonly UndoPoint[]): void {
   undoHistory.length = 0;
+  mutedLines.clear();
   deadAttempt = null;
   for (const p of points) undoHistory.push(p); // a loop, not a spread: a long attempt is thousands
 }
 /** A death auto-restart: start a fresh history, but keep the ended attempt's behind it. */
 export function retireUndoHistory(): void {
   deadAttempt = undoHistory.splice(0);
+  mutedLines.clear();
 }
 /** The player has moved on from the restart's start position: the ended attempt is gone. */
 export function dropDeadAttempt(): void {

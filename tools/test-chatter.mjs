@@ -36,4 +36,18 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.setTrepat(0));
   await tickSleep(p, 4);
   expect(!(await p.evaluate(() => window.__ff.canvasTransform())).includes('translate('), 'the shake clears when TrepatRoom resets');
+
+  // A room that already has its first-solve record never chatters (savy[prv].dat<>0,
+  // URoom.pas:3357). The gate itself is unit-tested; this checks the host hands the timer
+  // the room's solved state. Overdue and with no dialogue running, an unsolved room
+  // would fire on the next tick and move `last`.
+  await p.evaluate(() => window.__ff.markSolved(7));
+  await p.evaluate(() => window.__ff.enterRoomAwait(7));
+  await waitRoom(p, 0);
+  await idle(p);
+  await p.waitForFunction(() => window.__ff.script()?.dialog === false);
+  await p.evaluate(() => window.__ff.makeChatterDue());
+  const due = await p.evaluate(() => window.__ff.chatterInfo().last);
+  await tickSleep(p, 4);
+  expect((await p.evaluate(() => window.__ff.chatterInfo().last)) === due, 'a solved room stays silent (StdKecej)');
 });
