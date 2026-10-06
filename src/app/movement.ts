@@ -207,9 +207,9 @@ export function applyRecordStep(st: RecordStep): void {
  * `keepRoompole` is the player's F3. The original saves every item's Vars but not
  * `roompole` (`uloz_promenne`, URoom.pas:1721), and `TRoom.Load` runs InitItems +
  * InitProgramky without touching it, so a load keeps the visit's live bank — after the
- * room's init has run on it, as a restart does. The saved bank is still written, for the
- * exact rebuilds that need it (GPU-loss recovery, the demo's checkpoint); undo puts back
- * the bank from before the rebuild itself (`undo.ts`).
+ * room's init has run on it, as a restart does. Every other caller restores the bank
+ * from the snapshot: GPU-loss recovery, the demo's checkpoint, and undo (the target
+ * point's bank; with no snapshot, the rebuild's).
  */
 export function restore(
   rec: string,

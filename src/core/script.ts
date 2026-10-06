@@ -12,7 +12,7 @@
 import type { Item, Room } from './room.js';
 import { Dir } from './dir.js';
 import { captureBank, type ScriptBank } from './scriptBank.js';
-import { dropMutedRun, INIT_TAG, isTalk, lineFamily, type HeardLine } from './lineMute.js';
+import { dropMutedRun, INIT_TAG, isTalk, lineFamily, type HeardLine, type QueuedLine } from './lineMute.js';
 
 /** natoceni facing codes (URoom.pas:420-421). */
 export const SMER_VLEVO = 1;
@@ -21,13 +21,8 @@ export const SMER_VPRAVO = 2;
 export const MLUVI_MALA = 1;
 export const MLUVI_VELKA = 2;
 
-export interface DialogEntry {
+export interface DialogEntry extends QueuedLine {
   delay: number;
-  zvuk: string;
-  prior: number;
-  promSet?: (val: number) => void;
-  tag?: number; // see QueuedLine (lineMute.ts)
-  batch?: number;
 }
 
 /** Plays a named voice + subtitle; returns how many frames it lasts. */
@@ -141,10 +136,10 @@ export class Script {
 
   private queue: DialogEntry[] = [];
 
-  /** Undo's view of the room's lines (`lineMute.ts`); `progTag`: undo history length, per tick. */
+  /** Undo's handling of the room's lines; explained in `src/app/undo.ts`. */
   progTag = 0;
   mutedLines: Set<string> | null = null;
-  private carried = new Set<string>(); // families of lines carryOver queued (one re-trigger each)
+  private carriedHolds = new Set<string>(); // families of carried lines: one re-trigger each is dropped
   private heard: HeardLine[] = [];
   private speaking: { line: HeardLine; entry: DialogEntry } | null = null;
   private progRun = 0;
@@ -562,20 +557,21 @@ export class Script {
   /** Drop this run's conversation if it holds a muted line (`dropMutedRun`). */
   endProg(): void {
     this.inProg = false;
-    for (const m of [this.mutedLines, this.carried]) if (m?.size) this.queue = dropMutedRun(this.queue, this.progRun, m, this.heard, (o, a) => this.setanim(o, a));
+    const anim = (o: number, a: string) => this.setanim(o, a);
+    if (this.mutedLines?.size) this.queue = dropMutedRun(this.queue, this.progRun, this.mutedLines, this.heard, anim);
+    if (this.carriedHolds.size) this.queue = dropMutedRun(this.queue, this.progRun, this.carriedHolds, null, anim);
   }
 
 
   /** What is still to be said, the line being spoken first and from its start. */
-  pending(): DialogEntry[] {
+  pendingDialogue(): DialogEntry[] {
     const cut = this.cutLine() ? [{ ...this.speaking!.entry, delay: 0 }] : [];
     return [...cut, ...this.queue];
   }
 
-  /** Undo: drop the rebuild's own `init()` queue, queue the old Script's `entries` (batch -1:
-   *  no `prog()` run claims them) and hold back one re-trigger of each (`carried`). */
-  carryOver(entries: DialogEntry[]): void {
-    for (const d of entries) if (d.tag !== INIT_TAG && isTalk(d.zvuk)) this.carried.add(lineFamily(d.zvuk));
+  /** Undo: drop this rebuild's `init()` queue, queue `entries` (batch -1), hold back one re-trigger of each. */
+  adoptPendingDialogue(entries: DialogEntry[]): void {
+    for (const d of entries) if (d.tag !== INIT_TAG && isTalk(d.zvuk)) this.carriedHolds.add(lineFamily(d.zvuk));
     this.queue = [...this.queue.filter((d) => d.batch !== 0), ...entries.map((d) => ({ ...d, batch: -1 }))];
   }
 
@@ -585,7 +581,7 @@ export class Script {
     return this.speaking && this.count < this.voiceEndCount ? this.speaking.line : null;
   }
 
-  /** The room-script lines heard since the last call, oldest first. */
+  /** Lines credited as heard since the last call (see `src/app/undo.ts`, step 2). */
   takeHeard(): HeardLine[] {
     return this.heard.splice(0);
   }

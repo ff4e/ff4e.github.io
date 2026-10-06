@@ -23,22 +23,34 @@
  * playback modes gate it (Martin's call, 2026-08-29).
  *
  * ── What the fish have already said ──────────────────────────────────────────
- * A point's script snapshot rewinds the room's "already said" flags with the position:
- * they live in the item Vars and `roompole`, beside puzzle state and timers that must
- * match it, so none of them can be kept back. The rewound script is therefore free to
- * queue a line the player has just heard, and undo holds back only what is HEARD, never
- * the state:
- *  - Every room-script line heard is banked on the newest point (`said`), except one the
- *    press cuts off, which the player did not hear out. An undo moves the ones its target
- *    predates into `mutedLines` (`takeUnsaid`; everything heard, past `SNAPSHOT_DEPTH`),
- *    and the rebuilt script drops a conversation containing one of them, once
- *    (`Script.endProg`). A mute matches the line's family, so a random variant of the
- *    same line is held back too. Mutes last for the attempt; a save does not carry them.
- *  - A line queued but not yet heard must not be lost either: `carryOver` hands the
- *    rebuilt Script what its rewound flags will not bring back, and drops the rebuild's
- *    own `init()` queue so the room's opening does not start again.
- *  - The exit cheer, the idle chatter and the death commentary are not the room script's
- *    and are never held back.
+ * The one place this is explained; `lineMute.ts`, `takeUnsaid` and `Script` only point
+ * here. None of it is the original's, which has no undo.
+ *
+ * A point's snapshot rewinds the room's "already said" flags with the position: they live
+ * in the item Vars and `roompole`, beside puzzle state and timers that must match it, so
+ * no flag is ever kept back. The rewound script is therefore free to queue a line again,
+ * and undo works on what the player HEARS instead, never on the state. In order:
+ *  1. Tag. Before each tick the host sets `Script.progTag` to the history's length, and
+ *     every entry `prog()` queues carries it (`tag`); entries `init()` queued carry
+ *     `INIT_TAG`. `tag <= idx` therefore means "queued before point idx was banked, so its
+ *     flag is in that point's snapshot".
+ *  2. Bank. A tagged line is credited as heard when it starts playing, and `bankHeard`
+ *     files it on the newest point (`said`). The line a press cuts off is taken back out
+ *     (`forgetHeard`): the player did not hear it out. Speech a room plays straight away
+ *     with `talkNow`, and lines that are not the room script's (the exit cheer, idle
+ *     chatter, death commentary), are outside all of this and never held back.
+ *  3. Mute. An undo to point idx moves the heard lines its snapshot predates (`tag > idx`;
+ *     everything, past `SNAPSHOT_DEPTH`) into the attempt's `mutedLines` (`takeUnsaid`).
+ *     The rebuilt script drops, once, a conversation of its own that contains one, by line
+ *     family so a random variant counts too (`Script.endProg`, `dropMutedRun`). Its `set`
+ *     entries still run: only voice, subtitle and their time are skipped.
+ *  4. Carry. A line queued but not heard yet when undo is pressed is moved into the rebuilt
+ *     Script when its flag is in the target's snapshot (`tag <= idx`, or `INIT_TAG`) — the
+ *     rewound script would never queue it again (`transferPendingDialogue`). The rebuild's
+ *     own `init()` queue is dropped, so the room's opening does not restart. A carried line
+ *     comes with a hold against one re-trigger of it, kept on that Script only, so a later
+ *     undo that discards the line cannot leave a mute behind.
+ * Mutes last for the attempt; a save does not carry them.
  *
  * ── Why the key is matched on `e.key`, alone in this game ────────────────────
  * Every other keyboard binding here uses `e.code`, a PHYSICAL key position on a US
@@ -113,10 +125,9 @@ let wasPlayback = false;
  * So the DEPTH stays unlimited and the snapshots do not. Past this many points back, a
  * point keeps its record and drops its snapshot: undo still lands on the right position,
  * because the position comes from replaying the record, and only loses the script's
- * "already said" progress — which `takeUnsaid` makes up for by muting every line heard
- * in the attempt, so the fish still do not repeat themselves.
- * That is the right thing to spend — an undo 120 moves deep is already far outside what
- * this is for, and losing a position would be a real loss where repeating a line is not.
+ * "already said" flags — which `takeUnsaid` makes up for by muting every line heard in the
+ * attempt (step 3 above). Position history stays unlimited; the hearing history is what
+ * covers for the snapshots let go.
  */
 const SNAPSHOT_DEPTH = 120;
 
@@ -171,27 +182,20 @@ export function sampleUndoPoint(): void {
 }
 
 /**
- * Hand the rebuilt Script what the old one still had to say. A line queued before the
- * target point existed (`tag <= idx`) was an event of the position being returned to, and
- * its flag is in that point's snapshot, so the rewound script will not queue it again:
- * left behind, it would never be heard. It is carried, and the rebuilt Script holds back
- * one re-trigger of it (`Script.carryOver`), so a script that does queue it again (from a
- * point with no snapshot, whose flags restart from init) does not say it twice. That hold
- * belongs to the rebuilt Script, not to the attempt's `mutedLines`: if a later undo
- * discards the carried line, the hold goes with the Script instead of eating the line. A line queued after the point is left out: its flag rewound with the
- * position, and it belongs to moves that are being taken back. Room-start lines always
- * carry, since the rebuild's own `init()` queue is dropped. The `set` entries travel with
- * their lines, so the old Script and its item arrays are pointed at the new ones.
+ * Step 4 above: move what the old Script still had to say, and that the rewound flags will
+ * not bring back, into the rebuilt one. Queued `set` entries are closures over the Script
+ * and the item arrays that queued them, so the old Script forwards every field to the new
+ * one (`forwardScript`) and the new room adopts the old item arrays (`shareVars`).
  */
-function carryOver(old: { s: Script; room: Room } | null, idx: number): void {
+function transferPendingDialogue(old: { s: Script; room: Room } | null, idx: number): void {
   const s = activeScript?.s;
   if (!s || !old || old.s === s) return;
-  const keep = old.s.pending().filter((d) => d.tag === INIT_TAG || (d.tag !== undefined && d.tag <= idx));
+  const keep = old.s.pendingDialogue().filter((d) => d.tag === INIT_TAG || (d.tag !== undefined && d.tag <= idx));
   if (keep.length) {
     shareVars(old.room.items, s.room.items);
     forwardScript(old.s, s);
   }
-  s.carryOver(keep);
+  s.adoptPendingDialogue(keep);
 }
 
 /** File the room-script lines heard since the last tick under the newest point. */
@@ -288,7 +292,7 @@ export function undoMove(): boolean {
     if (activeScript) activeScript.s.mutedLines = mutedLines;
     if (previousRoom && room) continuePhoneRoom(previousRoom, room);
     if (engine?.srecord === target.rec && room?.anyFishDead === false) {
-      carryOver(old, idx);
+      transferPendingDialogue(old, idx);
       if (focusBeforeUndo) {
         const which = phoneUndoFocus(focusBeforeUndo.rec, target.rec, focusBeforeUndo.active, room.alive);
         if (which) focusRestoredFish(which);

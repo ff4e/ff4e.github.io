@@ -208,34 +208,25 @@ things on top of that were the port's:
   records, not the room (`URoom.pas:3367/3372`); the port reset it on every entry, restart and
   undo. It is now handed from timer to timer. Still a deviation: the original also keeps it
   across sessions, the port only for the browser session.
-- **Undo rewound the "already said" flags** rooms keep in their Vars and `roompole`. Those
-  cannot be kept — the same banks hold puzzle state — so the state rewinds and only the
-  OUTPUT is held back (`src/app/undo.ts`, "What the fish have already said"):
-  room-script lines heard after the undo point are muted, and the rewound script's first
-  conversation containing one is dropped, its `set` entries still applied
-  (`src/core/lineMute.ts`). Undoing 10 moves mid-solution and replaying them across 69 rooms:
-  re-heard lines 38 → 9, the 9 being lines the rooms repeat by design (the parrot, TRUP's
-  "au"); positions and refused moves identical with and without muting. Script state differs
-  only in dialogue-paced timers, as a conversation that took no time would leave it. A line
-  the undo press cuts off is not counted as heard. Four cases on top of that:
-  - Undo never starts the room's opening again. The rebuild runs `init()`, and TRUHLA queues
-    its whole opening there, so the rebuild's `init()` queue is dropped.
-  - A line queued but not yet heard when undo is pressed is carried into the rebuilt room
-    (`carryOver`), with its `set` entries pointed at the live state (`forwardScript`,
-    `shareVars`). That is, when it belongs to the position being returned to: queued before
-    that point existed. Otherwise the rewound flag would mean it is never heard. Measured on
-    603 undos: lines lost 119 → 0, and 103 → 0 for a deep undo; 0 lost, repeated or doubled
-    for double and triple presses too.
-  - A point past the 120 kept snapshots mutes everything heard, because its script restarts
-    from init.
-  - A mute matches the line family (`lineFamily`), so another random variant of the same
-    line is held back too.
+- **Undo rewound the "already said" flags** rooms keep in their Vars and `roompole`, so it
+  brought back lines the player had just heard, and dropped lines queued but not yet heard.
+  The flags cannot be kept, because the same banks hold puzzle state. So the state still
+  rewinds and undo works on what is heard instead: heard lines are muted against the
+  rewound script, unheard queued lines are carried into the rebuilt room, and the room's
+  opening never restarts. The design is in `src/app/undo.ts`, "What the fish have already
+  said". Measured headless across the solution rooms:
+  - Once-only lines heard again after an undo: 17 → 0 (10 moves back); 250 → 0 for a deep
+    undo past the 120 kept snapshots.
+  - Queued lines lost: 119 → 0 (deep: 103 → 0).
+  - No line doubled, including double and triple presses.
+  - Positions and refused moves are identical with and without the muting. Script state
+    differs only in dialogue-paced timers, as a conversation that took no time would leave
+    it.
 
-  Measured across the solution rooms, the once-per-attempt and once-per-visit lines that came
-  back after an undo went 17 → 0 for a 10-move undo and 250 → 0 for a deep undo with no
-  snapshot. The exit cheer, idle chatter and death commentary are never muted. Mutes last
-  for the attempt and are not saved, so undo after an F3 load can still repeat a line
-  heard before the save.
+  What remains: a line cut off by the press plays again from its start. Mutes are not saved,
+  so undo after an F3 load can repeat a line heard before the save. Speech a room plays
+  directly with `talkNow`, the exit cheer, the idle chatter and the death commentary are
+  outside it.
 - **F3 restored `roompole` from the save.** The original saves every item's Vars but not
   `roompole` (`uloz_promenne`, `URoom.pas:1721`), and `TRoom.Load` leaves the bank alone, so
   a load within the visit kept the lines said since the save from repeating. The player's

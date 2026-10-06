@@ -46,10 +46,7 @@ describe('Script muting (endProg)', () => {
     expect(s.isDialog(), 'nothing left to say').toBe(false);
     expect(writes, 'the sets ran, in order').toEqual([1, 0]);
     expect(s.mutedLines.size, 'the mute is spent').toBe(0);
-    expect(s.takeHeard(), 'and the dropped lines count as heard').toEqual([
-      { name: 'a', tag: 4 },
-      { name: 'b', tag: 4 },
-    ]);
+    expect(s.takeHeard(), 'the muted line counts as heard again; b was never heard').toEqual([{ name: 'a', tag: 4 }]);
     for (let c = 1; c < 30; c++) s.dialogy(c);
     expect(talked).toEqual([]);
   });
@@ -192,7 +189,7 @@ describe('room-start lines (init)', () => {
 
     s = script(talked); // undo's rebuild
     def.init(s);
-    s.carryOver([]);
+    s.adoptPendingDialogue([]);
     for (let c = 1; c < 10; c++) tick(s, def, 0, c);
     expect(talked).toEqual(['intro']);
   });
@@ -226,10 +223,10 @@ describe('carrying a pending conversation across the rebuild', () => {
     const nu = script(talked);
     def.init(nu);
     nu.applySnapshot(snap);
-    const keep = old.pending().filter((d) => d.tag !== undefined && d.tag <= 0);
+    const keep = old.pendingDialogue().filter((d) => d.tag !== undefined && d.tag <= 0);
     shareVars(old.room.items, nu.room.items);
     forwardScript(old, nu);
-    nu.carryOver(keep);
+    nu.adoptPendingDialogue(keep);
     for (let c = 1; c < 80; c++) tick(nu, def, 1, c);
     expect(talked).toEqual(['late']);
     expect(nu.vars(0)[2]).toBe(7);
@@ -241,15 +238,16 @@ describe('carrying a pending conversation across the rebuild', () => {
     s.beginProg();
     s.addv(5, 'x');
     s.endProg();
-    const carried = s.pending();
+    const carried = s.pendingDialogue();
     const nu = script(talked);
-    nu.carryOver(carried);
+    nu.adoptPendingDialogue(carried);
     nu.beginProg();
     nu.addv(0, 'x'); // the rewound script queues it too
     nu.endProg();
     for (let c = 1; c < 30; c++) nu.dialogy(c);
     expect(talked, 'said once, from the carried copy').toEqual(['x']);
     expect(nu.mutedLines, "the attempt's mutes are not touched").toBe(null);
+    expect(nu.takeHeard(), 'only the carried copy that played counts as heard').toEqual([{ name: 'x', tag: 0 }]);
 
     const later = script(talked); // a later undo that does not carry it: no hold left
     later.beginProg();
@@ -257,6 +255,21 @@ describe('carrying a pending conversation across the rebuild', () => {
     later.endProg();
     for (let c = 1; c < 10; c++) later.dialogy(c);
     expect(talked).toEqual(['x', 'x']);
+  });
+
+  it('does not mark a held-back duplicate as heard (review: false heard records)', () => {
+    // A snapshot-less rebuild re-triggers the carried line before its carried copy plays:
+    // the duplicate is dropped, but nothing was heard, so a later undo must not mute it.
+    const s = script();
+    s.beginProg();
+    s.addv(50, 'hello');
+    s.endProg();
+    const nu = script();
+    nu.adoptPendingDialogue(s.pendingDialogue());
+    nu.beginProg();
+    nu.addv(0, 'hello');
+    nu.endProg();
+    expect(nu.takeHeard()).toEqual([]);
   });
 
   it('forwards every field of the old Script to the new one', () => {

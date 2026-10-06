@@ -1,19 +1,12 @@
 /**
- * Undo's view of the room's own lines; no part of the original, which has no undo.
- *
- * An undo rewinds the item Vars, and with them whatever "already said" flag a room keeps
- * there, so the rewound script would say again what the player has just heard. The flags
- * cannot simply be kept: the same Vars hold puzzle state and timers that must match the
- * position. So the state is left exactly as the script writes it and only the OUTPUT is
- * held back — a conversation `prog()` queues that contains a muted line is dropped once.
- * The bookkeeping that decides what is muted is `takeUnsaid` (`undoStack.ts`) and
- * `src/app/undo.ts`; this is the part that runs inside the Script.
+ * The Script-side pieces of undo's handling of the room's lines: tagging, muting by line
+ * family, and carrying queued entries across a rebuild. The design is explained once, in
+ * `src/app/undo.ts` ("What the fish have already said").
  */
 
 /**
- * The tag of a line the room's `init()` queued (an opening conversation, TRUHLA's). An
- * undo rebuilds the room and so runs init again, whatever point it lands on, so these
- * are muted on every undo once heard — no snapshot decides them.
+ * The tag of an entry the room's `init()` queued (TRUHLA's opening). Never muted: undo
+ * drops the rebuild's own opening instead and carries the unfinished part of the old one.
  */
 export const INIT_TAG = -1;
 
@@ -84,14 +77,17 @@ export function isTalk(zvuk: string): boolean {
  *
  * What the dropped entries would have DONE still happens, in order: a `set` writes its
  * variable, an animation starts, a speaker's prom variable goes up and back to 0. Only the
- * voice, the subtitle and the time they take are skipped. Each mute is spent once, and the
- * dropped lines are logged as heard, so a deeper undo mutes them again.
+ * voice, the subtitle and the time they take are skipped. Each mute is spent once. A line
+ * that was muted — heard before — is logged in `heard` again, so a deeper undo mutes it
+ * again; the rest of the conversation was never heard and is not. `heard` is null for
+ * undo's carried-copy holds (`Script.adoptPendingDialogue`), which mark nothing as heard: the carried
+ * copy will, when it plays.
  */
 export function dropMutedRun<T extends QueuedLine>(
   queue: T[],
   run: number,
   muted: Set<string>,
-  heard: HeardLine[],
+  heard: HeardLine[] | null,
   setanim: (obj: number, anim: string) => void,
 ): T[] {
   const batch = queue.filter((d) => d.batch === run);
@@ -103,8 +99,7 @@ export function dropMutedRun<T extends QueuedLine>(
     else if (isTalk(d.zvuk)) {
       d.promSet?.(d.prior);
       d.promSet?.(0);
-      muted.delete(lineFamily(d.zvuk));
-      heard.push({ name: d.zvuk, tag: d.tag! });
+      if (muted.delete(lineFamily(d.zvuk))) heard?.push({ name: d.zvuk, tag: d.tag! });
     }
   }
   return queue.filter((d) => d.batch !== run);

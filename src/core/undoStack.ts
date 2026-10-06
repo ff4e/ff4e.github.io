@@ -44,17 +44,12 @@ export function forgetHeard(history: UndoPoint[], line: HeardLine | null): void 
 }
 
 /**
- * The lines an undo to `idx` un-says, which the rebuilt script must not say again:
- *  - those heard after point `idx` was banked, which its snapshot therefore predates. A
- *    line's tag is the history length when `prog()` queued it, so `tag > idx` means
- *    "queued after point idx existed". Lines heard later but queued earlier are left out —
- *    their flag is in the snapshot, so the script will not say them again;
- *  - everything the room script said, when the point has no snapshot (past
- *    `SNAPSHOT_DEPTH`): its script then starts from init, every flag cleared.
- * Room-start lines (`INIT_TAG`) never are: undo does not run the room's opening again
- * (`Script.carryOver`). Point `idx` keeps every line that stays heard at it, including those
- * filed on the points the caller is about to drop (a line queued early and heard later),
- * so a deeper undo still knows them.
+ * Step 3 of undo's handling of the room's lines (`src/app/undo.ts`): the heard lines an
+ * undo to `idx` un-says. Those queued after point `idx` was banked (`tag > idx`), whose
+ * flags its snapshot predates; everything, when the point has no snapshot (its script
+ * starts from init). Never a room-start line (`INIT_TAG`): undo does not run the opening
+ * again. Point `idx` keeps every line still heard at it, including those filed on the
+ * points the caller is about to drop, so a deeper undo still knows them.
  */
 export function takeUnsaid(history: UndoPoint[], idx: number): string[] {
   const at = history[idx];
