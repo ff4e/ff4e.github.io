@@ -846,6 +846,10 @@ try {
   expect(true, 'Restart in between leaves nothing in memory to undo');
 
   // ── Load (region 13): it takes, without the room ending up somewhere else.
+  // Slot 98 is written after the save, so only a load that keeps the live bank still
+  // reads 5 — the original saves Vars but not roompole (`uloz_promenne`), and its Load
+  // leaves the bank alone. KOSTE never touches slot 98.
+  await p.evaluate(() => window.__ff.setRoompole(98, 5));
   await tap(p, 13);
   // `loading()` as well as `roomLoading()`, and they are different things: the second is
   // the ROOM being fetched, the first is the load's fast-forward still replaying the
@@ -861,6 +865,7 @@ try {
     savedMoves,
   );
   expect((await p.evaluate(() => window.__ff.roomNum())) === ROOM, 'Load stays in the same room');
+  expect((await p.evaluate(() => window.__ff.roompole(98))) === 5, 'and keeps the live roompole, as TRoom.Load does');
   expect(
     await p.evaluate(() => window.__ff.canUndo()),
     'and it brings the saved run\'s undo history back with it',

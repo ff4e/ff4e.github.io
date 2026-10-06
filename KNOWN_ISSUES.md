@@ -189,7 +189,7 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 Reported as "the same shout several times during a long solution". Most of that is the
 original's design: room scripts re-fire conversations on timers (BATHROOM every 40–120 s,
 KNIHOVNA cycling four talks through `roompole[1]`). Replaying the 70 committed solutions at
-a human pace gives ~1 600 lines with ~750 repeats, all of them `URoom.pas` behaviour. Four
+a human pace gives ~1 600 lines with ~750 repeats, all of them `URoom.pas` behaviour. Five
 things on top of that were the port's:
 
 - **StdKecej chattered in solved rooms.** `if zaznamy.rooms[roomnumber].savy[prv].dat<>0 then exit`
@@ -209,8 +209,14 @@ things on top of that were the port's:
   (`src/core/lineMute.ts`). Undoing 10 moves mid-solution and replaying them across 69 rooms:
   re-heard lines 38 → 9, the 9 being lines the rooms repeat by design (the parrot, TRUP's
   "au"); positions and refused moves identical with and without muting. Script state differs
-  only in dialogue-paced timers, as a conversation that took no time would leave it. Mutes
-  last for the attempt and are not saved, so undo after an F3 load can still repeat a line.
+  only in dialogue-paced timers, as a conversation that took no time would leave it. A line
+  the undo press cuts off is not counted as heard. Mutes last for the attempt and are not
+  saved, so undo after an F3 load can still repeat a line heard before the save.
+- **F3 restored `roompole` from the save.** The original saves every item's Vars but not
+  `roompole` (`uloz_promenne`, `URoom.pas:1721`), and `TRoom.Load` leaves the bank alone, so
+  a load within the visit kept the lines said since the save from repeating. The player's
+  load now keeps the live bank (`restore`'s `keepRoompole`); GPU-loss recovery and the demo's
+  checkpoint still restore it exactly.
 
 ### 🟠 KUFRIK's first tutorial line ended in half a second of buzz — fixed 2026-08-16
 

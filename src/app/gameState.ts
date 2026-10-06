@@ -213,6 +213,7 @@ export let loadmode: {
   idx: number;
   speed: number;
   snapshot: ScriptSnapshot | null;
+  keepRoompole?: boolean; // see `restore`
 } | null = null;
 // Debug replay trace (opt-in via __ff.showmodeTraceOn).
 export let showmodeTraceOn = false;
@@ -257,7 +258,7 @@ export function setShowmodeSave(v: { rec: string; snapshot: ScriptSnapshot | nul
   showmodeSave = v;
 }
 export function setLoadmode(
-  v: { steps: RecordStep[]; idx: number; speed: number; snapshot: ScriptSnapshot | null } | null,
+  v: { steps: RecordStep[]; idx: number; speed: number; snapshot: ScriptSnapshot | null; keepRoompole?: boolean } | null,
 ): void {
   loadmode = v;
 }

@@ -934,7 +934,7 @@ function loadGame(): void {
     /* legacy plain-string save (just the move record) */
   }
   loadUndoHistory(undoData); // the saved attempt's points, before its record is replayed
-  restore(rec, snapshot, false, true); // player load: fast-forward animated replay (TRoom.Load)
+  restore(rec, snapshot, false, true, true); // player load: animated replay, live roompole (TRoom.Load)
 }
 
 /** True if a save exists for the current room. */

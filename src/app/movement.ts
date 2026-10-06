@@ -203,12 +203,20 @@ export function applyRecordStep(st: RecordStep): void {
  * at LoadSpeed moves/tick (TRoom.Load loadmode, URoom.pas:24102) so the fish visibly
  * rewind to spawn and race back to the saved position; otherwise it is applied
  * instantly (used by deterministic tests).
+ *
+ * `keepRoompole` is the player's F3. The original saves every item's Vars but not
+ * `roompole` (`uloz_promenne`, URoom.pas:1721), and `TRoom.Load` runs InitItems +
+ * InitProgramky without touching it, so a load keeps the visit's live bank — after the
+ * room's init has run on it, as a restart does. The saved bank is still written, for the
+ * exact rebuilds that need it (GPU-loss recovery, the demo's checkpoint); undo puts back
+ * the bank from before the rebuild itself (`undo.ts`).
  */
 export function restore(
   rec: string,
   snapshot: ScriptSnapshot | null = null,
   preserveShowmode = false,
   animated = false,
+  keepRoompole = false,
 ): void {
   if (!preserveShowmode) host.endShowmode(); // loading a saved game ends any KUFRIK demonstration
   setLoadmode(null);
@@ -230,7 +238,7 @@ export function restore(
     // LoadSpeed := size div 150, clamped 5..50 (URoom.pas:1927). `size` is the save
     // byte count; the record length is our proxy.
     const speed = Math.max(5, Math.min(50, Math.floor(rec.length / 150)));
-    setLoadmode({ steps, idx: 0, speed, snapshot });
+    setLoadmode({ steps, idx: 0, speed, snapshot, keepRoompole });
     host.setInfo();
     return;
   }
@@ -241,7 +249,7 @@ export function restore(
   // Restore the script's "already said"/progress Vars so loading doesn't re-fire
   // dialogue the fish have already spoken (the original re-derives these during a
   // suppressed load replay; buildRoom reset them, so re-apply the saved snapshot).
-  if (snapshot && activeScript) activeScript.s.applySnapshot(snapshot);
+  if (snapshot && activeScript) activeScript.s.applySnapshot(snapshot, { roompole: !keepRoompole });
   host.setInfo();
 }
 
@@ -270,7 +278,7 @@ export function advanceLoadmode(): void {
   }
   if (loadmode.idx >= loadmode.steps.length) {
     // LoadDone (URoom.pas:1789): re-apply progress Vars, settle, resume play.
-    if (loadmode.snapshot && activeScript) activeScript.s.applySnapshot(loadmode.snapshot);
+    if (loadmode.snapshot && activeScript) activeScript.s.applySnapshot(loadmode.snapshot, { roompole: !loadmode.keepRoompole });
     room.clearAllDirs();
     room.fallToRest();
     room.clearAllDirs();

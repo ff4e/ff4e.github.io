@@ -37,7 +37,8 @@
  * and timers that must match the position, and writing any of them back would put the
  * room in a state no play reaches. So the Vars rewind, the script is free to queue the
  * line again, and only what the player HEARS is held back: every room-script line heard
- * is banked on the newest point (`said`), an undo moves the ones its target predates into
+ * is banked on the newest point (`said`) — except one the press itself cuts off, which
+ * the player did not get to hear out — an undo moves the ones its target predates into
  * `mutedLines`, and the rebuilt script drops a conversation containing one of them, once
  * (`Script.endProg`). Nothing is muted beyond the attempt, and a save does not carry it.
  *
@@ -86,7 +87,7 @@ import { phoneUndoFocus } from './phoneUndoFocus.js';
 import { phoneUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 import { inSolvemode } from './solveMode.js';
-import { decodeUndoHistory, encodeUndoHistory, shareSnapshot, takeUnsaid, undoTargetIndex } from '../core/undoStack.js';
+import { decodeUndoHistory, encodeUndoHistory, forgetHeard, shareSnapshot, takeUnsaid, undoTargetIndex } from '../core/undoStack.js';
 import type { UndoSaveData } from '../core/undoStack.js';
 
 /** Points that the replay failed to reproduce, for the probes. See `undoMove`. */
@@ -221,6 +222,10 @@ export function canUndo(): boolean {
 export function undoMove(): boolean {
   if (!canUndo()) return false;
   const focusBeforeUndo = phoneUi() && engine ? { rec: engine.srecord, active: engine.active } : null;
+  // File what was heard under the history it was heard in, before a resume can swap it,
+  // minus the line this press is about to cut off: half a sentence is not "already said".
+  bankHeard();
+  forgetHeard(undoHistory, activeScript?.s.cutLine() ?? null);
   // Back into the attempt the death restart ended: it becomes the history again, and the
   // loop below lands on its newest point exactly as it would on a death without a restart.
   if (resumesDeadAttempt()) setUndoHistory(deadAttempt!);
@@ -228,7 +233,6 @@ export function undoMove(): boolean {
   // `roompole` there (ZAVAL counts an attempt, KUCHYNE demotes its latch), and an undo is
   // not an attempt. See "What it does NOT take back" above.
   const livePole = activeScript ? [...activeScript.s.roompole] : null;
-  bankHeard();
   let idx = undoTargetIndex(undoHistory, engine?.srecord ?? '');
   // Fall back down the history until the replay actually lands where the point says.
   //

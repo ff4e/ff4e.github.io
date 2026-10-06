@@ -177,3 +177,21 @@ describe.each([[61, 'TRUHLA'], [57, 'BANKA']] as const)('%s %s ticking banks', (
     expect(captureBank(s.globpole)).toEqual(saved.globpole);
   });
 });
+
+describe('the player load keeps the live roompole (TRoom.Load, uloz_promenne)', () => {
+  it('restores the Vars but leaves roompole as the room has it, when asked', () => {
+    const saved = script();
+    saved.vars(0, 2)[1] = 5;
+    saved.roompole[3] = 1;
+    const snap = saved.snapshot();
+
+    const live = script();
+    live.roompole[3] = 2; // said again since the save
+    live.applySnapshot(snap, { roompole: false });
+    expect(live.vars(0)[1]).toBe(5);
+    expect(live.roompole[3]).toBe(2);
+
+    live.applySnapshot(snap); // an exact rebuild still takes it all back
+    expect(live.roompole[3]).toBe(1);
+  });
+});

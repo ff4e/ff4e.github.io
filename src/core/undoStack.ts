@@ -38,6 +38,18 @@ export interface UndoPoint {
  * earlier are left out — their flag is in the snapshot, so the script will not say them
  * again. Removes what it returns from point `idx` (the caller drops the points above it).
  */
+/** Take back a heard line the player did not get to hear out (by identity). */
+export function forgetHeard(history: UndoPoint[], line: HeardLine | null): void {
+  if (!line) return;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const k = history[i]!.said?.indexOf(line) ?? -1;
+    if (k >= 0) {
+      history[i]!.said!.splice(k, 1);
+      return;
+    }
+  }
+}
+
 export function takeUnsaid(history: UndoPoint[], idx: number): string[] {
   const out: string[] = [];
   for (let i = Math.max(idx, 0); i < history.length; i++) {

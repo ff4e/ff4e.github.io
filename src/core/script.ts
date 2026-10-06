@@ -146,6 +146,7 @@ export class Script {
   progTag = 0;
   mutedLines: Set<string> | null = null;
   private heard: HeardLine[] = [];
+  private speaking: HeardLine | null = null;
   private progRun = 0;
   private inProg = false;
   private voiceEndCount = 0;
@@ -236,13 +237,14 @@ export class Script {
     };
   }
 
-  /** Restore after replay; indexed reads accept both sparse banks and legacy arrays. */
-  applySnapshot(s: ScriptSnapshot): void {
+  /** Restore after replay; indexed reads accept both sparse banks and legacy arrays.
+   *  `roompole: false` leaves the live bank alone, as the original's load does. */
+  applySnapshot(s: ScriptSnapshot, { roompole = true }: { roompole?: boolean } = {}): void {
     for (let i = 0; i < s.vars.length; i++) {
       const it = this.room.items[i];
       if (it && s.vars[i]) it.vars = [...s.vars[i]!];
     }
-    for (let i = 0; i < this.roompole.length; i++) this.roompole[i] = s.roompole[i] ?? 0;
+    if (roompole) for (let i = 0; i < this.roompole.length; i++) this.roompole[i] = s.roompole[i] ?? 0;
     for (let i = 0; i < this.globpole.length; i++) this.globpole[i] = s.globpole[i] ?? 0;
     this.zvykacka = s.zvykacka;
     // gspec is snapshotted for the modes a room script toggles at RUNTIME (CHODBA's
@@ -561,6 +563,12 @@ export class Script {
     this.queue = dropMutedRun(this.queue, this.progRun, this.mutedLines, this.heard, (o, a) => this.setanim(o, a));
   }
 
+  /** The room-script line still being spoken, if any: undo cuts it off, so it is not
+   *  heard. The same object `takeHeard` handed out, so it can be found and taken back. */
+  cutLine(): HeardLine | null {
+    return this.speaking && this.count < this.voiceEndCount ? this.speaking : null;
+  }
+
   /** The room-script lines heard since the last call, oldest first. */
   takeHeard(): HeardLine[] {
     return this.heard.splice(0);
@@ -719,6 +727,7 @@ export class Script {
       } else {
         this.aktdialzvuk = 0;
         this.lastprom?.(0);
+        this.speaking = null;
       }
     }
     const d = this.queue[0];
@@ -742,7 +751,8 @@ export class Script {
       if (this.sound.voicesReady && !this.sound.voicesReady()) return;
       this.aktdialzvuk = d.prior;
       this.voiceEndCount = count + this.talk(d.zvuk, d.prior);
-      if (d.tag !== undefined) this.heard.push({ name: d.zvuk, tag: d.tag });
+      this.speaking = d.tag === undefined ? null : { name: d.zvuk, tag: d.tag };
+      if (this.speaking) this.heard.push(this.speaking);
       d.promSet?.(d.prior);
       this.lastprom = d.promSet;
     }

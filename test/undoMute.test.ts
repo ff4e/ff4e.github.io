@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { makeRoom } from './roomBuilder.js';
 import { Script, type RoomScript } from '../src/core/script.js';
-import { takeUnsaid, type UndoPoint } from '../src/core/undoStack.js';
+import { forgetHeard, takeUnsaid, type UndoPoint } from '../src/core/undoStack.js';
 
 function script(talked: string[] = []): Script {
   const room = makeRoom({ w: 20, h: 12, items: [{ kind: 'little', x: 2, y: 2 }] });
@@ -89,6 +89,40 @@ describe('Script muting (endProg)', () => {
     s.endProg();
     for (let c = 1; c < 20; c++) s.dialogy(c);
     expect(talked).toEqual(['earlier']);
+  });
+});
+
+describe('a line the undo cuts off', () => {
+  it('is reported as playing only while it is being spoken', () => {
+    const s = script();
+    s.beginProg();
+    s.addv(0, 'a');
+    s.endProg();
+    s.dialogy(1); // starts: 3 ticks long
+    expect(s.cutLine()?.name).toBe('a');
+    s.dialogy(2);
+    expect(s.cutLine()?.name).toBe('a');
+    s.dialogy(4); // over
+    expect(s.cutLine()).toBe(null);
+  });
+
+  it('is taken back out of the history, so the undo does not mute it', () => {
+    const s = script();
+    s.beginProg();
+    s.addv(0, 'a');
+    s.endProg();
+    s.progTag = 1;
+    s.dialogy(1);
+    const h: UndoPoint[] = [{ rec: '', snapshot: null, said: s.takeHeard() }];
+    forgetHeard(h, s.cutLine());
+    expect(takeUnsaid(h, 0)).toEqual([]);
+  });
+
+  it('leaves a line that finished in the history', () => {
+    const line = { name: 'a', tag: 1 };
+    const h: UndoPoint[] = [{ rec: '', snapshot: null, said: [line] }];
+    forgetHeard(h, { name: 'a', tag: 1 }); // equal, not the same object: a different line
+    expect(takeUnsaid(h, 0)).toEqual(['a']);
   });
 });
 
