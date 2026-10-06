@@ -12,7 +12,7 @@
  * from costing megabytes, and how to fit one in a save slot are decisions that need no
  * browser — so they live here and are tested in milliseconds rather than through a probe.
  */
-import { INIT_TAG, type HeardLine } from './lineMute.js';
+import { INIT_TAG, lineFamily, type HeardLine } from './lineMute.js';
 import type { ScriptSnapshot } from './script.js';
 import { bankEntries, bankFromEntries, captureBank, sameBank, type ScriptBank } from './scriptBank.js';
 
@@ -31,9 +31,21 @@ export interface UndoPoint {
   said?: HeardLine[];
 }
 
-/** Take back a heard line the player did not get to hear out (by identity). */
-export function forgetHeard(history: UndoPoint[], line: HeardLine | null): void {
-  if (!line) return;
+/**
+ * The line an undo press cuts off: take it back out of the heard record (by identity), so
+ * it plays again — but only the first time that line is cut in the attempt (`forgiven`,
+ * by family). Cut again, it counts as heard: otherwise a burst of presses through a
+ * conversation, or past a spot that triggers the line, restarts it on every press.
+ * Returns whether it was forgiven, i.e. whether undo should carry it to be said again.
+ */
+export function forgiveCut(history: UndoPoint[], line: HeardLine | null, forgiven: Set<string>): boolean {
+  if (!line || forgiven.has(lineFamily(line.name))) return false;
+  forgiven.add(lineFamily(line.name));
+  forgetHeard(history, line);
+  return true;
+}
+
+function forgetHeard(history: UndoPoint[], line: HeardLine): void {
   for (let i = history.length - 1; i >= 0; i--) {
     const k = history[i]!.said?.indexOf(line) ?? -1;
     if (k >= 0) {

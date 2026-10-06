@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import { makeRoom } from './roomBuilder.js';
 import { Script, type RoomScript } from '../src/core/script.js';
-import { forgetHeard, takeUnsaid, type UndoPoint } from '../src/core/undoStack.js';
+import { forgiveCut, takeUnsaid, type UndoPoint } from '../src/core/undoStack.js';
 import { forwardScript, INIT_TAG, lineFamily, shareVars } from '../src/core/lineMute.js';
 
 function script(talked: string[] = []): Script {
@@ -106,6 +106,23 @@ describe('a line the undo cuts off', () => {
     expect(s.cutLine()).toBe(null);
   });
 
+  it('waits before it is said again, and waits afresh at every press while still waiting', () => {
+    const s = script();
+    s.beginProg();
+    s.addv(0, 'a');
+    s.addm(0, 'b');
+    s.endProg();
+    s.dialogy(1); // 'a' starts (3 ticks long)
+    const [cut, rest] = s.pendingDialogue();
+    expect([cut!.zvuk, cut!.delay, cut!.replay]).toEqual(['a', 15, true]);
+    expect(rest!.zvuk).toBe('b');
+    const nu = script();
+    nu.adoptPendingDialogue([cut!, rest!]);
+    for (let c = 1; c <= 10; c++) nu.dialogy(c); // pressed again 10 ticks later: still waiting
+    expect(nu.cutLine()).toBe(null);
+    expect(nu.pendingDialogue()[0]!.delay, 'the wait starts over').toBe(15);
+  });
+
   it('is taken back out of the history, so the undo does not mute it', () => {
     const s = script();
     s.beginProg();
@@ -114,15 +131,26 @@ describe('a line the undo cuts off', () => {
     s.progTag = 1;
     s.dialogy(1);
     const h: UndoPoint[] = [{ rec: '', snapshot: null, said: s.takeHeard() }];
-    forgetHeard(h, s.cutLine());
+    expect(forgiveCut(h, s.cutLine(), new Set())).toBe(true);
     expect(takeUnsaid(h, 0)).toEqual([]);
   });
 
   it('leaves a line that finished in the history', () => {
     const line = { name: 'a', tag: 1 };
     const h: UndoPoint[] = [{ rec: '', snapshot: null, said: [line] }];
-    forgetHeard(h, { name: 'a', tag: 1 }); // equal, not the same object: a different line
+    forgiveCut(h, { name: 'a', tag: 1 }, new Set()); // equal, not the same object: a different line
     expect(takeUnsaid(h, 0)).toEqual(['a']);
+  });
+
+  it('is forgiven once per attempt: cut again, it counts as heard (no restart on every press)', () => {
+    const forgiven = new Set<string>();
+    const first = { name: 'kuch-v-kreslo0', tag: 3 };
+    const h: UndoPoint[] = [{ rec: '', snapshot: null, said: [first] }];
+    expect(forgiveCut(h, first, forgiven)).toBe(true);
+    const again = { name: 'kuch-v-kreslo0', tag: 2 }; // the rewound script said it again
+    h[0]!.said!.push(again);
+    expect(forgiveCut(h, again, forgiven)).toBe(false);
+    expect(takeUnsaid(h, 0)).toEqual(['kuch-v-kreslo0']); // so the next re-trigger is muted
   });
 });
 

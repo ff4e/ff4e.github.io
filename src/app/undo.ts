@@ -35,8 +35,11 @@
  *     `INIT_TAG`. `tag <= idx` therefore means "queued before point idx was banked, so its
  *     flag is in that point's snapshot".
  *  2. Bank. A tagged line is credited as heard when it starts playing, and `bankHeard`
- *     files it on the newest point (`said`). The line a press cuts off is taken back out
- *     (`forgetHeard`): the player did not hear it out. Speech a room plays straight away
+ *     files it on the newest point (`said`). The line a press cuts off is taken back out,
+ *     so it plays again, but only the first time that line is cut in the attempt
+ *     (`forgiveCut`); cut again, it counts as heard, or a burst of presses would restart
+ *     it on every press. Carried to be said again (step 4), it waits ~1 s first, afresh
+ *     at each press, so the fish stay quiet while the player keeps pressing. Speech a room plays straight away
  *     with `talkNow`, and lines that are not the room script's (the exit cheer, idle
  *     chatter, death commentary), are outside all of this and never held back.
  *  3. Mute. An undo to point idx moves the heard lines its snapshot predates (`tag > idx`;
@@ -89,7 +92,7 @@
  * is dead and the record has run past it (`undoTargetIndex`, "adrift"), so the restart does
  * not move where undo lands.
  */
-import { activeScript, clearUndoHistory, cutscene, deadAttempt, dropDeadAttempt, engine, loadmode, mutedLines, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
+import { activeScript, clearUndoHistory, cutscene, deadAttempt, dropDeadAttempt, engine, forgivenCuts, loadmode, mutedLines, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
 import { focusRestoredFish, restore } from './movement.js';
 import { atRest } from './roomGates.js';
 import { continuePhoneRoom } from './phoneViewport.js';
@@ -97,7 +100,7 @@ import { phoneUndoFocus } from './phoneUndoFocus.js';
 import { phoneUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 import { inSolvemode } from './solveMode.js';
-import { decodeUndoHistory, encodeUndoHistory, forgetHeard, shareSnapshot, takeUnsaid, undoTargetIndex } from '../core/undoStack.js';
+import { decodeUndoHistory, encodeUndoHistory, forgiveCut, shareSnapshot, takeUnsaid, undoTargetIndex } from '../core/undoStack.js';
 import { forwardScript, INIT_TAG, lineFamily, shareVars } from '../core/lineMute.js';
 import type { Script } from '../core/script.js';
 import type { Room } from '../core/room.js';
@@ -187,10 +190,10 @@ export function sampleUndoPoint(): void {
  * and the item arrays that queued them, so the old Script forwards every field to the new
  * one (`forwardScript`) and the new room adopts the old item arrays (`shareVars`).
  */
-function transferPendingDialogue(old: { s: Script; room: Room } | null, idx: number): void {
+function transferPendingDialogue(old: { s: Script; room: Room } | null, idx: number, replayCut: boolean): void {
   const s = activeScript?.s;
   if (!s || !old || old.s === s) return;
-  const keep = old.s.pendingDialogue().filter((d) => d.tag === INIT_TAG || (d.tag !== undefined && d.tag <= idx));
+  const keep = old.s.pendingDialogue(replayCut).filter((d) => d.tag === INIT_TAG || (d.tag !== undefined && d.tag <= idx));
   if (keep.length) {
     shareVars(old.room.items, s.room.items);
     forwardScript(old.s, s);
@@ -256,7 +259,7 @@ export function undoMove(): boolean {
   // File what was heard under the history it was heard in, before a resume can swap it,
   // minus the line this press is about to cut off: half a sentence is not "already said".
   bankHeard();
-  forgetHeard(undoHistory, activeScript?.s.cutLine() ?? null);
+  const replayCut = forgiveCut(undoHistory, activeScript?.s.cutLine() ?? null, forgivenCuts);
   // Back into the attempt the death restart ended: it becomes the history again, and the
   // loop below lands on its newest point exactly as it would on a death without a restart.
   if (resumesDeadAttempt()) setUndoHistory(deadAttempt!);
@@ -292,7 +295,7 @@ export function undoMove(): boolean {
     if (activeScript) activeScript.s.mutedLines = mutedLines;
     if (previousRoom && room) continuePhoneRoom(previousRoom, room);
     if (engine?.srecord === target.rec && room?.anyFishDead === false) {
-      transferPendingDialogue(old, idx);
+      transferPendingDialogue(old, idx, replayCut);
       if (focusBeforeUndo) {
         const which = phoneUndoFocus(focusBeforeUndo.rec, target.rec, focusBeforeUndo.active, room.alive);
         if (which) focusRestoredFish(which);

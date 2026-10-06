@@ -104,6 +104,8 @@ export const undoHistory: UndoPoint[] = [];
  * the history is replaced: a room change, a restart, a load, a death auto-restart.
  */
 export const mutedLines = new Set<string>();
+/** Families of lines an undo press has cut off and let play again (`forgiveCut`); same lifetime. */
+export const forgivenCuts = new Set<string>();
 
 export function setActiveScript(v: { def: RoomScript; s: Script } | null): void {
   activeScript = v;
@@ -146,12 +148,14 @@ export let deadAttempt: UndoPoint[] | null = null;
 export function clearUndoHistory(): void {
   undoHistory.length = 0;
   mutedLines.clear();
+  forgivenCuts.clear();
   deadAttempt = null;
 }
 /** Replace the history wholesale — a load, restoring the saved attempt's own points. */
 export function setUndoHistory(points: readonly UndoPoint[]): void {
   undoHistory.length = 0;
   mutedLines.clear();
+  forgivenCuts.clear();
   deadAttempt = null;
   for (const p of points) undoHistory.push(p); // a loop, not a spread: a long attempt is thousands
 }
@@ -159,6 +163,7 @@ export function setUndoHistory(points: readonly UndoPoint[]): void {
 export function retireUndoHistory(): void {
   deadAttempt = undoHistory.splice(0);
   mutedLines.clear();
+  forgivenCuts.clear();
 }
 /** The player has moved on from the restart's start position: the ended attempt is gone. */
 export function dropDeadAttempt(): void {

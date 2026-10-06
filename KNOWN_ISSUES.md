@@ -223,7 +223,10 @@ things on top of that were the port's:
     differs only in dialogue-paced timers, as a conversation that took no time would leave
     it.
 
-  What remains: a line cut off by the press plays again from its start. Mutes are not saved,
+  A line the press cuts off is said again once, from its start, about a second after the
+  presses stop; cut a second time it counts as heard. Before that rule a burst of presses
+  through a conversation restarted the line on every press (21 times in 20 presses, BARELY
+  and TRUHLA). What remains: mutes are not saved,
   so undo after an F3 load can repeat a line heard before the save. Speech a room plays
   directly with `talkNow`, the exit cheer, the idle chatter and the death commentary are
   outside it.

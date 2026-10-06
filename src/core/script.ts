@@ -23,7 +23,10 @@ export const MLUVI_VELKA = 2;
 
 export interface DialogEntry extends QueuedLine {
   delay: number;
+  replay?: boolean; // a line undo cut off, queued to be said again
 }
+
+const REPLAY_DELAY = 15; // ticks (~1.2 s) a line cut off by undo waits before it is said again
 
 /** Plays a named voice + subtitle; returns how many frames it lasts. */
 export type TalkFn = (name: string, prior: number) => number;
@@ -563,10 +566,11 @@ export class Script {
   }
 
 
-  /** What is still to be said, the line being spoken first and from its start. */
-  pendingDialogue(): DialogEntry[] {
-    const cut = this.cutLine() ? [{ ...this.speaking!.entry, delay: 0 }] : [];
-    return [...cut, ...this.queue];
+  /** What is still to be said; the line being cut, if `includeCut`, first and from its start. A
+   *  replay waits REPLAY_DELAY again at each press, so a burst of presses keeps the fish quiet. */
+  pendingDialogue(includeCut = true): DialogEntry[] {
+    const cut = includeCut && this.cutLine() ? [{ ...this.speaking!.entry, replay: true }] : [];
+    return [...cut, ...this.queue].map((d) => (d.replay ? { ...d, delay: REPLAY_DELAY } : d));
   }
 
   /** Undo: drop this rebuild's `init()` queue, queue `entries` (batch -1), hold back one re-trigger of each. */
