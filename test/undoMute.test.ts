@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { makeRoom } from './roomBuilder.js';
 import { Script, type RoomScript } from '../src/core/script.js';
 import { forgetHeard, takeUnsaid, type UndoPoint } from '../src/core/undoStack.js';
-import { INIT_TAG, lineFamily } from '../src/core/lineMute.js';
+import { forwardScript, INIT_TAG, lineFamily, shareVars } from '../src/core/lineMute.js';
 
 function script(talked: string[] = []): Script {
   const room = makeRoom({ w: 20, h: 12, items: [{ kind: 'little', x: 2, y: 2 }] });
@@ -145,13 +145,10 @@ describe('takeUnsaid', () => {
     expect(takeUnsaid([pt(), pt()], 0)).toEqual([]);
   });
 
-  it('always returns room-start lines, and keeps them on the target for a deeper undo', () => {
-    const h = [pt(), pt([{ name: 'intro', tag: INIT_TAG }]), pt()];
-    expect(takeUnsaid(h, 0)).toEqual(['intro']);
-    expect(h[0]!.said).toEqual([{ name: 'intro', tag: INIT_TAG }]);
-    // Heard while standing at the start, undone to a later point: still the room's opening.
-    const g = [pt([{ name: 'intro', tag: INIT_TAG }]), pt(), pt()];
-    expect(takeUnsaid(g, 1)).toEqual(['intro']);
+  it('never returns room-start lines: undo does not run the opening again', () => {
+    const h = [pt([{ name: 'intro', tag: INIT_TAG }]), pt(), pt()];
+    expect(takeUnsaid(h, 0)).toEqual([]);
+    expect(takeUnsaid([{ ...pt([{ name: 'intro', tag: INIT_TAG }]), snapshot: null }], 0)).toEqual([]);
   });
 
   it('returns everything heard when the target has no snapshot (its flags restart from init)', () => {
@@ -177,21 +174,66 @@ describe('a mute matches the line family', () => {
 });
 
 describe('room-start lines (init)', () => {
-  it('are tagged, heard, and dropped by a rebuild once muted', () => {
+  it('are tagged, and a rebuild that carries over drops its own opening', () => {
     const def: RoomScript = { name: 'T', init: (s) => s.addv(0, 'intro'), prog: () => {} };
     const talked: string[] = [];
     let s = script(talked);
     def.init(s);
     tick(s, def, 0, 1);
-    const heard = s.takeHeard();
-    expect(heard).toEqual([{ name: 'intro', tag: INIT_TAG }]);
+    expect(s.takeHeard()).toEqual([{ name: 'intro', tag: INIT_TAG }]);
 
     s = script(talked); // undo's rebuild
     def.init(s);
-    s.mutedLines = new Set(heard.map((h) => lineFamily(h.name)));
-    s.dropMutedInit();
+    s.carryOver([]);
     for (let c = 1; c < 10; c++) tick(s, def, 0, c);
     expect(talked).toEqual(['intro']);
+  });
+});
+
+describe('carrying a pending conversation across the rebuild', () => {
+  // The room latches the line in a Var when it QUEUES it, and the line waits 50 ticks: a
+  // point banked in between holds the flag, so undoing to it must still let it be heard.
+  const def: RoomScript = {
+    name: 'T',
+    init: (s) => {
+      s.vars(0, 2);
+    },
+    prog: (s) => {
+      const v = s.vars(0);
+      if (v[1] === 0) {
+        v[1] = 1;
+        s.addv(50, 'late');
+        s.addset((x) => (v[2] = x), 7); // a closure over the OLD room's array
+      }
+    },
+  };
+
+  it('plays it in the rebuilt room, and its set lands on the live state', () => {
+    const talked: string[] = [];
+    const old = script(talked);
+    def.init(old);
+    tick(old, def, 0, 1); // queued, tag 0: before point 0
+    const snap = old.snapshot(); // point 0: flag set, line unheard
+
+    const nu = script(talked);
+    def.init(nu);
+    nu.applySnapshot(snap);
+    const keep = old.pending().filter((d) => d.tag !== undefined && d.tag <= 0);
+    shareVars(old.room.items, nu.room.items);
+    forwardScript(old, nu);
+    nu.carryOver(keep);
+    for (let c = 1; c < 80; c++) tick(nu, def, 1, c);
+    expect(talked).toEqual(['late']);
+    expect(nu.vars(0)[2]).toBe(7);
+  });
+
+  it('forwards every field of the old Script to the new one', () => {
+    const a = script();
+    const b = script();
+    forwardScript(a, b);
+    a.natvrdo = 1;
+    expect(b.natvrdo).toBe(1);
+    expect(a.room).toBe(b.room);
   });
 });
 

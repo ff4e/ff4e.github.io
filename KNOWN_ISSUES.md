@@ -220,8 +220,13 @@ things on top of that were the port's:
   "au"); positions and refused moves identical with and without muting. Script state differs
   only in dialogue-paced timers, as a conversation that took no time would leave it. A line
   the undo press cuts off is not counted as heard. Three cases on top of that:
-  - Room-start lines are muted on every undo once heard, because the rebuild runs `init()`
-    again (TRUHLA queues its whole opening there).
+  - Undo never starts the room's opening again. The rebuild runs `init()`, and TRUHLA queues
+    its whole opening there, so the rebuild's `init()` queue is dropped.
+  - A line queued but not yet heard when undo is pressed is carried into the rebuilt room
+    (`carryOver`), with its `set` entries pointed at the live state (`forwardScript`,
+    `shareVars`). That is, when it belongs to the position being returned to: queued before
+    that point existed. Otherwise the rewound flag would mean it is never heard. Measured on
+    603 undos: lines lost 119 → 0, and 103 → 0 for a deep undo.
   - A point past the 120 kept snapshots mutes everything heard, because its script restarts
     from init.
   - A mute matches the line family (`lineFamily`), so another random variant of the same

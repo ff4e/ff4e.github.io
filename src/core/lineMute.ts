@@ -26,6 +26,35 @@ export function lineFamily(name: string): string {
   return name.replace(/\d+$/, '');
 }
 
+/**
+ * Make `old` a window onto `nu`: every field read or written on it lands on `nu`. A room
+ * script's queued `set` callbacks are closures over the Script that queued them (`s`), so
+ * an entry carried across undo's rebuild would otherwise write into a Script nobody reads.
+ */
+export function forwardScript(old: object, nu: object): void {
+  for (const key of Object.keys(old)) {
+    Object.defineProperty(old, key, {
+      get: () => (nu as Record<string, unknown>)[key],
+      set: (v: unknown) => ((nu as Record<string, unknown>)[key] = v),
+    });
+  }
+}
+
+/**
+ * Hand the new room the old room's per-item `vars` arrays, holding the new values. The
+ * same closures often capture an item's array directly (`const v = s.vars(R.room)`).
+ */
+export function shareVars(oldItems: readonly { vars: number[] }[], newItems: { vars: number[] }[]): void {
+  for (let i = 0; i < newItems.length; i++) {
+    const a = oldItems[i]?.vars;
+    const b = newItems[i]!.vars;
+    if (!a || a === b) continue;
+    a.length = b.length;
+    for (let k = 0; k < b.length; k++) a[k] = b[k]!;
+    newItems[i]!.vars = a;
+  }
+}
+
 /** A line the room script queued and the player then heard, with its `progTag`. */
 export interface HeardLine {
   name: string;

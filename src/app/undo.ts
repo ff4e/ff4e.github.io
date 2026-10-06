@@ -39,11 +39,15 @@
  * line again, and only what the player HEARS is held back: every room-script line heard
  * is banked on the newest point (`said`) — except one the press itself cuts off, which
  * the player did not get to hear out — an undo moves the ones its target predates into
- * `mutedLines` (`takeUnsaid`: also every room-start line heard, since the rebuild runs
- * `init()` again, and everything heard when the point is past `SNAPSHOT_DEPTH`), and the
- * rebuilt script drops a conversation containing one of them, once (`Script.endProg`,
- * `dropMutedInit`). A mute matches the line's family, so a random variant of the same
+ * `mutedLines` (`takeUnsaid`: everything heard, when the point is past `SNAPSHOT_DEPTH`),
+ * and the rebuilt script drops a conversation containing one of them, once
+ * (`Script.endProg`). A mute matches the line's family, so a random variant of the same
  * line is held back too. Nothing is muted beyond the attempt, and a save does not carry it.
+ *
+ * The other direction matters as much: a line queued but not yet heard when undo is
+ * pressed must not be lost. `carryOver` hands the rebuilt Script whatever its rewound
+ * flags will not bring back, and drops the rebuild's own `init()` queue so the room's
+ * opening is not started again.
  * Lines that are not the room script's are never held back: the exit cheer, the idle
  * chatter and the death commentary.
  *
@@ -93,7 +97,9 @@ import { phoneUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 import { inSolvemode } from './solveMode.js';
 import { decodeUndoHistory, encodeUndoHistory, forgetHeard, shareSnapshot, takeUnsaid, undoTargetIndex } from '../core/undoStack.js';
-import { lineFamily } from '../core/lineMute.js';
+import { forwardScript, INIT_TAG, isTalk, lineFamily, shareVars } from '../core/lineMute.js';
+import type { Script } from '../core/script.js';
+import type { Room } from '../core/room.js';
 import type { UndoSaveData } from '../core/undoStack.js';
 
 /** Points that the replay failed to reproduce, for the probes. See `undoMove`. */
@@ -175,6 +181,29 @@ export function sampleUndoPoint(): void {
   if (drop >= 0 && undoHistory[drop]!.snapshot !== null) undoHistory[drop]!.snapshot = null;
 }
 
+/**
+ * Hand the rebuilt Script what the old one still had to say. A line queued before the
+ * target point existed (`tag <= idx`) was an event of the position being returned to, and
+ * its flag is in that point's snapshot, so the rewound script will not queue it again:
+ * left behind, it would never be heard. It is carried, and muted, so that a script that
+ * does queue it again (from a point with no snapshot, whose flags restart from init) does
+ * not say it twice. A line queued after the point is left out: its flag rewound with the
+ * position, and it belongs to moves that are being taken back. Room-start lines always
+ * carry, since the rebuild's own `init()` queue is dropped. The `set` entries travel with
+ * their lines, so the old Script and its item arrays are pointed at the new ones.
+ */
+function carryOver(old: { s: Script; room: Room } | null, idx: number): void {
+  const s = activeScript?.s;
+  if (!s || !old || old.s === s) return;
+  const keep = old.s.pending().filter((d) => d.tag === INIT_TAG || (d.tag !== undefined && d.tag <= idx));
+  for (const d of keep) if (d.tag !== INIT_TAG && isTalk(d.zvuk)) mutedLines.add(lineFamily(d.zvuk));
+  if (keep.length) {
+    shareVars(old.room.items, s.room.items);
+    forwardScript(old.s, s);
+  }
+  s.carryOver(keep);
+}
+
 /** File the room-script lines heard since the last tick under the newest point. */
 function bankHeard(): void {
   const top = undoHistory[undoHistory.length - 1];
@@ -241,6 +270,7 @@ export function undoMove(): boolean {
   // `roompole` there (ZAVAL counts an attempt, KUCHYNE demotes its latch), and an undo is
   // not an attempt. See "What it does NOT take back" above.
   const livePole = activeScript ? [...activeScript.s.roompole] : null;
+  const old = activeScript ? { s: activeScript.s, room: activeScript.s.room } : null;
   let idx = undoTargetIndex(undoHistory, engine?.srecord ?? '');
   // Fall back down the history until the replay actually lands where the point says.
   //
@@ -270,12 +300,10 @@ export function undoMove(): boolean {
     const previousRoom = room;
     restore(target.rec, target.snapshot, false, false);
     if (livePole && activeScript) activeScript.s.roompole.splice(0, livePole.length, ...livePole);
-    if (activeScript) {
-      activeScript.s.mutedLines = mutedLines;
-      activeScript.s.dropMutedInit(); // the rebuild ran init() again: its opening, if heard
-    }
+    if (activeScript) activeScript.s.mutedLines = mutedLines;
     if (previousRoom && room) continuePhoneRoom(previousRoom, room);
     if (engine?.srecord === target.rec && room?.anyFishDead === false) {
+      carryOver(old, idx);
       if (focusBeforeUndo) {
         const which = phoneUndoFocus(focusBeforeUndo.rec, target.rec, focusBeforeUndo.active, room.alive);
         if (which) focusRestoredFish(which);

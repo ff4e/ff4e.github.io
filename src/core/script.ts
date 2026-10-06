@@ -21,7 +21,7 @@ export const SMER_VPRAVO = 2;
 export const MLUVI_MALA = 1;
 export const MLUVI_VELKA = 2;
 
-interface DialogEntry {
+export interface DialogEntry {
   delay: number;
   zvuk: string;
   prior: number;
@@ -146,7 +146,7 @@ export class Script {
   progTag = 0;
   mutedLines: Set<string> | null = null;
   private heard: HeardLine[] = [];
-  private speaking: HeardLine | null = null;
+  private speaking: { line: HeardLine; entry: DialogEntry } | null = null;
   private progRun = 0;
   private inProg = false;
   private voiceEndCount = 0;
@@ -562,23 +562,27 @@ export class Script {
   /** Drop this run's conversation if it holds a muted line (`dropMutedRun`). */
   endProg(): void {
     this.inProg = false;
-    this.dropMuted(this.progRun);
-  }
-
-  /** The same for what `init()` queued: undo calls it after its rebuild. */
-  dropMutedInit(): void {
-    this.dropMuted(0);
-  }
-
-  private dropMuted(run: number): void {
     if (!this.mutedLines?.size) return;
-    this.queue = dropMutedRun(this.queue, run, this.mutedLines, this.heard, (o, a) => this.setanim(o, a));
+    this.queue = dropMutedRun(this.queue, this.progRun, this.mutedLines, this.heard, (o, a) => this.setanim(o, a));
   }
 
-  /** The room-script line still being spoken, if any: undo cuts it off, so it is not
-   *  heard. The same object `takeHeard` handed out, so it can be found and taken back. */
+
+  /** What is still to be said, the line being spoken first and from its start. */
+  pending(): DialogEntry[] {
+    const cut = this.cutLine() ? [{ ...this.speaking!.entry, delay: 0 }] : [];
+    return [...cut, ...this.queue];
+  }
+
+  /** Undo: drop what the rebuild's `init()` queued (the attempt's own opening carries on)
+   *  and queue the old Script's `entries`, as batch -1 so no `prog()` run claims them. */
+  carryOver(entries: DialogEntry[]): void {
+    this.queue = [...this.queue.filter((d) => d.batch !== 0), ...entries.map((d) => ({ ...d, batch: -1 }))];
+  }
+
+  /** The room-script line still being spoken (undo cuts it off): the very object
+   *  `takeHeard` handed out, so it can be found and taken back. */
   cutLine(): HeardLine | null {
-    return this.speaking && this.count < this.voiceEndCount ? this.speaking : null;
+    return this.speaking && this.count < this.voiceEndCount ? this.speaking.line : null;
   }
 
   /** The room-script lines heard since the last call, oldest first. */
@@ -763,8 +767,8 @@ export class Script {
       if (this.sound.voicesReady && !this.sound.voicesReady()) return;
       this.aktdialzvuk = d.prior;
       this.voiceEndCount = count + this.talk(d.zvuk, d.prior);
-      this.speaking = d.tag === undefined ? null : { name: d.zvuk, tag: d.tag };
-      if (this.speaking) this.heard.push(this.speaking);
+      this.speaking = d.tag === undefined ? null : { line: { name: d.zvuk, tag: d.tag }, entry: d };
+      if (this.speaking) this.heard.push(this.speaking.line);
       d.promSet?.(d.prior);
       this.lastprom = d.promSet;
     }

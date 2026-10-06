@@ -49,26 +49,20 @@ export function forgetHeard(history: UndoPoint[], line: HeardLine | null): void 
  *    line's tag is the history length when `prog()` queued it, so `tag > idx` means
  *    "queued after point idx existed". Lines heard later but queued earlier are left out —
  *    their flag is in the snapshot, so the script will not say them again;
- *  - every room-start line heard (`INIT_TAG`), because the rebuild runs `init()` again;
- *  - everything heard, when the point has no snapshot (past `SNAPSHOT_DEPTH`): the script
- *    then starts from init, every flag cleared.
- * Point `idx` keeps what stays true at it, and the room-start lines of the points the
- * caller is about to drop, so a deeper undo still knows they were heard.
+ *  - everything the room script said, when the point has no snapshot (past
+ *    `SNAPSHOT_DEPTH`): its script then starts from init, every flag cleared.
+ * Room-start lines (`INIT_TAG`) never are: undo does not run the room's opening again
+ * (`Script.carryOver`). Point `idx` keeps what stays true at it.
  */
 export function takeUnsaid(history: UndoPoint[], idx: number): string[] {
   const at = history[idx];
   if (!at) return [];
   const all = at.snapshot === null;
   const out: string[] = [];
-  for (let i = 0; i < idx; i++) for (const h of history[i]!.said ?? []) if (all || h.tag === INIT_TAG) out.push(h.name);
-  const keep: HeardLine[] = [];
-  for (let i = idx; i < history.length; i++) {
-    for (const h of history[i]!.said ?? []) {
-      if (all || h.tag > idx || h.tag === INIT_TAG) out.push(h.name);
-      if (h.tag === INIT_TAG || (i === idx && h.tag <= idx)) keep.push(h);
-    }
-  }
-  at.said = keep;
+  history.forEach((p, i) => {
+    for (const h of p.said ?? []) if (h.tag !== INIT_TAG && (all || (i >= idx && h.tag > idx))) out.push(h.name);
+  });
+  at.said = (at.said ?? []).filter((h) => h.tag <= idx);
   return out;
 }
 
