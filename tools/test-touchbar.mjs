@@ -674,11 +674,6 @@ try {
     }
   }
   expect(bank.length === 4, `three moves banked to undo (${bank.length - 1})`);
-  // `roompole` is what the room keeps across a restart so the fish do not repeat
-  // themselves, and undo keeps it too (undo.ts, "What it does NOT take back"). Written
-  // AFTER the last point was banked, so the point being restored holds a 0 there and only
-  // a kept live bank can still read 7. KOSTE never touches slot 99.
-  await p.evaluate(() => window.__ff.setRoompole(99, 7));
   // The `-` key first, once, so the desktop trigger is asserted on a real key event and
   // not only through the button. FFNG's key for it, which is where the choice comes from.
   await p.keyboard.press('Minus');
@@ -687,7 +682,6 @@ try {
     (await p.evaluate(() => window.__ff.posHash())) === bank[bank.length - 2],
     'the − key takes back exactly one move',
   );
-  expect((await p.evaluate(() => window.__ff.roompole(99))) === 7, 'and leaves roompole as it was, not as it is in the point');
   // …and on a layout that is not the one this machine is typing on. Playwright presses a
   // physical key, so the line above only ever proves the US position; the binding matches
   // `e.key` precisely so that it does not. On a Czech QWERTZ the `-` key reports

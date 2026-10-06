@@ -52,7 +52,9 @@ export function forgetHeard(history: UndoPoint[], line: HeardLine | null): void 
  *  - everything the room script said, when the point has no snapshot (past
  *    `SNAPSHOT_DEPTH`): its script then starts from init, every flag cleared.
  * Room-start lines (`INIT_TAG`) never are: undo does not run the room's opening again
- * (`Script.carryOver`). Point `idx` keeps what stays true at it.
+ * (`Script.carryOver`). Point `idx` keeps every line that stays heard at it, including those
+ * filed on the points the caller is about to drop (a line queued early and heard later),
+ * so a deeper undo still knows them.
  */
 export function takeUnsaid(history: UndoPoint[], idx: number): string[] {
   const at = history[idx];
@@ -62,7 +64,7 @@ export function takeUnsaid(history: UndoPoint[], idx: number): string[] {
   history.forEach((p, i) => {
     for (const h of p.said ?? []) if (h.tag !== INIT_TAG && (all || (i >= idx && h.tag > idx))) out.push(h.name);
   });
-  at.said = (at.said ?? []).filter((h) => h.tag <= idx);
+  at.said = history.slice(idx).flatMap((p) => p.said ?? []).filter((h) => h.tag <= idx);
   return out;
 }
 

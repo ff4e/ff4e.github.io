@@ -198,7 +198,7 @@ Now a deliberate deviation that sets `omicich = -1`, as FFNG does (`gods/code.lu
 Reported as "the same shout several times during a long solution". Most of that is the
 original's design: room scripts re-fire conversations on timers (BATHROOM every 40–120 s,
 KNIHOVNA cycling four talks through `roompole[1]`). Replaying the 70 committed solutions at
-a human pace gives ~1 600 lines with ~750 repeats, all of them `URoom.pas` behaviour. Five
+a human pace gives ~1 600 lines with ~750 repeats, all of them `URoom.pas` behaviour. Four
 things on top of that were the port's:
 
 - **StdKecej chattered in solved rooms.** `if zaznamy.rooms[roomnumber].savy[prv].dat<>0 then exit`
@@ -208,25 +208,24 @@ things on top of that were the port's:
   records, not the room (`URoom.pas:3367/3372`); the port reset it on every entry, restart and
   undo. It is now handed from timer to timer. Still a deviation: the original also keeps it
   across sessions, the port only for the browser session.
-- **Undo rewound `roompole`.** The bank the original keeps across a restart so the fish do not
-  repeat themselves was restored from the undo point, so undo brought those lines back. Undo
-  now keeps the live one (`src/app/undo.ts`, "What it does NOT take back").
-- **Undo rewound the "already said" flags rooms keep in their Vars.** Those cannot be kept —
-  the same Vars hold puzzle state — so the state rewinds and only the OUTPUT is held back:
+- **Undo rewound the "already said" flags** rooms keep in their Vars and `roompole`. Those
+  cannot be kept — the same banks hold puzzle state — so the state rewinds and only the
+  OUTPUT is held back (`src/app/undo.ts`, "What the fish have already said"):
   room-script lines heard after the undo point are muted, and the rewound script's first
   conversation containing one is dropped, its `set` entries still applied
   (`src/core/lineMute.ts`). Undoing 10 moves mid-solution and replaying them across 69 rooms:
   re-heard lines 38 → 9, the 9 being lines the rooms repeat by design (the parrot, TRUP's
   "au"); positions and refused moves identical with and without muting. Script state differs
   only in dialogue-paced timers, as a conversation that took no time would leave it. A line
-  the undo press cuts off is not counted as heard. Three cases on top of that:
+  the undo press cuts off is not counted as heard. Four cases on top of that:
   - Undo never starts the room's opening again. The rebuild runs `init()`, and TRUHLA queues
     its whole opening there, so the rebuild's `init()` queue is dropped.
   - A line queued but not yet heard when undo is pressed is carried into the rebuilt room
     (`carryOver`), with its `set` entries pointed at the live state (`forwardScript`,
     `shareVars`). That is, when it belongs to the position being returned to: queued before
     that point existed. Otherwise the rewound flag would mean it is never heard. Measured on
-    603 undos: lines lost 119 → 0, and 103 → 0 for a deep undo.
+    603 undos: lines lost 119 → 0, and 103 → 0 for a deep undo; 0 lost, repeated or doubled
+    for double and triple presses too.
   - A point past the 120 kept snapshots mutes everything heard, because its script restarts
     from init.
   - A mute matches the line family (`lineFamily`), so another random variant of the same
@@ -234,8 +233,9 @@ things on top of that were the port's:
 
   Measured across the solution rooms, the once-per-attempt and once-per-visit lines that came
   back after an undo went 17 → 0 for a 10-move undo and 250 → 0 for a deep undo with no
-  snapshot. The exit cheer, idle chatter and death commentary are never muted. Mutes last for the attempt and are not
-  saved, so undo after an F3 load can still repeat a line heard before the save.
+  snapshot. The exit cheer, idle chatter and death commentary are never muted. Mutes last
+  for the attempt and are not saved, so undo after an F3 load can still repeat a line
+  heard before the save.
 - **F3 restored `roompole` from the save.** The original saves every item's Vars but not
   `roompole` (`uloz_promenne`, `URoom.pas:1721`), and `TRoom.Load` leaves the bank alone, so
   a load within the visit kept the lines said since the save from repeating. The player's

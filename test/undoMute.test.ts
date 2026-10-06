@@ -141,6 +141,14 @@ describe('takeUnsaid', () => {
     expect(h[1]!.said, 'what stays true at the target stays on it').toEqual([{ name: 'old', tag: 1 }]);
   });
 
+  it('keeps a line queued early but heard later, so a second undo still mutes it', () => {
+    // Queued after point 0 existed (tag 1), heard while point 2 was the newest.
+    const h = [pt(), pt(), pt([{ name: 'late', tag: 1 }])];
+    expect(takeUnsaid(h, 1)).toEqual([]); // its flag is in point 1: nothing to mute yet
+    h.length = 2;
+    expect(takeUnsaid(h, 0)).toEqual(['late']); // ...but undoing past it must
+  });
+
   it('is empty when nothing was heard', () => {
     expect(takeUnsaid([pt(), pt()], 0)).toEqual([]);
   });
@@ -225,6 +233,30 @@ describe('carrying a pending conversation across the rebuild', () => {
     for (let c = 1; c < 80; c++) tick(nu, def, 1, c);
     expect(talked).toEqual(['late']);
     expect(nu.vars(0)[2]).toBe(7);
+  });
+
+  it('holds back one re-trigger of a carried line, in that Script only', () => {
+    const talked: string[] = [];
+    const s = script(talked);
+    s.beginProg();
+    s.addv(5, 'x');
+    s.endProg();
+    const carried = s.pending();
+    const nu = script(talked);
+    nu.carryOver(carried);
+    nu.beginProg();
+    nu.addv(0, 'x'); // the rewound script queues it too
+    nu.endProg();
+    for (let c = 1; c < 30; c++) nu.dialogy(c);
+    expect(talked, 'said once, from the carried copy').toEqual(['x']);
+    expect(nu.mutedLines, "the attempt's mutes are not touched").toBe(null);
+
+    const later = script(talked); // a later undo that does not carry it: no hold left
+    later.beginProg();
+    later.addv(0, 'x');
+    later.endProg();
+    for (let c = 1; c < 10; c++) later.dialogy(c);
+    expect(talked).toEqual(['x', 'x']);
   });
 
   it('forwards every field of the old Script to the new one', () => {

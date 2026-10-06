@@ -12,7 +12,7 @@
 import type { Item, Room } from './room.js';
 import { Dir } from './dir.js';
 import { captureBank, type ScriptBank } from './scriptBank.js';
-import { dropMutedRun, INIT_TAG, type HeardLine } from './lineMute.js';
+import { dropMutedRun, INIT_TAG, isTalk, lineFamily, type HeardLine } from './lineMute.js';
 
 /** natoceni facing codes (URoom.pas:420-421). */
 export const SMER_VLEVO = 1;
@@ -141,10 +141,10 @@ export class Script {
 
   private queue: DialogEntry[] = [];
 
-  /** Undo's muting of the room's own lines (`lineMute.ts`). `progTag` is the undo
-   *  history's length, set by the host before each tick; lines `prog()` queues carry it. */
+  /** Undo's view of the room's lines (`lineMute.ts`); `progTag`: undo history length, per tick. */
   progTag = 0;
   mutedLines: Set<string> | null = null;
+  private carried = new Set<string>(); // families of lines carryOver queued (one re-trigger each)
   private heard: HeardLine[] = [];
   private speaking: { line: HeardLine; entry: DialogEntry } | null = null;
   private progRun = 0;
@@ -562,8 +562,7 @@ export class Script {
   /** Drop this run's conversation if it holds a muted line (`dropMutedRun`). */
   endProg(): void {
     this.inProg = false;
-    if (!this.mutedLines?.size) return;
-    this.queue = dropMutedRun(this.queue, this.progRun, this.mutedLines, this.heard, (o, a) => this.setanim(o, a));
+    for (const m of [this.mutedLines, this.carried]) if (m?.size) this.queue = dropMutedRun(this.queue, this.progRun, m, this.heard, (o, a) => this.setanim(o, a));
   }
 
 
@@ -573,9 +572,10 @@ export class Script {
     return [...cut, ...this.queue];
   }
 
-  /** Undo: drop what the rebuild's `init()` queued (the attempt's own opening carries on)
-   *  and queue the old Script's `entries`, as batch -1 so no `prog()` run claims them. */
+  /** Undo: drop the rebuild's own `init()` queue, queue the old Script's `entries` (batch -1:
+   *  no `prog()` run claims them) and hold back one re-trigger of each (`carried`). */
   carryOver(entries: DialogEntry[]): void {
+    for (const d of entries) if (d.tag !== INIT_TAG && isTalk(d.zvuk)) this.carried.add(lineFamily(d.zvuk));
     this.queue = [...this.queue.filter((d) => d.batch !== 0), ...entries.map((d) => ({ ...d, batch: -1 }))];
   }
 
