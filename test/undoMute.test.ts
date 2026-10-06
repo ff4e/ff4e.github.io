@@ -11,6 +11,7 @@ import { describe, it, expect } from 'vitest';
 import { makeRoom } from './roomBuilder.js';
 import { Script, type RoomScript } from '../src/core/script.js';
 import { forgetHeard, takeUnsaid, type UndoPoint } from '../src/core/undoStack.js';
+import { INIT_TAG, lineFamily } from '../src/core/lineMute.js';
 
 function script(talked: string[] = []): Script {
   const room = makeRoom({ w: 20, h: 12, items: [{ kind: 'little', x: 2, y: 2 }] });
@@ -70,6 +71,8 @@ describe('Script muting (endProg)', () => {
   it('never mutes or logs lines queued outside prog (chatter, death lines)', () => {
     const talked: string[] = [];
     const s = script(talked);
+    s.beginProg(); // the room is live: init is behind it
+    s.endProg();
     s.mutedLines = new Set(['a']);
     s.addv(0, 'a');
     for (let c = 1; c < 10; c++) s.dialogy(c);
@@ -127,7 +130,8 @@ describe('a line the undo cuts off', () => {
 });
 
 describe('takeUnsaid', () => {
-  const pt = (said?: { name: string; tag: number }[]): UndoPoint => ({ rec: '', snapshot: null, said });
+  const snap = script().snapshot();
+  const pt = (said?: { name: string; tag: number }[]): UndoPoint => ({ rec: '', snapshot: snap, said });
 
   it('returns what was queued after the target point existed, and nothing older', () => {
     // Point 1 banked at length 2: a line tagged 1 was queued before it (in its snapshot),
@@ -139,6 +143,55 @@ describe('takeUnsaid', () => {
 
   it('is empty when nothing was heard', () => {
     expect(takeUnsaid([pt(), pt()], 0)).toEqual([]);
+  });
+
+  it('always returns room-start lines, and keeps them on the target for a deeper undo', () => {
+    const h = [pt(), pt([{ name: 'intro', tag: INIT_TAG }]), pt()];
+    expect(takeUnsaid(h, 0)).toEqual(['intro']);
+    expect(h[0]!.said).toEqual([{ name: 'intro', tag: INIT_TAG }]);
+    // Heard while standing at the start, undone to a later point: still the room's opening.
+    const g = [pt([{ name: 'intro', tag: INIT_TAG }]), pt(), pt()];
+    expect(takeUnsaid(g, 1)).toEqual(['intro']);
+  });
+
+  it('returns everything heard when the target has no snapshot (its flags restart from init)', () => {
+    const h = [pt([{ name: 'early', tag: 0 }]), { ...pt([{ name: 'mid', tag: 1 }]), snapshot: null }, pt([{ name: 'late', tag: 2 }])];
+    expect(takeUnsaid(h, 1).sort()).toEqual(['early', 'late', 'mid']);
+  });
+});
+
+describe('a mute matches the line family', () => {
+  it('holds back another random variant of the same line', () => {
+    const talked: string[] = [];
+    const s = script(talked);
+    s.beginProg();
+    s.endProg();
+    s.mutedLines = new Set([lineFamily('kuch-v-svitek0')]);
+    s.beginProg();
+    s.addv(0, 'kuch-v-svitek1');
+    s.addm(8, 'kuch-m-recept');
+    s.endProg();
+    for (let c = 1; c < 30; c++) s.dialogy(c);
+    expect(talked).toEqual([]);
+  });
+});
+
+describe('room-start lines (init)', () => {
+  it('are tagged, heard, and dropped by a rebuild once muted', () => {
+    const def: RoomScript = { name: 'T', init: (s) => s.addv(0, 'intro'), prog: () => {} };
+    const talked: string[] = [];
+    let s = script(talked);
+    def.init(s);
+    tick(s, def, 0, 1);
+    const heard = s.takeHeard();
+    expect(heard).toEqual([{ name: 'intro', tag: INIT_TAG }]);
+
+    s = script(talked); // undo's rebuild
+    def.init(s);
+    s.mutedLines = new Set(heard.map((h) => lineFamily(h.name)));
+    s.dropMutedInit();
+    for (let c = 1; c < 10; c++) tick(s, def, 0, c);
+    expect(talked).toEqual(['intro']);
   });
 });
 

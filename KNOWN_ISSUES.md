@@ -184,6 +184,15 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🟡 LODE's ball conversation looped forever (a 1998 bug) — fixed 2026-10-06
+
+The branch that says "did you notice the real golf ball…" is gated on the `omicich`
+countdown reaching 0 and never re-arms it (`URoom.pas:19401`). Once the countdown expires
+(96–320 s of dialogue-free play), the conversation is queued again every time the queue
+empties: back to back, every ~13 s, for the rest of the attempt. It was ported faithfully.
+Now a deliberate deviation that sets `omicich = -1`, as FFNG does (`gods/code.lua:144`), in
+`src/rooms/lode.ts`; covered by `test/lode-room.test.ts`.
+
 ### 🟡 The fish repeated themselves more than in the original — fixed 2026-10-06
 
 Reported as "the same shout several times during a long solution". Most of that is the
@@ -210,7 +219,17 @@ things on top of that were the port's:
   re-heard lines 38 → 9, the 9 being lines the rooms repeat by design (the parrot, TRUP's
   "au"); positions and refused moves identical with and without muting. Script state differs
   only in dialogue-paced timers, as a conversation that took no time would leave it. A line
-  the undo press cuts off is not counted as heard. Mutes last for the attempt and are not
+  the undo press cuts off is not counted as heard. Three cases on top of that:
+  - Room-start lines are muted on every undo once heard, because the rebuild runs `init()`
+    again (TRUHLA queues its whole opening there).
+  - A point past the 120 kept snapshots mutes everything heard, because its script restarts
+    from init.
+  - A mute matches the line family (`lineFamily`), so another random variant of the same
+    line is held back too.
+
+  Measured across the solution rooms, the once-per-attempt and once-per-visit lines that came
+  back after an undo went 17 → 0 for a 10-move undo and 250 → 0 for a deep undo with no
+  snapshot. The exit cheer, idle chatter and death commentary are never muted. Mutes last for the attempt and are not
   saved, so undo after an F3 load can still repeat a line heard before the save.
 - **F3 restored `roompole` from the save.** The original saves every item's Vars but not
   `roompole` (`uloz_promenne`, `URoom.pas:1721`), and `TRoom.Load` leaves the bank alone, so

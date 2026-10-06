@@ -10,6 +10,22 @@
  * `src/app/undo.ts`; this is the part that runs inside the Script.
  */
 
+/**
+ * The tag of a line the room's `init()` queued (an opening conversation, TRUHLA's). An
+ * undo rebuilds the room and so runs init again, whatever point it lands on, so these
+ * are muted on every undo once heard — no snapshot decides them.
+ */
+export const INIT_TAG = -1;
+
+/**
+ * What a mute matches: the name without its trailing digits. A room that says one of
+ * several variants (`'kuch-v-svitek' + random(2)`) may pick a different one when the
+ * rewound script fires the same event again, and that is still the same line coming back.
+ */
+export function lineFamily(name: string): string {
+  return name.replace(/\d+$/, '');
+}
+
 /** A line the room script queued and the player then heard, with its `progTag`. */
 export interface HeardLine {
   name: string;
@@ -21,7 +37,8 @@ export interface QueuedLine {
   zvuk: string;
   prior: number;
   promSet?: (val: number) => void;
-  /** Queued by `prog()`: the host's `progTag` then, and which `prog()` run queued it. */
+  /** Queued by `prog()` (or `init()`, as INIT_TAG / run 0): the host's `progTag` then,
+   *  and which run queued it. */
   tag?: number;
   batch?: number;
 }
@@ -49,7 +66,7 @@ export function dropMutedRun<T extends QueuedLine>(
   setanim: (obj: number, anim: string) => void,
 ): T[] {
   const batch = queue.filter((d) => d.batch === run);
-  if (!batch.some((d) => isTalk(d.zvuk) && muted.has(d.zvuk))) return queue;
+  if (!batch.some((d) => isTalk(d.zvuk) && muted.has(lineFamily(d.zvuk)))) return queue;
   for (const d of batch) {
     if (d.zvuk === 'set') d.promSet?.(d.prior);
     else if (d.zvuk.startsWith('ANIMWAIT')) setanim(d.prior, d.zvuk.slice(8));
@@ -57,7 +74,7 @@ export function dropMutedRun<T extends QueuedLine>(
     else if (isTalk(d.zvuk)) {
       d.promSet?.(d.prior);
       d.promSet?.(0);
-      muted.delete(d.zvuk);
+      muted.delete(lineFamily(d.zvuk));
       heard.push({ name: d.zvuk, tag: d.tag! });
     }
   }

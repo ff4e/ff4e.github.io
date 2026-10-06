@@ -12,7 +12,7 @@
  * from costing megabytes, and how to fit one in a save slot are decisions that need no
  * browser — so they live here and are tested in milliseconds rather than through a probe.
  */
-import type { HeardLine } from './lineMute.js';
+import { INIT_TAG, type HeardLine } from './lineMute.js';
 import type { ScriptSnapshot } from './script.js';
 import { bankEntries, bankFromEntries, captureBank, sameBank, type ScriptBank } from './scriptBank.js';
 
@@ -31,13 +31,6 @@ export interface UndoPoint {
   said?: HeardLine[];
 }
 
-/**
- * The lines an undo to `idx` un-says: those heard after point `idx` was banked, which its
- * snapshot therefore predates. A line's tag is the history length when `prog()` queued it,
- * so `tag > idx` means "queued after point idx existed". Lines heard later but queued
- * earlier are left out — their flag is in the snapshot, so the script will not say them
- * again. Removes what it returns from point `idx` (the caller drops the points above it).
- */
 /** Take back a heard line the player did not get to hear out (by identity). */
 export function forgetHeard(history: UndoPoint[], line: HeardLine | null): void {
   if (!line) return;
@@ -50,14 +43,32 @@ export function forgetHeard(history: UndoPoint[], line: HeardLine | null): void 
   }
 }
 
+/**
+ * The lines an undo to `idx` un-says, which the rebuilt script must not say again:
+ *  - those heard after point `idx` was banked, which its snapshot therefore predates. A
+ *    line's tag is the history length when `prog()` queued it, so `tag > idx` means
+ *    "queued after point idx existed". Lines heard later but queued earlier are left out —
+ *    their flag is in the snapshot, so the script will not say them again;
+ *  - every room-start line heard (`INIT_TAG`), because the rebuild runs `init()` again;
+ *  - everything heard, when the point has no snapshot (past `SNAPSHOT_DEPTH`): the script
+ *    then starts from init, every flag cleared.
+ * Point `idx` keeps what stays true at it, and the room-start lines of the points the
+ * caller is about to drop, so a deeper undo still knows they were heard.
+ */
 export function takeUnsaid(history: UndoPoint[], idx: number): string[] {
+  const at = history[idx];
+  if (!at) return [];
+  const all = at.snapshot === null;
   const out: string[] = [];
-  for (let i = Math.max(idx, 0); i < history.length; i++) {
-    const said = history[i]!.said;
-    if (!said) continue;
-    for (const h of said) if (h.tag > idx) out.push(h.name);
-    if (i === idx) history[i]!.said = said.filter((h) => h.tag <= idx);
+  for (let i = 0; i < idx; i++) for (const h of history[i]!.said ?? []) if (all || h.tag === INIT_TAG) out.push(h.name);
+  const keep: HeardLine[] = [];
+  for (let i = idx; i < history.length; i++) {
+    for (const h of history[i]!.said ?? []) {
+      if (all || h.tag > idx || h.tag === INIT_TAG) out.push(h.name);
+      if (h.tag === INIT_TAG || (i === idx && h.tag <= idx)) keep.push(h);
+    }
   }
+  at.said = keep;
   return out;
 }
 

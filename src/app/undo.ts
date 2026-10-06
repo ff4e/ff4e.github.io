@@ -39,8 +39,13 @@
  * line again, and only what the player HEARS is held back: every room-script line heard
  * is banked on the newest point (`said`) — except one the press itself cuts off, which
  * the player did not get to hear out — an undo moves the ones its target predates into
- * `mutedLines`, and the rebuilt script drops a conversation containing one of them, once
- * (`Script.endProg`). Nothing is muted beyond the attempt, and a save does not carry it.
+ * `mutedLines` (`takeUnsaid`: also every room-start line heard, since the rebuild runs
+ * `init()` again, and everything heard when the point is past `SNAPSHOT_DEPTH`), and the
+ * rebuilt script drops a conversation containing one of them, once (`Script.endProg`,
+ * `dropMutedInit`). A mute matches the line's family, so a random variant of the same
+ * line is held back too. Nothing is muted beyond the attempt, and a save does not carry it.
+ * Lines that are not the room script's are never held back: the exit cheer, the idle
+ * chatter and the death commentary.
  *
  * ── Why the key is matched on `e.key`, alone in this game ────────────────────
  * Every other keyboard binding here uses `e.code`, a PHYSICAL key position on a US
@@ -88,6 +93,7 @@ import { phoneUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 import { inSolvemode } from './solveMode.js';
 import { decodeUndoHistory, encodeUndoHistory, forgetHeard, shareSnapshot, takeUnsaid, undoTargetIndex } from '../core/undoStack.js';
+import { lineFamily } from '../core/lineMute.js';
 import type { UndoSaveData } from '../core/undoStack.js';
 
 /** Points that the replay failed to reproduce, for the probes. See `undoMove`. */
@@ -112,7 +118,8 @@ let wasPlayback = false;
  * So the DEPTH stays unlimited and the snapshots do not. Past this many points back, a
  * point keeps its record and drops its snapshot: undo still lands on the right position,
  * because the position comes from replaying the record, and only loses the script's
- * "already said" progress, so a line the fish spoke that long ago may be spoken again.
+ * "already said" progress — which `takeUnsaid` makes up for by muting every line heard
+ * in the attempt, so the fish still do not repeat themselves.
  * That is the right thing to spend — an undo 120 moves deep is already far outside what
  * this is for, and losing a position would be a real loss where repeating a line is not.
  */
@@ -170,9 +177,10 @@ export function sampleUndoPoint(): void {
 
 /** File the room-script lines heard since the last tick under the newest point. */
 function bankHeard(): void {
-  const heard = activeScript?.s.takeHeard();
   const top = undoHistory[undoHistory.length - 1];
-  if (heard?.length && top) (top.said ??= []).push(...heard);
+  if (!top) return; // keep them in the Script until the room's first point is banked
+  const heard = activeScript?.s.takeHeard();
+  if (heard?.length) (top.said ??= []).push(...heard);
 }
 
 /**
@@ -253,7 +261,7 @@ export function undoMove(): boolean {
     // Truncate FIRST: this both drops the position being left and leaves `target` on top,
     // so the history's "the newest point is where the player is" invariant holds again
     // and the next sample sees nothing new.
-    for (const name of takeUnsaid(undoHistory, idx)) mutedLines.add(name);
+    for (const name of takeUnsaid(undoHistory, idx)) mutedLines.add(lineFamily(name));
     undoHistory.length = idx + 1;
     // `animated: false` — the instant branch, matching FFNG's snap-back. An animated
     // rewind would play the room's whole record back at load speed on every press, which
@@ -262,7 +270,10 @@ export function undoMove(): boolean {
     const previousRoom = room;
     restore(target.rec, target.snapshot, false, false);
     if (livePole && activeScript) activeScript.s.roompole.splice(0, livePole.length, ...livePole);
-    if (activeScript) activeScript.s.mutedLines = mutedLines;
+    if (activeScript) {
+      activeScript.s.mutedLines = mutedLines;
+      activeScript.s.dropMutedInit(); // the rebuild ran init() again: its opening, if heard
+    }
     if (previousRoom && room) continuePhoneRoom(previousRoom, room);
     if (engine?.srecord === target.rec && room?.anyFishDead === false) {
       if (focusBeforeUndo) {

@@ -12,7 +12,7 @@
 import type { Item, Room } from './room.js';
 import { Dir } from './dir.js';
 import { captureBank, type ScriptBank } from './scriptBank.js';
-import { dropMutedRun, type HeardLine } from './lineMute.js';
+import { dropMutedRun, INIT_TAG, type HeardLine } from './lineMute.js';
 
 /** natoceni facing codes (URoom.pas:420-421). */
 export const SMER_VLEVO = 1;
@@ -546,6 +546,9 @@ export class Script {
     if (this.inProg) {
       d.tag = this.progTag;
       d.batch = this.progRun;
+    } else if (this.progRun === 0) {
+      d.tag = INIT_TAG; // queued by init(), before the first prog() run
+      d.batch = 0;
     }
     this.queue.push(d);
   }
@@ -559,8 +562,17 @@ export class Script {
   /** Drop this run's conversation if it holds a muted line (`dropMutedRun`). */
   endProg(): void {
     this.inProg = false;
+    this.dropMuted(this.progRun);
+  }
+
+  /** The same for what `init()` queued: undo calls it after its rebuild. */
+  dropMutedInit(): void {
+    this.dropMuted(0);
+  }
+
+  private dropMuted(run: number): void {
     if (!this.mutedLines?.size) return;
-    this.queue = dropMutedRun(this.queue, this.progRun, this.mutedLines, this.heard, (o, a) => this.setanim(o, a));
+    this.queue = dropMutedRun(this.queue, run, this.mutedLines, this.heard, (o, a) => this.setanim(o, a));
   }
 
   /** The room-script line still being spoken, if any: undo cuts it off, so it is not
