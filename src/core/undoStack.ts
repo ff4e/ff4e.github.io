@@ -12,6 +12,7 @@
  * from costing megabytes, and how to fit one in a save slot are decisions that need no
  * browser — so they live here and are tested in milliseconds rather than through a probe.
  */
+import { INIT_TAG, lineFamily, type HeardLine } from './lineMute.js';
 import type { ScriptSnapshot } from './script.js';
 import { bankEntries, bankFromEntries, captureBank, sameBank, type ScriptBank } from './scriptBank.js';
 
@@ -23,6 +24,55 @@ import { bankEntries, bankFromEntries, captureBank, sameBank, type ScriptBank } 
 export interface UndoPoint {
   rec: string;
   snapshot: ScriptSnapshot | null;
+  /**
+   * Room-script lines heard while this was the newest point. Kept in memory only (a save
+   * does not carry them), and only as long as the attempt: they go when the point does.
+   */
+  said?: HeardLine[];
+}
+
+/**
+ * The line an undo press cuts off: take it back out of the heard record (by identity), so
+ * it plays again — but only the first time that line is cut in the attempt (`forgiven`,
+ * by family). Cut again, it counts as heard: otherwise a burst of presses through a
+ * conversation, or past a spot that triggers the line, restarts it on every press.
+ * Returns whether it was forgiven, i.e. whether undo should carry it to be said again.
+ */
+export function forgiveCut(history: UndoPoint[], line: HeardLine | null, forgiven: Set<string>): boolean {
+  if (!line || forgiven.has(lineFamily(line.name))) return false;
+  forgiven.add(lineFamily(line.name));
+  forgetHeard(history, line);
+  return true;
+}
+
+function forgetHeard(history: UndoPoint[], line: HeardLine): void {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const k = history[i]!.said?.indexOf(line) ?? -1;
+    if (k >= 0) {
+      history[i]!.said!.splice(k, 1);
+      return;
+    }
+  }
+}
+
+/**
+ * Step 3 of undo's handling of the room's lines (`src/app/undo.ts`): the heard lines an
+ * undo to `idx` un-says. Those queued after point `idx` was banked (`tag > idx`), whose
+ * flags its snapshot predates; everything, when the point has no snapshot (its script
+ * starts from init). Never a room-start line (`INIT_TAG`): undo does not run the opening
+ * again. Point `idx` keeps every line still heard at it, including those filed on the
+ * points the caller is about to drop, so a deeper undo still knows them.
+ */
+export function takeUnsaid(history: UndoPoint[], idx: number): string[] {
+  const at = history[idx];
+  if (!at) return [];
+  const all = at.snapshot === null;
+  const out: string[] = [];
+  history.forEach((p, i) => {
+    for (const h of p.said ?? []) if (h.tag !== INIT_TAG && (all || (i >= idx && h.tag > idx))) out.push(h.name);
+  });
+  at.said = history.slice(idx).flatMap((p) => p.said ?? []).filter((h) => h.tag <= idx);
+  return out;
 }
 
 /**

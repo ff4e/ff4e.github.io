@@ -764,9 +764,17 @@ try {
     (await p.evaluate(() => [window.__ff.moves(), window.__ff.canUndo()])).join() === '0,true',
     'after both fish die the room auto-restarts, and undo is offered from its start',
   );
+  // The restart queues KOSTE's opening straight away (its `uvod` latch starts at 0 again).
+  // Undo back into the ended attempt must not bring any of that queue with it: it once
+  // did, and the opening played again in the attempt the player had gone back into.
+  await p.waitForFunction(() => window.__ff.script()?.dialog === true);
   await tap(p, 24);
   await p.waitForFunction((h) => window.__ff.posHash() === h && !window.__ff.state().dead, bothDeadAt);
   expect(true, 'Undo after the auto-restart returns to the position the fish died in');
+  expect(
+    !(await p.evaluate(() => window.__ff.script().dialog)),
+    "and none of the restart's queued dialogue comes with it",
+  );
   await p.evaluate(() => {
     window.__ff.killFish('little');
     window.__ff.killFish('big');
@@ -840,6 +848,10 @@ try {
   expect(true, 'Restart in between leaves nothing in memory to undo');
 
   // ── Load (region 13): it takes, without the room ending up somewhere else.
+  // Slot 98 is written after the save, so only a load that keeps the live bank still
+  // reads 5 — the original saves Vars but not roompole (`uloz_promenne`), and its Load
+  // leaves the bank alone. KOSTE never touches slot 98.
+  await p.evaluate(() => window.__ff.setRoompole(98, 5));
   await tap(p, 13);
   // `loading()` as well as `roomLoading()`, and they are different things: the second is
   // the ROOM being fetched, the first is the load's fast-forward still replaying the
@@ -855,6 +867,7 @@ try {
     savedMoves,
   );
   expect((await p.evaluate(() => window.__ff.roomNum())) === ROOM, 'Load stays in the same room');
+  expect((await p.evaluate(() => window.__ff.roompole(98))) === 5, 'and keeps the live roompole, as TRoom.Load does');
   expect(
     await p.evaluate(() => window.__ff.canUndo()),
     'and it brings the saved run\'s undo history back with it',

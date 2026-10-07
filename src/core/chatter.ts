@@ -199,15 +199,34 @@ export function vyberHlasku(s: Script, druh: number, depth15 = false): void {
 export interface ChatterState {
   interval: number; // CasKecu, in game ticks
   last: number; // count of the last chatter (posldialog)
-  poslhlasky: number; // packed history of the last three group numbers (1..6), 3 bits each
+  /**
+   * Packed history of the last three group numbers (1..6), 3 bits each. In the original
+   * this is `zaznamy.poslhlasky` (URoom.pas:3367/3372) — part of the game's records, not
+   * of the room — so it carries across rooms, restarts and (here) undo. See `newChatter`.
+   */
+  poslhlasky: number;
+  /**
+   * The room already has a first-solve record (`savy[prv].dat<>0`), so StdKecej stays
+   * silent for the whole visit (URoom.pas:3357). Fixed at room entry: the record is only
+   * written by a win, and a won room is past chatter anyway.
+   */
+  roomSolved: boolean;
 }
 
-/** A fresh chatter timer for a room entry: CasKecu = random(60)+60 seconds. */
-export function newChatter(s: Script, ticksPerSecond: number): ChatterState {
+/**
+ * A fresh chatter timer for a room entry: CasKecu = random(60)+60 seconds.
+ *
+ * `poslhlasky` is the previous timer's history, handed on so a room entry, a restart or
+ * an undo (each builds a new timer) cannot replay a group just heard. The original keeps
+ * it in the records file and so across sessions too; here it lasts for the browser
+ * session.
+ */
+export function newChatter(s: Script, ticksPerSecond: number, poslhlasky = 0, roomSolved = false): ChatterState {
   return {
     interval: Math.round((s.random(61) + 60) * ticksPerSecond),
     last: 0,
-    poslhlasky: 0,
+    poslhlasky,
+    roomSolved,
   };
 }
 
@@ -224,6 +243,7 @@ export function tickChatter(
   dialogActive: boolean,
   depth15 = false,
 ): boolean {
+  if (st.roomSolved) return false; // if zaznamy.rooms[roomnumber].savy[prv].dat<>0 then exit
   if (dialogActive) return false;
   if (now - st.last < st.interval) return false;
   st.last = now;

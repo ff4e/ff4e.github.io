@@ -184,6 +184,58 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🟡 LODE's ball conversation looped forever (a 1998 bug) — fixed 2026-10-06
+
+The branch that says "did you notice the real golf ball…" is gated on the `omicich`
+countdown reaching 0 and never re-arms it (`URoom.pas:19401`). Once the countdown expires
+(96–320 s of dialogue-free play), the conversation is queued again every time the queue
+empties: back to back, every ~13 s, for the rest of the attempt. It was ported faithfully.
+Now a deliberate deviation that sets `omicich = -1`, as FFNG does (`gods/code.lua:144`), in
+`src/rooms/lode.ts`; covered by `test/lode-room.test.ts`.
+
+### 🟡 The fish repeated themselves more than in the original — fixed 2026-10-06
+
+Reported as "the same shout several times during a long solution". Most of that is the
+original's design: room scripts re-fire conversations on timers (BATHROOM every 40–120 s,
+KNIHOVNA cycling four talks through `roompole[1]`). Replaying the 70 committed solutions at
+a human pace gives ~1 600 lines with ~750 repeats, all of them `URoom.pas` behaviour. Four
+things on top of that were the port's:
+
+- **StdKecej chattered in solved rooms.** `if zaznamy.rooms[roomnumber].savy[prv].dat<>0 then exit`
+  (`URoom.pas:3357`) keeps the idle chatter off once a room has a first-solve record. Now
+  `ChatterState.roomSolved` (`src/core/chatter.ts`), set by `armChatter` (`logicTick.ts`).
+- **The no-repeat-last-three history was per room.** `poslhlasky` lives in `zaznamy`, the
+  records, not the room (`URoom.pas:3367/3372`); the port reset it on every entry, restart and
+  undo. It is now handed from timer to timer. Still a deviation: the original also keeps it
+  across sessions, the port only for the browser session.
+- **Undo rewound the "already said" flags** rooms keep in their Vars and `roompole`, so it
+  brought back lines the player had just heard, and dropped lines queued but not yet heard.
+  The flags cannot be kept, because the same banks hold puzzle state. So the state still
+  rewinds and undo works on what is heard instead: heard lines are muted against the
+  rewound script, unheard queued lines are carried into the rebuilt room, and the room's
+  opening never restarts. The design is in `src/app/undo.ts`, "What the fish have already
+  said". Measured headless across the solution rooms:
+  - Once-only lines heard again after an undo: 17 → 0 (10 moves back); 250 → 0 for a deep
+    undo past the 120 kept snapshots.
+  - Queued lines lost: 119 → 0 (deep: 103 → 0).
+  - No line doubled, including double and triple presses.
+  - Positions and refused moves are identical with and without the muting. Script state
+    differs only in dialogue-paced timers, as a conversation that took no time would leave
+    it.
+
+  A line the press cuts off is said again once, from its start, about a second after the
+  presses stop; cut a second time it counts as heard. Before that rule a burst of presses
+  through a conversation restarted the line on every press (21 times in 20 presses, BARELY
+  and TRUHLA). What remains: mutes are not saved,
+  so undo after an F3 load can repeat a line heard before the save. Speech a room plays
+  directly with `talkNow`, the exit cheer, the idle chatter and the death commentary are
+  outside it.
+- **F3 restored `roompole` from the save.** The original saves every item's Vars but not
+  `roompole` (`uloz_promenne`, `URoom.pas:1721`), and `TRoom.Load` leaves the bank alone, so
+  a load within the visit kept the lines said since the save from repeating. The player's
+  load now keeps the live bank (`restore`'s `keepRoompole`); GPU-loss recovery and the demo's
+  checkpoint still restore it exactly.
+
 ### 🟠 KUFRIK's first tutorial line ended in half a second of buzz — fixed 2026-08-16
 
 The last 0.47 s of `002/help1` — *"Teď na nic nesahej, jen se dívej…"*, the first thing the

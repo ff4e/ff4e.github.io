@@ -22,6 +22,40 @@
  * valuable use, and it is exactly the state saving forbids. Only `atRest()` and the
  * playback modes gate it (Martin's call, 2026-08-29).
  *
+ * ── What the fish have already said ──────────────────────────────────────────
+ * The one place this is explained; `lineMute.ts`, `takeUnsaid` and `Script` only point
+ * here. None of it is the original's, which has no undo.
+ *
+ * A point's snapshot rewinds the room's "already said" flags with the position: they live
+ * in the item Vars and `roompole`, beside puzzle state and timers that must match it, so
+ * no flag is ever kept back. The rewound script is therefore free to queue a line again,
+ * and undo works on what the player HEARS instead, never on the state. In order:
+ *  1. Tag. Before each tick the host sets `Script.progTag` to the history's length, and
+ *     every entry `prog()` queues carries it (`tag`); entries `init()` queued carry
+ *     `INIT_TAG`. `tag <= idx` therefore means "queued before point idx was banked, so its
+ *     flag is in that point's snapshot".
+ *  2. Bank. A tagged line is credited as heard when it starts playing, and `bankHeard`
+ *     files it on the newest point (`said`). The line a press cuts off is taken back out,
+ *     so it plays again, but only the first time that line is cut in the attempt
+ *     (`forgiveCut`); cut again, it counts as heard, or a burst of presses would restart
+ *     it on every press. Carried to be said again (step 4), it waits ~1 s first, afresh
+ *     at each press, so the fish stay quiet while the player keeps pressing. Speech a
+ *     room plays straight away with `talkNow`, and lines that are not the room script's
+ *     (the exit cheer, idle chatter, death commentary), are outside all of this and are
+ *     never held back.
+ *  3. Mute. An undo to point idx moves the heard lines its snapshot predates (`tag > idx`;
+ *     everything, past `SNAPSHOT_DEPTH`) into the attempt's `mutedLines` (`takeUnsaid`).
+ *     The rebuilt script drops, once, a conversation of its own that contains one, by line
+ *     family so a random variant counts too (`Script.endProg`, `dropMutedRun`). Its `set`
+ *     entries still run: only voice, subtitle and their time are skipped.
+ *  4. Carry. A line queued but not heard yet when undo is pressed is moved into the rebuilt
+ *     Script when its flag is in the target's snapshot (`tag <= idx`, or `INIT_TAG`) — the
+ *     rewound script would never queue it again (`transferPendingDialogue`). The rebuild's
+ *     own `init()` queue is dropped, so the room's opening does not restart. A carried line
+ *     comes with a hold against one re-trigger of it, kept on that Script only, so a later
+ *     undo that discards the line cannot leave a mute behind.
+ * Mutes last for the attempt; a save does not carry them.
+ *
  * ── Why the key is matched on `e.key`, alone in this game ────────────────────
  * Every other keyboard binding here uses `e.code`, a PHYSICAL key position on a US
  * layout, and is right to: IJKL and WASD are chosen as shapes under the hands, so a Czech
@@ -59,7 +93,7 @@
  * is dead and the record has run past it (`undoTargetIndex`, "adrift"), so the restart does
  * not move where undo lands.
  */
-import { activeScript, clearUndoHistory, cutscene, deadAttempt, dropDeadAttempt, engine, loadmode, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
+import { activeScript, clearUndoHistory, cutscene, deadAttempt, dropDeadAttempt, engine, forgivenCuts, loadmode, mutedLines, replaymode, room, setUndoHistory, showmode, undoHistory } from './gameState.js';
 import { focusRestoredFish, restore } from './movement.js';
 import { atRest } from './roomGates.js';
 import { continuePhoneRoom } from './phoneViewport.js';
@@ -67,7 +101,10 @@ import { phoneUndoFocus } from './phoneUndoFocus.js';
 import { phoneUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 import { inSolvemode } from './solveMode.js';
-import { decodeUndoHistory, encodeUndoHistory, shareSnapshot, undoTargetIndex } from '../core/undoStack.js';
+import { decodeUndoHistory, encodeUndoHistory, forgiveCut, shareSnapshot, takeUnsaid, undoTargetIndex } from '../core/undoStack.js';
+import { forwardScript, INIT_TAG, lineFamily, shareVars } from '../core/lineMute.js';
+import type { Script } from '../core/script.js';
+import type { Room } from '../core/room.js';
 import type { UndoSaveData } from '../core/undoStack.js';
 
 /** Points that the replay failed to reproduce, for the probes. See `undoMove`. */
@@ -92,9 +129,9 @@ let wasPlayback = false;
  * So the DEPTH stays unlimited and the snapshots do not. Past this many points back, a
  * point keeps its record and drops its snapshot: undo still lands on the right position,
  * because the position comes from replaying the record, and only loses the script's
- * "already said" progress, so a line the fish spoke that long ago may be spoken again.
- * That is the right thing to spend — an undo 120 moves deep is already far outside what
- * this is for, and losing a position would be a real loss where repeating a line is not.
+ * "already said" flags — which `takeUnsaid` makes up for by muting every line heard in the
+ * attempt (step 3 above). Position history stays unlimited; the hearing history is what
+ * covers for the snapshots let go.
  */
 const SNAPSHOT_DEPTH = 120;
 
@@ -112,6 +149,7 @@ const SNAPSHOT_DEPTH = 120;
  */
 export function sampleUndoPoint(): void {
   if (!room || !engine || ui.screen !== 'room') return;
+  bankHeard();
   if (engine.phase !== 'idle') return; // mid-move: not a position to come back to
   // Something other than the player is driving the record: the KUFRIK demonstration, the
   // map's "Replay", or a dev solution run. Bank nothing while one plays — those are not
@@ -145,6 +183,33 @@ export function sampleUndoPoint(): void {
   undoHistory.push({ rec, snapshot: snapshot ? shareSnapshot(top?.snapshot ?? null, snapshot) : null });
   const drop = undoHistory.length - 1 - SNAPSHOT_DEPTH;
   if (drop >= 0 && undoHistory[drop]!.snapshot !== null) undoHistory[drop]!.snapshot = null;
+}
+
+/**
+ * Step 4 above: move what the old Script still had to say, and that the rewound flags will
+ * not bring back, into the rebuilt one. With no `old` (undo resuming a death-ended attempt)
+ * nothing is carried, but the rebuild's own `init()` queue is still dropped. Queued `set`
+ * entries are closures over the Script and the item arrays that queued them, so the old
+ * Script forwards every field to the new one (`forwardScript`) and the new room adopts the
+ * old item arrays (`shareVars`).
+ */
+function transferPendingDialogue(old: { s: Script; room: Room } | null, idx: number, replayCut: boolean): void {
+  const s = activeScript?.s;
+  if (!s || old?.s === s) return;
+  const keep = old ? old.s.pendingDialogue(replayCut).filter((d) => d.tag === INIT_TAG || (d.tag !== undefined && d.tag <= idx)) : [];
+  if (old && keep.length) {
+    shareVars(old.room.items, s.room.items);
+    forwardScript(old.s, s);
+  }
+  s.adoptPendingDialogue(keep);
+}
+
+/** File the room-script lines heard since the last tick under the newest point. */
+function bankHeard(): void {
+  const top = undoHistory[undoHistory.length - 1];
+  if (!top) return; // keep them in the Script until the room's first point is banked
+  const heard = activeScript?.s.takeHeard();
+  if (heard?.length) (top.said ??= []).push(...heard);
 }
 
 /**
@@ -194,9 +259,18 @@ export function canUndo(): boolean {
 export function undoMove(): boolean {
   if (!canUndo()) return false;
   const focusBeforeUndo = phoneUi() && engine ? { rec: engine.srecord, active: engine.active } : null;
+  // File what was heard under the history it was heard in, before a resume can swap it,
+  // minus the line this press is about to cut off: half a sentence is not "already said".
+  bankHeard();
+  const replayCut = forgiveCut(undoHistory, activeScript?.s.cutLine() ?? null, forgivenCuts);
   // Back into the attempt the death restart ended: it becomes the history again, and the
   // loop below lands on its newest point exactly as it would on a death without a restart.
-  if (resumesDeadAttempt()) setUndoHistory(deadAttempt!);
+  const resuming = resumesDeadAttempt();
+  if (resuming) setUndoHistory(deadAttempt!);
+  // Whose queue to carry (step 4). Not the restart's when resuming: its tags count from its
+  // own fresh history, so all of it would pass `tag <= idx`, and its opening would play in
+  // the attempt the player went back into.
+  const old = activeScript && !resuming ? { s: activeScript.s, room: activeScript.s.room } : null;
   let idx = undoTargetIndex(undoHistory, engine?.srecord ?? '');
   // Fall back down the history until the replay actually lands where the point says.
   //
@@ -217,6 +291,7 @@ export function undoMove(): boolean {
     // Truncate FIRST: this both drops the position being left and leaves `target` on top,
     // so the history's "the newest point is where the player is" invariant holds again
     // and the next sample sees nothing new.
+    for (const name of takeUnsaid(undoHistory, idx)) mutedLines.add(lineFamily(name));
     undoHistory.length = idx + 1;
     // `animated: false` — the instant branch, matching FFNG's snap-back. An animated
     // rewind would play the room's whole record back at load speed on every press, which
@@ -224,8 +299,10 @@ export function undoMove(): boolean {
     // that branch; the load and the demo both take the animated one.
     const previousRoom = room;
     restore(target.rec, target.snapshot, false, false);
+    if (activeScript) activeScript.s.mutedLines = mutedLines;
     if (previousRoom && room) continuePhoneRoom(previousRoom, room);
     if (engine?.srecord === target.rec && room?.anyFishDead === false) {
+      transferPendingDialogue(old, idx, replayCut);
       if (focusBeforeUndo) {
         const which = phoneUndoFocus(focusBeforeUndo.rec, target.rec, focusBeforeUndo.active, room.alive);
         if (which) focusRestoredFish(which);

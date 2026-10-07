@@ -46,7 +46,6 @@ import { TALKING_MEZ_SEC, MUSIC_PRIOR } from '../audio/audio.js';
 import { musicForCHud, musicUrl } from '../audio/music.js';
 import { Script, type ScriptSnapshot } from '../core/script.js';
 import { StepEngine, TURN_FRAMES } from '../core/stepEngine.js';
-import { newChatter } from '../core/chatter.js';
 import { newDeathState } from '../core/deathlines.js';
 import { movesOf, lengthOfRecord } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
@@ -94,7 +93,7 @@ import {
   showMap,
 } from './mapNav.js';
 import { initBoot, runBoot } from './boot.js';
-import { hracNespi, initLogicTick, step } from './logicTick.js';
+import { armChatter, hracNespi, initLogicTick, step } from './logicTick.js';
 import { openSaveStore } from './persist.js';
 import { initFramePainter } from './framePainter.js';
 import {
@@ -195,7 +194,6 @@ import {
   prevKostra,
   room,
   setActiveScript,
-  setChatter,
   setCount,
   setDeathState,
   setEngine,
@@ -785,7 +783,7 @@ function buildRoom(carryPole = false): void {
       engine.phase = 'idle';
     }
   }
-  setChatter(activeScript ? newChatter(activeScript.s, 1000 / LOGIC_MS) : null);
+  armChatter(solved.has(Number(select.value)));
   setDeathState(newDeathState());
   setRoomDepth(depthOfRoom(Number(select.value)));
   setInfo();
@@ -936,7 +934,7 @@ function loadGame(): void {
     /* legacy plain-string save (just the move record) */
   }
   loadUndoHistory(undoData); // the saved attempt's points, before its record is replayed
-  restore(rec, snapshot, false, true); // player load: fast-forward animated replay (TRoom.Load)
+  restore(rec, snapshot, false, true, true); // player load: animated replay, live roompole (TRoom.Load)
 }
 
 /** True if a save exists for the current room. */

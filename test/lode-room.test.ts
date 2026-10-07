@@ -132,3 +132,18 @@ describe('LODE room — end-of-game loops into a fresh match', () => {
     expect(sawVyhral).toBe(true);
   });
 });
+
+describe('LODE room — the ball conversation is said once (deliberate deviation)', () => {
+  it('does not loop once its countdown expires (URoom.pas:19401; FFNG gods/code.lua:144)', () => {
+    const { s, spoken } = lodeScript();
+    const rv = s.vars(0);
+    rv[1] = 1; // room_uvod done
+    rv[2] = -1; // room_costim done
+    rv[3] = 1; // room_oholi done
+    rv[4] = 1; // room_opalce done
+    rv[5] = 1; // room_omicich about to expire
+    rv[ROOM_STAVHRY] = 3; // keep the gods' game out of the queue
+    for (let count = 1; count <= 3000; count++) tick(s, count);
+    expect(spoken.filter((l) => l === 'lod-m-micek').length).toBe(1);
+  });
+});

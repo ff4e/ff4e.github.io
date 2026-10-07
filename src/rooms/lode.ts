@@ -192,6 +192,11 @@ function prog(s: Script): void {
         if (s.item(R.palka).x === 23 && s.item(R.palka).y === 2)
           s.addm(s.random(7), 'lod-m-pal' + 'ka');
       } else if (v[R.room_omicich] === 0) {
+        // DELIBERATE DEVIATION (URoom.pas:19401): the original never re-arms this branch.
+        // The countdown above stops at 0, so once it expires the ball conversation is
+        // queued again every time the queue empties — back to back, every ~13 s, for the
+        // rest of the attempt. FFNG fixed it the same way (gods/code.lua:144).
+        v[R.room_omicich] = -1;
         if (s.item(R.kriketak).x > 24 && s.item(R.kriketak).y > 19) {
           s.addv(s.random(5), 'lod-v-micky');
           s.addm(s.random(5), 'lod-m-vyznam');

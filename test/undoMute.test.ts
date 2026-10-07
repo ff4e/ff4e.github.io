@@ -1,0 +1,371 @@
+/**
+ * Undo's muting of room-script lines (`Script.endProg`, `takeUnsaid`): an undo rewinds the
+ * item Vars, and with them the "already said" flags rooms keep there, so the rewound script
+ * queues lines the player has just heard. The state must stay exactly as the script writes
+ * it — the same Vars hold puzzle state — so only what is HEARD is held back.
+ *
+ * The last test walks the whole loop the browser runs (`logicTick` tags, `undo.ts` banks
+ * and mutes, a rebuilt Script re-triggers) without a browser, against a synthetic room.
+ */
+import { describe, it, expect } from 'vitest';
+import { makeRoom } from './roomBuilder.js';
+import { Script, type RoomScript } from '../src/core/script.js';
+import { forgiveCut, takeUnsaid, type UndoPoint } from '../src/core/undoStack.js';
+import { forwardScript, INIT_TAG, lineFamily, shareVars } from '../src/core/lineMute.js';
+
+function script(talked: string[] = []): Script {
+  const room = makeRoom({ w: 20, h: 12, items: [{ kind: 'little', x: 2, y: 2 }] });
+  return new Script(room, (name) => {
+    talked.push(name);
+    return 3;
+  });
+}
+
+/** One host tick's worth of script: tag, prog, then the speech queue. */
+function tick(s: Script, def: RoomScript, tag: number, count: number): void {
+  s.progTag = tag;
+  s.beginProg();
+  def.prog(s);
+  s.endProg();
+  s.dialogy(count);
+}
+
+describe('Script muting (endProg)', () => {
+  it('drops a whole conversation containing a muted line, once, and still applies its sets', () => {
+    const talked: string[] = [];
+    const s = script(talked);
+    const writes: number[] = [];
+    s.mutedLines = new Set(['a']);
+    s.progTag = 4;
+    s.beginProg();
+    s.addv(5, 'a');
+    s.addset((v) => writes.push(v), 1);
+    s.addm(5, 'b');
+    s.addset((v) => writes.push(v), 0);
+    s.endProg();
+    expect(s.isDialog(), 'nothing left to say').toBe(false);
+    expect(writes, 'the sets ran, in order').toEqual([1, 0]);
+    expect(s.mutedLines.size, 'the mute is spent').toBe(0);
+    expect(s.takeHeard(), 'the muted line counts as heard again; b was never heard').toEqual([{ name: 'a', tag: 4 }]);
+    for (let c = 1; c < 30; c++) s.dialogy(c);
+    expect(talked).toEqual([]);
+  });
+
+  it('leaves a conversation alone when none of it is muted, and logs what is heard', () => {
+    const talked: string[] = [];
+    const s = script(talked);
+    s.mutedLines = new Set(['x']);
+    s.progTag = 2;
+    s.beginProg();
+    s.addv(0, 'a');
+    s.endProg();
+    for (let c = 1; c < 10; c++) s.dialogy(c);
+    expect(talked).toEqual(['a']);
+    expect(s.takeHeard()).toEqual([{ name: 'a', tag: 2 }]);
+    expect(s.mutedLines.has('x')).toBe(true);
+  });
+
+  it('never mutes or logs lines queued outside prog (chatter, death lines)', () => {
+    const talked: string[] = [];
+    const s = script(talked);
+    s.beginProg(); // the room is live: init is behind it
+    s.endProg();
+    s.mutedLines = new Set(['a']);
+    s.addv(0, 'a');
+    for (let c = 1; c < 10; c++) s.dialogy(c);
+    expect(talked).toEqual(['a']);
+    expect(s.takeHeard()).toEqual([]);
+  });
+
+  it('only drops the run that queued the muted line, not one already waiting', () => {
+    const talked: string[] = [];
+    const s = script(talked);
+    s.beginProg();
+    s.addv(0, 'earlier');
+    s.endProg();
+    s.mutedLines = new Set(['a']);
+    s.beginProg();
+    s.addm(0, 'a');
+    s.endProg();
+    for (let c = 1; c < 20; c++) s.dialogy(c);
+    expect(talked).toEqual(['earlier']);
+  });
+});
+
+describe('a line the undo cuts off', () => {
+  it('is reported as playing only while it is being spoken', () => {
+    const s = script();
+    s.beginProg();
+    s.addv(0, 'a');
+    s.endProg();
+    s.dialogy(1); // starts: 3 ticks long
+    expect(s.cutLine()?.name).toBe('a');
+    s.dialogy(2);
+    expect(s.cutLine()?.name).toBe('a');
+    s.dialogy(4); // over
+    expect(s.cutLine()).toBe(null);
+  });
+
+  it('waits before it is said again, and waits afresh at every press while still waiting', () => {
+    const s = script();
+    s.beginProg();
+    s.addv(0, 'a');
+    s.addm(0, 'b');
+    s.endProg();
+    s.dialogy(1); // 'a' starts (3 ticks long)
+    const [cut, rest] = s.pendingDialogue();
+    expect([cut!.zvuk, cut!.delay, cut!.replay]).toEqual(['a', 15, true]);
+    expect(rest!.zvuk).toBe('b');
+    const nu = script();
+    nu.adoptPendingDialogue([cut!, rest!]);
+    for (let c = 1; c <= 10; c++) nu.dialogy(c); // pressed again 10 ticks later: still waiting
+    expect(nu.cutLine()).toBe(null);
+    expect(nu.pendingDialogue()[0]!.delay, 'the wait starts over').toBe(15);
+  });
+
+  it('is taken back out of the history, so the undo does not mute it', () => {
+    const s = script();
+    s.beginProg();
+    s.addv(0, 'a');
+    s.endProg();
+    s.progTag = 1;
+    s.dialogy(1);
+    const h: UndoPoint[] = [{ rec: '', snapshot: null, said: s.takeHeard() }];
+    expect(forgiveCut(h, s.cutLine(), new Set())).toBe(true);
+    expect(takeUnsaid(h, 0)).toEqual([]);
+  });
+
+  it('leaves a line that finished in the history', () => {
+    const line = { name: 'a', tag: 1 };
+    const h: UndoPoint[] = [{ rec: '', snapshot: null, said: [line] }];
+    forgiveCut(h, { name: 'a', tag: 1 }, new Set()); // equal, not the same object: a different line
+    expect(takeUnsaid(h, 0)).toEqual(['a']);
+  });
+
+  it('is forgiven once per attempt: cut again, it counts as heard (no restart on every press)', () => {
+    const forgiven = new Set<string>();
+    const first = { name: 'kuch-v-kreslo0', tag: 3 };
+    const h: UndoPoint[] = [{ rec: '', snapshot: null, said: [first] }];
+    expect(forgiveCut(h, first, forgiven)).toBe(true);
+    const again = { name: 'kuch-v-kreslo0', tag: 2 }; // the rewound script said it again
+    h[0]!.said!.push(again);
+    expect(forgiveCut(h, again, forgiven)).toBe(false);
+    expect(takeUnsaid(h, 0)).toEqual(['kuch-v-kreslo0']); // so the next re-trigger is muted
+  });
+});
+
+describe('takeUnsaid', () => {
+  const snap = script().snapshot();
+  const pt = (said?: { name: string; tag: number }[]): UndoPoint => ({ rec: '', snapshot: snap, said });
+
+  it('returns what was queued after the target point existed, and nothing older', () => {
+    // Point 1 banked at length 2: a line tagged 1 was queued before it (in its snapshot),
+    // one tagged 2 after it.
+    const h = [pt(), pt([{ name: 'old', tag: 1 }, { name: 'new', tag: 2 }]), pt([{ name: 'later', tag: 3 }])];
+    expect(takeUnsaid(h, 1)).toEqual(['new', 'later']);
+    expect(h[1]!.said, 'what stays true at the target stays on it').toEqual([{ name: 'old', tag: 1 }]);
+  });
+
+  it('keeps a line queued early but heard later, so a second undo still mutes it', () => {
+    // Queued after point 0 existed (tag 1), heard while point 2 was the newest.
+    const h = [pt(), pt(), pt([{ name: 'late', tag: 1 }])];
+    expect(takeUnsaid(h, 1)).toEqual([]); // its flag is in point 1: nothing to mute yet
+    h.length = 2;
+    expect(takeUnsaid(h, 0)).toEqual(['late']); // ...but undoing past it must
+  });
+
+  it('is empty when nothing was heard', () => {
+    expect(takeUnsaid([pt(), pt()], 0)).toEqual([]);
+  });
+
+  it('never returns room-start lines: undo does not run the opening again', () => {
+    const h = [pt([{ name: 'intro', tag: INIT_TAG }]), pt(), pt()];
+    expect(takeUnsaid(h, 0)).toEqual([]);
+    expect(takeUnsaid([{ ...pt([{ name: 'intro', tag: INIT_TAG }]), snapshot: null }], 0)).toEqual([]);
+  });
+
+  it('returns everything heard when the target has no snapshot (its flags restart from init)', () => {
+    const h = [pt([{ name: 'early', tag: 0 }]), { ...pt([{ name: 'mid', tag: 1 }]), snapshot: null }, pt([{ name: 'late', tag: 2 }])];
+    expect(takeUnsaid(h, 1).sort()).toEqual(['early', 'late', 'mid']);
+  });
+});
+
+describe('a mute matches the line family', () => {
+  it('holds back another random variant of the same line', () => {
+    const talked: string[] = [];
+    const s = script(talked);
+    s.beginProg();
+    s.endProg();
+    s.mutedLines = new Set([lineFamily('kuch-v-svitek0')]);
+    s.beginProg();
+    s.addv(0, 'kuch-v-svitek1');
+    s.addm(8, 'kuch-m-recept');
+    s.endProg();
+    for (let c = 1; c < 30; c++) s.dialogy(c);
+    expect(talked).toEqual([]);
+  });
+});
+
+describe('room-start lines (init)', () => {
+  it('are tagged, and a rebuild that carries over drops its own opening', () => {
+    const def: RoomScript = { name: 'T', init: (s) => s.addv(0, 'intro'), prog: () => {} };
+    const talked: string[] = [];
+    let s = script(talked);
+    def.init(s);
+    tick(s, def, 0, 1);
+    expect(s.takeHeard()).toEqual([{ name: 'intro', tag: INIT_TAG }]);
+
+    s = script(talked); // undo's rebuild
+    def.init(s);
+    s.adoptPendingDialogue([]);
+    for (let c = 1; c < 10; c++) tick(s, def, 0, c);
+    expect(talked).toEqual(['intro']);
+  });
+});
+
+describe('carrying a pending conversation across the rebuild', () => {
+  // The room latches the line in a Var when it QUEUES it, and the line waits 50 ticks: a
+  // point banked in between holds the flag, so undoing to it must still let it be heard.
+  const def: RoomScript = {
+    name: 'T',
+    init: (s) => {
+      s.vars(0, 2);
+    },
+    prog: (s) => {
+      const v = s.vars(0);
+      if (v[1] === 0) {
+        v[1] = 1;
+        s.addv(50, 'late');
+        s.addset((x) => (v[2] = x), 7); // a closure over the OLD room's array
+      }
+    },
+  };
+
+  it('plays it in the rebuilt room, and its set lands on the live state', () => {
+    const talked: string[] = [];
+    const old = script(talked);
+    def.init(old);
+    tick(old, def, 0, 1); // queued, tag 0: before point 0
+    const snap = old.snapshot(); // point 0: flag set, line unheard
+
+    const nu = script(talked);
+    def.init(nu);
+    nu.applySnapshot(snap);
+    const keep = old.pendingDialogue().filter((d) => d.tag !== undefined && d.tag <= 0);
+    shareVars(old.room.items, nu.room.items);
+    forwardScript(old, nu);
+    nu.adoptPendingDialogue(keep);
+    for (let c = 1; c < 80; c++) tick(nu, def, 1, c);
+    expect(talked).toEqual(['late']);
+    expect(nu.vars(0)[2]).toBe(7);
+  });
+
+  it('holds back one re-trigger of a carried line, in that Script only', () => {
+    const talked: string[] = [];
+    const s = script(talked);
+    s.beginProg();
+    s.addv(5, 'x');
+    s.endProg();
+    const carried = s.pendingDialogue();
+    const nu = script(talked);
+    nu.adoptPendingDialogue(carried);
+    nu.beginProg();
+    nu.addv(0, 'x'); // the rewound script queues it too
+    nu.endProg();
+    for (let c = 1; c < 30; c++) nu.dialogy(c);
+    expect(talked, 'said once, from the carried copy').toEqual(['x']);
+    expect(nu.mutedLines, "the attempt's mutes are not touched").toBe(null);
+    expect(nu.takeHeard(), 'only the carried copy that played counts as heard').toEqual([{ name: 'x', tag: 0 }]);
+
+    const later = script(talked); // a later undo that does not carry it: no hold left
+    later.beginProg();
+    later.addv(0, 'x');
+    later.endProg();
+    for (let c = 1; c < 10; c++) later.dialogy(c);
+    expect(talked).toEqual(['x', 'x']);
+  });
+
+  it('does not mark a held-back duplicate as heard (review: false heard records)', () => {
+    // A snapshot-less rebuild re-triggers the carried line before its carried copy plays:
+    // the duplicate is dropped, but nothing was heard, so a later undo must not mute it.
+    const s = script();
+    s.beginProg();
+    s.addv(50, 'hello');
+    s.endProg();
+    const nu = script();
+    nu.adoptPendingDialogue(s.pendingDialogue());
+    nu.beginProg();
+    nu.addv(0, 'hello');
+    nu.endProg();
+    expect(nu.takeHeard()).toEqual([]);
+  });
+
+  it('forwards every field of the old Script to the new one', () => {
+    const a = script();
+    const b = script();
+    forwardScript(a, b);
+    a.natvrdo = 1;
+    expect(b.natvrdo).toBe(1);
+    expect(a.room).toBe(b.room);
+  });
+});
+
+describe('undo, end to end', () => {
+  // A room that says hello ONCE, the first time the fish is at x >= 7, latched in a Var —
+  // the shape most rooms use, and the one undo used to break.
+  const def: RoomScript = {
+    name: 'TEST',
+    init: (s) => {
+      s.vars(0, 1)[1] = 0;
+    },
+    prog: (s) => {
+      const v = s.vars(0);
+      if (v[1] === 0 && s.item(s.room.littleIdx).x >= 7) {
+        v[1] = 1;
+        s.addm(0, 'hello');
+      }
+    },
+  };
+
+  it('does not say a Var-latched line again after an undo to before it, and keeps the latch', () => {
+    const talked: string[] = [];
+    const history: UndoPoint[] = [];
+    const bank = (s: Script): void => {
+      const heard = s.takeHeard();
+      const top = history[history.length - 1];
+      if (heard.length && top) (top.said ??= []).push(...heard);
+    };
+
+    let s = script(talked);
+    def.init(s);
+    tick(s, def, history.length, 1);
+    history.push({ rec: '', snapshot: s.snapshot() }); // point 0, flag clear
+
+    s.item(s.room.littleIdx).x = 7; // the move
+    for (let c = 2; c < 8; c++) {
+      tick(s, def, history.length, c);
+      bank(s);
+    }
+    history.push({ rec: 'r', snapshot: s.snapshot() }); // point 1
+    expect(talked).toEqual(['hello']);
+
+    // Undo to point 0: rebuild, restore its (older) snapshot, replay the move.
+    const muted = new Set(takeUnsaid(history, 0));
+    history.length = 1;
+    s = script(talked);
+    def.init(s);
+    s.applySnapshot(history[0]!.snapshot!);
+    s.item(s.room.littleIdx).x = 7;
+    s.mutedLines = muted;
+    for (let c = 1; c < 8; c++) {
+      tick(s, def, history.length, c);
+      bank(s);
+    }
+    expect(talked, 'heard once, not twice').toEqual(['hello']);
+    expect(s.vars(0)[1], 'the latch is set exactly as the script set it').toBe(1);
+
+    // And a deeper undo still knows it was heard.
+    history.push({ rec: 'r', snapshot: s.snapshot() });
+    expect(takeUnsaid(history, 0)).toEqual(['hello']);
+  });
+});

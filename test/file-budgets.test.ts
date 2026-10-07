@@ -176,7 +176,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // Two more lines give the active-fish controller the same explicit preview seam.
   // Four for the GPU-loss recovery: `gpuLossArmed` and `simulateGpuLoss`, which wipes the
   // sentinel as a lost GPU process does, since no probe can kill the real one.
-  ['src/app/debugHooks.ts', 1668],
+  // One for `setRoompole`: the load probe writes a slot after the save was taken, which is
+  // the only way to tell the live `roompole` an F3 keeps from the one in the save.
+  ['src/app/debugHooks.ts', 1669],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
