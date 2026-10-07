@@ -186,15 +186,16 @@ export function sampleUndoPoint(): void {
 
 /**
  * Step 4 above: move what the old Script still had to say, and that the rewound flags will
- * not bring back, into the rebuilt one. Queued `set` entries are closures over the Script
+ * not bring back, into the rebuilt one. With no `old` (undo resuming a death-ended attempt)
+ * nothing is carried, but the rebuild's own `init()` queue is still dropped. Queued `set` entries are closures over the Script
  * and the item arrays that queued them, so the old Script forwards every field to the new
  * one (`forwardScript`) and the new room adopts the old item arrays (`shareVars`).
  */
 function transferPendingDialogue(old: { s: Script; room: Room } | null, idx: number, replayCut: boolean): void {
   const s = activeScript?.s;
-  if (!s || !old || old.s === s) return;
-  const keep = old.s.pendingDialogue(replayCut).filter((d) => d.tag === INIT_TAG || (d.tag !== undefined && d.tag <= idx));
-  if (keep.length) {
+  if (!s || old?.s === s) return;
+  const keep = old ? old.s.pendingDialogue(replayCut).filter((d) => d.tag === INIT_TAG || (d.tag !== undefined && d.tag <= idx)) : [];
+  if (old && keep.length) {
     shareVars(old.room.items, s.room.items);
     forwardScript(old.s, s);
   }
@@ -262,8 +263,12 @@ export function undoMove(): boolean {
   const replayCut = forgiveCut(undoHistory, activeScript?.s.cutLine() ?? null, forgivenCuts);
   // Back into the attempt the death restart ended: it becomes the history again, and the
   // loop below lands on its newest point exactly as it would on a death without a restart.
-  if (resumesDeadAttempt()) setUndoHistory(deadAttempt!);
-  const old = activeScript ? { s: activeScript.s, room: activeScript.s.room } : null;
+  const resuming = resumesDeadAttempt();
+  if (resuming) setUndoHistory(deadAttempt!);
+  // Whose queue to carry (step 4). Not the restart's when resuming: its tags count from its
+  // own fresh history, so all of it would pass `tag <= idx`, and its opening would play in
+  // the attempt the player went back into.
+  const old = activeScript && !resuming ? { s: activeScript.s, room: activeScript.s.room } : null;
   let idx = undoTargetIndex(undoHistory, engine?.srecord ?? '');
   // Fall back down the history until the replay actually lands where the point says.
   //
