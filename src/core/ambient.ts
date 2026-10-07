@@ -23,23 +23,30 @@ export interface CheerCtx {
   venkuOther: boolean; // the partner has already exited
   venkuLittle: boolean; // the little fish has exited (for the jo-v-4 variant)
   zvykacka: boolean; // the chewing-gum easter-egg flag is set
+  talkingLittle: boolean;
+  talkingBig: boolean;
 }
 
 /**
  * The line a fish says as it swims out (jo-m/jo-v, URoom.pas:24393-24410): only
  * if the partner is alive or already out. The little fish picks jo-m-0..4; the
  * big fish jo-v-0..3, with a 15% chance of jo-v-4 when its partner is already
- * out. If the gum easter egg is armed and the partner is out, the little fish
- * quips `ob-m-zvykacka` instead (and the flag clears).
+ * out. A speaker already talking skips its farewell, rather than queueing it.
+ * If the gum easter egg is armed and the partner is out, the little fish quips
+ * `ob-m-zvykacka` instead, even when the big fish exits. Delphi leaves the flag
+ * set (`zvykacka:=true`) and checks the LITTLE voice for this special line.
  */
 export function exitCheer(
   which: 'little' | 'big',
   ctx: CheerCtx,
   rnd: Rnd,
-): { sound: string | null; clearGum: boolean } {
-  if (ctx.zvykacka && ctx.venkuOther) return { sound: 'ob-m-zvykacka', clearGum: true };
-  if (!(ctx.aliveOther || ctx.venkuOther)) return { sound: null, clearGum: false };
-  if (which === 'little') return { sound: `jo-m-${rnd(5)}`, clearGum: false };
-  if (rnd(100) < 15 && ctx.venkuLittle) return { sound: 'jo-v-4', clearGum: false };
-  return { sound: `jo-v-${rnd(4)}`, clearGum: false };
+): { sound: string; speaker: 'little' | 'big' } | null {
+  if (ctx.zvykacka && ctx.venkuOther && !ctx.talkingLittle) {
+    return { sound: 'ob-m-zvykacka', speaker: 'little' };
+  }
+  if (which === 'little' ? ctx.talkingLittle : ctx.talkingBig) return null;
+  if (!(ctx.aliveOther || ctx.venkuOther)) return null;
+  if (which === 'little') return { sound: `jo-m-${rnd(5)}`, speaker: which };
+  if (rnd(100) < 15 && ctx.venkuLittle) return { sound: 'jo-v-4', speaker: which };
+  return { sound: `jo-v-${rnd(4)}`, speaker: which };
 }

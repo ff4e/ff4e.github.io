@@ -184,6 +184,29 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🟠 Exit farewells overlapped the same fish's dialogue — fixed 2026-10-07
+
+The port played a farewell unconditionally at exit completion. Delphi checks the
+speaker's `Talking` state at exit START and skips the farewell if that fish is already
+speaking (`URoom.pas:24387-24414`). It then discards pending dialogue and clears both
+fish's busy flags, without stopping the current voice, subtitles, or active dialogue
+completion callback (`zrus_dialogy`, `URoom.pas:748-755`).
+
+Restored in `StepEngine.startExit` / `Script.cancelPendingDialogue`. The chewing-gum
+line belongs to the little fish even when the big fish exits, checks her voice, and
+leaves the gum flag set, as in Delphi. This is intentionally not global speech
+serialization: the OTHER fish may still be talking, and `Talking` ignores the sample's
+final ~0.45 seconds. Covered by `test/exit-dialogue.test.ts`, `test/ambient.test.ts`,
+and the existing `tools/test-exitwin.mjs` browser probe.
+
+Undo keeps exit-discarded dialogue separate from the live queue. It restores the
+unheard remainder only when reversing that fish's exit, including its state-setting
+callbacks; intermediate undos while the fish remains outside keep it silent.
+`test/exit-undo.test.ts` exercises the real undo/restore path for opening and
+prog-triggered conversations, cut-line replay, re-exits, and expired snapshots.
+Like the other undo dialogue bookkeeping, these closures are attempt-local and are
+not stored in saves.
+
 ### 🟡 LODE's ball conversation looped forever (a 1998 bug) — fixed 2026-10-06
 
 The branch that says "did you notice the real golf ball…" is gated on the `omicich`

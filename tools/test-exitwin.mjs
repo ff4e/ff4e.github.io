@@ -5,6 +5,25 @@
  */
 import { selectRoom, tickSleep, withApp } from './ui-lib.mjs';
 
+async function exitWhileSpeaking(p, expect, which, name, holdLittleKey = false) {
+  await p.waitForFunction(name => window.__ff.audioHas(name), name);
+  const speech = await p.evaluate(({ which, name, holdLittleKey }) => {
+    window.__ff.clearSoundLog();
+    const duration = window.__ff.speakLine(name, which);
+    const before = window.__ff.lines();
+    window.__ff.forceExit(which, 3);
+    if (holdLittleKey) window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', bubbles: true }));
+    return {
+      duration, before, after: window.__ff.lines(),
+      playing: window.__ff.voicePlaying(), subtitles: window.__ff.subsActive(),
+      phase: window.__ff.phase(), line: window.__ff.lastLine().name,
+    };
+  }, { which, name, holdLittleKey });
+  expect(speech.duration > 1 && speech.playing && speech.subtitles, `${which}: current voice and caption survive exit start`);
+  expect(speech.phase === 'exit' && speech.before === speech.after && speech.line === name,
+    `${which}: farewell is skipped while already talking, without blocking the exit`);
+}
+
 await withApp(async ({ p, expect }) => {
   await selectRoom(p, 7); // UTES
   await p.evaluate(() => localStorage.removeItem('ff.solved'));
@@ -15,14 +34,13 @@ await withApp(async ({ p, expect }) => {
   // Send the little fish out of the left edge (wait for idle first — forceExit is a
   // no-op unless the engine is idle, main.ts:4338).
   await p.waitForFunction(() => window.__ff.phase() === 'idle');
-  await p.evaluate(() => {
-    window.__ff.forceExit('little', 3);
-    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyL', bubbles: true }));
-  });
+  await exitWhileSpeaking(p, expect, 'little', 'uts-m-otresy', true);
   await p.waitForFunction(() => window.__ff.state().venku.little);
   await tickSleep(p, 2);
   await p.keyboard.up('KeyL');
   expect(await p.evaluate(() => window.__ff.state().venku.little), 'little fish exited');
+  expect(await p.evaluate(() => !window.__ff.soundLog().some(s => s.name.startsWith('jo-m-'))),
+    'skipped little farewell is not replayed at exit completion');
   expect(!(await p.evaluate(() => window.__ff.state().won)), 'not won with one fish still in');
   expect(await p.evaluate(() => window.__ff.state().active === 'big'), 'big fish becomes active despite a held little-fish key');
   await p.evaluate(() => {
@@ -32,7 +50,12 @@ await withApp(async ({ p, expect }) => {
 
   // Send the big fish out too -> the room is solved.
   await p.waitForFunction(() => window.__ff.phase() === 'idle');
-  await p.evaluate(() => window.__ff.forceExit('big', 3));
+  const farewell = await p.evaluate(() => {
+    window.__ff.forceExit('big', 3);
+    return { name: window.__ff.lastLine().name, phase: window.__ff.phase(), outside: window.__ff.state().venku.big };
+  });
+  expect(farewell.name.startsWith('jo-v-') && farewell.phase === 'exit' && !farewell.outside,
+    'an available farewell starts with the exit slide, not after it');
   await p.waitForFunction(() => window.__ff.state().won);
   expect(await p.evaluate(() => window.__ff.state().won), 'both fish out => room won');
 
@@ -79,8 +102,10 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.panelAction(10));
   await p.waitForFunction(() => window.__ff.phase() === 'idle');
   expect(await p.evaluate(() => window.__ff.state().active === 'big'), 'big fish selected before exiting first');
-  await p.evaluate(() => window.__ff.forceExit('big', 3));
+  await exitWhileSpeaking(p, expect, 'big', 'uts-v-koraly');
   await p.waitForFunction(() => window.__ff.state().venku.big);
+  expect(await p.evaluate(() => !window.__ff.soundLog().some(s => s.name.startsWith('jo-v-'))),
+    'skipped big farewell is not replayed at exit completion');
   expect(await p.evaluate(() => window.__ff.state().active === 'little'), 'little fish becomes active when big exits first');
   await p.evaluate(() => {
     for (const region of [6, 7, 8, 9]) window.__ff.panelAction(region);

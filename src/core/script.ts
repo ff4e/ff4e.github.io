@@ -13,6 +13,7 @@ import type { Item, Room } from './room.js';
 import { Dir } from './dir.js';
 import { captureBank, type ScriptBank } from './scriptBank.js';
 import { dropMutedRun, INIT_TAG, isTalk, lineFamily, type HeardLine, type QueuedLine } from './lineMute.js';
+import type { ExitDiscard } from './undoDialogue.js';
 
 /** natoceni facing codes (URoom.pas:420-421). */
 export const SMER_VLEVO = 1;
@@ -138,6 +139,8 @@ export class Script {
   readonly globpole: number[] = new Array<number>(1024).fill(0);
 
   private queue: DialogEntry[] = [];
+  /** Kept outside the live queue until undo reverses the exit; never saved. */
+  readonly discardedOnExit: ExitDiscard[] = [];
 
   /** Undo's handling of the room's lines; explained in `src/app/undo.ts`. */
   progTag = 0;
@@ -568,9 +571,9 @@ export class Script {
 
   /** What is still to be said; the line being cut, if `includeCut`, first and from its start. A
    *  replay waits REPLAY_DELAY again at each press, so a burst of presses keeps the fish quiet. */
-  pendingDialogue(includeCut = true): DialogEntry[] {
+  pendingDialogue(includeCut = true, recovered: readonly DialogEntry[] = []): DialogEntry[] {
     const cut = includeCut && this.cutLine() ? [{ ...this.speaking!.entry, replay: true }] : [];
-    return [...cut, ...this.queue].map((d) => (d.replay ? { ...d, delay: REPLAY_DELAY } : d));
+    return [...cut, ...recovered, ...this.queue].map((d) => (d.replay ? { ...d, delay: REPLAY_DELAY } : d));
   }
 
   /** Undo: drop this rebuild's `init()` queue, queue `entries`, hold one re-trigger of each. */
@@ -729,6 +732,16 @@ export class Script {
   clearDialog(): void {
     this.queue.length = 0;
     this.aktdialzvuk = 0;
+  }
+
+  /** zrus_dialogy (URoom.pas:748): discard pending actions, not the active line/wait.
+   *  Its completion callback and undo's current-line bookkeeping must survive. */
+  cancelPendingDialogue(which: 'little' | 'big'): void {
+    if (this.queue.length) this.discardedOnExit.push({ which, entries: this.queue });
+    this.queue = [];
+    this.setBusy('little', 0);
+    this.setBusy('big', 0);
+    // vzdy_tit has no counterpart here; see stdKonecKrajniHlasky.
   }
 
   /** dialogy (URoom.pas:779): advance the speech queue, one line at a time. */

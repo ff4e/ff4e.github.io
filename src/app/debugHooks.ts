@@ -53,7 +53,7 @@ import { Script } from '../core/script.js';
 import type { RoomScript, ScriptSnapshot } from '../core/script.js';
 import { saveSettings } from '../core/settings.js';
 import type { GraphicsLevel, Settings, SubtitleMode } from '../core/settings.js';
-import { MOVE_FRAMES, StepEngine, exitFramesFor } from '../core/stepEngine.js';
+import { MOVE_FRAMES, StepEngine } from '../core/stepEngine.js';
 import type { TetrisKey } from '../core/tetris.js';
 import type { FfpPanel } from '../data/ffp.js';
 import type { FfrRoom } from '../data/ffr.js';
@@ -1563,14 +1563,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     // Force a fish to swim out (demonstrates the stav_ven exit animation + win).
     forceExit: (which: 'little' | 'big', dir: number = Dir.left) => {
       if (!room || !engine || engine.phase !== 'idle' || room.won) return;
-      const idx = which === 'little' ? room.littleIdx : room.bigIdx;
-      engine.exiting = { which, dir };
-      engine.exitFrames = exitFramesFor(which, dir);
-      room.items[idx]!.dir = dir;
-      if (dir === Dir.left) room.facingRight[which] = false;
-      else if (dir === Dir.right) room.facingRight[which] = true;
-      engine.phase = 'exit';
-      engine.animFrame = 0;
+      engine.startExit(which, dir);
     },
     // Dev-only: genuinely win via the real path. No button and no hotkey any more — the
     // dev bar's button plays the room's recorded solution instead — but kept as a hook,
