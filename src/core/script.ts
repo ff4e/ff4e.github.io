@@ -573,7 +573,7 @@ export class Script {
     return [...cut, ...this.queue].map((d) => (d.replay ? { ...d, delay: REPLAY_DELAY } : d));
   }
 
-  /** Undo: drop this rebuild's `init()` queue, queue `entries` (batch -1), hold back one re-trigger of each. */
+  /** Undo: drop this rebuild's `init()` queue, queue `entries`, hold one re-trigger of each. */
   adoptPendingDialogue(entries: DialogEntry[]): void {
     for (const d of entries) if (d.tag !== INIT_TAG && isTalk(d.zvuk)) this.carriedHolds.add(lineFamily(d.zvuk));
     this.queue = [...this.queue.filter((d) => d.batch !== 0), ...entries.map((d) => ({ ...d, batch: -1 }))];

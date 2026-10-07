@@ -104,7 +104,7 @@ export const undoHistory: UndoPoint[] = [];
  * the history is replaced: a room change, a restart, a load, a death auto-restart.
  */
 export const mutedLines = new Set<string>();
-/** Families of lines an undo press has cut off and let play again (`forgiveCut`); same lifetime. */
+/** Families of lines an undo press cut off and let play again (`forgiveCut`); same lifetime. */
 export const forgivenCuts = new Set<string>();
 
 export function setActiveScript(v: { def: RoomScript; s: Script } | null): void {

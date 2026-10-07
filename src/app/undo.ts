@@ -39,9 +39,10 @@
  *     so it plays again, but only the first time that line is cut in the attempt
  *     (`forgiveCut`); cut again, it counts as heard, or a burst of presses would restart
  *     it on every press. Carried to be said again (step 4), it waits ~1 s first, afresh
- *     at each press, so the fish stay quiet while the player keeps pressing. Speech a room plays straight away
- *     with `talkNow`, and lines that are not the room script's (the exit cheer, idle
- *     chatter, death commentary), are outside all of this and never held back.
+ *     at each press, so the fish stay quiet while the player keeps pressing. Speech a
+ *     room plays straight away with `talkNow`, and lines that are not the room script's
+ *     (the exit cheer, idle chatter, death commentary), are outside all of this and are
+ *     never held back.
  *  3. Mute. An undo to point idx moves the heard lines its snapshot predates (`tag > idx`;
  *     everything, past `SNAPSHOT_DEPTH`) into the attempt's `mutedLines` (`takeUnsaid`).
  *     The rebuilt script drops, once, a conversation of its own that contains one, by line

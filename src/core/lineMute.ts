@@ -80,8 +80,8 @@ export function isTalk(zvuk: string): boolean {
  * voice, the subtitle and the time they take are skipped. Each mute is spent once. A line
  * that was muted — heard before — is logged in `heard` again, so a deeper undo mutes it
  * again; the rest of the conversation was never heard and is not. `heard` is null for
- * undo's carried-copy holds (`Script.adoptPendingDialogue`), which mark nothing as heard: the carried
- * copy will, when it plays.
+ * undo's carried-copy holds (`Script.adoptPendingDialogue`), which mark nothing as heard:
+ * the carried copy will, when it plays.
  */
 export function dropMutedRun<T extends QueuedLine>(
   queue: T[],
