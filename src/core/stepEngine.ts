@@ -39,7 +39,7 @@ export interface EngineHooks {
   random: (n: number) => number;
   /** Landing thud (dopad 1 = soft, 2 = steel). */
   onLanding?: (kind: 1 | 2) => void;
-  /** Play a cheer/effect sound by name (exit cheer). */
+  /** Play a cheer/effect by name; `which` is the speaker, not necessarily the exiting fish. */
   playSound?: (name: string, which?: Which) => void;
   /** A blocked player push (host: KAJUTA1 screen-shove / gspec latch). */
   onBlockedMove?: (which: Which, dir: number) => void;
@@ -222,17 +222,38 @@ export class StepEngine {
     }
     const edge = room.gspec === 9 ? null : room.checkEdges();
     if (edge && !room.won) {
-      this.exiting = edge;
-      this.exitFrames = exitFramesFor(edge.which, edge.dir);
-      const idx = edge.which === 'little' ? room.littleIdx : room.bigIdx;
-      room.items[idx]!.dir = edge.dir; // drives the exit slide
-      if (edge.dir === Dir.left) room.facingRight[edge.which] = false;
-      else if (edge.dir === Dir.right) room.facingRight[edge.which] = true;
-      this.phase = 'exit';
-      this.animFrame = 0;
+      this.startExit(edge.which, edge.dir);
     } else {
       this.phase = 'idle';
     }
+  }
+
+  /** stav_ven entry (URoom.pas:24387-24414): speak, then discard pending dialogue. */
+  startExit(which: Which, dir: number): void {
+    const room = this.room;
+    this.exiting = { which, dir };
+    this.exitFrames = exitFramesFor(which, dir);
+    const idx = which === 'little' ? room.littleIdx : room.bigIdx;
+    room.items[idx]!.dir = dir; // drives the exit slide
+    if (dir === Dir.left) room.facingRight[which] = false;
+    else if (dir === Dir.right) room.facingRight[which] = true;
+    this.phase = 'exit';
+    this.animFrame = 0;
+    const other: Which = which === 'little' ? 'big' : 'little';
+    const cheer = exitCheer(
+      which,
+      {
+        aliveOther: room.alive[other],
+        venkuOther: room.venku[other],
+        venkuLittle: room.venku.little,
+        zvykacka: this.script?.zvykacka ?? false,
+        talkingLittle: this.script?.talking('little') ?? false,
+        talkingBig: this.script?.talking('big') ?? false,
+      },
+      this.hooks.random,
+    );
+    if (cheer) this.hooks.playSound?.(cheer.sound, cheer.speaker);
+    this.script?.cancelPendingDialogue(which);
   }
 
   /** Common win bookkeeping (triggerWin): latch `won`, start the auto-return countdown. */
@@ -280,7 +301,7 @@ export class StepEngine {
   /**
    * Advance the phase machine one tick: set up a gspec=9 cork exit if a spec=9 item
    * was pushed to the edge, drive move/fall/turn/exit/cork animations to completion
-   * (firing the exit cheer + triggerWin), then run any pending auto-swim / possession
+   * (firing the exit cheer at entry, triggerWin at completion), then run any pending auto-swim / possession
    * step while idle. Mirrors main.ts's step() phase block (URoom.pas:24375-24950).
    */
   advance(): void {
@@ -342,19 +363,6 @@ export class StepEngine {
         const idx = which === 'little' ? room.littleIdx : room.bigIdx;
         room.items[idx]!.dir = Dir.no;
         this.exitFish(which);
-        const other: Which = which === 'little' ? 'big' : 'little';
-        const cheer = exitCheer(
-          which,
-          {
-            aliveOther: room.alive[other],
-            venkuOther: room.venku[other],
-            venkuLittle: room.venku.little,
-            zvykacka: this.script?.zvykacka ?? false,
-          },
-          this.hooks.random,
-        );
-        if (cheer.sound) this.hooks.playSound?.(cheer.sound, which);
-        if (cheer.clearGum && this.script) this.script.zvykacka = false;
         this.exiting = null;
         this.phase = 'idle';
         if (room.won) this.triggerWin();

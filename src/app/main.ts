@@ -748,7 +748,7 @@ function buildRoom(carryPole = false): void {
       random: (n) => Math.floor(Math.random() * n),
       onLanding: (kind) =>
         audio.playRandom(kind === 1 ? ['sp-zuch1', 'sp-zuch2'] : ['sp-ocel1', 'sp-ocel2'], EFFECT_VOL),
-      // Exit cheer (jo-m/jo-v): play it as a proper voice line on the exiting fish's
+      // Exit cheer (jo-m/jo-v, or the little fish's gum line): use the speaker's
       // mluvi channel — tracked (so the win auto-return can wait for `talking()` to end),
       // lip-synced, and subtitled — matching the original's talk(...,mluvi_mala/velka)
       // (URoom.pas:24393-24410). Without a fish, fall back to a plain effect play.

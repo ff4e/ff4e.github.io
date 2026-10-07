@@ -178,7 +178,7 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // sentinel as a lost GPU process does, since no probe can kill the real one.
   // One for `setRoompole`: the load probe writes a slot after the save was taken, which is
   // the only way to tell the live `roompole` an F3 keeps from the one in the save.
-  ['src/app/debugHooks.ts', 1669],
+  ['src/app/debugHooks.ts', 1662],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
@@ -249,7 +249,10 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // the PR. The sequence itself is not here: it is `src/render/zxBands.ts`, generated
   // once and shared with the faithful renderer, which is what keeps this to a uniform.
   ['src/render/glRoomAi.ts', 830],
-  ['src/core/script.ts', 780],
+  // Thirteen lines for exit's zrus_dialogy: discard the private queue without
+  // resetting the active line, and retain it for undo. Transfer/recovery logic lives
+  // in undoDialogue.ts; only the queue ownership and capture stay here.
+  ['src/core/script.ts', 793],
   // 720 -> 780 for `backgroundZx`, the canvas-2D half of the same change: the stripes
   // masked by the wall's alpha, plus the `paint`/`paintBg` split that lets it reuse the
   // wobbled-background half rather than copy it.
