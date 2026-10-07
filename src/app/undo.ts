@@ -187,9 +187,10 @@ export function sampleUndoPoint(): void {
 /**
  * Step 4 above: move what the old Script still had to say, and that the rewound flags will
  * not bring back, into the rebuilt one. With no `old` (undo resuming a death-ended attempt)
- * nothing is carried, but the rebuild's own `init()` queue is still dropped. Queued `set` entries are closures over the Script
- * and the item arrays that queued them, so the old Script forwards every field to the new
- * one (`forwardScript`) and the new room adopts the old item arrays (`shareVars`).
+ * nothing is carried, but the rebuild's own `init()` queue is still dropped. Queued `set`
+ * entries are closures over the Script and the item arrays that queued them, so the old
+ * Script forwards every field to the new one (`forwardScript`) and the new room adopts the
+ * old item arrays (`shareVars`).
  */
 function transferPendingDialogue(old: { s: Script; room: Room } | null, idx: number, replayCut: boolean): void {
   const s = activeScript?.s;
