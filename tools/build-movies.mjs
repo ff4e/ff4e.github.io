@@ -2,7 +2,7 @@
  * Transcode the original game movies (Cinepak AVI, 640x480) to web-friendly
  * H.264 MP4 for the intro/logo playback (UMain.pas daLogo/daIntro).
  *
- * Produces two variants per movie under public/data/Movie/ (gitignored, local):
+ * Produces two variants per movie under public/data/Movie/:
  *  - `<name>.mp4`       FAITHFUL straight transcode (keeps the original Cinepak
  *    vector-quantization "block" artifacts — looks like the real 1998 game).
  *  - `<name>_clean.mp4` The intro's worst artifact is a ~2s "burst": from ~12.03s
@@ -16,15 +16,17 @@
  *    transcode. logo has no burst, so logo_clean is a plain copy of logo.mp4.
  *
  * Usage: `node tools/build-movies.mjs` (needs ffmpeg on PATH).
+ *   MOVIE_SOURCE_DIR=/path/to/original/Movie keeps the source AVIs outside public/.
  *   FFNG_MOVIE=/path/to/intro.mpg to override the FFNG source location.
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, statSync, copyFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const toolsDir = dirname(fileURLToPath(import.meta.url));
 const movieDir = join(dirname(toolsDir), 'public', 'data', 'Movie');
+const sourceDir = process.env.MOVIE_SOURCE_DIR ? resolve(process.env.MOVIE_SOURCE_DIR) : movieDir;
 
 const CRF = '17'; // near-lossless for this low-detail 1998 CGI (SSIM ~0.99)
 
@@ -106,11 +108,14 @@ function spliceIntro(src, dst) {
 }
 
 for (const name of ['logo', 'intro']) {
-  const src = join(movieDir, `${name}.avi`);
+  const src = join(sourceDir, `${name}.avi`);
   if (!existsSync(src)) {
-    console.error(`SKIP ${name}: source not found at ${src}`);
-    continue;
+    console.error(`Source not found: ${src}; set MOVIE_SOURCE_DIR to the original Movie directory.`);
+    process.exit(1);
   }
+}
+for (const name of ['logo', 'intro']) {
+  const src = join(sourceDir, `${name}.avi`);
   const faithfulDst = join(movieDir, `${name}.mp4`);
   const cleanDst = join(movieDir, `${name}_clean.mp4`);
   faithful(src, faithfulDst);

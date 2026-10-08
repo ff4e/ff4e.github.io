@@ -1,0 +1,76 @@
+{
+  "schema": 1,
+  "movie": "logo",
+  "base": {
+    "file": "logo.mp4",
+    "sha256": "88e5654cc94c0a63eddc54454cb377bcc0d39226ef150b54bc95201a6e06047e",
+    "frames": 457,
+    "rate": "1000000/66667",
+    "duration": 30.466819,
+    "width": 640,
+    "height": 480,
+    "audio_duration": 30.466984,
+    "video_codec": "h264",
+    "pixel_format": "yuv420p",
+    "audio_codec": "aac"
+  },
+  "spatial_input": {
+    "file": "logo_spatial.mp4",
+    "sha256": "0d345670a4c53009bcde3f6cda9ae321a53b82f49f23123af5addf903f9a4c14",
+    "frames": 457,
+    "rate": "1000000/66667",
+    "duration": 30.466819,
+    "width": 1920,
+    "height": 1440,
+    "audio_duration": 30.466984,
+    "video_codec": "h264",
+    "pixel_format": "yuv420p",
+    "audio_codec": "aac",
+    "audio_sha256": "7404adceac5c733a4d880c10b41c04ebbd59ffa75c0c4248554e4e955a434673"
+  },
+  "cadence": {
+    "algorithm": "uniform-rife-v1",
+    "retained_frames": 457,
+    "cut_boundaries": [],
+    "plan_sha256": "b6dc4df32d2c28bac0b165aae261d4dcbbf42168074d1674005de1980e463cfe",
+    "verified_rgb_copies": 460,
+    "multiplier": 4
+  },
+  "rife": {
+    "model": "rife-v4.6",
+    "binary_sha256": "d11429c72f0cddfb170fd131ee9373dc5329a5729c4382c0acfd40092e5ed19a",
+    "model_sha256": {
+      "flownet.bin": "f334ed2260149ce0188a6dcf049844e8b0cdd912e01cbcfb63553157d2508958",
+      "flownet.param": "724569596bcd1e7b9fa50455c604777ebed99746d2ef40aa86e31b5725f1053c"
+    }
+  },
+  "software": {
+    "python": "3.9.6",
+    "numpy": "2.0.2",
+    "opencv-python-headless": "5.0.0.93",
+    "ffmpeg": "ffmpeg version 8.1.1 Copyright (c) 2000-2026 the FFmpeg developers"
+  },
+  "encoding": {
+    "codec": "libx264",
+    "preset": "slow",
+    "crf": 23,
+    "pixel_format": "yuv420p",
+    "audio": "copy",
+    "faststart": true
+  },
+  "output": {
+    "frames": 1828,
+    "rate": "4000000/66667",
+    "duration": 30.466819,
+    "width": 1920,
+    "height": 1440,
+    "audio_duration": 30.466984,
+    "video_codec": "h264",
+    "pixel_format": "yuv420p",
+    "audio_codec": "aac",
+    "file": "logo_ai.mp4",
+    "bytes": 9289765,
+    "sha256": "984eca33a19470f3573548114d710492dd536a00862c6cca8dfc0cb55a9d43f3",
+    "audio_sha256": "7404adceac5c733a4d880c10b41c04ebbd59ffa75c0c4248554e4e955a434673"
+  }
+}

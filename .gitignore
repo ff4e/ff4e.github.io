@@ -7,6 +7,13 @@ public/data/Program/
 public/data/256col/
 .idea/
 .DS_Store
+.venv-movies/
+__pycache__/
+*.pyc
+# Original movie inputs and redundant base-stage comparison outputs are build-only.
+public/data/Movie/*.avi
+public/data/Movie/intro.mp4
+public/data/Movie/logo_clean.mp4
 
 # Private / session artifacts — must never be committed to this public repo
 .copilot/
