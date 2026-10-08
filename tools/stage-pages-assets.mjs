@@ -80,6 +80,11 @@ const isHelpPage = (rest) => rest.startsWith(`Help${sep}`) && /\.(bmp|txt)$/i.te
 const CREDITS_ORIGINALS = new Set([`Menu${sep}CredStat1.BMP`, `Menu${sep}CredMov.BMP`, `Menu${sep}CredMov_port.BMP`]);
 const isCreditsOriginal = (rest) => CREDITS_ORIGINALS.has(rest);
 
+// Originals, spatial caches and comparison encodes are build inputs, not runtime movies.
+const MOVIE_FILES = new Set(['logo.mp4', 'intro_clean.mp4', 'logo_ai.mp4', 'intro_ai.mp4']);
+const MOVIE_PREFIX = `Movie${sep}`;
+const isMovieBuildInput = (rest) => rest.startsWith(MOVIE_PREFIX) && !MOVIE_FILES.has(rest.slice(MOVIE_PREFIX.length));
+
 if (!existsSync(DIST)) {
   console.error(`${DIST}/ is missing — run \`npm run build\` first.`);
   process.exit(1);
@@ -101,7 +106,8 @@ for (const entry of readdirSync(PUBLIC)) {
       const rest = src.startsWith(prefix) ? src.slice(prefix.length) : '';
       const seg = rest.split(sep)[0];
       if (seg && DATA_EXCLUDE.has(seg)) return false;
-      return !isMusicOriginal(rest) && !isVoiceOriginal(rest) && !isHelpPage(rest) && !isCreditsOriginal(rest);
+      return !isMusicOriginal(rest) && !isVoiceOriginal(rest) && !isHelpPage(rest)
+        && !isCreditsOriginal(rest) && !isMovieBuildInput(rest);
     };
   }
   // The restored package is a sound package like any other and is staged like one, so

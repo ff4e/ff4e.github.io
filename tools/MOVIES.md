@@ -1,75 +1,166 @@
-# Intro movies — how they're built
+# Intro and logo movies: source-to-delivery build
 
-The startup **intro** (ALTAR logo → intro movie) and the map's top-left "watch
-intro" corner play the original game's two movies as HTML5 `<video>` overlays.
-`tools/build-movies.mjs` transcodes them from the original assets into
-`public/data/Movie/` (gitignored, like all game data). Run it once:
-
-    node tools/build-movies.mjs      # needs ffmpeg on PATH
-
-Without the MP4s the game just skips the intro and boots straight to the map.
+The startup sequence and the map's "watch intro" corner use the original game's
+movies through an HTML5 `<video>` overlay. Runtime selection lives in
+`src/app/introOverlay.ts`: classic/enhanced use `logo.mp4` and `intro_clean.mp4`;
+the AI tier uses `logo_ai.mp4` and `intro_ai.mp4` when present. No video processing
+happens at runtime or during a normal site build.
 
 ## Sources
 
 | File | What it is |
 |------|------------|
-| `public/data/Movie/intro.avi` | The intro movie — **Cinepak** AVI, 640×480, 30 fps, ~73 s, PCM stereo 22 kHz. The 1998 original. |
-| `public/data/Movie/logo.avi` | The ALTAR logo — Cinepak AVI, 640×480, ~30 s. |
-| Fish Fillets NG `intro.mpg` | The community FFNG port's intro — MPEG-1, a **clean re-render of the same footage**. Used only to patch one broken window (below). Default path: `/Applications/Fillets.app/Contents/Resources/fillets/share/games/fillets-ng/images/menu/intro.mpg`; override with `FFNG_MOVIE=/path/to/intro.mpg`. |
+| Original `Movie/intro.avi` | Cinepak AVI, 640x480, `1000000/33333` fps (~30), 2,201 frames, ~73.366 s, PCM stereo audio. |
+| Original `Movie/logo.avi` | Cinepak AVI, 640x480, `1000000/66667` fps (~15), 457 frames, ~30.467 s. |
+| Fish Fillets NG `intro.mpg` | The community FFNG port's MPEG-1 version of the same footage, used only for the burst patch below. Default path: `/Applications/Fillets.app/Contents/Resources/fillets/share/games/fillets-ng/images/menu/intro.mpg`; override with `FFNG_MOVIE=/path/to/intro.mpg`. |
 
-Browsers can't play Cinepak AVI or MPEG-1 in `<video>`, so everything is
-transcoded to **H.264/MP4** — the one codec that plays in *every* browser and
-device (Safari included). It's the correct choice here: the video is bundled
-locally (not streamed) and is low-detail 1998 CGI, so H.264's universal
-compatibility matters far more than the marginal file-size win of VP9/AV1 (which
-also lack reliable Safari support). See the README "Original data" note.
+Keep original AVIs outside `public/`; they are build sources, not shipped assets.
+The movie footage descends from ALTAR's GPL-released game data (see
+`CONTRIBUTING.md`). Neural models are offline tool dependencies, not replacement
+movie footage.
 
-## Outputs (two variants per movie)
+## Pipeline and shipped files
 
-| File | Description |
-|------|-------------|
-| `intro.mp4`, `logo.mp4` | **Faithful** — a straight H.264 transcode (`libx264 -crf 17`, near-lossless). Preserves the original's Cinepak vector-quantization "block" artifacts — i.e. looks exactly like the real 1998 game. |
-| `intro_clean.mp4` | **Cleaned** — the faithful transcode, with one ~2 s window patched (see "The burst fix"). Everything outside that window is byte-for-byte the faithful video. |
-| `logo_clean.mp4` | A plain copy of `logo.mp4` (the logo has no burst to fix). |
+1. **Base conversion:** `tools/build-movies.mjs` converts the original movies to
+   H.264 (`libx264`, CRF 17, yuv420p) and AAC. For the intro, FFNG footage patches
+   the original Cinepak burst described below. The AI tier inherits that patch.
+2. **Spatial upscale:** `tools/build-movies-ai.mjs` extracts every base frame
+   without resampling, applies Real-ESRGAN `realesr-animevideov3-x4`, then downsamples
+   2560x1920 to 1920x1440 with Lanczos. It creates a temporary spatial-only MP4 at
+   the source rate, CRF 23, with copied audio.
+3. **Temporal reconstruction:** `tools/interpolate-movie.py` and
+   `tools/movie_pipeline/` run RIFE v4.6 over those spatial images. The intro uses
+   motion-aware cadence recovery; the logo uses uniform 4x interpolation.
+4. **Delivery:** H.264, yuv420p, CRF 23, slow preset, faststart MP4, 1920x1440.
+   Audio is copied in a separate mux step so the logo's final partial AAC packet
+   is not cut off by the video frame limit. Frame count, exact rational rate,
+   duration, retained RGB images and audio packets are checked before replacement.
 
-The port currently plays the **faithful** intro. `intro_clean.mp4` exists as the
-higher-quality option; wiring the port to prefer it (globally, or only in
-Enhanced-graphics mode) is a one-line change in `src/app/main.ts` (the
-`INTRO_MOVIE` constant).
+| Shipped file under `public/data/Movie/` | Role | Video frames / rate |
+| --- | --- | --- |
+| `logo.mp4` | Faithful base; classic/enhanced | 457 at ~15 fps |
+| `intro_clean.mp4` | Cleaned base; classic/enhanced | 2,201 at ~30 fps |
+| `logo_ai.mp4` | Spatial upscale + uniform RIFE | 1,828 at `4000000/66667` fps (~60) |
+| `intro_ai.mp4` | Spatial upscale + motion-aware RIFE | 4,402 at `2000000/33333` fps (~60) |
 
-## AI-upscaled variants (the `ai` graphics level)
+The rational rates are deliberate: multiplying the original rate preserves the
+movie's duration rather than slightly speeding it up or slowing it down. The
+two AI MP4s **replace the previous spatial-only files at the same URLs**. There
+is no second unsmoothed AI variant to ship. Faithful/classic assets are unchanged.
 
-The third graphics level, **AI-upscaled** (dev-toolbar Graphics combobox / `E`
-hotkey), plays AI-super-resolved encodes of the logo + intro when they exist, and
-otherwise falls back to the faithful/clean encodes above (see `logoMovie()` /
-`introMovie()` in `src/app/main.ts`). classic + enhanced are unaffected.
+### Why the intro and logo use different temporal methods
 
-| File | Description |
-|------|-------------|
-| `logo_ai.mp4` | AI upscale of `logo.mp4`. |
-| `intro_ai.mp4` | AI upscale of `intro_clean.mp4` (the cleaned base, so the burst fix is inherited). |
+The logo already has a useful ~15 fps motion cadence. Keep every source image
+and insert three RIFE images between each pair.
 
-Built by `tools/build-movies-ai.mjs` (`npm run build-movies-ai [logo|intro]`).
-Per movie it extracts every frame, AI-upscales the frame folder with **Real-ESRGAN
-ncnn-vulkan** (the same upscaler as `tools/build-cover.py`), then re-encodes at the
-source frame rate and copies the original audio. The default model is
-`realesr-animevideov3-x4` — Real-ESRGAN's **video** model, which cleanly de-blocks
-the smooth 1998 CGI (removing the Cinepak VQ blocks) without hallucinating texture
-or drifting frame-to-frame. Frames are upscaled x4 (2560 wide) then supersampled
-**down** to 1920 wide (`AI_OUT_WIDTH`) for a clean result at a reasonable file size.
+The intro's ~30 fps encoding does **not** mean 30 distinct motion updates each
+second. The original AVI itself contains exact and near-held images, unevenly
+distributed; some sections also have genuinely more frequent motion. Merely
+doubling FPS, dropping every second image, or using one pixel-difference threshold
+leaves stretches of visibly uneven motion.
 
-The upscaler binary + models are **not** in the repo (same policy as
-`build-cover.py`); the committed `*_ai.mp4` are the outputs, so a normal site build
-needs neither Python, ffmpeg, nor the upscaler:
+`motion-progress-v1` estimates optical flow at 320x240 with OpenCV DIS. It compares
+the motion to an intermediate image against the motion to a later endpoint.
+Little progress supported by most moving pixels identifies a held-image candidate,
+even when compression has changed its pixel values. Short repeated-image bursts
+can span up to eight source frames (~0.27 s); longer stationary pauses remain.
+Surviving images keep their original timestamps.
 
-    export REALESRGAN_NCNN=/path/to/realesrgan-ncnn-vulkan   # its dir must hold ./models
-    npm run build-movies-ai        # needs ffmpeg on PATH
-    # env overrides: AI_MODEL=realesr-animevideov3-x4  AI_SCALE=4  AI_OUT_WIDTH=1920  AI_CRF=23
+The same rule applies throughout the intro: no manually selected time windows,
+no blanket 15 fps conversion, and no source-rate fallback during dissolves.
+Cut detection additionally checks image correspondence so a lighting flash is not
+mistaken for a hard cut. RIFE fills the recovered timeline at ~60 fps.
 
-Download the binary from https://github.com/xinntao/Real-ESRGAN/releases
-(`realesrgan-ncnn-vulkan-*-macos`). Being derived from this port's own faithful
-encodes (themselves from the GPL-released Fish Fillets data), the AI outputs stay
-GPL-clean — no third-party assets.
+This remains an estimate, not a guarantee of perfect motion or preservation of
+every short intended pause. Review the **whole movie**, including fast motion,
+dissolves, lighting changes and retained pauses. Scoring only repaired intervals
+does not establish that the rest of the film is smooth.
+
+## Rebuilding from the original movies
+
+Prerequisites: Node 22; FFmpeg/ffprobe with libx264; native Python (3.9 tested);
+Real-ESRGAN ncnn-vulkan plus its models; RIFE ncnn-vulkan plus `rife-v4.6`.
+The binaries/models are not committed. Upstream packages:
+https://github.com/xinntao/Real-ESRGAN/releases and
+https://github.com/nihui/rife-ncnn-vulkan/releases (RIFE package `20221029`).
+
+From the repository root, using a POSIX shell:
+
+```sh
+python3 -m venv .venv-movies
+.venv-movies/bin/python -m pip install -r tools/movie_pipeline/requirements.txt
+
+# Rebuild the faithful/clean bases from the original, external AVI directory.
+MOVIE_SOURCE_DIR=/path/to/original/Movie \
+FFNG_MOVIE=/path/to/fillets-ng/intro.mpg \
+node tools/build-movies.mjs
+
+export AI_PYTHON="$PWD/.venv-movies/bin/python"
+export REALESRGAN_NCNN=/path/to/realesrgan-ncnn-vulkan
+export RIFE_NCNN=/path/to/rife-ncnn-vulkan
+npm run build-movies-ai             # both movies
+# npm run build-movies-ai -- intro  # or just one
+```
+
+Real-ESRGAN's directory must contain `models/`; RIFE's directory must contain
+`rife-v4.6/flownet.bin` and `flownet.param`. The Python dependencies are pinned in
+`tools/movie_pipeline/requirements.txt`. `AI_MODEL`, `AI_SCALE`, `AI_OUT_WIDTH`
+and `AI_CRF` retain their spatial-builder overrides; `AI_CRF` also controls final
+delivery. Shipped settings are model `realesr-animevideov3-x4`, scale 4, width 1920
+and CRF 23. `RIFE_GPU` defaults to 0 (`-1` selects CPU).
+
+On Apple Silicon, run the **whole command chain natively**, especially from a
+Rosetta-hosted terminal: create/install the venv with `arch -arm64 python3`, and
+use `arch -arm64 node tools/build-movies-ai.mjs` instead of the npm command.
+An arm64 Node executable alone may still inherit an x86 preference for a universal
+Python binary. Do not mix x86 Python with arm64 NumPy/OpenCV.
+
+The FFNG input is necessary to reproduce the cleaned intro. Without it, the base
+builder explicitly warns and makes `intro_clean.mp4` a faithful copy instead;
+that is a different input. `intro.mp4` and `logo_clean.mp4` are redundant base-stage
+comparison outputs, not committed runtime assets. `stage-pages-assets.mjs` ships
+only the four runtime movie filenames, excluding these outputs, AVIs and spatial caches.
+
+### Reusing an existing spatial stage
+
+The first smoothed delivery reused the existing spatial encodes introduced in
+commit `e5aaadd`, retaining their appearance rather than rerunning Real-ESRGAN.
+Their input hashes are recorded in `tools/movie-builds/{intro,logo}.json`.
+To reproduce just the temporal stage, put those **spatial-only** files outside
+`public/`, named `intro_spatial.mp4` and `logo_spatial.mp4`, then run:
+
+```sh
+AI_PYTHON=/path/to/venv/bin/python \
+RIFE_NCNN=/path/to/rife-ncnn-vulkan \
+node tools/build-movies-ai.mjs --spatial-dir /path/to/spatial-cache
+```
+
+This skips Real-ESRGAN, not validation. The tool rejects already-interpolated
+inputs and inputs whose frame count, cadence or audio differ from the base.
+Never rename the new ~60 fps outputs into this cache and smooth them again.
+The old spatial files are rebuildable intermediates, not an additional shipped
+graphics tier. Fresh full rebuilds create and remove their intermediates automatically.
+
+The JSON reports record input/base/output hashes, retained-frame counts, the
+cadence-plan hash, RIFE executable/model hashes, software versions and encoding
+settings. GPU upscaling/interpolation and codec versions can affect exact bytes;
+the recipe is reproducible, but cross-platform bit-identical output is not promised.
+
+## Validation
+
+```sh
+.venv-movies/bin/python -m unittest discover -s tools -p 'test_*.py'
+npm run typecheck
+npm test
+npm run test:ui -- intro
+```
+
+The Python suite covers hold recovery, genuine slow motion, lighting vs cuts,
+terminal timing, the logo's partial AAC packet, and failure leaving old outputs
+intact. Ordinary unit tests verify the committed movie reports and file hashes
+without requiring GPU tools. The UI probe covers playback routing/skip behavior;
+also play both complete final movies at 1x to check decode performance and visual
+quality. A high container FPS or a passing short excerpt is not sufficient.
 
 ## The burst fix (why `intro_clean` exists)
 
@@ -107,9 +198,10 @@ frames onto our faithful base:
   because the offset holds the alignment.
 - **Audio:** our original audio is kept (`-map 0:a`).
 
-Result: each burst window is clean FFNG globe (real content, no blocks, **no
-blur**); the seams are invisible; and everything outside the windows is our
-faithful transcode, byte-for-byte (verified PSNR = ∞ / identical at t=6/18/30/48/60 s).
+The source content outside these windows remains the original footage. The
+historical comparison reported **PSNR = ∞ / identical at t=6/18/30/48/60 s**.
+That checks sampled decoded frames, not whole-file identity or every later codec
+build; H.264 is a lossy delivery encoding.
 The windows are declared in the `SPLICES` array at the top of
 `tools/build-movies.mjs` — add a `{ offset, fadeIn, fadeOut, d }` entry (each with
 its own measured FFNG offset) to fix another burst. Each window uses its own FFNG
