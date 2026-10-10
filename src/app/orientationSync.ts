@@ -1,6 +1,7 @@
 /**
  * Keeping the device's orientation lock in step with what is on screen.
- * Phones remain unlocked on every screen; the policy below is retained for tablets.
+ * Phones lock presentation screens to landscape and unlock rooms; tablets keep their
+ * room-based policy.
  *
  * ── Derived per frame, not pushed ────────────────────────────────────────────
  * The same architecture as `touchButtons.ts`'s `syncEdge()` and `loadingUi.ts`, and for
@@ -17,7 +18,7 @@
  *
  * ── What a frame actually costs ──────────────────────────────────────────────
  * Nothing at all on the web: the first line leaves, and the website's behaviour is
- * unchanged by design (see `deviceOrientation.ts`). On the native host a frame in a
+ * unchanged by design (see `deviceOrientation.ts`). On a native tablet a frame in a
  * steady room costs three `computeStageLayout` calls, one `getComputedStyle`, and no
  * native call — `lockOrientation()` is a no-op once the standing lock already matches, so
  * an unchanged answer never reaches the bridge.
@@ -41,6 +42,7 @@ import type { DeviceOrientation } from './deviceOrientation.js';
 import { isNativeHost } from '../platform/nativeHost.js';
 import { lockOrientation, unlockOrientation } from '../platform/orientationLock.js';
 import { deviceClass } from './deviceGate.js';
+import { currentPhoneOrientation, type PhoneOrientation } from './phoneOrientation.js';
 
 /**
  * The last answer — kept so that a room which cannot be measured for a frame holds the
@@ -51,6 +53,7 @@ import { deviceClass } from './deviceGate.js';
  * reached the bridge; a second latch here would swallow the retry (see its `desired`).
  */
 let want: DeviceOrientation | null = null;
+let phoneWant: PhoneOrientation = 'landscape';
 
 /**
  * Which way the player should be holding the device, right now.
@@ -103,9 +106,12 @@ export function syncOrientationLock(): void {
   // This also runs before touch chrome is initialized at boot; do not use its cache.
   if (deviceClass(window) === 'phone') {
     want = null;
-    unlockOrientation();
+    phoneWant = currentPhoneOrientation(phoneWant);
+    if (phoneWant === 'unlocked') unlockOrientation();
+    else lockOrientation(phoneWant);
     return;
   }
+  phoneWant = 'landscape';
   want = currentWant();
   lockOrientation(want);
 }
@@ -113,4 +119,5 @@ export function syncOrientationLock(): void {
 /** Test seam: forget the standing answer. */
 export function resetOrientationSyncForTest(): void {
   want = null;
+  phoneWant = 'landscape';
 }

@@ -124,12 +124,14 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `touchButtons.ts` | | Shared touch/phone mode transitions, stage relayout and Options cleanup; tablet buttons dispatch through the panel's own `panelAction` table. |
 | `nativeMenu.ts` | | Shared touch/native rustic symbols and fixed room accents, enabled by device mode. |
 | `touchBarEdge.ts` | 7.2 k | Where the floating tablet buttons go, in either orientation: the usual edge unless the other covers less of the centred room, and moved in to the room's edge rather than left straddling it. |
-| `deviceOrientation.ts` | 1.4 k | Native tablet orientation policy: compare landscape and portrait with the existing bar budget. Phones and browsers keep player-controlled rotation. |
-| `orientationSync.ts` | 0.8 k | Native phones rotate freely; tablets retain per-screen orientation locks. A no-op in every browser. |
+| `deviceOrientation.ts` | 1.4 k | Native tablet orientation policy: compare landscape and portrait with the existing bar budget. Phones use a separate presentation/free-room policy. |
+| `phoneOrientation.ts` | | Native phones lock splash, map, movies and other presentation screens to landscape, unlock visible rooms, and retain the standing policy through room loading. Options/Help inherit their underlying screen. |
+| `orientationSync.ts` | 0.8 k | Applies the phone presentation/free-room policy or tablet room-based locks. A no-op in every browser. |
 | `safeArea.ts` | 0.5 k | How big the display cutout is, read back from the `--sa-*` custom properties — the one place that knows their names. |
 | `touchSwipe.ts` | 1.6 k | Swipe to move: a finger drag on the room is delivered as a held arrow key, so every guard the keyboard has applies unchanged. |
 | `dialogueHints.ts` | 1.0 k | Touch-only swipe/tap illustration and Save/Load pulses triggered by tutorial dialogue, with expiry and screen/demo lifecycle cleanup. Styled by `src/styles/dialogueHints.css`. |
 | `zoomHint.ts` | | First-entry phone pinch illustrations in rooms 2 and 3; persists each room independently and follows live-play/loading/zoom eligibility. |
+| `portraitHint.ts` | | One-time, five-second animated portrait suggestion in VRAK on landscape phones; waits for native unlock and remembers only after 2.4 seconds of landscape display. Icon-only with reduced-motion support, no orientation lock. Styled by `src/styles/portraitHint.css`. |
 | `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `cutsceneClose.ts` | | The briefcase demo's ✕: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |

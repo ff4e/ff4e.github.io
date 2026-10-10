@@ -29,6 +29,7 @@ import { syncOrientationLock } from './orientationSync.js';
 import { syncTouchOptions } from './touchOptions.js';
 import { syncDialogueHint } from './dialogueHints.js';
 import { syncZoomHint } from './zoomHint.js';
+import { syncPortraitHint } from './portraitHint.js';
 import { drawMap } from './mapDraw.js';
 import { drawHelp, drawPanel, tickPanelScroll } from './panel.js';
 import { enhancedArtActive, graphics, renderOnDirty, renderer } from './renderSettings.js';
@@ -319,7 +320,8 @@ export function loop(now: number): void {
   syncTouchOptions();
   syncDialogueHint(now);
   syncZoomHint(now);
-  // Native phones stay unlocked; tablets retain the room-based orientation policy.
+  syncPortraitHint(now);
+  // Native phones lock presentation screens, not rooms; tablets keep their room policy.
   syncOrientationLock();
   updatePerfHud(now);
   scheduleNextFrame();

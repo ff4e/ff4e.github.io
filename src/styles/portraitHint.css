@@ -1,0 +1,45 @@
+#phone-portrait-hint {
+  position: fixed;
+  z-index: 3;
+  top: max(24px, calc(var(--sa-top) + 8px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: 80px;
+  /* Stay between both 56px corner controls, including either landscape cutout. */
+  max-width: calc(100vw - 2 * (max(24px, calc(var(--sa-left) + 8px), calc(var(--sa-right) + 8px)) + 72px));
+  box-sizing: border-box;
+  padding: 8px;
+  border-radius: 16px;
+  background: #10161ad9;
+  pointer-events: none;
+  user-select: none;
+}
+#phone-portrait-hint * { pointer-events: none; }
+#phone-portrait-hint svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  fill: none;
+  stroke: #aee;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.portrait-hint-phone {
+  transform-box: view-box;
+  transform-origin: 36px 36px;
+  fill: #fffae8;
+  stroke: #253b43;
+  animation: portrait-hint-turn 2.4s ease-in-out 2;
+}
+.portrait-hint-screen { fill: #253b43; stroke: none; }
+@keyframes portrait-hint-turn {
+  0%, 15% { transform: rotate(-90deg); }
+  60%, 100% { transform: rotate(0deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .portrait-hint-phone { animation: none; }
+}
+@media (orientation: portrait) {
+  #phone-portrait-hint { display: none; }
+}
