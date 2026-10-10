@@ -1,6 +1,6 @@
 /**
  * The per-frame derivation (`src/app/orientationSync.ts`).
- * Phone rotation is free; the historical shape fixtures below retain the tablet policy.
+ * Phones lock presentation screens, not rooms; the shape fixtures retain the tablet policy.
  *
  * `deviceOrientation.test.ts` pins the DECISION and `orientationLock.test.ts` the
  * plumbing; what is left in the middle is the wiring, and all of it is about the states
@@ -21,20 +21,32 @@ const state = {
   screen: 'room' as 'map' | 'room' | 'intro' | 'legimage',
   room: {} as object | null,
   loading: false,
+  artPending: false,
+  entryHeld: false,
+  booted: true,
+  cutscene: null as object | null,
+  helpOpen: false,
+  mapOverlay: 'none' as 'none' | 'options' | 'credits',
   phone: false,
   size: { w: 780, h: 225 }, // UTES, the widest room
 };
 
 vi.mock('../src/app/screenState.js', () => ({
   get ui() {
-    return { screen: state.screen };
+    return { screen: state.screen, helpOpen: state.helpOpen, mapOverlay: state.mapOverlay };
   },
 }));
 vi.mock('../src/app/gameState.js', () => ({
   get room() {
     return state.room;
   },
+  get cutscene() {
+    return state.cutscene;
+  },
 }));
+vi.mock('../src/app/art.js', () => ({ roomArtPending: () => state.artPending }));
+vi.mock('../src/app/roomLoad.js', () => ({ roomEntryHeld: () => state.entryHeld }));
+vi.mock('../src/app/stageState.js', () => ({ get booted() { return state.booted; } }));
 vi.mock('../src/app/framePacing.js', () => ({
   get roomLoading() {
     return state.loading;
@@ -82,6 +94,12 @@ beforeEach(() => {
   state.screen = 'room';
   state.room = {};
   state.loading = false;
+  state.artPending = false;
+  state.entryHeld = false;
+  state.booted = true;
+  state.cutscene = null;
+  state.helpOpen = false;
+  state.mapOverlay = 'none';
   state.phone = false;
   state.size = { w: 780, h: 225 };
 });
@@ -93,25 +111,115 @@ afterEach(() => {
 });
 
 describe('syncOrientationLock', () => {
-  it('unlocks phones from boot through rooms, loading, map and movies, without choosing an orientation', () => {
+  it('locks phone boot to landscape, even when the hidden initial room is already loaded', () => {
     const choose = vi.spyOn(orientation, 'preferredDeviceOrientation');
     state.phone = true;
+    state.booted = false;
     state.room = null;
-    syncOrientationLock(); // before a room or the touch chrome has initialized
-    state.room = {};
-    for (const screen of ['room', 'map', 'intro', 'legimage'] as const) {
-      state.screen = screen;
-      for (const [w, h] of [[874, 402], [402, 874]]) {
-        setViewport(w, h);
-        syncOrientationLock();
-      }
-    }
-    state.screen = 'room';
-    state.loading = true;
     syncOrientationLock();
-    expect(unlockOrientation).toHaveBeenCalledTimes(10);
+    state.room = {};
+    syncOrientationLock();
+    expect(lockOrientation.mock.calls).toEqual([['landscape'], ['landscape']]);
+    expect(unlockOrientation).not.toHaveBeenCalled();
+    expect(choose).not.toHaveBeenCalled();
+  });
+
+  it.each(['map', 'intro', 'legimage'] as const)('locks phone %s presentation in either device orientation', (screen) => {
+    state.phone = true;
+    state.screen = screen;
+    for (const [w, h] of [[874, 402], [402, 874]]) {
+      setViewport(w!, h!);
+      syncOrientationLock();
+    }
+    expect(lockOrientation.mock.calls).toEqual([['landscape'], ['landscape']]);
+    expect(unlockOrientation).not.toHaveBeenCalled();
+  });
+
+  it('unlocks every visible phone room, without measuring or choosing its orientation', () => {
+    const choose = vi.spyOn(orientation, 'preferredDeviceOrientation');
+    state.phone = true;
+    for (const [w, h] of [[780, 225], [315, 555]]) {
+      state.size = { w: w!, h: h! };
+      syncOrientationLock();
+    }
+    expect(unlockOrientation).toHaveBeenCalledTimes(2);
     expect(lockOrientation).not.toHaveBeenCalled();
     expect(choose).not.toHaveBeenCalled();
+  });
+
+  it.each(['loading', 'artPending', 'entryHeld'] as const)('retains the phone policy through %s, but immediately locks a map visit', (hold) => {
+    state.phone = true;
+    state.screen = 'map';
+    syncOrientationLock();
+    state.screen = 'room';
+    state[hold] = true;
+    syncOrientationLock();
+    expect(lockOrientation.mock.calls).toEqual([['landscape'], ['landscape']]);
+    expect(unlockOrientation).not.toHaveBeenCalled();
+    state[hold] = false;
+    syncOrientationLock();
+    expect(unlockOrientation).toHaveBeenCalledTimes(1);
+    lockOrientation.mockClear();
+    state[hold] = true;
+    syncOrientationLock();
+    expect(unlockOrientation).toHaveBeenCalledTimes(2);
+    expect(lockOrientation).not.toHaveBeenCalled();
+    state.screen = 'map';
+    syncOrientationLock();
+    expect(asked()).toBe('landscape');
+  });
+
+  it('keeps phone map Options, Help and credits landscape, but room Help unlocked', () => {
+    state.phone = true;
+    state.screen = 'map';
+    for (const overlay of ['none', 'options', 'credits'] as const) {
+      state.mapOverlay = overlay;
+      syncOrientationLock();
+      expect(asked()).toBe('landscape');
+    }
+    state.helpOpen = true;
+    syncOrientationLock();
+    expect(unlockOrientation).not.toHaveBeenCalled();
+    lockOrientation.mockClear();
+    state.screen = 'room';
+    state.mapOverlay = 'none';
+    syncOrientationLock();
+    expect(unlockOrientation).toHaveBeenCalledTimes(1);
+    expect(lockOrientation).not.toHaveBeenCalled();
+  });
+
+  it('locks a phone cutscene over a room, then restores player-controlled rotation', () => {
+    state.phone = true;
+    syncOrientationLock();
+    state.cutscene = {};
+    syncOrientationLock();
+    expect(asked()).toBe('landscape');
+    state.cutscene = null;
+    syncOrientationLock();
+    expect(unlockOrientation).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps phone loading landscape before any standing answer or live room exists', () => {
+    state.phone = true;
+    state.loading = true;
+    syncOrientationLock();
+    expect(asked()).toBe('landscape');
+    state.loading = false;
+    state.room = null;
+    syncOrientationLock();
+    expect(unlockOrientation).not.toHaveBeenCalled();
+  });
+
+  it('reasserts phone policy each frame so a failed bridge request can retry', () => {
+    state.phone = true;
+    state.screen = 'map';
+    syncOrientationLock();
+    syncOrientationLock();
+    expect(lockOrientation).toHaveBeenCalledTimes(2);
+    state.screen = 'room';
+    syncOrientationLock();
+    syncOrientationLock();
+    expect(unlockOrientation).toHaveBeenCalledTimes(2);
   });
 
   it('retains the tablet bar budget', () => {

@@ -5,6 +5,7 @@
 import { chromium } from 'playwright';
 import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkZoomHints, checkZoomHintsAfterReload } from './ui-zoom-hints.mjs';
+import { checkPortraitHint } from './ui-portrait-hint.mjs';
 
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 const browser = await chromium.launch();
@@ -831,6 +832,7 @@ try {
   await p.setViewportSize({ width: 852, height: 393 });
   await enter(2);
   await checkZoomHints(p, expect, { enter, pinch, waitZoom });
+  await checkPortraitHint(p, expect, enter);
   expect(await p.evaluate(() => {
     const map = document.getElementById('phone-map').getBoundingClientRect();
     const more = document.getElementById('phone-more').getBoundingClientRect();
@@ -887,6 +889,8 @@ try {
   await p.reload({ waitUntil: 'domcontentloaded' });
   await p.waitForFunction(() => window.__ff);
   await checkZoomHintsAfterReload(p, expect, enter);
+  await enter(4);
+  expect(await p.locator('#phone-portrait-hint').count() === 0, 'VRAK rotation hint stays seen after relaunch');
   await enter(7);
   expect(await scale() === 1, 'relaunch resets the zoom preference');
   expect(errors.length === 0, `no page errors (${errors.join('; ')})`);

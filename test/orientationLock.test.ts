@@ -28,7 +28,7 @@
  * by its comment and by play.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { initOrientationLock, lockOrientation, resetOrientationLockForTest, unlockOrientation } from '../src/platform/orientationLock.js';
+import { initOrientationLock, isOrientationUnlocked, lockOrientation, resetOrientationLockForTest, unlockOrientation } from '../src/platform/orientationLock.js';
 
 const lock = vi.fn(() => Promise.resolve());
 const unlock = vi.fn(() => Promise.resolve());
@@ -73,6 +73,7 @@ afterEach(() => {
 describe('on the web', () => {
   it('never loads the plugin, however many times it is asked', async () => {
     setProtocol('https:');
+    expect(isOrientationUnlocked()).toBe(true);
     initOrientationLock();
     lockOrientation('landscape');
     lockOrientation('portrait');
@@ -110,6 +111,46 @@ describe('on the native host', () => {
     expect(unlock).toHaveBeenCalledTimes(2);
   });
 
+  it('reports unlocked only after native acknowledgment, and withdraws it on a new lock', async () => {
+    let finish!: () => void;
+    unlock.mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+    expect(isOrientationUnlocked()).toBe(false);
+    unlockOrientation();
+    expect(isOrientationUnlocked()).toBe(false);
+    await settle();
+    expect(isOrientationUnlocked()).toBe(false);
+    finish();
+    await settle();
+    expect(isOrientationUnlocked()).toBe(true);
+    lockOrientation('landscape');
+    expect(isOrientationUnlocked()).toBe(false);
+    await settle();
+    expect(isOrientationUnlocked()).toBe(false);
+  });
+
+  it.each(['success', 'failure'])('ignores stale unlock %s after a lock and a newer unlock', async (outcome) => {
+    let finishOld!: () => void;
+    let failOld!: (error: Error) => void;
+    let finishNew!: () => void;
+    unlock.mockReturnValueOnce(new Promise<void>((resolve, reject) => {
+      finishOld = resolve;
+      failOld = reject;
+    }));
+    unlockOrientation();
+    lockOrientation('landscape');
+    unlock.mockReturnValueOnce(new Promise<void>((resolve) => { finishNew = resolve; }));
+    unlockOrientation();
+    if (outcome === 'success') finishOld();
+    else failOld(new Error('stale request'));
+    await settle();
+    expect(isOrientationUnlocked()).toBe(false);
+    finishNew();
+    await settle();
+    expect(isOrientationUnlocked()).toBe(true);
+    unlockOrientation();
+    expect(unlock).toHaveBeenCalledTimes(2);
+  });
+
   it('logs and throttles an unlock failure, then retries rather than keeping the lock', async () => {
     const now = vi.spyOn(Date, 'now').mockReturnValue(0);
     const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -117,13 +158,16 @@ describe('on the native host', () => {
     unlock.mockRejectedValueOnce(error);
     unlockOrientation();
     await settle();
+    expect(isOrientationUnlocked()).toBe(false);
     expect(warning).toHaveBeenCalledWith('[orientation] Could not apply orientation:', 'unlocked', error);
     for (let frame = 0; frame < 60; frame++) unlockOrientation();
     expect(unlock).toHaveBeenCalledTimes(1);
     now.mockReturnValue(1000);
     unlockOrientation();
+    expect(isOrientationUnlocked()).toBe(false);
     await settle();
     expect(unlock).toHaveBeenCalledTimes(2);
+    expect(isOrientationUnlocked()).toBe(true);
     warning.mockRestore();
     now.mockRestore();
   });
@@ -204,9 +248,11 @@ describe('before the plugin has loaded', () => {
     lockOrientation('landscape');
     unlockOrientation();
     expect(unlock).not.toHaveBeenCalled();
+    expect(isOrientationUnlocked()).toBe(false);
     await settle();
     expect(unlock).toHaveBeenCalledTimes(1);
     expect(lock).not.toHaveBeenCalled();
+    expect(isOrientationUnlocked()).toBe(true);
   });
 
   it('does not stall the frame, and still applies once the plugin lands', async () => {

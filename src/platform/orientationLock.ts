@@ -1,5 +1,6 @@
 /**
- * The native app's orientation policy: phones unlock, tablets retain room-based locks.
+ * The native orientation bridge: phones unlock in rooms and lock presentation screens;
+ * tablets retain room-based locks.
  *
  * ── What this is for ────────────────────────────────────────────────────────
  * The rooms run from MIKRO's 360x210 to UTES's 780x225, and a couple are taller than
@@ -111,6 +112,9 @@ let desired: Want | null = null;
  * reports before that. Either way the outcome is the fail-open one the header describes.
  */
 let locked: Want | null = null;
+/** The latest request acknowledged by native code, not merely sent to the bridge. */
+let acknowledged: Want | null = null;
+let requestSerial = 0;
 /**
  * The earliest a REPEAT of `retryWant` may be tried again, as a `Date.now()` stamp.
  *
@@ -201,14 +205,18 @@ function apply(): void {
   if (desired === retryWant && Date.now() < retryAfter) return;
   retryWant = null;
   const want = desired;
+  const serial = ++requestSerial;
+  acknowledged = null;
   locked = want;
   const request = want === 'unlocked'
     ? mod.ScreenOrientation.unlock()
     : mod.ScreenOrientation.lock({ orientation: typeFor(want) });
-  void request.catch((error: unknown) => {
+  void request.then(() => {
+    if (serial === requestSerial) acknowledged = want;
+  }, (error: unknown) => {
     // Not applied, so not remembered — a later frame's decision tries again. Guarded so a
     // stale rejection cannot erase a lock that has since been re-issued.
-    if (locked !== want) return;
+    if (serial !== requestSerial) return;
     console.warn('[orientation] Could not apply orientation:', want, error);
     locked = null;
     retryWant = want;
@@ -241,12 +249,19 @@ export function unlockOrientation(): void {
   requestOrientation('unlocked');
 }
 
+/** Native acknowledgment can still precede a WebView resize; browsers have no app lock. */
+export function isOrientationUnlocked(): boolean {
+  return !isNativeHost() || (desired === 'unlocked' && acknowledged === 'unlocked');
+}
+
 /** Test seam: forget the loaded plugin and the standing lock. */
 export function resetOrientationLockForTest(): void {
   mod = null;
   load = null;
   desired = null;
   locked = null;
+  acknowledged = null;
+  requestSerial++;
   retryAfter = 0;
   retryWant = null;
 }

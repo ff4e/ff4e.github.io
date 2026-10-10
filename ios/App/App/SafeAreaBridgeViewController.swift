@@ -102,6 +102,20 @@ class SafeAreaBridgeViewController: CAPBridgeViewController {
         return mask
     }
 
+    /// Both plugin lock and unlock call this on the root controller.
+    /// Apple's nonanimated-update path, scoped to phones and this update only:
+    /// https://developer.apple.com/documentation/uikit/uiviewcontroller/setneedsupdateofsupportedinterfaceorientations()
+    @available(iOS 16.0, *)
+    override func setNeedsUpdateOfSupportedInterfaceOrientations() {
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            UIView.performWithoutAnimation {
+                super.setNeedsUpdateOfSupportedInterfaceOrientations()
+            }
+        } else {
+            super.setNeedsUpdateOfSupportedInterfaceOrientations()
+        }
+    }
+
     /// Held for the controller's lifetime — releasing it ends the observation.
     private var loadObservation: NSKeyValueObservation?
 
