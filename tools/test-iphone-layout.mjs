@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkZoomHints, checkZoomHintsAfterReload } from './ui-zoom-hints.mjs';
 import { checkPortraitHint } from './ui-portrait-hint.mjs';
+import { checkUndoHold } from './ui-undo-hold.mjs';
 
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 const browser = await chromium.launch();
@@ -548,6 +549,8 @@ try {
     await waitStill();
     expect(near(await scale(), 2.2), `corner Undo ${attempt} reverses one move without resetting the chosen zoom`);
   }
+  await checkUndoHold(p, expect, '#phone-undo', touch);
+  expect(near(await scale(), 2.2), 'holding Undo preserves the chosen phone zoom');
   await stepRight();
   await p.waitForFunction(() => window.__ff.canSave());
   const savedHash = await p.evaluate(() => window.__ff.posHash());

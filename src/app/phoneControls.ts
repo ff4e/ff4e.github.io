@@ -4,6 +4,8 @@ import { ui } from './screenState.js';
 import { cutscene, room } from './gameState.js';
 import { touchOptionsOpen } from './touchOptions.js';
 import { wake } from './frameClock.js';
+import { TOUCH_REGIONS } from './keyTables.js';
+import { bindUndoHold } from './undoButton.js';
 
 let controls: HTMLElement;
 let more: HTMLButtonElement;
@@ -38,6 +40,7 @@ export function initPhoneControls(host: TouchButtonsHost): void {
   for (const el of controls.querySelectorAll<HTMLButtonElement>('[data-region]')) {
     const region = Number(el.dataset.region);
     if (!Number.isFinite(region)) throw new Error('Invalid phone control region');
+    if (region === TOUCH_REGIONS.undo) bindUndoHold(el, () => host.panelAction(region));
     el.addEventListener('click', (e) => {
       if (e.detail > 0) el.blur();
       setExpanded(false, e.detail === 0);

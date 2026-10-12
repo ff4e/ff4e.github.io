@@ -73,6 +73,7 @@ import { roomLoading } from './framePacing.js';
 import { safeAreaInset } from './safeArea.js';
 import { isNativeHost } from '../platform/nativeHost.js';
 import { setNativeMenuEnabled, syncNativeMenu } from './nativeMenu.js';
+import { bindUndoHold } from './undoButton.js';
 
 export { TOUCH_REGIONS };
 
@@ -175,13 +176,14 @@ export function initTouchButtons(h: TouchButtonsHost): void {
   initPhoneControls(h);
   window.matchMedia('(any-pointer: coarse)').addEventListener('change', refreshTouchMode);
   window.addEventListener('resize', refreshTouchMode);
-  for (const el of document.querySelectorAll<HTMLElement>('#touchbar [data-region]')) {
+  for (const el of document.querySelectorAll<HTMLButtonElement>('#touchbar [data-region]')) {
     const region = Number(el.dataset.region);
     if (!Number.isFinite(region)) continue;
+    if (region === TOUCH_REGIONS.undo) bindUndoHold(el, () => host.panelAction(region));
     // `click`, not `pointerdown`: a tap that starts on a button and slides off should not
     // fire, and `click` is the event that already encodes that. The panel's own mouse
     // path uses mousedown because it also drives the volume sliders by drag, which none
-    // of these do.
+    // of these do. Undo also repeats while held, without an extra click on release.
     el.addEventListener('click', (e) => {
       // A pointer click must not leave Save focused when game keys are used next.
       // Keyboard/assistive clicks have detail=0 and retain their focus indicator.
