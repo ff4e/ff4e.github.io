@@ -13,6 +13,7 @@ import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicke
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
 import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
+import { continuePhoneRoom } from './phoneViewport.js';
 import { advanceSolve, inSolvemode, noteSolveDeath, noteSolveWin, solvemode, tickSolveWatchdog } from './solveMode.js';
 import { subsOn } from './playerSettings.js';
 import { ui } from './screenState.js';
@@ -217,7 +218,9 @@ export function step(): boolean {
       // this one, and with both fish gone at once there was no moment to press undo in
       // before it came. Kept behind the new history so the fatal move can be taken back.
       retireUndoHistory();
+      const previousRoom = room;
       host.buildRoom(true);
+      if (room) continuePhoneRoom(previousRoom, room);
       return true;
     }
     // A fully-eroded skeleton leaves the grid; anything it was holding up now
@@ -289,7 +292,9 @@ export function step(): boolean {
     ) {
       setPokus(pokus + 1);
       retireUndoHistory(); // same as the crush restart above
+      const previousRoom = room;
       host.buildRoom(true);
+      if (room) continuePhoneRoom(previousRoom, room);
       return true;
     }
   }

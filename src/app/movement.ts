@@ -10,6 +10,7 @@
 import { wake } from './frameClock.js';
 import { activeScript, clearUndoHistory, cutscene, engine, loadmode, pokus, room, screenShoveX, setLoadmode, setPokus, setScreenShoveX } from './gameState.js';
 import { fishBusy } from './roomGates.js';
+import { continuePhoneRoom } from './phoneViewport.js';
 import { ui } from './screenState.js';
 import { Dir } from '../core/dir.js';
 import { stepsOf } from '../core/record.js';
@@ -309,6 +310,8 @@ export function restartRoom(): void {
   host.endShowmode(); // a player restart aborts the KUFRIK demonstration (unlike a death-restart)
   clearUndoHistory(); // Restart means "throw this attempt away" — it is not undoable
   setPokus(pokus + 1);
+  const previousRoom = room;
   host.buildRoom(true);
+  if (room) continuePhoneRoom(previousRoom, room);
   host.setInfo();
 }
