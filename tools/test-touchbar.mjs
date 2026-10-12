@@ -27,6 +27,7 @@
 import { chromium } from 'playwright';
 import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkDialogueHints } from './ui-dialogue-hints.mjs';
+import { checkUndoHold } from './ui-undo-hold.mjs';
 import { touchBarEdgeFor, touchBarLeftW } from '../src/app/touchBarEdge.ts';
 
 const BASE = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
@@ -719,6 +720,7 @@ try {
   await tap(p, 24);
   const after = await p.evaluate(() => [window.__ff.moves(), window.__ff.screen()]);
   expect(after[0] === 0 && after[1] === 'room', 'and pressing it anyway is a clean no-op');
+  await checkUndoHold(p, expect, '#touchbar-undo');
 
   // ── The rescue case, which is why undo does NOT copy save's rule. `CanSave` refuses
   // while a fish is dead (URoom.pas:26900) and a lone survivor deliberately keeps playing,
