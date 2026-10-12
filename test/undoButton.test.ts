@@ -178,13 +178,52 @@ describe('Undo button hold', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('also cancels a short tap when its room changes before release', () => {
+  it.each([0, 350, 1000])(
+    'preserves one release click across a death auto-restart before repeating (held %i ms)',
+    (held) => {
+      pointer('pointerdown');
+      state.room = {};
+      vi.advanceTimersByTime(held);
+      expect(repeat).not.toHaveBeenCalled();
+      expect(button.captured).toBe(1);
+      pointer('pointerup');
+      click();
+      vi.advanceTimersByTime(1000);
+      expect(clickAction).toHaveBeenCalledTimes(1);
+      expect(repeat).not.toHaveBeenCalled();
+      expect(button.captured).toBeNull();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it.each(['drag-out', 'pointercancel', 'lostpointercapture', 'blur'])(
+    'still cancels on %s after a room change has stopped the timer',
+    (reason) => {
+      pointer('pointerdown');
+      state.room = {};
+      vi.advanceTimersByTime(350);
+      if (reason === 'drag-out') pointer('pointermove', { clientY: 5 });
+      else if (reason === 'blur') win.dispatchEvent(new Event('blur'));
+      else pointer(reason);
+      pointer('pointermove');
+      pointer('pointerup');
+      click();
+      expect(clickAction).not.toHaveBeenCalled();
+      expect(repeat).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(0);
+    },
+  );
+
+  it('does not preserve the click if an overlay opens after the room-change timer stops', () => {
     pointer('pointerdown');
     state.room = {};
+    vi.advanceTimersByTime(350);
+    state.options = true;
     pointer('pointerup');
     click();
     expect(clickAction).not.toHaveBeenCalled();
     expect(repeat).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('ignores secondary buttons, additional fingers and unrelated pointer releases', () => {

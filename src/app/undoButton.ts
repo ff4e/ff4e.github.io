@@ -35,10 +35,14 @@ export function bindUndoHold(button: HTMLButtonElement, repeat: () => void): voi
   const tick = (): void => {
     timer = undefined;
     if (pointer === null) return;
-    if (!available() || room !== owner) {
+    if (!available()) {
       stop(true);
       return;
     }
+    // A death auto-restart replaces the room too. Stop repeating, but keep the
+    // pointer until release: a press that has not repeated still gets its normal
+    // gated Undo click, unless it slides off or is cancelled in the meantime.
+    if (room !== owner) return;
     suppressClick = true;
     button.blur();
     repeat();
@@ -61,7 +65,7 @@ export function bindUndoHold(button: HTMLButtonElement, repeat: () => void): voi
     if (e.pointerId === pointer && (!inside(e) || e.buttons === 0)) stop(true);
   }, true);
   window.addEventListener('pointerup', (e) => {
-    if (e.pointerId === pointer) stop(!inside(e) || !available() || room !== owner);
+    if (e.pointerId === pointer) stop(!inside(e) || !available());
   }, true);
   window.addEventListener('pointercancel', (e) => {
     if (e.pointerId === pointer) stop(true);
