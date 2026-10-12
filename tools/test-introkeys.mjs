@@ -151,8 +151,9 @@ const newGatedPage = async (devEnabled) => {
   expect((await p.evaluate(() => window.__ff.graphics())) === 'ai', 'combobox switches the level to AI-upscaled');
   // Wait for the AI HEAD-probe to resolve so the resolver reports the upscale.
   await p.waitForFunction(() => window.__ff.logoMovieUrl().includes('logo_ai'));
-  // Click "Click to start"; the logo that plays must be the AI upscale.
-  await p.click('#intro-start');
+  // The start and Skip buttons keep native keyboard activation.
+  await p.focus('#intro-start');
+  await p.keyboard.press('Enter');
   await p.waitForFunction(() => {
       const v = document.getElementById('intro-video');
       const s = v && v.getAttribute('src');
@@ -160,6 +161,24 @@ const newGatedPage = async (devEnabled) => {
     });
   const src = await p.evaluate(() => document.getElementById('intro-video').getAttribute('src'));
   expect(src.includes('logo_ai.mp4'), `the played logo is the AI upscale after picking AI on the splash (got ${src})`);
+  await p.focus('#intro-skip');
+  await p.keyboard.press('Tab');
+  expect(await p.locator('#intro-video').getAttribute('src') === src, 'Tab moves focus without skipping a movie');
+  await p.waitForFunction(() => {
+    const v = document.getElementById('intro-video');
+    return !v.paused && v.currentTime > 0;
+  });
+  await p.focus('#intro-skip');
+  await p.keyboard.press('Enter');
+  expect((await p.locator('#intro-video').getAttribute('src')).includes('intro_ai'),
+    'Enter activates Skip exactly once, advancing logo to intro');
+  await p.waitForFunction(() => {
+    const v = document.getElementById('intro-video');
+    return !v.paused && v.currentTime > 0;
+  });
+  await p.keyboard.press('Space');
+  await p.waitForFunction(() => window.__ff.screen() === 'map');
+  expect(await p.locator('#intro-skip').isHidden(), 'Space activates the focused Skip button and returns to the map');
   if (errs.length) {
     ok = false;
     console.log('  console errors:', errs);

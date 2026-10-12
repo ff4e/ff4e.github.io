@@ -1,5 +1,5 @@
 /**
- * The briefcase demo's ✕ (src/app/cutsceneClose.ts) and the phone corners standing aside
+ * The briefcase demo's Skip (src/app/cutsceneClose.ts) and the phone corners standing aside
  * for it (src/app/phoneControls.ts). The tablet bar's half is in touchButtons.test.ts.
  *
  * Units, not a probe: both are one predicate over state, and what a browser adds — that

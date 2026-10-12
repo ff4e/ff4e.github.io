@@ -247,7 +247,7 @@ export function syncTouchButtons(): void {
   // Not over the help pages: they fill the stage the room was centred in, and the buttons
   // float, so they would sit across the page's edge (the room-based placement cannot see
   // it). The phone controls and the fish indicator already step aside for help the same way.
-  // Nor over the briefcase demo, where nothing on the bar applies and its ✕ is the one
+  // Nor over the briefcase demo, where nothing on the bar applies and Skip is the one
   // control (cutsceneClose.ts); the phone controls stand aside for it too.
   const want = active && !phone && ui.screen === 'room' && !ui.helpOpen && !cutscene;
   let changed = false;

@@ -1,5 +1,5 @@
 /* Shared touch/native paint; geometry and input stay in index.html. Button surfaces are
-   a single translucent color, with fully opaque symbols and labels. The surface alphas
+   a single translucent color, with fully opaque symbols and labels. Room-control alphas
    match `menuPalette()` in src/platform/nativeMenuPalette.ts, which explains them. */
 html[data-native-menu] {
   --menu-glass: rgb(23 29 34 / 80%);
@@ -26,6 +26,12 @@ html[data-native-menu] #phone-controls > .tbtn {
   border-radius: var(--menu-radius);
   box-shadow: var(--menu-bevel);
   text-shadow: 0 1px 2px #000;
+}
+html[data-native-menu][data-phone] :is(#cutscene-close, #intro-skip) {
+  --menu-glass: rgb(23 29 34 / 60%);
+  --menu-ink: #aab2b4;
+  --menu-edge: rgb(208 215 206 / 25%);
+  --menu-bevel: none;
 }
 html[data-native-menu] .tbtn svg {
   color: var(--menu-symbol, var(--menu-ink));

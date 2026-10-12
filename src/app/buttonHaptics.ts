@@ -3,7 +3,7 @@
  *
  * ── Every HTML button, from one listener ────────────────────────────────────
  * The buttons are spread over a dozen modules (the phone corners, the tablet bar, the
- * touch Options, the briefcase ✕, the fish indicator, the help close, the load and
+ * touch Options, the briefcase Skip, the fish indicator, the help close, the load and
  * feedback notes, the intro start). Wiring each one would mean every new button has to
  * remember to buzz, and the one that forgets is the one a player notices. So this is a
  * single delegated listener, and a button added tomorrow ticks without being told to.

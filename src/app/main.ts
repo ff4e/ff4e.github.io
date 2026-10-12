@@ -1368,13 +1368,15 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-  // While the intro movie plays, swallow input; any key skips the current movie
+  // While the intro movie plays, swallow input except native button/focus keys; other keys skip
   // (the original's mouse-down MediaPlayer1.Stop, UMain.pas:1603). Two exceptions:
   // a bare modifier keydown must NOT skip (otherwise arming Ctrl+Alt+D during the
   // intro fires three skips — Ctrl, Alt, D — and blows through the whole sequence),
   // and Ctrl+Alt+D itself toggles the dev pane in place so it can be armed before
   // the game proper without abandoning the movies.
   if (intro.playing) {
+    if (e.key === 'Tab' || ((e.key === 'Enter' || e.key === ' ') &&
+      e.target instanceof HTMLButtonElement)) return;
     if (e.key === 'Control' || e.key === 'Alt' || e.key === 'Shift' || e.key === 'Meta') return;
     if (e.ctrlKey && e.altKey && e.code === 'KeyD') {
       e.preventDefault();
@@ -1687,7 +1689,7 @@ canvas.addEventListener('mousedown', (e) => {
     else helpScreens.next(helpPageCount(subLang()));
     return;
   }
-  // A click does NOT skip the briefcase demo: its ✕ button does (cutsceneClose.ts).
+  // A click does NOT skip the briefcase demo: its Skip button does (cutsceneClose.ts).
   if (cutscene) {
     e.preventDefault();
     return;

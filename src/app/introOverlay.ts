@@ -96,7 +96,7 @@ export function initIntro(): void {
     video: document.getElementById('intro-video') as HTMLVideoElement,
     startBtn: document.getElementById('intro-start') as HTMLElement,
     cover: document.getElementById('intro-cover') as HTMLElement,
-    hint: document.getElementById('intro-hint') as HTMLElement,
+    skipBtn: document.getElementById('intro-skip') as HTMLButtonElement,
   });
   void probeAiMovies();
 }

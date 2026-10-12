@@ -1,5 +1,5 @@
 /**
- * The briefcase demo's ✕ button: the one pointer way out of the KUFRIK story.
+ * The briefcase demo's Skip button: the one pointer way out of the KUFRIK story.
  *
  * A deliberate departure from the original, where any click skips the demo (zrus_kufr,
  * URoom.pas:2965). Martin (2026-09-30): skip it with a close button instead of any tap or
