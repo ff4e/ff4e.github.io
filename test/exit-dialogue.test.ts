@@ -76,7 +76,6 @@ describe.each(['little', 'big'] as const)('%s exit dialogue (URoom.pas:24387-244
     const prom = vi.fn();
     h.script.addd(0, 'current-sentence', prior[which], prom);
     h.script.dialogy(0);
-    const current = h.script.cutLine();
     h.script.addm(100, 'pending-sentence');
     const pendingSet = vi.fn();
     h.script.addset(pendingSet, 7);
@@ -87,10 +86,8 @@ describe.each(['little', 'big'] as const)('%s exit dialogue (URoom.pas:24387-244
 
     expect(h.playSound).not.toHaveBeenCalled();
     expect(h.random).not.toHaveBeenCalled();
-    expect(h.script.pendingDialogue(false)).toEqual([]);
     expect(h.room.busy).toEqual({ little: 0, big: 0 });
     expect(h.script.isDialog()).toBe(true);
-    expect(h.script.cutLine()).toBe(current);
     expect(prom.mock.calls).toEqual([[prior[which]]]);
     expect(h.ksnd).not.toHaveBeenCalled();
     h.finish();
@@ -119,7 +116,7 @@ describe.each(['little', 'big'] as const)('%s exit dialogue (URoom.pas:24387-244
     h.script.addset(set, 1);
     h.script.addd(0, 'ANIMa2', h.room.bigIdx);
     h.start();
-    expect(h.script.pendingDialogue()).toEqual([]);
+    expect(h.script.isDialog()).toBe(false);
     h.finish();
     for (let i = 0; i < 150; i++) h.tick();
     expect(h.talk).toHaveBeenCalledTimes(1);
@@ -146,7 +143,7 @@ describe.each(['little', 'big'] as const)('%s exit dialogue (URoom.pas:24387-244
     h.room.killFish(h.other);
     h.script.addm(100, 'never-spoken');
     h.start();
-    expect(h.script.pendingDialogue()).toEqual([]);
+    expect(h.script.isDialog()).toBe(false);
     expect(h.playSound).not.toHaveBeenCalled();
     expect(h.random).not.toHaveBeenCalled();
   });

@@ -253,7 +253,7 @@ export class StepEngine {
       this.hooks.random,
     );
     if (cheer) this.hooks.playSound?.(cheer.sound, cheer.speaker);
-    this.script?.cancelPendingDialogue(which);
+    this.script?.cancelPendingDialogue();
   }
 
   /** Common win bookkeeping (triggerWin): latch `won`, start the auto-return countdown. */
@@ -292,9 +292,7 @@ export class StepEngine {
     } else {
       s.gstav = this.phase === 'fall' ? 1 : this.phase === 'turn' ? 6 : this.phase === 'exit' ? 7 : this.phase === 'kuk' ? 8 : 0;
     }
-    s.beginProg();
     this.def.prog(s);
-    s.endProg();
     s.tickShodLod(); // advance and destructively render any falling ship (ShodLod/VyresLode)
   }
 

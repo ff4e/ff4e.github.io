@@ -199,13 +199,8 @@ serialization: the OTHER fish may still be talking, and `Talking` ignores the sa
 final ~0.45 seconds. Covered by `test/exit-dialogue.test.ts`, `test/ambient.test.ts`,
 and the existing `tools/test-exitwin.mjs` browser probe.
 
-Undo keeps exit-discarded dialogue separate from the live queue. It restores the
-unheard remainder only when reversing that fish's exit, including its state-setting
-callbacks; intermediate undos while the fish remains outside keep it silent.
-`test/exit-undo.test.ts` exercises the real undo/restore path for opening and
-prog-triggered conversations, cut-line replay, re-exits, and expired snapshots.
-Like the other undo dialogue bookkeeping, these closures are attempt-local and are
-not stored in saves.
+Exit-discarded dialogue is not retained for undo. That recovery was removed with the
+undo dialogue-preservation changes on 2026-10-11; the exit-speech fixes above remain.
 
 ### 🟡 LODE's ball conversation looped forever (a 1998 bug) — fixed 2026-10-06
 
@@ -221,8 +216,8 @@ Now a deliberate deviation that sets `omicich = -1`, as FFNG does (`gods/code.lu
 Reported as "the same shout several times during a long solution". Most of that is the
 original's design: room scripts re-fire conversations on timers (BATHROOM every 40–120 s,
 KNIHOVNA cycling four talks through `roompole[1]`). Replaying the 70 committed solutions at
-a human pace gives ~1 600 lines with ~750 repeats, all of them `URoom.pas` behaviour. Four
-things on top of that were the port's:
+a human pace gives ~1 600 lines with ~750 repeats, all of them `URoom.pas` behaviour. Three
+additional differences remain fixed:
 
 - **StdKecej chattered in solved rooms.** `if zaznamy.rooms[roomnumber].savy[prv].dat<>0 then exit`
   (`URoom.pas:3357`) keeps the idle chatter off once a room has a first-solve record. Now
@@ -231,33 +226,17 @@ things on top of that were the port's:
   records, not the room (`URoom.pas:3367/3372`); the port reset it on every entry, restart and
   undo. It is now handed from timer to timer. Still a deviation: the original also keeps it
   across sessions, the port only for the browser session.
-- **Undo rewound the "already said" flags** rooms keep in their Vars and `roompole`, so it
-  brought back lines the player had just heard, and dropped lines queued but not yet heard.
-  The flags cannot be kept, because the same banks hold puzzle state. So the state still
-  rewinds and undo works on what is heard instead: heard lines are muted against the
-  rewound script, unheard queued lines are carried into the rebuilt room, and the room's
-  opening never restarts. The design is in `src/app/undo.ts`, "What the fish have already
-  said". Measured headless across the solution rooms:
-  - Once-only lines heard again after an undo: 17 → 0 (10 moves back); 250 → 0 for a deep
-    undo past the 120 kept snapshots.
-  - Queued lines lost: 119 → 0 (deep: 103 → 0).
-  - No line doubled, including double and triple presses.
-  - Positions and refused moves are identical with and without the muting. Script state
-    differs only in dialogue-paced timers, as a conversation that took no time would leave
-    it.
-
-  A line the press cuts off is said again once, from its start, about a second after the
-  presses stop; cut a second time it counts as heard. Before that rule a burst of presses
-  through a conversation restarted the line on every press (21 times in 20 presses, BARELY
-  and TRUHLA). What remains: mutes are not saved,
-  so undo after an F3 load can repeat a line heard before the save. Speech a room plays
-  directly with `talkNow`, the exit cheer, the idle chatter and the death commentary are
-  outside it.
 - **F3 restored `roompole` from the save.** The original saves every item's Vars but not
   `roompole` (`uloz_promenne`, `URoom.pas:1721`), and `TRoom.Load` leaves the bank alone, so
   a load within the visit kept the lines said since the save from repeating. The player's
   load now keeps the live bank (`restore`'s `keepRoompole`); GPU-loss recovery and the demo's
   checkpoint still restore it exactly.
+
+**Undo dialogue preservation was reverted by request on 2026-10-11.** Undo again
+rebuilds the room and restores the target's script snapshot without muting heard lines,
+carrying pending dialogue, suppressing the opening, or scheduling interrupted-line
+replays. Lines may repeat and queued lines may be lost, including across an exit.
+`test/undo-dialogue.test.ts` covers this behavior through the real undo/restore path.
 
 ### 🟠 KUFRIK's first tutorial line ended in half a second of buzz — fixed 2026-08-16
 
