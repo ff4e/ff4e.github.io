@@ -174,7 +174,7 @@ function sendKey(type: 'keydown' | 'keyup', code: string): void {
 function armed(): boolean {
   // Not during the briefcase demo or the help pages: both are still `screen === 'room'`.
   // A tap dismisses the help, and must not also be read as a command; the demo takes no
-  // taps at all (its ✕ button skips it, cutsceneClose.ts), and a gesture must not drive
+  // taps at all (its Skip button skips it, cutsceneClose.ts), and a gesture must not drive
   // a fish under it.
   return touchUi() && ui.screen === 'room' && !ui.helpOpen && !cutscene &&
     !(phoneUi() && (phoneMenuOpen() || touchOptionsOpen()));

@@ -135,7 +135,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `portraitHint.ts` | | One-time, five-second animated portrait suggestion in VRAK on landscape phones; waits for native unlock and remembers only after 2.4 seconds of landscape display. Icon-only with reduced-motion support, no orientation lock. Styled by `src/styles/portraitHint.css`. |
 | `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
-| `cutsceneClose.ts` | | The briefcase demo's ✕: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
+| `cutsceneClose.ts` | | The briefcase demo's Skip button: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |

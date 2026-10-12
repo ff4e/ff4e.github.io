@@ -14,6 +14,7 @@ await withApp(async ({ p, expect }) => {
   expect(await p.evaluate(() => window.__ff.introPlaying()), 'intro is active on first run');
   expect(await p.evaluate(() => window.__ff.introSeen()) === false, 'introSeen is false before the intro is watched');
   expect(await p.locator('#intro-start').innerText() === '▶ Click to start', 'desktop keeps the click-to-start prompt');
+  expect(await p.locator('#intro-skip').isHidden(), 'Skip is hidden on the gated splash');
 
   // Intro video sizing (v1.0.3): the <video> must fill the viewport and letterbox
   // via object-fit:contain. The pre-fix CSS used only max-width/max-height:100v*,
@@ -67,11 +68,34 @@ await withApp(async ({ p, expect }) => {
   // Click "Click to start" to begin, then skip through the movies (logo → intro) to
   // the map — now that playback has begun, skipping advances as usual.
   await p.click('#intro-start');
-  expect(await p.locator('#intro-hint').innerText() === 'click / Esc to skip', 'desktop keeps the click / Esc skip hint');
+  const skip = p.getByRole('button', { name: 'Skip', exact: true });
+  expect(await skip.isVisible(), 'playback shows a labeled Skip button');
+  const skipBox = await skip.boundingBox();
+  expect(skipBox && skipBox.x === 24 && skipBox.y === 24 && skipBox.width >= 56 && skipBox.height >= 32,
+    'Skip is inset from the viewport top-left corner with room for its label');
   await p.waitForFunction(() => !window.__ff.introSeen() && window.__ff.screen() === 'intro');
-  await p.evaluate(() => window.__ff.skipIntro()); // skip the logo → intro
-  await p.evaluate(() => window.__ff.skipIntro()); // skip the intro → map
+  await p.waitForFunction(() => {
+    const v = document.getElementById('intro-video');
+    return !v.paused && v.currentTime > 0;
+  });
+  const logo = await p.locator('#intro-video').getAttribute('src');
+  await p.locator('#intro-video').click({ position: { x: 300, y: 200 } });
+  expect(await p.locator('#intro-video').getAttribute('src') === logo, 'clicking the movie no longer skips it');
+  await p.mouse.move(skipBox.x + skipBox.width / 2, skipBox.y + skipBox.height / 2);
+  await p.mouse.down();
+  await p.mouse.move(300, 200);
+  await p.mouse.up();
+  expect(await p.locator('#intro-video').getAttribute('src') === logo, 'sliding off Skip cancels the press');
+  await skip.click(); // skip the logo → intro
+  expect((await p.locator('#intro-video').getAttribute('src')).includes('intro'),
+    'one Skip click advances only the current movie');
+  await p.waitForFunction(() => {
+    const v = document.getElementById('intro-video');
+    return !v.paused && v.currentTime > 0;
+  });
+  await skip.click(); // skip the intro → map
   await p.waitForFunction(() => window.__ff.screen() === 'map');
+  expect(await skip.isHidden(), 'Skip disappears after the sequence');
   expect(await p.evaluate(() => window.__ff.introSeen()) === true, 'introSeen persists after the intro finishes');
   expect(await p.evaluate(() => window.__ff.introPlaying()) === false, 'intro is no longer active on the map');
   expect(
@@ -124,7 +148,8 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.clickMapCorner(20, 20));
   await p.waitForFunction(() => window.__ff.screen() === 'intro');
   expect(await p.evaluate(() => window.__ff.introPlaying()), 'the intro replays from the top-left corner');
-  await p.evaluate(() => window.__ff.skipIntro());
+  expect(await skip.isVisible(), 'Skip is available on an ungated replay too');
+  await skip.click();
   await p.waitForFunction(() => window.__ff.screen() === 'map');
 
   // Options corner opens the Options panel over the map; Esc/close returns.

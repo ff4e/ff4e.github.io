@@ -4,7 +4,7 @@ const regions: Readonly<Record<string, string>> = {
   14: 'map', 24: 'undo', 12: 'save', 13: 'load', 16: 'options', 15: 'restart',
 };
 /** Buttons that dispatch no panel region. */
-const buttons: Readonly<Record<string, string>> = { 'phone-more': 'more', 'cutscene-close': 'close' };
+const buttons: Readonly<Record<string, string>> = { 'phone-more': 'more' };
 let library: Document | null = null;
 
 /** Replace only the artwork; keep button dispatch, SVG boxes and accessible names. */

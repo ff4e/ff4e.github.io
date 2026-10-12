@@ -116,6 +116,9 @@ async function visit(contextOpts) {
       startText: document.getElementById('intro-start').textContent,
     }));
     let skipText = null;
+    let skipBrowserLayout = null;
+    let skipLayout = null;
+    let backgroundIgnored = true;
     let skippedToMap = false;
     if (dom.booted) {
       const activate = async (selector) => {
@@ -123,14 +126,32 @@ async function visit(contextOpts) {
         else await p.locator(selector).click();
       };
       await activate('#intro-start');
-      await p.locator('#intro-hint').waitFor({ state: 'visible' });
-      skipText = await p.locator('#intro-hint').innerText();
+      await p.locator('#intro-skip').waitFor({ state: 'visible' });
+      skipText = await p.locator('#intro-skip').innerText();
+      const readSkipLayout = () => p.locator('#intro-skip').evaluate((button) => {
+        const r = button.getBoundingClientRect();
+        const style = getComputedStyle(button);
+        return { left: r.left, top: r.top, width: r.width, height: r.height,
+          fontSize: parseFloat(style.fontSize), color: style.color, background: style.backgroundColor, shadow: style.boxShadow,
+          button: button.tagName === 'BUTTON', inViewport: r.right <= innerWidth && r.bottom <= innerHeight };
+      });
+      skipBrowserLayout = await readSkipLayout();
+      if (contextOpts.hasTouch) {
+        await p.evaluate(() => {
+          document.documentElement.style.setProperty('--sa-top', '24px');
+          document.documentElement.style.setProperty('--sa-left', '44px');
+        });
+      }
+      skipLayout = await readSkipLayout();
       for (let movie = 0; movie < 2; movie++) {
         await p.waitForFunction(() => {
           const video = document.getElementById('intro-video');
           return !video.paused && video.currentTime > 0;
         });
+        const src = await p.locator('#intro-video').getAttribute('src');
         await activate('#intro-video');
+        backgroundIgnored &&= await p.locator('#intro-video').getAttribute('src') === src;
+        await activate('#intro-skip');
       }
       await p.waitForFunction(() => window.__ff.screen() === 'map');
       skippedToMap = await p.evaluate(() => window.__ff.introSeen() && !window.__ff.introPlaying());
@@ -157,7 +178,7 @@ async function visit(contextOpts) {
       undoUnchanged = await p.evaluate(() => window.__ff.state().active === 'big' &&
         window.__ff.undo() && window.__ff.state().active === 'little');
     }
-    return { ...dom, startup, skipText, skippedToMap, errs, undoUnchanged };
+    return { ...dom, startup, skipText, skipBrowserLayout, skipLayout, backgroundIgnored, skippedToMap, errs, undoUnchanged };
   } finally {
     releaseScripts();
     await b.close();
@@ -262,8 +283,24 @@ try {
     expect(result.startup.accessible, `${name}: spinner-only loading retains an accessible status`);
     expect(result.startText === (touch ? '▶ Tap to start' : '▶ Click to start'),
       `${name}: the start button matches the input device`);
-    expect(result.skipText === (touch ? 'Tap to skip' : 'click / Esc to skip'),
-      `${name}: the skip hint matches the input device`);
+    expect(result.skipText === 'Skip' && result.skipLayout?.button,
+      `${name}: playback has a real button labeled Skip`);
+    const browserLayout = result.skipBrowserLayout;
+    expect(browserLayout?.inViewport && browserLayout.left === (result.phone ? 32 : 24) && browserLayout.top === 24,
+      `${name}: Skip clears browser corners even with zero safe-area insets (${JSON.stringify(browserLayout)})`);
+    const layout = result.skipLayout;
+    expect(layout?.inViewport && layout.left === (result.phone ? 56 : touch ? 52 : 24) &&
+      layout.top === (result.phone ? 36 : touch ? 32 : 24) &&
+      layout.width >= (touch ? 44 : 56) && layout.height >= (touch ? 44 : 32) &&
+      layout.fontSize === (touch && !result.phone ? 18 : 14),
+      `${name}: Skip is legible, top-left, and clear of safe-area insets (${JSON.stringify(layout)})`);
+    if (result.phone) {
+      expect(layout?.width === 64 && layout.height === 44 && layout.shadow === 'none' &&
+        layout.background === 'rgba(23, 29, 34, 0.6)',
+        `${name}: Skip is compact and translucent without shrinking its 44px tap target`);
+      expect(layout?.color === 'rgb(170, 178, 180)', `${name}: Skip uses muted gray text instead of bright white`);
+    }
+    expect(result.backgroundIgnored, `${name}: tapping or clicking the movie does not skip it`);
     expect(result.skippedToMap, `${name}: real start and skip gestures still reach the map`);
   }
 } catch (e) {

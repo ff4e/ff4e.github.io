@@ -2,7 +2,7 @@
  * Intro-movie playback (UMain.pas daLogo/daIntro). The original played the
  * ALTAR logo + intro AVIs full-screen via an MCI `TMediaPlayer`; here they are
  * H.264 transcodes played through an HTML5 `<video>` overlay layered over the
- * canvas (see tools/MOVIES.md for how the movies are built). A mouse-down / Esc
+ * canvas (see tools/MOVIES.md for how the movies are built). The Skip button / Esc
  * skips the current movie (the original's `MediaPlayer1.Stop`, UMain.pas:1603),
  * advancing logo→intro→caller.
  *
@@ -20,8 +20,8 @@ export interface IntroElements {
   startBtn: HTMLElement;
   /** Title cover shown behind the splash; hidden once a movie starts. */
   cover: HTMLElement;
-  /** Input-mode-specific skip hint, shown once playback begins. */
-  hint: HTMLElement;
+  /** Explicit skip control, shown once playback begins. */
+  skipBtn: HTMLButtonElement;
 }
 
 export class IntroPlayer {
@@ -34,9 +34,10 @@ export class IntroPlayer {
     // shouldn't wedge the boot, so treat it the same as a finished movie.
     els.video.addEventListener('ended', () => this.next());
     els.video.addEventListener('error', () => this.next());
-    // A click anywhere on the overlay (except the start button) skips.
-    els.layer.addEventListener('pointerdown', () => this.skip());
-    els.startBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+    els.skipBtn.addEventListener('click', (e) => {
+      if (e.detail > 0) els.skipBtn.blur();
+      this.skip();
+    });
     els.startBtn.addEventListener('click', () => this.beginPlayback());
   }
 
@@ -62,7 +63,6 @@ export class IntroPlayer {
   start(resolvers: Array<() => string>, onDone: () => void, gated: boolean): void {
     const touch = touchModeActive(window);
     this.els.startBtn.textContent = touch ? '▶ Tap to start' : '▶ Click to start';
-    this.els.hint.textContent = touch ? 'Tap to skip' : 'click / Esc to skip';
     this.queue = resolvers.slice();
     this.onDone = onDone;
     this.active = true;
@@ -70,11 +70,11 @@ export class IntroPlayer {
     if (gated) {
       this.els.startBtn.hidden = false;
       this.els.cover.hidden = false; // show the title cover behind the splash
-      this.els.hint.hidden = true;
+      this.els.skipBtn.hidden = true;
     } else {
       this.els.startBtn.hidden = true;
       this.els.cover.hidden = true;
-      this.els.hint.hidden = false;
+      this.els.skipBtn.hidden = false;
       this.playCurrent();
     }
   }
@@ -84,7 +84,7 @@ export class IntroPlayer {
     if (!this.gated) return;
     this.els.startBtn.hidden = true;
     this.els.cover.hidden = true; // the movie takes over from the cover
-    this.els.hint.hidden = false;
+    this.els.skipBtn.hidden = false;
     this.playCurrent();
   }
 
@@ -125,6 +125,7 @@ export class IntroPlayer {
     this.els.layer.hidden = true;
     this.els.startBtn.hidden = true;
     this.els.cover.hidden = true;
+    this.els.skipBtn.hidden = true;
     const cb = this.onDone;
     this.onDone = null;
     cb?.();

@@ -76,7 +76,7 @@ export function initPhoneControls(host: TouchButtonsHost): void {
 }
 
 export function syncPhoneControls(): void {
-  // Not during the briefcase demo: its ✕ takes this corner (cutsceneClose.ts).
+  // Not during the briefcase demo: its Skip button takes this corner (cutsceneClose.ts).
   const want = phoneUi() && ui.screen === 'room' && !ui.helpOpen && !touchOptionsOpen() && !cutscene;
   if (expanded && (!want || owner !== room)) setExpanded(false);
   owner = room;

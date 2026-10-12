@@ -63,12 +63,11 @@ helpClose.textContent = '✕';
 helpClose.hidden = true;
 helpClose.setAttribute('aria-label', 'Close help');
 /**
- * Close button for the briefcase demo (KUFRIK), top-left of the stage — or of the screen,
+ * Skip button for the briefcase demo (KUFRIK), top-left of the stage — or of the screen,
  * in touch mode. Behaviour and the reason it exists: cutsceneClose.ts.
  *
  * A `.tbtn` so the touch/native skin paints it like the room controls it stands in for;
- * the desktop keeps it small (index.html). The icon is inline for the same reason the
- * touch bar's are.
+ * the desktop keeps it small (index.html).
  */
 export const cutsceneClose = document.createElement('button');
 cutsceneClose.id = 'cutscene-close';
@@ -76,7 +75,7 @@ cutsceneClose.className = 'tbtn';
 cutsceneClose.type = 'button';
 cutsceneClose.hidden = true;
 cutsceneClose.setAttribute('aria-label', 'Skip the briefcase intro');
-cutsceneClose.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+cutsceneClose.textContent = 'Skip';
 
 export const panelCanvas = document.getElementById('panel') as HTMLCanvasElement;
 export const panelCtx = panelCanvas.getContext('2d')!;
