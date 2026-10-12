@@ -514,6 +514,14 @@ try {
   await undoTurn(bigTurn);
   await undoTurn(await turnForUndo('big'), true);
 
+  await turnForUndo('little');
+  const keyboardAttempt = await p.evaluate(() => window.__ff.script().pokus);
+  await p.keyboard.press('Backspace');
+  await p.waitForFunction((attempt) => window.__ff.script().pokus === attempt + 1 &&
+    window.__ff.moves() === 0 && window.__ff.phase() === 'idle', keyboardAttempt);
+  await waitStill();
+  expect(near(await scale(), 1.375), 'keyboard Restart starts a fresh attempt without resetting fractional zoom');
+
   await p.evaluate(() => { window.phoneKeys = []; });
   await pointerStream([['pointerdown', 41], ['pointercancel', 41]]);
   expect(await p.evaluate(() => window.phoneKeys.length === 0), 'cancelled phone touch never becomes a tap');
@@ -561,14 +569,31 @@ try {
   };
   await choose(12);
   await p.waitForFunction(() => window.__ff.hasSave());
+  const menuAttempt = await p.evaluate(() => window.__ff.script().pokus);
   await choose(15);
   await p.waitForFunction(() => window.__ff.moves() === 0 && window.__ff.phase() === 'idle');
-  await waitZoom(1);
-  expect(true, 'overflow Save and Restart save the run and start a fresh attempt');
+  await waitStill();
+  expect(await p.evaluate(({ hash, attempt }) => window.__ff.posHash() === hash &&
+    window.__ff.script().pokus === attempt + 1, { hash: initialHash, attempt: menuAttempt }) &&
+    near(await scale(), 2.2), 'overflow Save and Restart save the run and start a fresh attempt without resetting zoom');
+  const deathAttempt = await p.evaluate(() => {
+    const attempt = window.__ff.script().pokus;
+    window.__ff.killFish('little');
+    window.__ff.killFish('big');
+    return attempt;
+  });
+  await p.waitForFunction((attempt) => window.__ff.script().pokus === attempt + 1 &&
+    window.__ff.phase() === 'idle', deathAttempt);
+  await waitStill();
+  expect(await p.evaluate((hash) => window.__ff.posHash() === hash &&
+    window.__ff.moves() === 0 && !window.__ff.state().dead, initialHash) &&
+    near(await scale(), 2.2), 'death auto-restart restores the initial room without resetting zoom');
   await choose(13);
   await p.waitForFunction((n) => !window.__ff.loading() && !window.__ff.roomLoading() &&
     window.__ff.moves() === n && window.__ff.phase() === 'idle', savedMoves);
   expect(await p.evaluate(() => window.__ff.posHash()) === savedHash, 'overflow Load restores the saved position');
+  await waitZoom(1);
+  expect(true, 'Load keeps its existing full-room camera reset');
 
   await enter(33);
   expect(await p.evaluate(() => window.__ff.roomGeom().scale * 15 >= 20), 'MIKRO is readable at standard phone-landscape size');

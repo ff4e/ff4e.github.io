@@ -83,7 +83,7 @@ describe('camera bounds', () => {
 });
 
 describe('per-room continuous camera', () => {
-  it.each([1.375, 2.2, 3])('preserves %sx zoom and framing across repeated Undo rebuilds', (zoom) => {
+  it.each([1.375, 2.2, 3])('preserves %sx zoom and framing across repeated Undo/restart rebuilds', (zoom) => {
     const s = setup();
     s.zoom(zoom);
     const position = [s.camera.x, s.camera.y];
@@ -116,6 +116,24 @@ describe('per-room continuous camera', () => {
     expect(s.camera.zoom).toBe(2.2);
     expect(s.camera.inspecting).toBe(false);
     expect(s.camera.x).toBeLessThan(held);
+  });
+
+  it('keeps the final pinch sample when restarting before the next paint', () => {
+    const s = setup();
+    s.zoom(2);
+    s.begin();
+    s.camera.moveGesture({ ratio: 1.1, x: 80, y: 0 });
+    const restarted = {};
+    s.camera.continueRoom(s.frame().owner, restarted);
+    expect(s.camera.zoom).toBe(2);
+    expect(s.camera.inspecting).toBe(false);
+    s.camera.hold();
+    s.tick({ owner: restarted, fishX: 100 });
+    expect(s.camera.zoom).toBeGreaterThan(2);
+    s.settle();
+    expect(s.camera.zoom).toBe(2.2);
+    expect(s.camera.x).toBe(cameraAxis(780, 852, 100, 2.2));
+    expect(s.camera.moving).toBe(false);
   });
 
   it('does not transfer another room or attempt into the current camera', () => {

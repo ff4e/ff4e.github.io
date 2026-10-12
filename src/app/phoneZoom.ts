@@ -120,7 +120,7 @@ export class PhoneCamera {
 
   get inspecting(): boolean { return this.inspection !== null; }
 
-  /** Undo replaces the simulation object without entering a new room. */
+  /** Undo and restart replace the simulation object without entering a new room. */
   continueRoom(previous: object, next: object): void {
     if (this.owner !== previous) return;
     this.cancelGesture();
