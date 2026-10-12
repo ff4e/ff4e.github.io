@@ -12,8 +12,6 @@
 import type { Item, Room } from './room.js';
 import { Dir } from './dir.js';
 import { captureBank, type ScriptBank } from './scriptBank.js';
-import { dropMutedRun, INIT_TAG, isTalk, lineFamily, type HeardLine, type QueuedLine } from './lineMute.js';
-import type { ExitDiscard } from './undoDialogue.js';
 
 /** natoceni facing codes (URoom.pas:420-421). */
 export const SMER_VLEVO = 1;
@@ -22,12 +20,12 @@ export const SMER_VPRAVO = 2;
 export const MLUVI_MALA = 1;
 export const MLUVI_VELKA = 2;
 
-export interface DialogEntry extends QueuedLine {
+interface DialogEntry {
   delay: number;
-  replay?: boolean; // a line undo cut off, queued to be said again
+  zvuk: string;
+  prior: number;
+  promSet?: (val: number) => void;
 }
-
-const REPLAY_DELAY = 15; // ticks (~1.2 s) a line cut off by undo waits before it is said again
 
 /** Plays a named voice + subtitle; returns how many frames it lasts. */
 export type TalkFn = (name: string, prior: number) => number;
@@ -139,17 +137,6 @@ export class Script {
   readonly globpole: number[] = new Array<number>(1024).fill(0);
 
   private queue: DialogEntry[] = [];
-  /** Kept outside the live queue until undo reverses the exit; never saved. */
-  readonly discardedOnExit: ExitDiscard[] = [];
-
-  /** Undo's handling of the room's lines; explained in `src/app/undo.ts`. */
-  progTag = 0;
-  mutedLines: Set<string> | null = null;
-  private carriedHolds = new Set<string>(); // families of carried lines: one re-trigger each is dropped
-  private heard: HeardLine[] = [];
-  private speaking: { line: HeardLine; entry: DialogEntry } | null = null;
-  private progRun = 0;
-  private inProg = false;
   private voiceEndCount = 0;
   private aktdialzvuk = 0;
   private lastprom: ((v: number) => void) | undefined;
@@ -543,54 +530,7 @@ export class Script {
 
   /** addd (URoom.pas:684): enqueue a delayed action; `set` writes via `promSet`. */
   addd(delay: number, zvuk: string, prior: number, promSet?: (v: number) => void): void {
-    const d: DialogEntry = promSet ? { delay, zvuk, prior, promSet } : { delay, zvuk, prior };
-    if (this.inProg) {
-      d.tag = this.progTag;
-      d.batch = this.progRun;
-    } else if (this.progRun === 0) {
-      d.tag = INIT_TAG; // queued by init(), before the first prog() run
-      d.batch = 0;
-    }
-    this.queue.push(d);
-  }
-
-  /** Bracket one `prog()` call, so `endProg` knows which entries that run queued. */
-  beginProg(): void {
-    this.progRun++;
-    this.inProg = true;
-  }
-
-  /** Drop this run's conversation if it holds a muted line (`dropMutedRun`). */
-  endProg(): void {
-    this.inProg = false;
-    const anim = (o: number, a: string) => this.setanim(o, a);
-    if (this.mutedLines?.size) this.queue = dropMutedRun(this.queue, this.progRun, this.mutedLines, this.heard, anim);
-    if (this.carriedHolds.size) this.queue = dropMutedRun(this.queue, this.progRun, this.carriedHolds, null, anim);
-  }
-
-
-  /** What is still to be said; the line being cut, if `includeCut`, first and from its start. A
-   *  replay waits REPLAY_DELAY again at each press, so a burst of presses keeps the fish quiet. */
-  pendingDialogue(includeCut = true, recovered: readonly DialogEntry[] = []): DialogEntry[] {
-    const cut = includeCut && this.cutLine() ? [{ ...this.speaking!.entry, replay: true }] : [];
-    return [...cut, ...recovered, ...this.queue].map((d) => (d.replay ? { ...d, delay: REPLAY_DELAY } : d));
-  }
-
-  /** Undo: drop this rebuild's `init()` queue, queue `entries`, hold one re-trigger of each. */
-  adoptPendingDialogue(entries: DialogEntry[]): void {
-    for (const d of entries) if (d.tag !== INIT_TAG && isTalk(d.zvuk)) this.carriedHolds.add(lineFamily(d.zvuk));
-    this.queue = [...this.queue.filter((d) => d.batch !== 0), ...entries.map((d) => ({ ...d, batch: -1 }))];
-  }
-
-  /** The room-script line still being spoken (undo cuts it off): the very object
-   *  `takeHeard` handed out, so it can be found and taken back. */
-  cutLine(): HeardLine | null {
-    return this.speaking && this.count < this.voiceEndCount ? this.speaking.line : null;
-  }
-
-  /** Lines credited as heard since the last call (see `src/app/undo.ts`, step 2). */
-  takeHeard(): HeardLine[] {
-    return this.heard.splice(0);
+    this.queue.push(promSet ? { delay, zvuk, prior, promSet } : { delay, zvuk, prior });
   }
   /** addm: the small fish speaks after `delay` frames. */
   addm(delay: number, name: string): void {
@@ -735,10 +675,9 @@ export class Script {
   }
 
   /** zrus_dialogy (URoom.pas:748): discard pending actions, not the active line/wait.
-   *  Its completion callback and undo's current-line bookkeeping must survive. */
-  cancelPendingDialogue(which: 'little' | 'big'): void {
-    if (this.queue.length) this.discardedOnExit.push({ which, entries: this.queue });
-    this.queue = [];
+   *  Its completion callback must survive. */
+  cancelPendingDialogue(): void {
+    this.queue.length = 0;
     this.setBusy('little', 0);
     this.setBusy('big', 0);
     // vzdy_tit has no counterpart here; see stdKonecKrajniHlasky.
@@ -756,7 +695,6 @@ export class Script {
       } else {
         this.aktdialzvuk = 0;
         this.lastprom?.(0);
-        this.speaking = null;
       }
     }
     const d = this.queue[0];
@@ -780,8 +718,6 @@ export class Script {
       if (this.sound.voicesReady && !this.sound.voicesReady()) return;
       this.aktdialzvuk = d.prior;
       this.voiceEndCount = count + this.talk(d.zvuk, d.prior);
-      this.speaking = d.tag === undefined ? null : { line: { name: d.zvuk, tag: d.tag }, entry: d };
-      if (this.speaking) this.heard.push(this.speaking.line);
       d.promSet?.(d.prior);
       this.lastprom = d.promSet;
     }

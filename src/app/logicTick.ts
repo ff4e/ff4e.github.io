@@ -9,7 +9,7 @@
 import { audio } from './audioEngine.js';
 import { tickFrameEffects } from './cheats.js';
 import { advanceReplay, advanceShowmode, cutsceneCaption, disposeAiKufr, inReplay } from './cutscene.js';
-import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, retireUndoHistory, room, roomDepth, setChatter, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs, undoHistory } from './gameState.js';
+import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, retireUndoHistory, room, roomDepth, setChatter, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
 import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
@@ -238,7 +238,6 @@ export function step(): boolean {
   // StepEngine still advances VyresLode so an in-flight wreck finishes falling.
   if (activeScript) {
     const wasWon = room.won;
-    activeScript.s.progTag = undoHistory.length; // which undo points predate a line queued now
     engine.runScript(count, host.casHry()); // idle timers + scalar sync + prog + tickShodLod
     // The win edge, taken here because this is where it happens: `runScript` is what
     // flips it. Guarded like the death commentary below — a demonstration or a replay

@@ -249,10 +249,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // the PR. The sequence itself is not here: it is `src/render/zxBands.ts`, generated
   // once and shared with the faithful renderer, which is what keeps this to a uniform.
   ['src/render/glRoomAi.ts', 830],
-  // Thirteen lines for exit's zrus_dialogy: discard the private queue without
-  // resetting the active line, and retain it for undo. Transfer/recovery logic lives
-  // in undoDialogue.ts; only the queue ownership and capture stay here.
-  ['src/core/script.ts', 793],
+  // Undo dialogue preservation was removed; exit's zrus_dialogy still discards the
+  // private queue without resetting the active line or its completion callback.
+  ['src/core/script.ts', 730],
   // 720 -> 780 for `backgroundZx`, the canvas-2D half of the same change: the stripes
   // masked by the wall's alpha, plus the `paint`/`paintBg` split that lets it reuse the
   // wobbled-background half rather than copy it.
