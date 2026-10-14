@@ -23,6 +23,7 @@ import { O_NORMAL, O_OPTIONS, SCMAX, ui } from './screenState.js';
 import { contentScaleFor, scalingFilterFor } from './stageGeometry.js';
 import { touchUi } from './touchButtons.js';
 import { openTouchOptions } from './touchOptions.js';
+import { scheduleStoreReview } from './storeReview.js';
 import { musicUrl } from '../audio/music.js';
 import { saveSettings } from '../core/settings.js';
 import { bmpToRgba, parseBmp } from '../data/bmp.js';
@@ -92,6 +93,7 @@ export function showMap(): void {
   poslMluv.big = -1;
   startMenuMusic();
   host.setInfo();
+  scheduleStoreReview();
 }
 
 /**

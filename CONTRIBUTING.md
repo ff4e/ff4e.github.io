@@ -46,6 +46,23 @@ line-range map: if a file is big enough to want one, split it instead.
   `*.mp4` produced by `tools/build-movies.mjs`. `public/data/{Writes,Program,256col}/` are
   runtime/staging/original-binary dirs and are intentionally not tracked.
 
+## Native App Store reviews
+
+`src/app/storeReview.ts` requests Apple's review prompt after the 4th, 12th and 30th
+distinct genuine solve, only on iOS. Replays, demonstrations, developer auto-solves
+and cheats do not queue requests. The request waits two seconds on the map, after
+any win dialogue/story page; leaving the map or still being busy when the delay expires
+skips that opportunity. Restarting, loading or otherwise rebuilding the room also
+discards a pending opportunity, including during the win countdown.
+Existing progress is not backfilled on launch. `ff.reviewMilestone` stores the highest
+attempted milestone across launches, not proof of a displayed prompt or submitted rating.
+Apple controls presentation (including its limits and the user's review-request setting);
+TestFlight does not display the prompt. See [Apple's guidance](https://developer.apple.com/documentation/storekit/requesting-app-store-reviews).
+
+`src/platform/storeReview.ts` lazily loads Capacitor only for the native host and calls
+the app-local `StoreReviewPlugin.swift`, registered in `SafeAreaBridgeViewController`.
+No third-party review plugin is needed. The web build does not request reviews.
+
 ## Deploy
 
 - Pushing a `v*` tag triggers the GitHub Actions Pages build (see `.github/workflows/`).
