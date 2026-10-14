@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { appReady, WAIT_BACKSTOP } from './ui-lib.mjs';
+import { tapPanel } from './ui-tablet-options.mjs';
 
 /** Real pointer and keyboard activation must switch once, never swim or lose keyboard focus. */
 export async function checkFishSwitchButton(p, badge) {
@@ -170,7 +171,7 @@ export async function checkTabletFishIndicator(browser, base, evidence, errors) 
     await waitFish('big');
     await p.click('#touchbar [data-region="16"]');
     await badge.waitFor({ state: 'hidden' });
-    await p.click('#topt-close');
+    await tapPanel(p, 135, 370, true);
     await waitFish('big');
 
     await p.evaluate(() => { window.tabletFishBadge = document.getElementById('active-fish-indicator'); });

@@ -736,7 +736,7 @@
           padding-left: max(var(--sa-left), var(--bar-lead)); padding-bottom: var(--sa-bottom);
         }
       }
-      /* ── The touch Options ────────────────────────────────────────────────
+      /* ── The phone Options ────────────────────────────────────────────────
          Plain HTML controls over the same settings the panel's Options face
          edits — deliberately not a copy of it, because that face's sliders are
          9px tall (src/app/touchOptions.ts explains the whole choice).
@@ -1152,11 +1152,11 @@
       </div>
     </div>
     <div id="info"></div>
-    <!-- The touch Options: the panel's Options face as plain HTML, because that face's
+    <!-- The phone Options: the panel's Options face as plain HTML, because that face's
          sliders are 9px tall and its subtitle buttons ~20px square — unhittable with a
-         thumb at the scale a phone draws the panel. Shown instead of it in touch mode;
-         the canvas face is unchanged for mouse players and the two are never both
-         reachable. Every control dispatches through the SAME `panelAction` regions the
+         thumb at the scale a phone draws the panel. Tablets borrow the original canvas
+         into this dialog and hide the HTML card; mouse players keep the side panel.
+         Every control dispatches through the SAME `panelAction` regions the
          panel uses (17-19 volumes, 20-22 subtitles, 23 help) — see
          src/app/touchOptions.ts for why, sliders included. -->
     <div id="touchopts" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="topt-title">

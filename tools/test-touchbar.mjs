@@ -6,8 +6,8 @@
  * (test/touchMode.test.ts). What only a browser can show is everything these two modules
  * are actually made of: that each button reaches the RIGHT verb, that the bar comes and
  * goes with the screen, that its buttons float over the room without reserving any of the
- * room's space, and that the two doors into the faithful Options face lead somewhere else
- * in touch mode.
+ * room's space, and that both Options entry points reuse the faithful canvas inside the
+ * tablet dialog without restoring the gameplay panel.
  *
  * The buttons and the Options controls are asserted by their EFFECT — the map appears,
  * the effects bus moves, the active fish changes — rather than by spying on
@@ -28,6 +28,7 @@ import { chromium } from 'playwright';
 import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkDialogueHints } from './ui-dialogue-hints.mjs';
 import { checkUndoHold } from './ui-undo-hold.mjs';
+import { checkTabletOptions, tapPanel } from './ui-tablet-options.mjs';
 import { touchBarEdgeFor, touchBarLeftW } from '../src/app/touchBarEdge.ts';
 
 const BASE = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
@@ -298,21 +299,6 @@ const barFit = (p) =>
   });
 
 const tap = (p, region) => p.click(`#touchbar [data-region="${region}"]`);
-
-/**
- * Move a range input the way a thumb does: set the value, then fire the `input` event
- * the browser fires during a drag. `p.fill()` on a range does not emit it, and `input`
- * is what the live-volume wiring listens to (src/app/touchOptions.ts).
- */
-const setRange = (p, id, value) =>
-  p.evaluate(
-    ({ id, value }) => {
-      const el = document.getElementById(id);
-      el.value = String(value);
-      el.dispatchEvent(new Event('input', { bubbles: true }));
-    },
-    { id, value },
-  );
 
 const browser = await chromium.launch();
 try {
@@ -591,58 +577,14 @@ try {
   await p.setViewportSize({ width: 1100, height: 620 });
   await p.waitForFunction(() => window.innerWidth === 1100);
 
-  // ── Options (region 16): in touch mode the corner button opens the plain-HTML
-  // Options, NOT the canvas face the mouse gets. Both halves matter: a touch player has
-  // to reach the settings, and a touch player must not be able to reach the 9px-tall
-  // canvas sliders that this screen exists to replace.
+  // The dev override previews a tablet: Options reuses the original canvas, while the
+  // gameplay panel stays hidden. Compare the actual pixels with the desktop above.
   await tap(p, 16);
-  await p.waitForFunction(() => document.documentElement.hasAttribute('data-touchopts'));
-  expect(true, 'Options opens the touch Options');
-  expect(
-    (await p.evaluate(() => window.__ff.optionsOpen())) === false,
-    'and NOT the canvas options face',
-  );
-
-  // Each control reaches the same verb the panel's own region does. Asserted by effect —
-  // the setting actually moved — rather than by spying on `panelAction`, like the buttons
-  // above: what is worth catching is a slider wired to the wrong bus.
-  await setRange(p, 'topt-effect', 3);
-  expect((await p.evaluate(() => window.__ff.volumes().effect)) === 3, 'the effects slider sets the effects bus');
-  await setRange(p, 'topt-voice', 9);
-  expect((await p.evaluate(() => window.__ff.volumes().voice)) === 9, 'the voices slider sets the voices bus');
-  await setRange(p, 'topt-music', 12);
-  expect((await p.evaluate(() => window.__ff.volumes().music)) === 12, 'the music slider sets the music bus');
-  // The readout is the ORIGINAL's level (Volumes[12] = 64), not the 0..12 index.
-  expect(
-    (await p.evaluate(() => document.getElementById('topt-music-val').textContent)) === '64',
-    'and the number beside it is the level, not the index',
-  );
-  await p.click('#touchopts input[value="cz"]');
-  await p.waitForFunction(() => window.__ff.subtitleMode() === 'cz');
-  await p.click('#touchopts input[value="en"]');
-  await p.waitForFunction(() => window.__ff.subtitleMode() === 'en');
-  expect(true, 'the subtitle radios set the subtitle mode');
-
-  // Help: the pages are a full-screen document, so this overlay has to get out of the way
-  // — it is position:fixed and would otherwise sit on top of them.
-  await p.click('#topt-help');
-  await p.waitForFunction(() => window.__ff.helpOpen());
-  expect(
-    !(await p.evaluate(() => document.documentElement.hasAttribute('data-touchopts'))),
-    'Help opens the help pages and closes the Options over them',
-  );
-  // The floating buttons step aside for the help pages too, and come back after.
-  await settle(p, false);
-  expect(!(await barState(p)).visible, 'the buttons are hidden while help is open');
-  await p.keyboard.press('Escape');
-  await p.waitForFunction(() => !window.__ff.helpOpen());
-  await settle(p, true);
-
-  await tap(p, 16);
-  await p.waitForFunction(() => document.documentElement.hasAttribute('data-touchopts'));
-  await p.click('#topt-close');
-  await p.waitForFunction(() => !document.documentElement.hasAttribute('data-touchopts'));
-  expect(true, 'Done closes it again');
+  await p.locator('#touchopts #panel').waitFor({ state: 'visible' });
+  const desktopPixels = await desktop.locator('#panel').evaluate(el => el.toDataURL());
+  await p.waitForFunction(pixels => document.getElementById('panel').toDataURL() === pixels, desktopPixels);
+  expect(true, 'tablet Options uses byte-identical desktop artwork');
+  await checkTabletOptions(p, expect);
 
   // ── Undo (region 24), and the `-` key that is its desktop door. The one button on this
   // bar with no `Uovl.pas` region behind it: the 1998 game has no undo, so nothing here
@@ -895,17 +837,14 @@ try {
     onMap.marginLeft === '0px',
     `and the map has no margin either (${onMap.marginLeft})`,
   );
-  // ── The map's own Options corner is the SECOND door into the faithful face, and it
-  // has to hand over too — otherwise the panel column floats over the map on a phone
-  // with the very sliders the touch screen replaces. `mapOverlay` staying 'none' is the
-  // half worth pinning: nothing floats, so there is no overlay state to unwind.
+  // The map uses the same tablet dialog, without leaving a desktop overlay behind.
   await p.evaluate(() => window.__ff.openMapOptions());
   await p.waitForFunction(() => document.documentElement.hasAttribute('data-touchopts'));
   expect(
     (await p.evaluate(() => window.__ff.mapOverlay())) === 'none',
-    "the map's Options corner opens the touch Options, without floating the panel",
+    "the map's Options corner opens the touch dialog without a desktop overlay",
   );
-  await p.click('#topt-close');
+  await tapPanel(p, 135, 370);
   await p.waitForFunction(() => !document.documentElement.hasAttribute('data-touchopts'));
   // ── The dev-bar control, driven the way a person drives it. Two independent
   // reviewers found the same defect here: the page was loaded with `?touch=on`, and

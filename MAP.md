@@ -121,7 +121,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
 | `mapDraw.ts` | 4.0 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `mapInfoZoom.ts` | 1.4 k | The record panel enlarged 1.5x on a phone, lifted off the map it was baked onto, and the zoom-aware button hit test the pointer routers use. |
-| `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden outright in touch mode — the touch bar and the swipe layer carry its verbs there. |
+| `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden during touch gameplay; tablets reuse its Options face in the touch overlay. |
 | `touchButtons.ts` | | Shared touch/phone mode transitions, stage relayout and Options cleanup; tablet buttons dispatch through the panel's own `panelAction` table. |
 | `nativeMenu.ts` | | Shared touch/native rustic symbols and fixed room accents, enabled by device mode. |
 | `touchBarEdge.ts` | 7.2 k | Where the floating tablet buttons go, in either orientation: the usual edge unless the other covers less of the centred room, and moved in to the room's edge rather than left straddling it. |
@@ -133,7 +133,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `dialogueHints.ts` | 1.0 k | Touch-only swipe/tap illustration and Save/Load pulses triggered by tutorial dialogue, with expiry and screen/demo lifecycle cleanup. Styled by `src/styles/dialogueHints.css`. |
 | `zoomHint.ts` | | First-entry phone pinch illustrations in rooms 2 and 3; persists each room independently and follows live-play/loading/zoom eligibility. |
 | `portraitHint.ts` | | One-time, five-second animated portrait suggestion in VRAK on landscape phones; waits for native unlock and remembers only after 2.4 seconds of landscape display. Icon-only with reduced-motion support, no orientation lock. Styled by `src/styles/portraitHint.css`. |
-| `touchOptions.ts` | 2.0 k | The touch Options: the panel's Options face as plain HTML controls, dispatched through the same `panelAction` regions. |
+| `touchOptions.ts` | 2.0 k | The touch Options overlay: the original panel canvas on tablets, HTML controls on phones, both using the same `panelAction` regions. |
 | `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
 | `cutsceneClose.ts` | | The briefcase demo's Skip button: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |

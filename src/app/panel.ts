@@ -33,7 +33,7 @@ import { engine, room } from './gameState.js';
 import { settings, subLang } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
 import { scalingFilterFor, stage } from './stageGeometry.js';
-import { toggleTouchOptions } from './touchOptions.js';
+import { canvasTouchOptionsOpen, toggleTouchOptions } from './touchOptions.js';
 import { touchUi } from './touchButtons.js';
 import type { VolumeBus } from '../core/settings.js';
 import { ui, O_NORMAL, O_OPTIONS, O_SC_DOWN, O_SC_UP, PANEL_SCROLL_MS, SCMAX, SCMIN, helpScreens } from './screenState.js';
@@ -138,7 +138,7 @@ export function tickPanelScroll(dtMs: number): void {
  * Toggle the options sub-panel (the corner button oblroh, or a right-click on the
  * panel; Uovl.pas:636-639,709-712): normal -> scroll up -> options -> scroll down.
  *
- * In touch mode the plain-HTML Options stands in for this face, and this is one of the
+ * In touch mode an Options overlay stands in for this face, and this is one of the
  * two doors into it (`openMapOptions` is the other), so the hand-over is here rather
  * than at each caller — the corner button, the panel's right-click and the keyboard
  * shortcut must not each remember to check.
@@ -198,6 +198,7 @@ export function drawHelp(): void {
 export function drawPanel(): void {
   if (!ui.panel) return;
   const asMapOverlay = ui.screen === 'map' && ui.mapOverlay === 'options';
+  const asTouchOverlay = canvasTouchOptionsOpen();
   // Hidden while the help pages are up. The help page is drawn at its own unscaled size
   // (drawHelp), and the stage box hugs its content, so a visible panel would slide a long
   // way left the moment help opened and back again when it closed — measured 541px at
@@ -205,17 +206,15 @@ export function drawPanel(): void {
   // page is self-contained anyway: nothing on the panel acts on it. `helpClose` is the
   // way out that this takes away (dom.ts).
   //
-  // Hidden for good in touch mode, which is the last step of the touch series and the
+  // Hidden during touch gameplay, which is the last step of the touch series and the
   // reason the other five came first: the panel is the only way to reach map/save/load/
   // options/swap and to move a fish, so retiring it before the bar and the swipe layer
   // existed would have left the game controls-less. Everything it does now has a
-  // thumb-sized counterpart, and its own controls are the ones a thumb cannot work — the
-  // 9px option sliders, the 12px direction arrows. `asMapOverlay` cannot be true here
-  // either: `openMapOptions` hands over to the HTML Options in touch mode and leaves
-  // `ui.mapOverlay === 'none'`, and it is the only writer of `'options'`. It is left in
-  // the expression rather than asserted away, because the touch term already covers it
-  // and a second rule would only be a second thing to keep true.
-  const visible = (ui.screen === 'room' || asMapOverlay) && !ui.helpOpen && !touchUi();
+  // thumb-sized counterpart. Tablets reuse just the Options face inside their touch
+  // overlay; phones still need HTML controls for the 9px sliders. The column is moved
+  // into that dialog, so it never takes width away from the room or floats over Help.
+  const visible = (ui.screen === 'room' || asMapOverlay || asTouchOverlay) &&
+    !ui.helpOpen && (!touchUi() || asTouchOverlay);
   // Hide the COLUMN, not just the canvas inside it. `display: none` takes an element
   // out of the flex row entirely, and with it the row's gap; hiding only the canvas
   // would leave a zero-width column still claiming that gap, so the map sat half a gap
@@ -289,13 +288,15 @@ export function drawPanel(): void {
   // Fixed panel size at the stage scale — constant across all rooms (no longer
   // tracks the room height, so it stops resizing room-to-room). Only touch the DOM
   // when it actually changes (a resize), so idle frames do no style work.
-  const pw = `${Math.round(stage.panelW)}px`;
-  const ph = `${Math.round(stage.panelH)}px`;
+  const panelW = asTouchOverlay ? PANEL_W * stage.scale : stage.panelW;
+  const panelH = asTouchOverlay ? PANEL_H * stage.scale : stage.panelH;
+  const pw = `${Math.round(panelW)}px`;
+  const ph = `${Math.round(panelH)}px`;
   if (panelCanvas.style.width !== pw) panelCanvas.style.width = pw;
   if (panelCanvas.style.height !== ph) panelCanvas.style.height = ph;
   // The ai panel composites at ×4 into a 620×1580 store shown at ~145px wide, so
   // without this it is point-sampled and loses the detail it was upscaled for.
-  const pFilter = scalingFilterFor(panelCanvas.width, Math.round(stage.panelW));
+  const pFilter = scalingFilterFor(panelCanvas.width, Math.round(panelW));
   if (panelCanvas.style.imageRendering !== pFilter) panelCanvas.style.imageRendering = pFilter;
 }
 

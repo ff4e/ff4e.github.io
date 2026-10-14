@@ -1,8 +1,8 @@
 /**
- * The touch Options: the same four settings, as plain HTML controls.
+ * The touch Options: the original canvas on tablets, plain HTML controls on phones.
  *
- * ── Why this one screen is deliberately not faithful ─────────────────────────
- * Everything else in this port reproduces the 1998 game; this does not, and the reason
+ * ── Why the phone screen is deliberately not faithful ─────────────────────────
+ * Everything else in this port reproduces the 1998 game; the phone UI does not. The reason
  * is physical. The faithful Options is a FACE of the 155x395 control panel: the corner
  * button scrolls the indexed-palette bitmap over ten frames to a second picture whose
  * volume sliders are 130 px wide and 9 px tall, and whose three subtitle buttons are
@@ -15,9 +15,12 @@
  * and blue lettering (styles/nativeMenu.css).
  * This is paint only: the HTML geometry, native inputs and dispatch stay the same.
  *
+ * Tablets have room for the original artwork, so their overlay borrows the SAME panel
+ * canvas as the desktop, rather than maintaining a second renderer or dispatch table.
+ * Closing it returns the panel column to the stage, hidden during tablet gameplay.
  * The canvas Options face is untouched and stays exactly as it was for mouse players.
- * The two are never both reachable: `togglePanelOptions` and `openMapOptions` — the only
- * two ways into the faithful face — hand over to this module while touch mode is on.
+ * Only one presentation is reachable: `togglePanelOptions` and `openMapOptions` — the
+ * two doors into Options — hand over to this module while touch mode is on.
  *
  * ── Everything goes through `panelAction`, sliders included ──────────────────
  * The same rule `touchButtons.ts` states, and here it costs one helper to keep: a range
@@ -40,8 +43,10 @@
 import { VOLUMES, type SubtitleMode, type VolumeBus } from '../core/settings.js';
 import { settings } from './playerSettings.js';
 import { sliderX } from '../render/hud.js';
-import { touchUi } from './touchButtons.js';
-import { ui } from './screenState.js';
+import { panelCol } from './dom.js';
+import { phoneUi, touchUi } from './touchButtons.js';
+import { O_NORMAL, O_OPTIONS, SCMAX, SCMIN, ui } from './screenState.js';
+import '../styles/touchOptions.css';
 
 /** The one name this module needs from `main.ts` — the panel's dispatch table. */
 export interface TouchOptionsHost {
@@ -61,10 +66,16 @@ const SUB_REGION: Record<SubtitleMode, number> = { cz: 20, en: 21, off: 22 };
 
 let host!: TouchOptionsHost;
 let open = false;
+let panelHome: HTMLElement | null = null;
 
 /** Is the touch Options overlay up? Read by the panel/map hand-over and by the probe. */
 export function touchOptionsOpen(): boolean {
   return open;
+}
+
+/** The original panel is mounted inside the tablet's Options overlay. */
+export function canvasTouchOptionsOpen(): boolean {
+  return open && panelHome !== null;
 }
 
 /**
@@ -75,6 +86,23 @@ function setOpen(want: boolean): void {
   if (want === open) return;
   open = want;
   const el = document.getElementById('touchopts');
+  if (want && !phoneUi() && el) {
+    panelHome = panelCol.parentElement;
+    el.prepend(panelCol);
+    ui.ostav = O_OPTIONS;
+    ui.scroll = SCMAX;
+    ui.scrollAcc = 0;
+  } else if (!want && panelHome) {
+    panelCol.style.display = 'none';
+    panelHome.append(panelCol);
+    panelHome = null;
+    ui.ostav = O_NORMAL;
+    ui.scroll = SCMIN;
+    ui.scrollAcc = 0;
+    ui.panelPressed = 0;
+    ui.panelDragBus = null;
+  }
+  el?.toggleAttribute('data-canvas-options', canvasTouchOptionsOpen());
   if (el) el.hidden = !want;
   // Mirrors `data-touch`/`data-touchbar`: an attribute a probe can see even if the
   // markup is missing, so a test cannot pass by finding nothing.
@@ -101,8 +129,8 @@ export function toggleTouchOptions(): void {
  * Push the live settings into the controls.
  *
  * On open rather than per frame: these four values change from exactly two places — this
- * screen, and the faithful panel that is unreachable while this one is on — so there is
- * nothing to keep in step in between. A reading on open also covers the dev override
+ * phone screen, and the faithful panel that replaces it on larger devices — so there
+ * is nothing to keep in step in between. A reading on open also covers the dev override
  * flipping touch mode mid-session with the canvas panel having moved a slider.
  */
 function syncControls(): void {
@@ -175,5 +203,5 @@ export function initTouchOptions(h: TouchOptionsHost): void {
 export function syncTouchOptions(): void {
   if (!open) return;
   const grounded = touchUi() && !ui.helpOpen && (ui.screen === 'room' || ui.screen === 'map');
-  if (!grounded) closeTouchOptions();
+  if (!grounded || canvasTouchOptionsOpen() === phoneUi()) closeTouchOptions();
 }
