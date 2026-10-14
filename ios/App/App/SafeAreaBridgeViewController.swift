@@ -95,6 +95,28 @@ class SafeAreaBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(StoreReviewPlugin())
     }
 
+    /// No text interaction in this web view: that is what raises iOS's selection loupe on
+    /// a pressed button.
+    ///
+    /// Reported on the device: pressing the touch bar's buttons sometimes brought up the
+    /// empty magnifying bubble, worst on Undo, whose press-and-hold repeat is a long press
+    /// by design. The page cannot call it off there. CSS (`-webkit-user-select: none`,
+    /// `-webkit-touch-callout: none` on the body, index.html) kills the selection and the
+    /// callout menu but not the loupe, which WebKit runs from its own gesture recognizer;
+    /// the only web-side lever is cancelling `touchstart`, and touchSwipe.ts does that on
+    /// the play surface only, because a cancelled `touchstart` also cancels the `click`
+    /// every button is driven by.
+    ///
+    /// Turned off here instead, for the whole app. Nothing is lost: the page has no text
+    /// field of any kind (only range, checkbox and radio inputs), and nothing in a game
+    /// needs a player to select text. Safari, which this cannot reach, keeps the page's own
+    /// guards.
+    override func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
+        let configuration = super.webViewConfiguration(for: instanceConfiguration)
+        configuration.preferences.isTextInteractionEnabled = false
+        return configuration
+    }
+
     /// Widen a single-landscape lock to both landscapes. See the header.
     ///
     /// Portrait is left exactly as asked: a lock to portrait must not quietly become
