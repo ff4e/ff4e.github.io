@@ -91,6 +91,10 @@ import Capacitor
  */
 class SafeAreaBridgeViewController: CAPBridgeViewController {
 
+    override func capacitorDidLoad() {
+        bridge?.registerPluginInstance(StoreReviewPlugin())
+    }
+
     /// Widen a single-landscape lock to both landscapes. See the header.
     ///
     /// Portrait is left exactly as asked: a lock to portrait must not quietly become

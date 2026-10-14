@@ -107,7 +107,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // 2 275 -> 2 278 for one getter on boot's host: `enterRoom`, which a GPU-loss recovery
   // reload needs in order to put the player back into their room (gpuLossRecovery.ts).
   // Room entry lives here and nowhere else; the recovery itself is in its own modules.
-  ['src/app/main.ts', 2278],
+  // 2 278 -> 2 281: review import, first-solve notification and rebuild cancellation;
+  // review policy lives in storeReview.ts.
+  ['src/app/main.ts', 2281],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
@@ -226,7 +228,8 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `panel.ts`. The guard is three lines; the rest is the note on what deliberately is
   // NOT set with it (no `mapOverlay`, so the panel column never floats over the map),
   // which is the part a later reader would otherwise have to reconstruct.
-  ['src/app/mapNav.ts', 583],
+  // 583 -> 585: import and map-arrival notification; no review policy lives here.
+  ['src/app/mapNav.ts', 585],
   // New entry: the layout rework took this over the 520-line threshold. The CODE shrank
   // (162 -> 138 lines, 9 -> 5 exported functions; the elastic stage box and its two per-mode
   // ceilings are gone). What grew is the prose: the file now opens with the RESULT it is

@@ -95,6 +95,7 @@ import {
 import { initBoot, runBoot } from './boot.js';
 import { armChatter, hracNespi, initLogicTick, step } from './logicTick.js';
 import { openSaveStore } from './persist.js';
+import { cancelStoreReview, noteReviewSolve } from './storeReview.js';
 import { initFramePainter } from './framePainter.js';
 import {
   aiSubScale,
@@ -646,6 +647,7 @@ function previewSubFont(next = true): void {
 
 function buildRoom(carryPole = false): void {
   if (!ffr) return;
+  cancelStoreReview();
   clearHeldKey(); // a room change/restart drops any held movement key
   // roompole persists across a RESTART (TRoom.Restart doesn't clear it) but is zeroed
   // on a room CHANGE (cleared in TRoom.Init, URoom.pas:1432). Capture it before the new
@@ -952,6 +954,7 @@ function saveExists(): boolean {
 function onWinBookkeeping(_countdown: number): void {
   const roomNum = Number(select.value);
   if (!solved.has(roomNum)) {
+    noteReviewSolve(roomNum, solved);
     solved.add(roomNum); // progression: mark this room solved
     saveSolved();
   }
