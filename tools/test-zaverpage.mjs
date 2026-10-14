@@ -10,7 +10,7 @@
  * Drives the real win path (engine.triggerWin -> onWin -> the auto-return countdown ->
  * returnFromRoom) rather than calling showLegImage directly, so it asserts the WIRING.
  */
-import { budget, observed, withApp } from './ui-lib.mjs';
+import { budget, observed, waitRoom, withApp } from './ui-lib.mjs';
 
 await withApp(async ({ p, expect }) => {
   const bootDocument = await p.evaluate(() => performance.timeOrigin);
@@ -21,6 +21,8 @@ await withApp(async ({ p, expect }) => {
 
   await p.evaluate(() => window.__ff.enterRoomAwait(71));
   await p.waitForFunction(() => window.__ff.roomNum() === 71);
+  // The load resolves before the map's parchment hands over to the playable room.
+  await waitRoom(p, 0);
   expect((await p.evaluate(() => window.__ff.screen())) === 'room', 'ZAVER is running');
 
   // Wait for the engine to settle, then drive a genuine win.

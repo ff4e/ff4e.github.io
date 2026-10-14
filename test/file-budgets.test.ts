@@ -254,7 +254,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   ['src/render/glRoomAi.ts', 830],
   // Undo dialogue preservation was removed; exit's zrus_dialogy still discards the
   // private queue without resetting the active line or its completion callback.
-  ['src/core/script.ts', 730],
+  // 730 -> 733: the shared RoomScript contract gains a presentation-only restore hook;
+  // MOTOR owns the motion policy, so replay need not know which room shakes.
+  ['src/core/script.ts', 733],
   // 720 -> 780 for `backgroundZx`, the canvas-2D half of the same change: the stripes
   // masked by the wall's alpha, plus the `paint`/`paintBg` split that lets it reuse the
   // wobbled-background half rather than copy it.

@@ -67,6 +67,9 @@ export interface RoomScript {
   readonly name: string;
   init(s: Script): void;
   prog(s: Script): void;
+  /** Recompute visual-only state after replay, without running dialogue or physics.
+   *  Instant undo supplies the previous script so motion can remain continuous. */
+  restorePresentation?(s: Script, previous?: Script): void;
   /**
    * A recorded solution for this room: one character per move, lowercase = the little
    * fish, UPPERCASE = the big one, `u`/`d`/`l`/`r` = up/down/left/right (WIN #68's bonus
