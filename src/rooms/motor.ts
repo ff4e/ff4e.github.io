@@ -11,6 +11,8 @@
  *
  * NEW engine feature: the circular screen wobble (Script.screenOffset, applied by the
  * host draw transform, reset per room).
+ * Unlike the movable Delphi window, the browser view recenters when the motor stops.
+ * Undo preserves the live circle phase: the view is presentation, not a puzzle move.
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
@@ -41,6 +43,35 @@ const R = {
 
 const digit = (n: number): string => String.fromCharCode(48 + n);
 const aktRole = (s: Script): number => (s.aktivni() === 'little' ? MALA : VELKA);
+// Rebuilding for undo resets count. Carry its three-tick remainder too, or rapid
+// undos can keep resetting the clock before the circle ever takes its next step.
+const wobbleTickOffset = new WeakMap<Script, number>();
+const wobbleTick = (s: Script): number => (s.count + (wobbleTickOffset.get(s) ?? 0)) % 3;
+
+function motorRunning(s: Script): boolean {
+  return s.item(R.klicek).x + 2 === s.item(R.motorek).x && s.item(R.klicek).y - 2 === s.item(R.motorek).y;
+}
+
+function syncScreenOffset(s: Script): void {
+  if (!motorRunning(s)) {
+    s.screenOffset.x = 0;
+    s.screenOffset.y = 0;
+    return;
+  }
+  // The circular screen judder (URoom.pas: Left/Top on a circle of radius polomer).
+  const a = (s.roompole[0]! / 20) * Math.PI;
+  const r = s.vars(R.wall)[R.wall_polomer]!;
+  s.screenOffset.x = -Math.round(r * Math.sin(a));
+  s.screenOffset.y = Math.round(r * Math.cos(a)) - r;
+}
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (previous) {
+    s.roompole[0] = previous.roompole[0]!;
+    wobbleTickOffset.set(s, (wobbleTick(previous) - s.count % 3 + 3) % 3);
+  }
+  syncScreenOffset(s);
+}
 
 function init(s: Script): void {
   const v = s.vars(R.wall, 9);
@@ -71,8 +102,7 @@ function init(s: Script): void {
 
 function prog(s: Script): void {
   const v = s.vars(R.wall);
-  const running =
-    s.item(R.klicek).x + 2 === s.item(R.motorek).x && s.item(R.klicek).y - 2 === s.item(R.motorek).y;
+  const running = motorRunning(s);
 
   if (running) {
     v[R.wall_vypnula] = 0;
@@ -82,7 +112,7 @@ function prog(s: Script): void {
     }
     s.roompole[1] = 1;
     if (!s.playing(10)) s.sndcyc('mot-x-motor', 10);
-    if (s.count % 3 === 0) s.roompole[0]!++;
+    if (wobbleTick(s) === 0) s.roompole[0]!++;
   } else {
     v[R.wall_zapnula] = 0;
     if (v[R.wall_vypnula] === 0) {
@@ -92,13 +122,7 @@ function prog(s: Script): void {
     if (s.playing(10)) s.ksnd(10);
   }
 
-  // The circular screen judder (URoom.pas: Left/Top on a circle of radius polomer).
-  if (s.count % 3 === 0) {
-    const a = (s.roompole[0]! / 20) * Math.PI;
-    const r = v[R.wall_polomer]!;
-    s.screenOffset.x = -Math.round(r * Math.sin(a));
-    s.screenOffset.y = Math.round(r * Math.cos(a)) - r;
-  }
+  syncScreenOffset(s);
 
   // ---- room dialogue ----
   if (s.noDialog() && s.alive('little') && s.alive('big')) {
@@ -210,4 +234,4 @@ function prog(s: Script): void {
   if (s.item(R.velkar).x === 8) s.vars(R.velkar)[R.velkar_vylezla] = 1;
 }
 
-export const MOTOR: RoomScript = { name: 'MOTOR', init, prog };
+export const MOTOR: RoomScript = { name: 'MOTOR', init, prog, restorePresentation };

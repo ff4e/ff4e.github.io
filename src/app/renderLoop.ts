@@ -178,6 +178,12 @@ export function loop(now: number): void {
   syncTouchSwipe();
   syncPhoneViewport(now);
   if (ui.helpOpen || ui.screen !== 'room' || roomLoading) glCanvas.style.display = 'none';
+  // Both canvases are reused by other screens; a room's shake/shove must not travel
+  // with them. Keep the transform during a room-art hold, which still shows that room.
+  if (ui.helpOpen || ui.screen !== 'room' || roomLoading || cutscene) {
+    if (canvas.style.transform) canvas.style.transform = '';
+    if (glCanvas.style.transform) glCanvas.style.transform = '';
+  }
   // The help overlay's close button, derived here for the same reason the layers below
   // are: nothing that paints #screen can take a sibling element down, and `drawHelp` only
   // runs while help is OPEN, so it could never hide it again. Guarded rather than assigned

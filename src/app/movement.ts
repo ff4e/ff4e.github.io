@@ -220,6 +220,7 @@ export function restore(
   keepRoompole = false,
 ): void {
   if (!preserveShowmode) host.endShowmode(); // loading a saved game ends any KUFRIK demonstration
+  const previousScript = activeScript?.s;
   setLoadmode(null);
   // Rebuild with carryPole, i.e. the RESTART flavour: TRoom.Load runs InitItems +
   // InitProgramky (URoom.pas:1905-1948), never TRoom.Init, so loading a save must
@@ -251,6 +252,7 @@ export function restore(
   // dialogue the fish have already spoken (the original re-derives these during a
   // suppressed load replay; buildRoom reset them, so re-apply the saved snapshot).
   if (snapshot && activeScript) activeScript.s.applySnapshot(snapshot, { roompole: !keepRoompole });
+  if (activeScript) activeScript.def?.restorePresentation?.(activeScript.s, previousScript);
   host.setInfo();
 }
 
@@ -285,6 +287,7 @@ export function advanceLoadmode(): void {
     room.clearAllDirs();
     engine.phase = 'idle';
     setLoadmode(null);
+    if (activeScript) activeScript.def?.restorePresentation?.(activeScript.s);
     // The original's loadmode branch ends `LoadDone; kdo:=0; ...; hrac_nespi`
     // (URoom.pas:24111). What that reset is FOR here is the ambient-chatter clock
     // (casposlzmeny), not the fish idle timers: `logicTick` returns at the loadmode branch
