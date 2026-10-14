@@ -1,0 +1,8 @@
+#touchopts[data-canvas-options] .topts-card { display: none; }
+@media (forced-colors: none) {
+  html[data-touch] #touchopts[data-canvas-options] { background: rgb(11 11 18 / 65%); }
+}
+#touchopts #panel { touch-action: none; }
+#touchopts #panelcol { width: min-content; }
+/* The desktop strip hangs outside the panel; here it belongs inside the scrollable dialog. */
+#touchopts #feedbar { position: static; width: 100%; margin-top: 8px; }

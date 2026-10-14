@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { appReady, launchBrowser, exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
+import { checkTabletOptions, checkTabletReplayOptions } from './ui-tablet-options.mjs';
 
 const browser = await launchBrowser();
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
@@ -207,6 +208,11 @@ try {
       await p.waitForFunction((phone) => !document.getElementById('touchopts').hidden &&
         (!phone || document.getElementById('phone-controls').hidden), phone);
       await pair(p, `${c.name}-options`, c);
+      if (!phone) {
+        await checkTabletOptions(p, (condition, message) => assert(condition, message), true);
+        console.log(`  ok   ${c.name}: original tablet Options artwork, translucent backdrop, finger drags, subtitles, Help and close`);
+        continue;
+      }
       await native(p, false);
       const originalPixels = await p.locator('#touchopts').screenshot();
       await native(p, true);
@@ -255,6 +261,7 @@ try {
       await p.waitForFunction((phone) => !document.getElementById(phone ? 'phone-controls' : 'touchbar').hidden, phone);
       console.log(`  ok   ${c.name}: expected geometry, browser pixels, input and focus`);
     }
+    if (!phone) await checkTabletReplayOptions(p, (condition, message) => assert(condition, message));
     await p.emulateMedia({ reducedMotion: 'reduce' });
     const control = phone ? '#phone-map' : '#touchbar .tbtn';
     const hint = p.locator(control).first();

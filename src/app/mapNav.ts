@@ -356,10 +356,10 @@ export function dispatchMapCorner(action: MapAction | null): void {
 
 /** Open the Options panel over the map (daOptions modal Ovl, UMain.pas:1120-1135). */
 export function openMapOptions(): void {
-  // The map's own door into the Options face, and in touch mode it leads to the HTML
-  // one instead — the same hand-over `togglePanelOptions` makes for the in-room door.
-  // Note what is NOT set below in that case: `ui.mapOverlay` stays 'none', so the panel
-  // column never floats over the map and there is no overlay state to unwind on close.
+  // The map's own door into the touch Options dialog: canvas on tablets, HTML on
+  // phones — the same hand-over `togglePanelOptions` makes for the in-room door.
+  // Note what is NOT set below: `ui.mapOverlay` stays 'none', so the desktop overlay
+  // never floats over the map and there is no desktop state to unwind on close.
   if (touchUi()) {
     openTouchOptions();
     return;

@@ -121,7 +121,7 @@ import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { initTouchButtons } from './touchButtons.js';
 import { initCutsceneClose } from './cutsceneClose.js';
-import { initTouchOptions } from './touchOptions.js';
+import { canvasTouchOptionsOpen, initTouchOptions } from './touchOptions.js';
 import { initTouchSwipe } from './touchSwipe.js';
 import { showDialogueHint } from './dialogueHints.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
@@ -1884,15 +1884,15 @@ function panelCoords(e: MouseEvent): { x: number; y: number } {
 
 panelCanvas.addEventListener('contextmenu', (e) => e.preventDefault()); // right-click toggles options
 
-panelCanvas.addEventListener('mousedown', (e) => {
+panelCanvas.addEventListener('pointerdown', (e) => {
   wake();
   if (!ui.panel) return;
   if (tetrisModal()) {
     e.preventDefault(); // modal minigame: the control panel is inert behind it
     return;
   }
-  if (inAutoPlay()) {
-    e.preventDefault(); // "Replay"/solution playback: the control panel is inert
+  if (inAutoPlay() && !canvasTouchOptionsOpen()) {
+    e.preventDefault(); // Playback blocks the side panel, not the tablet Options dialog.
     return;
   }
   // Right-click anywhere on the panel toggles the options sub-panel (Uovl.pas:633-639),
@@ -1903,7 +1903,7 @@ panelCanvas.addEventListener('mousedown', (e) => {
     else togglePanelOptions();
     return;
   }
-  if (e.button !== 0) return;
+  if (e.button !== 0 || !e.isPrimary) return;
   e.preventDefault();
   const { x, y } = panelCoords(e);
   const region = panelHitTest(x, y, ui.ostav === O_OPTIONS);
@@ -1915,7 +1915,7 @@ panelCanvas.addEventListener('mousedown', (e) => {
   }
   if (region) {
     ui.panelPressed = region; // lit-button feedback until release
-    // A press on a volume slider begins a drag (updates live as the mouse moves).
+    // A press begins a live slider drag; touch pointers capture implicitly.
     if (region >= 17 && region <= 19) {
       ui.panelDragBus = region === 17 ? 'effect' : region === 18 ? 'voice' : 'music';
     }
@@ -1923,15 +1923,15 @@ panelCanvas.addEventListener('mousedown', (e) => {
   }
 });
 
-// Slider drag: while a volume slider is held, track the handle to the mouse x.
-panelCanvas.addEventListener('mousemove', (e) => {
-  if (!ui.panelDragBus || !ui.panel) return;
+// Slider drag: while a volume slider is held, track the handle to the pointer x.
+panelCanvas.addEventListener('pointermove', (e) => {
+  if (!e.isPrimary || !ui.panelDragBus || !ui.panel) return;
   e.preventDefault();
   const { x } = panelCoords(e);
   setVolume(ui.panelDragBus, sliderIndex(x));
 });
 
-window.addEventListener('mouseup', () => {
+for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) window.addEventListener(event, () => {
   ui.panelPressed = 0;
   ui.panelDragBus = null;
 });
