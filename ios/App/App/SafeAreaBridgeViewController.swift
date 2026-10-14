@@ -93,10 +93,11 @@ class SafeAreaBridgeViewController: CAPBridgeViewController {
 
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(StoreReviewPlugin())
+        bridge?.registerPluginInstance(TextInteractionPlugin())
     }
 
-    /// No text interaction in this web view: that is what raises iOS's selection loupe on
-    /// a pressed button.
+    /// Text interaction starts OFF in this web view: that is what raises iOS's selection
+    /// loupe on a pressed button.
     ///
     /// Reported on the device: pressing the touch bar's buttons sometimes brought up the
     /// empty magnifying bubble, worst on Undo, whose press-and-hold repeat is a long press
@@ -107,10 +108,11 @@ class SafeAreaBridgeViewController: CAPBridgeViewController {
     /// the play surface only, because a cancelled `touchstart` also cancels the `click`
     /// every button is driven by.
     ///
-    /// Turned off here instead, for the whole app. Nothing is lost: the page has no text
-    /// field of any kind (only range, checkbox and radio inputs), and nothing in a game
-    /// needs a player to select text. Safari, which this cannot reach, keeps the page's own
-    /// guards.
+    /// Turned off here instead, for the whole app. The one thing that needs it is the
+    /// feedback form (its textarea's caret and selection, and a preview the player may
+    /// select by hand), so `TextInteractionPlugin` turns it back on while that form is open
+    /// — see `src/platform/textInteraction.ts`. Safari, which this cannot reach, keeps the
+    /// page's own guards.
     override func webViewConfiguration(for instanceConfiguration: InstanceConfiguration) -> WKWebViewConfiguration {
         let configuration = super.webViewConfiguration(for: instanceConfiguration)
         configuration.preferences.isTextInteractionEnabled = false
