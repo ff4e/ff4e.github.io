@@ -47,6 +47,7 @@ import {
   type FeedbackEnv,
   type FeedbackKind,
 } from '../platform/feedback.js';
+import { setTextInteraction } from '../platform/textInteraction.js';
 
 /** What the host (main.ts) must be able to tell the form. */
 export interface FeedbackHost {
@@ -214,6 +215,10 @@ export function initFeedback(host: FeedbackHost): FeedbackUi {
     };
     kind = k;
     for (const r of kindInputs()) r.checked = r.value === kind;
+    // The iOS app runs with text interaction off (it is what raises the loupe on a pressed
+    // button); this form is the one place that needs it — a caret in the textarea, and a
+    // preview the player can select by hand when the clipboard is out of reach.
+    void setTextInteraction(true);
     // Open FIRST: whatever the preview does, the player gets the form and their text.
     if (!dialog!.open) {
       if (typeof dialog!.showModal === 'function') dialog!.showModal();
@@ -226,9 +231,15 @@ export function initFeedback(host: FeedbackHost): FeedbackUi {
 
   function close(): void {
     if (dialog!.open) dialog!.close();
-    else dialog!.removeAttribute('open');
+    else {
+      // The attribute fallback fires no `close` event, so it has to switch it off itself.
+      dialog!.removeAttribute('open');
+      void setTextInteraction(false);
+    }
   }
 
+  // On the event rather than in close(): Escape closes a modal dialog without asking us.
+  dialog.addEventListener('close', () => void setTextInteraction(false));
   openBtn.addEventListener('click', () => open());
   closeBtn?.addEventListener('click', () => close());
   what.addEventListener('input', render);
