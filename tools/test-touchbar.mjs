@@ -715,8 +715,14 @@ try {
     window.__ff.killFish('little');
     window.__ff.killFish('big');
   });
+  // `undoDepth() === 1` too: the new attempt's start point is banked a tick after the
+  // restart, and a move that beats it leaves nothing to undo (see the Save section below).
   await p.waitForFunction(
-    (n) => window.__ff.script().pokus === n + 2 && !window.__ff.state().dead && window.__ff.phase() === 'idle',
+    (n) =>
+      window.__ff.script().pokus === n + 2 &&
+      !window.__ff.state().dead &&
+      window.__ff.phase() === 'idle' &&
+      window.__ff.undoDepth() === 1,
     bothDeadPokus,
   );
   const freshStart = await p.evaluate(() => window.__ff.posHash());
@@ -757,6 +763,14 @@ try {
   // ── Save (region 12): a save exists afterwards where none did before. One move first,
   // remembering the position BEFORE it, because what the save has to carry is not only
   // where the player is but how they got there.
+  //
+  // The Restart above emptied the history, and the start point it leaves is banked by the
+  // NEXT logic tick (`sampleUndoPoint`), not by `restartRoom`. A press that lands before
+  // that tick is still accepted — `idle()` does not wait for it — and its move becomes the
+  // only point, with nothing below it, so the save would carry nothing to undo. On a
+  // loaded machine the probe's round trips fit inside that window, and the full gate
+  // failed exactly that way. Wait for the start point, as the undo walk above does.
+  await p.waitForFunction(() => window.__ff.moves() === 0 && window.__ff.undoDepth() === 1);
   await p.evaluate(() => localStorage.removeItem('ff.save.' + window.__ff.roomNum()));
   let beforeLast = null;
   for (const dir of [3, 4, 1, 2]) {
