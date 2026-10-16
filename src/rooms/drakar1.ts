@@ -18,9 +18,10 @@
  * music restarted from the top, and a point banked during the handoff (`room_dohrat` = -1,
  * `room_blok` = -1, the rest of it queued) left the band never starting at all, because
  * the queue does not survive the rebuild. So the band's sounds are `carriedSounds`, and
- * `restorePresentation` hands the live performance — Vars, frames, Anim cursors and an
- * unfinished handoff — to the rebuilt script. The handoff's `set` entries act on the
- * script handed to them (`cur`), which is what lets them be adopted.
+ * `restorePresentation` hands the live performance — Vars, frames, Anim cursors and the
+ * pending lines, an unfinished handoff among them — to the rebuilt script. The handoff's
+ * `set` entries act on the script handed to them (`cur`), which is what lets them be
+ * adopted.
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { carryItem } from './carry.js';
@@ -327,9 +328,10 @@ function prog(s: Script): void {
   }
 }
 
-/** Priorities of the performance: intro music, the three band tracks, and the players'
- *  and singer's voices (talk 132/102 in the handoff, the brb mutters 133/122/112). */
-const BAND_SOUNDS = [-998, 111, 121, 131, 102, 132, 133, 122, 112];
+/** Priorities of the performance: intro music, the three band tracks, the players' and
+ *  singer's voices (talk 132/102 in the handoff, the brb mutters 133/122/112), and the
+ *  fish's, whose pending lines carry too. */
+const BAND_SOUNDS = [-998, 111, 121, 131, 102, 132, 133, 122, 112, 1, 2];
 const PLAYERS = [R.melodak1, R.hlavni, R.basak, R.piskac, R.melodak2, R.snecek];
 
 function restorePresentation(s: Script, previous?: Script): void {
@@ -342,10 +344,11 @@ function restorePresentation(s: Script, previous?: Script): void {
   }
   s.item(R.room).vars = [...previous.item(R.room).vars];
   for (const i of PLAYERS) carryItem(s, previous, i);
-  // Mid-handoff the queue is the band's (it is only queued on an empty one); any other
-  // dialogue is the fish's, and undo drops theirs in every room.
-  const rv = previous.vars(R.room);
-  if (rv[R.room_dohrat] === -1 && rv[R.room_blok] === -1) s.adoptDialogue(previous);
+  // Pending lines carry, but not a dead fish's: those are the death lines, which an undo
+  // that brings the fish back must not finish saying.
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
 }
 
 export const DRAKAR1: RoomScript = { name: 'DRAKAR1', init, prog, restorePresentation, carriedSounds: BAND_SOUNDS };

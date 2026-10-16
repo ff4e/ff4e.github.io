@@ -44,11 +44,15 @@ await withApp(async ({ p, expect }) => {
   }
   await p.waitForFunction(() => window.__ff.undoDepth() > 1 && window.__ff.canUndo());
   await p.evaluate(() => window.__ff.clearSoundLog());
+  // A line on screen when undo is pressed stays there: its voice carries, so must its words.
+  await p.evaluate(() => window.__ff.pushSubtitle('undo-carry', 'A'));
   const undone = await p.evaluate(() => window.__ff.undo());
+  const subsKept = await p.evaluate(() => window.__ff.subsActive());
   await p.waitForTimeout(400);
   const after = await p.evaluate(() => ({
     playing: window.__ff.playingPrior(-998),
     recued: window.__ff.soundLog().filter((x) => x.name.startsWith('rybky04')).length,
   }));
   expect(undone && after.playing && after.recued === 0, `DRAKAR1 undo keeps rybky04 playing, not restarted: ${JSON.stringify({ undone, ...after })}`);
+  expect(subsKept, 'DRAKAR1 undo keeps the subtitles of the lines that carry on');
 });

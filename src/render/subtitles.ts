@@ -52,6 +52,9 @@ interface TitleLine {
    * recorded rather than inferred.
    */
   block: number;
+  /** The voice priority the line is spoken on, if any — port bookkeeping, so an undo can
+   *  keep the subtitles of the lines it carries and drop those of the ones it cut. */
+  prior?: number;
 }
 
 /** najdi_barvu (URoom.pas:1087): nearest palette index by weighted RGB distance. */
@@ -124,7 +127,7 @@ export class SubtitleSystem {
   /** NovyTitulek (URoom.pas:592): word-wrap `text` to the room width, add lines.
    *  Faithful to the original: shrink the current line word-by-word (re-checking the
    *  width each time) until it fits, add it, then recurse on the remainder. */
-  newSubtitle(text: string, color: string, count: number): void {
+  newSubtitle(text: string, color: string, count: number, prior?: number): void {
     const maxW = this.screenW - BORDERTITLE * 2;
     let obsah = text;
     let prvni = true; // the outer call; the original recurses with prvni=false
@@ -142,7 +145,7 @@ export class SubtitleSystem {
         s = s.slice(0, i - 1); // delete(s, i, ..) -> s[1..i-1]
       }
       if (this.silentFilm) this.addSilentLine(s, color, prvni);
-      else this.addLine(s, color, count, block);
+      else this.addLine(s, color, count, block, prior);
       prvni = false;
       if (s.length >= obsah.length) return; // whole string fit on this line
       obsah = obsah.slice(i); // delete(obsah, 1, i) -> obsah[i+1..], dropping the break space
@@ -150,7 +153,7 @@ export class SubtitleSystem {
   }
 
   /** NovyRadekTitulku (URoom.pas:520): add a title line, pushing existing ones up. */
-  private addLine(s: string, c: string, count: number, block: number): void {
+  private addLine(s: string, c: string, count: number, block: number, prior?: number): void {
     let lasty: number;
     if (this.titles.length === 0) {
       lasty = -1000;
@@ -173,6 +176,7 @@ export class SubtitleSystem {
       killcount,
       id: ++this.rowSeq,
       block,
+      ...(prior === undefined ? {} : { prior }),
     });
   }
 
@@ -186,6 +190,22 @@ export class SubtitleSystem {
     }
     const oldest = this.titles[0];
     if (oldest && (oldest.killcount < count || oldest.ys < MINYTITLE)) this.titles.shift();
+  }
+
+  /** Re-time the lines onto a clock that restarted `by` ticks earlier (an instant restore
+   *  carries them over a room rebuild, which resets `count`). */
+  rebase(by: number): this {
+    for (const t of this.titles) {
+      t.startcount -= by;
+      t.killcount -= by;
+    }
+    return this;
+  }
+
+  /** Drop the lines whose voice has stopped (an undo cut it); unvoiced lines stay. */
+  retain(sounding: (prior: number) => boolean): void {
+    const kept = this.titles.filter((t) => t.prior === undefined || sounding(t.prior));
+    this.titles.splice(0, this.titles.length, ...kept);
   }
 
   clear(): void {

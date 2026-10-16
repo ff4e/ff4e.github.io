@@ -694,9 +694,10 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
     built.wper = 6;
   }
   setScreenShoveX(0); // reset the KAJUTA1 screen-shove offset
+  const keptSubs = carried.length > 0 ? subs?.rebase(count) : undefined; // carried lines keep theirs
   setCount(0);
   const wall = built.bitmaps[built.wallItem.bmp];
-  setSubs(font && wall ? new SubtitleSystem(font, ffr.palette, ffr.width, wall.w, wall.h) : null);
+  setSubs(keptSubs ?? (font && wall ? new SubtitleSystem(font, ffr.palette, ffr.width, wall.w, wall.h) : null));
   if (subs) subs.silentFilm = silentFilm; // a restart keeps silent-film mode running
   talkIdx.little = 0;
   talkIdx.big = 0;
@@ -813,7 +814,7 @@ function scriptTalk(name: string, prior: number): number {
     // current globtit fragment (LODE uses it to inject the announced "A5" coordinate).
     const text =
       t.text.includes('@') && activeScript ? t.text.replace('@', activeScript.s.globtit) : t.text;
-    if (text) subs.newSubtitle(text, t.color, count);
+    if (text) subs.newSubtitle(text, t.color, count, prior);
   }
   audio.play(name, 1, prior, 'voice');
   setLastLine({ name, count }); // debug: track dialogue line firing

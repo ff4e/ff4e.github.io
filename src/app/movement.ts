@@ -8,7 +8,7 @@
  * share a file.
  */
 import { wake } from './frameClock.js';
-import { activeScript, clearUndoHistory, cutscene, engine, loadmode, pokus, room, screenShoveX, setLoadmode, setPokus, setScreenShoveX } from './gameState.js';
+import { activeScript, clearUndoHistory, cutscene, engine, loadmode, pokus, room, screenShoveX, setLoadmode, setPokus, setScreenShoveX, subs } from './gameState.js';
 import { fishBusy } from './roomGates.js';
 import { continuePhoneRoom } from './phoneViewport.js';
 import { ui } from './screenState.js';
@@ -255,6 +255,9 @@ export function restore(
   // suppressed load replay; buildRoom reset them, so re-apply the saved snapshot).
   if (snapshot && activeScript) activeScript.s.applySnapshot(snapshot, { roompole: !keepRoompole });
   if (activeScript) activeScript.def?.restorePresentation?.(activeScript.s, previousScript);
+  // The rebuild kept the subtitles if the room carries sounds; keep only the lines it carried.
+  const s = activeScript?.s;
+  if (s) subs?.retain((prior) => s.playing(prior));
   host.setInfo();
 }
 

@@ -53,6 +53,7 @@ describe('DRAKAR1 band across undo', () => {
   it('does not restart the intro music on undo before the band starts', () => {
     const h = band();
     h.move();
+    h.until(() => h.s().noDialog(), 2000); // the countdown only runs while nobody talks
     h.ticks(50);
     h.move();
     h.ticks(20);

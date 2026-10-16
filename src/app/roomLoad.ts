@@ -582,6 +582,6 @@ export function talk(which: 'little' | 'big'): void {
   const entry = lines[talkIdx[which] % lines.length]!;
   talkIdx[which]++;
   const t = l === 'cz' ? entry.cz : entry.en;
-  if (subsOn()) subs.newSubtitle(t.text, t.color, count);
+  if (subsOn()) subs.newSubtitle(t.text, t.color, count, MLUVI_PRIOR[which]);
   audio.play(entry.name, 1, MLUVI_PRIOR[which], 'voice'); // voice at the fish's mluvi priority (drives lip-sync)
 }

@@ -4,6 +4,7 @@
  * Real room data, real scripts, real undo path; DRAKAR1's band is in drakar1-undo.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { VES } from '../src/rooms/ves.js';
 import { roomHarness } from './undoRoomHarness.js';
 import { restoreRandom, seedRandom } from './rng.js';
 
@@ -101,6 +102,18 @@ describe('VES', () => {
     expect(h.head()[STAV]).toBe(0);
     h.ticks(2);
     expect(h.head()[STAV]).toBe(1);
+  });
+
+  it('keeps a finished farewell when the live gig is a fresh one (GPU reload, death restart)', () => {
+    const fresh = ves().s();
+    const h = ves();
+    const target = h.s();
+    target.vars(4)[STAV] = 101; // the head has sung its farewell
+    target.vars(0)[3] = 7; // after all three smashes
+    for (const [i] of AMPS) target.vars(i)[STAV] = 4;
+    VES.restorePresentation!(target, fresh);
+    expect(target.vars(4)[STAV]).toBe(101);
+    expect(target.vars(0)[3]).toBe(7);
   });
 
   it('brings back the loop of an amp whose smash is undone', () => {

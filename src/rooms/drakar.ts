@@ -92,13 +92,16 @@ function init(s: Script): void {
   s.vars(R.hlavadr, 1)[R.hlavadr_mluvi] = 0;
 }
 
+// Queued `set`s act on the script running them (`cur`), so an undo can adopt the queue.
+const setV1 = (x: number, cur: Script) => (cur.vars(R.viking1)[R.viking1_cinnost] = x);
+const setV2 = (x: number, cur: Script) => (cur.vars(R.viking2)[R.viking2_cinnost] = x);
+const setV3 = (x: number, cur: Script) => (cur.vars(R.viking3)[R.viking3_cinnost] = x);
+const setV4 = (x: number, cur: Script) => (cur.vars(R.viking4)[R.viking4_cinnost] = x);
+const setHd = (x: number, cur: Script) => (cur.vars(R.hlavadr)[R.hlavadr_mluvi] = x);
+const setQuvod = (x: number, cur: Script) => (cur.vars(R.room)[R.room_quvod] = x);
+
 function prog(s: Script): void {
   const v = s.vars(R.room);
-  const setV1 = (x: number) => (s.vars(R.viking1)[R.viking1_cinnost] = x);
-  const setV2 = (x: number) => (s.vars(R.viking2)[R.viking2_cinnost] = x);
-  const setV3 = (x: number) => (s.vars(R.viking3)[R.viking3_cinnost] = x);
-  const setV4 = (x: number) => (s.vars(R.viking4)[R.viking4_cinnost] = x);
-  const setHd = (x: number) => (s.vars(R.hlavadr)[R.hlavadr_mluvi] = x);
 
   // ---- room orchestration ----
   {
@@ -118,7 +121,7 @@ function prog(s: Script): void {
       if (s.random(4) > 0) s.addv(30 + s.random(30), 'dr1-v-snorr');
       if (s.random(4) > 0) s.addv(30 + s.random(30), 'dr1-v-thorson');
       if (s.random(6) > 0) s.addd(50 + s.random(30), 'dr1-x-erik', 116, setHd);
-      s.addset((x) => (v[R.room_quvod] = x), -2);
+      s.addset(setQuvod, -2);
     } else if (v[R.room_quvod] === -2) {
       if (s.vars(R.viking7)[R.viking7_dostal] === -1) s.vars(R.viking7)[R.viking7_dostal] = 0;
     }
@@ -633,11 +636,45 @@ function prog(s: Script): void {
   }
 }
 
-/** Undo (a port addition) leaves the dog's barking cycle running, bark and all: it is on
- *  a timer, not anything the fish did. Before, a bark under way went silent while the dog
- *  kept barking for the rest of its turn. */
+/**
+ * Undo (a port addition) and the crew. Everything here runs on time — the roll-call, the
+ * beard argument, the rowing chants, the coward taunts, viking8's temper, the dog — so an
+ * undo leaves it where it is, pending lines included, as DRAKAR1 does with its band.
+ * Before, the rebuild dropped the queue: a point banked during the roll-call kept
+ * `quvod = -1` and lost the `set` that ends it, so the crew never spoke again that visit,
+ * and a rower or talker could be left frozen on a line that never came.
+ *
+ * With a fish dead, the fish's own lines (the death lines) are not carried, and the
+ * banter switch the death threw (`quvod`, `qpejsek` := -1) is taken from the undo target.
+ * A load has no queue to carry, so it re-runs a roll-call it caught mid-way and clears
+ * the talking flags of lines it cannot finish.
+ */
+const CREW = [R.viking1, R.viking3, R.viking4, R.viking5, R.viking6, R.viking7, R.viking8, R.pesos, R.viking2, R.hlavadr];
+const CREW_SOUNDS = [1, 2, 116, 210, 220, 230, 240, 241, 252, 260, 270, 271, 280, 281, 351];
+
 function restorePresentation(s: Script, previous?: Script): void {
-  if (previous) carryItem(s, previous, R.pesos);
+  if (!previous) {
+    if (s.noDialog()) {
+      const v = s.vars(R.room);
+      if (v[R.room_quvod] === -1) v[R.room_quvod] = 0;
+      for (const [i, slot] of [[R.viking1, R.viking1_cinnost], [R.viking3, R.viking3_cinnost], [R.viking4, R.viking4_cinnost], [R.hlavadr, R.hlavadr_mluvi]] as const)
+        s.vars(i)[slot] = 0;
+      if (s.vars(R.viking2)[R.viking2_cinnost] === -1) s.vars(R.viking2)[R.viking2_cinnost] = 0;
+    }
+    return;
+  }
+  const target = s.vars(R.room);
+  const [quvod, qpejsek] = [target[R.room_quvod]!, target[R.room_qpejsek]!];
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  for (const i of CREW) carryItem(s, previous, i);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+  if (dead.length > 0) {
+    const v = s.vars(R.room);
+    v[R.room_quvod] = quvod === -1 && s.noDialog() ? 0 : quvod;
+    v[R.room_qpejsek] = qpejsek;
+  }
 }
 
-export const DRAKAR: RoomScript = { name: 'DRAKAR', init, prog, restorePresentation, carriedSounds: [351] };
+export const DRAKAR: RoomScript = { name: 'DRAKAR', init, prog, restorePresentation, carriedSounds: CREW_SOUNDS };

@@ -177,18 +177,6 @@ Neither is fixable without inventing audio, which is out of scope for a faithful
 Should a build of the 1998 data containing them ever surface, both could be added by
 extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
-## Undo: 🟠 LODE's Battleship match stops scoring after an undo mid-match
-
-The gods' match runs on time, but its boards live in a module-private `LodeGame` that the
-rebuild's `init` replaces with an empty one, while the snapshot restores the match counters
-(`room_stavhry`, ships left). From then on every shot misses and the match never ends
-(headless, real room data: 14 shots/4 hits before the undo, 40 shots/0 hits in 4 000 ticks
-after it). Its pending `addset`s — hands, mouths, `setShodit`'s falling ship — are lost too.
-The likely fix is the DRAKAR1 one below (carry the live `LodeGame`, match Vars and the gods'
-sounds), but LODE's queue mixes the gods' narration with the fish's lines and the gods are
-the push-out objects, so what to carry needs deciding first. A load mid-match has the same
-empty boards.
-
 ## Excluded by design (not issues)
 
 - **ZAVER #71** — non-playable ending screen.
@@ -196,23 +184,36 @@ empty boards.
 
 ## Resolved
 
-### 🟠 Undo stopped or restarted room music and performances — fixed 2026-10-16
+### 🟠 Undo stopped, restarted or stranded rooms' own performances — fixed 2026-10-16
 
-Undo rebuilds the room, which silenced every sound, re-ran `init` and restored the previous
-point's script state. A room's own time-driven performance was rewound with the move:
-DRAKAR1's band stopped mid-song and `rybky04` started again, and a point banked during the
-music-to-band handoff left the band never starting (its queued `set blok:=0` was lost).
-KORALY's octopus tune was cut to its ending and VES's three amplifier loops restarted.
-The dog (DRAKAR), duck (BARELY), clock (SMETAK) and motor (MOTOR) loops were cut or restarted.
+Undo rebuilds the room, which silenced every sound, re-ran `init`, dropped the dialogue queue
+and restored the previous point's script state, so a room's time-driven performance was
+rewound with the move, or stranded:
+
+- **DRAKAR1:** the band stopped mid-song and `rybky04` started again. A point banked during
+  the music-to-band handoff lost the queued `set blok:=0`, and the band never came in.
+- **DRAKAR:** a point banked during the roll-call lost the `set quvod:=-2` that ends it, and
+  the crew never spoke again that visit. Rowers and talkers froze mid-line.
+- **LODE:** `init` dealt empty boards under the restored score, so every later shot missed
+  and the match never ended. Pending answers and falling ships were lost too.
+- **KORALY:** the octopus tune was cut to its ending. **VES:** the amplifier loops
+  restarted. The DRAKAR dog, BARELY duck, SMETAK clock and MOTOR hum loops were cut or
+  restarted.
 
 Rooms now declare `carriedSounds`, which an instant restore neither stops nor lets `init`
 re-cue (`killVoices(except)`, `initQuiet.ts`), and hand the live state to the rebuilt script
-in `restorePresentation`. Whatever an undone move started or stopped still follows the move.
-Undoing the octopus shove ends its tune, and undoing an amp's smash brings its loop back. A load
-re-arms a DRAKAR1 handoff saved without its queue. Covered by `test/drakar1-undo.test.ts`,
-`test/undo-ambience.test.ts` and `tools/test-music.mjs`. Not carried: an NPC line cut by
-the undo (MIKRO's crabs, VLADOVA's skull, VITEJTE1's ruler), as with the fish's own lines,
-and the subtitle of a carried viking line, which the rebuilt subtitle system drops.
+in `restorePresentation`. DRAKAR1, DRAKAR and LODE carry all pending lines
+(`Script.adoptDialogue`; their `set` callbacks act on the script running them), the fish's
+included, except a dead fish's death lines. LODE also carries its boards, falling ship and
+eroded wreckage. Subtitles of carried lines stay on screen (`SubtitleSystem.rebase`).
+Whatever an undone move started or stopped still follows the move. Undoing the octopus shove
+ends its tune, and undoing an amp's smash brings its loop back. A load, which has no queue to
+carry, re-arms a stranded DRAKAR1 handoff and DRAKAR roll-call, and deals LODE a new match.
+
+Covered by `test/drakar1-undo.test.ts`, `test/drakar-undo.test.ts`, `test/lode-undo.test.ts`,
+`test/undo-ambience.test.ts` and `tools/test-music.mjs`. Not carried: an NPC line in other
+rooms (MIKRO's crabs, VLADOVA's skull, VITEJTE1's ruler), which undo cuts as it does the
+fish's own lines there.
 
 ### 🟠 Exit farewells overlapped the same fish's dialogue — fixed 2026-10-07
 
@@ -267,6 +268,8 @@ rebuilds the room and restores the target's script snapshot without muting heard
 carrying pending dialogue, suppressing the opening, or scheduling interrupted-line
 replays. Lines may repeat and queued lines may be lost, including across an exit.
 `test/undo-dialogue.test.ts` covers this behavior through the real undo/restore path.
+DRAKAR1, DRAKAR and LODE are the exception: their talk is part of a performance that runs
+on time, and they carry it (see "Undo stopped, restarted or stranded…" above).
 
 ### 🟠 KUFRIK's first tutorial line ended in half a second of buzz — fixed 2026-08-16
 

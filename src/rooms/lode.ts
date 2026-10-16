@@ -13,6 +13,7 @@
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
 import { LodeGame, LODE } from './lode-game.js';
+import { carryItem } from './carry.js';
 
 const NLODI = 7; // matches lode-game NKOSTEK (7 ships)
 
@@ -64,11 +65,12 @@ const istr = (n: number): string => String(n);
 const rowUpper = (y: number): string => String.fromCharCode(y - 1 + 65);
 const rowLower = (y: number): string => String.fromCharCode(y - 1 + 97);
 
-/** The battleship game state (planek + posltrefena). Reset per room enter in init(). */
-let game = new LodeGame();
+/** The battleship game state (planek + posltrefena), one per script: `init` deals a new
+ *  one, and an undo hands the live one to the rebuilt script (`restorePresentation`). */
+const games = new WeakMap<Script, LodeGame>();
 
 function init(s: Script): void {
-  game = new LodeGame((n) => s.random(n));
+  games.set(s, new LodeGame((n) => s.random(n)));
 
   const v = s.vars(R.room, 10);
   s.room.gspec = 9;
@@ -100,16 +102,19 @@ function init(s: Script): void {
   s.item(R.maska).spec = 11;
 }
 
+// Queued `set`s act on the script running them (`cur`), so an undo can adopt the queue.
+const setB1cinruky = (x: number, cur: Script) => (cur.vars(R.buh1)[R.buh1_cinruky] = x);
+const setB2cinruky = (x: number, cur: Script) => (cur.vars(R.buh2)[R.buh2_cinruky] = x);
+const setB1mluveni = (x: number, cur: Script) => (cur.vars(R.buh1)[R.buh1_mluveni] = x);
+const setB2mluveni = (x: number, cur: Script) => (cur.vars(R.buh2)[R.buh2_mluveni] = x);
+const setShodit = (x: number, cur: Script) => (cur.vars(R.room)[R.room_shodit] = x);
+const setVelkarHlaska = (x: number, cur: Script) => (cur.vars(R.velkar)[R.velkar_hlaska] = x);
+
 function prog(s: Script): void {
+  const game = games.get(s)!;
   const v = s.vars(R.room);
   const b1v = s.vars(R.buh1);
   const b2v = s.vars(R.buh2);
-  const setB1cinruky = (x: number) => (b1v[R.buh1_cinruky] = x);
-  const setB2cinruky = (x: number) => (b2v[R.buh2_cinruky] = x);
-  const setB1mluveni = (x: number) => (b1v[R.buh1_mluveni] = x);
-  const setB2mluveni = (x: number) => (b2v[R.buh2_mluveni] = x);
-  const setShodit = (x: number) => (v[R.room_shodit] = x);
-  const setVelkarHlaska = (x: number) => (s.vars(R.velkar)[R.velkar_hlaska] = x);
 
   // ---- room: fish dialogue + the game clock ----
   {
@@ -554,4 +559,49 @@ function prog(s: Script): void {
   }
 }
 
-export const LODE_ROOM: RoomScript = { name: 'LODE', init, prog };
+/**
+ * Undo (a port addition) and the match. The gods play on time, so an undo leaves the match
+ * where it is: the boards, the score, the gods' faces and hands, a ship still falling and
+ * the wreckage the sunk ones have eroded into the background, and every pending line —
+ * the gods' calls and answers and the fish's remarks alike. Before, the rebuild's `init`
+ * dealt empty boards under the restored score, so every later shot missed and the match
+ * never ended, and the queued answers, hand moves and falling ships were lost.
+ *
+ * The gods' position is the fish's doing (they are the push-out objects) and comes from
+ * the replay. With a fish dead, the fish's own lines are not carried: they are the death
+ * lines, which an undo that brings the fish back must not finish saying.
+ */
+const LODE_SOUNDS = [1, 2, 101, 102, 103, 104, 105, 106, 201, 202, 203, 204, 205, 220];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    // A load has the saved score but not the boards it was played on: deal a new match.
+    const v = s.vars(R.room);
+    if (v[R.room_stavhry] !== 0) {
+      v[R.room_stavhry] = 0;
+      v[R.room_shodit] = -1;
+      s.vars(R.buh1)[R.buh1_cinnost] = 0; // and nobody is mid-call: the queue is gone
+      s.vars(R.buh1)[R.buh1_mluveni] = 0;
+      s.vars(R.buh2)[R.buh2_cinnost] = 0;
+      s.vars(R.buh2)[R.buh2_mluveni] = 0;
+    }
+    return;
+  }
+  games.set(s, games.get(previous)!);
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  s.item(R.velkar).vars = [...previous.item(R.velkar).vars];
+  carryItem(s, previous, R.buh1);
+  carryItem(s, previous, R.buh2);
+  for (const w of previous.room.wreckSwaps) s.room.applyWreckSwap(w.x, w.y, w.phase);
+  s.padalod = previous.padalod;
+  s.lodniX = previous.lodniX;
+  s.lodniY = previous.lodniY;
+  s.lodniDX = previous.lodniDX;
+  s.lodniDY = previous.lodniDY;
+  s.globtit = previous.globtit;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const LODE_ROOM: RoomScript = { name: 'LODE', init, prog, restorePresentation, carriedSounds: LODE_SOUNDS };

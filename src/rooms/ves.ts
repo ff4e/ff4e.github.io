@@ -287,7 +287,16 @@ function restorePresentation(s: Script, previous?: Script): void {
   }
   const v = s.vars(R.room);
   const lh = previous.vars(R.hlava);
-  if (lh[R.hlava_stav]! <= 3 || v[R.room_rozbito]! >= 3) {
+  // The live head is only the continuation of the target's when it is at least as far
+  // along: after a GPU-loss reload, or an undo back across a death restart, `previous`
+  // is a freshly started gig, and taking its head would strand a farewell already sung.
+  const ahead =
+    lh[R.hlava_stav]! >= s.vars(R.hlava)[R.hlava_stav]! &&
+    previous.vars(R.room)[R.room_rozbito]! >= v[R.room_rozbito]!;
+  if (!ahead) {
+    s.ksnd(301); // keep the target's head and smash count, without the fresh gig's voice
+    s.ksnd(302);
+  } else if (lh[R.hlava_stav]! <= 3 || v[R.room_rozbito]! >= 3) {
     if (v[R.room_rozbito]! >= 3) v[R.room_rozbito] = previous.vars(R.room)[R.room_rozbito]!;
     s.item(R.hlava).vars = [...lh];
     s.item(R.hlava).afaze = previous.item(R.hlava).afaze;

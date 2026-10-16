@@ -695,10 +695,13 @@ export class Script {
   }
 
   /** Take over `previous`'s unfinished dialogue across an instant restore, the line in
-   *  progress keeping its remaining length on this script's clock. Only for a room whose
-   *  callbacks act on the script they are handed, not one they captured. */
-  adoptDialogue(previous: Script): void {
-    this.queue = previous.queue.map((d) => ({ ...d }));
+   *  progress keeping its remaining length on this script's clock, less the lines of the
+   *  speakers in `drop`. Only for a room whose callbacks act on the script they are
+   *  handed, not one they captured. */
+  adoptDialogue(previous: Script, drop: readonly number[] = []): void {
+    const spoken = (d: DialogEntry) => d.zvuk !== 'set' && d.zvuk !== 'del' && !d.zvuk.startsWith('ANIM');
+    this.queue = previous.queue.filter((d) => !spoken(d) || !drop.includes(d.prior)).map((d) => ({ ...d }));
+    if (drop.includes(previous.aktdialzvuk)) return;
     this.aktdialzvuk = previous.aktdialzvuk;
     this.voiceEndCount = this.count + previous.voiceEndCount - previous.count;
     this.lastprom = previous.lastprom;
