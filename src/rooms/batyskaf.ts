@@ -69,8 +69,8 @@ function onCradle(s: Script, phone: number, cradle: number): boolean {
 
 function prog(s: Script): void {
   const v = s.vars(R.main);
-  const setSnek = (x: number) => (s.vars(R.snek)[R.snek_mluvi] = x);
-  const setHalo = (x: number) => (v[R.main_halo] = x);
+  const setSnek = (x: number, cur: Script) => (cur.vars(R.snek)[R.snek_mluvi] = x);
+  const setHalo = (x: number, cur: Script) => (cur.vars(R.main)[R.main_halo] = x);
 
   // ---- main gadget state machine ----
   switch (v[R.main_aktivni]) {
@@ -309,4 +309,39 @@ function ringPhone(
   }
 }
 
-export const BATYSKAF: RoomScript = { name: 'BATYSKAF', init, prog };
+/**
+ * Undo (a port addition) and the operator. A lifted phone sets `halo` to 2 and queues the
+ * snail-operator reading a combination, ending with a `set` back to 0; while `halo` is 2
+ * the phones do not ring. The operator, the snail and the fish speak on time, so an undo
+ * leaves the conversation where it is: the pending lines, the fish's included, `halo`
+ * and the snail's mouth. Before, the rebuild dropped the queue, and a point banked during
+ * the readout kept `halo` = 2 without the `set` that ends it: the phones never rang again
+ * that visit, and a snail banked mid-line mouthed on.
+ *
+ * Lifting the phone is the fish's doing: if the undone move lifted it, the readout goes
+ * with the move (`halo` stays the target's, nothing is carried and the voices stop), and
+ * the snail stops mid-line. The gadget machine (`aktivni`) is the target's. With a fish
+ * dead, the fish's own lines (the death lines) are not carried. A load has no queue, so
+ * it leaves the operator and the snail silent and the phones free.
+ */
+const TALK_SOUNDS = [1, 2, 49, 111];
+const DIALOGUE_SLOTS = [R.main_mikros, R.main_nemam, R.main_odsud, R.main_pronej, R.main_uhnu, R.main_teduz];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  const v = s.vars(R.main);
+  if (!previous || (v[R.main_halo] !== 2 && previous.vars(R.main)[R.main_halo] === 2)) {
+    if (previous) for (const p of TALK_SOUNDS) s.ksnd(p);
+    if (v[R.main_halo] === 2) v[R.main_halo] = 0;
+    s.vars(R.snek)[R.snek_mluvi] = 0;
+    return;
+  }
+  const pv = previous.vars(R.main);
+  if (v[R.main_halo] === 2) v[R.main_halo] = pv[R.main_halo]!;
+  for (const slot of DIALOGUE_SLOTS) v[slot] = pv[slot]!;
+  s.vars(R.snek)[R.snek_mluvi] = previous.vars(R.snek)[R.snek_mluvi]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const BATYSKAF: RoomScript = { name: 'BATYSKAF', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

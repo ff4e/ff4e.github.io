@@ -15,6 +15,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -87,8 +88,8 @@ function init(s: Script): void {
 
 function prog(s: Script): void {
   const v = s.vars(R.room);
-  const setStav = (val: number): void => {
-    s.vars(R.papouch)[R.papouch_stav] = val;
+  const setStav = (val: number, cur: Script): void => {
+    cur.vars(R.papouch)[R.papouch_stav] = val;
   };
 
   // ---- room: death squawk, else the ambient chain + the screen-shove reaction ----
@@ -201,7 +202,7 @@ function prog(s: Script): void {
       } else {
         v[R.room_mov] = 1;
         s.addm(4, 'k1-m-codelas');
-        s.addset((val) => (s.room.gspec = val), 0);
+        s.addset((val, cur) => (cur.room.gspec = val), 0);
         s.addv(3, 'k1-v-promin');
       }
     }
@@ -388,4 +389,48 @@ function prog(s: Script): void {
   }
 }
 
-export const KAJUTA1: RoomScript = { name: 'KAJUTA1', init, prog };
+/**
+ * Undo (a port addition) and the stuffed parrot. A heckle is queued with a callback that
+ * sets `stav` to 101/102 as the line starts (the jaw flaps) and back to 0 as it ends, and
+ * only an idle parrot heckles again. The parrot and the fish speak on time, so an undo
+ * leaves the conversation where it is: the pending lines and sets, the room's dialogue
+ * flags and the parrot. Before, the rebuild dropped the queue, and a point banked
+ * mid-heckle kept `stav` at 1/101/102 without the line that ends it: the parrot flapped
+ * its jaw for the rest of the visit and never heckled again.
+ *
+ * The screen shove is not a move (the wall stops the fish), so its reaction is carried
+ * like the rest, `gspec` with it: the target's 3/4 waits for a `set` to 0, and without
+ * it the shove would stay armed for the visit, each push into a wall sliding the view and
+ * starting the reaction over.
+ *
+ * The heckles answer the fish's pushes and positions: one the parrot started after the
+ * target point goes with the undone move (the parrot is the target's, its line is not
+ * carried and its voice stops). With a fish dead, neither the fish's lines nor the
+ * parrot's are carried: this room's death line is the parrot's "karamba", on the parrot's
+ * own voice, and the parrot is left idle for the fish that is alive again. A load has no
+ * queue, so it leaves the parrot idle and a finished shove reaction finished.
+ */
+const TALK_SOUNDS = [1, 2, 101, 102];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  const pv = s.vars(R.papouch);
+  if (!previous) {
+    pv[R.papouch_stav] = 0;
+    if (s.vars(R.room)[R.room_mov] === 1) s.room.gspec = 0;
+    return;
+  }
+  const nekro = s.vars(R.room)[R.room_nekro]!;
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  s.vars(R.room)[R.room_nekro] = nekro;
+  s.room.gspec = previous.room.gspec;
+  const dead = previous.room.anyFishDead;
+  const drop = dead ? [1, 2] : [];
+  if (dead || (pv[R.papouch_stav] === 0 && previous.vars(R.papouch)[R.papouch_stav] !== 0)) {
+    pv[R.papouch_stav] = 0;
+    drop.push(101, 102);
+  } else carryItem(s, previous, R.papouch);
+  for (const p of drop) s.ksnd(p);
+  s.adoptDialogue(previous, drop);
+}
+
+export const KAJUTA1: RoomScript = { name: 'KAJUTA1', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

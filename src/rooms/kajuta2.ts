@@ -191,8 +191,8 @@ function prog(s: Script): void {
   {
     const pv = s.vars(R.papouch);
     const it = s.item(R.papouch);
-    const setStav = (val: number): void => {
-      pv[R.papouch_stav] = val;
+    const setStav = (val: number, cur: Script): void => {
+      cur.vars(R.papouch)[R.papouch_stav] = val;
     };
     if (pv[R.papouch_stav] === 0 && s.random(250) === 0 && s.noDialog()) {
       switch (s.random(7)) {
@@ -355,4 +355,31 @@ function prog(s: Script): void {
   }
 }
 
-export const KAJUTA2: RoomScript = { name: 'KAJUTA2', init, prog };
+/**
+ * Undo (a port addition) and the stuffed parrot. It squawks on time: a phrase is queued
+ * with a callback that sets `stav` to 101 as the line starts (the jaw flaps) and back to
+ * 0 as it ends, and only an idle parrot squawks again. The parrot and the fish speak on
+ * time, so an undo leaves the conversation where it is: the pending lines, the room's
+ * dialogue flags and the parrot. Before, the rebuild dropped the queue, and a point
+ * banked mid-squawk kept `stav` = 101 without the line that ends it: the parrot flapped
+ * its jaw for the rest of the visit and never squawked again.
+ *
+ * With a fish dead, the fish's own lines (the death lines) are not carried. A load has
+ * no queue, so it leaves the parrot idle.
+ */
+const TALK_SOUNDS = [1, 2, 101];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    s.vars(R.papouch)[R.papouch_stav] = 0;
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  s.vars(R.papouch)[R.papouch_stav] = previous.vars(R.papouch)[R.papouch_stav]!;
+  s.item(R.papouch).afaze = previous.item(R.papouch).afaze;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const KAJUTA2: RoomScript = { name: 'KAJUTA2', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

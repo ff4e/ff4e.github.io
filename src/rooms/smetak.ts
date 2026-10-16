@@ -139,7 +139,7 @@ function prog(s: Script): void {
         s.addv(s.random(7), 'sm-v-marnost');
         s.addm(s.random(7), 'sm-m-proc');
         s.addv(s.random(7), 'sm-v-podivej');
-        s.addd(s.random(7), 'sm-x-meduza', 101, (val) => (s.vars(R.meduza)[R.meduza_keca] = val));
+        s.addd(s.random(7), 'sm-x-meduza', 101, (val, cur) => (cur.vars(R.meduza)[R.meduza_keca] = val));
       }
     }
   }
@@ -205,5 +205,37 @@ function prog(s: Script): void {
   }
 }
 
-// The clock's tick loop is unconditional (`budik` above), so undo just leaves it ticking.
-export const SMETAK: RoomScript = { name: 'SMETAK', init, prog, carriedSounds: [940] };
+/**
+ * Undo (a port addition) and the jellyfish. The fish's chatter and the jellyfish's line run
+ * on time, so an undo leaves the conversation where it is: the pending lines and the slots
+ * they act on. Before, the rebuild dropped the queue, and a point banked while the
+ * jellyfish spoke kept `meduza_keca` = 101 without the callback that ends it: the jellyfish
+ * ignored the ball for the rest of the visit. The clock's tick loop is unconditional
+ * (`budik` above), so undo just leaves it ticking.
+ *
+ * The boat is the fish's doing: its remark, set off by the undone move, goes with it. With
+ * a fish dead, the fish's own lines (the death lines) are not carried. A load has no
+ * queue, so it leaves the jellyfish listening to the ball.
+ */
+const TALK_SOUNDS = [1, 2, 101];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    s.vars(R.meduza)[R.meduza_keca] = 0;
+    return;
+  }
+  const v = s.vars(R.room);
+  const live = previous.vars(R.room);
+  if (live[R.room_olodi] !== v[R.room_olodi]) {
+    s.vars(R.meduza)[R.meduza_keca] = 0;
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  for (const slot of [R.room_uvod, R.room_obudikovi, R.room_okramech, R.room_sbirka]) v[slot] = live[slot]!;
+  s.vars(R.meduza)[R.meduza_keca] = previous.vars(R.meduza)[R.meduza_keca]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const SMETAK: RoomScript = { name: 'SMETAK', init, prog, restorePresentation, carriedSounds: [940, ...TALK_SOUNDS] };

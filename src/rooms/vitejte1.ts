@@ -16,6 +16,7 @@
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
 import { vladceKsichtyFrame } from './vladce.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -360,7 +361,7 @@ function dispatchCinnost(s: Script, vladce: { afaze: number }, vl: number[]): vo
       s.addm(0, 'vit-m-jakze');
       s.addv(0, 'vit-v-vazne');
       s.addm(0, 'vit-m-nechutne');
-      s.addset((val) => (vl[C] = val), 63);
+      s.addset((val, cur) => (cur.vars(R.vladce)[C] = val), 63);
       vl[C] = 62;
       break;
     case 63:
@@ -487,4 +488,30 @@ function dispatchCinnost(s: Script, vladce: { afaze: number }, vl: number[]): vo
   }
 }
 
-export const VITEJTE1: RoomScript = { name: 'VITEJTE1', init, prog };
+/**
+ * Undo (a port addition) and the ruler. His announcements and the fish's comments on them
+ * run on time, so an undo leaves the performance where it is: his voice (302, the ad
+ * jingle 303), his topic, face and schedule, the room's comment counters and every pending
+ * line. Before, the rebuild cut his line mid-word, and a point banked while the fish
+ * answered the dining speech lost the queued `set` that brings its second half (63).
+ *
+ * The crabs are pushed, so their state is the target's; they bop to the carried voice.
+ * With a fish dead, the fish's own lines (the death lines) are not carried. A load has no
+ * queue and no voice: a dining speech waiting on the fish goes straight to its second half.
+ */
+const TALK_SOUNDS = [1, 2, 302, 303];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    const vl = s.vars(R.vladce);
+    if (vl[R.vladce_cinnost] === 62) vl[R.vladce_cinnost] = 63;
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  carryItem(s, previous, R.vladce);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const VITEJTE1: RoomScript = { name: 'VITEJTE1', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };
