@@ -7,6 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { appReady, exitProbe, launchBrowser, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkFishSwitchButton, checkTabletFishIndicator } from './ui-tablet-fish-indicator.mjs';
+import { tapPanel } from './ui-tablet-options.mjs';
 
 const browser = await launchBrowser();
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
@@ -144,7 +145,7 @@ try {
   await badge.waitFor({ state: 'hidden' });
   await p.click('#phone-menu [data-region="16"]');
   await badge.waitFor({ state: 'hidden' });
-  await p.click('#topt-close');
+  await tapPanel(p, 135, 370); // The original Exit Options corner.
   await badge.waitFor({ state: 'visible' });
 
   // The existing engine hook drives the real animated handover, not a badge setter.

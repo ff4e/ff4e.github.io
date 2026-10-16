@@ -1,9 +1,17 @@
-/** Use the original's image-space regions, independent of CSS scale and art tier. */
+/**
+ * Use the original's image-space regions, independent of CSS scale and art tier.
+ *
+ * A landscape phone shows the panel cut at row 197, the lower half beside the upper and
+ * overlapping it by five columns (optionsLayout.ts), so a face wider than it is tall is
+ * read as that 305x198 layout.
+ */
 export async function panelPoint(p, x, y) {
   await p.locator('#panel').waitFor({ state: 'visible' });
   return p.locator('#panel').evaluate((el, [x, y]) => {
     const r = el.getBoundingClientRect();
-    return { x: r.left + x * r.width / 155, y: r.top + y * r.height / 395 };
+    const [fx, fy, w, h] = r.width <= r.height ? [x, y, 155, 395]
+      : y < 197 ? [x, y, 305, 198] : [x + 150, y - 197, 305, 198];
+    return { x: r.left + fx * r.width / w, y: r.top + fy * r.height / h };
   }, [x, y]);
 }
 
@@ -17,7 +25,10 @@ export async function tapPanel(p, x, y, touch = false) {
 export async function checkTabletOptions(p, expect, touch = false) {
   await p.locator('#touchopts #panel').waitFor({ state: 'visible' });
   expect(await p.evaluate(() => window.__ff.optionsOpen()), 'tablet: the original Options face is open');
-  expect(await p.locator('.topts-card').isHidden(), 'tablet: phone HTML settings are hidden');
+  expect(await p.locator('#panel').evaluate(el => {
+    const r = el.getBoundingClientRect();
+    return Math.abs(r.width / r.height - 155 / 395) < 0.01;
+  }), 'tablet: the whole original face is shown, never the phone\'s landscape cut');
   const backdrop = await p.locator('#touchopts').evaluate(el => {
     const style = getComputedStyle(el);
     return { color: style.backgroundColor, image: style.backgroundImage, opacity: style.opacity };

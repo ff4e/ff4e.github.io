@@ -1,0 +1,70 @@
+/**
+ * The phone's touch Options: the original face, whole in portrait and cut in two in
+ * landscape (optionsLayout.ts). Every tap goes through `panelPoint`, which reads the layout
+ * from the canvas's own shape, so the mapping under test is not the one doing the tapping.
+ */
+import { panelPoint, tapPanel } from './ui-tablet-options.mjs';
+
+const FACE = { portrait: [155, 395], landscape: [305, 198] };
+
+/** Called with Options open. `landscape` is the face the caller expects; ends with it closed. */
+export async function checkPhoneOptions(p, expect, label, landscape) {
+  await p.locator('#touchopts #panel').waitFor({ state: 'visible' });
+  const [fw, fh] = FACE[landscape ? 'landscape' : 'portrait'];
+  const face = await p.locator('#panel').evaluate(el => el.getBoundingClientRect().toJSON());
+  const privacy = await p.locator('#feedbar-privacy').evaluate(el => el.getBoundingClientRect().toJSON());
+  const vp = p.viewportSize();
+  expect(await p.evaluate(() => window.__ff.optionsOpen()) && Math.abs(face.width / face.height - fw / fh) < 0.01,
+    `${label}: the ${landscape ? 'cut landscape' : 'whole portrait'} Options face is open`);
+  const scale = face.width / fw;
+  expect(face.x >= 0 && face.y >= 0 && face.right <= vp.width && face.bottom <= vp.height &&
+    privacy.bottom <= vp.height && privacy.height > 0 && 17 * scale >= 22,
+  `${label}: the face and Privacy fit on screen, scaled to ${scale.toFixed(2)}x with finger-sized sliders`);
+
+  const volumes = await p.evaluate(() => window.__ff.volumes());
+  const subtitles = await p.evaluate(() => window.__ff.subtitleMode());
+  for (const [bus, y, level] of [['effect', 85, 3], ['voice', 134, 9], ['music', 183, 12]]) {
+    await tapPanel(p, 15 + 10 * level, y, true);
+    expect(await p.evaluate(bus => window.__ff.volumes()[bus], bus) === level,
+      `${label}: the original ${bus} slider changes the correct bus`);
+  }
+  for (const [x, mode] of [[120, 'off'], [28, 'cz'], [75, 'en']]) {
+    await tapPanel(p, x, 266, true);
+    expect(await p.evaluate(() => window.__ff.subtitleMode()) === mode, `${label}: subtitles ${mode}`);
+  }
+  if (landscape) {
+    // Across the seam and well into the lower half's picture: still the slider, clamped.
+    const cdp = await p.context().newCDPSession(p);
+    try {
+      const start = await panelPoint(p, 15, 85);
+      const end = await panelPoint(p, 75, 266);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...start, id: 1 }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ ...end, id: 1 }] });
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    } finally {
+      await cdp.detach();
+    }
+    expect(await p.evaluate(() => window.__ff.volumes().effect) === 12 &&
+      await p.evaluate(() => window.__ff.subtitleMode()) === 'en',
+    `${label}: a slider drag carried past the seam stays on the slider and reads loudest`);
+  }
+  for (const [bus, y] of [['effect', 85], ['voice', 134], ['music', 183]]) await tapPanel(p, 15 + 10 * volumes[bus], y, true);
+  await tapPanel(p, { cz: 28, en: 75, off: 120 }[subtitles], 266, true);
+  expect(JSON.stringify(await p.evaluate(() => window.__ff.volumes())) === JSON.stringify(volumes) &&
+    await p.evaluate(() => window.__ff.subtitleMode()) === subtitles, `${label}: settings restored`);
+
+  await tapPanel(p, 135, 370, true);
+  await p.locator('#touchopts').waitFor({ state: 'hidden' });
+  expect(await p.locator('.stage > #panelcol').count() === 1 && await p.locator('#panelcol').isHidden(),
+    `${label}: the original corner closes Options and returns the hidden column to the stage`);
+}
+
+/** Help sits in the lower half, so on a landscape phone it is reached through the cut. */
+export async function checkPhoneOptionsHelp(p, expect, label) {
+  await p.locator('#touchopts #panel').waitFor({ state: 'visible' });
+  await tapPanel(p, 50, 338, true);
+  await p.waitForFunction(() => window.__ff.helpOpen() && document.getElementById('touchopts').hidden);
+  expect(await p.locator('#panelcol').isHidden(), `${label}: Help replaces Options completely`);
+  await p.locator('#help-close').tap();
+  await p.waitForFunction(() => !window.__ff.helpOpen());
+}

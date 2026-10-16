@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { appReady, launchBrowser, exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
-import { checkTabletOptions, checkTabletReplayOptions } from './ui-tablet-options.mjs';
+import { checkTabletOptions, checkTabletReplayOptions, tapPanel } from './ui-tablet-options.mjs';
 
 const browser = await launchBrowser();
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
@@ -168,16 +168,6 @@ try {
     await p.waitForFunction(() => !window.__ff.roomLoading() && document.getElementById('loading').hidden);
     await p.waitForFunction((phone) => !document.getElementById(phone ? 'phone-controls' : 'touchbar').hidden, phone);
     if (phone) await p.locator('#active-fish-indicator').waitFor({ state: 'visible' });
-    // Pure paint must remain scoped even after CSS bundling. Keyframes are not selectors.
-    assert.equal(await p.evaluate(() => {
-      const walk = (rules) => [...rules].every((rule) => {
-        if (rule instanceof CSSStyleRule) {
-          return !rule.cssText.includes('native-menu/stone') || rule.selectorText.includes('[data-native-menu]');
-        }
-        return rule instanceof CSSMediaRule ? walk(rule.cssRules) : true;
-      });
-      return [...document.styleSheets].every((sheet) => walk(sheet.cssRules));
-    }), true, 'stone rules stay scoped to the enabled touch/native skin');
     for (const c of cases.filter((c) => c.phone === phone)) {
       await p.setViewportSize({ width: c.width, height: c.height });
       await p.evaluate((insets) => {
@@ -213,53 +203,29 @@ try {
         console.log(`  ok   ${c.name}: original tablet Options artwork, translucent backdrop, finger drags, subtitles, Help and close`);
         continue;
       }
+      // Phones share the tablet's canvas face; checkPhoneOptions (test-iphone-layout) drives it.
+      // Here: every inset case gets the right face, clear of the cutouts, and the skin leaves it alone.
+      const landscape = c.width > c.height;
+      const [fw, fh] = landscape ? [305, 198] : [155, 395];
+      const face = await p.locator('#touchopts #panel').evaluate((el) => el.getBoundingClientRect().toJSON());
+      const privacy = await p.locator('#feedbar-privacy').evaluate((el) => el.getBoundingClientRect().toJSON());
+      assert(Math.abs(face.width / face.height - fw / fh) < 0.01,
+        `${c.name}: the ${landscape ? 'cut landscape' : 'whole portrait'} original Options face`);
+      assert(face.left >= c.insets[3] && face.right <= c.width - c.insets[1] && face.top >= c.insets[0] &&
+        privacy.height > 0 && privacy.bottom <= c.height - c.insets[2],
+      `${c.name}: the face and Privacy stay inside the safe area`);
+      assert(17 * face.width / fw >= 20, `${c.name}: sliders are finger-sized (${(face.width / fw).toFixed(2)}x)`);
+      // Inside the face only: the translucent backdrop shows the live room moving behind it,
+      // and the face's fractional edge pixels blend with that room.
+      const clip = { x: face.x + 2, y: face.y + 2, width: face.width - 4, height: face.height - 4 };
+      const skinned = await p.screenshot({ clip });
       await native(p, false);
-      const originalPixels = await p.locator('#touchopts').screenshot();
+      assert(skinned.equals(await p.screenshot({ clip })), `${c.name}: the skin does not repaint the face`);
       await native(p, true);
-      assert.equal(await p.locator('#touchopts').evaluate((el) =>
-        getComputedStyle(el).backgroundImage.includes('stone')), true, 'native texture applied');
-      const nativePixels = await p.locator('#touchopts').screenshot();
-      assert(!originalPixels.equals(nativePixels), 'the skin must visibly change Options');
-      await native(p, false);
-      assert(originalPixels.equals(await p.locator('#touchopts').screenshot()),
-        'temporarily disabling the skin must restore the unskinned pixels exactly');
-      await native(p, true);
-      assert.equal(await p.locator('#topt-close').evaluate((el) => getComputedStyle(el).borderColor),
-        'rgb(121, 101, 55)', 'Done uses the shared C accent rather than the unskinned teal border');
-      await p.locator('#topt-effect').scrollIntoViewIfNeeded();
-      const range = await p.locator('#topt-effect').boundingBox();
-      assert(range, 'volume range must be visible');
-      await p.locator('#topt-effect').evaluate((el) => {
-        el.value = '0';
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-      });
-      assert.equal(await p.evaluate(() => window.__ff.volumes().effect), 0, 'range starts away from the tap');
-      await p.touchscreen.tap(range.x + range.width / 2, range.y + range.height / 2);
-      assert.equal(await p.evaluate(() => window.__ff.volumes().effect), 6, 'native range taps still dispatch');
-      assert.equal(await p.locator('#touchopts input[value="en"]').isChecked(), true,
-        'English subtitles are selected on first open and retained on reopen');
-      await p.locator('#touchopts input[value="cz"]').check();
-      assert.equal(await p.evaluate(() => window.__ff.subtitleMode()), 'cz', 'Czech remains selectable');
-      await p.locator('#touchopts input[value="en"]').check();
-      assert.equal(await p.evaluate(() => window.__ff.subtitleMode()), 'en', 'native radios still dispatch');
-      await p.locator('#topt-close').scrollIntoViewIfNeeded();
-      const end = await p.locator('#topt-close').boundingBox();
-      assert(end && end.y >= 0 && end.y + end.height <= c.height, `${c.name}: Done must stay reachable`);
-      const resting = await p.locator('#topt-close').evaluate((el) => getComputedStyle(el).boxShadow);
-      await p.mouse.move(end.x + end.width / 2, end.y + end.height / 2);
-      await p.mouse.down();
-      assert.notEqual(await p.locator('#topt-close').evaluate((el) => getComputedStyle(el).boxShadow),
-        resting, 'Done has a visible pressed state');
-      await p.mouse.move(1, 1);
-      await p.mouse.up();
-      await p.keyboard.press('Tab');
-      await p.locator('#topt-close').focus();
-      assert.equal(await p.locator('#topt-close').evaluate((el) =>
-        getComputedStyle(el).outlineStyle), 'solid', 'keyboard focus stays visible');
-      await p.keyboard.press('Enter');
+      await tapPanel(p, 135, 370, true);
       await p.waitForFunction(() => document.getElementById('touchopts').hidden);
       await p.waitForFunction((phone) => !document.getElementById(phone ? 'phone-controls' : 'touchbar').hidden, phone);
-      console.log(`  ok   ${c.name}: expected geometry, browser pixels, input and focus`);
+      console.log(`  ok   ${c.name}: expected geometry, the original Options face at ${(face.width / fw).toFixed(2)}x, and its corner`);
     }
     if (!phone) await checkTabletReplayOptions(p, (condition, message) => assert(condition, message));
     await p.emulateMedia({ reducedMotion: 'reduce' });

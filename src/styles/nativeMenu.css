@@ -56,46 +56,6 @@ html[data-native-menu] #phone-menu {
   border-radius: var(--menu-radius);
   box-shadow: inset 0 0 0 1px var(--menu-edge);
 }
-html[data-native-menu] #touchopts {
-  color: var(--menu-text);
-  background: linear-gradient(#d3d7d1e8, #bcc5bfe8), url('/native-menu/stone.png') #c7cbc6;
-}
-html[data-native-menu] .topts-card h1 {
-  font-family: Georgia, 'Times New Roman', serif;
-  font-style: italic;
-  color: var(--menu-title);
-  text-shadow: var(--menu-title-shadow);
-}
-html[data-native-menu] .topts-row output { color: var(--menu-muted); }
-html[data-native-menu] .topts-row input[type='range'],
-html[data-native-menu] .topts-subs input {
-  accent-color: var(--menu-accent);
-  color-scheme: light;
-}
-html[data-native-menu] .topts-subs {
-  background: var(--menu-option-fill);
-  border-color: var(--menu-option-border);
-  border-radius: var(--menu-radius);
-}
-html[data-native-menu] .topts-buttons button,
-html[data-native-menu] #topt-close {
-  background: var(--menu-option-fill);
-  color: var(--menu-text);
-  border-color: var(--menu-option-border);
-  border-radius: var(--menu-radius);
-  box-shadow: var(--menu-bevel);
-}
-html[data-native-menu] #topt-close { border-color: var(--menu-accent); }
-html[data-native-menu] .topts-buttons button:active,
-html[data-native-menu] #topt-close:active { box-shadow: inset 0 1px 3px #0007; }
-html[data-native-menu] .topts-privacy {
-  color: var(--menu-muted);
-  border-bottom-color: var(--menu-option-border);
-}
-html[data-native-menu] .topts-privacy:active {
-  color: var(--menu-text);
-  border-bottom-color: var(--menu-accent);
-}
 html[data-native-menu] #touchopts :is(input, button, a):focus-visible {
   outline: 2px solid var(--menu-accent);
   outline-offset: 2px;
