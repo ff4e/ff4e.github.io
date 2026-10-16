@@ -16,6 +16,8 @@ export async function checkPhoneOptions(p, expect, label, landscape) {
   const vp = p.viewportSize();
   expect(await p.evaluate(() => window.__ff.optionsOpen()) && Math.abs(face.width / face.height - fw / fh) < 0.01,
     `${label}: the ${landscape ? 'cut landscape' : 'whole portrait'} Options face is open`);
+  expect(await p.locator('#panel').evaluate(el => getComputedStyle(el).webkitTapHighlightColor) === 'rgba(0, 0, 0, 0)',
+    `${label}: a press does not tint the whole face with the browser's tap highlight`);
   const scale = face.width / fw;
   expect(face.x >= 0 && face.y >= 0 && face.right <= vp.width && face.bottom <= vp.height &&
     privacy.bottom <= vp.height && privacy.height > 0 && 17 * scale >= 22,

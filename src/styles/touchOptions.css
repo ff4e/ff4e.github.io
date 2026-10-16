@@ -1,7 +1,9 @@
 @media (forced-colors: none) {
   html[data-touch] #touchopts { background: rgb(11 11 18 / 65%); }
 }
-#touchopts #panel { touch-action: none; }
+/* The face is one canvas with a press listener, so a browser's tap highlight would tint
+   all of it on every press. Only the face: the links and feedback form below keep theirs. */
+#touchopts #panel { touch-action: none; -webkit-tap-highlight-color: transparent; }
 #touchopts #panelcol { width: min-content; }
 /* The desktop strip hangs outside the panel; here it belongs inside the scrollable dialog. */
 #touchopts #feedbar { position: static; width: 100%; margin-top: 8px; }
