@@ -177,12 +177,42 @@ Neither is fixable without inventing audio, which is out of scope for a faithful
 Should a build of the 1998 data containing them ever surface, both could be added by
 extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
+## Undo: 🟠 LODE's Battleship match stops scoring after an undo mid-match
+
+The gods' match runs on time, but its boards live in a module-private `LodeGame` that the
+rebuild's `init` replaces with an empty one, while the snapshot restores the match counters
+(`room_stavhry`, ships left). From then on every shot misses and the match never ends
+(headless, real room data: 14 shots/4 hits before the undo, 40 shots/0 hits in 4 000 ticks
+after it). Its pending `addset`s — hands, mouths, `setShodit`'s falling ship — are lost too.
+The likely fix is the DRAKAR1 one below (carry the live `LodeGame`, match Vars and the gods'
+sounds), but LODE's queue mixes the gods' narration with the fish's lines and the gods are
+the push-out objects, so what to carry needs deciding first. A load mid-match has the same
+empty boards.
+
 ## Excluded by design (not issues)
 
 - **ZAVER #71** — non-playable ending screen.
 - **SCORE #72** — non-playable results screen.
 
 ## Resolved
+
+### 🟠 Undo stopped or restarted room music and performances — fixed 2026-10-16
+
+Undo rebuilds the room, which silenced every sound, re-ran `init` and restored the previous
+point's script state. A room's own time-driven performance was rewound with the move:
+DRAKAR1's band stopped mid-song and `rybky04` started again, and a point banked during the
+music-to-band handoff left the band never starting (its queued `set blok:=0` was lost).
+KORALY's octopus tune was cut to its ending and VES's three amplifier loops restarted.
+The dog (DRAKAR), duck (BARELY), clock (SMETAK) and motor (MOTOR) loops were cut or restarted.
+
+Rooms now declare `carriedSounds`, which an instant restore neither stops nor lets `init`
+re-cue (`killVoices(except)`, `initQuiet.ts`), and hand the live state to the rebuilt script
+in `restorePresentation`. Whatever an undone move started or stopped still follows the move.
+Undoing the octopus shove ends its tune, and undoing an amp's smash brings its loop back. A load
+re-arms a DRAKAR1 handoff saved without its queue. Covered by `test/drakar1-undo.test.ts`,
+`test/undo-ambience.test.ts` and `tools/test-music.mjs`. Not carried: an NPC line cut by
+the undo (MIKRO's crabs, VLADOVA's skull, VITEJTE1's ruler), as with the fish's own lines,
+and the subtitle of a carried viking line, which the rebuilt subtitle system drops.
 
 ### 🟠 Exit farewells overlapped the same fish's dialogue — fixed 2026-10-07
 

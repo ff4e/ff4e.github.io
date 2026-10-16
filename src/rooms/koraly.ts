@@ -467,4 +467,24 @@ function prog(s: Script): void {
   }
 }
 
-export const KORALY: RoomScript = { name: 'KORALY', init, prog };
+/**
+ * Undo (a port addition) and the tune. Shoving the octopus is a move, but the tune it
+ * starts then plays on time, so undoing a LATER move must not end it: the rebuild used to
+ * kill `rybky08`, and the score cursor saw `not playing(10)` and skipped to the ending.
+ * So the tune is a carried sound, and the live performance continues when the undo
+ * target had already started that same performance (same `hrala`); otherwise — the shove
+ * itself undone — the tune stops with it. The crabs and anemones follow `playing(10)`.
+ */
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return;
+  const bal = s.vars(R.balalajka);
+  const live = previous.vars(R.balalajka);
+  if (bal[R.balalajka_cinnost]! > 0 && bal[R.balalajka_hrala] === live[R.balalajka_hrala]) {
+    s.item(R.balalajka).vars = [...live];
+    s.item(R.balalajka).afaze = previous.item(R.balalajka).afaze;
+  } else {
+    s.ksnd(10);
+  }
+}
+
+export const KORALY: RoomScript = { name: 'KORALY', init, prog, restorePresentation, carriedSounds: [10] };

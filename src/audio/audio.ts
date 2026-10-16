@@ -851,8 +851,11 @@ export class AudioEngine {
     this.activeUntil.delete(prior);
   }
 
-  /** KillSnd (RSound.pas:954): stop every playing voice/effect (not the music). */
-  killVoices(): void {
+  /** KillSnd (RSound.pas:954): stop every playing voice/effect (not the music), except
+   *  the priorities in `except` — a room's carried sounds on an instant restore. */
+  killVoices(except: readonly number[] = []): void {
+    const kept = except.map((p) => [p, this.priorSources.get(p), this.activeUntil.get(p)] as const);
+    for (const [, set] of kept) for (const src of set ?? []) this.voices.delete(src);
     for (const src of this.voices) {
       try {
         src.stop();
@@ -869,11 +872,16 @@ export class AudioEngine {
     // (URoom.pas:1588, RSound.pas:962). So an in-flight -999 start must survive here,
     // exactly as the sounding one does at the end of this method.
     for (const prior of [...this.pending.keys()]) {
-      if (prior !== MUSIC_PRIOR) this.clearReserved(prior);
+      if (prior !== MUSIC_PRIOR && !except.includes(prior)) this.clearReserved(prior);
     }
     this.voices.clear();
     this.priorSources.clear();
     this.activeUntil.clear();
+    for (const [prior, set, until] of kept) {
+      if (set) this.priorSources.set(prior, set);
+      for (const src of set ?? []) this.voices.add(src);
+      if (until !== undefined) this.activeUntil.set(prior, until);
+    }
     // KillSnd leaves the room music untouched, so keep its playing(-999) flag.
     if (this.musicSrc) this.activeUntil.set(MUSIC_PRIOR, Infinity);
   }

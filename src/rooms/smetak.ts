@@ -205,4 +205,5 @@ function prog(s: Script): void {
   }
 }
 
-export const SMETAK: RoomScript = { name: 'SMETAK', init, prog };
+// The clock's tick loop is unconditional (`budik` above), so undo just leaves it ticking.
+export const SMETAK: RoomScript = { name: 'SMETAK', init, prog, carriedSounds: [940] };

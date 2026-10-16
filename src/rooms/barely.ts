@@ -13,6 +13,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -811,4 +812,10 @@ function prog(s: Script): void {
   }
 }
 
-export const BARELY: RoomScript = { name: 'BARELY', init, prog };
+/** Undo (a port addition) leaves the duck's quacking cycle running, loop and all: it is
+ *  on a timer, not anything the fish did. */
+function restorePresentation(s: Script, previous?: Script): void {
+  if (previous) carryItem(s, previous, R.kachnicka);
+}
+
+export const BARELY: RoomScript = { name: 'BARELY', init, prog, restorePresentation, carriedSounds: [701] };

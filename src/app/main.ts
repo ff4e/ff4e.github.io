@@ -53,6 +53,7 @@ import { ROOMS } from '../data/roomTable.js';
 import { canvas, info, panelCanvas, select } from './dom.js';
 import { ARROWS, KEYS, MLUVI_PRIOR, NOOP_SCRIPT, TETRIS_KEYS } from './keyTables.js';
 import { audio, initAudio } from './audioEngine.js';
+import { initQuiet } from './initQuiet.js';
 import { atRest, fishBusy, idle } from './roomGates.js';
 import { initRoomLoad, loadRoom, roomVoicesSettled, talk } from './roomLoad.js';
 import { initRenderLoop, loop } from './renderLoop.js';
@@ -645,7 +646,7 @@ function previewSubFont(next = true): void {
   sys?.newSubtitle('Příliš žluťoučký kůň úpěl ďábelské ódy. 0123', 'A', count);
 }
 
-function buildRoom(carryPole = false): void {
+function buildRoom(carryPole = false, carried: readonly number[] = []): void {
   if (!ffr) return;
   cancelStoreReview();
   clearHeldKey(); // a room change/restart drops any held movement key
@@ -658,7 +659,7 @@ function buildRoom(carryPole = false): void {
   // (TRoom.Restart → KillExcept(-999), URoom.pas:1600). Only the restart path needs
   // this: a room CHANGE already killed all audio when leaving the previous room. This
   // is what makes VES fall silent on restart until the head strikes up the band again.
-  if (carryPole) audio.killVoices();
+  if (carryPole) audio.killVoices(carried); // `carried`: RoomScript.carriedSounds
   // Bound locally as well as published: `room` is an imported binding now (gameState.ts),
   // and TypeScript cannot narrow one — it has to assume any call could reassign it. The
   // local is the same object, and keeps the rest of this function reading as it did.
@@ -711,12 +712,13 @@ function buildRoom(carryPole = false): void {
   // The room's own looping-music descriptor (MusName/MusCycle) — used both to set
   // s.musName and to re-cue the music when a room calls musiccyc(MusName, -999).
   const roomMusic = musicForCHud(ROOMS[Number(select.value) - 1]?.cHud ?? -1);
+  let initializing = true; // until `init` returns: see initQuiet
   if (room) {
     const s = new Script(
       room,
       scriptTalk,
       (prior) => audio.playing(prior),
-      {
+      initQuiet(carried, () => initializing, {
         snd: (name, prior) => audio.snd(name, prior, false, EFFECT_VOL),
         sndcyc: (name, prior) => audio.snd(name, prior, true, EFFECT_VOL),
         sndvol: (name, prior, vol) => audio.snd(name, prior, false, Math.max(0, Math.min(1, vol / 64))),
@@ -735,7 +737,7 @@ function buildRoom(carryPole = false): void {
         },
         talkNow: (name, prior) => scriptTalk(name, prior),
         voicesReady: () => roomVoicesSettled,
-      },
+      }),
       (prior) => audio.talking(prior),
     );
     s.pokus = pokus;
@@ -761,6 +763,7 @@ function buildRoom(carryPole = false): void {
     }));
     s.onWin = () => engine!.triggerWin(); // SCORE etc.: puzzle-solve win
     def?.init(s);
+    initializing = false;
     // Snapshot each item's static spec (post-init) so the enhanced art source can
     // tell a statically-mirrored item (spec=10 set in init → FFNG art pre-mirrored)
     // from one whose spec toggles to 10 at runtime (FFNG art base, needs mirroring).

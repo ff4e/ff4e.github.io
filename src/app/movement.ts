@@ -24,7 +24,7 @@ import { hapticBlocked } from '../platform/haptics.js';
  */
 export interface MovementHost {
   /** Rebuild the room; `carryPole` keeps the room-scoped cheats (the RESTART flavour). */
-  readonly buildRoom: (carryPole?: boolean) => void;
+  readonly buildRoom: (carryPole?: boolean, carried?: readonly number[]) => void;
   /** Ends any running KUFRIK demonstration. */
   readonly endShowmode: () => void;
   /** The player is awake: reset the idle timers (delay[]) and the ambient-chatter clock. */
@@ -225,7 +225,9 @@ export function restore(
   // Rebuild with carryPole, i.e. the RESTART flavour: TRoom.Load runs InitItems +
   // InitProgramky (URoom.pas:1905-1948), never TRoom.Init, so loading a save must
   // not clear the room-scoped cheats (or roompole) the way a room change does.
-  host.buildRoom(true); // fresh room (resets srecord); may leave pending fall dirs
+  // An instant restore (undo, GPU-loss recovery) keeps the room's own time-driven sounds
+  // playing; a load replays into the saved attempt and starts them over, as a restart does.
+  host.buildRoom(true, animated ? [] : (activeScript?.def.carriedSounds ?? [])); // resets srecord; may leave pending fall dirs
   if (!room || !engine) return;
   room.clearAllDirs();
   room.fallToRest(); // settle the initial gravity instantly

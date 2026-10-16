@@ -30,4 +30,25 @@ await withApp(async ({ p, expect }) => {
     p.waitForFunction(() => window.__ff.playingPrior(-998)),
   );
   expect(playing, 'DRAKAR1 intro music (rybky04) plays via the Music/ fallback');
+
+  // Undo leaves it playing: the band is the room's own time-driven performance, so the
+  // rebuild keeps its carried sounds (RoomScript.carriedSounds) and `init` must not cue
+  // rybky04 again. The unit tests drive a copy of buildRoom; this is the real one.
+  await p.waitForFunction(() => window.__ff.undoDepth() === 1);
+  for (const which of ['little', 'big']) {
+    for (const dir of [4, 3, 1, 2]) {
+      if ((await p.evaluate(() => window.__ff.undoDepth())) > 1) break;
+      await p.evaluate(([w, d]) => window.__ff.press(w, d), [which, dir]);
+      await p.waitForFunction(() => window.__ff.phase() === 'idle');
+    }
+  }
+  await p.waitForFunction(() => window.__ff.undoDepth() > 1 && window.__ff.canUndo());
+  await p.evaluate(() => window.__ff.clearSoundLog());
+  const undone = await p.evaluate(() => window.__ff.undo());
+  await p.waitForTimeout(400);
+  const after = await p.evaluate(() => ({
+    playing: window.__ff.playingPrior(-998),
+    recued: window.__ff.soundLog().filter((x) => x.name.startsWith('rybky04')).length,
+  }));
+  expect(undone && after.playing && after.recued === 0, `DRAKAR1 undo keeps rybky04 playing, not restarted: ${JSON.stringify({ undone, ...after })}`);
 });

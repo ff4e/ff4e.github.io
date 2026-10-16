@@ -12,6 +12,7 @@
  * (URoom.pas:3614-3655).
  */
 import type { RoomScript, Script } from '../core/script.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -632,4 +633,11 @@ function prog(s: Script): void {
   }
 }
 
-export const DRAKAR: RoomScript = { name: 'DRAKAR', init, prog };
+/** Undo (a port addition) leaves the dog's barking cycle running, bark and all: it is on
+ *  a timer, not anything the fish did. Before, a bark under way went silent while the dog
+ *  kept barking for the rest of its turn. */
+function restorePresentation(s: Script, previous?: Script): void {
+  if (previous) carryItem(s, previous, R.pesos);
+}
+
+export const DRAKAR: RoomScript = { name: 'DRAKAR', init, prog, restorePresentation, carriedSounds: [351] };
