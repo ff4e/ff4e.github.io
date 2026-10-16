@@ -18,7 +18,7 @@ vi.mock('../src/app/stageGeometry.js', () => ({ stage: { scale: 2 } }));
 import { parseFfp } from '../src/data/ffp.js';
 import { composeOptions, hitTest, NOBLMYSI, OBLMYSI, OBLROH, PANEL_H, PANEL_W, type OptionsState } from '../src/render/hud.js';
 import {
-  composeLandscape, faceSize, fitScale, optionsLayout, SEAM, SPLIT_ROW, toPanelPoint, touchFaceCss,
+  composeLandscape, faceSize, fitScale, fitWithStrip, optionsLayout, SEAM, SPLIT_ROW, toPanelPoint, touchFaceCss,
 } from '../src/app/optionsLayout.js';
 
 const RIGHT_X = PANEL_W - SEAM;
@@ -59,6 +59,18 @@ describe('optionsLayout', () => {
     expect(fitScale(305, 198, 610, 1000)).toBe(2);
     expect(fitScale(305, 198, 1000, 99)).toBe(0.5);
     expect(fitScale(305, 198, -5, 100)).toBe(0);
+  });
+
+  it('fits the strip as it wraps at the face width being decided', () => {
+    // A strip of 30px per line, wrapping every 200px: one line at 832, three at 384.
+    const strip = (w: number) => 30 * Math.ceil(600 / w) + 8;
+    const s = fitWithStrip(305, 198, 832, 373, strip);
+    expect(198 * s + strip(305 * s)).toBeLessThanOrEqual(373);
+    // The answer does not depend on how wide the face happened to be before.
+    expect(s).toBeCloseTo((373 - strip(305 * s)) / 198, 6);
+    // Strictly better than reading the strip at a stale portrait width of 297px.
+    expect(s).toBeGreaterThan((373 - strip(297)) / 198);
+    expect(fitWithStrip(305, 198, 832, 373, () => 0)).toBeCloseTo(373 / 198, 6);
   });
 
   it('keeps the stage scale on a tablet', () => {

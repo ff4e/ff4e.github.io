@@ -112,8 +112,28 @@ export function fitScale(w: number, h: number, availW: number, availH: number): 
   return Math.max(0, Math.min(availW / w, availH / h));
 }
 
+/**
+ * The largest scale at which the face, plus a strip under it whose height depends on the
+ * face's width, fits the box. `stripH(w)` is the strip's height when it wraps at `w`.
+ *
+ * Starts from the strip at its shortest (wrapped at the full box width), so the first
+ * scale is an upper bound; each pass can only make the strip taller and the scale smaller,
+ * so it settles on the largest scale that really fits, normally in two passes.
+ */
+export function fitWithStrip(
+  w: number, h: number, availW: number, availH: number, stripH: (width: number) => number,
+): number {
+  let s = fitScale(w, h, availW, availH - stripH(availW));
+  for (let i = 0; i < 4; i++) {
+    const next = fitScale(w, h, availW, availH - stripH(w * s));
+    if (next >= s) break;
+    s = next;
+  }
+  return s;
+}
+
 let fitKey = '';
-let fitBox = { w: 0, h: 0 };
+let fitSize = { w: 0, h: 0 };
 
 /**
  * The CSS size of the face inside the touch dialog.
@@ -123,6 +143,13 @@ let fitBox = { w: 0, h: 0 };
  * stage scale a landscape phone draws the panel, they are ~7px tall. The box is the
  * dialog's content area less the feedback strip under the face, and it is measured only
  * when the viewport or the face changes, so a steady dialog does no layout work per frame.
+ *
+ * The strip wraps at the face's width, so its height is measured at the width being
+ * decided, never at whatever width the face is showing now. Reading it as it stood made
+ * the answer depend on the canvas's last size: reopened after a moment as a desktop
+ * panel (touch dropped for a frame, as Chrome's emulation does as it rotates), the canvas
+ * was still 63px wide, the strip wrapped a word to a line, and that 117px strip was
+ * cached as if it were the real one — a landscape face three-quarters of its proper size.
  */
 export function touchFaceCss(layout: OptionsLayout): { w: number; h: number } {
   const face = faceSize(layout);
@@ -131,15 +158,26 @@ export function touchFaceCss(layout: OptionsLayout): { w: number; h: number } {
   const key = `${window.innerWidth}x${window.innerHeight}|${layout}`;
   if (key !== fitKey) {
     const cs = getComputedStyle(dialog);
+    // The face's own border (every canvas has one, index.html) sits outside the size set here.
+    const canvas = document.getElementById('panel');
+    const ccs = canvas ? getComputedStyle(canvas) : null;
+    const borderW = ccs ? parseFloat(ccs.borderLeftWidth) + parseFloat(ccs.borderRightWidth) : 0;
+    const borderH = ccs ? parseFloat(ccs.borderTopWidth) + parseFloat(ccs.borderBottomWidth) : 0;
+    const availW = dialog.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - borderW;
+    const availH = dialog.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - borderH;
     const bar = document.getElementById('feedbar');
-    const barH = bar && !bar.hidden ? bar.offsetHeight + parseFloat(getComputedStyle(bar).marginTop || '0') : 0;
-    fitBox = {
-      w: dialog.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
-      h: dialog.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - barH,
+    const stripH = (width: number): number => {
+      if (!bar || bar.hidden) return 0;
+      const was = bar.style.width;
+      bar.style.width = `${Math.floor(width + borderW)}px`;
+      const h = bar.offsetHeight + parseFloat(getComputedStyle(bar).marginTop || '0');
+      bar.style.width = was;
+      return h;
     };
+    const s = availW > 0 && availH > 0 ? fitWithStrip(face.w, face.h, availW, availH, stripH) : 0;
+    fitSize = { w: face.w * s, h: face.h * s };
     // A dialog not laid out yet measures nothing; measure again next frame rather than keep it.
-    fitKey = fitBox.w > 0 && fitBox.h > 0 ? key : '';
+    fitKey = s > 0 ? key : '';
   }
-  const s = fitScale(face.w, face.h, fitBox.w, fitBox.h);
-  return { w: face.w * s, h: face.h * s };
+  return fitSize;
 }

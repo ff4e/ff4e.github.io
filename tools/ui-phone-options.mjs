@@ -22,6 +22,19 @@ export async function checkPhoneOptions(p, expect, label, landscape) {
   expect(face.x >= 0 && face.y >= 0 && face.right <= vp.width && face.bottom <= vp.height &&
     privacy.bottom <= vp.height && privacy.height > 0 && 17 * scale >= 22,
   `${label}: the face and Privacy fit on screen, scaled to ${scale.toFixed(2)}x with finger-sized sliders`);
+  // As large as the dialog allows, judged by the strip as it wraps NOW: a strip measured at
+  // a stale width (the face's previous size) left a landscape face about 3/4 size.
+  const slack = await p.evaluate(() => {
+    const dlg = document.getElementById('touchopts');
+    const cs = getComputedStyle(dlg);
+    const bar = document.getElementById('feedbar');
+    const face = document.getElementById('panel').getBoundingClientRect();
+    const barH = bar.offsetHeight + parseFloat(getComputedStyle(bar).marginTop);
+    return Math.min(
+      dlg.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight) - face.width,
+      dlg.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom) - barH - face.height);
+  });
+  expect(slack > -1 && slack < 2, `${label}: the face fills the dialog (${slack.toFixed(1)}px to spare)`);
 
   const volumes = await p.evaluate(() => window.__ff.volumes());
   const subtitles = await p.evaluate(() => window.__ff.subtitleMode());

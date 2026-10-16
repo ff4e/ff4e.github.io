@@ -883,6 +883,14 @@ try {
   await waitZoom(1);
   await p.locator('#phone-controls').waitFor({ state: 'hidden' });
   expect(await p.locator('#phone-controls').isHidden(), 'map navigation removes camera and corner controls');
+  // Opened upright, then turned: the face is re-cut and re-fitted, not left at its old size.
+  await p.setViewportSize({ width: 393, height: 852 });
+  await p.evaluate(() => window.__ff.openMapOptions());
+  await p.locator('#touchopts #panel').waitFor({ state: 'visible' });
+  await p.waitForFunction(() => { const r = document.getElementById('panel').getBoundingClientRect(); return r.height > r.width; });
+  await p.setViewportSize({ width: 852, height: 393 });
+  await p.waitForFunction(() => { const r = document.getElementById('panel').getBoundingClientRect(); return r.width > r.height; });
+  await checkPhoneOptions(p, expect, 'phone map turned from portrait', true);
   await p.evaluate(() => window.__ff.openMapOptions());
   await checkPhoneOptions(p, expect, 'phone map', true);
   expect(await p.evaluate(() => window.__ff.screen() === 'map'), 'closing Options leaves the phone on the map');
