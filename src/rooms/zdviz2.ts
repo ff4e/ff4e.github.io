@@ -57,7 +57,7 @@ function init(s: Script): void {
 
 function prog(s: Script): void {
   const v = s.vars(R.room);
-  const setDedekMluvi = (x: number) => (s.vars(R.dedek)[R.dedek_mluvi] = x);
+  const setDedekMluvi = (x: number, cur: Script) => (cur.vars(R.dedek)[R.dedek_mluvi] = x);
   const malar = s.item(R.malar);
   const dedek = s.item(R.dedek);
 
@@ -232,4 +232,42 @@ function prog(s: Script): void {
   }
 }
 
-export const ZDVIZ2: RoomScript = { name: 'ZDVIZ2', init, prog };
+/**
+ * Undo (a port addition) and the old man. His shouts come on a random roll while the
+ * painters crowd him, and the painters' chatter on time, so an undo leaves the conversation
+ * where it is: the pending lines, the room's dialogue flags and timers, and the old man's
+ * voice and wave. Before, the rebuild dropped the queue, and a point banked mid-shout kept
+ * `dedek_mluvi` = 101/102 without the callback that ends it: he waved and shouted until his
+ * next line.
+ *
+ * Whether he has been moved (`pohlse`) is the fish's doing and stays the target's, and so
+ * is the remark on spotting him: it fires the moment the painters take up their places, so
+ * when the undone move set it off (`odedkovi` set since the target) it goes with the move.
+ * With a fish dead, the fish's own lines (the death lines) are not carried. A load has no
+ * queue, so it leaves the old man quiet.
+ */
+const TALK_SOUNDS = [1, 2, 101, 102];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  const d = s.vars(R.dedek);
+  if (!previous) {
+    d[R.dedek_mluvi] = 0;
+    return;
+  }
+  const v = s.vars(R.room);
+  if (previous.vars(R.room)[R.room_odedkovi] !== v[R.room_odedkovi]) {
+    d[R.dedek_mluvi] = 0;
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  const live = previous.vars(R.dedek);
+  d[R.dedek_mluvi] = live[R.dedek_mluvi]!;
+  d[R.dedek_mavani] = live[R.dedek_mavani]!;
+  s.item(R.dedek).afaze = previous.item(R.dedek).afaze;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const ZDVIZ2: RoomScript = { name: 'ZDVIZ2', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

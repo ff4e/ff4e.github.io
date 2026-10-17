@@ -61,7 +61,7 @@ function prog(s: Script): void {
       else s.addm(s.random(100) + 50, 'rea-m-proboha');
       s.addv(14, 'rea-v-coto');
       s.addm(6, 'rea-m-nevim');
-      s.addset((val) => (s.vars(R.pld)[R.pld_smutny] = val), 60);
+      s.addset((val, cur) => (cur.vars(R.pld)[R.pld_smutny] = val), 60);
       s.addd(3, 'rea-x-pldik', 101);
     }
     if (w[R.wall_zacni] === 0) {
@@ -205,4 +205,37 @@ function prog(s: Script): void {
   }
 }
 
-export const REAKTOR: RoomScript = { name: 'REAKTOR', init, prog };
+/**
+ * Undo (a port addition) and the blob. The fish's worried talk and the blob's sad spell
+ * run on time (both are queued as the room opens), so an undo leaves the conversation
+ * where it is: the pending lines and the `set` that starts the sulk, the room's dialogue
+ * flags, and the sulk itself (`smutny`, the countdown that `set` starts). Before, the
+ * rebuild dropped the queue, and a point banked before the `set` lost the rest of the talk
+ * and the blob never sulked. The blob's ripples are a push's, so the rest of its state is
+ * the target's (a push that cut the sulk short is not taken back with it).
+ *
+ * The gulp once enough rods are seated is the fish's doing: when the undone move set it
+ * off (`tyce` 1000 live, not in the target), the room is the target's and the gulp goes
+ * with the move; a rod the target point had landing clanks and sets it off again. With a
+ * fish dead, the fish's own lines (the death lines) are not carried. A load has no queue;
+ * the sulk is a countdown and ends on its own, so it needs nothing.
+ */
+const TALK_SOUNDS = [1, 2, 101];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return;
+  const w = s.vars(R.wall);
+  const live = previous.vars(R.wall);
+  if (live[R.wall_tyce] === 1000 && w[R.wall_tyce] !== 1000) {
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  w[R.wall_zacni] = live[R.wall_zacni]!;
+  w[R.wall_pldpred] = live[R.wall_pldpred]!;
+  s.vars(R.pld)[R.pld_smutny] = previous.vars(R.pld)[R.pld_smutny]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const REAKTOR: RoomScript = { name: 'REAKTOR', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

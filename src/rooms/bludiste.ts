@@ -12,6 +12,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -42,8 +43,8 @@ function init(s: Script): void {
 
 function prog(s: Script): void {
   const v = s.vars(R.room);
-  const setZprava = (val: number): void => {
-    s.vars(R.snecek)[R.snecek_zprava] = val;
+  const setZprava = (val: number, cur: Script): void => {
+    cur.vars(R.snecek)[R.snecek_zprava] = val;
   };
 
   if (s.noDialog() && s.alive('little') && s.alive('big')) {
@@ -154,4 +155,37 @@ function prog(s: Script): void {
   }
 }
 
-export const BLUDISTE: RoomScript = { name: 'BLUDISTE', init, prog };
+/**
+ * Undo (a port addition) and the snail. The fish's banter runs on time, and so does the
+ * rhyme with the snail once the little fish has watched it long enough (`rikanka`), so an
+ * undo leaves the conversation where it is: the pending lines, the `set`s that cue the
+ * snail's answers, the room's topic flags and countdown, and the snail mid-answer. Before,
+ * the rebuild dropped the queue, and a point banked mid-rhyme kept `rikanka` = -1 without
+ * the rest of it: the fish fell silent half-way and the snail never answered again.
+ *
+ * Dragging the fly-trap plant is the fish's doing: when the undone move set off the remark
+ * about it (`osundavani` 0 -> 1, only ever while the plant moves), the room is the
+ * target's and the remark goes with the move. With a fish dead, the fish's own lines (the
+ * death lines) are not carried. A load has no queue, so it leaves the snail with no answer
+ * cued.
+ */
+const TALK_SOUNDS = [1, 2];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    s.vars(R.snecek)[R.snecek_zprava] = 0;
+    return;
+  }
+  if (s.vars(R.room)[R.room_osundavani] === 0 && previous.vars(R.room)[R.room_osundavani] === 1) {
+    s.vars(R.snecek)[R.snecek_zprava] = 0;
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  carryItem(s, previous, R.snecek);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const BLUDISTE: RoomScript = { name: 'BLUDISTE', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

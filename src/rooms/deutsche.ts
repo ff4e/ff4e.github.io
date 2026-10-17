@@ -11,6 +11,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -44,8 +45,8 @@ function init(s: Script): void {
 
 function prog(s: Script): void {
   const v = s.vars(R.room);
-  const setLoos = (x: number) => (s.vars(R.loos)[R.loos_cinnost] = x);
-  const setPap = (x: number) => (s.vars(R.papouch)[R.papouch_cinnost] = x);
+  const setLoos = (x: number, cur: Script) => (cur.vars(R.loos)[R.loos_cinnost] = x);
+  const setPap = (x: number, cur: Script) => (cur.vars(R.papouch)[R.papouch_cinnost] = x);
 
   // ---- room dialogue ----
   if (s.noDialog() && s.alive('little') && s.alive('big')) {
@@ -217,4 +218,34 @@ function prog(s: Script): void {
   }
 }
 
-export const DEUTSCHE: RoomScript = { name: 'DEUTSCHE', init, prog };
+/**
+ * Undo (a port addition) and the U-boat's crew. The parrot's orders and the elk's mumbling
+ * come on the room's timer (and the elk's aside on a random roll while the little fish is
+ * near), and the fish speak on time, so an undo leaves the conversation where it is: the
+ * pending lines, the room's dialogue flags and timers, the elk and the parrot. Before, the
+ * rebuild dropped the queue, and a point banked mid-line kept `loos_cinnost` = 101 or
+ * `papouch_cinnost` = 111 without the callback that ends it: the elk or the parrot mouthed
+ * until its next line, and an elk banked before `addset(setLoos, 30)` never shook his head.
+ *
+ * The snail peeks when nudged, which is the fish's doing, so it is left as the target had
+ * it. With a fish dead, the fish's own lines (the death lines) are not carried. A load has
+ * no queue, so it leaves the elk and the parrot quiet.
+ */
+const TALK_SOUNDS = [1, 2, 101, 111];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    if (s.vars(R.loos)[R.loos_cinnost] === 101) s.vars(R.loos)[R.loos_cinnost] = 0;
+    s.vars(R.papouch)[R.papouch_cinnost] = 0;
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  carryItem(s, previous, R.loos);
+  s.vars(R.papouch)[R.papouch_cinnost] = previous.vars(R.papouch)[R.papouch_cinnost]!;
+  s.item(R.papouch).afaze = previous.item(R.papouch).afaze;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const DEUTSCHE: RoomScript = { name: 'DEUTSCHE', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };
