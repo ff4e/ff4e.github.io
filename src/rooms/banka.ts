@@ -892,4 +892,21 @@ function rukaProg(s: Script): void {
   }
 }
 
-export const BANKA: RoomScript = { name: 'BANKA', init, prog };
+/**
+ * Undo (a port addition) restarts `count` from 0 with the rebuilt room, and this room keeps
+ * its schedule of remarks on the creatures (`kdy`, `kdy2`) as absolute `count` values, so the
+ * target point's schedule put the next one as far off again as the time already spent in the
+ * room: after ten minutes of play, an undo silenced them for ten more. The schedule runs on
+ * time, so it plays on: the live one, rebased onto the restarted count, as VES does with its
+ * head's cues. `fuja` (when the little fish last said "fuj") is a `count` too, rebased with
+ * them. The one-time "it is alive" line compares `count` with a sum of the two schedules,
+ * which no rebase keeps exact: after an undo it comes somewhat later.
+ */
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return;
+  const room = s.vars(R.room);
+  const live = previous.vars(R.room);
+  for (const slot of [R.room_kdy, R.room_kdy2, R.room_fuja]) room[slot] = live[slot]! - previous.count + s.count;
+}
+
+export const BANKA: RoomScript = { name: 'BANKA', init, prog, restorePresentation };
