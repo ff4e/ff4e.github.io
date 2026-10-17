@@ -258,7 +258,11 @@ describe('KAJUTA1', () => {
   it('lets the screen-shove reaction banked mid-way end the shove', () => {
     const h = roomHarness('KAJUTA1', () => 25);
     h.play();
-    const reacting = () => h.s().vars(0)[6] === 1 && h.s().room.gspec !== 0;
+    const reacting = () => {
+      // A line queued on the tick the shove lands turns it back into 3: shove again.
+      if (h.s().vars(0)[6] === 0 && h.s().room.gspec === 3 && h.s().noDialog()) h.s().room.gspec = 4;
+      return h.s().vars(0)[6] === 1 && h.s().room.gspec !== 0;
+    };
     strandArmed(
       h,
       () => {
