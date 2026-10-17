@@ -243,7 +243,8 @@ function prog(s: Script): void {
  * Whether he has been moved (`pohlse`) is the fish's doing and stays the target's, and so
  * is the remark on spotting him: it fires the moment the painters take up their places, so
  * when the undone move set it off (`odedkovi` set since the target) it goes with the move.
- * With a fish dead, the fish's own lines (the death lines) are not carried. A load has no
+ * A push sets off shouts too (`dir <> dir_no`, 2% a tick): when the undone move shifted him,
+ * his lines go with it, while the fish's carry. With a fish dead, the fish's own lines (the death lines) are not carried. A load has no
  * queue, so it leaves the old man quiet.
  */
 const TALK_SOUNDS = [1, 2, 101, 102];
@@ -261,13 +262,19 @@ function restorePresentation(s: Script, previous?: Script): void {
     return;
   }
   s.item(R.room).vars = [...previous.item(R.room).vars];
-  const live = previous.vars(R.dedek);
-  d[R.dedek_mluvi] = live[R.dedek_mluvi]!;
-  d[R.dedek_mavani] = live[R.dedek_mavani]!;
-  s.item(R.dedek).afaze = previous.item(R.dedek).afaze;
-  const dead = previous.room.anyFishDead ? [1, 2] : [];
-  for (const p of dead) s.ksnd(p);
-  s.adoptDialogue(previous, dead);
+  const was = previous.item(R.dedek);
+  const shifted = was.x !== s.item(R.dedek).x || was.y !== s.item(R.dedek).y;
+  if (shifted) {
+    d[R.dedek_mluvi] = 0;
+  } else {
+    const live = previous.vars(R.dedek);
+    d[R.dedek_mluvi] = live[R.dedek_mluvi]!;
+    d[R.dedek_mavani] = live[R.dedek_mavani]!;
+    s.item(R.dedek).afaze = was.afaze;
+  }
+  const drop = [...(previous.room.anyFishDead ? [1, 2] : []), ...(shifted ? [101, 102] : [])];
+  for (const p of drop) s.ksnd(p);
+  s.adoptDialogue(previous, drop);
 }
 
 export const ZDVIZ2: RoomScript = { name: 'ZDVIZ2', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

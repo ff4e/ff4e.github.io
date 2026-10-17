@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as game from '../src/app/gameState.js';
 import { undoMove } from '../src/app/undo.js';
 import { Dir } from '../src/core/dir.js';
+import { ZDVIZ2 } from '../src/rooms/zdviz2.js';
 import { roomHarness } from './undoRoomHarness.js';
 import { restoreRandom, seedRandom } from './rng.js';
 
@@ -153,6 +154,24 @@ describe('ZDVIZ2', () => {
     expect(h.s().vars(0)[2]).toBe(0);
     expect(h.mix.playing(1)).toBe(false);
     expect(h.mix.playing(2)).toBe(false);
+    expect(mluvi(h)).toBe(0);
+  });
+
+  it('takes back a shout the undone push set off, and carries the fish', () => {
+    // The recorded solution never pushes him, so the live script is set up by hand: he has
+    // been shifted a cell, shouts (a push rolls that, 2% a tick), and a fish line waits.
+    const live = roomHarness('ZDVIZ2', () => 25).s();
+    live.addd(0, 'zd2-x-krik1', 102, (val, cur) => (cur.vars(6)[1] = val));
+    live.addm(0, 'zd2-m-nevid0');
+    live.dialogy(live.count);
+    expect(live.vars(6)[1]).toBe(102);
+    live.item(6).x += 1;
+    const h = roomHarness('ZDVIZ2', () => 25);
+    ZDVIZ2.restorePresentation!(h.s(), live);
+    expect(mluvi(h)).toBe(0);
+    h.tick();
+    expect(h.mix.on(1)).toBe('zd2-m-nevid0'); // the fish's line, next in the carried queue
+    expect(h.mix.playing(102)).toBe(false);
     expect(mluvi(h)).toBe(0);
   });
 });
