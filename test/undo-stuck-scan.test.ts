@@ -13,17 +13,21 @@
  * (`undoRoomHarness.ts`) with every queued callback wrapped, noting which callbacks are
  * pending at each banked undo point — queued, or the end-of-line call of the line being
  * spoken — and what each one writes when it fires. Pass 2, for each distinct pending
- * callback and phase, replays to the first point it was pending at, plays the next move,
- * undoes onto the point, idles, and then plays out the rest of the solution. A write the
+ * callback and phase, replays to a point it was pending at (the first, or several spread
+ * over all of them: `FF_UNDO_SCAN_SAMPLES`), plays the next move, undoes onto the point,
+ * idles, and then plays out the rest of the solution. A write the
  * room never makes again is reported in `out/undo-stuck-scan/`. `firedBeforeUndo` marks a
  * callback that already ran during the next move: in a room that carries its queue that is
  * not a strand. Whether a finding matters is a reading of the room's script; this only
- * finds candidates, and it cannot see a state the solution never reaches, nor the middle
- * of a sequence it first met at the start.
+ * finds candidates, and it cannot see a state the solution never reaches. With one sample
+ * it also misses the middle of a sequence it first met at the start, and a later repeat of
+ * a callback whose first occurrence was harmless.
  *
  * Options: `FF_TEST_SEED`, `FF_UNDO_SCAN_WAIT` (ticks to sit still after each move, so
  * idle-triggered sequences get a chance to start), `FF_UNDO_SCAN_IDLE` (ticks after the
  * undo, default 3000), `FF_UNDO_SCAN_PER_ROOM` (signatures per room, default 40),
+ * `FF_UNDO_SCAN_SAMPLES` (points per signature, spread from its first occurrence to its
+ * last, default 1: the first only),
  * `FF_UNDO_SCAN_SKIP` (rooms to leave out: LODE's endless match exhausts memory with a
  * wait), and `FF_UNDO_SCAN_NOADOPT` (disable `adoptDialogue`, to see the scan find the
  * strands the carrying rooms fixed).
@@ -50,6 +54,7 @@ vi.mock('../src/platform/haptics.js', () => ({ hapticBlocked: vi.fn() }));
 const SCAN = process.env.FF_UNDO_SCAN ?? '';
 const IDLE = Number(process.env.FF_UNDO_SCAN_IDLE ?? 3000);
 const PER_ROOM = Number(process.env.FF_UNDO_SCAN_PER_ROOM ?? 40);
+const SAMPLES = Math.max(1, Number(process.env.FF_UNDO_SCAN_SAMPLES ?? 1));
 /** Ticks to sit still after each move, so idle-triggered callbacks get a chance to queue. */
 const WAIT = Number(process.env.FF_UNDO_SCAN_WAIT ?? 0);
 const OUT = join(process.cwd(), 'out', 'undo-stuck-scan', `seed${process.env.FF_TEST_SEED ?? 1}-wait${WAIT}`);
@@ -197,30 +202,35 @@ function scanRoom(jmeno: string): RoomResult {
   };
   const d = drive(jmeno, label);
   const seen: { tag: Tag; speaking: boolean; move: number; tick: number }[] = [];
-  const seenIds = new Set<string>();
   const guard = d.steps.length * (80 + WAIT) + 20_000;
   for (; tick < guard && !d.over(); tick++) {
     d.step();
     if (d.banked && d.mi < d.steps.length)
-      for (const { tag: t, speaking } of pending(d.h.s())) {
-        const key = `${t.id}${speaking}`;
-        if (!seenIds.has(key)) { seenIds.add(key); seen.push({ tag: t, speaking, move: d.mi, tick }); }
-      }
+      for (const { tag: t, speaking } of pending(d.h.s())) seen.push({ tag: t, speaking, move: d.mi, tick });
     if (d.mi >= d.steps.length && game.engine!.phase === 'idle' && d.h.s().noDialog()) break;
   }
   for (let i = 0; i < 300 && !d.over(); i++, tick++) d.step();
   const won = game.engine!.won || game.room!.won;
   const linesControl = d.h.mix.started.length;
-  const bySig = new Map<string, Candidate>();
+  // Every point each signature was pending at, in order; each one that writes is a candidate.
+  const bySig = new Map<string, Candidate[]>();
   for (const { tag, speaking, move, tick: at } of seen) {
     const sig = `${speaking ? 'speaking' : 'queued'}|${tag.zvuk}|${tag.value}|${tag.src}`;
-    if (bySig.has(sig)) continue;
-    const after = (fired.get(tag.id) ?? []).filter((f) => f.tick >= at);
+    // Strictly after: a callback that fired on the banking tick ran before the sample
+    // (`dialogy` precedes `sampleUndoPoint`), so the point already holds what it wrote.
+    const after = (fired.get(tag.id) ?? []).filter((f) => f.tick > at);
     const writes = after.flatMap((f) => f.writes);
     if (writes.length === 0) continue;
-    bySig.set(sig, { sig, tag, move, bankTick: at, writes, firedAfter: after[0]!.tick - at });
+    const all = bySig.get(sig) ?? [];
+    all.push({ sig, tag, move, bankTick: at, writes, firedAfter: after[0]!.tick - at });
+    bySig.set(sig, all);
   }
-  const candidates = [...bySig.values()].slice(0, PER_ROOM);
+  const spread = (all: Candidate[]): Candidate[] => {
+    if (SAMPLES === 1 || all.length <= SAMPLES) return all.slice(0, SAMPLES);
+    const at = new Set(Array.from({ length: SAMPLES }, (_, k) => Math.round((k * (all.length - 1)) / (SAMPLES - 1))));
+    return [...at].map((i) => all[i]!);
+  };
+  const candidates = [...bySig.values()].slice(0, PER_ROOM).flatMap(spread);
   onFire = () => {};
 
   // Pass 2: undo onto each point, idle, play on; which writes never happen again?
