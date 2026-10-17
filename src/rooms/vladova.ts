@@ -11,6 +11,7 @@
  * existing primitives.
  */
 import type { RoomScript, Script } from '../core/script.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -144,7 +145,7 @@ function prog(s: Script): void {
       v[R.room_ohaku] = 1;
       s.addm(20, 'vl-m-hak');
       s.addv(s.random(10) + 5, 'vl-v-lodni');
-      s.addd(3, 'vl-x-site', 301, (val) => (s.vars(R.hakahak)[R.hakahak_cinnost] = val));
+      s.addd(3, 'vl-x-site', 301, (val, cur) => (cur.vars(R.hakahak)[R.hakahak_cinnost] = val));
     } else if (v[R.room_kecdel1] === 0) {
       v[R.room_kecdel1] = -1;
       pom1 = v[R.room_kec1]!;
@@ -172,7 +173,7 @@ function prog(s: Script): void {
         30,
         'vl-leb-kecy' + digit(pom1),
         pom2,
-        (val) => (s.vars(R.lebkic)[R.lebkic_cinnost] = val),
+        (val, cur) => (cur.vars(R.lebkic)[R.lebkic_cinnost] = val),
       );
     }
   }
@@ -383,4 +384,31 @@ function prog(s: Script): void {
   diamondSparkle(s, R.diamant2, R.diamant2_faze);
 }
 
-export const VLADOVA: RoomScript = { name: 'VLADOVA', init, prog };
+/**
+ * Undo (a port addition) and the cabin's talkers. The skull's chatter, the hook's line and
+ * the fish's remarks run on time, so an undo leaves the conversation where it is: the
+ * pending lines, the room's topic timers and the talkers' state. Before, the rebuild
+ * dropped the queue, and a point banked mid-line kept `lebkic_cinnost` (101/102) or
+ * `hakahak_cinnost` (301) without the callback that ends it: the skull's jaw flapped until
+ * its next line, and the hook, whose line is said once, flapped for the rest of the visit.
+ *
+ * With a fish dead, the fish's own lines (the death lines) are not carried. A load has no
+ * queue, so it leaves the skull and the hook quiet.
+ */
+const TALK_SOUNDS = [1, 2, 101, 102, 301];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    s.vars(R.lebkic)[R.lebkic_cinnost] = 0;
+    s.vars(R.hakahak)[R.hakahak_cinnost] = 0;
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  carryItem(s, previous, R.lebkic);
+  carryItem(s, previous, R.hakahak);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const VLADOVA: RoomScript = { name: 'VLADOVA', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

@@ -166,15 +166,15 @@ function prog(s: Script): void {
         if (s.random(100) < 80) s.addm(s.random(10) + 5, 'ch-m-vubec');
       }
       room[R.room_cpsa] = s.random(2);
-      const setP = (val: number): void => {
-        room[R.room_pesmluvi] = val;
+      const setP = (val: number, cur: Script): void => {
+        cur.vars(R.room)[R.room_pesmluvi] = val;
       };
       s.addd(s.random(20), 'ch-r-nevsimej' + digit(s.random(3)), 10, setP);
       s.addd(s.random(20), 'ch-r-hracka', 10, setP);
       s.addd(10 + s.random(20), 'ch-r-ikdyz' + digit(s.random(4)), 10, setP);
       s.addd(10 + s.random(20), 'ch-r-anavic' + String.fromCharCode(pom1), 10, setP);
-      s.addset((val) => {
-        room[R.room_nerusit] = val;
+      s.addset((val, cur) => {
+        cur.vars(R.room)[R.room_nerusit] = val;
       }, 0);
     } else if (
       room[R.room_rpesmala] === 0 &&
@@ -264,4 +264,40 @@ function prog(s: Script): void {
   flapItem(s, R.poklop1, R.poklop1_faze, R.poklop1_pocit, 3);
 }
 
-export const CHODBA: RoomScript = { name: 'CHODBA', init, prog };
+/**
+ * Undo (a port addition) and the robot dogs. The dogs' banter and the fish's remarks in the
+ * dark run on time, so an undo leaves the conversation where it is: the pending lines and
+ * the slots they act on. Before, the rebuild dropped the queue, and a point banked mid-dog
+ * line kept `pesmluvi` = 10 without the `set` that ends it, so a dog mouthed for the rest of
+ * the visit; banked before the banter's last `set`, `nerusit` stayed 1 and the light switch
+ * never cut a remark again.
+ *
+ * The switch is the fish's doing: its state, the darkness and its `bliknul` count come from
+ * the target. Remarks on a switching the undo took back (the count differs, no banter
+ * running) go with it. With a fish dead, the fish's own lines (the death lines) are not
+ * carried. A load has no queue, so it leaves the dogs quiet and the switch free.
+ */
+const TALK_SOUNDS = [1, 2, 10];
+const DOGS = [R.room_rpesvelka, R.room_nerusit, R.room_cpsa, R.room_pesmluvi];
+const REMARKS = [R.room_tma, R.room_last, R.room_rpesmala];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  const room = s.vars(R.room);
+  if (!previous) {
+    room[R.room_pesmluvi] = 0;
+    room[R.room_nerusit] = 0;
+    return;
+  }
+  const live = previous.vars(R.room);
+  for (const slot of DOGS) room[slot] = live[slot]!;
+  if (live[R.room_nerusit] !== 1 && live[R.room_bliknul] !== room[R.room_bliknul]) {
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  for (const slot of REMARKS) room[slot] = live[slot]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const CHODBA: RoomScript = { name: 'CHODBA', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

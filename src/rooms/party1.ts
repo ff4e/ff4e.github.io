@@ -11,6 +11,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -119,8 +120,8 @@ function prog(s: Script): void {
     } else if (v[R.room_uvod2] === 0) {
       s.addv(s.random(20) + 20, 'pt1-v-predtucha');
       s.addm(0, 'pt1-m-predtucha');
-      s.addset((x) => (s.globpole[1] = x), 0);
-      s.addset((x) => (s.globpole[2] = x), 0);
+      s.addset((x, cur) => (cur.globpole[1] = x), 0);
+      s.addset((x, cur) => (cur.globpole[2] = x), 0);
       v[R.room_uvod2] = 1;
     } else if (v[R.room_uvod2] === 1 && (s.globpole[1] !== 0 || s.globpole[2] !== 0)) {
       v[R.room_uvod2] = 2;
@@ -412,4 +413,53 @@ function prog(s: Script): void {
   }
 }
 
-export const PARTY1: RoomScript = { name: 'PARTY1', init, prog };
+/**
+ * Undo (a port addition) and the party. The intro, the passengers and their window locks
+ * run on time, so an undo leaves them where they are, pending lines included. Before, the
+ * rebuild dropped the queue: a point banked mid-intro kept the two windows locked
+ * (`globpole[1..2]` = 1, from `init`) without the `set`s that free them, so no passenger
+ * ever came to a window again. The locks and the passengers who hold them go together.
+ *
+ * The cylinder remark and the spilled-drinks warning are the fish's doing: when the undone
+ * move set one off, the room is the target's and its lines go with the move. With a fish
+ * dead, the fish's own lines (the death lines) are not carried. A load has no queue, so it
+ * frees every window no passenger is standing in, as the intro's `set`s would have.
+ */
+const PASSENGERS = [R.frkavec, R.dama, R.kapitan, R.lodnik];
+
+/** Free the windows nobody holds: the intro's `set`s, once the intro has been queued. */
+function settle(s: Script): void {
+  if (s.vars(R.room)[R.room_uvod2] === 0) return;
+  const fv = s.vars(R.frkavec);
+  const held = [fv[R.frkavec_cinnost] === 1 && fv[R.frkavec_faze]! <= 9 ? fv[R.frkavec_okno] : 0];
+  for (const [i, cinnost, okno] of [
+    [R.dama, R.dama_cinnost, R.dama_okno],
+    [R.kapitan, R.kapitan_cinnost, R.kapitan_okno],
+    [R.lodnik, R.lodnik_cinnost, R.lodnik_okno],
+  ] as const)
+    held.push(s.vars(i)[cinnost]! > 0 ? s.vars(i)[okno] : 0);
+  for (const okno of [1, 2]) s.globpole[okno] = held.includes(okno) ? 1 : 0;
+}
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return settle(s);
+  const target = s.vars(R.room);
+  const live = previous.vars(R.room);
+  if (
+    (target[R.room_ovalci] === 0 && live[R.room_ovalci] === 1) ||
+    (target[R.room_nevylit] === 0 && live[R.room_nevylit] === 1)
+  ) {
+    s.ksnd(1);
+    s.ksnd(2);
+    return settle(s);
+  }
+  s.item(R.room).vars = [...live];
+  for (const i of PASSENGERS) carryItem(s, previous, i);
+  s.globpole[1] = previous.globpole[1]!;
+  s.globpole[2] = previous.globpole[2]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const PARTY1: RoomScript = { name: 'PARTY1', init, prog, restorePresentation, carriedSounds: [1, 2] };
