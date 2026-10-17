@@ -177,12 +177,67 @@ Neither is fixable without inventing audio, which is out of scope for a faithful
 Should a build of the 1998 data containing them ever surface, both could be added by
 extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
+## Undo and load: 🟡 what they still do not keep
+
+Accepted, or faithful to the original. Triaged 2026-10-17 after the per-room undo fixes
+(see the undo entries under Resolved).
+
+- **An undo back across a death restart** (accepted, Martin, 2026-10-17). `restorePresentation`
+  is handed the fresh attempt's script as `previous`. A room that carries its conversation
+  or its schedule therefore takes the new attempt's, and a line may be said again: DRAKAR,
+  DRAKAR1, LODE and the rooms of the "Undo …" entries under Resolved. A room cannot tell this
+  undo from any other, so a fix would need a signal from the generic undo code. VES guards
+  its head on its own.
+- **A load made mid-sequence.** The original saves mid-dialogue (`CanSave`, `URoom.pas:26900`)
+  and stores every item's Vars, not the queue (`uloz_promenne`, `URoom.pas:1721`). A load then
+  restores, say, a talking flag with nothing queued to clear it, and the port does the same.
+  Only rooms that carry their conversation through undo also settle such a load (their
+  `restorePresentation` without `previous`). The others are left as in 1998.
+- **`count` on a load.** `TRoom.Load` runs `InitItems`, which sets `count:=0`
+  (`URoom.pas:1905`, `1479`). `count` then ticks only during the replay, and absolute `count`
+  schedules restored from the save are not rebased. The port does the same. Only undo rebases
+  (ZAVAL, TRUP, UTES, BANKA, PRVNI, VES).
+- **BANKA's one-time "it is alive" line** compares `count` with `(10000 - kdy - kdy2) / 16`.
+  No rebase keeps that exact, so after an undo it comes somewhat later.
+- **What the scan can see.** `test/undo-stuck-scan.test.ts` tests only states the committed
+  solutions reach. With `FF_UNDO_SCAN_SAMPLES` > 1 it also tests later repeats and the middle
+  of a sequence, not only the first time each callback is pending. A transient strand that
+  the next occurrence repairs before the solution ends (POHON's quarrel) passes unseen.
+
 ## Excluded by design (not issues)
 
 - **ZAVER #71** — non-playable ending screen.
 - **SCORE #72** — non-playable results screen.
 
 ## Resolved
+
+### 🟠 Undo cut lines, left talkers mouthing and replayed openings in 14 more rooms — fixed 2026-10-17
+
+Follow-up to the two undo entries below, by the same cause: the rebuild drops the queue,
+restores the target's Vars and restarts the room's own time-driven state.
+
+- **Lines cut** (nothing stuck): BARELY's slime, BLUDISTE's rhyme with the snail, ZELVA's
+  "it's a turtle!", REAKTOR's sulking blob, JEDNICKY's clam, BOTTLES' grinning totem.
+- **Talkers left mouthing until their next line:** the ZDVIZ1/ZDVIZ2 old man, DEUTSCHE's elk
+  and parrot, POHON's prisoners (quarrel faces until the next quarrel), and MAPA's nine
+  snails, frozen for minutes. MAPA was found by the scan's new sampling (`FF_UNDO_SCAN_SAMPLES`).
+- **Performances restarted:** BATHROOM's whirlpool loop restarted, and its `tvor` stayed set
+  until a creature loop next played. BANKA's slime colony started over from one blob.
+- **Openings replayed after every undo:** MAPA's intro (`count = 10 + pokus`) and BATYSKAF's
+  first remark (`count = 20`) are timed on `count` alone, and the rebuild restarts `count`.
+
+These rooms now carry their conversation, as decided for NPC lines on 2026-10-16. The rules
+are those of the entry below: callbacks act on the script running them, and dialogue state
+and talkers come from the live script. A remark the undone move set off goes with the move,
+a dead fish's lines do not carry, and a load leaves nobody mid-line. BATHROOM carries the
+whirlpool and its gurgle. BANKA hands the live colony to the rebuilt script. MAPA and
+BATYSKAF mark a script rebuilt after the opening's moment, and the guard sits beside the
+faithful condition in `prog`. A load still replays them, as the original does.
+
+Covered by `test/undo-cut-lines.test.ts`, `test/undo-talkers.test.ts` and the MAPA cases in
+`test/undo-strands.test.ts`. BATHROOM and BANKA are in `test/undo-ambience.test.ts`, the
+openings in `test/undo-schedules.test.ts`. Every carry case fails with the rooms reverted.
+The "takes it back" cases guard against carrying too much.
 
 ### 🟡 Undo held back rooms' scheduled remarks — fixed 2026-10-17
 
@@ -243,13 +298,13 @@ Each of these rooms now carries its conversation as DRAKAR and LODE do:
 
 Covered by `test/undo-strands.test.ts`. Every strand case fails with its room reverted.
 
-**Not changed:**
-- An undo still cuts a line without leaving anything stuck in BARELY, BLUDISTE, ZELVA,
-  REAKTOR, JEDNICKY and BOTTLES.
-- A talker banked mid-line mouths until its next line in ZDVIZ1/ZDVIZ2, DEUTSCHE and
-  POHON (its quarrel faces).
+**Not changed here:**
+- An undo still cut a line in BARELY, BLUDISTE, ZELVA, REAKTOR, JEDNICKY and BOTTLES. A talker
+  banked mid-line mouthed until its next line in ZDVIZ1/ZDVIZ2, DEUTSCHE and POHON. Both fixed
+  on 2026-10-17 (see the entry above).
 - An undo back across a death restart hands the rooms that carry the fresh attempt's
-  conversation, so a line may be said again. DRAKAR, DRAKAR1 and LODE do the same.
+  conversation, so a line may be said again. DRAKAR, DRAKAR1 and LODE do the same. Accepted
+  (see "Undo and load: what they still do not keep").
 
 ### 🟠 Undo stopped, restarted or stranded rooms' own performances — fixed 2026-10-16
 
