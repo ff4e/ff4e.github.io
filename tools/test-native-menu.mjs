@@ -1,6 +1,6 @@
 /**
  * Shared touch skin: browser-default activation, paired geometry with phone insets on the
- * SAME live controls, native-input operation, focus and reduced motion.
+ * SAME live controls, the original Options face, and reduced motion.
  * The diagnostic hook toggles paint for comparisons, never for initial activation.
  * FF_NATIVE_EVIDENCE saves comparison screenshots.
  */
