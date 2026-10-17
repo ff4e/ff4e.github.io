@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { VES } from '../src/rooms/ves.js';
-import { roomHarness } from './undoRoomHarness.js';
+import { roomHarness, undoOnto } from './undoRoomHarness.js';
 import { restoreRandom, seedRandom } from './rng.js';
 
 vi.mock('../src/app/frameClock.js', () => ({ wake: vi.fn() }));
@@ -134,5 +134,55 @@ describe('VES', () => {
     const restored = broken.filter(([i]) => h.s().vars(i)[STAV]! <= 2);
     expect(restored.length).toBeGreaterThan(0);
     for (const [, p] of restored) expect(h.mix.playing(p)).toBe(true);
+  });
+});
+
+describe('BATHROOM', () => {
+  const WHIRLPOOL = 9; // tvor Var 1: the creature is out, between the loop's S1,1 and S1,0
+  const out = (h: ReturnType<typeof roomHarness>) => h.s().vars(WHIRLPOOL)[1] === 1;
+
+  it('plays the whirlpool loop on through an undo, and the creature goes back in', () => {
+    const h = roomHarness('BATHROOM', lengths);
+    h.play();
+    for (let i = 0; i < 20 && !undoOnto(h, () => out(h) && h.s().item(WHIRLPOOL).anim !== ''); i++);
+    const it = h.s().item(WHIRLPOOL);
+    expect(out(h)).toBe(true);
+    expect(it.anim).not.toBe(''); // carried, not restarted by the rebuild
+    const loop = it.anim;
+    h.until(() => !out(h), 400);
+    expect(h.s().item(WHIRLPOOL).anim).toBe(loop); // its own S1,0, in the same loop
+  });
+
+  it('keeps the gurgle playing, not restarted, through an undo', () => {
+    const h = roomHarness('BATHROOM', lengths);
+    h.move();
+    h.move();
+    h.s().snd('br-x-pracka', 105);
+    const voice = h.mix.sounding.get(105);
+    h.undo();
+    expect(h.mix.sounding.get(105)).toBe(voice);
+    expect(h.mix.playing(105)).toBe(true);
+  });
+});
+
+describe('BANKA', () => {
+  const PLDICEK = 51; // 27 items, one per cell of the colony's cage; 36 is an empty cell
+  const frames = (h: ReturnType<typeof roomHarness>) =>
+    Array.from({ length: 27 }, (_, i) => h.s().item(PLDICEK + i).afaze);
+  const blobs = (h: ReturnType<typeof roomHarness>) => frames(h).filter((f) => f !== 36).length;
+
+  it('keeps the slime colony growing through an undo, not started over', () => {
+    const h = roomHarness('BANKA', lengths);
+    h.move();
+    h.until(() => blobs(h) >= 3, 20000);
+    h.move();
+    const before = frames(h);
+    h.undo();
+    expect(frames(h)).toEqual(before);
+    // A blob mid-hop leaves its cell empty for a moment, so count at the busiest tick. A
+    // colony started over is one blob, which does not divide for its first 200 ticks.
+    let most = 0;
+    for (let i = 0; i < 100; i++, h.tick()) most = Math.max(most, blobs(h));
+    expect(most).toBeGreaterThanOrEqual(3);
   });
 });

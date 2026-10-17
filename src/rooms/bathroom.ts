@@ -12,6 +12,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -177,4 +178,16 @@ function prog(s: Script): void {
   }
 }
 
-export const BATHROOM: RoomScript = { name: 'BATHROOM', init, prog };
+/**
+ * Undo (a port addition) and the whirlpool. Its loop runs on time, so an undo leaves it
+ * where it is: the Anim cursor, the frame, `tvor` and the gurgle (105). Before, the rebuild
+ * restarted the loop and restored `tvor` without the Anim whose `S1,0` clears it, so a point
+ * banked inside a creature loop kept the creature "out", gurgling and drawing the fish's
+ * remarks, until it next played one of those two loops. A load is left as the original's:
+ * `uloz_promenne` saves the Vars and not the Anim.
+ */
+function restorePresentation(s: Script, previous?: Script): void {
+  if (previous) carryItem(s, previous, R.whirlpool);
+}
+
+export const BATHROOM: RoomScript = { name: 'BATHROOM', init, prog, restorePresentation, carriedSounds: [105] };
