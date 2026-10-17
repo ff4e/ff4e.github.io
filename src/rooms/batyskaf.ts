@@ -44,6 +44,9 @@ const R = {
 const odd = (n: number): boolean => (n & 1) !== 0;
 const digit = (n: number): string => String.fromCharCode(48 + n);
 
+/** Scripts an undo rebuilt after the opening remark's moment had passed (`restorePresentation`). */
+const opened = new WeakSet<Script>();
+
 function init(s: Script): void {
   const v = s.vars(R.main, 10);
   v[R.main_aktivni] = R.main;
@@ -160,7 +163,7 @@ function prog(s: Script): void {
 
   // ---- fish comments (microscope / headset / calm-down / phone pick-up nudges) ----
   if (s.noDialog() && s.alive('little') && s.alive('big')) {
-    if (s.count === 20 && s.random(s.pokus) < 3) {
+    if (s.count === 20 && !opened.has(s) && s.random(s.pokus) < 3) {
       s.addm(5, 'bat-m-tohle');
     } else if (
       v[R.main_mikros] === 0 &&
@@ -323,11 +326,16 @@ function ringPhone(
  * the snail stops mid-line. The gadget machine (`aktivni`) is the target's. With a fish
  * dead, the fish's own lines (the death lines) are not carried. A load has no queue, so
  * it leaves the operator and the snail silent and the phones free.
+ *
+ * The little fish's opening remark is timed on `count` alone (`count = 20`), and the rebuild
+ * starts `count` again from 0, so every undo replayed it. A script rebuilt once that moment
+ * has passed is marked, and the remark is not made again; a load is left as the original's.
  */
 const TALK_SOUNDS = [1, 2, 49, 111];
 const DIALOGUE_SLOTS = [R.main_mikros, R.main_nemam, R.main_odsud, R.main_pronej, R.main_uhnu, R.main_teduz];
 
 function restorePresentation(s: Script, previous?: Script): void {
+  if (previous && (opened.has(previous) || previous.count >= 20)) opened.add(s);
   const v = s.vars(R.main);
   if (!previous || (v[R.main_halo] !== 2 && previous.vars(R.main)[R.main_halo] === 2)) {
     if (previous) for (const p of TALK_SOUNDS) s.ksnd(p);

@@ -20,6 +20,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -70,7 +71,7 @@ function init(s: Script): void {
 
 function prog(s: Script): void {
   const v = s.vars(R.room);
-  const setDedekMluvi = (x: number) => (s.vars(R.dedek)[R.dedek_mluvi] = x);
+  const setDedekMluvi = (x: number, cur: Script) => (cur.vars(R.dedek)[R.dedek_mluvi] = x);
 
   // ---- room dialogue (both painters alive, no active dialogue) ----
   if (s.alive('little') && s.alive('big') && s.noDialog()) {
@@ -202,4 +203,38 @@ function prog(s: Script): void {
   }
 }
 
-export const ZDVIZ1: RoomScript = { name: 'ZDVIZ1', init, prog };
+/**
+ * Undo (a port addition) and the old man. His grumbles come on a random roll and the
+ * painters' chatter on time, so an undo leaves the conversation where it is: the pending
+ * lines, the room's dialogue flags and the old man. Before, the rebuild dropped the queue,
+ * and a point banked mid-grumble kept `dedek_mluvi` = 101 without the callback that ends
+ * it: his mouth flapped until his next grumble.
+ *
+ * The ride remarks are the fish's doing: they fire the moment a painter's ride on the lift
+ * reaches its count, so a remark the undone move set off (`jizdam`/`jizdav` spent since the
+ * target) goes with it, and the rides are counted again. With a fish dead, the fish's own
+ * lines (the death lines) are not carried. A load has no queue, so it leaves the old man
+ * quiet.
+ */
+const TALK_SOUNDS = [1, 2, 101];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    s.vars(R.dedek)[R.dedek_mluvi] = 0;
+    return;
+  }
+  const v = s.vars(R.room);
+  const live = previous.vars(R.room);
+  if (live[R.room_jizdam] !== v[R.room_jizdam] || live[R.room_jizdav] !== v[R.room_jizdav]) {
+    s.vars(R.dedek)[R.dedek_mluvi] = 0;
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  carryItem(s, previous, R.dedek);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const ZDVIZ1: RoomScript = { name: 'ZDVIZ1', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

@@ -9,6 +9,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -91,7 +92,7 @@ function prog(s: Script): void {
     } else if (v[R.room_osklebakovi] === 0) {
       s.addv(50, 'bot-v-vsim');
       s.addm(s.random(20), 'bot-m-vypada');
-      s.addset((val) => (s.vars(R.sklebak)[R.sklebak_cinnost] = val), 10);
+      s.addset((val, cur) => (cur.vars(R.sklebak)[R.sklebak_cinnost] = val), 10);
       v[R.room_osklebakovi] = -1;
     } else if (v[R.room_osklebu] === 0 && s.playing(110)) {
       v[R.room_osklebu] = 1;
@@ -161,4 +162,41 @@ function prog(s: Script): void {
   if (s.count % 2 === 1) s.item(R.lebzna).afaze = (s.item(R.lebzna).afaze + 1) % 4;
 }
 
-export const BOTTLES: RoomScript = { name: 'BOTTLES', init, prog };
+/**
+ * Undo (a port addition) and the totem. It laughs or growls on a timer, and the fish's
+ * intro and their remark on it (`bot-v-vsim`, then the `set` that makes it grin) run on
+ * time too, so an undo leaves the conversation where it is: the pending lines and `set`,
+ * the room's dialogue flags and timers, and the totem, its voice (prior 110) playing on.
+ * Before, the rebuild dropped the queue: a point banked after the remark was queued kept
+ * `osklebakovi` = -1 without the `set`, so the totem never grinned, and its laugh was cut.
+ *
+ * The other remarks are set off by the fish: the little fish climbing (`uvod` 2), near the
+ * skull, the idol or the totem, the relics they toppled. A remark the undone move set off
+ * goes with it; the totem, on its own clock, plays on. With a fish dead, the fish's own
+ * lines (the death lines) are not carried. A load has no queue and leaves the totem to
+ * settle itself: it waits only on its own voice.
+ */
+const TALK_SOUNDS = [1, 2];
+
+function setOffByFish(v: number[], live: number[]): boolean {
+  return (
+    [R.room_olebce, R.room_odrackovi, R.room_opadu].some((slot) => live[slot] !== v[slot]) ||
+    (v[R.room_uvod] === 2 && live[R.room_uvod] !== 2) ||
+    (v[R.room_osklebu] !== 2 && live[R.room_osklebu] === 2)
+  );
+}
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return;
+  carryItem(s, previous, R.sklebak);
+  if (setOffByFish(s.vars(R.room), previous.vars(R.room))) {
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const BOTTLES: RoomScript = { name: 'BOTTLES', init, prog, restorePresentation, carriedSounds: [...TALK_SOUNDS, 110] };

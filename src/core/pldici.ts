@@ -39,12 +39,21 @@ export class PldiciState {
   private pocet = 0;
 
   constructor(
-    private readonly s: Script,
+    private s: Script,
     private readonly cislo: number,
   ) {
     for (let i = 0; i < NPLDIKU; i++)
       this.pldik.push({ xs: 0, ys: 0, cinnost: 0, faze: 0, smer: 0, delit: 0, otec: 0 });
     this.init();
+  }
+
+  /**
+   * Undo (a port addition): the colony lives on time, so an instant restore hands the live
+   * one to the rebuilt script, its frames included, instead of the fresh one `init` dealt.
+   */
+  moveTo(s: Script, from: Script): void {
+    this.s = s;
+    for (let i = 0; i < NPLDIKU; i++) s.item(this.cislo + i).afaze = from.item(this.cislo + i).afaze;
   }
 
   /** InitPldici (URoom.pas:2150). */

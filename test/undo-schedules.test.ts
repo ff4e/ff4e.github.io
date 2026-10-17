@@ -54,3 +54,31 @@ describe('PRVNI', () => {
     expect(v() - h.s().count).toBe(due);
   });
 });
+
+/** Rooms whose opening is timed on `count` alone, and a line it always says. */
+describe.each([
+  ['MAPA', /^map-m-ukol$/], // count = 10 + pokus; on the first attempt the intro always says it
+  ['BATYSKAF', /^bat-m-tohle$/], // count = 20
+] as const)('%s', (room, opening) => {
+  const said = (h: ReturnType<typeof roomHarness>, from: number) =>
+    h.mix.started.slice(from).some((e) => opening.test(e.name));
+
+  it('does not say its opening again after an undo, or two in quick succession', () => {
+    const h = roomHarness(room, () => 25);
+    h.play();
+    h.ticks(300);
+    expect(said(h, 0)).toBe(true);
+    h.play();
+    h.play();
+    let from = h.mix.started.length;
+    h.undo();
+    h.ticks(300);
+    expect(said(h, from)).toBe(false);
+    from = h.mix.started.length;
+    h.undo();
+    h.ticks(3); // before the rebuilt room's count reaches the opening's moment
+    h.undo();
+    h.ticks(300);
+    expect(said(h, from)).toBe(false);
+  });
+});

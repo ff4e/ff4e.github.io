@@ -202,9 +202,9 @@ function prog(s: Script): void {
       if (pom1 >= 5) s.addv(5, 'bar-v-co');
       if (pom1 >= 2) {
         s.addm(10, 'bar-m-pobit');
-        s.addd(2, 'bar-x-suckne', 201, (val) => (s.vars(R.pldik)[R.pldik_cinnost] = val));
+        s.addd(2, 'bar-x-suckne', 201, (val, cur) => (cur.vars(R.pldik)[R.pldik_cinnost] = val));
         s.addv(10, 'bar-v-priciny');
-        s.addd(2, 'bar-x-suckano', 202, (val) => (s.vars(R.pldik)[R.pldik_cinnost] = val));
+        s.addd(2, 'bar-x-suckano', 202, (val, cur) => (cur.vars(R.pldik)[R.pldik_cinnost] = val));
       }
       if (pom1 >= 4) s.addm(s.random(30) + 10, 'bar-m-no');
       if (pom1 >= 2) s.addv(5, 'bar-v-sud');
@@ -261,7 +261,7 @@ function prog(s: Script): void {
       s.addv(10, 'bar-v-pld');
       s.addm(6, 'bar-m-pudy');
       s.addv(2, 'bar-v-traverza');
-      s.addd(2, 'bar-x-suckne', 201, (val) => (s.vars(R.pldik)[R.pldik_cinnost] = val));
+      s.addd(2, 'bar-x-suckne', 201, (val, cur) => (cur.vars(R.pldik)[R.pldik_cinnost] = val));
     } else if (
       v[R.room_okukajde] === 0 &&
       s.item(R.kukajda).dir !== Dir.no &&
@@ -812,10 +812,41 @@ function prog(s: Script): void {
   }
 }
 
-/** Undo (a port addition) leaves the duck's quacking cycle running, loop and all: it is
- *  on a timer, not anything the fish did. */
+/**
+ * Undo (a port addition) and the dump's residents. The duck's quacking cycle is on a timer,
+ * not anything the fish did, so undo leaves it running, loop and all. The fish's intro and
+ * their four staggered one-liners run on time too, and so do the slime's sucks inside them
+ * (`bar-x-suckne`/`bar-x-suckano`, prior 201/202, which write its `cinnost`) and the
+ * `bar-x-vypr` (prior 5), so an undo leaves the conversation where it is: the pending
+ * lines, the room's dialogue flags and timers, and the slime. Before, the rebuild dropped
+ * the queue and cut the line in progress: a point banked mid-intro lost the rest of it,
+ * the slime's sucks with it. The border remark is carried with the rest.
+ *
+ * The other remarks are set off by the fish: one near the leg, the slime or the crab, or
+ * on the little fish or the duck they pushed. A remark the undone move set off goes with
+ * it. With a fish dead, the fish's own lines (the death lines) are not carried. A load has
+ * no queue, so it leaves the slime idle.
+ */
+const TALK_SOUNDS = [1, 2, 5, 201, 202];
+const REMARKS = [R.room_onoze, R.room_opldech, R.room_okukajde, R.room_okrabovi, R.room_okachne];
+
 function restorePresentation(s: Script, previous?: Script): void {
-  if (previous) carryItem(s, previous, R.kachnicka);
+  if (!previous) {
+    if (s.vars(R.pldik)[R.pldik_cinnost]! >= 200) s.vars(R.pldik)[R.pldik_cinnost] = 0;
+    return;
+  }
+  carryItem(s, previous, R.kachnicka);
+  const v = s.vars(R.room);
+  const live = previous.vars(R.room);
+  if (REMARKS.some((slot) => live[slot] !== v[slot])) {
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  carryItem(s, previous, R.pldik);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
 }
 
-export const BARELY: RoomScript = { name: 'BARELY', init, prog, restorePresentation, carriedSounds: [701] };
+export const BARELY: RoomScript = { name: 'BARELY', init, prog, restorePresentation, carriedSounds: [701, ...TALK_SOUNDS] };

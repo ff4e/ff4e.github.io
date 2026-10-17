@@ -101,6 +101,8 @@ const R = {
 const d1 = (n: number): string => String.fromCharCode(49 + n);
 
 let pldici: PldiciState | null = null;
+/** Each script's colony, so an undo can find the live one (`restorePresentation`). */
+const colonies = new WeakMap<Script, PldiciState>();
 
 function init(s: Script): void {
   const room = s.vars(R.room, 20);
@@ -181,6 +183,7 @@ function init(s: Script): void {
 
   s.vars(R.pldicek, 1)[R.pldicek_pocet] = 0;
   pldici = new PldiciState(s, R.pldicek);
+  colonies.set(s, pldici);
 }
 
 function roomBlock(s: Script): void {
@@ -901,9 +904,19 @@ function rukaProg(s: Script): void {
  * head's cues. `fuja` (when the little fish last said "fuj") is a `count` too, rebased with
  * them. The one-time "it is alive" line compares `count` with a sum of the two schedules,
  * which no rebase keeps exact: after an undo it comes somewhat later.
+ *
+ * The slime colony (`pldicek`) lives on time as well, so the live colony carries rather than
+ * the single blob `init` deals; before, every undo started it over. A load still deals a new
+ * one (see `pldici.ts`).
  */
 function restorePresentation(s: Script, previous?: Script): void {
   if (!previous) return;
+  const colony = colonies.get(previous);
+  if (colony) {
+    colony.moveTo(s, previous);
+    colonies.set(s, colony);
+    pldici = colony;
+  }
   const room = s.vars(R.room);
   const live = previous.vars(R.room);
   for (const slot of [R.room_kdy, R.room_kdy2, R.room_fuja]) room[slot] = live[slot]! - previous.count + s.count;

@@ -258,7 +258,11 @@ describe('KAJUTA1', () => {
   it('lets the screen-shove reaction banked mid-way end the shove', () => {
     const h = roomHarness('KAJUTA1', () => 25);
     h.play();
-    const reacting = () => h.s().vars(0)[6] === 1 && h.s().room.gspec !== 0;
+    const reacting = () => {
+      // A line queued on the tick the shove lands turns it back into 3: shove again.
+      if (h.s().vars(0)[6] === 0 && h.s().room.gspec === 3 && h.s().noDialog()) h.s().room.gspec = 4;
+      return h.s().vars(0)[6] === 1 && h.s().room.gspec !== 0;
+    };
     strandArmed(
       h,
       () => {
@@ -460,5 +464,38 @@ describe('VITEJTE1', () => {
       () => vl(h)[2] !== 6 && vl(h)[2] !== 61 && saidSince(h, from, 'vit-hs-jidelna1') && !saidSince(h, from, 'vit-hs-jidelna2'),
     );
     h.until(() => saidSince(h, from, 'vit-hs-jidelna2'), 2000);
+  });
+});
+
+describe('MAPA', () => {
+  // room (item 0): poh 1, utb 2, obec 3; sneci (17): mluvi 1, 111 while the snails speak
+  const room = (h: Harness) => h.s().vars(0);
+  const mluvi = (h: Harness) => h.s().vars(17)[1];
+
+  it('lets the snails banked mid-line finish, and poke out again', () => {
+    const h = roomHarness('MAPA', () => 25);
+    h.play();
+    // The chatter is kept due; the room picks the topic, the snails one time in four.
+    const speaking = () => {
+      if (h.s().noDialog() && mluvi(h) === 0) room(h)[3] = 0;
+      return mluvi(h) === 111;
+    };
+    strandOnce(h, () => h.s().noDialog() && mluvi(h) === 0, () => {}, speaking);
+    h.until(() => mluvi(h) === 0, 200);
+    h.until(() => [...Array(9).keys()].some((i) => h.s().item(17 + i).afaze !== 2), 2000);
+  });
+
+  it('drops the remark on a map the undone move shifted', () => {
+    const h = roomHarness('MAPA', () => 25);
+    const map = h.s().item(2);
+    for (let i = 0; i < 6000 && map.x === map.xStart; i++) h.play();
+    expect(h.s().item(2).x).not.toBe(h.s().item(2).xStart); // that move shifted the map
+    h.until(() => room(h)[1] === 1 && h.mix.on(1) === 'map-m-pohnout', 400);
+    h.undo();
+    expect(room(h)[1]).toBe(0);
+    for (let i = 0; i < 300; i++) {
+      h.tick();
+      expect(h.mix.on(1) === 'map-m-pohnout' || h.mix.on(2) === 'map-v-dal').toBe(false);
+    }
   });
 });

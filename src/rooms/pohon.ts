@@ -155,7 +155,7 @@ function prog(s: Script): void {
       if (s.vars(R.nasrany)[R.nasrany_hybese] === 1) s.vars(R.nasrany)[R.nasrany_hybese] = 2;
     } else if (v[R.room_ohadce] === 0) {
       v[R.room_ohadce] = s.random(5000) + 2000;
-      s.addset((val) => (s.vars(R.room)[R.room_obadva] = val), 1);
+      s.addset((val, cur) => (cur.vars(R.room)[R.room_obadva] = val), 1);
       s.adddel(s.random(100) + 50);
       s.addm(0, 'poh-m-pohadali');
       if (s.random(100) < 60) {
@@ -163,7 +163,7 @@ function prog(s: Script): void {
         if (s.random(100) < 60) s.addm(5, 'poh-m-sestra');
       }
       s.adddel(s.random(100) + 50);
-      s.addset((val) => (s.vars(R.room)[R.room_obadva] = val), 0);
+      s.addset((val, cur) => (cur.vars(R.room)[R.room_obadva] = val), 0);
     }
   }
 
@@ -337,4 +337,38 @@ function prog(s: Script): void {
   }
 }
 
-export const POHON: RoomScript = { name: 'POHON', init, prog };
+/**
+ * Undo (a port addition) and the prisoners' quarrel. The project talk runs on the room's
+ * timers and so does the quarrel: `ohadce` counts down to it, an `addset` raises `obadva`
+ * (the prisoners pull their quarrel faces), the fish remark on it, and a closing `addset`
+ * lowers it. An undo leaves the conversation where it is: the pending lines and `set`s and
+ * the room's timers and flags. Before, the rebuild dropped the queue, and a point banked
+ * inside the quarrel kept `obadva` = 1 without the `set` that ends it: the prisoners kept
+ * their quarrel faces until the next quarrel, thousands of ticks away.
+ *
+ * The greeting is the fish's doing: it is said the moment the little fish shifts a
+ * prisoner, so when the undone move set it off (`kteraprosba` moved on since the target)
+ * it goes with the move, and the prisoners' own state is the target's throughout. With a
+ * fish dead, the fish's own lines (the death lines) are not carried. A load has no queue,
+ * so it ends any quarrel.
+ */
+const TALK_SOUNDS = [1, 2];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  const v = s.vars(R.room);
+  if (!previous) {
+    v[R.room_obadva] = 0;
+    return;
+  }
+  if (previous.vars(R.room)[R.room_kteraprosba] !== v[R.room_kteraprosba]) {
+    v[R.room_obadva] = 0;
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const POHON: RoomScript = { name: 'POHON', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

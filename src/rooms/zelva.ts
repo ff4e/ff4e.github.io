@@ -152,7 +152,7 @@ function prog(s: Script): void {
       }
       if (v[R.main_cosedelo]! > 4) {
         s.adddel(s.random(30) + 10);
-        s.addset((val) => (s.vars(R.malar)[R.malar_hlasit] = val), 1);
+        s.addset((val, cur) => (cur.vars(R.malar)[R.malar_hlasit] = val), 1);
         s.addv(0, 'zel-v-tazelva');
         switch (s.random(2)) {
           case 0:
@@ -437,4 +437,36 @@ function prog(s: Script): void {
   }
 }
 
-export const ZELVA: RoomScript = { name: 'ZELVA', init, prog };
+/**
+ * Undo (a port addition) and the turtle's mischief. The possessions come on a timer, and
+ * the fish's taunts, their puzzling over it afterwards and their idle chatter run on time,
+ * so an undo leaves the conversation where it is: the pending lines and the `set` that
+ * cues the little fish's "it's a turtle!", the room's timers and topic flags, and how far
+ * the possessions have got (`roompole[0]`). Before, the rebuild dropped the queue, and a
+ * point banked before that `set` lost the rest of the aftermath: the big fish never worked
+ * out it was the turtle, and the little fish never said it either.
+ *
+ * The possession needs both fish idle, so no move sets it off. (The border remark,
+ * `zel-v-ukol`, is a move's; its state is the Room's, not a Var, so as in every room it is
+ * carried.) A possession in progress is not carried (`natvrdo` is not a Var): undo ends
+ * it, as it did before, and the fish then talk it over. The turtle's face, the pearl and
+ * the shy fish say nothing and are left as the target has them. With a fish dead, the
+ * fish's own lines (the death lines) are not carried. A load has no queue, so it leaves
+ * the little fish with nothing cued to say.
+ */
+const TALK_SOUNDS = [1, 2];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    s.vars(R.malar)[R.malar_hlasit] = 0;
+    return;
+  }
+  s.item(R.main).vars = [...previous.item(R.main).vars];
+  s.vars(R.malar)[R.malar_hlasit] = previous.vars(R.malar)[R.malar_hlasit]!;
+  s.roompole[0] = previous.roompole[0]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const ZELVA: RoomScript = { name: 'ZELVA', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

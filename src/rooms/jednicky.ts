@@ -12,6 +12,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -54,8 +55,8 @@ function init(s: Script): void {
 
 function prog(s: Script): void {
   const v = s.vars(R.room);
-  const setCinnost = (val: number): void => {
-    s.vars(R.zeva)[R.zeva_cinnost] = val;
+  const setCinnost = (val: number, cur: Script): void => {
+    cur.vars(R.zeva)[R.zeva_cinnost] = val;
   };
 
   // ---- room: timers + one dialogue branch per tick ----
@@ -271,4 +272,38 @@ function prog(s: Script): void {
   }
 }
 
-export const JEDNICKY: RoomScript = { name: 'JEDNICKY', init, prog };
+/**
+ * Undo (a port addition) and the clam. The fish's intro and their timed remarks run on
+ * time, so an undo leaves the conversation where it is: the pending lines, the room's
+ * dialogue flags and timers, and the clam, whose refusal (`jed-x-nedam`, prior 101/102)
+ * sets off its own gape through `cinnost`. Before, the rebuild dropped the queue: a point
+ * banked between the little fish's plea and the clam's answer lost the answer, and one
+ * banked mid-answer cut it short.
+ *
+ * The plea and the big fish's nag are the fish's doing: the little fish facing the clam up
+ * close, or the move that tipped its hustle count (`fofr`), sets them off. One the undone
+ * move set off goes with it: `flakat` differs, or the plea staircase (`jestejednu`) is on
+ * another step. With a fish dead, the fish's own lines (the death lines) are not carried.
+ * A load has no queue; the clam's gapes end on their own.
+ */
+const TALK_SOUNDS = [1, 2, 101, 102];
+
+/** The plea staircase's step: before the first plea, after the first, after the second. */
+const step = (jestejednu: number): number => (jestejednu >= 0 ? 0 : jestejednu > -60 ? 1 : 2);
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return;
+  const v = s.vars(R.room);
+  const live = previous.vars(R.room);
+  if (live[R.room_flakat] !== v[R.room_flakat] || step(live[R.room_jestejednu]!) !== step(v[R.room_jestejednu]!)) {
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  carryItem(s, previous, R.zeva);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const JEDNICKY: RoomScript = { name: 'JEDNICKY', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };
