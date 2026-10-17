@@ -184,6 +184,28 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🟡 Undo held back rooms' scheduled remarks — fixed 2026-10-17
+
+The rebuild behind an undo restarts `count` from 0, and five rooms keep a schedule as
+absolute `count` values in their Vars. The undo target's schedule therefore put the next
+event as far off again as the time already spent in the room. Measured: after ~6 000 ticks,
+one undo moved ZAVAL's next remark from 1 566 to 7 577 ticks away. TRUP and UTES behaved
+the same way.
+
+Affected:
+- **ZAVAL** (`uz`), **TRUP** (`rozh`) and **UTES** (`rozhovor`): the room's recurring
+  remark or conversation.
+- **BANKA:** `kdy`/`kdy2`, its remarks on the creatures, and `fuja`, the "fuj" cooldown.
+- **PRVNI:** `qnavod2`, the tutorial's fallback start, whose countdown began again.
+
+Each now rebases the live schedule onto the restarted count in `restorePresentation`, as
+VES does. PRVNI does so only while the tutorial is still pending.
+
+Not exact: BANKA's one-time "it is alive" line compares `count` with a sum of the two
+schedules. After an undo it comes somewhat later.
+
+Covered by `test/undo-schedules.test.ts`. Every case fails with the rooms reverted.
+
 ### 🟠 Undo stopped, restarted or stranded rooms' own performances — fixed 2026-10-16
 
 Undo rebuilds the room, which silenced every sound, re-ran `init`, dropped the dialogue queue

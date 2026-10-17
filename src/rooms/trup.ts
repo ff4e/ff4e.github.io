@@ -111,4 +111,16 @@ function prog(s: Script): void {
   }
 }
 
-export const TRUP: RoomScript = { name: 'TRUP', init, prog };
+/**
+ * Undo (a port addition) restarts `count` from 0 with the rebuilt room, and this room keeps
+ * its schedule as absolute `count` values, so the target point's schedule put the next shiver
+ * as far off again as the time already spent in the room: after ten minutes of play, an
+ * undo silenced it for ten more. The schedule runs on time, so it plays on: the live one,
+ * rebased onto the restarted count, as VES does with its head's cues.
+ */
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return;
+  s.vars(R.room)[R.room_rozh] = previous.vars(R.room)[R.room_rozh]! - previous.count + s.count;
+}
+
+export const TRUP: RoomScript = { name: 'TRUP', init, prog, restorePresentation };
