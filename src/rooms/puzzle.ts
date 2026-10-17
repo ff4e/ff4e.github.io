@@ -82,7 +82,7 @@ function prog(s: Script): void {
     } else if (v[R.room_hlaska] === 0) {
       v[R.room_hlaska] = -1;
       s.addm(20, 'pz-m-pocitace');
-      s.addd(s.random(20) + 30, 'pz-x-pocitac', 5, (val) => (v[R.room_mluveni] = val));
+      s.addd(s.random(20) + 30, 'pz-x-pocitac', 5, (val, cur) => (cur.vars(R.room)[R.room_mluveni] = val));
     } else if (
       v[R.room_nudise] === 0 &&
       s.vars(R.malar)[R.malar_pohyby]! >= s.vars(R.malar)[R.malar_trpelivost]! &&
@@ -107,4 +107,36 @@ function prog(s: Script): void {
     s.vars(R.malar)[R.malar_pohyby]!++;
 }
 
-export const PUZZLE: RoomScript = { name: 'PUZZLE', init, prog };
+/**
+ * Undo (a port addition) and the computer. Its line and the fish's chatter run on time, so
+ * an undo leaves the conversation where it is: the pending lines and the slots they act on.
+ * Before, the rebuild dropped the queue, and a point banked while the computer spoke kept
+ * `mluveni` = 5 without the callback that ends it: the screen wobbled for the rest of the
+ * visit. Once the carried line ends, the water settles back to `oldwamp`/`oldwper`.
+ *
+ * The board is the fish's doing, and so are the two remarks it prompts (a chip that does
+ * not fit, the little fish fidgeting): a remark the undone move set off goes with it. With
+ * a fish dead, the fish's own lines (the death lines) are not carried. A load has no queue,
+ * so it leaves the computer silent and the water calm.
+ */
+const TALK_SOUNDS = [1, 2, 5];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  const v = s.vars(R.room);
+  if (!previous) {
+    v[R.room_mluveni] = 0;
+    return;
+  }
+  const live = previous.vars(R.room);
+  if (live[R.room_nepas] !== v[R.room_nepas] || live[R.room_nudise] !== v[R.room_nudise]) {
+    v[R.room_mluveni] = 0;
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  for (const slot of [R.room_uvod, R.room_hlaska, R.room_mluveni]) v[slot] = live[slot]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const PUZZLE: RoomScript = { name: 'PUZZLE', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

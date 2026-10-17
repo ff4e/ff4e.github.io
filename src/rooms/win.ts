@@ -125,8 +125,8 @@ function roomBlock(s: Script): void {
         s.addv(0, 'win-v-pockej');
         s.addm(2, 'win-m-zavrene');
       }
-      s.addset((val) => s.setBusy('little', val), 0);
-      s.addset((val) => s.setBusy('big', val), 0);
+      s.addset((val, cur) => cur.setBusy('little', val), 0);
+      s.addset((val, cur) => cur.setBusy('big', val), 0);
       if (s.pokus < 3 || s.random(100) < 40) {
         s.addv(5, 'win-v-osvobodit');
         s.addm(10, 'win-m-ven');
@@ -205,13 +205,13 @@ function roomBlock(s: Script): void {
             v[R.room_onotepadu] = 1;
             s.addm(10, 'win-m-blok');
             s.adddel(s.random(15) + 5);
-            s.addset((val) => (s.vars(R.notepad)[R.notepad_napsano] = val), 1);
+            s.addset((val, cur) => (cur.vars(R.notepad)[R.notepad_napsano] = val), 1);
             s.adddel(s.random(15) + 5);
-            s.addset((val) => (s.vars(R.notepad)[R.notepad_napsano] = val), 2);
+            s.addset((val, cur) => (cur.vars(R.notepad)[R.notepad_napsano] = val), 2);
             s.adddel(s.random(15) + 5);
-            s.addset((val) => (s.vars(R.notepad)[R.notepad_napsano] = val), 3);
+            s.addset((val, cur) => (cur.vars(R.notepad)[R.notepad_napsano] = val), 3);
             s.adddel(s.random(15) + 5);
-            s.addset((val) => (s.vars(R.notepad)[R.notepad_napsano] = val), 4);
+            s.addset((val, cur) => (cur.vars(R.notepad)[R.notepad_napsano] = val), 4);
             s.addv(10, 'win-v-premyslej');
           }
           break;
@@ -269,4 +269,39 @@ function prog(s: Script): void {
   }
 }
 
-export const WIN: RoomScript = { name: 'WIN', init, prog };
+/**
+ * Undo (a port addition) and the desktop chatter. The remarks run on time, and so does
+ * the notepad writing itself out after `win-m-blok`, so an undo leaves them where they
+ * are, pending lines included. Before, the rebuild dropped the queue: a point banked
+ * while the notepad was being written kept `onotepadu` = 1 without the `set`s still to
+ * come, so the notepad stayed half-written for the rest of the visit.
+ *
+ * The bonus level (`resit`), the VGA-hole remark and the remark on an old fish left
+ * behind (`umrela`) are the fish's doing: when the undone move entered or left the bonus
+ * level or set off the VGA remark, the room is the target's and its lines go with the
+ * move. With a fish dead, the fish's own lines (the death lines) are not carried. A load
+ * has no queue, so it finishes a notepad it caught mid-way, as the `set`s would have.
+ */
+function settle(s: Script): void {
+  if (s.vars(R.room)[R.room_onotepadu] === 1) s.vars(R.notepad)[R.notepad_napsano] = 4;
+}
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return settle(s);
+  const v = s.vars(R.room);
+  const live = previous.vars(R.room);
+  if (v[R.room_resit] !== live[R.room_resit] || (v[R.room_ooceli] === 0 && live[R.room_ooceli] === 1)) {
+    s.ksnd(1);
+    s.ksnd(2);
+    return settle(s);
+  }
+  const umrela = v[R.room_umrela]!;
+  s.item(R.room).vars = [...live];
+  s.vars(R.room)[R.room_umrela] = umrela;
+  s.vars(R.notepad)[R.notepad_napsano] = previous.vars(R.notepad)[R.notepad_napsano]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const WIN: RoomScript = { name: 'WIN', init, prog, restorePresentation, carriedSounds: [1, 2] };

@@ -15,6 +15,7 @@ import { Room } from '../src/core/room.js';
 import { Dir } from '../src/core/dir.js';
 import { Script } from '../src/core/script.js';
 import { StepEngine, type Which } from '../src/core/stepEngine.js';
+import { decodeMoves } from '../src/core/solutionMoves.js';
 import { ROOMS } from '../src/data/roomTable.js';
 import { roomScript } from '../src/rooms/index.js';
 import * as game from '../src/app/gameState.js';
@@ -144,5 +145,52 @@ export function roomHarness(jmeno: string, ticksOf: (name: string) => number = (
     next--;
   };
   const back = (): void => void next--;
-  return { mix, s, tick, ticks, until, move, undo, back };
+  /**
+   * One move of the recorded solution, played until it is banked as an undo point. Unlike
+   * `move`, it waits out a busy fish (mid-dialogue) instead of dropping the move, as the
+   * replay in `solutionsHarness.ts` does, so the solution stays in step whatever is said.
+   * Returns the record of the new point.
+   */
+  const steps = def.solution ? decodeMoves(def.solution) : [];
+  const play = (): string => {
+    const st = steps[next++]!;
+    for (let i = 0; i < 10 && game.undoHistory.length === 0; i++) tick(); // the start is banked on a tick
+    const banked = game.undoHistory.length;
+    const from = game.engine!.srecord;
+    for (let i = 0; i < 3000 && game.undoHistory.length === banked; i++) {
+      if (game.engine!.phase === 'idle' && game.engine!.srecord === from) {
+        game.engine!.active = st.which;
+        game.room!.hracNespi();
+        game.engine!.press(st.which, st.dir);
+      }
+      tick();
+    }
+    expect(game.undoHistory.length).toBe(banked + 1);
+    return game.engine!.srecord;
+  };
+  return { mix, s, tick, ticks, until, move, undo, back, play };
+}
+
+type Harness = ReturnType<typeof roomHarness>;
+
+/**
+ * Wait (ticking, no moves) for `mid` to hold, bank a point with one solution move while it
+ * still does, make one more move and undo onto that point. Returns false if `mid` was over
+ * by the time the point was banked or landed on, so the caller can try again.
+ */
+export function undoOnto(h: Harness, mid: () => boolean, wait = 20000): boolean {
+  h.until(mid, wait);
+  const rec = h.play();
+  if (!mid()) return false;
+  h.play();
+  expect(undoMove()).toBe(true);
+  h.back();
+  expect(game.engine!.srecord).toBe(rec);
+  return mid();
+}
+
+/** `undoOnto`, retried until the point it lands on is mid-sequence: the strand. */
+export function strand(h: Harness, mid: () => boolean, tries = 20): void {
+  for (let i = 0; i < tries; i++) if (undoOnto(h, mid)) return;
+  throw new Error('never banked a point mid-sequence');
 }

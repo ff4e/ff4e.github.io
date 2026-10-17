@@ -206,6 +206,51 @@ schedules. After an undo it comes somewhat later.
 
 Covered by `test/undo-schedules.test.ts`. Every case fails with the rooms reverted.
 
+### 🟠 Undo stranded talkers, locks and performances in 15 more rooms — fixed 2026-10-16
+
+The same cause as the entry below, in rooms whose `set` callbacks run room machines. A point
+banked while a sequence was pending restored Vars that wait for a queued `set` the rebuild
+had dropped, and nothing else ever moves them on. Found with `test/undo-stuck-scan.test.ts`
+(env-gated; 6 seeds × 3 idle waits over every solution room) and a read of each candidate.
+The states that stuck, by room:
+
+- **PARTY1:** the cabin windows stayed locked after the intro, so no passenger ever
+  appeared.
+- **MIKRO:** after a shush, the crabs never chattered again.
+- **BATYSKAF:** the phones never rang again.
+- **WIN:** the notepad stayed half-written.
+- **PUCLIK:** the finished picture never revealed.
+- **SECRET:** the stone mouth never performed.
+- **DISKETA:** a virus mouthed for the rest of the visit and never chittered again.
+- **ODPADKY:** the big fish pulled faces for ever.
+- **CHODBA:** the light switch no longer cut a remark, and a robot dog mouthed for ever.
+- **Talkers left mouthing** (and, where their machine waits for idle, silent for good): the
+  KAJUTA1/KAJUTA2 parrot, the PUZZLE computer (the screen wobbled for ever), the SMETAK
+  jellyfish (it ignored the ball), and the VLADOVA hook and skull. KAJUTA1 could also keep
+  its screen shove armed for the visit.
+
+Each of these rooms now carries its conversation as DRAKAR and LODE do:
+- The `set` callbacks act on the script running them.
+- Pending lines carry, NPC and fish alike, with the voices that speak them (`carriedSounds`).
+- The dialogue flags and the talkers' state come from the live script; what the fish did
+  comes from the undo target.
+- A sequence the undone move started goes with the move: lifting a phone in BATYSKAF,
+  assembling the picture in PUCLIK, a heckle the parrot started after the point in KAJUTA1,
+  a remark on an undone push.
+- A dead fish's lines do not carry (in KAJUTA1 that includes the parrot's "karamba").
+- A load, which has no queue, leaves nobody mid-sequence.
+- VITEJTE1's ruler and MIKRO's crabs, cut by undo before, play on.
+
+Covered by `test/undo-strands.test.ts`. Every strand case fails with its room reverted.
+
+**Not changed:**
+- An undo still cuts a line without leaving anything stuck in BARELY, BLUDISTE, ZELVA,
+  REAKTOR, JEDNICKY and BOTTLES.
+- A talker banked mid-line mouths until its next line in ZDVIZ1/ZDVIZ2, DEUTSCHE and
+  POHON (its quarrel faces).
+- An undo back across a death restart hands the rooms that carry the fresh attempt's
+  conversation, so a line may be said again. DRAKAR, DRAKAR1 and LODE do the same.
+
 ### 🟠 Undo stopped, restarted or stranded rooms' own performances — fixed 2026-10-16
 
 Undo rebuilds the room, which silenced every sound, re-ran `init`, dropped the dialogue queue
@@ -233,9 +278,8 @@ ends its tune, and undoing an amp's smash brings its loop back. A load, which ha
 carry, re-arms a stranded DRAKAR1 handoff and DRAKAR roll-call, and deals LODE a new match.
 
 Covered by `test/drakar1-undo.test.ts`, `test/drakar-undo.test.ts`, `test/lode-undo.test.ts`,
-`test/undo-ambience.test.ts` and `tools/test-music.mjs`. Not carried: an NPC line in other
-rooms (MIKRO's crabs, VLADOVA's skull, VITEJTE1's ruler), which undo cuts as it does the
-fish's own lines there.
+`test/undo-ambience.test.ts` and `tools/test-music.mjs`. MIKRO's crabs, VLADOVA's skull and
+VITEJTE1's ruler, cut by undo here, now carry too (see the entry above).
 
 ### 🟠 Exit farewells overlapped the same fish's dialogue — fixed 2026-10-07
 

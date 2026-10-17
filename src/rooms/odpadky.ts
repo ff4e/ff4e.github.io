@@ -51,9 +51,9 @@ function prog(s: Script): void {
         case 2:
         case 3:
           s.addv(5, 'odp-v-coja');
-          s.addset((val) => (s.vars(R.velkar)[R.velkar_xichtit] = val), 1);
+          s.addset((val, cur) => (cur.vars(R.velkar)[R.velkar_xichtit] = val), 1);
           s.adddel(s.random(20) + 15);
-          s.addset((val) => (s.vars(R.velkar)[R.velkar_xichtit] = val), 0);
+          s.addset((val, cur) => (cur.vars(R.velkar)[R.velkar_xichtit] = val), 0);
           s.addv(3, 'odp-v-nestacim');
           break;
       }
@@ -88,4 +88,26 @@ function prog(s: Script): void {
   else s.setXicht('big', 0);
 }
 
-export const ODPADKY: RoomScript = { name: 'ODPADKY', init, prog };
+/**
+ * Undo (a port addition) and the remarks. They all run on time, so an undo leaves them
+ * where they are, pending lines included, and the big fish's faces with them. Before, the
+ * rebuild dropped the queue: a point banked while the big fish pulled faces after
+ * `odp-v-coja` kept `xichtit` = 1 without the `set` that ends it, so it pulled faces for
+ * the rest of the visit.
+ *
+ * With a fish dead, the fish's own lines (the death lines) are not carried. A load has no
+ * queue, so it stops the faces, as the `set` would have.
+ */
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    s.vars(R.velkar)[R.velkar_xichtit] = 0;
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  s.vars(R.velkar)[R.velkar_xichtit] = previous.vars(R.velkar)[R.velkar_xichtit]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const ODPADKY: RoomScript = { name: 'ODPADKY', init, prog, restorePresentation, carriedSounds: [1, 2] };
