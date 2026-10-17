@@ -736,81 +736,16 @@
           padding-left: max(var(--sa-left), var(--bar-lead)); padding-bottom: var(--sa-bottom);
         }
       }
-      /* ── The phone Options ────────────────────────────────────────────────
-         Plain HTML controls over the same settings the panel's Options face
-         edits — deliberately not a copy of it, because that face's sliders are
-         9px tall (src/app/touchOptions.ts explains the whole choice).
-
-         Above the touch bar (z 120), below the loading/fatal pair (z 200): a
-         screen that has not loaded outranks the settings on it. It scrolls
-         rather than squeezing, because a phone in landscape has ~330px of
-         height for it. */
+      /* ── The touch Options ────────────────────────────────────────────────
+         The panel's own Options face, borrowed into this dialog on tablets and
+         phones (src/app/touchOptions.ts). Above the touch bar (z 120), below the
+         loading/fatal pair (z 200): a screen that has not loaded outranks the
+         settings on it. A phone in landscape has ~330px of height for it, so the
+         padding is tighter there; the face itself is scaled to whatever is left
+         (src/app/optionsLayout.ts). */
       #touchopts { z-index: 150; justify-content: safe center; overflow-y: auto; }
-      .topts-card {
-        display: flex; flex-direction: column; gap: 16px;
-        width: min(420px, 100%);
-        text-align: left;
-      }
-      .topts-card h1 { text-align: center; }
-      .topts-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; align-items: center; }
-      .topts-row label { font: 600 13px/1.4 system-ui, sans-serif; }
-      .topts-row output { font: 600 13px/1.4 system-ui, sans-serif; color: #6cc; min-width: 2.2em; text-align: right; }
-      .topts-row input[type='range'] {
-        grid-column: 1 / -1;
-        /* `pan-y`, matching `html[data-touch] .overlay`'s own value below: `touch-action`
-           is the INTERSECTION of an element's value with its ancestors' (see the note on
-           `.tbtn`), so this was already cut down to `pan-y` and was never a pinch-zoom
-           leak. Spelled out explicitly rather than left as `manipulation` so it reads as
-           the intended lock rather than an accident of the ancestor chain. `pan-x` here
-           would intersect with the overlay's `pan-y` to nothing, blocking the card's own
-           vertical scroll on every drag that starts on a slider. */
-        width: 100%; height: 34px; accent-color: #6cc; touch-action: pan-y;
-      }
-      .topts-subs { border: 1px solid #35555f; border-radius: 10px; padding: 10px 12px; margin: 0; }
-      .topts-subs legend { font: 600 13px/1 system-ui, sans-serif; padding: 0 6px; }
-      .topts-subs div { display: flex; gap: 14px; flex-wrap: wrap; }
-      .topts-subs label {
-        display: flex; align-items: center; gap: 6px;
-        min-height: 40px; font: 14px/1 system-ui, sans-serif;
-        /* `pan-y`, not `none` — see the note on the slider above. `none` would block the
-           card's vertical scroll on any drag starting on a subtitle checkbox row. */
-        -webkit-tap-highlight-color: transparent; touch-action: pan-y;
-      }
-      .topts-subs input { width: 20px; height: 20px; accent-color: #6cc; }
-      .topts-buttons { display: flex; gap: 10px; }
-      .topts-buttons button {
-        flex: 1 1 0; min-height: 46px;
-        color: #bdd; background: #18262e; border: 1px solid #35555f; border-radius: 10px;
-        font: 600 14px/1 system-ui, sans-serif;
-        /* `pan-y`, not `none` — see the note on the slider above. */
-        -webkit-tap-highlight-color: transparent; touch-action: pan-y;
-      }
-      .topts-buttons button:active { background: #24414c; border-color: #6cc; }
-      #topt-close { background: #24414c; border-color: #6cc; }
-      /* The privacy link: required in-app (Apple App Review 5.1.1(i)), but not an action a
-         player takes to use the game, so it reads as a quiet text link rather than a third
-         button competing with Help/Done. Still clears the 40px touch-target floor. */
-      .topts-privacy {
-        align-self: center; min-height: 40px; display: flex; align-items: center;
-        color: #9dd; font: 600 13px/1 system-ui, sans-serif;
-        text-decoration: none; border-bottom: 1px dotted #667;
-        /* `pan-y`, not `none` — see the note on the slider above. */
-        -webkit-tap-highlight-color: transparent; touch-action: pan-y;
-      }
-      .topts-privacy:active { color: #cde; border-bottom-color: #9dd; }
-      /* A phone in landscape is the shape this screen has to fit, and it is the tight
-         one: ~390px of height, against a card that wants 406. Compacted rather than
-         left to scroll, because the control that would fall below the fold is Done —
-         the way out. Everything here still clears the 40px touch-target floor. */
       @media (max-height: 500px) {
         #touchopts { padding: calc(10px + var(--sa-top)) calc(16px + var(--sa-right)) calc(10px + var(--sa-bottom)) calc(16px + var(--sa-left)); }
-        .topts-card { gap: 8px; }
-        .topts-card h1 { font: 600 19px/1.2 system-ui, sans-serif; }
-        .topts-row input[type='range'] { height: 28px; }
-        .topts-subs { padding: 2px 12px 6px; }
-        .topts-subs label { min-height: 40px; }
-        .topts-buttons button { min-height: 42px; }
-        .topts-privacy { min-height: 36px; }
       }
       /* Feedback strip: the player's only way to reach the author, and the only piece
          of modern chrome anywhere near the game. It hangs directly under the control
@@ -1152,46 +1087,11 @@
       </div>
     </div>
     <div id="info"></div>
-    <!-- The phone Options: the panel's Options face as plain HTML, because that face's
-         sliders are 9px tall and its subtitle buttons ~20px square — unhittable with a
-         thumb at the scale a phone draws the panel. Tablets borrow the original canvas
-         into this dialog and hide the HTML card; mouse players keep the side panel.
-         Every control dispatches through the SAME `panelAction` regions the
-         panel uses (17-19 volumes, 20-22 subtitles, 23 help) — see
-         src/app/touchOptions.ts for why, sliders included. -->
-    <div id="touchopts" class="overlay" hidden role="dialog" aria-modal="true" aria-labelledby="topt-title">
-      <div class="topts-card">
-        <h1 id="topt-title">Options</h1>
-        <div class="topts-row">
-          <label for="topt-effect">Sound effects</label>
-          <output id="topt-effect-val" for="topt-effect"></output>
-          <input type="range" id="topt-effect" min="0" max="12" step="1" />
-        </div>
-        <div class="topts-row">
-          <label for="topt-voice">Voices</label>
-          <output id="topt-voice-val" for="topt-voice"></output>
-          <input type="range" id="topt-voice" min="0" max="12" step="1" />
-        </div>
-        <div class="topts-row">
-          <label for="topt-music">Music</label>
-          <output id="topt-music-val" for="topt-music"></output>
-          <input type="range" id="topt-music" min="0" max="12" step="1" />
-        </div>
-        <fieldset class="topts-subs">
-          <legend>Subtitles</legend>
-          <div>
-            <label><input type="radio" name="topt-subs" value="cz" />Čeština</label>
-            <label><input type="radio" name="topt-subs" value="en" />English</label>
-            <label><input type="radio" name="topt-subs" value="off" />Off</label>
-          </div>
-        </fieldset>
-        <div class="topts-buttons">
-          <button id="topt-help" type="button">Help</button>
-          <button id="topt-close" type="button">Done</button>
-        </div>
-        <a id="topt-privacy" class="topts-privacy" href="https://ff4e.github.io/privacy.html" target="_blank" rel="noopener noreferrer">Privacy policy</a>
-      </div>
-    </div>
+    <!-- The touch Options: the panel's own canvas and the strip under it are moved in
+         here while it is open, on tablets and phones alike, so every control is the
+         original's and dispatches through the SAME `panelAction` regions the mouse uses
+         (src/app/touchOptions.ts). Mouse players keep the side panel. -->
+    <div id="touchopts" class="overlay" hidden role="dialog" aria-modal="true" aria-label="Options"></div>
     <dialog id="feedback" aria-labelledby="feedback-title">
       <div class="fb-body">
         <h2 id="feedback-title">Send feedback</h2>

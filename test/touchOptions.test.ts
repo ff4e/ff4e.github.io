@@ -9,21 +9,16 @@ vi.mock('../src/app/dom.js', () => ({ panelCol: dom.panelCol }));
 vi.mock('../src/app/touchButtons.js', () => ({
   touchUi: () => mode.touch, phoneUi: () => mode.phone,
 }));
-vi.mock('../src/app/playerSettings.js', () => ({
-  settings: { volume: { effect: 6, voice: 7, music: 8 }, subtitles: 'en' },
-}));
 import { O_NORMAL, O_OPTIONS, SCMAX, SCMIN, ui } from '../src/app/screenState.js';
 import {
-  canvasTouchOptionsOpen, closeTouchOptions, openTouchOptions, syncTouchOptions,
-  toggleTouchOptions, touchOptionsOpen,
+  closeTouchOptions, openTouchOptions, syncTouchOptions, toggleTouchOptions, touchOptionsOpen,
 } from '../src/app/touchOptions.js';
 
-const overlay = { hidden: true, prepend: vi.fn(), toggleAttribute: vi.fn() };
+const overlay = { hidden: true, prepend: vi.fn() };
 
 beforeEach(() => {
   vi.stubGlobal('document', {
     getElementById: (id: string) => id === 'touchopts' ? overlay : null,
-    querySelectorAll: () => [],
     documentElement: { toggleAttribute: vi.fn() },
   });
   mode.touch = true;
@@ -42,12 +37,11 @@ afterEach(() => {
 });
 
 describe('touch Options presentation', () => {
-  it('borrows the original panel on a tablet and restores it on close', () => {
+  it.each([false, true])('borrows the original panel (phone: %s) and restores it on close', (phone) => {
+    mode.phone = phone;
     openTouchOptions();
     expect(touchOptionsOpen()).toBe(true);
-    expect(canvasTouchOptionsOpen()).toBe(true);
     expect(overlay.prepend).toHaveBeenCalledExactlyOnceWith(dom.panelCol);
-    expect(overlay.toggleAttribute).toHaveBeenCalledWith('data-canvas-options', true);
     expect(overlay.hidden).toBe(false);
     expect(ui.ostav).toBe(O_OPTIONS);
     expect(ui.scroll).toBe(SCMAX);
@@ -64,47 +58,37 @@ describe('touch Options presentation', () => {
     expect(ui.panelDragBus).toBeNull();
     expect(ui.panelPressed).toBe(0);
     expect(overlay.hidden).toBe(true);
-    expect(canvasTouchOptionsOpen()).toBe(false);
+    expect(touchOptionsOpen()).toBe(false);
   });
 
-  it('leaves phones on HTML controls without moving the panel', () => {
-    mode.phone = true;
-    openTouchOptions();
-    expect(touchOptionsOpen()).toBe(true);
-    expect(canvasTouchOptionsOpen()).toBe(false);
-    expect(overlay.prepend).not.toHaveBeenCalled();
-    expect(ui.ostav).toBe(O_NORMAL);
-    syncTouchOptions();
-    expect(touchOptionsOpen()).toBe(true);
-  });
-
-  it('uses the same tablet presentation over the map without a desktop map overlay', () => {
+  it('uses the same presentation over the map without a desktop map overlay', () => {
     ui.screen = 'map';
     ui.mapOverlay = 'none';
     openTouchOptions();
     syncTouchOptions();
-    expect(canvasTouchOptionsOpen()).toBe(true);
+    expect(touchOptionsOpen()).toBe(true);
     expect(ui.mapOverlay).toBe('none');
   });
 
-  it.each(['help', 'intro', 'desktop', 'phone'] as const)('restores the column on transition to %s', (target) => {
+  it.each(['help', 'intro', 'desktop'] as const)('restores the column on transition to %s', (target) => {
     openTouchOptions();
     if (target === 'help') ui.helpOpen = true;
     if (target === 'intro') ui.screen = 'intro';
     if (target === 'desktop') mode.touch = false;
-    if (target === 'phone') mode.phone = true;
     syncTouchOptions();
     expect(touchOptionsOpen()).toBe(false);
     expect(dom.home.append).toHaveBeenCalledExactlyOnceWith(dom.panelCol);
   });
 
-  it('dismisses phone controls rather than leaving them on a newly detected tablet', () => {
+  it('keeps the dialog open when a phone is re-detected as a tablet, or back', () => {
     mode.phone = true;
     openTouchOptions();
     mode.phone = false;
     syncTouchOptions();
-    expect(touchOptionsOpen()).toBe(false);
-    openTouchOptions();
-    expect(canvasTouchOptionsOpen()).toBe(true);
+    expect(touchOptionsOpen()).toBe(true);
+    mode.phone = true;
+    syncTouchOptions();
+    expect(touchOptionsOpen()).toBe(true);
+    expect(overlay.prepend).toHaveBeenCalledTimes(1);
   });
 });

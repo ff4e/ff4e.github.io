@@ -7,8 +7,8 @@
  * the faithful control panel FITS on a tablet, which is why the old device gate admitted
  * one, but fitting is not the same as being pleasant to hit with a thumb, and shipping
  * two different products for one device class would be worse than either.
- * Options is the exception: tablets reuse the original canvas face inside the touch
- * dialog; only phones need the replacement HTML sliders (`touchOptions.ts`).
+ * Options is the exception: phones and tablets reuse the original canvas face inside the
+ * touch dialog (`touchOptions.ts`), a landscape phone's cut in two (`optionsLayout.ts`).
  *
  * A desktop is never in touch mode by the rule. That is the guarantee the whole touch
  * series rests on — the mouse-and-keyboard game cannot change under anyone — so it is one

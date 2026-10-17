@@ -33,7 +33,8 @@ import { engine, room } from './gameState.js';
 import { settings, subLang } from './playerSettings.js';
 import { graphics } from './renderSettings.js';
 import { scalingFilterFor, stage } from './stageGeometry.js';
-import { canvasTouchOptionsOpen, toggleTouchOptions } from './touchOptions.js';
+import { toggleTouchOptions, touchOptionsOpen } from './touchOptions.js';
+import { composeLandscape, faceSize, optionsLayout, scratchCtx, touchFaceCss } from './optionsLayout.js';
 import { touchUi } from './touchButtons.js';
 import type { VolumeBus } from '../core/settings.js';
 import { ui, O_NORMAL, O_OPTIONS, O_SC_DOWN, O_SC_UP, PANEL_SCROLL_MS, SCMAX, SCMIN, helpScreens } from './screenState.js';
@@ -198,7 +199,7 @@ export function drawHelp(): void {
 export function drawPanel(): void {
   if (!ui.panel) return;
   const asMapOverlay = ui.screen === 'map' && ui.mapOverlay === 'options';
-  const asTouchOverlay = canvasTouchOptionsOpen();
+  const asTouchOverlay = touchOptionsOpen();
   // Hidden while the help pages are up. The help page is drawn at its own unscaled size
   // (drawHelp), and the stage box hugs its content, so a visible panel would slide a long
   // way left the moment help opened and back again when it closed — measured 541px at
@@ -210,9 +211,10 @@ export function drawPanel(): void {
   // reason the other five came first: the panel is the only way to reach map/save/load/
   // options/swap and to move a fish, so retiring it before the bar and the swipe layer
   // existed would have left the game controls-less. Everything it does now has a
-  // thumb-sized counterpart. Tablets reuse just the Options face inside their touch
-  // overlay; phones still need HTML controls for the 9px sliders. The column is moved
-  // into that dialog, so it never takes width away from the room or floats over Help.
+  // thumb-sized counterpart. Touch devices reuse just the Options face inside their
+  // touch overlay — on a phone scaled to fill it, and cut in two in landscape
+  // (`optionsLayout.ts`). The column is moved into that dialog, so it never takes width
+  // away from the room or floats over Help.
   const visible = (ui.screen === 'room' || asMapOverlay || asTouchOverlay) &&
     !ui.helpOpen && (!touchUi() || asTouchOverlay);
   // Hide the COLUMN, not just the canvas inside it. `display: none` takes an element
@@ -256,40 +258,50 @@ export function drawPanel(): void {
   // is unchanged, so this is purely a resolution increase. Falls back the moment the
   // art is missing or the tier is switched away.
   const ai = graphics === 'ai' ? aiPanel : null;
-  const wantW = ai ? ai.width : PANEL_W;
-  const wantH = ai ? ai.height : PANEL_H;
+  // A phone's landscape face is the composed portrait one, cut and laid side by side, so
+  // the renderers below still paint 155x395 — into a scratch canvas — and the cut is one
+  // more blit (`composeLandscape`). `k` is the backing store's pixels per panel pixel.
+  const layout = optionsLayout();
+  const k = ai ? ai.scale : 1;
+  const face = faceSize(layout);
+  const wantW = face.w * k;
+  const wantH = face.h * k;
   if (panelCanvas.width !== wantW || panelCanvas.height !== wantH) {
     panelCanvas.width = wantW;
     panelCanvas.height = wantH;
     ui.panelSig = null; // resize cleared the backing store — force a repaint
   }
+  const ctx = layout === 'landscape' ? scratchCtx(PANEL_W * k, PANEL_H * k) : panelCtx;
   let sig: string;
   let paint: () => void;
   if (ui.ostav === O_NORMAL) {
     const st = panelState();
     sig = `n|${st.velka}|${st.mala}|${st.space}|${st.save}|${st.load}|${st.abort}|${st.restart}|${st.pressedDir}`;
     paint = ai
-      ? () => ai.drawPanel(panelCtx, st)
-      : () => panelCtx.putImageData(new ImageData(new Uint8ClampedArray(panelToRgba(composePanel(ui.panel!.images, st), ui.panel!.palette)), PANEL_W, PANEL_H), 0, 0);
+      ? () => ai.drawPanel(ctx, st)
+      : () => ctx.putImageData(new ImageData(new Uint8ClampedArray(panelToRgba(composePanel(ui.panel!.images, st), ui.panel!.palette)), PANEL_W, PANEL_H), 0, 0);
   } else {
     const st = optionsState();
     sig = `o|${st.volume.effect}|${st.volume.voice}|${st.volume.music}|${st.subtitles}|${st.helpActive ? 1 : 0}|${st.scrollFrame}`;
     paint = ai
-      ? () => ai.drawOptions(panelCtx, st)
-      : () => panelCtx.putImageData(new ImageData(new Uint8ClampedArray(panelToRgba(composeOptions(ui.panel!.images, ui.panel!.cudl, st), ui.panel!.palette)), PANEL_W, PANEL_H), 0, 0);
+      ? () => ai.drawOptions(ctx, st)
+      : () => ctx.putImageData(new ImageData(new Uint8ClampedArray(panelToRgba(composeOptions(ui.panel!.images, ui.panel!.cudl, st), ui.panel!.palette)), PANEL_W, PANEL_H), 0, 0);
   }
   // The signature must include which renderer produced the pixels, or switching tiers
-  // with an otherwise-identical panel state would leave the old resolution on screen.
-  sig = `${ai ? 'a' : 'f'}|${sig}`;
+  // with an otherwise-identical panel state would leave the old resolution on screen —
+  // and the same goes for the face's shape.
+  sig = `${ai ? 'a' : 'f'}|${layout}|${sig}`;
   if (sig !== ui.panelSig) {
     ui.panelSig = sig;
     paint();
+    if (ctx !== panelCtx) composeLandscape(panelCtx, ctx.canvas, k);
   }
   // Fixed panel size at the stage scale — constant across all rooms (no longer
   // tracks the room height, so it stops resizing room-to-room). Only touch the DOM
   // when it actually changes (a resize), so idle frames do no style work.
-  const panelW = asTouchOverlay ? PANEL_W * stage.scale : stage.panelW;
-  const panelH = asTouchOverlay ? PANEL_H * stage.scale : stage.panelH;
+  const touchCss = asTouchOverlay ? touchFaceCss(layout) : null;
+  const panelW = touchCss ? touchCss.w : stage.panelW;
+  const panelH = touchCss ? touchCss.h : stage.panelH;
   const pw = `${Math.round(panelW)}px`;
   const ph = `${Math.round(panelH)}px`;
   if (panelCanvas.style.width !== pw) panelCanvas.style.width = pw;

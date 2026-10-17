@@ -41,7 +41,7 @@ import { hapticTap } from '../platform/haptics.js';
 import { requiredAsset, requiredJson } from '../render/assetFetch.js';
 import { framesIdle, wake } from './frameClock.js';
 import { depthOfRoom, branchOfRoom } from '../data/world.js';
-import { hitTest as panelHitTest, sliderIndex, PANEL_W, PANEL_H } from '../render/hud.js';
+import { hitTest as panelHitTest, sliderIndex } from '../render/hud.js';
 import { TALKING_MEZ_SEC, MUSIC_PRIOR } from '../audio/audio.js';
 import { musicForCHud, musicUrl } from '../audio/music.js';
 import { Script, type ScriptSnapshot } from '../core/script.js';
@@ -123,7 +123,8 @@ import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
 import { initTouchButtons } from './touchButtons.js';
 import { initCutsceneClose } from './cutsceneClose.js';
-import { canvasTouchOptionsOpen, initTouchOptions } from './touchOptions.js';
+import { touchOptionsOpen } from './touchOptions.js';
+import { faceSize, optionsLayout, toPanelPoint } from './optionsLayout.js';
 import { initTouchSwipe } from './touchSwipe.js';
 import { showDialogueHint } from './dialogueHints.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
@@ -989,16 +990,15 @@ initPanel({
   },
 });
 
-//#region Touch controls wiring | anchors: initTouchButtons, initTouchOptions, initTouchSwipe | Hands the touch modules the panel's dispatch table and arms the swipe gestures. What the bar sends, what the plain-HTML Options looks like, and what a gesture IS are in those modules.
-// One host for the two that need one; the gestures need none, being a synthetic arrow
-// keydown that reaches the router already in this file.
+//#region Touch controls wiring | anchors: initTouchButtons, initTouchSwipe | Hands the touch bar the panel's dispatch table and arms the swipe gestures. What the bar sends and what a gesture IS are in those modules.
+// The bar needs a host; the gestures need none, being a synthetic arrow keydown that
+// reaches the router already in this file.
 const touchHost = {
   get panelAction() {
     return panelAction;
   },
 };
 initTouchButtons(touchHost);
-initTouchOptions(touchHost);
 initTouchSwipe();
 
 //#region Map drawing wiring | anchors: initMapDraw | Hands `mapDraw.ts` the four names it needs, all of them the persisted record the map is a view of. The drawing is in that module.
@@ -1880,13 +1880,13 @@ canvas.addEventListener('mouseleave', () => {
   canvas.style.cursor = 'default';
 });
 
-/** Panel-canvas coords -> panel image space (155x395), accounting for CSS scale. */
+/** Panel-canvas coords -> panel image space (155x395), through CSS scale and a phone's landscape cut. */
 function panelCoords(e: MouseEvent): { x: number; y: number } {
   const rect = panelCanvas.getBoundingClientRect();
-  return {
-    x: Math.floor((e.clientX - rect.left) * (PANEL_W / rect.width)),
-    y: Math.floor((e.clientY - rect.top) * (PANEL_H / rect.height)),
-  };
+  const layout = optionsLayout();
+  const face = faceSize(layout);
+  const x = Math.floor((e.clientX - rect.left) * (face.w / rect.width));
+  return toPanelPoint(x, Math.floor((e.clientY - rect.top) * (face.h / rect.height)), layout, ui.panelDragBus !== null);
 }
 
 panelCanvas.addEventListener('contextmenu', (e) => e.preventDefault()); // right-click toggles options
@@ -1898,7 +1898,7 @@ panelCanvas.addEventListener('pointerdown', (e) => {
     e.preventDefault(); // modal minigame: the control panel is inert behind it
     return;
   }
-  if (inAutoPlay() && !canvasTouchOptionsOpen()) {
+  if (inAutoPlay() && !touchOptionsOpen()) {
     e.preventDefault(); // Playback blocks the side panel, not the tablet Options dialog.
     return;
   }

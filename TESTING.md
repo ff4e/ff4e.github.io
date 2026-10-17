@@ -41,7 +41,7 @@ as well as Undo/Restart effects; phone markup and corner controls remain separat
 `test-native-menu.mjs` checks default skin/icon activation in phone/tablet browsers,
 then pairs the shared skin on/off on the same DOM: 15 viewport/safe-area
 configurations, exact control geometry and unskinned-pixel
-restoration, volume/radio dispatch, keyboard focus, reduced motion, forced colors,
+restoration, the original Options face on phones and tablets, reduced motion, forced colors,
 and stable warm/green room accents. The only paired geometry exceptions are the
 explicit shared phone insets: 24px top/bottom on wider portraits, 24px minimum
 landscape margins, and the corresponding reduction in overflow-menu height.
@@ -54,9 +54,7 @@ paint comparison, not for browser activation. Run against an
 isolated dev server with `FF_UI_PORT=<port> node tools/test-native-menu.mjs`;
 `FF_NATIVE_EVIDENCE=<directory>` saves before/after screenshots.
 `nativeMenuPalette.test.ts` covers palette extraction and neutral scenery. Physical
-iOS appearance remains a device check. The texture is a small crop of
-the original `panel.ffp`, regenerated with `npx tsx tools/build-native-menu-art.ts`;
-`nativeMenuArt.test.ts` compares every shipped pixel to that source.
+iOS appearance remains a device check.
 `FF_UI_PORT=<dev-port> node --import tsx tools/build-native-menu-palette.mjs`
 checks all 72 fixed accents against static AI wall artwork; `--write` regenerates
 `src/data/nativeMenuHues.ts` for visual review after an artwork change.
