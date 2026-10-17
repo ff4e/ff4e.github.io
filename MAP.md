@@ -150,6 +150,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `gpuLossRecovery.ts` | | Detecting that the browser's GPU process was lost, which wipes every decoded image and canvas and leaves the game black, then reloading and putting the player back into their room. |
 | `gpuLoss.ts` | | The recovery's pure decisions: what a wiped sentinel looks like, the reload-loop cooldown, and the sessionStorage hand-over. |
 | `audioEngine.ts` | 0.3 k | Who owns the `AudioEngine`. |
+| `initQuiet.ts` | 1.4 k | On an instant restore (undo), keeps a room's `init` from re-cueing the `carriedSounds` the rebuild left playing. |
 | `renderSettings.ts` | 2.0 k | What the game is drawn WITH — the four persisted choices: art tier, backend, idle-FPS saver, developer pane. |
 | `aiFilter.ts` | 2.5 k | The AI tier's colour look: three tunable channels written as CSS custom properties, clamped and persisted. |
 | `playerSettings.ts` | 1.2 k | The player's options: subtitle language and the three volume buses. |

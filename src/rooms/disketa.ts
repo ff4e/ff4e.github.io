@@ -9,6 +9,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -97,8 +98,8 @@ function roomBlock(s: Script): void {
     }
   }
 
-  const svabStav = (val: number): void => {
-    s.vars(R.svab)[R.svab_stav] = val;
+  const svabStav = (val: number, cur: Script): void => {
+    cur.vars(R.svab)[R.svab_stav] = val;
   };
   switch (pom2) {
     case 1:
@@ -153,8 +154,8 @@ function roomBlock(s: Script): void {
 function virProg(s: Script, idx: number): void {
   const v = s.vars(idx);
   const it = s.item(idx);
-  const setStav = (val: number): void => {
-    v[R.vir_stav] = val;
+  const setStav = (val: number, cur: Script): void => {
+    cur.vars(idx)[R.vir_stav] = val;
   };
   switch (v[R.vir_stav]) {
     case 0: // kouka (watching)
@@ -225,7 +226,7 @@ function prog(s: Script): void {
       else if (v[R.svab_pam] === 1) {
         v[R.svab_pam] = 0;
         if (s.noDialog())
-          s.addd(0, 'disk-x-au' + chr(48 + s.random(3)), 120, (val) => (v[R.svab_stav] = val));
+          s.addd(0, 'disk-x-au' + chr(48 + s.random(3)), 120, (val, cur) => (cur.vars(R.svab)[R.svab_stav] = val));
       }
     }
   }
@@ -233,4 +234,33 @@ function prog(s: Script): void {
   virProg(s, R.vir2);
 }
 
-export const DISKETA: RoomScript = { name: 'DISKETA', init, prog };
+/**
+ * Undo (a port addition) and the disk's residents. The viruses chitter and the cockroach
+ * squeaks on time, and so do the fish, so an undo leaves the conversation where it is: the
+ * pending lines, the fish's included, and the talkers' state. Before, the rebuild dropped
+ * the queue, and a point banked while a virus chittered kept `vir_stav` = 110 without the
+ * `set` that ends it: the virus mouthed for the rest of the visit and never chittered
+ * again. A cockroach banked mid-squeak was left mouthing the same way.
+ *
+ * A virus the undone move woke goes back to sleep, and the cockroach's push count is the
+ * target's: those are the fish's doing. With a fish dead, the fish's own lines (the death
+ * lines) are not carried. A load has no queue, so it leaves nobody mid-line.
+ */
+const TALK_SOUNDS = [1, 2, 110, 120];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    for (const vir of [R.vir1, R.vir2]) if (s.vars(vir)[R.vir_stav]! >= 2) s.vars(vir)[R.vir_stav] = 0;
+    if (s.vars(R.svab)[R.svab_stav]! >= 2) s.vars(R.svab)[R.svab_stav] = 0;
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  for (const vir of [R.vir1, R.vir2]) if (s.vars(vir)[R.vir_stav] !== 1) carryItem(s, previous, vir);
+  s.vars(R.svab)[R.svab_stav] = previous.vars(R.svab)[R.svab_stav]!;
+  s.item(R.svab).afaze = previous.item(R.svab).afaze;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const DISKETA: RoomScript = { name: 'DISKETA', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

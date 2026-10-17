@@ -8,7 +8,7 @@
  * share a file.
  */
 import { wake } from './frameClock.js';
-import { activeScript, clearUndoHistory, cutscene, engine, loadmode, pokus, room, screenShoveX, setLoadmode, setPokus, setScreenShoveX } from './gameState.js';
+import { activeScript, clearUndoHistory, cutscene, engine, loadmode, pokus, room, screenShoveX, setLoadmode, setPokus, setScreenShoveX, subs } from './gameState.js';
 import { fishBusy } from './roomGates.js';
 import { continuePhoneRoom } from './phoneViewport.js';
 import { ui } from './screenState.js';
@@ -24,7 +24,7 @@ import { hapticBlocked } from '../platform/haptics.js';
  */
 export interface MovementHost {
   /** Rebuild the room; `carryPole` keeps the room-scoped cheats (the RESTART flavour). */
-  readonly buildRoom: (carryPole?: boolean) => void;
+  readonly buildRoom: (carryPole?: boolean, carried?: readonly number[]) => void;
   /** Ends any running KUFRIK demonstration. */
   readonly endShowmode: () => void;
   /** The player is awake: reset the idle timers (delay[]) and the ambient-chatter clock. */
@@ -225,7 +225,9 @@ export function restore(
   // Rebuild with carryPole, i.e. the RESTART flavour: TRoom.Load runs InitItems +
   // InitProgramky (URoom.pas:1905-1948), never TRoom.Init, so loading a save must
   // not clear the room-scoped cheats (or roompole) the way a room change does.
-  host.buildRoom(true); // fresh room (resets srecord); may leave pending fall dirs
+  // An instant restore (undo, GPU-loss recovery) keeps the room's own time-driven sounds
+  // playing; a load replays into the saved attempt and starts them over, as a restart does.
+  host.buildRoom(true, animated ? [] : (activeScript?.def.carriedSounds ?? [])); // resets srecord; may leave pending fall dirs
   if (!room || !engine) return;
   room.clearAllDirs();
   room.fallToRest(); // settle the initial gravity instantly
@@ -253,6 +255,9 @@ export function restore(
   // suppressed load replay; buildRoom reset them, so re-apply the saved snapshot).
   if (snapshot && activeScript) activeScript.s.applySnapshot(snapshot, { roompole: !keepRoompole });
   if (activeScript) activeScript.def?.restorePresentation?.(activeScript.s, previousScript);
+  // The rebuild kept the subtitles if the room carries sounds; keep only the lines it carried.
+  const s = activeScript?.s;
+  if (s) subs?.retain((prior) => s.playing(prior));
   host.setInfo();
 }
 

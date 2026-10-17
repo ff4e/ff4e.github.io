@@ -86,6 +86,33 @@ describe('id: which row is which', () => {
     sub.newSubtitle('a line', 'M', 0);
     expect(sub.debugLines()[0]!.id).not.toBe(first);
   });
+
+  // An undo that carries a room's lines restarts `count` at 0; the line must keep its age
+  // and its remaining life, measured on the new clock.
+  it('keeps a line its age and remaining life when rebased onto a restarted clock', () => {
+    const sub = new SubtitleSystem(fakeFont, palette, 40, 600, 100);
+    sub.newSubtitle('a line', 'M', 1000);
+    for (let c = 1001; c <= 1010; c++) sub.tick(c);
+    const id = sub.debugLines()[0]!.id;
+    sub.rebase(1010);
+    expect(sub.debugLines()[0]).toMatchObject({ id, startcount: -10 });
+    let lasted = 0;
+    while (sub.active && lasted < 1000) sub.tick(++lasted);
+    const fresh = new SubtitleSystem(fakeFont, palette, 40, 600, 100);
+    fresh.newSubtitle('a line', 'M', 0);
+    let whole = 0;
+    while (fresh.active && whole < 1000) fresh.tick(++whole);
+    expect(lasted).toBe(whole - 10);
+  });
+
+  it('keeps only the lines whose voice is still sounding, and unvoiced ones', () => {
+    const sub = new SubtitleSystem(fakeFont, palette, 40, 600, 100);
+    sub.newSubtitle('fish', 'M', 0, 1);
+    sub.newSubtitle('band', 'A', 0, 132);
+    sub.newSubtitle('debug', 'A', 0);
+    sub.retain((prior) => prior === 132);
+    expect(sub.debugLines().map((l) => l.obsah)).toEqual(['band', 'debug']);
+  });
 });
 
 describe('block: which lines are one message', () => {

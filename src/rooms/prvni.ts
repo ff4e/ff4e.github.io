@@ -256,4 +256,19 @@ function prog(s: Script): void {
   }
 }
 
-export const PRVNI: RoomScript = { name: 'PRVNI', init, prog };
+/**
+ * Undo (a port addition) restarts `count` from 0 with the rebuilt room, and the tutorial's
+ * fallback start (`qnavod2`, -1 once it has started) is an absolute `count`, so an undo set
+ * its countdown going again from the top. While it is still pending, it plays on: the live
+ * countdown, rebased onto the restarted count, and never onto the -1 that means "started".
+ * When the tutorial started after the undo target, the target's countdown stands, so the
+ * tutorial the undo cut short comes again rather than being lost.
+ */
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return;
+  const v = s.vars(R.room);
+  const live = previous.vars(R.room)[R.room_qnavod2]!;
+  if (v[R.room_qnavod2] !== -1 && live !== -1) v[R.room_qnavod2] = Math.max(0, live - previous.count + s.count);
+}
+
+export const PRVNI: RoomScript = { name: 'PRVNI', init, prog, restorePresentation };

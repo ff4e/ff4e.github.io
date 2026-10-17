@@ -184,6 +184,103 @@ extending the `WANT` table in `tools/build-restored-sounds.ts`.
 
 ## Resolved
 
+### 🟡 Undo held back rooms' scheduled remarks — fixed 2026-10-17
+
+The rebuild behind an undo restarts `count` from 0, and five rooms keep a schedule as
+absolute `count` values in their Vars. The undo target's schedule therefore put the next
+event as far off again as the time already spent in the room. Measured: after ~6 000 ticks,
+one undo moved ZAVAL's next remark from 1 566 to 7 577 ticks away. TRUP and UTES behaved
+the same way.
+
+Affected:
+- **ZAVAL** (`uz`), **TRUP** (`rozh`) and **UTES** (`rozhovor`): the room's recurring
+  remark or conversation.
+- **BANKA:** `kdy`/`kdy2`, its remarks on the creatures, and `fuja`, the "fuj" cooldown.
+- **PRVNI:** `qnavod2`, the tutorial's fallback start, whose countdown began again.
+
+Each now rebases the live schedule onto the restarted count in `restorePresentation`, as
+VES does. PRVNI does so only while the tutorial is still pending.
+
+Not exact: BANKA's one-time "it is alive" line compares `count` with a sum of the two
+schedules. After an undo it comes somewhat later.
+
+Covered by `test/undo-schedules.test.ts`. Every case fails with the rooms reverted.
+
+### 🟠 Undo stranded talkers, locks and performances in 15 more rooms — fixed 2026-10-16
+
+The same cause as the entry below, in rooms whose `set` callbacks run room machines. A point
+banked while a sequence was pending restored Vars that wait for a queued `set` the rebuild
+had dropped, and nothing else ever moves them on. Found with `test/undo-stuck-scan.test.ts`
+(env-gated; 6 seeds × 3 idle waits over every solution room) and a read of each candidate.
+The states that stuck, by room:
+
+- **PARTY1:** the cabin windows stayed locked after the intro, so no passenger ever
+  appeared.
+- **MIKRO:** after a shush, the crabs never chattered again.
+- **BATYSKAF:** the phones never rang again.
+- **WIN:** the notepad stayed half-written.
+- **PUCLIK:** the finished picture never revealed.
+- **SECRET:** the stone mouth never performed.
+- **DISKETA:** a virus mouthed for the rest of the visit and never chittered again.
+- **ODPADKY:** the big fish pulled faces for ever.
+- **CHODBA:** the light switch no longer cut a remark, and a robot dog mouthed for ever.
+- **Talkers left mouthing** (and, where their machine waits for idle, silent for good): the
+  KAJUTA1/KAJUTA2 parrot, the PUZZLE computer (the screen wobbled for ever), the SMETAK
+  jellyfish (it ignored the ball), and the VLADOVA hook and skull. KAJUTA1 could also keep
+  its screen shove armed for the visit.
+
+Each of these rooms now carries its conversation as DRAKAR and LODE do:
+- The `set` callbacks act on the script running them.
+- Pending lines carry, NPC and fish alike, with the voices that speak them (`carriedSounds`).
+- The dialogue flags and the talkers' state come from the live script; what the fish did
+  comes from the undo target.
+- A sequence the undone move started goes with the move: lifting a phone in BATYSKAF,
+  assembling the picture in PUCLIK, a heckle the parrot started after the point in KAJUTA1,
+  a remark on an undone push.
+- A dead fish's lines do not carry (in KAJUTA1 that includes the parrot's "karamba").
+- A load, which has no queue, leaves nobody mid-sequence.
+- VITEJTE1's ruler and MIKRO's crabs, cut by undo before, play on.
+
+Covered by `test/undo-strands.test.ts`. Every strand case fails with its room reverted.
+
+**Not changed:**
+- An undo still cuts a line without leaving anything stuck in BARELY, BLUDISTE, ZELVA,
+  REAKTOR, JEDNICKY and BOTTLES.
+- A talker banked mid-line mouths until its next line in ZDVIZ1/ZDVIZ2, DEUTSCHE and
+  POHON (its quarrel faces).
+- An undo back across a death restart hands the rooms that carry the fresh attempt's
+  conversation, so a line may be said again. DRAKAR, DRAKAR1 and LODE do the same.
+
+### 🟠 Undo stopped, restarted or stranded rooms' own performances — fixed 2026-10-16
+
+Undo rebuilds the room, which silenced every sound, re-ran `init`, dropped the dialogue queue
+and restored the previous point's script state, so a room's time-driven performance was
+rewound with the move, or stranded:
+
+- **DRAKAR1:** the band stopped mid-song and `rybky04` started again. A point banked during
+  the music-to-band handoff lost the queued `set blok:=0`, and the band never came in.
+- **DRAKAR:** a point banked during the roll-call lost the `set quvod:=-2` that ends it, and
+  the crew never spoke again that visit. Rowers and talkers froze mid-line.
+- **LODE:** `init` dealt empty boards under the restored score, so every later shot missed
+  and the match never ended. Pending answers and falling ships were lost too.
+- **KORALY:** the octopus tune was cut to its ending. **VES:** the amplifier loops
+  restarted. The DRAKAR dog, BARELY duck, SMETAK clock and MOTOR hum loops were cut or
+  restarted.
+
+Rooms now declare `carriedSounds`, which an instant restore neither stops nor lets `init`
+re-cue (`killVoices(except)`, `initQuiet.ts`), and hand the live state to the rebuilt script
+in `restorePresentation`. DRAKAR1, DRAKAR and LODE carry all pending lines
+(`Script.adoptDialogue`; their `set` callbacks act on the script running them), the fish's
+included, except a dead fish's death lines. LODE also carries its boards, falling ship and
+eroded wreckage. Subtitles of carried lines stay on screen (`SubtitleSystem.rebase`).
+Whatever an undone move started or stopped still follows the move. Undoing the octopus shove
+ends its tune, and undoing an amp's smash brings its loop back. A load, which has no queue to
+carry, re-arms a stranded DRAKAR1 handoff and DRAKAR roll-call, and deals LODE a new match.
+
+Covered by `test/drakar1-undo.test.ts`, `test/drakar-undo.test.ts`, `test/lode-undo.test.ts`,
+`test/undo-ambience.test.ts` and `tools/test-music.mjs`. MIKRO's crabs, VLADOVA's skull and
+VITEJTE1's ruler, cut by undo here, now carry too (see the entry above).
+
 ### 🟠 Exit farewells overlapped the same fish's dialogue — fixed 2026-10-07
 
 The port played a farewell unconditionally at exit completion. Delphi checks the
@@ -237,6 +334,8 @@ rebuilds the room and restores the target's script snapshot without muting heard
 carrying pending dialogue, suppressing the opening, or scheduling interrupted-line
 replays. Lines may repeat and queued lines may be lost, including across an exit.
 `test/undo-dialogue.test.ts` covers this behavior through the real undo/restore path.
+DRAKAR1, DRAKAR and LODE are the exception: their talk is part of a performance that runs
+on time, and they carry it (see "Undo stopped, restarted or stranded…" above).
 
 ### 🟠 KUFRIK's first tutorial line ended in half a second of buzz — fixed 2026-08-16
 

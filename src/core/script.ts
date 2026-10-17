@@ -24,8 +24,12 @@ interface DialogEntry {
   delay: number;
   zvuk: string;
   prior: number;
-  promSet?: (val: number) => void;
+  promSet?: SetFn;
 }
+
+/** An `addset`/`addd` callback. It is handed the script running it, which is not the one
+ *  that queued it once `adoptDialogue` has moved the entry across an instant restore. */
+type SetFn = (val: number, s: Script) => void;
 
 /** Plays a named voice + subtitle; returns how many frames it lasts. */
 export type TalkFn = (name: string, prior: number) => number;
@@ -68,8 +72,12 @@ export interface RoomScript {
   init(s: Script): void;
   prog(s: Script): void;
   /** Recompute visual-only state after replay, without running dialogue or physics.
-   *  Instant undo supplies the previous script so motion can remain continuous. */
+   *  Instant undo supplies the previous script so motion can remain continuous, and so a
+   *  room can carry its own time-driven performance across the rebuild (DRAKAR1). */
   restorePresentation?(s: Script, previous?: Script): void;
+  /** Sound priorities of that performance: an instant restore neither stops them nor lets
+   *  `init` re-cue them, so they play on through an undo (`restore` in movement.ts). */
+  readonly carriedSounds?: readonly number[];
   /**
    * A recorded solution for this room: one character per move, lowercase = the little
    * fish, UPPERCASE = the big one, `u`/`d`/`l`/`r` = up/down/left/right (WIN #68's bonus
@@ -142,7 +150,7 @@ export class Script {
   private queue: DialogEntry[] = [];
   private voiceEndCount = 0;
   private aktdialzvuk = 0;
-  private lastprom: ((v: number) => void) | undefined;
+  private lastprom: SetFn | undefined;
 
   /** showmode: the room is running its scripted demonstration (help.cap autoplay). */
   showmode = false;
@@ -532,7 +540,7 @@ export class Script {
   // ----- dialog scheduler -----
 
   /** addd (URoom.pas:684): enqueue a delayed action; `set` writes via `promSet`. */
-  addd(delay: number, zvuk: string, prior: number, promSet?: (v: number) => void): void {
+  addd(delay: number, zvuk: string, prior: number, promSet?: SetFn): void {
     this.queue.push(promSet ? { delay, zvuk, prior, promSet } : { delay, zvuk, prior });
   }
   /** addm: the small fish speaks after `delay` frames. */
@@ -544,7 +552,7 @@ export class Script {
     this.addd(delay, name, MLUVI_VELKA);
   }
   /** addset: set a variable when reached in the queue. */
-  addset(set: (v: number) => void, value: number): void {
+  addset(set: SetFn, value: number): void {
     this.addd(0, 'set', value, set);
   }
   adddel(doba: number): void {
@@ -686,6 +694,19 @@ export class Script {
     // vzdy_tit has no counterpart here; see stdKonecKrajniHlasky.
   }
 
+  /** Take over `previous`'s unfinished dialogue across an instant restore, the line in
+   *  progress keeping its remaining length on this script's clock, less the lines of the
+   *  speakers in `drop`. Only for a room whose callbacks act on the script they are
+   *  handed, not one they captured. */
+  adoptDialogue(previous: Script, drop: readonly number[] = []): void {
+    const spoken = (d: DialogEntry) => d.zvuk !== 'set' && d.zvuk !== 'del' && !d.zvuk.startsWith('ANIM');
+    this.queue = previous.queue.filter((d) => !spoken(d) || !drop.includes(d.prior)).map((d) => ({ ...d }));
+    if (drop.includes(previous.aktdialzvuk)) return;
+    this.aktdialzvuk = previous.aktdialzvuk;
+    this.voiceEndCount = this.count + previous.voiceEndCount - previous.count;
+    this.lastprom = previous.lastprom;
+  }
+
   /** dialogy (URoom.pas:779): advance the speech queue, one line at a time. */
   dialogy(count: number): void {
     this.count = count;
@@ -697,7 +718,7 @@ export class Script {
         return; // still talking
       } else {
         this.aktdialzvuk = 0;
-        this.lastprom?.(0);
+        this.lastprom?.(0, this);
       }
     }
     const d = this.queue[0];
@@ -707,7 +728,7 @@ export class Script {
       return;
     }
     if (d.zvuk === 'set') {
-      d.promSet?.(d.prior);
+      d.promSet?.(d.prior, this);
     } else if (d.zvuk === 'del') {
       // pure delay, already consumed
     } else if (d.zvuk.startsWith('ANIMWAIT')) {
@@ -721,7 +742,7 @@ export class Script {
       if (this.sound.voicesReady && !this.sound.voicesReady()) return;
       this.aktdialzvuk = d.prior;
       this.voiceEndCount = count + this.talk(d.zvuk, d.prior);
-      d.promSet?.(d.prior);
+      d.promSet?.(d.prior, this);
       this.lastprom = d.promSet;
     }
     this.queue.shift();

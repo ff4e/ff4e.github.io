@@ -249,4 +249,64 @@ function prog(s: Script): void {
   }
 }
 
-export const VES: RoomScript = { name: 'VES', init, prog };
+/**
+ * Undo (a port addition) and the gig. The head's act and the amps' start run on time; only
+ * a push down and release (the smash) and the farewell that three smashes bring on are the
+ * fish's doing. The rebuild used to stop every loop and restart `count` from 0, so each
+ * undo started the gig over: the loops came back from their first bar on the defensive
+ * re-trigger, and a head not yet singing waited its whole `zac1` again.
+ *
+ * So the loops and the head's voices are carried sounds, and this hands the rebuilt script
+ * the live gig wherever the undo target agrees with it, and the target's state where an
+ * undone move changed it: an amp whose smash is undone sounds again (from the top — the
+ * loop it had is gone), and a farewell whose third smash is undone goes back to the show.
+ * `zac1`/`zac2` are rebased onto the restarted count so the schedule keeps its place.
+ */
+const AMPS = [
+  [R.amp1, 50, 0],
+  [R.amp2, 51, 4],
+  [R.amp3, 52, 6],
+] as const;
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return;
+  for (const [idx, prior, fazeInit] of AMPS) {
+    const av = s.vars(idx);
+    const live = previous.vars(idx);
+    if (av[STAV] === 0 && live[STAV]! >= 1) {
+      av[STAV] = 1; // it struck up on time after the target point
+      av[FAZE] = fazeInit;
+    }
+    if (av[STAV] === 1 && live[STAV] === 1) {
+      av[FAZE] = live[FAZE]!;
+      s.item(idx).afaze = previous.item(idx).afaze;
+    }
+    if (av[STAV] === 1 || av[STAV] === 2) {
+      if (!s.playing(prior)) s.musiccyc('ves-ampliony', prior);
+    } else s.ksnd(prior);
+  }
+  const v = s.vars(R.room);
+  const lh = previous.vars(R.hlava);
+  // The live head is only the continuation of the target's when it is at least as far
+  // along: after a GPU-loss reload, or an undo back across a death restart, `previous`
+  // is a freshly started gig, and taking its head would strand a farewell already sung.
+  const ahead =
+    lh[R.hlava_stav]! >= s.vars(R.hlava)[R.hlava_stav]! &&
+    previous.vars(R.room)[R.room_rozbito]! >= v[R.room_rozbito]!;
+  if (!ahead) {
+    s.ksnd(301); // keep the target's head and smash count, without the fresh gig's voice
+    s.ksnd(302);
+  } else if (lh[R.hlava_stav]! <= 3 || v[R.room_rozbito]! >= 3) {
+    if (v[R.room_rozbito]! >= 3) v[R.room_rozbito] = previous.vars(R.room)[R.room_rozbito]!;
+    s.item(R.hlava).vars = [...lh];
+    s.item(R.hlava).afaze = previous.item(R.hlava).afaze;
+  } else {
+    s.vars(R.hlava)[R.hlava_stav] = 3; // the third smash is undone: back to the show
+    s.ksnd(302);
+  }
+  const h = s.vars(R.hlava);
+  h[R.hlava_zac1] = lh[R.hlava_zac1]! - previous.count + s.count;
+  h[R.hlava_zac2] = lh[R.hlava_zac2]! - previous.count + s.count;
+}
+
+export const VES: RoomScript = { name: 'VES', init, prog, restorePresentation, carriedSounds: [50, 51, 52, 301, 302] };

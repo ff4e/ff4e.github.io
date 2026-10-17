@@ -229,7 +229,7 @@ describe('quiet map timing', () => {
 describe('room rebuild cancellation', () => {
   it('wires cancellation into the shared rebuild before replacing the room', () => {
     const main = readFileSync(new URL('../src/app/main.ts', import.meta.url), 'utf8');
-    expect(/function buildRoom\(carryPole = false\): void \{\s*if \(!ffr\) return;\s*cancelStoreReview\(\);/.test(main)).toBe(true);
+    expect(/function buildRoom\(carryPole = false[^)]*\): void \{\s*if \(!ffr\) return;\s*cancelStoreReview\(\);/.test(main)).toBe(true);
   });
 
   it('drops a win opportunity when the player restarts before the map return', async () => {

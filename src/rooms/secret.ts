@@ -13,6 +13,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -174,7 +175,7 @@ function prog(s: Script): void {
       s.addv(40, 'sec-v-socha');
       s.addm(s.random(10) + 4, 'sec-m-situace');
       s.adddel(s.random(15) + 5);
-      s.addset((val) => (s.vars(R.drzka)[R.drzka_cinnost] = val), 1);
+      s.addset((val, cur) => (cur.vars(R.drzka)[R.drzka_cinnost] = val), 1);
     } else if (v[R.room_opocitech] === 0) {
       v[R.room_opocitech] = -1;
       s.addv(20, 'sec-v-pocit');
@@ -395,4 +396,43 @@ function prog(s: Script): void {
   }
 }
 
-export const SECRET: RoomScript = { name: 'SECRET', init, prog };
+/**
+ * Undo (a port addition) and the timed schedule. The yells, the remarks and the stone
+ * mouth's one-time performance run on time, so an undo leaves them where they are,
+ * pending lines included, and the mouth mid-performance. Before, the rebuild dropped the
+ * queue: a point banked between `sec-v-socha` and the `set` that starts the mouth kept
+ * `osose` = -1 with the mouth still at rest, so it never performed.
+ *
+ * The brick (`uvod`, `venku`) and the balloon count (`obaloncich`) are the fish's doing:
+ * the balloon count is the target's, and when the undone move shifted the brick or ran the
+ * balloon count out, the room is the target's and its lines go with the move. With a fish
+ * dead, the fish's own lines (the death lines) are not carried. A load has no queue, so it
+ * starts a mouth it caught waiting, as the `set` would have.
+ */
+function settle(s: Script): void {
+  const dv = s.vars(R.drzka);
+  if (s.vars(R.room)[R.room_osose] === -1 && dv[R.drzka_cinnost] === 0) dv[R.drzka_cinnost] = 1;
+}
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return settle(s);
+  const v = s.vars(R.room);
+  const live = previous.vars(R.room);
+  if (
+    (v[R.room_uvod]! > 0 && live[R.room_uvod] === -1) ||
+    (v[R.room_obaloncich]! > 0 && live[R.room_obaloncich]! <= 0)
+  ) {
+    s.ksnd(1);
+    s.ksnd(2);
+    return settle(s);
+  }
+  const obaloncich = v[R.room_obaloncich]!;
+  s.item(R.room).vars = [...live];
+  if (obaloncich > 0) s.vars(R.room)[R.room_obaloncich] = obaloncich;
+  carryItem(s, previous, R.drzka);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const SECRET: RoomScript = { name: 'SECRET', init, prog, restorePresentation, carriedSounds: [1, 2] };

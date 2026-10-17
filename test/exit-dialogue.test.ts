@@ -88,14 +88,14 @@ describe.each(['little', 'big'] as const)('%s exit dialogue (URoom.pas:24387-244
     expect(h.random).not.toHaveBeenCalled();
     expect(h.room.busy).toEqual({ little: 0, big: 0 });
     expect(h.script.isDialog()).toBe(true);
-    expect(prom.mock.calls).toEqual([[prior[which]]]);
+    expect(prom.mock.calls.map(([v]) => v)).toEqual([prior[which]]);
     expect(h.ksnd).not.toHaveBeenCalled();
     h.finish();
     expect(h.engine.won).toBe(final);
     expect(h.onWin.mock.calls).toEqual(final ? [[30]] : []);
     for (let i = 0; i < 100; i++) h.tick();
     expect(h.talk.mock.calls).toEqual([['current-sentence', prior[which]]]);
-    expect(prom.mock.calls).toEqual([[prior[which]], [0]]);
+    expect(prom.mock.calls.map(([v]) => v)).toEqual([prior[which], 0]);
     expect(pendingSet).not.toHaveBeenCalled();
     expect(h.script.isDialog()).toBe(false);
   });

@@ -13,6 +13,7 @@
  */
 import type { RoomScript, Script } from '../core/script.js';
 import { Dir } from '../core/dir.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -117,7 +118,7 @@ function prog(s: Script): void {
           s.addv(s.random(5), 'mik-v-ticho2');
           break;
       }
-      s.addset((val) => (s.vars(R.room)[R.room_okrikla] = val), 1);
+      s.addset((val, cur) => (cur.vars(R.room)[R.room_okrikla] = val), 1);
     } else if (v[R.room_okrikla] === 1) {
       s.ksnd(101);
       s.ksnd(102);
@@ -164,7 +165,7 @@ function prog(s: Script): void {
       for (const c of [R.krab1, R.krab2, R.krab3, R.krab4]) s.vars(c)[R.drzej] = 0;
       s.adddel(s.random(20) + 30);
       for (const c of [R.krab1, R.krab2, R.krab3, R.krab4]) {
-        s.addset((val) => (s.vars(c)[R.drzej] = val), 1);
+        s.addset((val, cur) => (cur.vars(c)[R.drzej] = val), 1);
       }
     } else if (
       s.lookAt(R.malar, R.rybusa) &&
@@ -287,4 +288,39 @@ function prog(s: Script): void {
   crabTwitter(s, R.krab1, 101, 300, [R.krab2, R.krab3, R.krab4]);
 }
 
-export const MIKRO: RoomScript = { name: 'MIKRO', init, prog };
+/**
+ * Undo (a port addition) and the crabs. Their chatter and the big fish's shush run on
+ * time, so an undo leaves them where they are: the crabs' voices play on, and the pending
+ * lines and `set`s are carried with the crabs' state. Before, the rebuild dropped the
+ * queue: a point banked after a shush kept every crab's `drzej` at 0 without the `set`s
+ * that give it back, so the crabs never chattered again. The horse, the little fish, the
+ * cuttlefish and the snail have no lines and nothing queued; they are left as they were.
+ *
+ * The roller remark is the fish's doing: when the undone move set it off, the room is the
+ * target's and the remark goes with the move. With a fish dead, the fish's own lines (the
+ * death lines) are not carried. A load has no queue, so it gives the crabs their `drzej`
+ * back, as the shush's `set`s would have.
+ */
+const CRABS = [R.krab1, R.krab2, R.krab3, R.krab4];
+
+function settle(s: Script): void {
+  for (const c of CRABS) if (s.vars(c)[R.drzej] === 0) s.vars(c)[R.drzej] = 1;
+}
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) return settle(s);
+  if (s.vars(R.room)[R.room_prekazka] === 0 && previous.vars(R.room)[R.room_prekazka] === 1) {
+    s.ksnd(1);
+    s.ksnd(2);
+    return settle(s);
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  for (const c of CRABS) carryItem(s, previous, c);
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+const TALK_SOUNDS = [1, 2, 101, 102, 103, 104];
+
+export const MIKRO: RoomScript = { name: 'MIKRO', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };

@@ -109,7 +109,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // Room entry lives here and nowhere else; the recovery itself is in its own modules.
   // 2 278 -> 2 281: review import, first-solve notification and rebuild cancellation;
   // review policy lives in storeReview.ts.
-  ['src/app/main.ts', 2281],
+  // 2 281 -> 2 285: buildRoom takes the room's carried sounds on an instant restore and
+  // keeps them through its KillSnd and its `init`, and keeps the subtitles of the lines
+  // that carry on; the policy is in initQuiet.ts and the rooms' own `carriedSounds` /
+  // `restorePresentation`.
+  ['src/app/main.ts', 2285],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
@@ -256,7 +260,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // private queue without resetting the active line or its completion callback.
   // 730 -> 733: the shared RoomScript contract gains a presentation-only restore hook;
   // MOTOR owns the motion policy, so replay need not know which room shakes.
-  ['src/core/script.ts', 733],
+  // 733 -> 753: `carriedSounds` on the contract, `set` callbacks handed the running script,
+  // and `adoptDialogue`, which needs the private queue; rooms decide what to carry.
+  ['src/core/script.ts', 753],
   // 720 -> 780 for `backgroundZx`, the canvas-2D half of the same change: the stripes
   // masked by the wall's alpha, plus the `paint`/`paintBg` split that lets it reuse the
   // wobbled-background half rather than copy it.
@@ -341,7 +347,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // returning to the screen is the trigger that is always there. Most of the additions are
   // the comment, because the reason this trigger was passed over the first time is a good
   // one and the answer to it — early is survivable, absent is not — is the whole point.
-  ['src/audio/audio.ts', 1115],
+  // 1115 -> 1119: `killVoices(except)`, so an undo can leave a room's carried sounds
+  // playing (RoomScript.carriedSounds) while it silences everything else.
+  ['src/audio/audio.ts', 1119],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

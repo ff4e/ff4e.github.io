@@ -204,6 +204,25 @@ describe('bookkeeping stays clean', () => {
     expect(engine.playing(2)).toBe(false);
   });
 
+  it('keeps the excepted priorities sounding through killVoices(except), and only them', () => {
+    const engine = newEngine();
+    seed(engine, 'band', 'voice', 'fish');
+    engine.snd('band', 111, false, 1, 'music');
+    engine.play('voice', 1, 132, 'voice');
+    engine.play('fish', 1, 1, 'voice');
+
+    engine.killVoices([111, 132]); // an undo in DRAKAR1: the band plays on
+
+    expect(sources.map((s) => s.stopped)).toEqual([0, 0, 1]);
+    expect(engine.playing(111)).toBe(true);
+    expect(engine.talking(132)).toBe(true);
+    expect(engine.playing(1)).toBe(false);
+    engine.killVoice(111); // and the kept source is still the script's to stop
+    expect(sources[0]!.stopped).toBe(1);
+    engine.killVoices();
+    expect(sources[1]!.stopped).toBe(1);
+  });
+
   it('does not track a priority-less one-shot (KSnd cannot target it)', () => {
     const engine = newEngine();
     seed(engine, 'sp-bublina');

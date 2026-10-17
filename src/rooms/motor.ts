@@ -234,4 +234,6 @@ function prog(s: Script): void {
   if (s.item(R.velkar).x === 8) s.vars(R.velkar)[R.velkar_vylezla] = 1;
 }
 
-export const MOTOR: RoomScript = { name: 'MOTOR', init, prog, restorePresentation };
+// The hum follows the restored key position on the next tick (re-cued or `ksnd`), so undo
+// leaves a running motor's loop alone instead of restarting it.
+export const MOTOR: RoomScript = { name: 'MOTOR', init, prog, restorePresentation, carriedSounds: [10] };

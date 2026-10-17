@@ -10,8 +10,21 @@
  * songs the players mutter random "brb" phrases (talk) and blink (mrk). Background
  * music 'rybky04' plays until the band starts. Item indices are the generated
  * r_DRAKAR1_* values (URoom.pas:3911-3935).
+ *
+ * Undo (a port addition; the 1998 game has none) leaves the band alone. Nothing in this
+ * script depends on where the fish are — the countdown, the handoff and the arrangement
+ * all run on time — so taking back a move must not take the music back with it. Before
+ * this, undo restored the previous point's state: the band stopped mid-song and the intro
+ * music restarted from the top, and a point banked during the handoff (`room_dohrat` = -1,
+ * `room_blok` = -1, the rest of it queued) left the band never starting at all, because
+ * the queue does not survive the rebuild. So the band's sounds are `carriedSounds`, and
+ * `restorePresentation` hands the live performance — Vars, frames, Anim cursors and the
+ * pending lines, an unfinished handoff among them — to the rebuilt script. The handoff's
+ * `set` entries act on the script handed to them (`cur`), which is what lets them be
+ * adopted.
  */
 import type { RoomScript, Script } from '../core/script.js';
+import { carryItem } from './carry.js';
 
 const R = {
   room: 0,
@@ -115,16 +128,16 @@ function prog(s: Script): void {
       rv[R.room_dohrat] = -1;
       s.ksnd(-998);
       s.adddel(10);
-      s.addset((x) => (s.item(R.melodak1).afaze = x), 3);
+      s.addset((x, cur) => (cur.item(R.melodak1).afaze = x), 3);
       s.addd(s.random(10) + 5, 'd1-1-hud' + 'ba' + digit(s.random(3)), 132);
       s.adddel(5);
-      s.addset((x) => (s.vars(R.basak)[R.basak_hlasky] = x), 2);
-      s.addset((x) => (s.vars(R.piskac)[R.piskac_hlasky] = x), 2);
+      s.addset((x, cur) => (cur.vars(R.basak)[R.basak_hlasky] = x), 2);
+      s.addset((x, cur) => (cur.vars(R.piskac)[R.piskac_hlasky] = x), 2);
       s.adddel(10);
-      s.addset((x) => (s.vars(R.melodak1)[R.melodak1_hlasky] = x), 1);
+      s.addset((x, cur) => (cur.vars(R.melodak1)[R.melodak1_hlasky] = x), 1);
       s.addd(30 + s.random(10), 'd1-5-nevadi' + digit(s.random(3)), 102);
       s.adddel(10);
-      s.addset((x) => (rv[R.room_blok] = x), 0);
+      s.addset((x, cur) => (cur.vars(R.room)[R.room_blok] = x), 0);
     }
   }
 
@@ -315,4 +328,27 @@ function prog(s: Script): void {
   }
 }
 
-export const DRAKAR1: RoomScript = { name: 'DRAKAR1', init, prog };
+/** Priorities of the performance: intro music, the three band tracks, the players' and
+ *  singer's voices (talk 132/102 in the handoff, the brb mutters 133/122/112), and the
+ *  fish's, whose pending lines carry too. */
+const BAND_SOUNDS = [-998, 111, 121, 131, 102, 132, 133, 122, 112, 1, 2];
+const PLAYERS = [R.melodak1, R.hlavni, R.basak, R.piskac, R.melodak2, R.snecek];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  if (!previous) {
+    // A load has no live band to continue, only its saved Vars. One saved during the
+    // handoff would strand the same way, so let the countdown branch queue it again.
+    const rv = s.vars(R.room);
+    if (rv[R.room_dohrat] === -1 && rv[R.room_blok] === -1 && s.noDialog()) rv[R.room_dohrat] = 0;
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  for (const i of PLAYERS) carryItem(s, previous, i);
+  // Pending lines carry, but not a dead fish's: those are the death lines, which an undo
+  // that brings the fish back must not finish saying.
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const DRAKAR1: RoomScript = { name: 'DRAKAR1', init, prog, restorePresentation, carriedSounds: BAND_SOUNDS };

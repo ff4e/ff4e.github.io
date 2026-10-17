@@ -102,7 +102,7 @@ function prog(s: Script): void {
           break;
       }
       s.addm(s.random(30) + 5, 'puc-m-slizka');
-      s.addset((val) => (s.vars(R.pld)[R.pld_smutny] = val), 60 + s.random(60));
+      s.addset((val, cur) => (cur.vars(R.pld)[R.pld_smutny] = val), 60 + s.random(60));
       s.addd(3, 'puc-x-pldik', 101);
     } else if (
       v[R.room_tahy] === 1 &&
@@ -116,7 +116,7 @@ function prog(s: Script): void {
       s.addm(s.random(10) + 3, 'puc-m-stalo');
       s.addm(s.random(20) + 5, 'puc-m-obraz');
       s.adddel(5);
-      s.addset((val) => (s.vars(R.prvni)[R.prvni_faze] = val), 1);
+      s.addset((val, cur) => (cur.vars(R.prvni)[R.prvni_faze] = val), 1);
       s.addv(20, 'puc-v-nesmysl');
       s.vars(R.prvni)[R.prvni_hotovo] = 2;
     }
@@ -239,4 +239,39 @@ function prog(s: Script): void {
   }
 }
 
-export const PUCLIK: RoomScript = { name: 'PUCLIK', init, prog };
+/**
+ * Undo (a port addition) and the finished picture. Once the picture is assembled
+ * (`hotovo` 1) the fish remark on it, and a `set` in the middle of their lines starts the
+ * reveal (`faze`); `hotovo` is 2 from the moment the lines are queued. The fish and the
+ * blob speak on time, so an undo leaves the conversation where it is: the pending lines
+ * and sets, the room's dialogue flags and the picture's reveal. Before, the rebuild
+ * dropped the queue, and a point banked between the remarks and the reveal kept `hotovo`
+ * = 2, `faze` = 0 without the `set`: the picture never revealed.
+ *
+ * Assembling the picture is the fish's doing: if the undone move assembled it, the remarks
+ * go with the move (the picture is the target's, nothing is carried and the voices stop),
+ * and the fish remark again when they assemble it again. The blob's own state is the
+ * target's. With a fish dead, the fish's own lines (the death lines) are not carried. A
+ * load has no queue, so a picture banked waiting for its reveal starts revealing.
+ */
+const TALK_SOUNDS = [1, 2, 101];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  const pr = s.vars(R.prvni);
+  if (!previous) {
+    if (pr[R.prvni_hotovo] === 2 && pr[R.prvni_faze] === 0) pr[R.prvni_faze] = 1;
+    return;
+  }
+  const assembled = pr[R.prvni_hotovo] !== 0;
+  if (!assembled && previous.vars(R.prvni)[R.prvni_hotovo] === 2) {
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  s.item(R.room).vars = [...previous.item(R.room).vars];
+  if (assembled) s.item(R.prvni).vars = [...previous.item(R.prvni).vars];
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const PUCLIK: RoomScript = { name: 'PUCLIK', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };
