@@ -25,6 +25,9 @@ const R = {
   sneci_mluvi: 1,
 } as const;
 
+/** Scripts an undo rebuilt after the opening's moment had passed (`restorePresentation`). */
+const opened = new WeakSet<Script>();
+
 function init(s: Script): void {
   const v = s.vars(R.room, 3);
   s.room.gspec = 9;
@@ -46,7 +49,7 @@ function prog(s: Script): void {
     if (s.stdKrajniHlaska()) {
       s.addv(10, 'map-v-ukol');
       s.stdKonecKrajniHlasky();
-    } else if (s.count === 10 + s.pokus) {
+    } else if (s.count === 10 + s.pokus && !opened.has(s)) {
       pom2 = 1;
     } else if (v[R.room_poh] === 0 && s.item(R.mapous).x !== s.item(R.mapous).xStart) {
       pom2 = 6;
@@ -79,7 +82,7 @@ function prog(s: Script): void {
       break;
     case 3:
       s.addm(7, 'map-m-sneci');
-      s.addd(8, 'map-x-hlemyzdi', 111, (val) => (s.vars(R.sneci)[R.sneci_mluvi] = val));
+      s.addd(8, 'map-x-hlemyzdi', 111, (val, cur) => (cur.vars(R.sneci)[R.sneci_mluvi] = val));
       break;
     case 4:
       s.addv(8, 'map-v-oci');
@@ -165,4 +168,43 @@ function prog(s: Script): void {
   }
 }
 
-export const MAPA: RoomScript = { name: 'MAPA', init, prog };
+/**
+ * Undo (a port addition) and the snails. The snails' line, the fish's chatter and its timer
+ * (`obec`) run on time, so an undo leaves the conversation where it is: the pending lines
+ * and the snails' `mluvi`. Before, the rebuild dropped the queue, and a point banked while
+ * the snails spoke kept `mluvi` = 111 without the callback that ends it: all nine snails
+ * froze until the next snail line, minutes later.
+ *
+ * The opening is timed on `count` alone (`count = 10 + pokus`), and the rebuild starts
+ * `count` again from 0, so every undo replayed it. A script rebuilt once that moment has
+ * passed is marked, and the opening is not said again; a load is left as the original's.
+ *
+ * The map is the fish's doing: when the undone move shifted it, or brought it to the exit,
+ * the remark goes with the move and the room is the target's. With a fish dead, the fish's
+ * own lines (the death lines) are not carried. A load has no queue, so it leaves the snails
+ * quiet.
+ */
+const TALK_SOUNDS = [1, 2, 111];
+
+function restorePresentation(s: Script, previous?: Script): void {
+  const sneci = s.vars(R.sneci);
+  if (!previous) {
+    sneci[R.sneci_mluvi] = 0;
+    return;
+  }
+  if (opened.has(previous) || previous.count >= 10 + s.pokus) opened.add(s);
+  const v = s.vars(R.room);
+  const live = previous.vars(R.room);
+  if (live[R.room_poh] !== v[R.room_poh] || live[R.room_utb] !== v[R.room_utb]) {
+    sneci[R.sneci_mluvi] = 0;
+    for (const p of TALK_SOUNDS) s.ksnd(p);
+    return;
+  }
+  v[R.room_obec] = live[R.room_obec]!;
+  sneci[R.sneci_mluvi] = previous.vars(R.sneci)[R.sneci_mluvi]!;
+  const dead = previous.room.anyFishDead ? [1, 2] : [];
+  for (const p of dead) s.ksnd(p);
+  s.adoptDialogue(previous, dead);
+}
+
+export const MAPA: RoomScript = { name: 'MAPA', init, prog, restorePresentation, carriedSounds: TALK_SOUNDS };
