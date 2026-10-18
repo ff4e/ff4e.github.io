@@ -7,3 +7,15 @@
 #touchopts #panelcol { width: min-content; }
 /* The desktop strip hangs outside the panel; here it belongs inside the scrollable dialog. */
 #touchopts #feedbar { position: static; width: 100%; margin-top: 8px; }
+/* Equal cutout clearance keeps the face centred on the screen, not the remaining safe area. */
+html[data-phone] #touchopts {
+  padding-inline: calc(24px + max(var(--sa-left), var(--sa-right)));
+}
+@media (max-height: 500px) {
+  html[data-phone] #touchopts {
+    padding-inline: calc(16px + max(var(--sa-left), var(--sa-right)));
+    /* The compact footer sits nearer the edge; the face remains above it. */
+    padding-bottom: 10px;
+  }
+  html[data-phone] #touchopts #feedbar { margin-top: 4px; }
+}

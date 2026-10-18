@@ -212,8 +212,14 @@ try {
       assert(Math.abs(face.width / face.height - fw / fh) < 0.01,
         `${c.name}: the ${landscape ? 'cut landscape' : 'whole portrait'} original Options face`);
       assert(face.left >= c.insets[3] && face.right <= c.width - c.insets[1] && face.top >= c.insets[0] &&
-        privacy.height > 0 && privacy.bottom <= c.height - c.insets[2],
-      `${c.name}: the face and Privacy stay inside the safe area`);
+        face.bottom <= c.height - c.insets[2],
+      `${c.name}: the face stays inside the safe area`);
+      assert(Math.abs(face.left + face.width / 2 - c.width / 2) < 1,
+        `${c.name}: the face stays centred regardless of which side has the cutout`);
+      // The compact phone footer deliberately sits nearer the bottom edge than the face.
+      const footerInset = c.height <= 500 ? 10 : c.insets[2];
+      assert(privacy.height > 0 && privacy.bottom <= c.height - footerInset,
+        `${c.name}: Privacy remains visible above the footer's bottom clearance`);
       assert(17 * face.width / fw >= 20, `${c.name}: sliders are finger-sized (${(face.width / fw).toFixed(2)}x)`);
       // Inside the face only: the translucent backdrop shows the live room moving behind it,
       // and the face's fractional edge pixels blend with that room.

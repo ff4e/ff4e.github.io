@@ -28,6 +28,7 @@ import { PANEL_H, PANEL_W } from '../render/hud.js';
 import { stage } from './stageGeometry.js';
 import { phoneUi } from './touchButtons.js';
 import { touchOptionsOpen } from './touchOptions.js';
+import { wake } from './frameClock.js';
 
 export type OptionsLayout = 'portrait' | 'landscape';
 
@@ -134,6 +135,8 @@ export function fitWithStrip(
 
 let fitKey = '';
 let fitSize = { w: 0, h: 0 };
+let fitDialog: HTMLElement | null = null;
+let fitObserver: ResizeObserver | null = null;
 
 /**
  * The CSS size of the face inside the touch dialog.
@@ -142,7 +145,12 @@ let fitSize = { w: 0, h: 0 };
  * the dialog instead: that, not the cut, is what makes its sliders a target — at the
  * stage scale a landscape phone draws the panel, they are ~7px tall. The box is the
  * dialog's content area less the feedback strip under the face, and it is measured only
- * when the viewport or the face changes, so a steady dialog does no layout work per frame.
+ * when the viewport, face or dialog content box changes, so a steady dialog does no
+ * layout work per frame.
+ *
+ * On iOS the viewport can rotate before the dialog finishes resizing, and native
+ * safe-area insets arrive separately again. Observe the content box (including changes
+ * from padding), otherwise the viewport-only key can keep an intermediate fit forever.
  *
  * The strip wraps at the face's width, so its height is measured at the width being
  * decided, never at whatever width the face is showing now. Reading it as it stood made
@@ -155,6 +163,16 @@ export function touchFaceCss(layout: OptionsLayout): { w: number; h: number } {
   const face = faceSize(layout);
   const dialog = phoneUi() ? document.getElementById('touchopts') : null;
   if (!dialog) return { w: face.w * stage.scale, h: face.h * stage.scale };
+  if (dialog !== fitDialog) {
+    fitObserver?.disconnect();
+    fitDialog = dialog;
+    fitKey = '';
+    fitObserver = new ResizeObserver(() => {
+      fitKey = '';
+      if (touchOptionsOpen()) wake();
+    });
+    fitObserver.observe(dialog);
+  }
   const key = `${window.innerWidth}x${window.innerHeight}|${layout}`;
   if (key !== fitKey) {
     const cs = getComputedStyle(dialog);
