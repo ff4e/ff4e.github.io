@@ -103,6 +103,11 @@
  * `pointerdown` before its own `mousedown`, so any new interaction of any kind disarms a
  * stale flag, and the only event that can still be swallowed is one arriving between a
  * `pointerup` and the next press — which is exactly the compatibility event.
+ *
+ * The touch Options canvas needs the same belt: Exit closes and reparents it during
+ * `pointerdown`, and a later compatibility `mousedown` can hit the map underneath and
+ * reopen Options. Remember that target in capture, before the panel can close; leave
+ * the dialog's HTML links alone because they still need their ordinary click.
  */
 import { cutscene, room } from './gameState.js';
 import { phoneUi, touchUi } from './touchButtons.js';
@@ -256,7 +261,11 @@ export function initTouchSwipe(): void {
   window.addEventListener('pointerdown', (e) => {
     // FIRST, before any guard: a press of any kind, anywhere, disarms a stale swallow.
     // See the note on click-to-swim for the two taps this was measured to be eating.
-    swallowMouse = false;
+    swallowMouse = e.pointerType !== 'mouse' && touchOptionsOpen() &&
+      e.target instanceof Element && e.target.closest('#panel') !== null;
+  }, true);
+
+  window.addEventListener('pointerdown', (e) => {
     if (e.pointerType === 'mouse') return; // a finger only — see the file note
     if (!armed() || !onSurface(e.target)) return;
     if (phoneUi()) {
