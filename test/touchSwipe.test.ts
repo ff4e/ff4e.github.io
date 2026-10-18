@@ -3,6 +3,8 @@ import { Dir } from '../src/core/dir.js';
 
 const state = vi.hoisted(() => ({
   phone: true,
+  options: false,
+  screen: 'room',
   blockedKey: null as string | null,
   room: { alive: { little: true, big: true } },
   engine: {
@@ -19,8 +21,8 @@ vi.mock('../src/app/gameState.js', () => ({
 }));
 vi.mock('../src/app/touchButtons.js', () => ({ phoneUi: () => state.phone, touchUi: () => true }));
 vi.mock('../src/app/phoneControls.js', () => ({ phoneMenuOpen: () => false }));
-vi.mock('../src/app/touchOptions.js', () => ({ touchOptionsOpen: () => false }));
-vi.mock('../src/app/screenState.js', () => ({ ui: { screen: 'room', helpOpen: false } }));
+vi.mock('../src/app/touchOptions.js', () => ({ touchOptionsOpen: () => state.options }));
+vi.mock('../src/app/screenState.js', () => ({ ui: { get screen() { return state.screen; }, helpOpen: false } }));
 vi.mock('../src/app/frameClock.js', () => ({ wake: vi.fn() }));
 vi.mock('../src/app/roomGates.js', () => ({ fishBusy: () => false }));
 vi.mock('../src/platform/haptics.js', () => ({ hapticBlocked: vi.fn() }));
@@ -39,6 +41,11 @@ import { initTouchSwipe, switchFishFromTouch, syncTouchSwipe } from '../src/app/
 class Surface {
   closest(selector: string): Surface | null { return selector === '.stage' ? this : null; }
 }
+class Panel extends Surface {
+  override closest(selector: string): Surface | null {
+    return selector === '#panel' || selector === '#panelcol' ? this : null;
+  }
+}
 class KeyEvent extends Event {
   readonly code: string;
   constructor(type: string, init: KeyboardEventInit = {}) {
@@ -53,11 +60,11 @@ const directions: Record<string, Dir> = {
   ArrowUp: Dir.up, ArrowDown: Dir.down, ArrowLeft: Dir.left, ArrowRight: Dir.right,
 };
 
-function pointer(type: string, id: number, x = 400, y = 180): void {
+function pointer(type: string, id: number, x = 400, y = 180, target = surface, pointerType = 'touch'): void {
   const event = Object.assign(new Event(type, { cancelable: true }), {
-    pointerType: 'touch', pointerId: id, clientX: x, clientY: y,
+    pointerType, pointerId: id, clientX: x, clientY: y,
   });
-  Object.defineProperty(event, 'target', { value: surface });
+  Object.defineProperty(event, 'target', { value: target });
   win.dispatchEvent(event);
 }
 function key(type: 'keydown' | 'keyup', code = 'ArrowRight'): void {
@@ -72,6 +79,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   clearHeldKey();
   state.phone = true;
+  state.options = false;
+  state.screen = 'room';
   state.blockedKey = null;
   state.room = { alive: { little: true, big: true } };
   state.engine.active = 'little';
@@ -118,6 +127,52 @@ describe('shared touch fish switch', () => {
     pointer('pointerdown', 1);
     pointer('pointerup', 1);
     expect(keys).toEqual(['keydown:Space', 'keyup:Space']);
+  });
+});
+
+describe('touch Options compatibility mouse suppression', () => {
+  const panel = new Panel();
+  const mouseDown = () => {
+    const event = new Event('mousedown', { cancelable: true });
+    win.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const closeOptions = () => {
+    state.options = true;
+    pointer('pointerdown', 1, 400, 180, panel);
+    state.options = false;
+    pointer('pointerup', 1, 400, 180, panel);
+  };
+
+  it.each([false, true])('eats the mouse event after closing Options over the map (phone=%s)', (phone) => {
+    state.phone = phone;
+    state.screen = 'map';
+    closeOptions();
+    expect(mouseDown()).toBe(true);
+    expect(mouseDown()).toBe(false);
+  });
+
+  it('also consumes the compatibility event when closing back to a room', () => {
+    closeOptions();
+    expect(mouseDown()).toBe(true);
+    expect(state.engine.press).not.toHaveBeenCalled();
+  });
+
+  it.each(['touch', 'mouse'])('does not swallow the next %s press if no compatibility event arrived', (pointerType) => {
+    state.screen = 'map';
+    closeOptions();
+    pointer('pointerdown', 2, 400, 180, surface, pointerType);
+    pointer('pointerup', 2, 400, 180, surface, pointerType);
+    expect(mouseDown()).toBe(false);
+  });
+
+  it('leaves mouse presses on Options and touch presses on its HTML links alone', () => {
+    state.options = true;
+    state.screen = 'map';
+    pointer('pointerdown', 1, 400, 180, panel, 'mouse');
+    expect(mouseDown()).toBe(false);
+    pointer('pointerdown', 2);
+    expect(mouseDown()).toBe(false);
   });
 });
 

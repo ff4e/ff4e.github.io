@@ -110,10 +110,44 @@ export async function checkPhoneOptions(p, expect, label, landscape) {
   expect(JSON.stringify(await p.evaluate(() => window.__ff.volumes())) === JSON.stringify(volumes) &&
     await p.evaluate(() => window.__ff.subtitleMode()) === subtitles, `${label}: settings restored`);
 
-  await tapPanel(p, 135, 370, true);
+  const exit = await panelPoint(p, 135, 370);
+  await p.touchscreen.tap(exit.x, exit.y);
   await p.locator('#touchopts').waitFor({ state: 'hidden' });
   expect(await p.locator('.stage > #panelcol').count() === 1 && await p.locator('#panelcol').isHidden(),
     `${label}: the original corner closes Options and returns the hidden column to the stage`);
+  // Chromium cancels this compatibility event; inject the late mouse event that can
+  // instead land on the exposed map/room after WebKit hides the touched panel.
+  const reachedScreen = await p.locator('#screen').evaluate((el, point) => {
+    let reached = false;
+    const record = () => { reached = true; };
+    el.addEventListener('mousedown', record);
+    el.dispatchEvent(new MouseEvent('mousedown', {
+      button: 0, clientX: point.x, clientY: point.y, bubbles: true, cancelable: true,
+    }));
+    el.removeEventListener('mousedown', record);
+    return reached;
+  }, exit);
+  expect(!reachedScreen && await p.locator('#touchopts').isHidden(),
+    `${label}: closing Options consumes the same tap's late mouse event before it reaches the screen`);
+}
+
+/** A new press must work even when the browser never sent a compatibility mouse event. */
+export async function checkPhoneMapOptionsReopen(p, expect) {
+  const point = await p.locator('#screen').evaluate(el => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left + 620 * r.width / 640, y: r.top + 470 * r.height / 480 };
+  });
+  expect(await p.evaluate(() => window.__ff.mapCorner(620, 470)) === 'options',
+    'phone map: the reopen target is the drawn Options corner');
+  for (const pointer of ['touch', 'touch', 'mouse']) {
+    if (pointer === 'touch') await p.touchscreen.tap(point.x, point.y);
+    else await p.mouse.click(point.x, point.y);
+    await p.locator('#touchopts #panel').waitFor({ state: 'visible' });
+    expect(await p.evaluate(() => window.__ff.optionsOpen()),
+      `phone map: the next deliberate ${pointer === 'touch' ? 'tap' : 'mouse click'} can reopen Options`);
+    await tapPanel(p, 135, 370, true);
+    await p.locator('#touchopts').waitFor({ state: 'hidden' });
+  }
 }
 
 /** Help sits in the lower half, so on a landscape phone it is reached through the cut. */

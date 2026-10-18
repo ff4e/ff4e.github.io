@@ -7,7 +7,7 @@ import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkZoomHints, checkZoomHintsAfterReload } from './ui-zoom-hints.mjs';
 import { checkPortraitHint } from './ui-portrait-hint.mjs';
 import { checkUndoHold } from './ui-undo-hold.mjs';
-import { checkPhoneOptions, checkPhoneOptionsHelp, rotatePhoneOptions } from './ui-phone-options.mjs';
+import { checkPhoneOptions, checkPhoneOptionsHelp, checkPhoneMapOptionsReopen, rotatePhoneOptions } from './ui-phone-options.mjs';
 
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 const browser = await chromium.launch();
@@ -894,6 +894,7 @@ try {
   await checkPhoneOptions(p, expect, 'phone map turned from portrait', true);
   await p.evaluate(() => window.__ff.openMapOptions());
   await checkPhoneOptions(p, expect, 'phone map', true);
+  await checkPhoneMapOptionsReopen(p, expect);
   await p.evaluate(() => {
     for (const side of ['top', 'right', 'bottom', 'left'])
       document.documentElement.style.removeProperty(`--sa-${side}`);
