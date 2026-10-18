@@ -7,7 +7,7 @@ import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkZoomHints, checkZoomHintsAfterReload } from './ui-zoom-hints.mjs';
 import { checkPortraitHint } from './ui-portrait-hint.mjs';
 import { checkUndoHold } from './ui-undo-hold.mjs';
-import { checkPhoneOptions, checkPhoneOptionsHelp } from './ui-phone-options.mjs';
+import { checkPhoneOptions, checkPhoneOptionsHelp, rotatePhoneOptions } from './ui-phone-options.mjs';
 
 const base = `http://127.0.0.1:${process.env.FF_UI_PORT ?? '5173'}/`;
 const browser = await chromium.launch();
@@ -704,6 +704,8 @@ try {
   }), 'phone browsers get the shared portrait clearance without preview hooks or smaller targets');
   await p.locator('#phone-more').tap();
   await p.locator('#phone-menu [data-region="16"]').tap();
+  await rotatePhoneOptions(p, expect, 'phone room to landscape', true);
+  await rotatePhoneOptions(p, expect, 'phone room to portrait', false);
   await checkPhoneOptions(p, expect, 'phone portrait room', false);
   await p.evaluate(() => window.__ff.talk('little'));
   await p.waitForFunction(() => document.getElementById('domsubs')?.children.length > 0);
@@ -888,11 +890,14 @@ try {
   await p.evaluate(() => window.__ff.openMapOptions());
   await p.locator('#touchopts #panel').waitFor({ state: 'visible' });
   await p.waitForFunction(() => { const r = document.getElementById('panel').getBoundingClientRect(); return r.height > r.width; });
-  await p.setViewportSize({ width: 852, height: 393 });
-  await p.waitForFunction(() => { const r = document.getElementById('panel').getBoundingClientRect(); return r.width > r.height; });
+  await rotatePhoneOptions(p, expect, 'phone map to landscape', true);
   await checkPhoneOptions(p, expect, 'phone map turned from portrait', true);
   await p.evaluate(() => window.__ff.openMapOptions());
   await checkPhoneOptions(p, expect, 'phone map', true);
+  await p.evaluate(() => {
+    for (const side of ['top', 'right', 'bottom', 'left'])
+      document.documentElement.style.removeProperty(`--sa-${side}`);
+  });
   expect(await p.evaluate(() => window.__ff.screen() === 'map'), 'closing Options leaves the phone on the map');
   // The record panel is drawn INFO_PHONE_ZOOM (src/render/mapInfo.ts) times its size on
   // a phone, about its centre, and taps must land on the buttons where they are DRAWN.
