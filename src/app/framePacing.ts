@@ -38,7 +38,7 @@ import { aiWaterVisible } from '../render/roomAi.js';
 import { aiRoomRenderActive, roomArtPending } from './art.js';
 import { perfHud } from './dom.js';
 import { initFrameClock } from './frameClock.js';
-import { count, cutscene, engine, loadmode, room, subs } from './gameState.js';
+import { count, cutscene, engine, loadmode, replaymode, room, subs } from './gameState.js';
 import { glAiFailed, glFailed } from './glPlumbing.js';
 import { mapLaunching } from './roomLaunch.js';
 import { O_NORMAL, ui } from './screenState.js';
@@ -351,6 +351,9 @@ export function loopThrottleOk(): boolean {
       host.heldState === 0 &&
       !host.inShowmode() &&
       !loadmode &&
+      // A replay keeps playing through rests — a refused move, a fish busy talking — and
+      // waking from the throttle drops the time it slept, which would stall it.
+      !replaymode &&
       ui.ostav === O_NORMAL &&
       !roomArtPending()
     );

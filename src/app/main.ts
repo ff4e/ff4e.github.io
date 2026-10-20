@@ -72,13 +72,13 @@ import {
   aiKufr,
   aiKufrFrames,
   endShowmode,
-  inReplay,
   inShowmode,
   initCutscene,
   skipCutscene,
   startCutscene,
   startShowmode,
 } from './cutscene.js';
+import { inReplay, replayAtShowmodeSpot } from './replayMode.js';
 import { cancelSolve, inAutoPlay, inSolvemode } from './solveMode.js';
 import { loadUndoHistory, undoAvailable, undoHistoryForSave, undoMove } from './undo.js';
 import {
@@ -94,7 +94,7 @@ import {
   showMap,
 } from './mapNav.js';
 import { initBoot, runBoot } from './boot.js';
-import { armChatter, hracNespi, initLogicTick, step } from './logicTick.js';
+import { armChatter, initLogicTick, step } from './logicTick.js';
 import { openSaveStore } from './persist.js';
 import { cancelStoreReview, noteReviewSolve } from './storeReview.js';
 import { initFramePainter } from './framePainter.js';
@@ -190,6 +190,7 @@ import {
   ffr,
   fftEntries,
   font,
+  hracNespi,
   linesSpoken,
   loadmode,
   pokus,
@@ -746,8 +747,8 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
     s.musicVolume = musicLevel();
     if (savedPole) for (let i = 0; i < s.roompole.length; i++) s.roompole[i] = savedPole[i] ?? 0;
     s.musName = roomMusic?.name ?? '';
-    s.onKufrDemo = () => void startCutscene();
-    s.onShowmode = () => startShowmode();
+    s.onKufrDemo = () => void (inReplay() ? null : startCutscene()); // see replayAtShowmodeSpot
+    s.onShowmode = () => (inReplay() ? replayAtShowmodeSpot() : startShowmode());
     // The shared step-engine: all move/tick/win logic runs here, with side effects
     // (sound, the KAJUTA1 wall-shove, win bookkeeping, map return) injected as hooks.
     setEngine(new StepEngine(room, s, def ?? NOOP_SCRIPT, {
@@ -829,7 +830,7 @@ function scriptTalk(name: string, prior: number): number {
 }
 
 /** Launch the briefcase story cutscene (InitKufrDemo), loading its assets once. */
-//#region Cutscene wiring | anchors: initCutscene | Hands `cutscene.ts` the five names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo, the movies and the replay are in that module.
+//#region Cutscene wiring | anchors: initCutscene | Hands `cutscene.ts` the four names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo and the movies are in that module.
 initCutscene({
   get buildRoom() {
     return buildRoom;
@@ -839,9 +840,6 @@ initCutscene({
   },
   get selectFish() {
     return selectFish;
-  },
-  get showMap() {
-    return showMap;
   },
   get swapActive() {
     return swapActive;

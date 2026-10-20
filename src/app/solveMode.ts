@@ -145,7 +145,7 @@ export function inSolvemode(): boolean {
  * The predicate the INPUT LOCKOUT asks: is the room playing itself, so the player's keys,
  * mouse and control panel must not reach it?
  *
- * Deliberately NOT the same question as `inReplay()` (`cutscene.ts`), and the two must not
+ * Deliberately NOT the same question as `inReplay()` (`replayMode.ts`), and the two must not
  * be merged. `inReplay()` also gates the map replay's SILENCE (`scriptTalk` in `main.ts`,
  * `Zvuky_okoli` in `logicTick.ts`), which is faithful to the original's `loadtype=nej`
  * replay (`UMain.pas:1027`, `URoom.pas:24937`) and is exactly what `solvemode` must NOT
@@ -266,10 +266,14 @@ export function advanceSolve(ctx: {
    *
    * Be precise about WHY, because the obvious reason is wrong: it is NOT that a player
    * cannot press a key mid-animation. This port's held-key repeat does exactly that —
-   * `dispatchHeldMove` runs deliberately AFTER `advance()` (`logicTick.ts`) so a completed
-   * cell starts the next one on the same tick. The rule is a property of how the FFNG
-   * corpus was recorded and of the harness that validates it, which is precisely why it
-   * belongs to this mode and was not imposed on `replaymode` or on held keys.
+   * `dispatchHeldMove` runs deliberately AFTER `advance()` (`logicTick.ts`), and that is
+   * faithful: the original reaches `DalsiPrikaz` again on the same tick through its
+   * `repeat … until` loop (URoom.pas:24351/24838/24881/24438/24927). The rule here is a
+   * property of REPLAY, not of input — the original replays a solution in `loadmode`, a
+   * separate tick body that never runs `Programky` at all (URoom.pas:24102-24311) and
+   * replays script effects from the recording instead of re-deriving them. A port that
+   * animates the replay through the live tick has to re-derive them, and that only works
+   * if `prog` gets one at-rest pass per move.
    *
    * WIN #68 is where the difference is fatal. Its bonus level (`ZapniBonuslevel`,
    * URoom.pas:17944/23700) re-points little/big at the elderly pair from a positional
@@ -277,10 +281,9 @@ export function advanceSolve(ctx: {
    * that a move issued on the SAME tick as the handover lands the pair at (25,11)/(25,13)
    * instead of (24,11)/(24,13), and the big one arrives crushed.
    *
-   * That divergence is NOT confined to this mode, and this rule masks rather than fixes it:
-   * the map's "Replay" and a held key both use the loose cadence, so WIN #68 and GRAL #64
-   * are reachable failures there today. Recorded as a task rather than fixed here, because
-   * the fix belongs in the tick and is player-facing.
+   * The map's "Replay" now applies the same rule for the same reason (`advanceReplay`,
+   * `replayMode.ts`), which is where the full derivation from the Delphi source lives. Held
+   * keys deliberately still do not: the loose cadence there is the original's.
    */
   startedIdle: boolean;
   /** Applies one move through the REAL game loop (`tryStep`) and reports what it did. */

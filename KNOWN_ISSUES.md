@@ -547,7 +547,7 @@ times in a row at (5,31) — and the little fish died 111 moves into 620.
 (`URoom.pas:26985`), exactly as a keypress (`:26787`) or a click (`:26871`) does. The
 headless harness never did, and nothing else in the shared step-engine resets the idle
 timers — `hracNespi` lives in `src/app/`, and the browser's own replay path calls it
-(`cutscene.ts:199`). So `delay[]` only ever grew during a replay, and ZELVA's telepathic
+(`advanceReplay` in `replayMode.ts`). So `delay[]` only ever grew during a replay, and ZELVA's telepathic
 turtle — which seizes a fish and walks it across the room once **both** fish have idled 40
 ticks (`zelva.ts:85`) — possessed the big fish partway through every replay, drove it off
 the recorded route, and refused the player's commands while it did.

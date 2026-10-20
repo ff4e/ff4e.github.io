@@ -37,6 +37,7 @@ import { tickMapLaunch } from './roomLaunch.js';
 import { ui } from './screenState.js';
 import { LOGIC_MS, MAX_STEPS_PER_FRAME, roomGeometry } from './stageGeometry.js';
 import { solvemode, solveSpeed } from './solveMode.js';
+import { replaySettleDue } from './replayMode.js';
 import { syncSolveBtn } from './devBar.js';
 import { subFontReady } from './stageState.js';
 import { INFO_FAZE_MS, INFO_SETTLE_FAZE } from '../render/mapInfo.js';
@@ -141,6 +142,12 @@ export function loop(now: number): void {
     steps++;
     if (host.step()) {
       setAcc(0); // room rebuilt: discard partial-tick interpolation
+      break;
+    }
+    // A replayed move just landed: its settled tick runs now, undrawn, so the fish does not
+    // visibly stop between cells (`replaySettleDue`).
+    if (replaySettleDue() && host.step()) {
+      setAcc(0);
       break;
     }
   }

@@ -8,8 +8,9 @@
  */
 import { audio } from './audioEngine.js';
 import { tickFrameEffects } from './cheats.js';
-import { advanceReplay, advanceShowmode, cutsceneCaption, disposeAiKufr, inReplay } from './cutscene.js';
-import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, loadmode, pokus, prevKostra, replaymode, retireUndoHistory, room, roomDepth, setChatter, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
+import { advanceShowmode, cutsceneCaption, disposeAiKufr } from './cutscene.js';
+import { advanceReplay, inReplay } from './replayMode.js';
+import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, hracNespi, loadmode, pokus, prevKostra, replaymode, retireUndoHistory, room, roomDepth, setChatter, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
 import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
@@ -55,18 +56,6 @@ export function tickBlink(): void {
     else if (Math.random() < 0.08) blink[w] = 1; // occasional ~1-tick (~140ms) blink
     darkFlicker[w] = Math.random() < 0.06; // gspec=2 per-tick wink-out (random(100)<6)
   }
-}
-
-/**
- * hrac_nespi (Uovl.pas:235): activity happened — the player moved, or the KUFRIK
- * demo replayed an action. Reset the fish idle timers AND the ambient-chatter idle
- * clock (casposlzmeny), so StdKecej only fires after ~60-120s of genuine inactivity.
- * This is why the original never chatters during the demo: every replayed action
- * resets the clock (DalsiPrikaz calls hrac_nespi, URoom.pas:26985).
- */
-export function hracNespi(): void {
-  room?.hracNespi();
-  if (chatter) chatter.last = count; // casposlzmeny := now
 }
 
 /**
@@ -311,8 +300,21 @@ export function step(): boolean {
   // movement key on a rest tick. Run AFTER advance() so a cell that just completed
   // immediately starts the next one on the SAME tick — no stationary gap between cells
   // (holding flows continuously) — while jizda still accumulates (advance saw phase=move
-  // this tick before completing). Gated to the same rest conditions the original
-  // dispatches under (stav_klid, not possessed/finale/demo/dead/won).
+  // this tick before completing).
+  //
+  // That placement is what the original's loop does, not a judgement call: its tick body is
+  // a `repeat … until gstav >= stavy_platne` (URoom.pas:24351/24927) and a finished move
+  // passes through `stav_ma_padat` (:24838) to `stav_nic` (:24881), both below
+  // `stavy_platne`, so the loop reaches `DalsiPrikaz` (:24438) again on the same tick and
+  // `Programky` runs once after it (:24940). A REPLAY is a different path and does NOT
+  // share this rule — `advanceReplay`'s `startedIdle` has the full derivation.
+  //
+  // KNOWN, and faithful: because the original dispatches here too, holding a direction into
+  // WIN #68's bonus tile marks the push before `prog` fires the handover trigger, and the
+  // bonus level breaks. Tapping does not. Do not "fix" it by moving this above advance().
+  //
+  // Gated to the same rest conditions the original dispatches under (stav_klid, not
+  // possessed/finale/demo/dead/won).
   if (
     engine.phase === 'idle' &&
     !room.won &&
@@ -334,9 +336,13 @@ export function step(): boolean {
   // help.cap stream is consumed one action per idle step (DalsiPrikaz in stav_klid,
   // URoom.pas:24438). It keeps advancing while both fish are DEAD (the demo's
   // deliberate death countdown), so it checks phase directly rather than idle().
+  // This one IS DalsiPrikaz, so it keeps the loose cadence — and the original forces
+  // `busy` to 0 for the whole demo (URoom.pas:24945-24949), so it has no busy rule either.
   if (engine.phase === 'idle' && !room.won && showmode) advanceShowmode();
-  // Map "Replay": play back the best solution one move per idle tick (daReplay).
-  if (engine.phase === 'idle' && !room.won && replaymode) advanceReplay();
+  // Map "Replay": play back the best solution one move per idle tick (daReplay). The
+  // driver owns its own cadence rule — it needs a tick that BEGAN idle, which this one may
+  // not have — so `idleAtTickStart` is handed to it rather than tested here.
+  if (engine.phase === 'idle' && !room.won && replaymode) advanceReplay(idleAtTickStart);
   // Dev-only solution replay: the same one-move-per-idle-tick shape, off the room's own
   // recorded solution, aborting loudly on trouble instead of slipping back to the map.
   // The win is NOT excluded here the way it is above — `advanceSolve` needs the tick the

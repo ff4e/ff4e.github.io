@@ -156,6 +156,23 @@ export function dropDeadAttempt(): void {
   deadAttempt = null;
 }
 
+/**
+ * hrac_nespi (Uovl.pas:235): activity happened — the player moved, or a replay played an
+ * action. Reset the fish idle timers AND the ambient-chatter idle clock (casposlzmeny), so
+ * StdKecej only fires after ~60-120s of genuine inactivity. This is why the original never
+ * chatters during the KUFRIK demo: every replayed action resets the clock (DalsiPrikaz
+ * calls hrac_nespi, URoom.pas:26985).
+ *
+ * It lives here, with the state it mutates, rather than in `logicTick.ts` where it used to:
+ * every input path wakes the player, so owning it from the tick meant a driver that needed
+ * it had to either import the tick (a cycle — `logicTick.ts` imports the drivers) or take
+ * it through a `main.ts` host it needed nothing else from.
+ */
+export function hracNespi(): void {
+  room?.hracNespi();
+  if (chatter) chatter.last = count; // casposlzmeny := now
+}
+
 // ── Per-fish tick state ─────────────────────────────────────────────────────
 // Mutable contents, never reassigned, so they need no setter — but they were declared at
 // the top level of main.ts, which is exactly what made them unreachable from anywhere
