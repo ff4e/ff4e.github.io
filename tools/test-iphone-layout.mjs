@@ -877,9 +877,22 @@ try {
       undo.right === more.right && undo.bottom === innerHeight - 24 &&
       map.width === 56 && undo.height === 56;
   }), 'rotating back to shared landscape keeps 24px corner margins and full-sized targets');
-  await p.evaluate(() => window.__ff.speakLine('help2'));
-  expect(await p.locator('#phone-more.dialogue-hint-pulse').count() === 1 &&
-    await p.locator('#phone-menu').isHidden(), 'Save tutorial highlights More without opening the menu');
+  const saveHint = await p.evaluate(() => {
+    window.__ff.speakLine('help2');
+    const menu = document.getElementById('phone-menu');
+    const save = menu.querySelector('[data-region="12"]');
+    const arrow = document.getElementById('dialogue-button-arrow');
+    const a = arrow?.querySelector('svg').getBoundingClientRect();
+    const b = save.getBoundingClientRect();
+    const cue = !menu.hidden && document.getElementById('phone-more').getAttribute('aria-expanded') === 'true' &&
+      save.classList.contains('dialogue-hint-pulse') && document.querySelectorAll('.dialogue-hint-pulse').length === 1 &&
+      arrow?.dataset.side === 'left' && a.right <= b.left && b.left - a.right <= 22 && a.left >= 0 &&
+      Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) < 1;
+    window.__ff.speakLine('help1', 'little');
+    return cue && menu.hidden && !document.getElementById('dialogue-button-arrow') &&
+      !document.querySelector('.dialogue-hint-pulse');
+  });
+  expect(saveHint, 'Save tutorial opens More, points an arrow at its Save, and closes it with the next line');
   await p.locator('#phone-map').tap();
   await p.waitForFunction(() => window.__ff.screen() === 'map');
   await waitZoom(1);

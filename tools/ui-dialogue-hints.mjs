@@ -11,7 +11,8 @@ export async function checkDialogueHints(p, expect) {
   };
   const speak = (line) => p.evaluate((name) => window.__ff.speakLine(name), line);
   const absent = () => p.waitForFunction(() =>
-    !document.getElementById('dialogue-gesture-hint') && !document.querySelector('.dialogue-hint-pulse'));
+    !document.getElementById('dialogue-gesture-hint') && !document.querySelector('.dialogue-hint-pulse') &&
+    !document.getElementById('dialogue-button-arrow'));
 
   await enter(1);
   await p.selectOption('#touchmode', 'off');
@@ -129,18 +130,39 @@ export async function checkDialogueHints(p, expect) {
       animation.currentTime = 600;
       const bright = getComputedStyle(button).boxShadow;
       const end = button.getBoundingClientRect();
+      // Sample the arrow at the button end of its bob, where the tip is nearest.
+      const arrow = document.getElementById('dialogue-button-arrow');
+      const svg = arrow?.querySelector('svg');
+      const bob = svg?.getAnimations()[0];
+      bob?.pause();
+      if (bob) bob.currentTime = bob.effect.getTiming().duration;
+      const a = svg?.getBoundingClientRect();
+      const side = arrow?.dataset.side;
+      const gap = !a ? -1 : side === 'right' ? a.left - end.right : side === 'left' ? end.left - a.right :
+        side === 'below' ? a.top - end.bottom : side === 'above' ? end.top - a.bottom : -1;
+      const aligned = !a ? false : side === 'left' || side === 'right' ?
+        Math.abs((a.top + a.bottom) / 2 - (end.top + end.bottom) / 2) < 1 :
+        Math.abs((a.left + a.right) / 2 - (end.left + end.right) / 2) < 1;
+      const hit = a && document.elementFromPoint((a.left + a.right) / 2, (a.top + a.bottom) / 2);
+      const arrowOk = !!arrow && arrow.getAttribute('aria-hidden') === 'true' && gap >= 4 && gap <= 12 &&
+        aligned && a.width > 20 && a.height > 20 && !arrow.contains(hit) &&
+        document.querySelectorAll('#dialogue-button-arrow').length === 1;
       window.__ff.speakLine('help1', 'little');
+      const arrowGone = !arrow?.isConnected && !document.getElementById('dialogue-button-arrow');
       const restored = getComputedStyle(button);
       return {
         target: lit.length === 1 && button.dataset.region === region,
         visibleChange: base !== bright && bright.includes('0px 0px 0px 3px'),
         sameBox: size.width === end.width && size.height === end.height,
+        arrowOk, arrowGone, side,
         focusRestored: button.matches(':focus-visible') && restored.border === border &&
           restored.boxShadow === restingShadow && restored.outlineStyle === 'solid' &&
           restored.outlineColor === 'rgb(240, 238, 229)' && restored.outlineOffset === '2px',
       };
     }, { name, region });
     expect(pulse.target && pulse.visibleChange && pulse.sameBox, `${name} visibly pulses only button ${region}, without changing layout`);
+    expect(pulse.arrowOk, `${name} points one decorative, pointer-transparent arrow at button ${region} (${pulse.side})`);
+    expect(pulse.arrowGone, `${name}'s arrow leaves with the next line`);
     expect(pulse.focusRestored, `${name} restores the border with a visible, separate keyboard-focus outline`);
   }
   const save = p.locator('#touchbar [data-region="12"]');
@@ -175,10 +197,12 @@ export async function checkDialogueHints(p, expect) {
   const staticPulse = await p.evaluate(() => {
     window.__ff.speakLine('help2');
     const el = document.querySelector('.dialogue-hint-pulse');
+    const arrow = document.querySelector('#dialogue-button-arrow svg');
     return el && getComputedStyle(el).animationName === 'none' &&
-      el.getAnimations().length === 0 && getComputedStyle(el).boxShadow.includes('0px 0px 0px 3px');
+      el.getAnimations().length === 0 && getComputedStyle(el).boxShadow.includes('0px 0px 0px 3px') &&
+      arrow && arrow.getAnimations().length === 0;
   });
-  expect(staticPulse, 'reduced motion keeps a static button highlight');
+  expect(staticPulse, 'reduced motion keeps a static button highlight and arrow');
   await p.emulateMedia({ reducedMotion: 'no-preference' });
   await p.selectOption('#touchmode', 'off');
   await absent();

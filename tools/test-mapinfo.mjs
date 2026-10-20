@@ -92,6 +92,7 @@ await withApp(async ({ p, expect }) => {
     for (const name of ['1st-v-navod1', 'help2', 'help7', 'help11']) window.__ff.speakLine(name);
     return !document.getElementById('dialogue-gesture-hint') &&
       !document.querySelector('.dialogue-hint-pulse') &&
+      !document.getElementById('dialogue-button-arrow') &&
       window.__ff.lastLine() === line && window.__ff.lines() === count;
   });
   expect(silentHints, 'silent replay suppresses tutorial hints and preserves the dialogue debug counters');

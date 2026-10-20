@@ -201,7 +201,8 @@ await withApp(async (ctx) => {
       const line = window.__ff.lastLine()?.name;
       const region = line === 'help2' ? '12' : line === 'help7' ? '13' : null;
       const lit = document.querySelectorAll('#touchbar .dialogue-hint-pulse');
-      if (window.__ff.showmodeState().active && lit.length === 1 && lit[0].dataset.region === region) {
+      if (window.__ff.showmodeState().active && lit.length === 1 && lit[0].dataset.region === region &&
+        document.getElementById('dialogue-button-arrow')) {
         seen.add(line);
       }
     });

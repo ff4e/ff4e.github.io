@@ -12,6 +12,7 @@ const state = {
   phone: false,
   options: false,
   tetris: false,
+  menu: false,
 };
 vi.mock('../src/app/gameState.js', () => ({
   get room() { return state.room; },
@@ -24,6 +25,8 @@ vi.mock('../src/app/framePacing.js', () => ({ get roomLoading() { return state.l
 vi.mock('../src/app/touchButtons.js', () => ({ touchUi: () => state.touch, phoneUi: () => state.phone }));
 vi.mock('../src/app/touchOptions.js', () => ({ touchOptionsOpen: () => state.options }));
 vi.mock('../src/app/cheats.js', () => ({ tetrisModal: () => state.tetris }));
+const setPhoneMenuOpen = vi.fn((want: boolean) => { state.menu = want; });
+vi.mock('../src/app/phoneControls.js', () => ({ phoneMenuOpen: () => state.menu, setPhoneMenuOpen }));
 const wrap = { appendChild: vi.fn() };
 vi.mock('../src/app/dom.js', () => ({ wrap }));
 
@@ -34,14 +37,47 @@ const overlay = {
   style: { setProperty: vi.fn() },
   remove: vi.fn(),
 };
-const save = { offsetWidth: 52, classList: { add: vi.fn(), remove: vi.fn() } };
-const load = { offsetWidth: 52, classList: { add: vi.fn(), remove: vi.fn() } };
-const more = { offsetWidth: 44, classList: { add: vi.fn(), remove: vi.fn() } };
-const getElementById = vi.fn((id: string) => id === 'phone-more' ? more : null);
-const querySelector = vi.fn((selector: string) =>
-  selector === '#touchbar [data-region="12"]' ? save :
-    selector === '#touchbar [data-region="13"]' ? load : null);
-const createElement = vi.fn(() => overlay);
+type Box = { left: number; top: number; width: number; height: number };
+const rect = (b: Box) => ({ ...b, right: b.left + b.width, bottom: b.top + b.height });
+// A tablet bar down the left edge, and the phone's "..." menu in the top-right corner.
+const LEFT_BAR = { left: 0, top: 0, width: 80, height: 768 };
+const PHONE_MENU = { left: 740, top: 90, width: 112, height: 200 };
+const button = (box: Box, bar: Box) => ({
+  offsetWidth: box.width,
+  classList: { add: vi.fn(), remove: vi.fn() },
+  getBoundingClientRect: vi.fn(() => rect(box)),
+  parentElement: { getBoundingClientRect: () => rect(bar) },
+});
+const save = button({ left: 12, top: 100, width: 56, height: 56 }, LEFT_BAR);
+const load = button({ left: 12, top: 172, width: 56, height: 56 }, LEFT_BAR);
+const menuSave = button({ left: 746, top: 146, width: 100, height: 44 }, PHONE_MENU);
+const menuLoad = button({ left: 746, top: 96, width: 100, height: 44 }, PHONE_MENU);
+const getElementById = vi.fn(() => null);
+const BUTTONS: Record<string, unknown> = {
+  '#touchbar [data-region="12"]': save,
+  '#touchbar [data-region="13"]': load,
+  '#phone-menu [data-region="12"]': menuSave,
+  '#phone-menu [data-region="13"]': menuLoad,
+};
+// A button cue looks its button up and then makes its arrow; a gesture makes only its overlay.
+let arrowNext = false;
+const querySelector = vi.fn((selector: string) => {
+  arrowNext = true;
+  return BUTTONS[selector] ?? null;
+});
+const arrow = {
+  id: '', innerHTML: '', hidden: false,
+  setAttribute: vi.fn(),
+  style: { transform: '' },
+  dataset: {} as Record<string, string>,
+  remove: vi.fn(),
+};
+const createElement = vi.fn(() => {
+  const made = arrowNext ? arrow : overlay;
+  arrowNext = false;
+  return made;
+});
+const body = { appendChild: vi.fn() };
 
 beforeEach(() => {
   clearDialogueHint();
@@ -49,8 +85,13 @@ beforeEach(() => {
   Object.assign(state, {
     room: {}, showmode: null, cutscene: null, replaymode: null,
     screen: 'room', helpOpen: false, loading: false, touch: true, phone: false, options: false, tetris: false,
+    menu: false,
   });
-  vi.stubGlobal('document', { createElement, querySelector, getElementById, hidden: false });
+  arrowNext = false;
+  Object.assign(arrow, { id: '', innerHTML: '', hidden: false, style: { transform: '' }, dataset: {} });
+  vi.stubGlobal('document', { createElement, querySelector, getElementById, body, hidden: false });
+  vi.stubGlobal('innerWidth', 1024);
+  vi.stubGlobal('innerHeight', 768);
   vi.spyOn(performance, 'now').mockReturnValue(100);
 });
 afterEach(() => {
@@ -60,13 +101,97 @@ afterEach(() => {
 });
 
 describe('tutorial dialogue hints', () => {
-  it.each(['help2', 'help7', 'help11'])('%s highlights the overflow door on a phone', (name) => {
+  it.each([['help2', menuSave], ['help7', menuLoad], ['help11', menuLoad]])(
+    '%s opens the phone menu and highlights the real button inside it', (name, target) => {
+      state.phone = true;
+      showDialogueHint(name, 3000);
+      expect(setPhoneMenuOpen).toHaveBeenCalledExactlyOnceWith(true);
+      expect(target.classList.add).toHaveBeenCalledExactlyOnceWith('dialogue-hint-pulse');
+      expect(getElementById).not.toHaveBeenCalled();
+      clearDialogueHint();
+      expect(target.classList.remove).toHaveBeenCalledExactlyOnceWith('dialogue-hint-pulse');
+      expect(setPhoneMenuOpen).toHaveBeenLastCalledWith(false);
+      expect(state.menu).toBe(false);
+    },
+  );
+  it('leaves a menu the player had already opened open afterwards', () => {
     state.phone = true;
-    showDialogueHint(name, 3000);
-    expect(more.classList.add).toHaveBeenCalledExactlyOnceWith('dialogue-hint-pulse');
-    expect(querySelector).not.toHaveBeenCalled();
+    state.menu = true;
+    showDialogueHint('help2', 3000);
     clearDialogueHint();
-    expect(more.classList.remove).toHaveBeenCalledExactlyOnceWith('dialogue-hint-pulse');
+    expect(setPhoneMenuOpen).not.toHaveBeenCalled();
+    expect(state.menu).toBe(true);
+  });
+  it('ends when the player closes the phone menu, without reopening it', () => {
+    state.phone = true;
+    showDialogueHint('help2', 6000);
+    state.menu = false;
+    syncDialogueHint(101);
+    expect(menuSave.classList.remove).toHaveBeenCalledTimes(1);
+    expect(arrow.remove).toHaveBeenCalledTimes(1);
+    expect(setPhoneMenuOpen).toHaveBeenCalledExactlyOnceWith(true);
+  });
+  it('reopens the phone menu after the same demo rebuilds the room under it', () => {
+    state.phone = true;
+    state.showmode = {};
+    showDialogueHint('help7', 6000);
+    state.room = {};
+    state.menu = false;
+    syncDialogueHint(101);
+    expect(menuLoad.classList.remove).not.toHaveBeenCalled();
+    expect(setPhoneMenuOpen).toHaveBeenLastCalledWith(true);
+    state.menu = false;
+    syncDialogueHint(102);
+    expect(menuLoad.classList.remove).toHaveBeenCalledTimes(1);
+  });
+  it('clears if the device stops being a phone mid-cue', () => {
+    state.phone = true;
+    showDialogueHint('help2', 6000);
+    state.phone = false;
+    syncDialogueHint(101);
+    expect(menuSave.classList.remove).toHaveBeenCalledTimes(1);
+    expect(state.menu).toBe(false);
+  });
+
+  it('points a decorative arrow at a tablet button from the room side of a left bar', () => {
+    showDialogueHint('help2', 3000);
+    expect(arrow.id).toBe('dialogue-button-arrow');
+    expect(arrow.setAttribute).toHaveBeenCalledWith('aria-hidden', 'true');
+    expect(body.appendChild).toHaveBeenCalledExactlyOnceWith(arrow);
+    expect(arrow.dataset.side).toBe('right');
+    expect(arrow.style.transform).toBe('translate(76px, 128px) rotate(180deg)');
+    clearDialogueHint();
+    expect(arrow.remove).toHaveBeenCalledTimes(1);
+  });
+  it('points up at a button in a bar along the top', () => {
+    const bar = { left: 0, top: 0, width: 1024, height: 80 };
+    save.getBoundingClientRect.mockReturnValue(rect({ left: 300, top: 12, width: 56, height: 56 }));
+    save.parentElement.getBoundingClientRect = () => rect(bar);
+    try {
+      showDialogueHint('help2', 3000);
+      expect(arrow.dataset.side).toBe('below');
+      expect(arrow.style.transform).toBe('translate(328px, 76px) rotate(-90deg)');
+    } finally {
+      save.getBoundingClientRect.mockImplementation(() => rect({ left: 12, top: 100, width: 56, height: 56 }));
+      save.parentElement.getBoundingClientRect = () => rect(LEFT_BAR);
+    }
+  });
+  it('points right at the phone menu item from the room on its left', () => {
+    state.phone = true;
+    showDialogueHint('help2', 3000);
+    expect(arrow.dataset.side).toBe('left');
+    expect(arrow.style.transform).toBe('translate(738px, 168px) rotate(0deg)');
+  });
+  it('follows the button when the layout moves, and hides while it has no box', () => {
+    showDialogueHint('help7', 6000);
+    load.getBoundingClientRect.mockReturnValueOnce(rect({ left: 12, top: 300, width: 56, height: 56 }));
+    syncDialogueHint(101);
+    expect(arrow.style.transform).toBe('translate(76px, 328px) rotate(180deg)');
+    load.getBoundingClientRect.mockReturnValueOnce(rect({ left: 0, top: 0, width: 0, height: 0 }));
+    syncDialogueHint(102);
+    expect(arrow.hidden).toBe(true);
+    syncDialogueHint(103);
+    expect(arrow.hidden).toBe(false);
   });
   it('creates one decorative gesture for the exact movement line', () => {
     showDialogueHint('1st-v-navod1', 6000);
@@ -83,7 +208,9 @@ describe('tutorial dialogue hints', () => {
       showDialogueHint(name, 3000);
       expect(target.classList.add).toHaveBeenCalledExactlyOnceWith('dialogue-hint-pulse');
       expect((target === save ? load : save).classList.add).not.toHaveBeenCalled();
-      expect(createElement).not.toHaveBeenCalled();
+      expect(createElement).toHaveBeenCalledExactlyOnceWith('div');
+      expect(createElement).toHaveLastReturnedWith(arrow);
+      expect(setPhoneMenuOpen).not.toHaveBeenCalled();
     },
   );
 

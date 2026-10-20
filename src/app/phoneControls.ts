@@ -29,6 +29,11 @@ function setExpanded(want: boolean, focus = false): void {
   wake();
 }
 
+/** Tutorial hints open the menu to show its Save/Load; no focus moves, nothing is pressed. */
+export function setPhoneMenuOpen(want: boolean): void {
+  setExpanded(want);
+}
+
 export function initPhoneControls(host: TouchButtonsHost): void {
   controls = document.getElementById('phone-controls')!;
   more = document.getElementById('phone-more') as HTMLButtonElement;
