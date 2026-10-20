@@ -130,7 +130,7 @@ export function replaySolution(room: Room, jmeno: string, moves: string): Replay
       // dropped mid-dialogue has already reset the timers. Without this the idle timers
       // (delay[]) only ever grow here, because nothing else in the shared step-engine
       // resets them: `hracNespi` lives in `src/app/`, and the browser's own replay path
-      // calls it (`cutscene.ts:199`).
+      // calls it (`advanceReplay` in `replayMode.ts`).
       //
       // ZELVA #37 is the room that notices. Its telepathic turtle SEIZES a fish and walks
       // it across the room once `delay[mala] > 40` and `delay[velka] > 40` (`zelva.ts:85`),

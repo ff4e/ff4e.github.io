@@ -113,7 +113,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // keeps them through its KillSnd and its `init`, and keeps the subtitles of the lines
   // that carry on; the policy is in initQuiet.ts and the rooms' own `carriedSounds` /
   // `restorePresentation`.
-  ['src/app/main.ts', 2285],
+  // 2 285 -> 2 283: the map's "Replay" moved to `replayMode.ts`. One import line came in,
+  // and the cutscene host's `showMap` — which only that driver used — went out.
+  ['src/app/main.ts', 2283],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
@@ -148,7 +150,12 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // from the recording in hand and both loaders left this file — but the two async paths
   // stay as backstops for `__ff.startCutscene()`/`forceShowmode()`, which can be fired
   // from any room, and each needs the sentence saying it is no longer the path.
-  ['src/app/cutscene.ts', 600],
+  //
+  // 600 -> 570: the map's "Replay" left for `replayMode.ts`. It was never a cutscene — the
+  // KUFRIK demo and showmode next door ARE `DalsiPrikaz` and share the keyboard's tick
+  // cadence, and a replay is the original's `loadmode` and does not. Sitting in this file
+  // is how it inherited the wrong one and broke WIN #68 and GRAL #64.
+  ['src/app/cutscene.ts', 570],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
   // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine

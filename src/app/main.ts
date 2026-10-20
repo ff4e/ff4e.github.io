@@ -72,13 +72,13 @@ import {
   aiKufr,
   aiKufrFrames,
   endShowmode,
-  inReplay,
   inShowmode,
   initCutscene,
   skipCutscene,
   startCutscene,
   startShowmode,
 } from './cutscene.js';
+import { inReplay } from './replayMode.js';
 import { cancelSolve, inAutoPlay, inSolvemode } from './solveMode.js';
 import { loadUndoHistory, undoAvailable, undoHistoryForSave, undoMove } from './undo.js';
 import {
@@ -94,7 +94,7 @@ import {
   showMap,
 } from './mapNav.js';
 import { initBoot, runBoot } from './boot.js';
-import { armChatter, hracNespi, initLogicTick, step } from './logicTick.js';
+import { armChatter, initLogicTick, step } from './logicTick.js';
 import { openSaveStore } from './persist.js';
 import { cancelStoreReview, noteReviewSolve } from './storeReview.js';
 import { initFramePainter } from './framePainter.js';
@@ -190,6 +190,7 @@ import {
   ffr,
   fftEntries,
   font,
+  hracNespi,
   linesSpoken,
   loadmode,
   pokus,
@@ -829,7 +830,7 @@ function scriptTalk(name: string, prior: number): number {
 }
 
 /** Launch the briefcase story cutscene (InitKufrDemo), loading its assets once. */
-//#region Cutscene wiring | anchors: initCutscene | Hands `cutscene.ts` the five names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo, the movies and the replay are in that module.
+//#region Cutscene wiring | anchors: initCutscene | Hands `cutscene.ts` the four names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo and the movies are in that module.
 initCutscene({
   get buildRoom() {
     return buildRoom;
@@ -839,9 +840,6 @@ initCutscene({
   },
   get selectFish() {
     return selectFish;
-  },
-  get showMap() {
-    return showMap;
   },
   get swapActive() {
     return swapActive;

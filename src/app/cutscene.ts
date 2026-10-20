@@ -1,10 +1,14 @@
 /**
- * The KUFRIK demo, the intro/ending cutscenes and the recorded-solution replay.
+ * The KUFRIK demo and the intro/ending cutscenes.
  *
- * Three different drivers over one presentation. What they share is the frame: a movie
- * painted per logic tick with its own subtitle overlay, and one skip path. What differs
- * is what feeds it — KUFRIK runs `KufrDemo`, showmode steps a `CapAction` queue parsed
- * from help.cap, and replay walks a recorded move list.
+ * Two drivers over one presentation. What they share is the frame: a movie painted per
+ * logic tick with its own subtitle overlay, and one skip path. What differs is what feeds
+ * it — KUFRIK runs `KufrDemo`, showmode steps a `CapAction` queue parsed from help.cap.
+ *
+ * The map's "Replay" used to live here as a third driver and now does not (`replayMode.ts`).
+ * It looked like the same shape and is not: showmode IS `DalsiPrikaz` and shares the
+ * keyboard's tick cadence, a replay is the original's `loadmode` and does not. Sitting in
+ * this file is how it silently inherited the wrong one.
  *
  * The AI-tier upscaled frames (`aiKufr`) are cached here too, because nothing else looks
  * at them and the cache has to be dropped when the cutscene ends.
@@ -12,7 +16,7 @@
 import { audio } from './audioEngine.js';
 import { canvas, ctx, glCanvas } from './dom.js';
 import { perfPaint, roomLoadSeq, roomLoading, setPerfPaint } from './framePacing.js';
-import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, replaymode, room, setCutscene, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeHold, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeHold, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
+import { activeScript, count, cutscene, cutsceneAssets, cutsceneSubs, engine, fftEntries, font, room, setCutscene, setCutsceneSubs, setLoadmode, setReplaymode, setShowmode, setShowmodeHelptext, setShowmodeLoading, setShowmodeHold, setShowmodeRestarted, setShowmodeSave, showmode, showmodeHelptext, showmodeHold, showmodeLoading, showmodeRestarted, showmodeSave, showmodeTrace, showmodeTraceOn, subs } from './gameState.js';
 import { glCompositor, glFailed, markGlFailed } from './glPlumbing.js';
 import { clearDomSubtitles, syncDomSubtitles } from './subtitleDom.js';
 import { clearHeldKey, restore, tryStep } from './movement.js';
@@ -38,14 +42,13 @@ import { SubtitleSystem } from '../render/subtitles.js';
 import { SHOWMODE_HOLDS } from './showmodeHolds.js';
 
 /**
- * The five names this module needs from `main.ts` — all of them things a cutscene DOES
+ * The four names this module needs from `main.ts` — all of them things a cutscene DOES
  * to the game when it starts, ends or is skipped.
  */
 export interface CutsceneHost {
   readonly buildRoom: (carryPole?: boolean) => void;
   readonly hracNespi: () => void;
   readonly selectFish: (which: 'little' | 'big') => void;
-  readonly showMap: () => void;
   readonly swapActive: () => void;
 }
 
@@ -168,36 +171,6 @@ export function endShowmode(): void {
 /** True while the KUFRIK demo is playing or its recording is still loading. */
 export function inShowmode(): boolean {
   return showmode !== null || showmodeLoading;
-}
-
-/** True while a map "Replay" is running. The SILENCE predicate (`scriptTalk`, `Zvuky_okoli`;
- *  faithful, `loadtype=nej`); the input lockout is `inAutoPlay()` in `solveMode.ts`. */
-export function inReplay(): boolean {
-  return replaymode !== null;
-}
-
-/**
- * Play back one move of the room's best solution per idle tick (daReplay, the
- * animated LoadSpeed:=1 replay, URoom.pas:1932). Each move drives the real swim
- * animation via tryStep; on the last move the normal win → winCountdown → showMap
- * path returns to the map. A death aborts back to the map.
- */
-export function advanceReplay(): void {
-  if (!replaymode || !room || !engine) return;
-  if (room.anyFishDead) {
-    // The best solution shouldn't kill a fish, but abort safely to the map if it does.
-    setReplaymode(null);
-    host.showMap();
-    return;
-  }
-  if (replaymode.idx >= replaymode.moves.length) {
-    setReplaymode(null); // ran dry without a win (defensive) — hand control back
-    return;
-  }
-  const m = replaymode.moves[replaymode.idx++]!;
-  engine.active = m.which;
-  tryStep(m.which, m.dir);
-  host.hracNespi();
 }
 
 /**

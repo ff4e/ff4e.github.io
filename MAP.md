@@ -136,9 +136,10 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `portraitHint.ts` | | One-time, five-second animated portrait suggestion in VRAK on landscape phones; waits for native unlock and remembers only after 2.4 seconds of landscape display. Icon-only with reduced-motion support, no orientation lock. Styled by `src/styles/portraitHint.css`. |
 | `touchOptions.ts` | 2.0 k | The touch Options overlay: lends it the original panel canvas on phones and tablets alike, so presses go through the panel's own `panelAction` regions. |
 | `optionsLayout.ts` | | The phone's touch Options face: whole in portrait, cut at row 197 and laid side by side in landscape, with taps mapped back to the original panel and the face scaled to fill the dialog. |
-| `cutscene.ts` | 6.2 k | The KUFRIK demo, the intro/ending movies and the recorded-solution replay. |
+| `cutscene.ts` | 6.7 k | The KUFRIK demo and the intro/ending movies. |
 | `cutsceneClose.ts` | | The briefcase demo's Skip button: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
+| `replayMode.ts` | 1.9 k | The map's "Replay" of a stored best solution: one move per settled tick, and a `busy`-dropped move retried rather than lost. |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and where an asset failure is turned into a surface — the fatal screen, the note or nothing, chosen by the asset's TIER. The screen is generic (its one action is Reload whichever file broke); the asset's name goes to the log. Only absence BY DESIGN still falls back quietly. |

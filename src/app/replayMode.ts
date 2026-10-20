@@ -1,0 +1,98 @@
+/**
+ * The map's "Replay": playing a room's stored best solution back at the player.
+ *
+ * One driver, one decision — when may the next recorded move be played — and it is a
+ * different decision from the one a held key makes. That is the whole reason this is its
+ * own module rather than another function in `cutscene.ts`: the KUFRIK demo and the
+ * help.cap showmode next door really are `DalsiPrikaz` and really do share the keyboard's
+ * cadence, and keeping the three in one file is what let this one quietly inherit a rule
+ * that does not apply to it.
+ *
+ * The sibling to read alongside this is `solveMode.ts` — the dev-bar replay, same shape,
+ * same cadence rule, opposite failure policy (it aborts loudly; this one hands control
+ * back and returns to the map).
+ */
+// No `init*` host here, deliberately: both names this module needs have an owning module
+// already (`hracNespi` in `gameState.ts`, `showMap` in `mapNav.ts`), so routing them
+// through `main.ts` would only add an accessor to write and a wire to get wrong — see the
+// host-accessor note in AGENTS.md.
+import { engine, hracNespi, replaymode, room, setReplaymode } from './gameState.js';
+import { showMap } from './mapNav.js';
+import { tryStep } from './movement.js';
+
+/** True while a map "Replay" is running. The SILENCE predicate (`scriptTalk`, `Zvuky_okoli`;
+ *  faithful, `loadtype=nej`); the input lockout is `inAutoPlay()` in `solveMode.ts`. */
+export function inReplay(): boolean {
+  return replaymode !== null;
+}
+
+/**
+ * Play back one move of the room's best solution per settled tick (daReplay, the
+ * animated LoadSpeed:=1 replay, URoom.pas:1932). Each move drives the real swim
+ * animation via tryStep; on the last move the normal win → winCountdown → showMap
+ * path returns to the map. A death aborts back to the map.
+ */
+export function advanceReplay(
+  /**
+   * Whether this tick BEGAN at rest, not merely "is at rest now". A tick that only became
+   * idle inside `engine.advance()` has not yet given the room's `prog` an at-rest pass, so
+   * a move played on it starts BEFORE the script has observed the cell the previous move
+   * landed on.
+   *
+   * This is deliberately STRICTER than the cadence a held key gets, because the original
+   * has two different code paths here, not one:
+   *
+   *  - A HELD KEY goes through `DalsiPrikaz` inside the tick's `repeat … until` loop
+   *    (URoom.pas:24351/24438, `until gstav >= stavy_platne` at :24927). A finished move
+   *    sets `stav_ma_padat` (:24838), which becomes `stav_nic` when nothing is falling
+   *    (:24881) — both below `stavy_platne`, so the loop spins back round and reaches
+   *    `DalsiPrikaz` again on the SAME tick, with `Programky` running once afterwards
+   *    (:24940). Held direction keys re-register on every call (`KeyRoom` 1→2 at :26945;
+   *    `ZaznamenejPrikazKlavesou` returns true for them at any `stav`, Uovl.pas:787-806,
+   *    while one-shot keys are gated `stav<>2` at :774/:781). The loose cadence in
+   *    `logicTick.ts` is therefore faithful, and stays.
+   *
+   *  - A REPLAY does not go through `DalsiPrikaz` at all. The original replays a solution
+   *    in `loadmode`, a separate tick body (URoom.pas:24102-24311) that `exit`s at :24310
+   *    — before the state machine and before `Programky`. It applies each move instantly
+   *    (:24240-24293) and never re-derives script effects: they are IN the recording, which
+   *    is why entering WIN #68's bonus level is a literal `b`/`1` pair in the save stream
+   *    (:24148-24162) rather than something the room script works out again.
+   *
+   * This port animates the replay through the live tick, so it DOES re-derive those effects
+   * by running `prog` — which is only sound if `prog` observes every state the recording
+   * passed through, i.e. one settled tick per move. Under the loose cadence it does not,
+   * and exactly two rooms in the corpus break: WIN #68 dies at move 142, GRAL #64 plays all
+   * 1691 moves and never wins. Pinning `jizda` to 0 changes neither, so the acceleration is
+   * not the cause — the cadence is. `test/replayRules.test.ts` holds both measurements.
+   */
+  startedIdle: boolean,
+): void {
+  if (!replaymode || !room || !engine) return;
+  if (room.anyFishDead) {
+    // The best solution shouldn't kill a fish, but abort safely to the map if it does.
+    setReplaymode(null);
+    showMap();
+    return;
+  }
+  if (!startedIdle) return; // not a tick this may move on — see `startedIdle`
+  if (replaymode.idx >= replaymode.moves.length) {
+    setReplaymode(null); // ran dry without a win (defensive) — hand control back
+    return;
+  }
+  const m = replaymode.moves[replaymode.idx]!;
+  engine.active = m.which;
+  // hrac_nespi BEFORE the busy gate, exactly where DalsiPrikaz puts it (URoom.pas:26985 vs
+  // the busy drop at :27003) — a replayed command counts as activity even when it is
+  // dropped, which is what keeps ZELVA's turtle from seizing a fish mid-replay.
+  hracNespi();
+  // A move offered while a fish is talking is DROPPED, not consumed: `busy` clears on a
+  // later tick and the recording only ever advanced on an accepted move, so consuming it
+  // here loses it outright. That is a SECOND break, independent of the cadence above —
+  // WIN #68 plays all 794 moves and never wins on this rule alone, with the cadence
+  // correct, because its own bonus-level handover sets `busy` on both fish (URoom.pas:17953).
+  // The headless net (`test/solutionsHarness.ts`) and the dev-bar driver (`solveMode.ts`)
+  // both already retry; this was the path that did not.
+  if (tryStep(m.which, m.dir) === 'busy') return;
+  replaymode.idx++;
+}
