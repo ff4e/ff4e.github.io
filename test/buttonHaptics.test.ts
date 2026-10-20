@@ -19,8 +19,10 @@ interface FakeEl {
   type?: string;
   cls?: string;
   disabled?: boolean;
+  greyed?: boolean;
   parent?: FakeEl;
   closest(sel: string): FakeEl | null;
+  getAttribute(name: string): string | null;
 }
 
 /** `tag`, `tag.class` or `tag[type="x"]` — the only shapes the selector uses. */
@@ -34,6 +36,9 @@ function el(tag: string, extra: Partial<FakeEl> = {}): FakeEl {
   const self: FakeEl = {
     tag,
     ...extra,
+    getAttribute(name) {
+      return name === 'aria-disabled' && self.greyed ? 'true' : null;
+    },
     closest(sel) {
       for (let at: FakeEl | undefined = self; at; at = at.parent) {
         if (sel.split(',').some((s) => matches(at!, s))) return at;
@@ -61,6 +66,8 @@ describe('what counts as pressing a control', () => {
     expect(pressesControl(el('a'))).toBe(false);
     expect(pressesControl(el('canvas'))).toBe(false);
     expect(pressesControl(el('button', { disabled: true }))).toBe(false);
+    // The touch bar's greyed Save/Load/Undo (buttonAvailability.ts) looks unavailable too.
+    expect(pressesControl(el('button', { greyed: true }))).toBe(false);
   });
 
   it('ignores a target that is not an element', () => {

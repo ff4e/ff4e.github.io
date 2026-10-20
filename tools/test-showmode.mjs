@@ -167,6 +167,8 @@ async function checkShowmode({ p, expect }, mode, pulses) {
   if (mode === 'on') {
     await p.waitForFunction(({ seen }) => seen.has('help7'), pulses, { timeout: budget(10000) });
     expect(true, 'recorded help7 narration highlights Load after the demo restart');
+    expect(await pulses.evaluate(({ seen }) => !seen.has('greyed')),
+      'the demonstration greys none of the buttons it is teaching, saved game or not');
   }
   const afterRestart = await p.evaluate(() => window.__ff.fishCell('little'));
   expect(
@@ -201,13 +203,15 @@ await withApp(async (ctx) => {
       const line = window.__ff.lastLine()?.name;
       const region = line === 'help2' ? '12' : line === 'help7' ? '13' : null;
       const lit = document.querySelectorAll('#touchbar .dialogue-hint-pulse');
+      // The demo teaches these buttons, so it greys none of them (buttonAvailability.ts).
+      if (window.__ff.showmodeState().active && document.querySelector('#touchbar [aria-disabled]')) seen.add('greyed');
       if (window.__ff.showmodeState().active && lit.length === 1 && lit[0].dataset.region === region &&
         document.getElementById('dialogue-button-arrow')) {
         seen.add(line);
       }
     });
     observer.observe(document.getElementById('touchbar'), {
-      subtree: true, attributes: true, attributeFilter: ['class'],
+      subtree: true, attributes: true, attributeFilter: ['class', 'aria-disabled'],
     });
     return { seen, disconnect: () => observer.disconnect() };
   });

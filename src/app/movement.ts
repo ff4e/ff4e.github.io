@@ -18,6 +18,7 @@ import type { RecordStep, Which } from '../core/record.js';
 import { ITEM_WALL } from '../core/room.js';
 import type { ScriptSnapshot } from '../core/script.js';
 import { hapticBlocked } from '../platform/haptics.js';
+import { reportRoomAction } from './roomActionEvent.js';
 
 /**
  * The four names this module needs from `main.ts`.
@@ -322,4 +323,5 @@ export function restartRoom(): void {
   host.buildRoom(true);
   if (room) continuePhoneRoom(previousRoom, room);
   host.setInfo();
+  reportRoomAction('restart');
 }

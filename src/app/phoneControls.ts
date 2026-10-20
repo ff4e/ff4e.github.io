@@ -48,6 +48,8 @@ export function initPhoneControls(host: TouchButtonsHost): void {
     if (region === TOUCH_REGIONS.undo) bindUndoHold(el, () => host.panelAction(region));
     el.addEventListener('click', (e) => {
       if (e.detail > 0) el.blur();
+      // Greyed (buttonAvailability.ts): nothing happens, and the menu stays open.
+      if (el.getAttribute('aria-disabled') === 'true') return;
       setExpanded(false, e.detail === 0);
       host.panelAction(region);
     });

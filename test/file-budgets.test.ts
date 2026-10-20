@@ -115,7 +115,10 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // `restorePresentation`.
   // 2 285 -> 2 283: the map's "Replay" moved to `replayMode.ts`. One import line came in,
   // and the cutscene host's `showMap` — which only that driver used — went out.
-  ['src/app/main.ts', 2283],
+  // 2 283 -> 2 287: the touch "Saved"/"Loaded" badge. One import and a report at each of
+  // the three points a save or load has actually happened — only `saveGame`'s two writes and `loadGame` know
+  // that, after their own gates. The badge itself is roomActionBadge.ts.
+  ['src/app/main.ts', 2287],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

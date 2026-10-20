@@ -14,11 +14,11 @@
  * registered CAPTURING on `document` so a handler that stops propagation at the button
  * cannot swallow the tick.
  *
- * It acknowledges the PRESS, not the outcome — the way a native iOS button does. The
- * touch buttons are never `disabled`: Save or Load while a fish is still moving, Load
- * with no save, Undo with nothing to undo all look pressable, are pressed, and tick,
- * though `panelAction` then does nothing. Silence is reserved for a control that looks
- * unavailable, which in HTML means `disabled`.
+ * It acknowledges the PRESS, not the outcome — the way a native iOS button does. Save or
+ * Load while a fish is still moving looks pressable, is pressed, and ticks, though
+ * `panelAction` then does nothing. Silence is reserved for a control that looks
+ * unavailable: `disabled`, or the touch bar's greyed `aria-disabled` (Load with no save,
+ * Undo with nothing to undo — buttonAvailability.ts).
  *
  * Radio buttons count (the touch Options' subtitle choice looks and acts like a row of
  * buttons), and a click on their `<label>` reaches here once, as the synthetic click on
@@ -38,7 +38,8 @@ const PRESSABLE = 'button, a.fb-btn, input[type="radio"], input[type="checkbox"]
 /** Does a click on `target` press a control? Exported for the unit test. */
 export function pressesControl(target: EventTarget | null): boolean {
   const el = (target as Element | null)?.closest?.(PRESSABLE);
-  return !!el && !(el as HTMLButtonElement | HTMLInputElement).disabled;
+  return !!el && !(el as HTMLButtonElement | HTMLInputElement).disabled &&
+    el.getAttribute('aria-disabled') !== 'true';
 }
 
 /** Arm the delegated listener. Called once from `boot.ts`, beside `initHaptics()`. */

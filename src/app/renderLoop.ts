@@ -28,6 +28,8 @@ import { syncTouchSwipe } from './touchSwipe.js';
 import { syncOrientationLock } from './orientationSync.js';
 import { syncTouchOptions } from './touchOptions.js';
 import { syncDialogueHint } from './dialogueHints.js';
+import { syncRoomActionBadge } from './roomActionBadge.js';
+import { syncButtonAvailability } from './buttonAvailability.js';
 import { syncZoomHint } from './zoomHint.js';
 import { syncPortraitHint } from './portraitHint.js';
 import { drawMap } from './mapDraw.js';
@@ -331,7 +333,9 @@ export function loop(now: number): void {
   // they depend on. Both leave immediately on anything that is not touch.
   syncTouchButtons();
   syncTouchOptions();
+  syncButtonAvailability();
   syncDialogueHint(now);
+  syncRoomActionBadge(now);
   syncZoomHint(now);
   syncPortraitHint(now);
   // Native phones lock presentation screens, not rooms; tablets keep their room policy.

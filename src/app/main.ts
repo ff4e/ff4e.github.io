@@ -127,6 +127,7 @@ import { touchOptionsOpen } from './touchOptions.js';
 import { faceSize, optionsLayout, toPanelPoint } from './optionsLayout.js';
 import { initTouchSwipe } from './touchSwipe.js';
 import { showDialogueHint } from './dialogueHints.js';
+import { reportRoomAction } from './roomActionEvent.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
   applyVolumeSettings,
@@ -905,9 +906,11 @@ function saveGame(): void {
       saveKey(),
       JSON.stringify({ rec, vars: snapshot, undo: undoHistoryForSave() }),
     );
+    reportRoomAction('save');
   } catch {
     try {
       localStorage.setItem(saveKey(), JSON.stringify({ rec, vars: snapshot }));
+      reportRoomAction('save');
     } catch {
       /* storage unavailable */
     }
@@ -940,6 +943,7 @@ function loadGame(): void {
   }
   loadUndoHistory(undoData); // the saved attempt's points, before its record is replayed
   restore(rec, snapshot, false, true, true); // player load: animated replay, live roompole (TRoom.Load)
+  reportRoomAction('load');
 }
 
 /** True if a save exists for the current room. */

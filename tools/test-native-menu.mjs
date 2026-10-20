@@ -7,7 +7,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { appReady, launchBrowser, exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
+import { appReady, launchBrowser, exitProbe, trialTap, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkTabletOptions, checkTabletReplayOptions, tapPanel } from './ui-tablet-options.mjs';
 
 const browser = await launchBrowser();
@@ -190,7 +190,7 @@ try {
         }));
         assert(bounds.menu.top >= Math.max(c.insets[0] + 8, bounds.more.bottom + 8) &&
           bounds.menu.bottom <= bounds.undo.top - 8, `${c.name}: overflow clears both corner controls`);
-        for (const button of await p.locator('#phone-menu button').all()) await button.tap({ trial: true });
+        for (const button of await p.locator('#phone-menu button').all()) await trialTap(button);
         await p.click('#phone-menu [data-region="16"]');
       } else {
         await p.click('#touchbar [data-region="16"]');
