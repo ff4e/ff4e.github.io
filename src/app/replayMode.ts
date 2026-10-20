@@ -27,6 +27,39 @@ export function inReplay(): boolean {
 }
 
 /**
+ * KUFRIK's tutorial spot reached during a replay: the room script asks for the automatic
+ * demonstration (URoom.pas:19923), and a replay must NOT start it.
+ *
+ * The demonstration's moves are already IN the record. `startShowmode`'s driver feeds
+ * help.cap through `tryStep`, so `srecord` keeps every move the demo made — the walk to
+ * its F2 checkpoint, and everything after its last F3 load, which rearranges the room the
+ * player then went on to solve. Starting the demo again here put a second driver on the
+ * same fish, interleaved with the recorded copy of the first, and both derailed. The
+ * original never meets this: its replay is `loadmode`, which exits before `Programky`
+ * (URoom.pas:24310), so no room script — and so no demonstration — runs at all. The
+ * recorded demo moves simply play back, silent, like every other move.
+ *
+ * The briefcase STORY (`startKufrDemo`, InitKufrDemo) is held back for the same reason,
+ * at the same wiring in `main.ts`: it moves nothing, so the record does not depend on it,
+ * and the original's replay never reaches it. Played here it froze the replay for two
+ * minutes of music and narration inside a replay that is otherwise silent.
+ *
+ * The one thing starting the demo did to the room that the record does NOT carry is the
+ * facing: `natoceni[velka] := smer_vlevo` (`startShowmode`), with no move recorded for
+ * it. The demo's first big-fish `left` was recorded as a step; replayed onto a big fish
+ * that reached the spot facing right it becomes a turn in place, and every move after it
+ * lands one cell off.
+ *
+ * `prog` asks on every tick both fish stand there (live, `showmode` gates it off after the
+ * first), so this repeats until the first recorded move takes the little fish away. Every
+ * arrival in a record starts the demo, so those moves are the demo's own, which leave the
+ * big fish alone — repeating the turn changes nothing.
+ */
+export function replayAtShowmodeSpot(): void {
+  if (room) room.facingRight.big = false; // natoceni[velka] := smer_vlevo
+}
+
+/**
  * Play back one move of the room's best solution per settled tick (daReplay, the
  * animated LoadSpeed:=1 replay, URoom.pas:1932). Each move drives the real swim
  * animation via tryStep; on the last move the normal win → winCountdown → showMap

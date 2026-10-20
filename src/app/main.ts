@@ -78,7 +78,7 @@ import {
   startCutscene,
   startShowmode,
 } from './cutscene.js';
-import { inReplay } from './replayMode.js';
+import { inReplay, replayAtShowmodeSpot } from './replayMode.js';
 import { cancelSolve, inAutoPlay, inSolvemode } from './solveMode.js';
 import { loadUndoHistory, undoAvailable, undoHistoryForSave, undoMove } from './undo.js';
 import {
@@ -747,8 +747,8 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
     s.musicVolume = musicLevel();
     if (savedPole) for (let i = 0; i < s.roompole.length; i++) s.roompole[i] = savedPole[i] ?? 0;
     s.musName = roomMusic?.name ?? '';
-    s.onKufrDemo = () => void startCutscene();
-    s.onShowmode = () => startShowmode();
+    s.onKufrDemo = () => void (inReplay() ? null : startCutscene()); // see replayAtShowmodeSpot
+    s.onShowmode = () => (inReplay() ? replayAtShowmodeSpot() : startShowmode());
     // The shared step-engine: all move/tick/win logic runs here, with side effects
     // (sound, the KAJUTA1 wall-shove, win bookkeeping, map return) injected as hooks.
     setEngine(new StepEngine(room, s, def ?? NOOP_SCRIPT, {

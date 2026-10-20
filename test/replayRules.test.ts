@@ -1,6 +1,10 @@
 /**
- * The two rules the map "Replay" driver plays by, pinned against the rooms that prove they
+ * The rules the map "Replay" driver plays by, pinned against the rooms that prove they
  * are load-bearing.
+ *
+ * KUFRIK #2 adds a third, about what a replay must NOT do: start the tutorial
+ * demonstration. Its moves are already in the record, and the last block below replays a
+ * captured one into the exact room the live demo left (`replayAtShowmodeSpot`).
  *
  * `test/solutions.test.ts` replays the whole corpus under the rules the driver is SUPPOSED
  * to use, and passes. That is the wrong shape to protect a rule: it says the corpus solves,
@@ -25,6 +29,7 @@ import { join } from 'node:path';
 import { Room } from '../src/core/room.js';
 import { Script } from '../src/core/script.js';
 import { StepEngine } from '../src/core/stepEngine.js';
+import { movesOf } from '../src/core/record.js';
 import { decodeMoves } from '../src/core/solutionMoves.js';
 import { ROOMS } from '../src/data/roomTable.js';
 import { parseFfr } from '../src/data/ffr.js';
@@ -53,7 +58,12 @@ interface Rules {
  * copy rather than a parameter on the harness: the harness is the solvability net for 70
  * rooms and must not grow a knob that can silently change what that net asserts.
  */
-function replayUnder(num: number, slug: string, rules: Rules): { won: boolean; dead: boolean; consumed: number } {
+function replayUnder(
+  num: number,
+  slug: string,
+  rules: Rules,
+  opts: { moves?: { which: 'little' | 'big'; dir: number }[]; atShowmodeSpot?: (room: Room, count: number) => void } = {},
+): { won: boolean; dead: boolean; consumed: number; hash: string } {
   const jmeno = ROOMS[num - 1]!.jmeno;
   const ffr = join(gameDataDir(), 'Graphic', `${String(num).padStart(3, '0')}.ffr`);
   const room = new Room(parseFfr(new Uint8Array(readFileSync(ffr))));
@@ -61,6 +71,8 @@ function replayUnder(num: number, slug: string, rules: Rules): { won: boolean; d
   const script = new Script(room, () => 12, () => false, {}, () => false);
   const engine = new StepEngine(room, script, def, { random: makeRng() });
   script.onWin = () => engine.triggerWin();
+  let count = 0;
+  if (opts.atShowmodeSpot) script.onShowmode = () => opts.atShowmodeSpot!(room, count);
   def?.init(script);
   if (room.padani()) engine.phase = 'fall';
   else {
@@ -68,8 +80,7 @@ function replayUnder(num: number, slug: string, rules: Rules): { won: boolean; d
     engine.phase = 'idle';
   }
 
-  const steps = decodeMoves(recordedMoves(slug));
-  let count = 0;
+  const steps = opts.moves ?? decodeMoves(recordedMoves(slug));
   let mi = 0;
   let idleAfterMoves = 0;
   const guardMax = steps.length * 60 + 20_000;
@@ -92,7 +103,15 @@ function replayUnder(num: number, slug: string, rules: Rules): { won: boolean; d
     if (engine.press(s.which, s.dir) === 'busy' && rules.retryBusy) continue;
     mi++;
   }
-  return { won: engine.won, dead: room.anyFishDead, consumed: mi };
+  // The same snapshot as `__ff.posHash()`, so a live capture can be pasted in as-is.
+  const hash = [
+    ...room.items.map((it) => `${it.x},${it.y}`),
+    `fL:${room.facingRight.little ? 1 : 0}`,
+    `fB:${room.facingRight.big ? 1 : 0}`,
+    `vL:${room.venku.little ? 1 : 0}`,
+    `vB:${room.venku.big ? 1 : 0}`,
+  ].join('|');
+  return { won: engine.won, dead: room.anyFishDead, consumed: mi, hash };
 }
 
 const BOTH: Rules = { startedIdle: true, retryBusy: true };
@@ -135,6 +154,50 @@ describe('map Replay rules', () => {
       expect(r.won).toBe(false);
       expect(r.dead).toBe(false);
       expect(r.consumed).toBe(794);
+    });
+  });
+
+  describe('KUFRIK #2: the demonstration is replayed from the record, never started', () => {
+    // A real record, captured from live play on the build that introduced this test with
+    // `__ff.record()` once the demonstration had run to its end: 155 player moves to the
+    // tutorial spot, the demo's 22 to its F2 checkpoint, and the 200 it plays after its
+    // last F3 load. Those last 200 rearrange the room — three items end somewhere else —
+    // and a player's remaining moves are made in THAT room, so they cannot be skipped.
+    const RECORD =
+      'KLLLLLJSDDDDDDDDDDDDDDDDDDDDSSDDDDDDDDDSSSSSDDDDDAAAAADDDDDDAASSSSSSSSAAASSAAAAAWWAAWDAKKLLLLLLLLLLLLLLLKKLLLL' +
+      'LLLLLLLLLJJJJLLLLLLKKKKKKKKKKKKKKJJJJJJJJJJJJJJJJJJJJKKAAAAAAAAASASJJJJJJJJJJJIIILLLLASSAAAAAAAAASSSSSDDDWKKKJJ' +
+      'KKLLJJJJJJKKKWWLLLLLLLILAAASAAAAJJJJJIIIIJIKIIIIIIJLLLLIILLDDDDDDSDWWWJJJKKLLLKKKLLJJJJJJJKKKKKKLLLLLLLLLILLLIII' +
+      'IIJJJLLLDDDAAAKKKKJJJAAADDDDLLLLIJDDDDDDJJLL';
+    /** `__ff.posHash()` in the live room the moment the demonstration ended. */
+    const DEMO_END = '0,0|17,7|17,25|16,26|28,18|22,24|24,29|4,17|11,27|13,24|9,34|fL:1|fB:1|vL:0|vB:0';
+
+    /** `replayAtShowmodeSpot` (`src/app/replayMode.ts`): the demo's turn, and nothing else. */
+    const turnBigLeft = (room: Room) => {
+      room.facingRight.big = false; // natoceni[velka] := smer_vlevo
+    };
+
+    it('the recorded moves alone rebuild the room the demonstration left', () => {
+      const r = replayUnder(2, 'briefcase', BOTH, { moves: movesOf(RECORD), atShowmodeSpot: turnBigLeft });
+      expect(r).toMatchObject({ dead: false, consumed: 377 });
+      expect(r.hash).toBe(DEMO_END);
+    });
+
+    // The capture above reached the spot with the big fish already facing left, so it
+    // cannot tell whether the turn matters. Make the big fish turn right (a turn in place,
+    // `D`) just before the little fish's last move brings both onto the spot: live, the
+    // demo then turns it back without recording anything, so the record is otherwise the
+    // same and the room must end the same.
+    const TURNED = RECORD.slice(0, 154) + 'D' + RECORD.slice(154);
+
+    it("the demo's unrecorded turn is replayed too", () => {
+      const r = replayUnder(2, 'briefcase', BOTH, { moves: movesOf(TURNED), atShowmodeSpot: turnBigLeft });
+      expect(r).toMatchObject({ dead: false, consumed: 378 });
+      expect(r.hash).toBe(DEMO_END);
+    });
+
+    it('…and is load-bearing: without it the demo replays one cell off', () => {
+      const r = replayUnder(2, 'briefcase', BOTH, { moves: movesOf(TURNED) });
+      expect(r.hash).not.toBe(DEMO_END);
     });
   });
 });
