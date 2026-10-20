@@ -139,7 +139,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `cutscene.ts` | 6.7 k | The KUFRIK demo and the intro/ending movies. |
 | `cutsceneClose.ts` | | The briefcase demo's Skip button: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
-| `replayMode.ts` | 1.9 k | The map's "Replay" of a stored best solution: one move per settled tick, a `busy`-dropped move retried, and KUFRIK's story and tutorial demonstration never started (their moves are already in the record). |
+| `replayMode.ts` | 2.4 k | The map's "Replay" of a stored best solution: one move per settled tick (run undrawn, with the held-key speed-up carried, so it moves as smoothly as the KUFRIK demo), a `busy`-dropped move retried, and KUFRIK's story and tutorial demonstration never started (their moves are already in the record). |
 | `intro.ts` | 1.2 k | Intro-movie playback. |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and where an asset failure is turned into a surface — the fatal screen, the note or nothing, chosen by the asset's TIER. The screen is generic (its one action is Reload whichever file broke); the asset's name goes to the log. Only absence BY DESIGN still falls back quietly. |

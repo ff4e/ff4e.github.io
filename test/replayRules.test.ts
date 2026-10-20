@@ -36,6 +36,7 @@ import { parseFfr } from '../src/data/ffr.js';
 import { roomScript } from '../src/rooms/index.js';
 import { gameDataDir } from './gameData.js';
 import { recordedMoves } from './solutionsSource.js';
+import { KNOWN_DIVERGENT, SOLUTION_ROOMS } from './solutionsMapping.js';
 
 /** Deterministic RNG, matching `solutionsHarness.ts` so these runs are comparable to it. */
 function makeRng(): (n: number) => number {
@@ -51,6 +52,12 @@ interface Rules {
   startedIdle: boolean;
   /** Leave a move the engine refused as `busy` unconsumed, to retry (the busy rule). */
   retryBusy: boolean;
+  /**
+   * Give the next move back the `jizda` the last one landed with, across the settled tick
+   * (`landed` in `replayMode.ts`). Not a correctness rule — it is how the replay keeps a
+   * held key's acceleration — so it is on in `BOTH` and pinned harmless across the corpus.
+   */
+  carryJizda: boolean;
 }
 
 /**
@@ -63,7 +70,7 @@ function replayUnder(
   slug: string,
   rules: Rules,
   opts: { moves?: { which: 'little' | 'big'; dir: number }[]; atShowmodeSpot?: (room: Room, count: number) => void } = {},
-): { won: boolean; dead: boolean; consumed: number; hash: string } {
+): { won: boolean; dead: boolean; blocked: number; consumed: number; hash: string } {
   const jmeno = ROOMS[num - 1]!.jmeno;
   const ffr = join(gameDataDir(), 'Graphic', `${String(num).padStart(3, '0')}.ffr`);
   const room = new Room(parseFfr(new Uint8Array(readFileSync(ffr))));
@@ -82,6 +89,7 @@ function replayUnder(
 
   const steps = opts.moves ?? decodeMoves(recordedMoves(slug));
   let mi = 0;
+  let landedJizda: number | null = null;
   let idleAfterMoves = 0;
   const guardMax = steps.length * 60 + 20_000;
   for (let guard = 0; guard < guardMax; guard++) {
@@ -92,7 +100,12 @@ function replayUnder(
     engine.advance();
     if (engine.won || room.anyFishDead) break;
     if (engine.phase !== 'idle') continue;
-    if (rules.startedIdle && !idleAtStart) continue;
+    const carried = landedJizda;
+    landedJizda = null;
+    if (rules.startedIdle && !idleAtStart) {
+      landedJizda = engine.jizda;
+      continue;
+    }
     if (mi >= steps.length) {
       if (++idleAfterMoves > 120) break;
       continue;
@@ -100,6 +113,7 @@ function replayUnder(
     const s = steps[mi]!;
     engine.active = s.which;
     room.hracNespi();
+    if (rules.carryJizda && carried !== null) engine.jizda = carried;
     if (engine.press(s.which, s.dir) === 'busy' && rules.retryBusy) continue;
     mi++;
   }
@@ -111,12 +125,25 @@ function replayUnder(
     `vL:${room.venku.little ? 1 : 0}`,
     `vB:${room.venku.big ? 1 : 0}`,
   ].join('|');
-  return { won: engine.won, dead: room.anyFishDead, consumed: mi, hash };
+  return { won: engine.won, dead: room.anyFishDead, blocked: engine.blocked, consumed: mi, hash };
 }
 
-const BOTH: Rules = { startedIdle: true, retryBusy: true };
+const BOTH: Rules = { startedIdle: true, retryBusy: true, carryJizda: true };
 
 describe('map Replay rules', () => {
+  // `solutions.test.ts` proves the corpus solves under the settled tick alone. The live
+  // replay also carries `jizda` across it, which changes how many ticks each cell takes —
+  // and so where every timed room script stands when the next move arrives. Measured: same
+  // result in every room, 28% fewer ticks in total.
+  it("every recorded room still solves under the replay's own timing", () => {
+    const failed = Object.keys(SOLUTION_ROOMS)
+      .filter((slug) => !KNOWN_DIVERGENT.has(slug))
+      .map((slug) => ({ slug, ...replayUnder(SOLUTION_ROOMS[slug]!, slug, BOTH) }))
+      .filter((r) => !r.won || r.dead || r.blocked > 0)
+      .map(({ slug, won, dead, blocked, consumed }) => ({ slug, won, dead, blocked, consumed }));
+    expect(failed).toEqual([]);
+  });
+
   it('both rules together solve the two rooms that notice', () => {
     expect(replayUnder(68, 'windoze', BOTH)).toMatchObject({ won: true, dead: false });
     expect(replayUnder(64, 'grail', BOTH)).toMatchObject({ won: true, dead: false });

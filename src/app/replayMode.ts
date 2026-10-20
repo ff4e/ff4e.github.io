@@ -16,7 +16,7 @@
 // already (`hracNespi` in `gameState.ts`, `showMap` in `mapNav.ts`), so routing them
 // through `main.ts` would only add an accessor to write and a wire to get wrong — see the
 // host-accessor note in AGENTS.md.
-import { engine, hracNespi, replaymode, room, setReplaymode } from './gameState.js';
+import { count, engine, hracNespi, replaymode, room, setReplaymode } from './gameState.js';
 import { showMap } from './mapNav.js';
 import { tryStep } from './movement.js';
 
@@ -24,6 +24,32 @@ import { tryStep } from './movement.js';
  *  faithful, `loadtype=nej`); the input lockout is `inAutoPlay()` in `solveMode.ts`. */
 export function inReplay(): boolean {
   return replaymode !== null;
+}
+
+/**
+ * The cell a replayed move just landed on, while the settled tick `startedIdle` asks for is
+ * still to come — and the `jizda` the fish had as it landed.
+ *
+ * That settled tick is what keeps the replay correct, and it is also what made it look
+ * wrong: drawn, it is a visible stop between every two cells, and `advance()` resets `jizda`
+ * on it, so a long run never accelerated 3 -> 2 -> 1 ticks per cell the way a held key or
+ * the KUFRIK demonstration does. Neither is something the room needs. So:
+ *
+ *  - `renderLoop.ts` runs the settled tick at once, in the same frame as the landing
+ *    (`replaySettleDue`). Every tick still runs, in order — `prog` gets its at-rest pass —
+ *    but none of it is drawn, so the fish moves straight on.
+ *  - The next move gets back the `jizda` the landing had, which is exactly what a held key
+ *    starts its next cell with (`dispatchHeldMove` presses on the landing tick itself).
+ *
+ * `jizda` only sets how many ticks a cell animates for, never where anything goes, and the
+ * whole solution corpus replays to the same result under this timing as under the plain
+ * settled tick — `test/replayRules.test.ts` holds that.
+ */
+let landed: { engine: object; tick: number; jizda: number } | null = null;
+
+/** The tick just run landed a replayed move, so the next is its settled tick: run it now. */
+export function replaySettleDue(): boolean {
+  return replaymode !== null && landed?.engine === engine && landed.tick === count;
 }
 
 /**
@@ -108,7 +134,12 @@ export function advanceReplay(
     showMap();
     return;
   }
-  if (!startedIdle) return; // not a tick this may move on — see `startedIdle`
+  if (!startedIdle) {
+    landed = { engine, tick: count, jizda: engine.jizda }; // not a tick to move on — see `startedIdle`
+    return;
+  }
+  const carried = landed?.engine === engine && landed.tick === count - 1 ? landed.jizda : null;
+  landed = null;
   if (replaymode.idx >= replaymode.moves.length) {
     setReplaymode(null); // ran dry without a win (defensive) — hand control back
     return;
@@ -126,6 +157,7 @@ export function advanceReplay(
   // correct, because its own bonus-level handover sets `busy` on both fish (URoom.pas:17953).
   // The headless net (`test/solutionsHarness.ts`) and the dev-bar driver (`solveMode.ts`)
   // both already retry; this was the path that did not.
+  if (carried !== null) engine.jizda = carried; // see `landed`
   if (tryStep(m.which, m.dir) === 'busy') return;
   replaymode.idx++;
 }

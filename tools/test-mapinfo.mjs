@@ -103,9 +103,9 @@ await withApp(async ({ p, expect }) => {
   // The ruler head that spoke during the normal Run above must stay mute here — so
   // lines() must NOT advance across a couple seconds of replay, and no subtitle shows.
   const replayLines0 = await p.evaluate(() => window.__ff.lines());
-  const s0 = await p.evaluate(() => ({ c: window.__ff.count(), i: window.__ff.replayIndex() }));
+  const s0 = await p.evaluate(() => ({ c: window.__ff.count(), i: window.__ff.replayIndex(), b: window.__ff.blockedMoves() }));
   await p.waitForTimeout(2200);
-  const s1 = await p.evaluate(() => ({ c: window.__ff.count(), i: window.__ff.replayIndex(), f: window.__ff.moveFrames() }));
+  const s1 = await p.evaluate(() => ({ c: window.__ff.count(), i: window.__ff.replayIndex(), b: window.__ff.blockedMoves() }));
   const replayLines1 = await p.evaluate(() => window.__ff.lines());
   expect(replayLines1 === replayLines0, `no dialogue spoken during replay (lines ${replayLines0} -> ${replayLines1})`);
   expect((await p.evaluate(() => window.__ff.subsActive())) === false, 'no subtitle appears during replay');
@@ -113,26 +113,32 @@ await withApp(async ({ p, expect }) => {
   // ...and it plays ONE move per tick that STARTED idle, not per tick that merely ended
   // idle. This is the live half of the cadence rule; `advanceReplay`'s `startedIdle`
   // parameter carries the derivation from the Delphi source and why a held key does NOT
-  // share it. Asserted as a RATE because that is what separates the two cadences without
-  // needing a room where the difference is fatal: a cell animates for `moveFrames()` ticks,
-  // so the strict rule costs one further at-rest tick and can never average less than
-  // `moveFrames() + 1` ticks per move. The loose rule issues the next move on the tick the
-  // last one landed, so it averages at most `moveFrames()` — and less than that as `jizda`
-  // accelerates a continuous run from 3 ticks/cell to 1.
+  // share it. Asserted as a RATE: every animated move costs at least one animation tick
+  // plus its settled tick, so the strict rule never averages under 2 ticks per move. The
+  // replay carries `jizda` across the settled tick (`landed`, `replayMode.ts`), so a cell
+  // can take 1 to 3 ticks and 2 is the only bound that holds for every move. The loose rule
+  // breaks it only once a run has accelerated to 1 tick per cell, so this is the LIVE wiring
+  // check (that `logicTick` hands the driver the right flag), not the rule's proof — the
+  // rules themselves are pinned in `test/replayMode.test.ts`. A move the engine REFUSES (the
+  // fish at the ceiling) animates nothing and costs its one tick under either rule, so those
+  // are counted apart.
+  //
+  // The settled tick is run undrawn, in the landing's frame (`replaySettleDue`), so it
+  // still counts here although the player never sees the fish stop.
   //
   // Worth knowing what this cheap assertion stands in for: under the loose cadence the map
   // Replay of WIN #68 killed the big fish at move 142 and GRAL #64 played all 1691 moves
   // without ever winning. Replaying either of those here would be the direct oracle and
-  // costs a minute of wall clock at real speed (there is no speed knob outside solvemode),
-  // which is why the rate is measured instead — inside a window this probe was already
-  // waiting out, so it adds no time at all.
+  // costs minutes of wall clock, which is why the rate is measured instead — inside a
+  // window this probe was already waiting out, so it adds no time at all.
   const movesPlayed = s1.i - s0.i;
+  const refused = s1.b - s0.b;
   const ticksElapsed = s1.c - s0.c;
-  expect(movesPlayed >= 2, `the replay actually advanced during the window (${movesPlayed} moves)`);
+  const minTicks = (movesPlayed - refused) * 2 + refused;
+  expect(movesPlayed - refused >= 2, `the replay actually moved a fish during the window (${movesPlayed} moves, ${refused} refused)`);
   expect(
-    ticksElapsed >= movesPlayed * (s1.f + 1),
-    `replay plays at most one move per settled tick (${ticksElapsed} ticks / ${movesPlayed} moves, ` +
-      `min ${movesPlayed * (s1.f + 1)} at ${s1.f} frames per cell)`,
+    ticksElapsed >= minTicks,
+    `replay plays at most one move per settled tick (${ticksElapsed} ticks / ${movesPlayed} moves, ${refused} refused, min ${minTicks})`,
   );
 
   // A cheat-only room (room 2: solved-by-cheat, no genuine record): the panel opens
