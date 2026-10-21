@@ -16,7 +16,8 @@ export function bindUndoHold(button: HTMLButtonElement, repeat: () => void): voi
   let suppressClick = false;
 
   const available = (): boolean =>
-    !document.hidden && !button.disabled && button.getClientRects().length > 0 &&
+    !document.hidden && !button.disabled && button.getAttribute('aria-disabled') !== 'true' &&
+    button.getClientRects().length > 0 &&
     ui.screen === 'room' && !ui.helpOpen && !touchOptionsOpen() && !phoneMenuOpen() &&
     !roomLoading && !cutscene && !loadmode && !showmode && !replaymode;
   const inside = (e: PointerEvent): boolean => {

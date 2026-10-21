@@ -188,6 +188,7 @@ export function initTouchButtons(h: TouchButtonsHost): void {
       // A pointer click must not leave Save focused when game keys are used next.
       // Keyboard/assistive clicks have detail=0 and retain their focus indicator.
       if (e.detail > 0) el.blur();
+      if (el.getAttribute('aria-disabled') === 'true') return; // greyed (buttonAvailability.ts)
       host.panelAction(region);
     });
   }

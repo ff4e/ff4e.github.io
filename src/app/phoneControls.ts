@@ -29,6 +29,11 @@ function setExpanded(want: boolean, focus = false): void {
   wake();
 }
 
+/** Tutorial hints open the menu to show its Save/Load; no focus moves, nothing is pressed. */
+export function setPhoneMenuOpen(want: boolean): void {
+  setExpanded(want);
+}
+
 export function initPhoneControls(host: TouchButtonsHost): void {
   controls = document.getElementById('phone-controls')!;
   more = document.getElementById('phone-more') as HTMLButtonElement;
@@ -43,6 +48,8 @@ export function initPhoneControls(host: TouchButtonsHost): void {
     if (region === TOUCH_REGIONS.undo) bindUndoHold(el, () => host.panelAction(region));
     el.addEventListener('click', (e) => {
       if (e.detail > 0) el.blur();
+      // Greyed (buttonAvailability.ts): nothing happens, and the menu stays open.
+      if (el.getAttribute('aria-disabled') === 'true') return;
       setExpanded(false, e.detail === 0);
       host.panelAction(region);
     });

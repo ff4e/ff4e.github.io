@@ -127,6 +127,7 @@ import { touchOptionsOpen } from './touchOptions.js';
 import { faceSize, optionsLayout, toPanelPoint } from './optionsLayout.js';
 import { initTouchSwipe } from './touchSwipe.js';
 import { showDialogueHint } from './dialogueHints.js';
+import { reportRoomAction } from './roomActionEvent.js';
 import { beginRoomLoadingUi, initLoadingUi } from './loadingUi.js';
 import {
   applyVolumeSettings,
@@ -905,9 +906,11 @@ function saveGame(): void {
       saveKey(),
       JSON.stringify({ rec, vars: snapshot, undo: undoHistoryForSave() }),
     );
+    reportRoomAction('save');
   } catch {
     try {
       localStorage.setItem(saveKey(), JSON.stringify({ rec, vars: snapshot }));
+      reportRoomAction('save');
     } catch {
       /* storage unavailable */
     }
@@ -940,6 +943,7 @@ function loadGame(): void {
   }
   loadUndoHistory(undoData); // the saved attempt's points, before its record is replayed
   restore(rec, snapshot, false, true, true); // player load: animated replay, live roompole (TRoom.Load)
+  reportRoomAction('load');
 }
 
 /** True if a save exists for the current room. */
@@ -1546,14 +1550,14 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     // `atRest()` is true between the recording's moves, so without this a running replay
     // would bank a half-played record as the player's save.
-    if (atRest() && !inSolvemode()) saveGame();
+    if (atRest() && !inAutoPlay()) saveGame();
     return;
   }
   if (e.code === 'F3') {
     e.preventDefault();
     // Same hole as F2: `atRest()` is true between the recording's moves, and a load would
     // drop a saved room on top of a running replay. Escape is how you stop one.
-    if (atRest() && !inSolvemode()) loadGame();
+    if (atRest() && !inAutoPlay()) loadGame();
     return;
   }
   // Minus takes back one move (FFNG's key; its `+` redo is not ported). Nothing in the

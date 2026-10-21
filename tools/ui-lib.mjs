@@ -293,6 +293,21 @@ export const TICK_MS = 80;
 export const WAIT_BACKSTOP = 60000;
 
 /**
+ * A trial tap that also covers a greyed button (`aria-disabled`, buttonAvailability.ts).
+ * Playwright counts one as not enabled and would wait for ever, but whether it can be
+ * reached is still the question, so a greyed button gets the hit test directly.
+ */
+export async function trialTap(button) {
+  if ((await button.getAttribute('aria-disabled')) !== 'true') return button.tap({ trial: true });
+  await button.scrollIntoViewIfNeeded();
+  const reached = await button.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return el.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  });
+  if (!reached) throw new Error('a greyed button is covered where a tap would land');
+}
+
+/**
  * A LARGER budget for the few waits that genuinely need one: 12x the nominal duration on
  * an idle machine, never below the backstop, never above 5 minutes.
  *

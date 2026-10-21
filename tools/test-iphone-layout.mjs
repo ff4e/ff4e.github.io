@@ -3,7 +3,7 @@
  * corner dispatch and detached subtitles. Geometry/state-machine permutations are unit tests.
  */
 import { chromium } from 'playwright';
-import { exitProbe, WAIT_BACKSTOP } from './ui-lib.mjs';
+import { exitProbe, trialTap, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { checkZoomHints, checkZoomHintsAfterReload } from './ui-zoom-hints.mjs';
 import { checkPortraitHint } from './ui-portrait-hint.mjs';
 import { checkUndoHold } from './ui-undo-hold.mjs';
@@ -342,7 +342,7 @@ try {
     expect(menu && menu.x >= left + 8 && menu.x + menu.width <= width - Math.max(16, right + 8) &&
       menu.y >= Math.max(top + 8, more.bottom + 8) && menu.y + menu.height <= undo.top - 8,
     `${width}x${height}: the menu clears the top/side insets and both larger buttons`);
-    for (const button of await p.locator('#phone-menu button').all()) await button.tap({ trial: true });
+    for (const button of await p.locator('#phone-menu button').all()) await trialTap(button);
     expect(true, `${width}x${height}: every overflow action remains reachable, including when scrolling`);
     await p.keyboard.press('Escape');
   }
@@ -877,9 +877,22 @@ try {
       undo.right === more.right && undo.bottom === innerHeight - 24 &&
       map.width === 56 && undo.height === 56;
   }), 'rotating back to shared landscape keeps 24px corner margins and full-sized targets');
-  await p.evaluate(() => window.__ff.speakLine('help2'));
-  expect(await p.locator('#phone-more.dialogue-hint-pulse').count() === 1 &&
-    await p.locator('#phone-menu').isHidden(), 'Save tutorial highlights More without opening the menu');
+  const saveHint = await p.evaluate(() => {
+    window.__ff.speakLine('help2');
+    const menu = document.getElementById('phone-menu');
+    const save = menu.querySelector('[data-region="12"]');
+    const arrow = document.getElementById('dialogue-button-arrow');
+    const a = arrow?.querySelector('svg').getBoundingClientRect();
+    const b = save.getBoundingClientRect();
+    const cue = !menu.hidden && document.getElementById('phone-more').getAttribute('aria-expanded') === 'true' &&
+      save.classList.contains('dialogue-hint-pulse') && document.querySelectorAll('.dialogue-hint-pulse').length === 1 &&
+      arrow?.dataset.side === 'left' && a.right <= b.left && b.left - a.right <= 22 && a.left >= 0 &&
+      Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) < 1;
+    window.__ff.speakLine('help1', 'little');
+    return cue && menu.hidden && !document.getElementById('dialogue-button-arrow') &&
+      !document.querySelector('.dialogue-hint-pulse');
+  });
+  expect(saveHint, 'Save tutorial opens More, points an arrow at its Save, and closes it with the next line');
   await p.locator('#phone-map').tap();
   await p.waitForFunction(() => window.__ff.screen() === 'map');
   await waitZoom(1);
@@ -944,6 +957,45 @@ try {
   expect(await p.locator('#phone-portrait-hint').count() === 0, 'VRAK rotation hint stays seen after relaunch');
   await enter(7);
   expect(await scale() === 1, 'relaunch resets the zoom preference');
+  // The phone's own Save/Load/Undo grey like the tablet's (buttonAvailability.ts), and Save
+  // from the "..." menu confirms itself in the room (roomActionBadge.ts).
+  await p.evaluate(() => localStorage.removeItem('ff.save.' + window.__ff.roomNum()));
+  await p.waitForFunction(() => window.__ff.undoDepth() === 1 && window.__ff.phase() === 'idle');
+  await p.locator('#phone-more').tap();
+  await p.locator('#phone-menu').waitFor({ state: 'visible' });
+  await p.waitForFunction(() =>
+    document.querySelector('#phone-menu [data-region="13"]').getAttribute('aria-disabled') === 'true' &&
+    document.getElementById('phone-undo').getAttribute('aria-disabled') === 'true' &&
+    !document.querySelector('#phone-menu [data-region="12"]').hasAttribute('aria-disabled'));
+  expect(true, 'with no save and no moves, the phone greys Load in the menu and the Undo corner, not Save');
+  await p.locator('#phone-menu [data-region="13"]').tap({ force: true });
+  expect(await p.locator('#phone-menu').isVisible() &&
+    !(await p.evaluate(() => window.__ff.loading() || !!document.getElementById('room-action-badge'))),
+  'a tap on greyed Load does nothing and leaves the menu open');
+  await p.locator('#phone-menu [data-region="12"]').tap();
+  await p.waitForFunction(() => document.getElementById('room-action-badge')?.dataset.action === 'save');
+  expect(await p.evaluate(() => {
+    const b = document.getElementById('room-action-badge').getBoundingClientRect();
+    const r = document.getElementById('screen').getBoundingClientRect();
+    return window.__ff.hasSave() && document.getElementById('phone-menu').hidden &&
+      b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom;
+  }), 'Save from the menu saves, closes it and shows "Saved" inside the room');
+  // Zoomed in, the badge stays the stage's: the camera scales and pans `wrap`, not it.
+  await p.waitForFunction(() => !document.getElementById('room-action-badge'));
+  await pinch(2.2);
+  await waitZoom(2.2);
+  await p.locator('#phone-more').tap();
+  await p.locator('#phone-menu [data-region="12"]').tap();
+  await p.waitForFunction(() => document.getElementById('room-action-badge'));
+  expect(await p.evaluate(() => {
+    const el = document.getElementById('room-action-badge');
+    el.getAnimations().forEach((a) => { a.pause(); a.currentTime = 400; });
+    const b = el.getBoundingClientRect();
+    const s = document.getElementById('stagebox').getBoundingClientRect();
+    return Math.abs(b.width - el.offsetWidth) < 1 &&
+      Math.abs(b.left + b.width / 2 - (s.left + s.width / 2)) < 2 &&
+      Math.abs(b.top + b.height / 2 - (s.top + s.height / 2)) < 2;
+  }), 'at 2.2x zoom the badge is unscaled and centred on the visible stage');
   expect(errors.length === 0, `no page errors (${errors.join('; ')})`);
 } catch (e) {
   ok = false;

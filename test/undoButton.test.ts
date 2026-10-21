@@ -28,6 +28,8 @@ import { bindUndoHold } from '../src/app/undoButton.js';
 
 class Button extends EventTarget {
   disabled = false;
+  greyed = false;
+  getAttribute(name: string) { return name === 'aria-disabled' && this.greyed ? 'true' : null; }
   visible = true;
   captured: number | null = null;
   blur = vi.fn();
@@ -166,6 +168,7 @@ describe('Undo button hold', () => {
     ['solution replay', () => { state.replaymode = true; }],
     ['hidden control', () => { button.visible = false; }],
     ['disabled control', () => { button.disabled = true; }],
+    ['greyed control', () => { button.greyed = true; }],
   ])('stops before another repeat after %s', (_reason, change) => {
     pointer('pointerdown');
     vi.advanceTimersByTime(350);

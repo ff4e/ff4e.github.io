@@ -1,0 +1,52 @@
+/* Touch-only Save/Load/Restart feedback (roomActionBadge.ts, buttonAvailability.ts). */
+#room-action-badge {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 2; /* over the room layer beside it */
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: var(--menu-popup, #10161ae0);
+  color: var(--menu-ink, #dff);
+  box-shadow: 0 0 20px #0005;
+  font: 600 15px/1 system-ui, sans-serif;
+  letter-spacing: 0.3px;
+  text-shadow: 0 1px 2px #000;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+  animation: room-action-badge var(--badge-duration) ease-out both;
+}
+#room-action-badge svg {
+  width: 28px;
+  height: 28px;
+  color: var(--menu-symbol, currentColor);
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+@keyframes room-action-badge {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.9); }
+  12%, 70% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #room-action-badge { animation: none; }
+}
+
+/* Greyed: still focusable and still pressed by a finger, but it must not look pressed. The
+   attribute selectors outrank both skins' `:active`, including the phone corners' id rule. */
+.tbtn[aria-disabled='true'] { opacity: 0.4; }
+.tbtn[aria-disabled='true']:active { background: #18262e; border-color: #35555f; }
+html[data-native-menu] .tbtn[aria-disabled='true']:active,
+html[data-native-menu] #phone-controls .tbtn[aria-disabled='true']:active {
+  background: var(--menu-glass);
+  border-color: var(--menu-edge);
+  box-shadow: var(--menu-bevel);
+}

@@ -66,8 +66,38 @@
   0%, 100% { background: #18262e; border-color: #35555f; box-shadow: 0 0 0 0 #aee0; }
   50% { background: #365b64; border-color: #cff; box-shadow: 0 0 0 3px #aee9; }
 }
+/* A zero-size anchor at the arrow's tip; dialogueHints.ts translates and turns it. */
+#dialogue-button-arrow {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 121; /* over #touchbar and #phone-controls */
+  pointer-events: none;
+  user-select: none;
+}
+#dialogue-button-arrow[hidden] { display: none; }
+#dialogue-button-arrow svg {
+  position: absolute;
+  right: 0;
+  top: -14px;
+  width: 56px;
+  height: 28px;
+  overflow: visible;
+  fill: #aee;
+  stroke: #10161a;
+  stroke-width: 2.5;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px #000a);
+  animation: dialogue-hint-arrow 0.6s ease-in-out infinite alternate;
+}
+@keyframes dialogue-hint-arrow {
+  from { transform: translateX(-10px); }
+  to { transform: translateX(0); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .hint-finger, .hint-horizontal, .hint-vertical, .hint-tap { animation: none; }
+  .hint-finger, .hint-horizontal, .hint-vertical, .hint-tap, #dialogue-button-arrow svg { animation: none; }
   .tbtn.dialogue-hint-pulse {
     animation: none;
     background: #365b64;

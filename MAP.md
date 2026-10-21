@@ -131,7 +131,10 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `orientationSync.ts` | 0.8 k | Applies the phone presentation/free-room policy or tablet room-based locks. A no-op in every browser. |
 | `safeArea.ts` | 0.5 k | How big the display cutout is, read back from the `--sa-*` custom properties — the one place that knows their names. |
 | `touchSwipe.ts` | 1.6 k | Swipe to move: a finger drag on the room is delivered as a held arrow key, so every guard the keyboard has applies unchanged. |
-| `dialogueHints.ts` | 1.0 k | Touch-only swipe/tap illustration and Save/Load pulses triggered by tutorial dialogue, with expiry and screen/demo lifecycle cleanup. Styled by `src/styles/dialogueHints.css`. |
+| `dialogueHints.ts` | 1.9 k | Touch-only swipe/tap illustration and Save/Load pulses with a pointing arrow (opening the phone's "..." menu) triggered by tutorial dialogue, with expiry and screen/demo lifecycle cleanup. Styled by `src/styles/dialogueHints.css`. |
+| `roomActionBadge.ts` | 0.7 k | Touch-only "Saved"/"Loaded"/"Restarted" badge in the middle of the room, shown by the player's own action after its gates; styled by `src/styles/roomActions.css`. |
+| `roomActionEvent.ts` | 0.2 k | DOM-free hand-off of the player's last Save/Load/Restart to the badge, so `movement.ts` can report one without importing the document. |
+| `buttonAvailability.ts` | 0.8 k | Greys (`aria-disabled`) the touch Save, Load and Undo while a press cannot do anything — the panel's own CanSave/save-exists grey, empty undo, playback — but never in the KUFRIK demo. |
 | `zoomHint.ts` | | First-entry phone pinch illustrations in rooms 2 and 3; persists each room independently and follows live-play/loading/zoom eligibility. |
 | `portraitHint.ts` | | One-time, five-second animated portrait suggestion in VRAK on landscape phones; waits for native unlock and remembers only after 2.4 seconds of landscape display. Icon-only with reduced-motion support, no orientation lock. Styled by `src/styles/portraitHint.css`. |
 | `touchOptions.ts` | 2.0 k | The touch Options overlay: lends it the original panel canvas on phones and tablets alike, so presses go through the panel's own `panelAction` regions. |

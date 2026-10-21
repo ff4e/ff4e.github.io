@@ -68,6 +68,11 @@ export function initPanel(h: PanelHost): void {
   });
 }
 
+/** Is there a save to load? Through the host, which owns the slot's key. Reads the whole slot. */
+export function panelSaveExists(): boolean {
+  return host.saveExists();
+}
+
 export function panelState(): PanelState {
   const bigDead = !room || !room.alive.big || room.busy.big !== 0;
   const littleDead = !room || !room.alive.little || room.busy.little !== 0;

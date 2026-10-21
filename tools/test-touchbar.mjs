@@ -298,7 +298,32 @@ const barFit = (p) =>
     };
   });
 
-const tap = (p, region) => p.click(`#touchbar [data-region="${region}"]`);
+// `force` presses a greyed button anyway: Playwright counts `aria-disabled` as not enabled.
+const tap = (p, region, opts) => p.click(`#touchbar [data-region="${region}"]`, opts);
+// Greying is derived in the frame loop (buttonAvailability.ts), so wait for it to land.
+const greyedIs = (p, region, want) => p.waitForFunction(([r, w]) => {
+  const el = document.querySelector(`#touchbar [data-region="${r}"]`);
+  return (el.getAttribute('aria-disabled') === 'true') === w &&
+    getComputedStyle(el).opacity === (w ? '0.4' : '1');
+}, [region, want]);
+// The badge a real Save/Load/Restart leaves in the middle of the room (roomActionBadge.ts).
+const badgeShows = async (p, action) => {
+  await p.waitForFunction((a) => document.getElementById('room-action-badge')?.dataset.action === a, action);
+  return p.evaluate(() => {
+    const el = document.getElementById('room-action-badge');
+    const box = el.getBoundingClientRect();
+    const room = document.getElementById('screen').getBoundingClientRect();
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    const hit = document.elementFromPoint(cx, cy);
+    return {
+      label: el.textContent.trim(),
+      icon: !!el.querySelector('svg'),
+      centred: Math.abs(cx - (room.left + room.width / 2)) < 2 && Math.abs(cy - (room.top + room.height / 2)) < 2,
+      decorative: el.getAttribute('aria-hidden') === 'true' && !el.contains(hit),
+    };
+  });
+};
 
 const browser = await chromium.launch();
 try {
@@ -659,7 +684,9 @@ try {
   // And it stops at the room's start instead of running off the bottom: the last point in
   // the history IS where the player is, so there is nothing below it.
   expect(!(await p.evaluate(() => window.__ff.canUndo())), 'at the start, there is nothing to undo');
-  await tap(p, 24);
+  await greyedIs(p, 24, true);
+  expect(true, 'so Undo is greyed');
+  await tap(p, 24, { force: true });
   const after = await p.evaluate(() => [window.__ff.moves(), window.__ff.screen()]);
   expect(after[0] === 0 && after[1] === 'room', 'and pressing it anyway is a clean no-op');
   await checkUndoHold(p, expect, '#touchbar-undo');
@@ -675,6 +702,9 @@ try {
   const dead = await p.evaluate(() => [window.__ff.canSave(), window.__ff.canUndo()]);
   expect(!dead[0], 'with a fish dead, saving is refused');
   expect(dead[1], 'and undo is offered anyway');
+  await greyedIs(p, 12, true);
+  await greyedIs(p, 24, false);
+  expect(true, 'and the buttons say so: Save greyed, Undo not');
   await tap(p, 24);
   await p.waitForFunction(() => !window.__ff.state().dead);
   expect(true, 'Undo brings the dead fish back — the move that killed it is taken back');
@@ -754,6 +784,11 @@ try {
   await tap(p, 15);
   await p.waitForFunction((a) => window.__ff.state().active === a, startActive);
   expect(true, `Restart rebuilds the room (active fish back to ${startActive})`);
+  const restarted = await badgeShows(p, 'restart');
+  expect(restarted.label === 'Restarted' && restarted.icon && restarted.centred && restarted.decorative,
+    `and confirms it with a decorative badge centred on the room (${JSON.stringify(restarted)})`);
+  await p.waitForFunction(() => !document.getElementById('room-action-badge'));
+  expect(true, 'which goes away by itself');
   const nowPokus = await p.evaluate(() => window.__ff.script().pokus);
   expect(
     nowPokus === startPokus + 1,
@@ -772,6 +807,11 @@ try {
   // failed exactly that way. Wait for the start point, as the undo walk above does.
   await p.waitForFunction(() => window.__ff.moves() === 0 && window.__ff.undoDepth() === 1);
   await p.evaluate(() => localStorage.removeItem('ff.save.' + window.__ff.roomNum()));
+  await greyedIs(p, 13, true);
+  await tap(p, 13, { force: true });
+  await p.waitForTimeout(150);
+  expect(!(await p.evaluate(() => window.__ff.loading() || !!document.getElementById('room-action-badge'))),
+    'with no save, Load is greyed and a press on it does nothing');
   let beforeLast = null;
   for (const dir of [3, 4, 1, 2]) {
     const depth = await p.evaluate(() => window.__ff.undoDepth());
@@ -788,6 +828,9 @@ try {
   await tap(p, 12);
   await p.waitForFunction(() => window.__ff.hasSave());
   expect(true, 'Save writes a save for this room');
+  expect((await badgeShows(p, 'save')).label === 'Saved', 'and shows "Saved"');
+  await greyedIs(p, 13, false);
+  expect(true, 'and Load is no longer greyed');
 
   // ── A save carries the undo history with it (Martin, 2026-08-29), so a load resumes an
   // ATTEMPT and not merely a position: undo after it walks back through the moves that
@@ -803,6 +846,7 @@ try {
   // leaves the bank alone. KOSTE never touches slot 98.
   await p.evaluate(() => window.__ff.setRoompole(98, 5));
   await tap(p, 13);
+  expect((await badgeShows(p, 'load')).label === 'Loaded', 'Load shows "Loaded"');
   // `loading()` as well as `roomLoading()`, and they are different things: the second is
   // the ROOM being fetched, the first is the load's fast-forward still replaying the
   // record. `phase` is 'idle' between that replay's moves and `moves()` reaches its total
