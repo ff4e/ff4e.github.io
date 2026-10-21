@@ -96,6 +96,11 @@ await withApp(async ({ p, expect }) => {
       window.__ff.lastLine() === line && window.__ff.lines() === count;
   });
   expect(silentHints, 'silent replay suppresses tutorial hints and preserves the dialogue debug counters');
+  // Playback locks the save slot from both doors: the greyed touch buttons here
+  // (buttonAvailability.ts), and the F2/F3 keys (main.ts) after the cadence window below.
+  await p.waitForFunction(() => ['12', '13', '24'].every((r) =>
+    document.querySelector(`#touchbar [data-region="${r}"]`).getAttribute('aria-disabled') === 'true'));
+  expect(true, 'Replay greys the touch Save, Load and Undo');
   await p.selectOption('#touchmode', 'off');
 
   // A best-solution replay is SILENT, like the original's loadmode replay
@@ -141,6 +146,28 @@ await withApp(async ({ p, expect }) => {
     ticksElapsed >= minTicks,
     `replay plays at most one move per settled tick (${ticksElapsed} ticks / ${movesPlayed} moves, ${refused} refused, min ${minTicks})`,
   );
+
+  // F2/F3 during the same Replay, after the cadence window so its wait cannot shift it.
+  // Pressed on a frame where the replay is between moves: `atRest()` is what F2/F3 used
+  // to check, and at any other moment the press was refused anyway and proved nothing.
+  const slot = await p.evaluate(() => 'ff.save.' + window.__ff.roomNum());
+  const slotBefore = await p.evaluate((k) => localStorage.getItem(k), slot);
+  const pressedAtRest = await p.evaluate(() => new Promise((resolve) => {
+    const key = (code) => window.dispatchEvent(new KeyboardEvent('keydown', { key: code, code, bubbles: true, cancelable: true }));
+    const until = performance.now() + 5000;
+    const poll = () => {
+      if (!window.__ff.replayActive() || performance.now() > until) return resolve(false);
+      if (window.__ff.phase() !== 'idle' || window.__ff.loading()) return requestAnimationFrame(poll);
+      key('F2');
+      key('F3');
+      resolve(true);
+    };
+    poll();
+  }));
+  await p.waitForTimeout(150);
+  expect(pressedAtRest && await p.evaluate(([k, b]) => window.__ff.replayActive() && localStorage.getItem(k) === b &&
+    !window.__ff.loading() && !document.getElementById('room-action-badge'), [slot, slotBefore]),
+  'and F2/F3 between two replayed moves neither save nor load over it');
 
   // A cheat-only room (room 2: solved-by-cheat, no genuine record): the panel opens
   // but Replay is disabled (no ff.best.2). Use a fresh room so in-memory best of room 1

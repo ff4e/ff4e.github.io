@@ -6,9 +6,16 @@
 export type RoomAction = 'save' | 'load' | 'restart';
 
 let pending: RoomAction | null = null;
+let saves = 0;
 
 export function reportRoomAction(action: RoomAction): void {
   pending = action;
+  if (action === 'save') saves++;
+}
+
+/** How many saves have happened; buttonAvailability.ts re-reads the slot when it moves. */
+export function savesReported(): number {
+  return saves;
 }
 
 export function takeRoomAction(): RoomAction | null {

@@ -1550,14 +1550,14 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     // `atRest()` is true between the recording's moves, so without this a running replay
     // would bank a half-played record as the player's save.
-    if (atRest() && !inSolvemode()) saveGame();
+    if (atRest() && !inAutoPlay()) saveGame();
     return;
   }
   if (e.code === 'F3') {
     e.preventDefault();
     // Same hole as F2: `atRest()` is true between the recording's moves, and a load would
     // drop a saved room on top of a running replay. Escape is how you stop one.
-    if (atRest() && !inSolvemode()) loadGame();
+    if (atRest() && !inAutoPlay()) loadGame();
     return;
   }
   // Minus takes back one move (FFNG's key; its `+` redo is not ported). Nothing in the

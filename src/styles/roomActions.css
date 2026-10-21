@@ -3,6 +3,7 @@
   position: absolute;
   left: 50%;
   top: 50%;
+  z-index: 2; /* over the room layer beside it */
   transform: translate(-50%, -50%);
   display: flex;
   align-items: center;

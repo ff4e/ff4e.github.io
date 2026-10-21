@@ -980,6 +980,22 @@ try {
     return window.__ff.hasSave() && document.getElementById('phone-menu').hidden &&
       b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom;
   }), 'Save from the menu saves, closes it and shows "Saved" inside the room');
+  // Zoomed in, the badge stays the stage's: the camera scales and pans `wrap`, not it.
+  await p.waitForFunction(() => !document.getElementById('room-action-badge'));
+  await pinch(2.2);
+  await waitZoom(2.2);
+  await p.locator('#phone-more').tap();
+  await p.locator('#phone-menu [data-region="12"]').tap();
+  await p.waitForFunction(() => document.getElementById('room-action-badge'));
+  expect(await p.evaluate(() => {
+    const el = document.getElementById('room-action-badge');
+    el.getAnimations().forEach((a) => { a.pause(); a.currentTime = 400; });
+    const b = el.getBoundingClientRect();
+    const s = document.getElementById('stagebox').getBoundingClientRect();
+    return Math.abs(b.width - el.offsetWidth) < 1 &&
+      Math.abs(b.left + b.width / 2 - (s.left + s.width / 2)) < 2 &&
+      Math.abs(b.top + b.height / 2 - (s.top + s.height / 2)) < 2;
+  }), 'at 2.2x zoom the badge is unscaled and centred on the visible stage');
   expect(errors.length === 0, `no page errors (${errors.join('; ')})`);
 } catch (e) {
   ok = false;

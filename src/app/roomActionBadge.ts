@@ -8,7 +8,7 @@
  * (buttonAvailability.ts). The demo's recorded save/load and a death's auto-restart take
  * other paths and stay silent. Decorative: it never takes a pointer.
  */
-import { wrap } from './dom.js';
+import { stageBox } from './dom.js';
 import { ui } from './screenState.js';
 import { touchUi } from './touchButtons.js';
 import { touchOptionsOpen } from './touchOptions.js';
@@ -45,7 +45,9 @@ function showRoomActionBadge(action: RoomAction): void {
   el.setAttribute('aria-hidden', 'true');
   el.style.setProperty('--badge-duration', `${BADGE_MS}ms`);
   el.append(icon.cloneNode(true), label);
-  wrap.appendChild(el);
+  // The stage, not `wrap`: the phone camera zooms and pans `wrap` (phoneViewport.ts), which
+  // would scale the badge and could carry it off-screen. The stage is the visible room.
+  stageBox.appendChild(el);
   current = { el, until: performance.now() + BADGE_MS };
 }
 

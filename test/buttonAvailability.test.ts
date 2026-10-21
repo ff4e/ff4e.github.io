@@ -1,18 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const SEDY = 0;
-const ORANZOVY = 1;
 const state = {
   touch: true,
   screen: 'room',
+  room: { canSave: true } as { canSave: boolean } | null,
   showmode: null as object | null,
   autoplay: false,
   undo: true,
-  panel: { save: ORANZOVY, load: ORANZOVY },
+  hasSave: true,
+  saves: 0,
 };
-vi.mock('../src/render/hud.js', () => ({ SEDY }));
-vi.mock('../src/app/gameState.js', () => ({ get showmode() { return state.showmode; } }));
-vi.mock('../src/app/panel.js', () => ({ panelState: () => state.panel }));
+vi.mock('../src/app/gameState.js', () => ({
+  get room() { return state.room; },
+  get showmode() { return state.showmode; },
+}));
+const panelSaveExists = vi.fn(() => state.hasSave);
+vi.mock('../src/app/panel.js', () => ({ panelSaveExists }));
+vi.mock('../src/app/roomActionEvent.js', () => ({ savesReported: () => state.saves }));
 vi.mock('../src/app/screenState.js', () => ({ ui: state }));
 vi.mock('../src/app/solveMode.js', () => ({ inAutoPlay: () => state.autoplay }));
 vi.mock('../src/app/touchButtons.js', () => ({ touchUi: () => state.touch }));
@@ -42,12 +46,17 @@ const greyed = () => ({
 });
 const all = (v: boolean) => ({ save: [v, v], load: [v, v], undo: [v, v] });
 
+// Each test gets a fresh room, so the throttled save read starts over.
+let now = 0;
+const sync = () => syncButtonAvailability(now);
 beforeEach(() => {
   Object.assign(state, {
-    touch: true, screen: 'room', showmode: null, autoplay: false, undo: true,
-    panel: { save: ORANZOVY, load: ORANZOVY },
+    touch: true, screen: 'room', room: { canSave: true }, showmode: null, autoplay: false, undo: true,
+    hasSave: true, saves: 0,
   });
-  syncButtonAvailability();
+  now += 10_000;
+  sync();
+  panelSaveExists.mockClear();
 });
 
 describe('touch button availability', () => {
@@ -56,42 +65,66 @@ describe('touch button availability', () => {
   });
 
   it('greys Load with no save, following the original panel', () => {
-    state.panel = { save: ORANZOVY, load: SEDY };
-    syncButtonAvailability();
+    state.hasSave = false;
+    state.room = { canSave: true };
+    sync();
     expect(greyed()).toEqual({ save: [false, false], load: [true, true], undo: [false, false] });
   });
 
   it('greys Save while CanSave is false, following the original panel', () => {
-    state.panel = { save: SEDY, load: ORANZOVY };
-    syncButtonAvailability();
+    state.room = { canSave: false };
+    sync();
     expect(greyed()).toEqual({ save: [true, true], load: [false, false], undo: [false, false] });
   });
 
   it('greys Undo with nothing to take back', () => {
     state.undo = false;
-    syncButtonAvailability();
+    sync();
     expect(greyed()).toEqual({ save: [false, false], load: [false, false], undo: [true, true] });
   });
 
   it('greys all three during a map Replay or solution playback', () => {
     state.autoplay = true;
-    syncButtonAvailability();
+    sync();
     expect(greyed()).toEqual(all(true));
   });
 
   it('greys nothing during the KUFRIK demonstration, whatever else holds', () => {
-    Object.assign(state, { showmode: {}, autoplay: true, undo: false, panel: { save: SEDY, load: SEDY } });
-    syncButtonAvailability();
+    Object.assign(state, { showmode: {}, autoplay: true, undo: false, hasSave: false, room: { canSave: false } });
+    sync();
     expect(greyed()).toEqual(all(false));
   });
 
   it('restores a button as soon as it would act again', () => {
     state.undo = false;
-    syncButtonAvailability();
+    sync();
     state.undo = true;
-    syncButtonAvailability();
+    sync();
     expect(greyed()).toEqual(all(false));
     expect(els[24][0]!.attrs.has('aria-disabled')).toBe(false);
+  });
+
+  it('reads the save slot only on a new room, a save, or once a second', () => {
+    for (let i = 0; i < 30; i++) { now += 16; sync(); }
+    expect(panelSaveExists).not.toHaveBeenCalled();
+    state.hasSave = false;
+    state.room = { canSave: true }; // enter, restart, load or undo: a rebuilt room
+    sync();
+    expect(panelSaveExists).toHaveBeenCalledTimes(1);
+    expect(greyed().load).toEqual([true, true]);
+    state.hasSave = true;
+    state.saves++;
+    sync();
+    expect(panelSaveExists).toHaveBeenCalledTimes(2);
+    expect(greyed().load).toEqual([false, false]);
+    state.hasSave = false; // cleared from outside: another tab, a probe
+    now += 999;
+    sync();
+    expect(greyed().load).toEqual([false, false]);
+    now += 1;
+    sync();
+    expect(panelSaveExists).toHaveBeenCalledTimes(3);
+    expect(greyed().load).toEqual([true, true]);
   });
 
   it.each([
@@ -100,7 +133,7 @@ describe('touch button availability', () => {
   ])('leaves hidden buttons alone on %s', (_name, leave) => {
     state.autoplay = true;
     leave();
-    syncButtonAvailability();
+    sync();
     expect(greyed()).toEqual(all(false));
   });
 });

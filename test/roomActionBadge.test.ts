@@ -4,8 +4,8 @@ const state = { touch: true, screen: 'room', helpOpen: false, options: false };
 vi.mock('../src/app/screenState.js', () => ({ ui: state }));
 vi.mock('../src/app/touchButtons.js', () => ({ touchUi: () => state.touch }));
 vi.mock('../src/app/touchOptions.js', () => ({ touchOptionsOpen: () => state.options }));
-const wrap = { appendChild: vi.fn() };
-vi.mock('../src/app/dom.js', () => ({ wrap }));
+const stageBox = { appendChild: vi.fn() };
+vi.mock('../src/app/dom.js', () => ({ stageBox }));
 
 const { syncRoomActionBadge, clearRoomActionBadge, BADGE_MS } = await import('../src/app/roomActionBadge.js');
 const { reportRoomAction } = await import('../src/app/roomActionEvent.js');
@@ -53,7 +53,7 @@ describe('room action badge', () => {
       expect(badge()!.setAttribute).toHaveBeenCalledWith('aria-hidden', 'true');
       expect(badge()!.children[0]).toEqual({ copyOf: region });
       expect(label()).toBe(text);
-      expect(wrap.appendChild).toHaveBeenCalledExactlyOnceWith(badge());
+      expect(stageBox.appendChild).toHaveBeenCalledExactlyOnceWith(badge());
     },
   );
 
@@ -61,7 +61,7 @@ describe('room action badge', () => {
     reportRoomAction('save');
     syncRoomActionBadge(100);
     syncRoomActionBadge(100 + BADGE_MS - 1);
-    expect(wrap.appendChild).toHaveBeenCalledTimes(1);
+    expect(stageBox.appendChild).toHaveBeenCalledTimes(1);
     expect(badge()!.remove).not.toHaveBeenCalled();
     syncRoomActionBadge(100 + BADGE_MS);
     expect(badge()!.remove).toHaveBeenCalledTimes(1);

@@ -333,7 +333,7 @@ export function loop(now: number): void {
   // they depend on. Both leave immediately on anything that is not touch.
   syncTouchButtons();
   syncTouchOptions();
-  syncButtonAvailability();
+  syncButtonAvailability(now);
   syncDialogueHint(now);
   syncRoomActionBadge(now);
   syncZoomHint(now);
