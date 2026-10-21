@@ -612,6 +612,7 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
     lastLine: () => lastLine,
     /** Speak through the real scriptTalk path, not a subtitle-only or hint-only injection. */
     speakLine: (name: string, which: 'little' | 'big' = 'big') => activeScript?.s.talkNow(name, MLUVI_PRIOR[which]),
+    queueLine: (name: string, which: 'little' | 'big', delay = 0) => activeScript?.s.addd(delay, name, MLUVI_PRIOR[which]),
     subsActive: () => subs?.active ?? false,
     /** The CUTSCENE's captions are a separate SubtitleSystem, so they need their own read. */
     cutSubsActive: () => cutsceneSubs?.active ?? false,

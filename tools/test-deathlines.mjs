@@ -38,6 +38,23 @@ await withApp(async ({ p, expect }) => {
   await p.waitForFunction((b) => window.__ff.lines() > b, before).catch(() => {});
   expect((await p.evaluate(() => window.__ff.lines())) > before, 'the survivor speaks after the partner dies');
 
+  // A fish crushed mid-line is cut off (KSnd(mluvi_velka), URoom.pas:26769) and the
+  // dialogue still pending is dropped (Zrus_dialogy, URoom.pas:26777) — the survivor's too.
+  await enter(1);
+  expect(await p.evaluate(() => window.__ff.audioHas('smrt-m-autorest')), 'the line to queue exists');
+  await p.evaluate(() => window.__ff.speakLine('smrt-v-1', 'big'));
+  await p.waitForFunction(() => window.__ff.playingPrior(2)).catch(() => {});
+  expect(await p.evaluate(() => window.__ff.playingPrior(2)), 'the big fish is speaking before it dies');
+  await p.evaluate(() => window.__ff.queueLine('smrt-m-autorest', 'little', 20));
+  await p.evaluate(() => window.__ff.killFish('big'));
+  await waitTicks(p, await p.evaluate(() => window.__ff.count()), 2);
+  expect(!(await p.evaluate(() => window.__ff.playingPrior(2))), 'a fish crushed mid-line stops speaking');
+  await waitTicks(p, await p.evaluate(() => window.__ff.count()), 30);
+  expect(
+    !(await p.evaluate(() => window.__ff.soundLog().some((s) => s.name === 'smrt-m-autorest'))),
+    'the dialogue queued before the death is dropped',
+  );
+
   // Once the skeleton fully disintegrates, the fish must NOT be drawn again (the
   // "fish reappears" bug). Sample the big fish's canvas region while alive, then
   // again after full erosion, and require it to have changed substantially.
