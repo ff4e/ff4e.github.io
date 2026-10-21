@@ -102,14 +102,22 @@ export function step(): boolean {
   tickBlink();
   tickFrameEffects();
   subs?.tick(count);
-  // Death cry when a fish is first crushed (sp-smrt1/2, URoom.pas:26767/26773).
+  // Death cry when a fish is first crushed (sp-smrt1/2, URoom.pas:26767/26773). The same
+  // block of the original also cuts the dead fish off mid-line (KSnd(mluvi_velka/mala),
+  // URoom.pas:26769/26775) and drops the pending dialogue (Zrus_dialogy, URoom.pas:26777).
+  // Neither touches the subtitle: it runs out its own killcount, as it did in 1998. This
+  // runs before the room's Programky, as padani did, so a line the room queues in
+  // reaction to the death (ZRC's "zr-v-vzdyt") survives the cancel.
   if (room) {
+    const died: number[] = [];
     for (const w of ['little', 'big'] as const) {
       if (room.kostra[w] && !prevKostra[w]) {
         audio.play(w === 'big' ? 'sp-smrt2' : 'sp-smrt1', EFFECT_VOL);
         prevKostra[w] = true;
+        died.push(MLUVI_PRIOR[w]);
       }
     }
+    if (died.length > 0) activeScript?.s.fishDied(died);
   }
   if (!room || !engine) return false;
   // Was the room at rest when this tick STARTED? A solution replay may only play a move on

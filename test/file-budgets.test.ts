@@ -194,7 +194,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // sentinel as a lost GPU process does, since no probe can kill the real one.
   // One for `setRoompole`: the load probe writes a slot after the save was taken, which is
   // the only way to tell the live `roompole` an F3 keeps from the one in the save.
-  ['src/app/debugHooks.ts', 1662],
+  // One for `queueLine`: a probe queues a line, crushes a fish and checks the death's
+  // Zrus_dialogy dropped it — speakLine plays at once, so it cannot reach the queue.
+  ['src/app/debugHooks.ts', 1663],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
@@ -272,7 +274,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // MOTOR owns the motion policy, so replay need not know which room shakes.
   // 733 -> 753: `carriedSounds` on the contract, `set` callbacks handed the running script,
   // and `adoptDialogue`, which needs the private queue; rooms decide what to carry.
-  ['src/core/script.ts', 753],
+  // 753 -> 767: `fishDied`, a death's KSnd + Zrus_dialogy. It ends the private active line
+  // and keeps what it dropped, so an undo of the death hands that back to `adoptDialogue`.
+  ['src/core/script.ts', 767],
   // 720 -> 780 for `backgroundZx`, the canvas-2D half of the same change: the stripes
   // masked by the wall's alpha, plus the `paint`/`paintBg` split that lets it reuse the
   // wobbled-background half rather than copy it.

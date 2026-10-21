@@ -151,6 +151,8 @@ export class Script {
   private voiceEndCount = 0;
   private aktdialzvuk = 0;
   private lastprom: SetFn | undefined;
+  /** What a fish's death dropped from the queue (see fishDied), for an undo of that death. */
+  private droppedByDeath: DialogEntry[] = [];
 
   /** showmode: the room is running its scripted demonstration (help.cap autoplay). */
   showmode = false;
@@ -694,13 +696,25 @@ export class Script {
     // vzdy_tit has no counterpart here; see stdKonecKrajniHlasky.
   }
 
+  /** A fish crushed (URoom.pas:26763-26777): KSnd(mluvi_*) cuts the dead fish's voice and
+   *  Zrus_dialogy drops the pending queue. The original's Dialogy ends a line once its voice
+   *  stops (talking(aktdialzvuk)), so a cut line ends now, not at its full length. The
+   *  dropped entries are kept so that undoing the death does not strand the room. */
+  fishDied(priors: readonly number[]): void {
+    for (const p of priors) this.ksnd(p);
+    if (priors.includes(this.aktdialzvuk)) this.voiceEndCount = this.count;
+    this.droppedByDeath.push(...this.queue);
+    this.cancelPendingDialogue();
+  }
+
   /** Take over `previous`'s unfinished dialogue across an instant restore, the line in
    *  progress keeping its remaining length on this script's clock, less the lines of the
-   *  speakers in `drop`. Only for a room whose callbacks act on the script they are
-   *  handed, not one they captured. */
+   *  speakers in `drop`. What a death dropped comes back first: the undo takes it back.
+   *  Only for a room whose callbacks act on the script they are handed, not one they captured. */
   adoptDialogue(previous: Script, drop: readonly number[] = []): void {
     const spoken = (d: DialogEntry) => d.zvuk !== 'set' && d.zvuk !== 'del' && !d.zvuk.startsWith('ANIM');
-    this.queue = previous.queue.filter((d) => !spoken(d) || !drop.includes(d.prior)).map((d) => ({ ...d }));
+    const pending = [...previous.droppedByDeath, ...previous.queue];
+    this.queue = pending.filter((d) => !spoken(d) || !drop.includes(d.prior)).map((d) => ({ ...d }));
     if (drop.includes(previous.aktdialzvuk)) return;
     this.aktdialzvuk = previous.aktdialzvuk;
     this.voiceEndCount = this.count + previous.voiceEndCount - previous.count;
