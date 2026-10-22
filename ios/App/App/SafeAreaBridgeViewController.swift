@@ -94,6 +94,7 @@ class SafeAreaBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(StoreReviewPlugin())
         bridge?.registerPluginInstance(TextInteractionPlugin())
+        bridge?.registerPluginInstance(AudioDecodePlugin())
     }
 
     /// Text interaction starts OFF in this web view: that is what raises iOS's selection

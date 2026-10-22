@@ -23,6 +23,7 @@ import { isFfs2 } from './ffs2.js';
 import { decodeFfs2 } from './ffs2Decode.js';
 import { musicByName, musicSeconds } from './music.js';
 import type { VolumeBus } from '../core/settings.js';
+import { decodeAudioData } from '../platform/audioDecode.js';
 
 /**
  * Talking() lead time (RSound.pas:933, `mez=10000`): the original reports a voice
@@ -978,9 +979,8 @@ export class AudioEngine {
     if (this.musicBufs.has(name)) return;
     const ctx = this.ensureCtx();
     const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    this.musicBufs.set(name, await ctx.decodeAudioData(ab));
+    this.musicBufs.set(name, await decodeAudioData(ctx, ab));
   }
-
   async playMusic(name: string, url: string, loopSample: number): Promise<void> {
     if (this.musicName === name && this.musicSrc) {
       this.activeUntil.set(MUSIC_PRIOR, Infinity); // ensure playing(-999) reflects it
@@ -1030,7 +1030,7 @@ export class AudioEngine {
       }
       if (!buf) {
         const bytes = await requiredBytes(url, 'the music', 'mustHave', { init: { priority: 'low' } as RequestInit });
-        buf = await ctx.decodeAudioData(bytes.buffer.slice(0) as ArrayBuffer);
+        buf = await decodeAudioData(ctx, bytes.buffer.slice(0) as ArrayBuffer);
         this.musicBufs.set(name, buf);
       }
       // Superseded while decoding (room changed, music stopped, or a newer start for
