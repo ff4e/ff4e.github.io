@@ -59,7 +59,8 @@
  */
 
 import { execFileSync, execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
@@ -155,7 +156,17 @@ function findTeam() {
 function findDevice() {
   let json;
   try {
-    json = JSON.parse(sh(`xcrun devicectl list devices --json-output /dev/stdout --quiet`));
+    // devicectl requires a regular output file; /dev/stdout can emit JSON but still fail.
+    const temp = mkdtempSync(join(tmpdir(), 'ff4e-device-list-'));
+    try {
+      const path = join(temp, 'devices.json');
+      execFileSync('xcrun', ['devicectl', 'list', 'devices', '--json-output', path, '--quiet'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      json = JSON.parse(readFileSync(path, 'utf8'));
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
   } catch {
     die('`xcrun devicectl` failed. Xcode 15 or newer is required for this tool.');
   }
