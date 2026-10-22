@@ -60,6 +60,7 @@
 import { FFS_SAMPLE_RATE } from './ffs.js';
 import { parseFfs2 } from './ffs2.js';
 import type { FftEntry } from '../data/fft.js';
+import { decodeAudioData } from '../platform/audioDecode.js';
 
 /**
  * A copy of `buf` holding exactly the audio of `samples` samples at `FFS_SAMPLE_RATE`.
@@ -125,7 +126,7 @@ export async function decodeFfs2(
         body.byteOffset + seg.offset,
         body.byteOffset + seg.offset + seg.length,
       ) as ArrayBuffer;
-      out.set(e.name, trimToSamples(ctx, await ctx.decodeAudioData(ab), e.delka));
+      out.set(e.name, trimToSamples(ctx, await decodeAudioData(ctx, ab), e.delka));
     }),
   );
   return out;

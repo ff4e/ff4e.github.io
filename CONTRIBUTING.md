@@ -46,6 +46,18 @@ line-range map: if a file is big enough to want one, split it instead.
   `*.mp4` produced by `tools/build-movies.mjs`. `public/data/{Writes,Program,256col}/` are
   runtime/staging/original-binary dirs and are intentionally not tracked.
 
+## Native audio on Mac
+
+The iOS app running on Apple Silicon can reject AAC/MP3 in Web Audio even when the
+same files decode in native `AVAudioFile`. `src/platform/audioDecode.ts` routes only
+that host through `AudioDecodePlugin`, returning float PCM WAV to Web Audio for its
+normal resampling. Browsers and iPhone/iPad keep their existing decoder. The shipped
+audio, voice trimming and music loop points are unchanged; decode failures still
+propagate instead of substituting silence.
+`nativeAudioTiming.ts` makes the bridge's input copy sample-accurate: the staged
+MP4 edit duration is millisecond-rounded, which otherwise makes Core Audio cut
+real samples off the end. AAC payloads and the encoder-priming edit stay intact.
+
 ## Native App Store reviews
 
 `src/app/storeReview.ts` requests Apple's review prompt after the 4th, 12th and 30th
