@@ -25,6 +25,7 @@
  * centring. The bitmap path is still byte-exact, and is what `classic` draws.
  * On phones the vector hosts are fixed to the screen, outside the room's camera
  * transform. Portrait uses the safe viewport; landscape anchors to the physical bottom.
+ * Tablets keep their typography but align the lowest row directly with the game's edge.
  */
 import {
   VECTOR_GEOM,
@@ -39,8 +40,9 @@ import {
   waveDy,
 } from '../render/subtitleGeom.js';
 import { wrap } from './dom.js';
-import { phoneUi } from './touchButtons.js';
+import { phoneUi, touchUi } from './touchButtons.js';
 import { safeAreaInset } from './safeArea.js';
+import { tabletSubtitleBox, tabletSubtitleLineY, tabletSubtitleWaveDy } from './tabletSubtitleLayout.js';
 import {
   PHONE_SUBTITLE_FONT_PX, animatePhoneSubtitleRows, phoneSubtitleMessage,
   phoneSubtitlePositions, phoneSubtitleWordFlow,
@@ -189,14 +191,15 @@ function measureTextWidth(font: string, text: string): number {
 }
 
 /** The damped-cosine wave, as keyframes the compositor can run on its own. */
-function waveFrames(ampCss: number): Keyframe[] {
+function waveFrames(ampCss: number, bottomAligned: boolean): Keyframe[] {
   const out: Keyframe[] = [];
   for (let k = 0; k <= WAVE_KEYFRAMES; k++) {
     // PisStringF's own damped cosine (subtitleGeom.waveDy), sampled instead of
     // evaluated per frame — which is the whole trick: sampled once into keyframes, the
     // compositor runs it.
     const p = (k / WAVE_KEYFRAMES) * VECTOR_GEOM.waveLen;
-    out.push({ offset: k / WAVE_KEYFRAMES, opacity: 1, transform: `translateY(${waveDy(p, ampCss).toFixed(2)}px)` });
+    const dy = bottomAligned ? tabletSubtitleWaveDy(p, ampCss) : waveDy(p, ampCss);
+    out.push({ offset: k / WAVE_KEYFRAMES, opacity: 1, transform: `translateY(${dy.toFixed(2)}px)` });
   }
   return out;
 }
@@ -227,6 +230,8 @@ export function syncDomSubtitles(
   const L = layers[owner];
   const { w: screenW, h: screenH } = sys.vectorScreen;
   const detached = phoneUi();
+  const tablet = !detached && touchUi() ? tabletSubtitleBox(cssW, wrap.getBoundingClientRect(),
+    document.getElementById('touchbar-undo')?.getBoundingClientRect()) : null;
   const parent = detached ? document.body : wrap;
   // Portrait has room above Undo, not beside it: reserve its row instead of narrowing
   // every caption by two button widths. Landscape keeps the low, side-gutter layout.
@@ -241,6 +246,8 @@ export function syncDomSubtitles(
     cssW = Math.max(1, window.innerWidth - 2 * gutter);
     cssH = Math.max(1, window.innerHeight - safeAreaInset('--sa-top') - bottom);
     boxScale = 1;
+  } else if (tablet) {
+    cssW = tablet.width;
   }
   let host = L.host;
   if (!host) {
@@ -255,13 +262,15 @@ export function syncDomSubtitles(
     parent.appendChild(host);
   }
   if (host.parentElement !== parent) parent.appendChild(host);
-  const modeChanged = host.classList.contains('phone-subtitles') !== detached;
+  const modeChanged = host.classList.contains('phone-subtitles') !== detached ||
+    host.classList.contains('tablet-subtitles') !== (tablet !== null);
   const lineHeight = detached && !portrait ? '1.3' : '1.5';
   const spacingChanged = host.style.getPropertyValue('--phone-subtitle-line-height') !== lineHeight;
   host.style.setProperty('--phone-subtitle-line-height', lineHeight);
   host.classList.toggle('phone-subtitles', detached);
+  host.classList.toggle('tablet-subtitles', tablet !== null);
   host.style.position = detached ? 'fixed' : 'absolute';
-  host.style.left = detached ? `${gutter}px` : '0';
+  host.style.left = `${tablet?.left ?? gutter}px`;
   host.style.top = detached ? 'auto' : '0';
   host.style.bottom = detached ? `${bottom}px` : '';
   host.style.borderWidth = detached ? '0' : '1px';
@@ -303,7 +312,7 @@ export function syncDomSubtitles(
   const font = `${weight} ${fontPx.toFixed(2)}px ${family}`;
   // The width a row is fitted inside. Not the same thing as the font any more, so it is
   // watched on its own — see `Layer.lastFitW`.
-  const fitW = fitScreenW(detached ? cssW : screenW, boxScale, textScale);
+  const fitW = detached || tablet ? fitScreenW(cssW, 1, textScale) : fitScreenW(screenW, boxScale, textScale);
   const activeRows = sys.debugLines();
   const lines = detached ? retainPhoneSubtitleRows(activeRows, L.lines.values()) : activeRows;
   const want = new Set(activeRows.map(row => row.id));
@@ -392,7 +401,9 @@ export function syncDomSubtitles(
     // Two scales, deliberately: the bottom edge of the ROOM is a position in the room
     // (boxScale), while the line's distance up from it is a distance in the TEXT
     // (textScale). While the two were the same number this was one multiplication.
-    const y = detached ? 0 : screenH * boxScale + lineOffset(t.ys) * textScale - inset;
+    const y = detached ? 0 : tablet
+      ? tabletSubtitleLineY(cssH, t.ys, textScale, boxH, strokeWidth(fs))
+      : screenH * boxScale + lineOffset(t.ys) * textScale - inset;
     if (!line) {
       const el = document.createElement('div');
       el.style.cssText =
@@ -430,7 +441,7 @@ export function syncDomSubtitles(
       // Bitmap rows can begin below the room (negative amplitude). Those coordinates
       // have no meaning in phone word flow and would reverse the wave mid-sentence.
       const ampCss = detached ? PHONE_SUBTITLE_WAVE_PX : lineAnchor(t.ys, screenH).amp * textScale;
-      const frames = waveFrames(ampCss);
+      const frames = waveFrames(ampCss, tablet !== null);
       const phoneWave = detached ? L.phoneWaves.get(t.block)! : null;
       const offset = phoneWave ? phoneWave.offsets.get(t.id)! : 0;
       const stepMs = phoneWave?.stepMs ?? WAVE_STEP_MS;

@@ -93,6 +93,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `phoneSubtitleLayout.ts` | | Fixed-size phone captions: message-level word wrapping, stable expiry slots and arrival-only compositor scrolling. |
 | `phoneSubtitleExpiry.ts` | | Retain source text and retire whole displayed phone lines without moving surviving glyphs. |
 | `phoneSubtitleWave.ts` | | Phone message wave: stable reading-order phases across source-row expiry and bounded reveal time. |
+| `tabletSubtitleLayout.ts` | | Tablet caption alignment at the game's edge, upward-only waves and width clearance only where Undo overlaps the game. |
 | `touchPinch.ts` | | Continuous two-finger scale/centroid samples and gameplay suppression until all fingers lift. |
 | `dom.ts` | 1.3 k | The element handles and their 2D contexts. |
 | `helpDom.ts` | 2.4 k | The control-help pages (`Help.pas`) as a document: builds `src/data/helpText.ts` into DOM over #screen and scales it to the stage box. |

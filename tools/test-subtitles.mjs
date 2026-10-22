@@ -374,6 +374,101 @@ await withApp(async ({ p, expect }) => {
   await p.evaluate(() => window.__ff.clearSubtitles());
   await tickSleep(p, 2);
 
+  // Tablet captions align with the game's bottom border, not the viewport's bottom.
+  // Keep the desktop typography/engine rows, but never put the text underneath Undo.
+  await p.selectOption('#touchmode', 'on');
+  for (const [tier, width, height, inset, room, text, overlapsUndo = false] of [
+    ['enhanced', 1024, 768, 20, 7, 'Careful, fish!'],
+    ['ai', 768, 1024, 20, 7, 'Careful, fish!'],
+    ['ai', 744, 1133, 0, 7, 'Careful, fish!'],
+    ['enhanced', 568, 768, 20, 7, 'Keep these longer captions readable and clear of the Undo button, even when the tablet uses a narrow window.'],
+    ['enhanced', 1024, 500, 20, 7, 'Careful, fish!', true],
+  ]) {
+    await p.setViewportSize({ width, height });
+    await p.evaluate((inset) => {
+      document.documentElement.style.setProperty('--sa-top', '24px');
+      document.documentElement.style.setProperty('--sa-bottom', `${inset}px`);
+    }, inset);
+    await selectRoom(p, room);
+    await p.evaluate((t) => window.__ff.setGraphics(t), tier);
+    await p.waitForFunction((t) => (window.__ff.paintedRoomSig() ?? '').includes(`|${t}|`), tier);
+    await p.evaluate((text) => {
+      window.__ff.clearSubtitles();
+      window.__ff.pushSubtitle(text, 'M');
+    }, text);
+    await p.waitForFunction(() => window.__ff.subsActive() && !window.__ff.subsAnimating());
+    await tickSleep(p, 1);
+    const tablet = await p.evaluate(() => {
+      const host = document.getElementById('domsubs');
+      for (const animation of host.getAnimations({ subtree: true })) animation.finish();
+      const box = host.getBoundingClientRect();
+      const canvas = document.getElementById('screen');
+      const game = canvas.getBoundingClientRect();
+      const undo = document.getElementById('touchbar-undo').getBoundingClientRect();
+      const glyphs = [...host.querySelectorAll('.subtitle-glyph')].filter((el) => el.textContent.trim());
+      const rects = glyphs.map((el) => el.getBoundingClientRect());
+      const waves = glyphs.flatMap((el) => el.getAnimations());
+      let waveOverflow = 0;
+      for (let step = 0; step <= 24; step++) {
+        for (const animation of waves) {
+          const timing = animation.effect.getTiming();
+          animation.pause();
+          animation.currentTime = timing.delay + timing.duration * step / 24;
+        }
+        for (const glyph of glyphs) {
+          waveOverflow = Math.max(waveOverflow, glyph.getBoundingClientRect().bottom - box.bottom);
+        }
+      }
+      for (const animation of waves) animation.finish();
+      return {
+        attached: host.parentElement === canvas.parentElement && getComputedStyle(host).position === 'absolute',
+        bottom: game.bottom - Math.max(...rects.map((r) => r.bottom)),
+        centred: Math.abs((box.left + box.right - game.left - game.right) / 2) < 1,
+        visible: rects.length > 0 && rects.every((r) => r.top >= box.top && r.bottom <= box.bottom + 1 &&
+          r.left >= box.left - 1 && r.right <= box.right + 1 &&
+          (r.bottom <= undo.top || r.top >= undo.bottom || r.right <= undo.left - 8)),
+        overlapsUndo: game.bottom > undo.top && game.top < undo.bottom &&
+          game.right > undo.left && game.left < undo.right,
+        fullWidth: host.style.width === canvas.style.width,
+        waveOverflow,
+        sizes: [...new Set(glyphs.map((el) => getComputedStyle(el).fontSize))],
+        text: glyphs.map((el) => el.lastElementChild.textContent).join(''),
+        rows: host.children.length,
+      };
+    });
+    const label = `tablet ${tier} ${width}x${height}`;
+    expect(tablet.attached && tablet.centred, `${label}: captions are centred within the game`);
+    expect(tablet.bottom >= 0 && tablet.bottom <= 4,
+      `${label}: settled glyphs align directly with the game's bottom border (${tablet.bottom.toFixed(1)}px)`);
+    expect(tablet.visible && tablet.sizes.length === 1 && tablet.text === text.replaceAll(' ', ''),
+      `${label}: the complete caption fits and clears Undo at one message font size`);
+    expect(tablet.overlapsUndo === overlapsUndo, `${label}: the fixture has the expected Undo overlap`);
+    expect(tablet.fullWidth !== overlapsUndo, `${label}: caption width is reserved only when Undo overlaps the game`);
+    expect(tablet.waveOverflow <= 0.5, `${label}: the entire wave stays above the clipping edge (${tablet.waveOverflow.toFixed(1)}px overflow)`);
+    if (text.length > 20) expect(tablet.rows > 1, `${label}: wrapped messages keep distinct rows`);
+    if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/tablet-subs-${width}x${height}.png` });
+  }
+  await p.setViewportSize({ width: 1024, height: 768 });
+  await tickSleep(p, 2);
+  expect(await p.evaluate(() => {
+    const host = document.getElementById('domsubs');
+    for (const animation of host.getAnimations({ subtree: true })) animation.finish();
+    const game = document.getElementById('screen').getBoundingClientRect();
+    const bottom = Math.max(...[...host.querySelectorAll('.subtitle-glyph')].map((el) => el.getBoundingClientRect().bottom));
+    return game.bottom - bottom >= 0 && game.bottom - bottom <= 4;
+  }), 'tablet captions remain aligned with the game after rotating with a line already up');
+  await p.selectOption('#touchmode', 'off');
+  await tickSleep(p, 2);
+  expect(await p.evaluate(() => {
+    const host = document.getElementById('domsubs');
+    return host?.parentElement !== document.body && getComputedStyle(host).position === 'absolute' &&
+      !host.classList.contains('tablet-subtitles');
+  }), 'switching back to desktop restores the original caption presentation');
+  await p.selectOption('#touchmode', 'on');
+  await p.evaluate(() => window.__ff.setGraphics('classic'));
+  await tickSleep(p, 2);
+  expect((await domLines(p)) === 0, 'tablet classic still bakes its subtitles into the room');
+
   // Leaving the ROOM with a line still up must take the DOM text down. No draw branch
   // clears it on its own — a branch paints #screen, and the layer is a sibling element —
   // so a line survived onto the world map and sat over it. The render loop's guard covers
