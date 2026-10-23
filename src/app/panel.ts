@@ -36,6 +36,7 @@ import { scalingFilterFor, stage } from './stageGeometry.js';
 import { toggleTouchOptions, touchOptionsOpen } from './touchOptions.js';
 import { composeLandscape, faceSize, optionsLayout, scratchCtx, touchFaceCss } from './optionsLayout.js';
 import { touchUi } from './touchButtons.js';
+import { panelLight } from './panelLight.js';
 import type { VolumeBus } from '../core/settings.js';
 import { ui, O_NORMAL, O_OPTIONS, O_SC_DOWN, O_SC_UP, PANEL_SCROLL_MS, SCMAX, SCMIN, helpScreens } from './screenState.js';
 
@@ -77,7 +78,8 @@ export function panelState(): PanelState {
   const bigDead = !room || !room.alive.big || room.busy.big !== 0;
   const littleDead = !room || !room.alive.little || room.busy.little !== 0;
   const bothAlive = !!room && room.alive.big && room.alive.little;
-  const p = ui.panelPressed;
+  // The pointer's press-until-release light first, then the keyboard's (panelLight.ts).
+  const p = ui.panelPressed || panelLight();
   let pressedDir = 0;
   if (p >= 1 && p <= 4) pressedDir = p; // little up/down/left/right
   else if (p >= 6 && p <= 9) pressedDir = p - 1; // big -> 5..8

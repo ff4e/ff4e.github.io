@@ -14,6 +14,7 @@ import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicke
 import { MLUVI_PRIOR } from './keyTables.js';
 import { returnFromRoom } from './mapNav.js';
 import { advanceLoadmode, dispatchHeldMove, tryStep } from './movement.js';
+import { clearPanelLight, settlePanelLight } from './panelLight.js';
 import { continuePhoneRoom } from './phoneViewport.js';
 import { advanceSolve, inSolvemode, noteSolveDeath, noteSolveWin, solvemode, tickSolveWatchdog } from './solveMode.js';
 import { subsOn } from './playerSettings.js';
@@ -74,7 +75,10 @@ export function armChatter(roomSolved: boolean): void {
  * the room (death restart), so the catch-up loop discards leftover accumulation.
  */
 export function step(): boolean {
-  if (ui.screen !== 'room') return false; // the map/intro screens have no game clock
+  if (ui.screen !== 'room') {
+    clearPanelLight(); // no room, no rest tick to put out a key's lit button for the next one
+    return false; // the map/intro screens have no game clock
+  }
   setCount(count + 1);
   // Age a solution replay ONCE per tick, above every early return below. It used to be
   // aged next to where it advances, at the bottom — which meant any path that returned
@@ -323,6 +327,12 @@ export function step(): boolean {
   //
   // Gated to the same rest conditions the original dispatches under (stav_klid, not
   // possessed/finale/demo/dead/won).
+  //
+  // The rest tick also settles the keyboard's lit panel button (AktualizujPanel at the end
+  // of stav_klid, URoom.pas:24800-24812): whatever this tick dispatched, or out if nothing.
+  // Read before the dispatch, which takes the engine out of idle when it starts a move.
+  const restTick = engine.phase === 'idle';
+  let dispatched = 0;
   if (
     engine.phase === 'idle' &&
     !room.won &&
@@ -338,8 +348,9 @@ export function step(): boolean {
     activeScript?.s.natvrdo !== 1 &&
     !activeScript?.s.zavermode
   ) {
-    dispatchHeldMove();
+    dispatched = dispatchHeldMove();
   }
+  if (restTick) settlePanelLight(dispatched);
   // KUFRIK automatic demonstration: with no swim/possession pending, the recorded
   // help.cap stream is consumed one action per idle step (DalsiPrikaz in stav_klid,
   // URoom.pas:24438). It keeps advancing while both fish are DEAD (the demo's

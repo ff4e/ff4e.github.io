@@ -122,9 +122,13 @@ export function beginHeldMove(code: string, sys: boolean, which: 'little' | 'big
  *  the port's replay paths call it (`cutscene.ts`, `test/solutionsHarness.ts`) and this
  *  one does not. A live command was already counted when the key went down
  *  (FormKeyDown, :26787). Resetting again on every engine-driven repeat tick would be a
- *  stronger reset than the original's, which only refreshes on the OS's own key repeat. */
-export function dispatchHeldMove(): void {
-  if (heldState === 0 || !engine || !room) return;
+ *  stronger reset than the original's, which only refreshes on the OS's own key repeat.
+ *
+ *  Returns the panel region the move lights (`panelLight.ts`): the fish's arrow whenever
+ *  a press reached the engine, blocked or not — AktualizujPanel follows the command, not
+ *  its outcome (URoom.pas:24800-24803) — and 0 when nothing was dispatched (`kdo=0`). */
+export function dispatchHeldMove(): number {
+  if (heldState === 0 || !engine || !room) return 0;
   const which = heldSys ? engine.active : heldWhich;
   const release = heldState === 3;
   heldState = release ? 0 : 2;
@@ -132,8 +136,8 @@ export function dispatchHeldMove(): void {
     heldKey = null;
     heldToken = null;
   }
-  if (!room.alive[which]) return; // a held fish-specific key must not reselect an exited fish
-  if (fishBusy(which)) return; // dropped while the fish is talking (kdo:=0)
+  if (!room.alive[which]) return 0; // a held fish-specific key must not reselect an exited fish
+  if (fishBusy(which)) return 0; // dropped while the fish is talking (kdo:=0)
   engine.swim = null;
   engine.active = which;
   const result = tryStep(which, heldDir);
@@ -150,6 +154,7 @@ export function dispatchHeldMove(): void {
     buzzedBlocked = false;
   }
   host.setInfo();
+  return which === 'little' ? heldDir : heldDir + 5; // OBLMYSI: little 1-4, big 6-9
 }
 
 /**
@@ -313,9 +318,9 @@ export function advanceLoadmode(): void {
  * fresh attempt (pokus++). This is NOT a single-move undo — the 1998 Delphi game
  * had none; the tutorial's "1st-m-backspace" line teaches Backspace = start over.
  */
-export function restartRoom(): void {
+export function restartRoom(): boolean {
   wake();
-  if (!room || ui.screen !== 'room' || cutscene) return;
+  if (!room || ui.screen !== 'room' || cutscene) return false;
   host.endShowmode(); // a player restart aborts the KUFRIK demonstration (unlike a death-restart)
   clearUndoHistory(); // Restart means "throw this attempt away" — it is not undoable
   setPokus(pokus + 1);
@@ -324,4 +329,5 @@ export function restartRoom(): void {
   if (room) continuePhoneRoom(previousRoom, room);
   host.setInfo();
   reportRoomAction('restart');
+  return true;
 }

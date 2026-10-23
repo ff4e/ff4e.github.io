@@ -118,7 +118,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // 2 283 -> 2 287: the touch "Saved"/"Loaded" badge. One import and a report at each of
   // the three points a save or load has actually happened — only `saveGame`'s two writes and `loadGame` know
   // that, after their own gates. The badge itself is roomActionBadge.ts.
-  ['src/app/main.ts', 2287],
+  // 2 287 -> 2 289: the keyboard lights the panel button of the command it sends (Space,
+  // F2, F3, Backspace), as the original's dispatcher does for any input. One import, and
+  // `swapActive` saying whether it swapped; only the keyboard router knows which key ran
+  // which action past its gate. The light itself is panelLight.ts.
+  ['src/app/main.ts', 2289],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
