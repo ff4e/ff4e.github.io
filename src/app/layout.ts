@@ -66,7 +66,7 @@
  * On the DESKTOP target only, making a window TALLER can make a width-bound room slightly
  * smaller: the panel is reserved in NATIVE px, so a taller window raises `stageScale`, which
  * widens the panel, which takes width from a room that was already width-bound. Worst
- * measured: -4.39% in the shipped `medium` default, -10.62% in `fill`. It never happens in
+ * measured: -4.39% in `medium`, -10.62% in the shipped `fill` default. It never happens in
  * `fixed` (there the room scales with the stage too) and never in touch mode (no panel).
  *
  * It is not a bug to be fixed but an impossibility to be known: **the panel cannot be
@@ -79,9 +79,10 @@
  * ── The deliberate deviations from the original ──────────────────────────────
  *  - **The room is not letterboxed into a fixed 800x600 unless `fixed` asks for it.** The
  *    graded modes enlarge small content toward the space available, which the original
- *    never did; `medium` is the shipped default (core/settings.ts), so out of the box a
- *    room IS zoomed to fit, by 1.006x to 1.35x across the 71 rooms. That spread is why
- *    subtitles are sized from the stage and not from the room (app/framePainter.ts).
+ *    never did; `fill` is the shipped default on every device (core/settings.ts — it was
+ *    `medium` on desktop until 2026-10, when it moved to match touch), so out of the box a
+ *    room IS zoomed to fit the space, up to `maxCellPx`. That spread is why subtitles are
+ *    sized from the stage and not from the room (app/framePainter.ts).
  *  - **The panel's x tracks the room**, because `#stagebox` hugs its content: the original's
  *    panel was a fixed side column, so a narrow room genuinely did sit far from it, and here
  *    it would have been pushed away by a median 230px of the box's empty slack. The room
@@ -437,6 +438,12 @@ export function effectiveFitMode(mode: FitMode, panel = true): FitMode {
  * `margin` is `VIEWPORT_MARGIN` by default and is a parameter so a TV target can pass a
  * title-safe inset without a second code path — per axis if it needs to, which the TV
  * convention does (see `ViewportMargin`).
+ *
+ * `reservePanel` is false on a mouse screen whose panel column is not in the row — the
+ * map, the story pages, the intro. It gives the content the column's width back and
+ * changes nothing else: `scale`, the panel's size and the fit mode stay the room's, so the
+ * object-size reference and a map-floated Options panel are unchanged. Reserving it there
+ * shrank the map at 842x596 by ~145px of width for a panel that was not drawn.
  */
 export function computeStageLayout(
   viewportW: number,
@@ -444,6 +451,7 @@ export function computeStageLayout(
   mode: FitMode,
   panel = true,
   margin: ViewportMargin = VIEWPORT_MARGIN,
+  reservePanel = panel,
 ): StageLayout {
   const fit = effectiveFitMode(mode, panel);
   const m = marginAxes(margin);
@@ -460,7 +468,7 @@ export function computeStageLayout(
   // The panel is part of the artwork, so it is reserved in NATIVE px and scales with the
   // game — which is also the one place a taller window can cost a width-bound room a little
   // size. See the header; it is an accepted impossibility, not an oversight.
-  const contentW = Math.max(0, availW - gap - panelW);
+  const contentW = Math.max(0, availW - (reservePanel ? gap + panelW : 0));
   return {
     scale,
     mode: fit,

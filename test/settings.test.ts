@@ -8,6 +8,7 @@ import {
   defaultSettings,
   loadSettings,
   saveSettings,
+  FIT_VERSION,
   type Settings,
 } from '../src/core/settings.js';
 
@@ -117,15 +118,31 @@ describe('settings persistence', () => {
       titDef: 'cz',
       introSeen: true,
       fitMode: 'large',
+      fitVersion: FIT_VERSION,
     };
     saveSettings(s);
     const loaded = loadSettings();
     expect(loaded).toEqual(s);
   });
 
-  it("migrates the legacy 'capped' fit mode to 'medium'", () => {
+  it("migrates the legacy 'capped' fit mode to 'fill'", () => {
     localStorage.setItem('ff.options', JSON.stringify({ fitMode: 'capped' }));
+    expect(loadSettings().fitMode).toBe('fill');
+  });
+
+  it("migrates a 'medium' saved under the old default to 'fill', once", () => {
+    localStorage.setItem('ff.options', JSON.stringify({ fitMode: 'medium' }));
+    const s = loadSettings();
+    expect(s).toMatchObject({ fitMode: 'fill', fitVersion: FIT_VERSION });
+    // A 'medium' chosen after the default changed is a choice, and survives a reload.
+    s.fitMode = 'medium';
+    saveSettings(s);
     expect(loadSettings().fitMode).toBe('medium');
+  });
+
+  it('keeps any other fit mode saved under the old default', () => {
+    localStorage.setItem('ff.options', JSON.stringify({ fitMode: 'fixed' }));
+    expect(loadSettings().fitMode).toBe('fixed');
   });
 
   it('falls back to defaults on absent/corrupt data', () => {
@@ -144,7 +161,8 @@ describe('settings persistence', () => {
       subtitles: 'en',
       titDef: 'en',
       introSeen: true,
-      fitMode: 'medium',
+      fitMode: 'fill',
+      fitVersion: FIT_VERSION,
     });
   });
 

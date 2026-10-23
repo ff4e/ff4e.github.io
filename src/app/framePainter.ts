@@ -230,8 +230,9 @@ export function draw(): void {
  *    and "constant on the player's screen" two different things for the first time. The
  *    port had been honouring the first; the original only ever demonstrated the second.
  *  - Measured over the 71 real room sizes, the room's fit factor spans 1.006 to 1.35 in
- *    the default `medium` mode (and up to 2.22 in `fill`), so the same sentence was drawn
- *    up to a third larger in a small room than in a large one. That was reported.
+ *    `medium` (and up to 2.22 in `fill`, the default since 2026-10), so the same
+ *    sentence was drawn up to a third larger in a small room than in a large one. That
+ *    was reported.
  *
  * So the subtitle takes `stage.scale`, which every room shares, while the room keeps its
  * own zoom — capped at the room's own scale, because the crisp-integer modes can draw a

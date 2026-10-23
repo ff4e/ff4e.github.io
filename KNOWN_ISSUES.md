@@ -30,7 +30,7 @@ Severity: 🔴 breaks play · 🟠 visible/audible glitch · 🟡 minor/cosmetic
 ## Layout: 🟡 a taller desktop window can make a width-bound room slightly smaller
 
 - **Symptom:** on the DESKTOP target only, dragging a window taller can shrink a room that is
-  width-bound, by up to **4.4%** in the shipped `medium` and **10.6%** in `fill`. Never happens
+  width-bound, by up to **4.4%** in `medium` and **10.6%** in the shipped `fill`. Never happens
   in `fixed`, never in touch mode, and never on the width axis.
 - **Why (measured 2026-08-31):** the faithful control panel is reserved in NATIVE px, so its
   on-screen width is `167 x stageScale`. On a height-bound window a taller viewport raises

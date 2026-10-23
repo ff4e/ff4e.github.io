@@ -83,7 +83,7 @@ export function initDevBar(h: DevBarHost): void {
     el.value = settings.fitMode;
     el.addEventListener('change', () => {
       const v = el.value;
-      settings.fitMode = isFitMode(v) ? v : 'medium';
+      settings.fitMode = isFitMode(v) ? v : 'fill';
       saveSettings(settings);
       setForceRoomRedraw(true); // the fit scale changes the room canvas size — repaint
       relayout(); // the layout carries the mode (StageLayout.mode) — re-derive it too

@@ -426,6 +426,39 @@ describe('the panel footprint — retired in touch mode', () => {
  * Touch takes every pixel: the fit mode is a desktop control, so on a phone the stored
  * value is a setting the player cannot see. See `effectiveFitMode`.
  */
+describe('reservePanel — a mouse screen with no panel in the row', () => {
+  const VIEWPORTS = [[842, 596], [1512, 982], [2048, 1017], [669, 280]] as const;
+
+  it('gives the content the column back and changes nothing else', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of VIEWPORTS) {
+        const room = computeStageLayout(w, h, mode, true);
+        const map = computeStageLayout(w, h, mode, true, VIEWPORT_MARGIN, false);
+        // Rebuilt from the parts, not read off `room`, so a change to what the room
+        // reserves cannot move this expectation with it.
+        expect(map.availW).toBeCloseTo(w - 2 * VIEWPORT_MARGIN, 9);
+        expect(map.stageW).toBe(map.availW);
+        expect(map).toEqual({ ...room, availW: map.availW, stageW: map.stageW });
+      }
+    }
+  });
+
+  it('follows `panel` by default, so every existing caller is unchanged', () => {
+    for (const [w, h] of VIEWPORTS) {
+      expect(computeStageLayout(w, h, 'fill', true, VIEWPORT_MARGIN)).toEqual(
+        computeStageLayout(w, h, 'fill', true, VIEWPORT_MARGIN, true),
+      );
+      expect(computeStageLayout(w, h, 'fill', false, VIEWPORT_MARGIN)).toEqual(
+        computeStageLayout(w, h, 'fill', false, VIEWPORT_MARGIN, false),
+      );
+    }
+  });
+});
+
+/**
+ * Touch takes every pixel: the fit mode is a desktop control, so on a phone the stored
+ * value is a setting the player cannot see. See `effectiveFitMode`.
+ */
 describe('effectiveFitMode — touch is always fill', () => {
   it('leaves the mouse game on the player’s own mode', () => {
     for (const mode of FIT_MODES) {
