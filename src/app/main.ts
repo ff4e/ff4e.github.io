@@ -1583,6 +1583,7 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (ui.screen === 'map') return; // no fish keys on the map
+  if (e.code === 'Tab' && isSwapKey(e)) e.preventDefault(); // even a blocked swap keeps focus on the game
   if (activeScript?.s.natvrdo === 1) return; // possessed by ZELVA: input is ignored
   if (activeScript?.s.zavermode) return; // ZAVER finale cutscene: only restart/exit above work
   if (inShowmode()) return; // KUFRIK demonstration: fish keys blocked (Backspace/Escape end it above)

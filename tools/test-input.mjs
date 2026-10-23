@@ -77,4 +77,20 @@ await withApp(async ({ p, expect }) => {
   await p.waitForTimeout(30);
   const lx3 = (await state()).little.x;
   expect(lx3 === lx2 - 1, `right-click left of the fish steps it left (${lx2} -> ${lx3})`);
+
+  // --- a Tab while the swap is blocked (load fast-forward) must not move focus off the
+  // game, or every later Tab arrives from a focused control and stops swapping ---
+  await p.keyboard.press('F2');
+  await p.keyboard.press('ArrowRight');
+  await idle(p);
+  await p.keyboard.press('F3');
+  await p.waitForFunction(() => window.__ff.loading());
+  await p.keyboard.press('Tab');
+  expect(await p.evaluate(() => document.activeElement === document.body),
+    'a Tab during the load fast-forward leaves focus on the game');
+  await p.waitForFunction(() => !window.__ff.loading());
+  await idle(p);
+  const beforeTab = (await state()).active;
+  await p.keyboard.press('Tab');
+  expect((await state()).active !== beforeTab, 'Tab still swaps once the load has finished');
 });
