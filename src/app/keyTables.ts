@@ -2,6 +2,8 @@
  * The constant tables: which key moves which fish, the minigame's key map, which panel
  * region each touch button sends, and the two small constants the room scripts read.
  *
+ * Also `isSwapKey`, the one binding that needs more than a table lookup.
+ *
  * Pure data — no state, no side effects, nothing to initialise. They live here because
  * they were carrying edges out of `main.ts`'s core purely by being declared there:
  * the keyboard, the pointer and the room loader all reach for them, and a constant
@@ -55,6 +57,23 @@ export const ARROWS: Record<string, number> = {
   ArrowRight: Dir.right,
   ArrowDown: Dir.down,
 };
+
+/**
+ * Does this keydown swap the active fish (akce_switch)? Space is the original's key
+ * (ZaznamenejPrikazKlavesou #32) and keeps its behaviour exactly. Tab is a port-only
+ * alias, and only a bare Tab while no control has focus: Shift+Tab, and Tab from a focused
+ * touch button, stay the browser's focus navigation — the touchbar's keyboard access
+ * depends on it.
+ */
+export function isSwapKey(e: {
+  code: string; shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean;
+  target: EventTarget | null;
+}): boolean {
+  if (e.code === 'Space') return true;
+  if (e.code !== 'Tab' || e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
+  const t = e.target as { closest?: (s: string) => unknown } | null;
+  return !t?.closest?.('button, input, select, textarea, a[href], [tabindex], [contenteditable]');
+}
 
 /**
  * Which panel region each in-room touch button sends (`src/app/touchButtons.ts`), by the

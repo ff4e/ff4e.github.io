@@ -1,7 +1,7 @@
 /**
  * UI test: the faithful input map (ZaznamenejPrikazKlavesou / ZaznamenejPrikazRoom).
  * Verifies the controls added by the fidelity audit — arrow keys move the active
- * fish, Space swaps the active fish, 1/2 select a fish, right-click steps the
+ * fish, Space (or Tab) swaps the active fish, 1/2 select a fish, right-click steps the
  * active fish toward the click — and that clicking a fish only *selects* it (no
  * talk trigger). Drives real DOM key/mouse events plus the __ff hooks.
  */
@@ -24,6 +24,13 @@ await withApp(async ({ p, expect }) => {
   const before = (await state()).active;
   await p.keyboard.press('Space');
   expect((await state()).active !== before, `Space swaps the active fish (${before} -> other)`);
+  // Tab is a port-only alias; Shift+Tab stays focus navigation.
+  const afterSpace = (await state()).active;
+  await p.keyboard.press('Tab');
+  expect((await state()).active === before, `Tab swaps the active fish back (${afterSpace} -> ${before})`);
+  await p.keyboard.press('Shift+Tab');
+  expect((await state()).active === before, 'Shift+Tab does not swap the fish');
+  await p.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
 
   // --- arrow keys move the active fish ---
   await p.keyboard.press('Digit1'); // active = little
@@ -70,4 +77,20 @@ await withApp(async ({ p, expect }) => {
   await p.waitForTimeout(30);
   const lx3 = (await state()).little.x;
   expect(lx3 === lx2 - 1, `right-click left of the fish steps it left (${lx2} -> ${lx3})`);
+
+  // --- a Tab while the swap is blocked (load fast-forward) must not move focus off the
+  // game, or every later Tab arrives from a focused control and stops swapping ---
+  await p.keyboard.press('F2');
+  await p.keyboard.press('ArrowRight');
+  await idle(p);
+  await p.keyboard.press('F3');
+  await p.waitForFunction(() => window.__ff.loading());
+  await p.keyboard.press('Tab');
+  expect(await p.evaluate(() => document.activeElement === document.body),
+    'a Tab during the load fast-forward leaves focus on the game');
+  await p.waitForFunction(() => !window.__ff.loading());
+  await idle(p);
+  const beforeTab = (await state()).active;
+  await p.keyboard.press('Tab');
+  expect((await state()).active !== beforeTab, 'Tab still swaps once the load has finished');
 });

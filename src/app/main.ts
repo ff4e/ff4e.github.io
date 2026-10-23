@@ -51,7 +51,7 @@ import { movesOf, lengthOfRecord } from '../core/record.js';
 import { roomScript } from '../rooms/index.js';
 import { ROOMS } from '../data/roomTable.js';
 import { canvas, info, panelCanvas, select } from './dom.js';
-import { ARROWS, KEYS, MLUVI_PRIOR, NOOP_SCRIPT, TETRIS_KEYS } from './keyTables.js';
+import { ARROWS, KEYS, MLUVI_PRIOR, NOOP_SCRIPT, TETRIS_KEYS, isSwapKey } from './keyTables.js';
 import { audio, initAudio } from './audioEngine.js';
 import { initQuiet } from './initQuiet.js';
 import { atRest, fishBusy, idle } from './roomGates.js';
@@ -1583,14 +1583,15 @@ window.addEventListener('keydown', (e) => {
     return;
   }
   if (ui.screen === 'map') return; // no fish keys on the map
+  if (e.code === 'Tab' && isSwapKey(e)) e.preventDefault(); // even a blocked swap keeps focus on the game
   if (activeScript?.s.natvrdo === 1) return; // possessed by ZELVA: input is ignored
   if (activeScript?.s.zavermode) return; // ZAVER finale cutscene: only restart/exit above work
   if (inShowmode()) return; // KUFRIK demonstration: fish keys blocked (Backspace/Escape end it above)
   if (inAutoPlay()) return; // "Replay"/solution playback: player fish keys are blocked
   if (loadmode) return; // fast-forward load in progress: ignore fish keys (Backspace above aborts it)
-  if (e.code === 'Space') {
+  if (isSwapKey(e)) {
     e.preventDefault();
-    if (swapActive()) lightPanel(11); // akce_switch
+    if (swapActive()) lightPanel(11); // akce_switch (Space; Tab is a port-only alias)
     return;
   }
   if (e.code === 'Digit1' || e.code === 'Digit2') {

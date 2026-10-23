@@ -122,7 +122,10 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // F2, F3, Backspace), as the original's dispatcher does for any input. One import, and
   // `swapActive` saying whether it swapped; only the keyboard router knows which key ran
   // which action past its gate. The light itself is panelLight.ts.
-  ['src/app/main.ts', 2289],
+  // 2 289 -> 2 290: Tab swaps the fish too, and a blocked swap (replay, demo, load
+  // fast-forward) must still keep focus on the game; only the keyboard router knows the
+  // gates. The key test itself is `isSwapKey` in keyTables.ts.
+  ['src/app/main.ts', 2290],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left
