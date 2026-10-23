@@ -109,4 +109,34 @@ await withApp(async ({ p, expect }) => {
   const quiet = await tickSleep(p, 6);
   const later = await cell();
   expect(dist(stopped, later) === 0, `the fish stops once the held key is released (still after ${quiet} ticks)`);
+
+  // The panel lights the button of the key's command, as the original's dispatcher does
+  // for any input (AktualizujPanel, URoom.pas:24800-24812; panelLight.ts): a held direction
+  // keeps its arrow lit while it repeats — blocked or not — and the light goes out at the
+  // first rest tick with nothing dispatched. Space is run straight from keydown, so it is
+  // read in the same evaluate as the press.
+  const lit = () => p.evaluate(() => window.__ff.panelState());
+  const LIT_DIR = { KeyI: 1, KeyK: 2, KeyJ: 3, KeyL: 4, KeyW: 5 }; // pressedDir: little 1-4, big 5-8
+  for (const d of [bestDir, 'KeyW']) {
+    await p.evaluate(() => window.__ff.restart());
+    await waitIdle();
+    await key('keydown', d);
+    await tickSleep(p, 4);
+    const held = (await lit()).pressedDir;
+    expect(held === LIT_DIR[d], `holding ${d} lights its panel arrow (pressedDir ${held})`);
+    await key('keyup', d);
+    await waitIdle();
+    await tickSleep(p, 2);
+    const after = (await lit()).pressedDir;
+    expect(after === 0, `the arrow goes out after ${d} is released (pressedDir ${after})`);
+  }
+  const swapLit = await p.evaluate(() => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Space', bubbles: true }));
+    return window.__ff.panelState().space;
+  });
+  await p.evaluate(() => window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Space', bubbles: true })));
+  expect(swapLit === 3, `Space lights the swap band (SVITICI, got ${swapLit})`);
+  await tickSleep(p, 3);
+  const swapAfter = (await lit()).space;
+  expect(swapAfter !== 3, `the swap band goes out after a rest tick or two (got ${swapAfter})`);
 });

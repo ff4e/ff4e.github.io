@@ -124,6 +124,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `mapDraw.ts` | 4.0 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
 | `mapInfoZoom.ts` | 1.4 k | The record panel enlarged 1.5x on a phone, lifted off the map it was baked onto, and the zoom-aware button hit test the pointer routers use. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden during touch gameplay; phones and tablets reuse its Options face in the touch overlay. |
+| `panelLight.ts` | | Which panel button a keyboard command lights: set by the held move on each rest tick and by Space/F2/F3/Backspace, out at the first rest tick with nothing dispatched (the original's AktualizujPanel). |
 | `touchButtons.ts` | | Shared touch/phone mode transitions, stage relayout and Options cleanup; tablet buttons dispatch through the panel's own `panelAction` table. |
 | `nativeMenu.ts` | | Shared touch/native rustic symbols and fixed room accents, enabled by device mode. |
 | `touchBarEdge.ts` | 7.2 k | Where the floating tablet buttons go, in either orientation: the usual edge unless the other covers less of the centred room, and moved in to the room's edge rather than left straddling it. |

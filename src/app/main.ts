@@ -121,6 +121,7 @@ import { initDevBar, syncSolveBtn } from './devBar.js';
 import { closeMapInfo, ensureDeskyData, initMapDraw, openMapInfo } from './mapDraw.js';
 import { helpPageCount } from './helpDom.js';
 import { closeHelp, initPanel, openHelp, panelState, togglePanelOptions } from './panel.js';
+import { lightPanel } from './panelLight.js';
 import { initTouchButtons } from './touchButtons.js';
 import { initCutsceneClose } from './cutsceneClose.js';
 import { touchOptionsOpen } from './touchOptions.js';
@@ -585,14 +586,15 @@ function peekAtPlayer(which: 'little' | 'big'): void {
 }
 
 /** akce_switch (URoom.pas:24456): make the other fish active, only if it is alive. */
-function swapActive(): void {
-  if (!room || !engine || ui.screen !== 'room') return;
+function swapActive(): boolean {
+  if (!room || !engine || ui.screen !== 'room') return false;
   const other = engine.active === 'little' ? 'big' : 'little';
-  if (!room.alive[other]) return;
+  if (!room.alive[other]) return false;
   engine.active = other;
   engine.swim = null;
   peekAtPlayer(other);
   setInfo();
+  return true;
 }
 
 /** akce_set (URoom.pas:24708): select a fish as active, if it is alive. */
@@ -1543,21 +1545,21 @@ window.addEventListener('keydown', (e) => {
   // which the tutorial fish teach ("1st-m-backspace"). It is NOT a single-move undo.
   if (e.code === 'Backspace') {
     e.preventDefault();
-    restartRoom(); // ends any solution replay too: it calls endShowmode()
+    if (restartRoom()) lightPanel(15); // ends any solution replay too: it calls endShowmode()
     return;
   }
   if (e.code === 'F2') {
     e.preventDefault();
     // `atRest()` is true between the recording's moves, so without this a running replay
     // would bank a half-played record as the player's save.
-    if (atRest() && !inAutoPlay()) saveGame();
+    if (atRest() && !inAutoPlay() && canSave()) { saveGame(); lightPanel(12); }
     return;
   }
   if (e.code === 'F3') {
     e.preventDefault();
     // Same hole as F2: `atRest()` is true between the recording's moves, and a load would
     // drop a saved room on top of a running replay. Escape is how you stop one.
-    if (atRest() && !inAutoPlay()) loadGame();
+    if (atRest() && !inAutoPlay() && saveExists()) { loadGame(); lightPanel(13); }
     return;
   }
   // Minus takes back one move (FFNG's key; its `+` redo is not ported). Nothing in the
@@ -1588,7 +1590,7 @@ window.addEventListener('keydown', (e) => {
   if (loadmode) return; // fast-forward load in progress: ignore fish keys (Backspace above aborts it)
   if (e.code === 'Space') {
     e.preventDefault();
-    swapActive(); // akce_switch
+    if (swapActive()) lightPanel(11); // akce_switch
     return;
   }
   if (e.code === 'Digit1' || e.code === 'Digit2') {
