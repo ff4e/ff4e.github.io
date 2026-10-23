@@ -39,6 +39,7 @@ import {
   strokeWidth,
   waveDy,
 } from '../render/subtitleGeom.js';
+import { vectorSubtitleText } from '../render/subtitleChars.js';
 import { wrap } from './dom.js';
 import { phoneUi, touchUi } from './touchButtons.js';
 import { safeAreaInset } from './safeArea.js';
@@ -372,7 +373,7 @@ export function syncDomSubtitles(
     // the rule is defined (subtitleGeom) — dividing out `textScale` keeps a fit-to-room
     // decision from depending on the window size. Measured ONLY for a row being built:
     // it is a forced layout, and it cannot change while the row exists.
-    const natural = measureTextWidth(font, t.obsah) / textScale;
+    const natural = measureTextWidth(font, vectorSubtitleText(t.obsah)) / textScale;
     const list = blockNatural.get(t.block);
     if (list) list.push(natural);
     else blockNatural.set(t.block, [natural]);
@@ -446,7 +447,7 @@ export function syncDomSubtitles(
       const offset = phoneWave ? phoneWave.offsets.get(t.id)! : 0;
       const stepMs = phoneWave?.stepMs ?? WAVE_STEP_MS;
       const durMs = (VECTOR_GEOM.waveLen / VECTOR_GEOM.wavePerTick / TICKS_PER_SEC) * 1000;
-      [...t.obsah].forEach((ch, i) => {
+      [...vectorSubtitleText(t.obsah)].forEach((ch, i) => {
         // Two layers per glyph so the outline sits behind the fill in every engine.
         // The outer span is what the wave animates, so both move as one.
         const sp = document.createElement('span');
