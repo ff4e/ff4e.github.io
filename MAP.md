@@ -118,7 +118,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `roomLoad.ts` | 4.2 k | Fetching a room, arming its voices, starting its music — and the order that keeps audio behind art. Owns the two post-art entry holds and their composition, `roomEntryHeld()`. |
 | `roomPreload.ts` | 2.4 k | What a room's PLAY can demand beyond its art and sound — KUFRIK's briefcase cutscene, the leg story page — fetched on entering it, and held for. Plus the unheld `niceToHave` warm of ZAVER, which is the rule's one deliberate exception. |
 | `roomLaunch.ts` | 4.0 k | The room-entry parchment and the launch it belongs to. |
-| `keyTables.ts` | 0.6 k | Which key moves which fish, the minigame's key map, which panel region each touch button sends, and two constants the room scripts read. |
+| `keyTables.ts` | 0.6 k | Which key moves which fish, which key swaps them (Space, or a bare Tab outside a focused control), the minigame's key map, which panel region each touch button sends, and two constants the room scripts read. |
 | **Screens** | | |
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
 | `mapDraw.ts` | 4.0 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |

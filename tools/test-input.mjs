@@ -1,7 +1,7 @@
 /**
  * UI test: the faithful input map (ZaznamenejPrikazKlavesou / ZaznamenejPrikazRoom).
  * Verifies the controls added by the fidelity audit — arrow keys move the active
- * fish, Space swaps the active fish, 1/2 select a fish, right-click steps the
+ * fish, Space (or Tab) swaps the active fish, 1/2 select a fish, right-click steps the
  * active fish toward the click — and that clicking a fish only *selects* it (no
  * talk trigger). Drives real DOM key/mouse events plus the __ff hooks.
  */
@@ -24,6 +24,13 @@ await withApp(async ({ p, expect }) => {
   const before = (await state()).active;
   await p.keyboard.press('Space');
   expect((await state()).active !== before, `Space swaps the active fish (${before} -> other)`);
+  // Tab is a port-only alias; Shift+Tab stays focus navigation.
+  const afterSpace = (await state()).active;
+  await p.keyboard.press('Tab');
+  expect((await state()).active === before, `Tab swaps the active fish back (${afterSpace} -> ${before})`);
+  await p.keyboard.press('Shift+Tab');
+  expect((await state()).active === before, 'Shift+Tab does not swap the fish');
+  await p.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
 
   // --- arrow keys move the active fish ---
   await p.keyboard.press('Digit1'); // active = little
