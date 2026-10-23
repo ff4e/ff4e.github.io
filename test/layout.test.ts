@@ -422,6 +422,91 @@ describe('the panel footprint — retired in touch mode', () => {
   });
 });
 
+describe('reservePanel — a mouse screen with no panel in the row', () => {
+  const VIEWPORTS = [[842, 596], [1512, 982], [2048, 1017], [669, 280]] as const;
+
+  it('gives the content the column back and changes nothing else', () => {
+    for (const mode of FIT_MODES) {
+      for (const [w, h] of VIEWPORTS) {
+        const room = computeStageLayout(w, h, mode, true);
+        const map = computeStageLayout(w, h, mode, true, VIEWPORT_MARGIN, false);
+        // Rebuilt from the parts, not read off `room`, so a change to what the room
+        // reserves cannot move this expectation with it.
+        expect(map.availW).toBeCloseTo(w - 2 * VIEWPORT_MARGIN, 9);
+        expect(map.stageW).toBe(map.availW);
+        expect(map).toEqual({ ...room, availW: map.availW, stageW: map.stageW });
+      }
+    }
+  });
+
+  it('follows `panel` by default, so every existing caller is unchanged', () => {
+    for (const [w, h] of VIEWPORTS) {
+      expect(computeStageLayout(w, h, 'fill', true, VIEWPORT_MARGIN)).toEqual(
+        computeStageLayout(w, h, 'fill', true, VIEWPORT_MARGIN, true),
+      );
+      expect(computeStageLayout(w, h, 'fill', false, VIEWPORT_MARGIN)).toEqual(
+        computeStageLayout(w, h, 'fill', false, VIEWPORT_MARGIN, false),
+      );
+    }
+  });
+});
+
+/**
+ * Martin (2026-10): in a graded mode, narrowing the window shrank a room or the map that
+ * still fitted, because the enlargement was a multiple of `scale`, which also fits the panel
+ * into the width. Narrowing may now only shrink content that no longer fits.
+ */
+describe('enlargeRef — narrowing only shrinks what no longer fits', () => {
+  const at = (rw: number, rh: number, w: number, h: number, mode: FitMode, reserve = true) => {
+    const l = computeStageLayout(w, h, mode, true, VIEWPORT_MARGIN, reserve);
+    const k = contentScale(rw, rh, l.scale, l.mode, 1, l.availW, l.availH, l.maxCellPx, l.enlargeRef);
+    return { k, fits: Math.min(l.availW / rw, l.availH / rh), l };
+  };
+
+  it('is the height-only stage scale, never below `scale`', () => {
+    for (const [w, h] of [[842, 596], [1350, 1000], [2048, 1017], [669, 280], [300, 1400]]) {
+      const l = computeStageLayout(w, h, 'medium', true);
+      expect(l.enlargeRef).toBe(Math.max(l.scale, (h - 2 * VIEWPORT_MARGIN) / STAGE_H));
+    }
+  });
+
+  it('keeps a graded room the same size as the window narrows until it stops fitting', () => {
+    for (const mode of ['small', 'medium', 'large'] as const) {
+      for (const [rw, rh] of ROOMS) {
+        for (const reserve of [true, false]) {
+          let prev = at(rw, rh, 2400, 1000, mode, reserve);
+          for (let w = 2399; w >= 500; w -= 7) {
+            const cur = at(rw, rh, w, 1000, mode, reserve);
+            // Smaller only where the content is now bounded by the area it is drawn in.
+            if (cur.k < prev.k - 1e-9) expect(cur.k).toBeCloseTo(cur.fits, 9);
+            prev = cur;
+          }
+        }
+      }
+    }
+  });
+
+  it('leaves `fixed` alone — its floor is `scale`, not `enlargeRef`', () => {
+    for (const [rw, rh] of ROOMS) {
+      for (const [w, h] of [[842, 596], [1350, 1000], [669, 280]]) {
+        const { k, fits, l } = at(rw, rh, w, h, 'fixed');
+        expect(k).toBeCloseTo(Math.min(l.scale, fits), 9);
+      }
+    }
+  });
+
+  // The map is 640x480 and the stage 800x600, the same aspect, so any factor over the 1.25
+  // between them (`medium` and up) leaves the map bounded by the window alone.
+  it('lets `medium` and up fill with the map however narrow the window gets', () => {
+    for (const mode of ['medium', 'large', 'fill'] as const) {
+      for (const w of [1700, 1500, 1450, 1350, 1000, 842]) {
+        const { k, fits, l } = at(640, 480, w, 1000, mode, false);
+        expect(k).toBeCloseTo(Math.min(fits, l.maxCellPx / CELL_NATIVE), 9);
+      }
+    }
+  });
+});
+
 /**
  * Touch takes every pixel: the fit mode is a desktop control, so on a phone the stored
  * value is a setting the player cannot see. See `effectiveFitMode`.

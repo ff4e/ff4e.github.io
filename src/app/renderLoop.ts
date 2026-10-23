@@ -21,7 +21,7 @@ import { clearDomSubtitles } from './subtitleDom.js';
 import { drawCutscene } from './cutscene.js';
 import { syncCutsceneClose } from './cutsceneClose.js';
 import { drawCredits, drawLegImage } from './mapNav.js';
-import { syncLoadingUi } from './loadingUi.js';
+import { syncLoadingUi, syncPanelReserve } from './loadingUi.js';
 import { syncTouchButtons } from './touchButtons.js';
 import { syncPhoneViewport } from './phoneViewport.js';
 import { syncTouchSwipe } from './touchSwipe.js';
@@ -184,6 +184,7 @@ export function loop(now: number): void {
   // carrying the parchment has actually been painted, because drawMap() is what sets
   // `painted` (UMain.pas:1489-1493 — the paint sets daRealyRun, Spust runs after it).
   tickMapLaunch();
+  syncPanelReserve();
   syncTouchSwipe();
   syncPhoneViewport(now);
   if (ui.helpOpen || ui.screen !== 'room' || roomLoading) glCanvas.style.display = 'none';

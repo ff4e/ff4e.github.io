@@ -257,7 +257,8 @@ export function relayout(): void {
   // Asked of `touchUi()` rather than worked out here — one predicate, one place
   // (touchMode.ts) — and the shared mode handler calls this straight after flipping it, so
   // switching modes resizes the game immediately.
-  setStage(computeStageLayout(availW, availH, settings.fitMode, !touchUi()));
+  setStage(computeStageLayout(availW, availH, settings.fitMode, !touchUi(), undefined, panelInRow()));
+  reservedPanel = panelInRow();
   // The box HUGS its content horizontally rather than being pinned to the full stage
   // width: `wrap` is the box's only in-flow child and is sized to the room/map/cutscene
   // canvas, so `width: auto` tracks the content for free — including room changes, which
@@ -281,6 +282,26 @@ export function relayout(): void {
   if (stageRow) stageRow.style.gap = `${Math.round(stage.gap)}px`;
   setForceRoomRedraw(true); // the room canvas CSS size is set in draw() — repaint to rescale
   wake();
+}
+
+/**
+ * Does the side panel's column take a place in the stage row? Only in a room on the mouse
+ * game: `drawPanel` hides it on every other screen, and over the map it floats out of the
+ * flow. Help hides it too but keeps the reserve, so the room behind the pages stays put.
+ */
+function panelInRow(): boolean {
+  return !touchUi() && ui.screen === 'room';
+}
+let reservedPanel = true;
+
+/**
+ * Re-run `relayout` when the screen changes whether the panel takes width — entering or
+ * leaving a room. Called once per frame from the render loop, BEFORE anything paints, so
+ * the frame that changes screen is laid out for it; the map used to be sized as if the
+ * panel stood beside it, ~145px narrower than the window at 842x596.
+ */
+export function syncPanelReserve(): void {
+  if (panelInRow() !== reservedPanel) relayout();
 }
 
 // Intro-movie overlay (UMain.pas daLogo/daIntro): full-screen <video> played

@@ -336,6 +336,12 @@ export interface StageLayout {
    */
   scale: number;
   /**
+   * What a graded mode enlarges: the stage's scale from the HEIGHT alone, never below `scale`.
+   * `scale` also fits the panel into the width, so `medium` shrank content that still fitted
+   * as the window narrowed (Martin, 2026-10: only what no longer fits may shrink).
+   */
+  enlargeRef: number;
+  /**
    * The fit mode this layout was sized by — `effectiveFitMode(mode, panel)`, NOT the raw
    * setting, because touch overrides it. Carried so the layout and the content are scaled
    * by the SAME one; every consumer reads this rather than `settings.fitMode`.
@@ -437,6 +443,11 @@ export function effectiveFitMode(mode: FitMode, panel = true): FitMode {
  * `margin` is `VIEWPORT_MARGIN` by default and is a parameter so a TV target can pass a
  * title-safe inset without a second code path — per axis if it needs to, which the TV
  * convention does (see `ViewportMargin`).
+ *
+ * `reservePanel` is false on a mouse screen with no panel column in the row (the map, the
+ * story pages, the intro): it gives the content that width back and changes nothing else,
+ * so the object-size reference and a map-floated Options panel are unchanged. Reserving it
+ * there cost the map ~145px of width at 842x596.
  */
 export function computeStageLayout(
   viewportW: number,
@@ -444,6 +455,7 @@ export function computeStageLayout(
   mode: FitMode,
   panel = true,
   margin: ViewportMargin = VIEWPORT_MARGIN,
+  reservePanel = panel,
 ): StageLayout {
   const fit = effectiveFitMode(mode, panel);
   const m = marginAxes(margin);
@@ -460,9 +472,10 @@ export function computeStageLayout(
   // The panel is part of the artwork, so it is reserved in NATIVE px and scales with the
   // game — which is also the one place a taller window can cost a width-bound room a little
   // size. See the header; it is an accepted impossibility, not an oversight.
-  const contentW = Math.max(0, availW - gap - panelW);
+  const contentW = Math.max(0, availW - (reservePanel ? gap + panelW : 0));
   return {
     scale,
+    enlargeRef: Math.max(scale, availH / STAGE_H),
     mode: fit,
     gap,
     availW: contentW,
@@ -504,6 +517,7 @@ export function computeStageLayout(
  * default was silently scaling against an area that did not exist.
  *
  * `maxCellPx` is the enlargement ceiling (`MAX_CELL_PX`); pass `Infinity` to lift it.
+ * `enlargeRef` is `StageLayout.enlargeRef`; the 'fixed' floor stays `stageScale`.
  */
 export function contentScale(
   w: number,
@@ -514,6 +528,7 @@ export function contentScale(
   availW: number,
   availH: number,
   maxCellPx: number = MAX_CELL_PX,
+  enlargeRef: number = stageScale,
 ): number {
   // The largest scale that shows the whole thing. A ceiling in every mode — this is the
   // term the elastic stage box did not have, and its absence is why a room could be drawn
@@ -532,7 +547,7 @@ export function contentScale(
   // What 'fixed' would give: the faithful, constant-object-size scale.
   const base = Math.min(stageScale, fit);
   if (cap <= 1) return base;
-  const enlarged = Math.min(stageScale * cap, fit);
+  const enlarged = Math.min(Math.max(stageScale, enlargeRef) * cap, fit);
   const ceiling = maxCellPx > 0 ? maxCellPx / CELL_NATIVE : Infinity;
   // **Never below `base`**, and that floor is not a detail. The graded modes are defined as
   // "'fixed', enlarged by up to N", so the mode list reads as increasing magnification. A
