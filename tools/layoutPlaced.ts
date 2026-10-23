@@ -125,7 +125,7 @@ export function layoutRoom(req: LayoutRequest): LayoutResult {
   // overriding it. Falling back to the layout's rather than to the parameter default matters:
   // the default is the DESKTOP ceiling, so a tool that omitted it would model touch and TV
   // with the wrong number and could report a spurious failure against a correct game.
-  const s = contentScale(req.roomW, req.roomH, l.scale, fit, dpr, l.availW, l.availH, req.maxCellPx ?? l.maxCellPx);
+  const s = contentScale(req.roomW, req.roomH, l.scale, fit, dpr, l.availW, l.availH, req.maxCellPx ?? l.maxCellPx, l.enlargeRef);
 
   const drawnW = s * req.roomW;
   const drawnH = s * req.roomH;

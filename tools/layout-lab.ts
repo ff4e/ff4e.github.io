@@ -113,7 +113,7 @@ function defaultsFor(t: LayoutTarget): TargetSettings {
     marginX: d.marginX,
     marginY: d.marginY,
     maxCellPx: d.maxCellPx,
-    mode: 'fill',
+    mode: t === 'pc' ? 'medium' : 'fill',
   };
 }
 
@@ -222,7 +222,7 @@ function buildSelects(): void {
   }
 
   const mode = $<HTMLSelectElement>('mode');
-  for (const m of FIT_MODES) mode.append(opt(m, m === 'fill' ? `${m} (shipped default)` : m));
+  for (const m of FIT_MODES) mode.append(opt(m, m === 'medium' ? `${m} (shipped default)` : m));
 }
 
 function wire(): void {

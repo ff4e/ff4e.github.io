@@ -66,7 +66,7 @@
  * On the DESKTOP target only, making a window TALLER can make a width-bound room slightly
  * smaller: the panel is reserved in NATIVE px, so a taller window raises `stageScale`, which
  * widens the panel, which takes width from a room that was already width-bound. Worst
- * measured: -4.39% in `medium`, -10.62% in the shipped `fill` default. It never happens in
+ * measured: -4.39% in the shipped `medium` default, -10.62% in `fill`. It never happens in
  * `fixed` (there the room scales with the stage too) and never in touch mode (no panel).
  *
  * It is not a bug to be fixed but an impossibility to be known: **the panel cannot be
@@ -79,10 +79,9 @@
  * ── The deliberate deviations from the original ──────────────────────────────
  *  - **The room is not letterboxed into a fixed 800x600 unless `fixed` asks for it.** The
  *    graded modes enlarge small content toward the space available, which the original
- *    never did; `fill` is the shipped default on every device (core/settings.ts — it was
- *    `medium` on desktop until 2026-10, when it moved to match touch), so out of the box a
- *    room IS zoomed to fit the space, up to `maxCellPx`. That spread is why subtitles are
- *    sized from the stage and not from the room (app/framePainter.ts).
+ *    never did; `medium` is the shipped default (core/settings.ts), so out of the box a
+ *    room IS zoomed to fit, by 1.006x to 1.35x across the 71 rooms. That spread is why
+ *    subtitles are sized from the stage and not from the room (app/framePainter.ts).
  *  - **The panel's x tracks the room**, because `#stagebox` hugs its content: the original's
  *    panel was a fixed side column, so a narrow room genuinely did sit far from it, and here
  *    it would have been pushed away by a median 230px of the box's empty slack. The room
@@ -337,11 +336,11 @@ export interface StageLayout {
    */
   scale: number;
   /**
-   * What `contentScale` multiplies by the fit factor: `scale`, or with no panel in the row the
-   * stage's scale without it — else a graded mode shrinks the map as the window narrows only
-   * because a panel that is not drawn stopped fitting beside the room.
+   * What a graded mode enlarges: the stage's scale from the HEIGHT alone, never below `scale`.
+   * `scale` also fits the panel into the width, so `medium` shrank content that still fitted
+   * as the window narrowed (Martin, 2026-10: only what no longer fits may shrink).
    */
-  contentRef: number;
+  enlargeRef: number;
   /**
    * The fit mode this layout was sized by — `effectiveFitMode(mode, panel)`, NOT the raw
    * setting, because touch overrides it. Carried so the layout and the content are scaled
@@ -445,11 +444,10 @@ export function effectiveFitMode(mode: FitMode, panel = true): FitMode {
  * title-safe inset without a second code path — per axis if it needs to, which the TV
  * convention does (see `ViewportMargin`).
  *
- * `reservePanel` is false on a mouse screen whose panel column is not in the row — the
- * map, the story pages, the intro. It gives the content the column's width and `contentRef`
- * back; `scale`, the panel's size and the fit mode stay the room's, so a map-floated Options
- * panel is unchanged. Reserving it there shrank the map at 842x596 by ~145px of width for a
- * panel that was not drawn.
+ * `reservePanel` is false on a mouse screen with no panel column in the row (the map, the
+ * story pages, the intro): it gives the content that width back and changes nothing else,
+ * so the object-size reference and a map-floated Options panel are unchanged. Reserving it
+ * there cost the map ~145px of width at 842x596.
  */
 export function computeStageLayout(
   viewportW: number,
@@ -477,7 +475,7 @@ export function computeStageLayout(
   const contentW = Math.max(0, availW - (reservePanel ? gap + panelW : 0));
   return {
     scale,
-    contentRef: reservePanel ? scale : computeStageScale(availW, availH, false),
+    enlargeRef: Math.max(scale, availH / STAGE_H),
     mode: fit,
     gap,
     availW: contentW,
@@ -519,6 +517,7 @@ export function computeStageLayout(
  * default was silently scaling against an area that did not exist.
  *
  * `maxCellPx` is the enlargement ceiling (`MAX_CELL_PX`); pass `Infinity` to lift it.
+ * `enlargeRef` is `StageLayout.enlargeRef`; the 'fixed' floor stays `stageScale`.
  */
 export function contentScale(
   w: number,
@@ -529,6 +528,7 @@ export function contentScale(
   availW: number,
   availH: number,
   maxCellPx: number = MAX_CELL_PX,
+  enlargeRef: number = stageScale,
 ): number {
   // The largest scale that shows the whole thing. A ceiling in every mode — this is the
   // term the elastic stage box did not have, and its absence is why a room could be drawn
@@ -547,7 +547,7 @@ export function contentScale(
   // What 'fixed' would give: the faithful, constant-object-size scale.
   const base = Math.min(stageScale, fit);
   if (cap <= 1) return base;
-  const enlarged = Math.min(stageScale * cap, fit);
+  const enlarged = Math.min(Math.max(stageScale, enlargeRef) * cap, fit);
   const ceiling = maxCellPx > 0 ? maxCellPx / CELL_NATIVE : Infinity;
   // **Never below `base`**, and that floor is not a detail. The graded modes are defined as
   // "'fixed', enlarged by up to N", so the mode list reads as increasing magnification. A

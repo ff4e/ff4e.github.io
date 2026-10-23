@@ -95,20 +95,10 @@ export interface Settings {
    * Room-scaling fit mode (public-release Approach D/C). 'fixed' keeps a constant
    * on-screen object size in every room (small rooms letterboxed); the graded
    * 'small'/'medium'/'large'/'fill' modes enlarge small rooms by an increasing
-   * amount so they fill more of the stage. `fill` is the default on every device.
+   * amount so they fill more of the stage. (Legacy 'capped' loads as 'medium'.)
    */
   fitMode: FitMode;
-  /**
-   * Which default `fitMode` was saved under. Blobs without it (or below `FIT_VERSION`) were
-   * written while desktop defaulted to `medium`, and the selector is dev-only, so a stored
-   * `medium` (or the older `capped`) there is that default rather than a choice: it loads
-   * once as `fill`, the touch mode, and is not touched again after the next save.
-   */
-  fitVersion: number;
 }
-
-/** Bumped when the default `fitMode` changed — see `Settings.fitVersion`. */
-export const FIT_VERSION = 2;
 
 const STORAGE_KEY = 'ff.options';
 
@@ -120,8 +110,7 @@ export function defaultSettings(language = 'en'): Settings {
     subtitles: czech ? 'cz' : 'en',
     titDef: czech ? 'cz' : 'en',
     introSeen: false,
-    fitMode: 'fill',
-    fitVersion: FIT_VERSION,
+    fitMode: 'medium',
   };
 }
 
@@ -149,11 +138,9 @@ export function loadSettings(language?: string): Settings {
     }
     if (j.titDef === 'cz' || j.titDef === 'en') s.titDef = j.titDef;
     if (typeof j.introSeen === 'boolean') s.introSeen = j.introSeen;
-    // A pre-`fill` default ('medium', or the older 'capped') becomes 'fill'; otherwise
-    // accept any current fit mode.
+    // Legacy 'capped' → 'medium'; otherwise accept any current fit mode.
     const fm = (j as { fitMode?: unknown }).fitMode;
-    const fresh = typeof j.fitVersion === 'number' && j.fitVersion >= FIT_VERSION;
-    if (fm === 'capped' || (fm === 'medium' && !fresh)) s.fitMode = 'fill';
+    if (fm === 'capped') s.fitMode = 'medium';
     else if (isFitMode(fm)) s.fitMode = fm;
   } catch {
     /* corrupt/absent — keep defaults */
