@@ -81,7 +81,7 @@ export function contentScaleFor(w: number, h: number): number {
   // was sized by, or the box's ceilings and the content's bound would disagree.
   // `stage.maxCellPx`, not the constant: the ceiling is per target and only the layout was
   // told which target this is (layout.ts, MAX_CELL_PX / MAX_CELL_PX_TOUCH).
-  return fitScale(w, h, stage.scale, stage.mode, dpr, stage.availW, stage.availH, stage.maxCellPx);
+  return fitScale(w, h, stage.contentRef, stage.mode, dpr, stage.availW, stage.availH, stage.maxCellPx);
 }
 
 /**

@@ -337,6 +337,12 @@ export interface StageLayout {
    */
   scale: number;
   /**
+   * What `contentScale` multiplies by the fit factor: `scale`, or with no panel in the row the
+   * stage's scale without it — else a graded mode shrinks the map as the window narrows only
+   * because a panel that is not drawn stopped fitting beside the room.
+   */
+  contentRef: number;
+  /**
    * The fit mode this layout was sized by — `effectiveFitMode(mode, panel)`, NOT the raw
    * setting, because touch overrides it. Carried so the layout and the content are scaled
    * by the SAME one; every consumer reads this rather than `settings.fitMode`.
@@ -440,10 +446,10 @@ export function effectiveFitMode(mode: FitMode, panel = true): FitMode {
  * convention does (see `ViewportMargin`).
  *
  * `reservePanel` is false on a mouse screen whose panel column is not in the row — the
- * map, the story pages, the intro. It gives the content the column's width back and
- * changes nothing else: `scale`, the panel's size and the fit mode stay the room's, so the
- * object-size reference and a map-floated Options panel are unchanged. Reserving it there
- * shrank the map at 842x596 by ~145px of width for a panel that was not drawn.
+ * map, the story pages, the intro. It gives the content the column's width and `contentRef`
+ * back; `scale`, the panel's size and the fit mode stay the room's, so a map-floated Options
+ * panel is unchanged. Reserving it there shrank the map at 842x596 by ~145px of width for a
+ * panel that was not drawn.
  */
 export function computeStageLayout(
   viewportW: number,
@@ -471,6 +477,7 @@ export function computeStageLayout(
   const contentW = Math.max(0, availW - (reservePanel ? gap + panelW : 0));
   return {
     scale,
+    contentRef: reservePanel ? scale : computeStageScale(availW, availH, false),
     mode: fit,
     gap,
     availW: contentW,

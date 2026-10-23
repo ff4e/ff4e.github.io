@@ -438,7 +438,23 @@ describe('reservePanel — a mouse screen with no panel in the row', () => {
         // reserves cannot move this expectation with it.
         expect(map.availW).toBeCloseTo(w - 2 * VIEWPORT_MARGIN, 9);
         expect(map.stageW).toBe(map.availW);
-        expect(map).toEqual({ ...room, availW: map.availW, stageW: map.stageW });
+        expect(map.contentRef).toBe(computeStageScale(w - 2 * VIEWPORT_MARGIN, h - 2 * VIEWPORT_MARGIN, false));
+        expect(map).toEqual({ ...room, availW: map.availW, stageW: map.stageW, contentRef: map.contentRef });
+        expect(room.contentRef).toBe(room.scale);
+      }
+    }
+  });
+
+  // The reported defect: `medium`, a window just narrower than the room stage plus panel. The
+  // map is 640x480 and the stage without its panel is 800x600, same aspect, so any factor over
+  // the 1.25 between them (`medium` and up) leaves the map bounded by the window alone.
+  it('lets `medium` and up fill with the map however narrow the window gets', () => {
+    for (const mode of ['medium', 'large', 'fill'] as const) {
+      for (const w of [1700, 1500, 1450, 1350, 1000, 842]) {
+        const s = computeStageLayout(w, 1000, mode, true, VIEWPORT_MARGIN, false);
+        const fit = Math.min(s.availW / 640, s.availH / 480);
+        const k = contentScale(640, 480, s.contentRef, s.mode, 2, s.availW, s.availH, s.maxCellPx);
+        expect(k).toBeCloseTo(Math.min(fit, s.maxCellPx / CELL_NATIVE), 9);
       }
     }
   });
