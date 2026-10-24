@@ -683,6 +683,11 @@ try {
   expect(gpu.pixels < gpu.full * 0.6,
     `the zoomed WebGL present is cropped to the view (${(gpu.pixels / 1e6).toFixed(1)} of ${(gpu.full / 1e6).toFixed(1)} MP)`);
   expect(await glCoversView(), 'the cropped AI-tier WebGL present covers the visible room');
+  // The composite behind that present is clipped to the window it reads (phoneGlCrop.ts),
+  // and a wrong window would still present — with stale pixels along its edge.
+  const clip = await p.evaluate(() => window.__ff.aiClipParity());
+  expect(clip?.clipped && clip.frac < 0.6 && clip.diff === 0,
+    `the clipped AI composite presents the full frame's pixels (${clip ? `${clip.diff} of ${clip.bytes} bytes differ, ${(clip.frac * 100).toFixed(0)}% composited` : 'no crop'})`);
   if (process.env.FF_UI_SHOTS) await p.screenshot({ path: `${process.env.FF_UI_SHOTS}/iphone-landscape.png` });
   await p.evaluate(() => window.__ff.setRenderer('cpu'));
   await p.waitForFunction(() => !window.__ff.glActive());

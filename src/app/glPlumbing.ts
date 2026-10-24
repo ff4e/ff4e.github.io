@@ -24,6 +24,7 @@ import type { ArtSource } from '../render/artSource.js';
 import { ClassicArtSource } from '../render/classicArtSource.js';
 import { EnhancedArtSource } from '../render/enhancedArtSource.js';
 import type { EnhancedArt, EnhancedObject, FishSprites } from '../render/enhancedArtSource.js';
+import type { PresentWindow } from '../render/glCommon.js';
 import { GlAiScreen } from '../render/glRoomAi.js';
 import { GlScreen, webgl2Available } from '../render/glScreen.js';
 import { renderRoomInto, renderRoomRgba } from '../render/renderRoom.js';
@@ -270,15 +271,10 @@ export function drawAiGpu(
   try {
     comp.track(host.aiRoom); // so evicting the room frees its ~50 MB of textures with it
     const place = presentPlacement(geom, zoom, crop);
-    // A cropped present reads only part of the ×S frame, so composite only that part.
-    // Not in a room with a spec=1 mirror: its reflection reads pixels from across the
-    // mirror's window, which the clip would have left uncomposited.
-    const clip = crop && !r.items.some((it) => it?.spec === 1)
-      ? compositeClip(place, geom.backingW, geom.backingH) : null;
     // Not a formality: a ×4 room needs up to 3120px, WebGL2 only guarantees 2048, and an
     // oversized allocation is reported as a GL error rather than thrown — so without
     // this the frame would be "successfully" presented blank.
-    if (!comp.begin(geom.backingW, geom.backingH, clip)) return false;
+    if (!comp.begin(geom.backingW, geom.backingH, aiClipFor(geom, r, place, crop))) return false;
     host.aiRoom.drawInto(comp, r, f);
     if (comp.unsupported) return false;
     presentToGlCanvas((w, h, sub) => comp.present(w, h, sub), place, crop);
@@ -289,6 +285,58 @@ export function drawAiGpu(
     return false;
   } finally {
     comp.endClip(); // the context is shared: no early return may leave it scissored
+  }
+}
+
+/**
+ * The part of the ×S composite a cropped present reads, or null to composite all of it.
+ * Not in a room with a spec=1 mirror: its reflection reads pixels from across the
+ * mirror's window, which the clip would have left uncomposited.
+ */
+function aiClipFor(geom: RoomGeometry, r: Room, place: GlPlacement, crop: GlCrop | null): PresentWindow | null {
+  if (!crop || r.items.some((it) => it?.spec === 1)) return null;
+  return compositeClip(place, geom.backingW, geom.backingH);
+}
+
+/**
+ * Test probe: does a clipped frame present exactly the pixels of the full one?
+ *
+ * Nothing else can see a wrong clip. The parity probes compare unclipped composites, and a
+ * window that is flipped, shifted or a texel short of the present's filter footprint still
+ * presents "successfully" — with stale pixels along its edge. So present this frame both
+ * ways into the cropped canvas and count the bytes that differ. Null without a crop, or
+ * without the AI tier's GPU path. Leaves the canvas holding the unclipped present.
+ */
+export function aiClipParity(
+  geom: RoomGeometry, r: Room, f: AiRoomFrame, zoom: number, crop: GlCrop | null,
+): { clipped: boolean; frac: number; diff: number; bytes: number } | null {
+  const comp = glAiCompositor();
+  const gl = glCanvas.getContext('webgl2'); // the context the compositor draws with
+  if (!comp || !gl || !host.aiRoom || !crop) return null;
+  const place = presentPlacement(geom, zoom, crop);
+  const clip = aiClipFor(geom, r, place, crop);
+  const grab = (c: PresentWindow | null): Uint8Array | null => {
+    // Clear the whole buffer first: outside the clip it otherwise still holds the previous
+    // frame, which usually matches this one and would hide a window that came up short.
+    if (c && !comp.begin(geom.backingW, geom.backingH, null)) return null;
+    if (!comp.begin(geom.backingW, geom.backingH, c)) return null;
+    host.aiRoom!.drawInto(comp, r, f);
+    if (comp.unsupported) return null;
+    presentToGlCanvas((w, h, sub) => comp.present(w, h, sub), place, crop);
+    const out = new Uint8Array(place.w * place.h * 4);
+    gl.readPixels(0, 0, place.w, place.h, gl.RGBA, gl.UNSIGNED_BYTE, out);
+    return out;
+  };
+  try {
+    const clipped = grab(clip);
+    const full = grab(null);
+    if (!clipped || !full) return null;
+    let diff = 0;
+    for (let i = 0; i < full.length; i++) if (clipped[i] !== full[i]) diff++;
+    const frac = clip ? (clip.w * clip.h) / (geom.backingW * geom.backingH) : 1;
+    return { clipped: clip !== null, frac, diff, bytes: full.length };
+  } finally {
+    comp.endClip();
   }
 }
 

@@ -112,6 +112,8 @@ import { fatalShown, fatalText } from './loadingUi.js';
 import { checkGpuLoss, gpuLossArmed, wipeGpuLossSentinel } from './gpuLossRecovery.js';
 import { loadNoteShown, loadNoteText } from './loadNote.js';
 import { roomAudioPending } from './roomLoad.js';
+import { aiClipParity } from './glPlumbing.js';
+import { phoneGlCrop, phoneRenderZoom } from './phoneViewport.js';
 import { roomPreloadPending } from './roomPreload.js';
 // Imported rather than reached through `host`: `aiCredits` has an owning module, and
 // AGENTS.md's rule for that is to read it directly — cheaper (no accessor to write in
@@ -403,6 +405,8 @@ export function debugHooks(host: DebugHost): Record<string, unknown> {
       ostav: ui.ostav,
       forceRoomRedraw: host.forceRoomRedraw,
     }),
+    /** Test probe: bytes a clipped zoomed `ai` frame presents differently from the full frame (glPlumbing.ts). */
+    aiClipParity: () => (room ? aiClipParity(host.roomGeometry(room), room, { count, alpha: 0, slide: 0, fishAnim: { little: host.fishFrameFor('little'), big: host.fishFrameFor('big') } }, phoneRenderZoom(), phoneGlCrop()) : null),
     /** Dev/perf hook: mirror of the dev bar's idle-saver checkbox (P). */
     setRenderOnDirty: (v: boolean) => host.setRenderOnDirty(v),
     enhancedLoaded: () => host.enhancedArt !== null,
