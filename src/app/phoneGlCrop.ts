@@ -9,6 +9,7 @@
  * the canvas covers a viewport-sized window of the room instead, placed where the camera
  * looks, and the present pass draws exactly those pixels of the full-size present.
  */
+import type { PresentWindow } from '../render/glCommon.js';
 
 /** A rectangle of the room in its own CSS px (before the camera transform). */
 export interface GlCrop {
@@ -74,4 +75,26 @@ export function glPlacement(cssW: number, cssH: number, scale: number, crop: GlC
     x: Math.max(0, Math.min(fullW - w, Math.round(crop.x * scale))),
     y: Math.max(0, Math.min(fullH - h, Math.round(crop.y * scale))),
   };
+}
+
+/**
+ * The window of the room's ×S composite (bufW×bufH, top-down px) that a cropped present
+ * reads, or null when it reads all of it. GlAiScreen composites only this window.
+ *
+ * The present samples the buffer around each destination pixel's centre: up to half a
+ * footprint either side for its box taps, plus one texel for the LINEAR filter. The
+ * margin covers both with a texel to spare, so every pixel the present can touch was
+ * composited — the cropped frame stays the full frame's pixels, not an approximation.
+ */
+export function compositeClip(p: GlPlacement, bufW: number, bufH: number): PresentWindow | null {
+  if (p.w >= p.fullW && p.h >= p.fullH) return null;
+  const rx = bufW / p.fullW;
+  const ry = bufH / p.fullH;
+  const mx = Math.ceil(rx / 2) + 2;
+  const my = Math.ceil(ry / 2) + 2;
+  const x0 = Math.max(0, Math.floor(p.x * rx) - mx);
+  const y0 = Math.max(0, Math.floor(p.y * ry) - my);
+  const x1 = Math.min(bufW, Math.ceil((p.x + p.w) * rx) + mx);
+  const y1 = Math.min(bufH, Math.ceil((p.y + p.h) * ry) + my);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }

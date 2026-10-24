@@ -310,12 +310,14 @@ export class GlAiScreen implements AiTarget {
   private cur: { fbo: WebGLFramebuffer; tex: WebGLTexture } | null = null;
   private fboW = 0;
   private fboH = 0;
+  /** The ×S window this frame is composited in (top-down px), or null for all of it. See `begin`. */
+  private clip: PresentWindow | null = null;
 
   /**
    * "This backend could not fully composite the frame." Same seam GlScreen exposes: the
    * caller checks it after the room walk and falls back to canvas-2D for that frame,
-   * rather than presenting a frame that is silently missing an effect. Set only when the
-   * mirror ping-pong buffer cannot be allocated. Cleared by `begin`.
+   * rather than presenting a frame that is silently missing an effect. Set when the mirror
+   * ping-pong buffer cannot be allocated or would read outside a clip. Cleared by `begin`.
    */
   unsupported = false;
 
@@ -493,8 +495,15 @@ export class GlAiScreen implements AiTarget {
    * Two buffers are allocated only when a room actually needs the mirror ping-pong;
    * at ×4 each one is ~20 MB, so the 71 rooms with no spec=1 mirror never pay for the
    * second.
+   *
+   * `clip` (top-down ×S px) limits every pass of this frame to that window, for a zoomed
+   * phone view that will only present part of the room (phoneGlCrop.ts). Every pass but
+   * the mirror shades a pixel from textures alone, so the pixels inside the window are
+   * the ones the full composite would have produced; outside it the buffer is stale and
+   * must not be presented. On room 5 at 2.2x/3x (SwiftShader) it took composite + present
+   * from 38.6/36.7 to 27.5/22.0 ms, with the presented pixels byte-identical.
    */
-  begin(w: number, h: number): boolean {
+  begin(w: number, h: number, clip: PresentWindow | null = null): boolean {
     const gl = this.gl;
     if (this.fboW !== w || this.fboH !== h || !this.fboA) {
       if (this.fboA) { gl.deleteFramebuffer(this.fboA.fbo); gl.deleteTexture(this.fboA.tex); }
@@ -516,6 +525,9 @@ export class GlAiScreen implements AiTarget {
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.cur.fbo);
     gl.viewport(0, 0, w, h);
     gl.disable(gl.BLEND);
+    // Row 0 is the image's TOP (see present), so the window is the scissor box. Always set or cleared: the context is shared.
+    this.clip = clip;
+    if (clip) { gl.enable(gl.SCISSOR_TEST); gl.scissor(clip.x, clip.y, clip.w, clip.h); } else gl.disable(gl.SCISSOR_TEST);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     return true;
@@ -697,6 +709,10 @@ export class GlAiScreen implements AiTarget {
     if (rx1 <= rx0 || ry1 <= ry0) return;
     const dx0 = Math.max(rx0, X * S), dx1 = Math.min(rx1, (X + w) * S);
     if (dx1 <= dx0) return;
+    // The reflection reads across the whole window, which a clipped frame never composited.
+    // The caller does not clip mirror rooms (glPlumbing.ts); this is the backstop.
+    const c = this.clip;
+    if (c && (rx0 < c.x || ry0 < c.y || rx1 > c.x + c.w || ry1 > c.y + c.h)) { this.unsupported = true; return; }
     if (!this.fboB) this.fboB = this.makeFbo(this.fboW, this.fboH);
     if (!this.fboB) { this.unsupported = true; return; } // no VRAM for the ping-pong
     const src = this.cur!;
@@ -727,6 +743,11 @@ export class GlAiScreen implements AiTarget {
     this.cur = dst; // the rope, drawn after the mirror, must land on the reflected buffer
   }
 
+  /** Drop this frame's composite clip (begin), leaving the shared context unscissored. */
+  endClip(): void {
+    if (this.clip) { this.clip = null; this.gl.disable(this.gl.SCISSOR_TEST); }
+  }
+
   /**
    * Present the composited ×S frame to the canvas, box-filtered (see PRESENT_FS).
    * `sub` presents only that window (top-down px) of the canvasW×canvasH present, into a
@@ -743,6 +764,7 @@ export class GlAiScreen implements AiTarget {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.cur.tex);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.endClip(); // the clip is a window of the ×S buffer, not of the canvas
     gl.viewport(0, 0, sub ? sub.w : canvasW, sub ? sub.h : canvasH);
     gl.disable(gl.BLEND);
     gl.useProgram(this.presentProg);

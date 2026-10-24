@@ -35,7 +35,7 @@ import { cheatFishSprites } from './cheats.js';
 import { glCanvas } from './dom.js';
 import { count, room, subs } from './gameState.js';
 import type { RoomGeometry } from './layout.js';
-import { glPlacement, type GlCrop, type GlPlacement } from './phoneGlCrop.js';
+import { compositeClip, glPlacement, type GlCrop, type GlPlacement } from './phoneGlCrop.js';
 
 /** What this module needs to see of the running game. All read-only. */
 /**
@@ -246,7 +246,7 @@ export function drawGpu(
     renderRoomInto(gl, room, art, opts);
     if (gl.unsupported) return false; // defensive: an un-ported primitive → CPU this frame
     if (!useVecSubs) subs?.draw(gl, opts.count ?? 0); // baked subtitles via GPU setIndex
-    presentToGlCanvas((w, h, sub) => gl.present(w, h, false, sub), geom, zoom, crop);
+    presentToGlCanvas((w, h, sub) => gl.present(w, h, false, sub), presentPlacement(geom, zoom, crop), crop);
     return true;
   } catch (e) {
     glFailed = true;
@@ -269,19 +269,41 @@ export function drawAiGpu(
   if (!comp || !host.aiRoom) return false;
   try {
     comp.track(host.aiRoom); // so evicting the room frees its ~50 MB of textures with it
+    const place = presentPlacement(geom, zoom, crop);
+    // A cropped present reads only part of the ×S frame, so composite only that part.
+    // Not in a room with a spec=1 mirror: its reflection reads pixels from across the
+    // mirror's window, which the clip would have left uncomposited.
+    const clip = crop && !r.items.some((it) => it?.spec === 1)
+      ? compositeClip(place, geom.backingW, geom.backingH) : null;
     // Not a formality: a ×4 room needs up to 3120px, WebGL2 only guarantees 2048, and an
     // oversized allocation is reported as a GL error rather than thrown — so without
     // this the frame would be "successfully" presented blank.
-    if (!comp.begin(geom.backingW, geom.backingH)) return false;
+    if (!comp.begin(geom.backingW, geom.backingH, clip)) return false;
     host.aiRoom.drawInto(comp, r, f);
     if (comp.unsupported) return false;
-    presentToGlCanvas((w, h, sub) => comp.present(w, h, sub), geom, zoom, crop);
+    presentToGlCanvas((w, h, sub) => comp.present(w, h, sub), place, crop);
     return true;
   } catch (e) {
     glAiFailed = true;
     console.warn('[ff] the AI tier WebGL compositor failed; falling back to canvas-2D for this session', e);
     return false;
+  } finally {
+    comp.endClip(); // the context is shared: no early return may leave it scissored
   }
+}
+
+/** Where #screen-gl's present lands for this room box, zoom and phone crop (phoneGlCrop.ts). */
+interface PresentPlacement extends GlPlacement {
+  /** Backing px per room CSS px. */
+  scale: number;
+  /** The room's CSS box, which the uncropped canvas covers exactly. */
+  cssW: number;
+  cssH: number;
+}
+
+function presentPlacement(geom: RoomGeometry, zoom: number, crop: GlCrop | null): PresentPlacement {
+  const s = (window.devicePixelRatio || 1) * zoom;
+  return { ...glPlacement(geom.cssW, geom.cssH, s, crop), scale: s, cssW: geom.cssW, cssH: geom.cssH };
 }
 
 /**
@@ -296,20 +318,17 @@ export function drawAiGpu(
  */
 function presentToGlCanvas(
   present: (w: number, h: number, sub: GlPlacement | null) => void,
-  geom: RoomGeometry, zoom: number, crop: GlCrop | null,
+  p: PresentPlacement, crop: GlCrop | null,
 ): void {
-  const dpr = window.devicePixelRatio || 1;
-  const { cssW, cssH } = geom;
-  const s = dpr * zoom;
-  const p = glPlacement(cssW, cssH, s, crop);
+  const s = p.scale;
   if (glCanvas.width !== p.w || glCanvas.height !== p.h) {
     glCanvas.width = p.w;
     glCanvas.height = p.h;
   }
   glCanvas.style.left = crop ? `${p.x / s}px` : '0';
   glCanvas.style.top = crop ? `${p.y / s}px` : '0';
-  glCanvas.style.width = crop ? `${p.w / s}px` : `${cssW}px`;
-  glCanvas.style.height = crop ? `${p.h / s}px` : `${cssH}px`;
+  glCanvas.style.width = crop ? `${p.w / s}px` : `${p.cssW}px`;
+  glCanvas.style.height = crop ? `${p.h / s}px` : `${p.cssH}px`;
   present(p.fullW, p.fullH, crop ? p : null);
 }
 
