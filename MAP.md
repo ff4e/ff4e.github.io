@@ -86,7 +86,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `phoneControls.ts` | | Phone-only corner controls and the Load/Save/Options/Restart overflow. |
 | `phoneZoom.ts` | | Continuous per-room zoom, temporary two-finger inspection, spring-damped fish-follow and bounded render-resolution buckets. |
 | `phoneViewport.ts` | | Phone camera transforms, viewport-relative gesture coordinates and active-fish following. |
-| `phoneGlCrop.ts` | | Which window of a zoomed room #screen-gl presents, snapped to the full present's pixels. |
+| `phoneGlCrop.ts` | | Which window of a zoomed room #screen-gl presents, snapped to the full present's pixels, and the part of the `ai` tier's ×S composite that window reads. |
 | `phoneUndoFocus.ts` | | Choose the available fish whose move was undone, without mistaking replay consequences for moves. |
 | `activeFishIndicator.ts` | | Shared phone/tablet fish-switch button showing the engine selection; hidden outside live play. |
 | `buttonHaptics.ts` | | Which presses tick on the native iPhone: one delegated listener for every HTML button; the canvas map buttons call `hapticTap` from `main.ts`. |

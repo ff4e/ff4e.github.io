@@ -203,7 +203,10 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // the only way to tell the live `roompole` an F3 keeps from the one in the save.
   // One for `queueLine`: a probe queues a line, crushes a fish and checks the death's
   // Zrus_dialogy dropped it — speakLine plays at once, so it cannot reach the queue.
-  ['src/app/debugHooks.ts', 1663],
+  // Four for `aiClipParity` (two of them imports): a zoomed `ai` frame composites only the
+  // window its cropped present reads, and a wrong window still presents "successfully"
+  // with stale pixels at its edge. Only a clipped-vs-full comparison can see that.
+  ['src/app/debugHooks.ts', 1667],
   // 638. The typed cheat codes, the sprite/film effects and the Tetris minigame. Added
   // when the tripwire below first ran and found it unwatched: it is the one file in
   // `src/app/` that had grown past the threshold without anybody noticing, which is
