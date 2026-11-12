@@ -1,6 +1,6 @@
 /**
  * Release the web build: tag + push, watch the `deploy.yml` run, then verify the
- * live version string on ff4e.github.io.
+ * live version string on fishfillets.net.
  *
  * GitHub builds the site; nothing is built locally. `deploy.yml` triggers on a
  * `v*` tag. This wraps the manual sequence documented in the `fish_fillets_hub`
@@ -41,18 +41,18 @@ const sh = (cmd, opts = {}) =>
 
 function verifyLive() {
   console.log('verifying live site…');
-  const html = sh(`curl -fsS "https://ff4e.github.io/?cb=$(date +%s)"`);
+  const html = sh(`curl -fsS "https://fishfillets.net/?cb=$(date +%s)"`);
   const gateScript = html.match(/\/assets\/game-[^"']+\.js/)?.[0];
   if (!gateScript) die('could not find the gate <script src="/assets/game-*.js"> tag in the live HTML.');
 
-  const gateJs = sh(`curl -fsS "https://ff4e.github.io${gateScript}"`);
+  const gateJs = sh(`curl -fsS "https://fishfillets.net${gateScript}"`);
   // The gate script dynamically imports the real chunk; pull its literal path out
   // rather than assuming a naming convention, since Vite's hash changes per build.
   const mainScript = gateJs.match(/["'](\.?\/?assets\/main-[^"']+\.js)["']/)?.[1];
   if (!mainScript) die(`gate script ${gateScript} did not reference a main-*.js chunk (page structure changed?).`);
   const mainPath = mainScript.startsWith('/') ? mainScript : `/${mainScript.replace(/^\.?\//, '')}`;
 
-  const mainJs = sh(`curl -fsS "https://ff4e.github.io${mainPath}"`);
+  const mainJs = sh(`curl -fsS "https://fishfillets.net${mainPath}"`);
   const version = mainJs.match(/version:"?(1\.0\.\d+)"?/)?.[1] ?? mainJs.match(/v(1\.0\.\d+)/)?.[1];
   if (!version) die(`found ${mainPath} but no version string inside it.`);
   return version;

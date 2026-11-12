@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const html = readFileSync(join(import.meta.dirname, '..', 'index.html'), 'utf8');
-const POLICY = 'https://ff4e.github.io/privacy.html';
+const POLICY = 'https://fishfillets.net/privacy.html';
 
 describe('in-app privacy policy links', () => {
   for (const id of ['feedbar-privacy', 'feedback-privacy']) {

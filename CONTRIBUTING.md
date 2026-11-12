@@ -78,7 +78,9 @@ No third-party review plugin is needed. The web build does not request reviews.
 ## Deploy
 
 - Pushing a `v*` tag triggers the GitHub Actions Pages build (see `.github/workflows/`).
-  The live site is https://ff4e.github.io/.
+  The live site is https://fishfillets.net/ — the custom domain in Settings → Pages, with
+  HTTPS enforced. GitHub Pages 301-redirects https://ff4e.github.io/ (and every path under it)
+  there. The Cloudflare Web Analytics token for that site is the `CF_BEACON_TOKEN` secret.
 
 The web build is published to **GitHub Pages** via `.github/workflows/deploy.yml` (build on
 a pushed version tag `v*`, then Pages deploy — or run it manually via *workflow_dispatch*). Because `copyPublicDir` is disabled (see `vite.config.ts`),
