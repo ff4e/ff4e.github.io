@@ -19,7 +19,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const html = readFileSync('index.html', 'utf8');
-const SITE = 'https://ff4e.github.io/';
+const SITE = 'https://fishfillets.net/';
 
 /** All `<meta>` tags in document order, by `property` or `name`. */
 const metas = (): Map<string, string> => {
@@ -80,7 +80,7 @@ describe('the link preview', () => {
     for (const key of ['og:image', 'og:url', 'twitter:image']) {
       const value = metas().get(key);
       expect(value, key).toBeDefined();
-      expect(new URL(value!).origin, key).toBe('https://ff4e.github.io');
+      expect(new URL(value!).origin, key).toBe('https://fishfillets.net');
     }
     expect(links().get('canonical')).toBe(SITE);
     expect(metas().get('og:url')).toBe(SITE);

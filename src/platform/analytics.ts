@@ -15,7 +15,7 @@ export function initAnalytics(): void {
   const token = import.meta.env.VITE_CF_BEACON_TOKEN;
   if (!import.meta.env.PROD || !token) return;
   const s = document.createElement('script');
-  s.defer = true;
+  s.type = 'module'; // as in the snippet Cloudflare issues for the fishfillets.net site
   s.src = 'https://static.cloudflareinsights.com/beacon.min.js';
   s.setAttribute('data-cf-beacon', JSON.stringify({ token }));
   document.head.appendChild(s);

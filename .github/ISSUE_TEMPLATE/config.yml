@@ -3,7 +3,7 @@
 blank_issues_enabled: false
 contact_links:
   - name: Send feedback from inside the game
-    url: https://ff4e.github.io/
+    url: https://fishfillets.net/
     about: The Options panel has a Send feedback strip that fills a report in for you — build, room and move record included.
   - name: Email instead (no GitHub account needed)
     url: mailto:fish_fillets@icloud.com
