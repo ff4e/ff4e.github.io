@@ -5,21 +5,22 @@
  * them belongs to the backends, not to the scene.
  *
  * Deliberately NOT `src/app/`: that layer is the DOM game shell (menus, panel, subtitles,
- * audio), which a native host would rebuild. Only the pieces below it are reused.
+ * audio), which a native host would rebuild. Only the pieces below it are reused — plus
+ * the two DOM-free app modules the fish pose needs: `fishFrame.ts` and the `gameState.ts`
+ * it reads (see `publish`).
  */
 import { Room } from '../../src/core/room.js';
 import { Script } from '../../src/core/script.js';
-import { StepEngine, MOVE_FRAMES, FALL_FRAMES, TURN_FRAMES } from '../../src/core/stepEngine.js';
+import { StepEngine, MOVE_FRAMES, FALL_FRAMES } from '../../src/core/stepEngine.js';
 import { decodeMoves } from '../../src/core/solutionMoves.js';
-import { Dir } from '../../src/core/dir.js';
 import { roomScript } from '../../src/rooms/index.js';
 import { ROOM_SOLUTIONS } from '../../src/rooms/solutions.js';
 import { parseFfr } from '../../src/data/ffr.js';
 import { ROOMS } from '../../src/data/roomTable.js';
 import { loadAiRoom, type AiRoom, type AiRoomFrame } from '../../src/render/roomAi.js';
-import { TL_PLAV, TL_NAHORU, TL_DOLU, TL_OTOCKA, HL_TLACI, HL_MRK } from '../../src/render/renderRoom.js';
-import { TL_ZAKLAD, type FishFrame } from '../../src/render/roomWalk.js';
-import { FISH_BODY_FILE } from '../../src/render/enhancedArtSource.js';
+import { TL_PLAV, TL_NAHORU, HL_TLACI, HL_MRK } from '../../src/render/renderRoom.js';
+import { fishFrameFor } from '../../src/app/fishFrame.js';
+import { setCount, setEngine, setRoom } from '../../src/app/gameState.js';
 
 /** `src/app/stageGeometry.ts` EXIT_CELLS, restated: that module imports the DOM-bound art layer. */
 const EXIT_CELLS = 5;
@@ -121,38 +122,20 @@ export function replaySolution(s: Scene, ticks: number): number {
 }
 
 /**
- * KresliRybu frame selection — a SPIKE SUBSET of `fishFrameFor` (src/app/main.ts:1220):
- * swim, turn, peek, busy and the idle rest cycle, with the room's `xicht` face. Talking
- * heads, the idle blink and the gspec=2 darkness silhouette are left out; they read
- * app-layer state (lip sync, blink timers, poslMluv).
+ * Hand the scene to `gameState.ts`, which is where the game's own `fishFrameFor` reads the
+ * room, the engine and the tick from. Done per frame rather than once, so the pose can
+ * never be computed from a stale tick.
  *
- * The rest pose is the one that matters: `bodyFrame: 0` means "draw no fish" to the AI
- * walk (src/render/roomAi.ts:1144), so getting it wrong does not look wrong in a still —
- * the fish simply vanish whenever they stop. That shipped in the first cut of this file
- * and the parity harness could not see it, because both of its sides use this function.
+ * The rest of what `fishFrameFor` reads stays at its initial value here, and is NOT the
+ * game's behaviour yet: `blink` and `darkFlicker` are advanced by `tickBlink` in
+ * `src/app/logicTick.ts`, and `poslMluv` by the lip sync in `src/app/main.ts` from the
+ * audio engine — neither module is DOM-free. So the native fish never blink, never talk,
+ * and a darkness room's silhouette never winks out.
  */
-function fishFrame(s: Scene, which: Which): FishFrame {
-  const { engine, room, count } = s;
-  if (engine.phase === 'move' && engine.activeAnimFish === which) {
-    const dir = room.items[which === 'little' ? room.littleIdx : room.bigIdx]!.dir;
-    const tagr = count % 6;
-    const bodyFrame = dir === Dir.up ? TL_NAHORU[tagr]! : dir === Dir.down ? TL_DOLU[tagr]! : TL_PLAV[tagr]!;
-    return { bodyFrame, headFrame: room.tlaceno ? HL_TLACI : room.xicht[which] };
-  }
-  if (engine.phase === 'turn' && engine.activeAnimFish === which) {
-    const tf = Math.min(Math.floor(engine.animFrame / (TURN_FRAMES / 3)), 2);
-    return { bodyFrame: TL_OTOCKA[tf]!, headFrame: 0 };
-  }
-  if (engine.phase === 'kuk' && engine.activeAnimFish === which) return { bodyFrame: TL_OTOCKA[0]!, headFrame: 0 };
-  // A busy fish turns to its partner; with no lip sync here it is always tl_otocka[0].
-  if ((which === 'little' ? room.busy.little : room.busy.big) === 1) return { bodyFrame: TL_OTOCKA[0]!, headFrame: 0 };
-  return { bodyFrame: TL_ZAKLAD[Math.floor(count / 8) % 3]!, headFrame: room.xicht[which] };
-}
-
-/** Every pose this module hands the walk must be one the AI fish set can draw. */
-function checked(f: FishFrame, which: Which): FishFrame {
-  if (!FISH_BODY_FILE[f.bodyFrame]) throw new Error(`scene: ${which} fish has no drawable body for frame ${f.bodyFrame}`);
-  return f;
+function publish(s: Scene): void {
+  setRoom(s.room);
+  setEngine(s.engine);
+  setCount(s.count);
 }
 
 /** The frame description `AiRoom.drawInto` takes — slide as in src/app/framePainter.ts:66. */
@@ -163,7 +146,8 @@ export function frameFor(s: Scene, alpha: number): AiRoomFrame {
   if (engine.phase === 'move') slide = sub / (engine.cellFrames ?? MOVE_FRAMES);
   else if (engine.phase === 'fall') slide = sub / FALL_FRAMES;
   else if (engine.phase === 'exit') slide = (sub / engine.exitFrames) * EXIT_CELLS;
-  return { count: s.count, alpha, slide, fishAnim: { little: checked(fishFrame(s, 'little'), 'little'), big: checked(fishFrame(s, 'big'), 'big') } };
+  publish(s);
+  return { count: s.count, alpha, slide, fishAnim: { little: fishFrameFor('little'), big: fishFrameFor('big') } };
 }
 
 /** The fixed probe frame both sides render for the parity check (mirrors __ff.aiGlParity's pose). */

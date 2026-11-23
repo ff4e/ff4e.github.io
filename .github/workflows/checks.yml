@@ -105,7 +105,9 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: brew install sdl3 webp cmake ninja
+      # Build tools only: SDL3 and libwebp are fetched by native/CMakeLists.txt at pinned,
+      # hashed versions, so a Homebrew upgrade cannot move the parity result.
+      - run: brew install cmake ninja
       - run: npm run typecheck:native
       - run: node native/build-js.mjs
       - run: cmake -S native -B native/build/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release

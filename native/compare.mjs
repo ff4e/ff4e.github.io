@@ -25,8 +25,11 @@ const ROOMS = args.includes('--all')
   : opt('--rooms', '1').split(',').filter(Boolean).map(Number);
 // Rooms the spike cannot render natively yet (native/README.md, "What the spike does not do
 // yet"): 66 throws on backgroundZx; 9, 68 and 72 reach a path in src/render/roomAi.ts that
-// builds a canvas through the DOM ("document is not defined").
-const KNOWN_GAPS = new Set([9, 66, 68, 72]);
+// builds a canvas through the DOM ("document is not defined"). 56 CHODBA does the same, in
+// its played case only: by tick 240 its lights are out (gspec=2), and the fish silhouette
+// (TL_TMA) has no AI art, so drawFish falls back to classicSprite. Its still and wobble
+// cases use the fixed probe pose and are still checked.
+const KNOWN_GAPS = new Set([9, 56, 66, 68, 72]);
 const OUT = opt('--out', join(here, 'build', 'compare'));
 const HOST = join(here, 'build', 'cmake', 'ff4e-native');
 const BUNDLE = join(here, 'build', 'game.js');
