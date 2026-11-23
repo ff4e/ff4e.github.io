@@ -125,7 +125,9 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // 2 289 -> 2 290: Tab swaps the fish too, and a blocked swap (replay, demo, load
   // fast-forward) must still keep focus on the game; only the keyboard router knows the
   // gates. The key test itself is `isSwapKey` in keyTables.ts.
-  ['src/app/main.ts', 2290],
+  // 2 290 -> 2 217: `fishFrameFor` and `headFor` moved to `fishFrame.ts`, DOM-free so a
+  // host without a browser can import the frame selection instead of restating it.
+  ['src/app/main.ts', 2217],
   // 544. The KUFRIK demo, the cutscene movies and the recorded-solution replay — one
   // machine (a CapAction queue driven per logic tick) plus the AI-tier frame cache it
   // needs. It is over the 520 tripwire on arrival rather than by growth: it left

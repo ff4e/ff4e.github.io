@@ -109,6 +109,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `framePacing.ts` | 5.7 k | Whether the next frame must be painted at all, and the perf HUD's counters. |
 | `renderLoop.ts` | 3.7 k | The rAF callback: which screen paints, how many logic steps run, when to sleep. |
 | `framePainter.ts` | 3.5 k | One room frame, all three art tiers, both backends. |
+| `fishFrame.ts` | 0.9 k | Which sprite frame each fish shows this tick (`KresliRybu`): body and head, from the live room and engine. DOM-free at any import depth, so a host without a browser can import it. |
 | `logicTick.ts` | 3.0 k | One 80 ms game step: script, engine, dialogue, death, screensaver. |
 | **Playing a room** | | |
 | `movement.ts` | 2.6 k | The held-key state machine, and replaying a saved record back into a room. |
