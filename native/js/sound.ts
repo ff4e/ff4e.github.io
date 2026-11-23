@@ -14,22 +14,20 @@ import { MLUVI_PRIOR } from '../../src/app/keyTables.js';
 import { requireSoundPkg } from '../../src/app/roomLoad.js';
 import { voiceUrl } from '../../src/audio/ffs2.js';
 import { musicUrl } from '../../src/audio/music.js';
-import { busMultiplier, loadSettings, VOLUMES } from '../../src/core/settings.js';
-
-let musicVolume: number = VOLUMES[0];
+import { busMultiplier, VOLUMES } from '../../src/core/settings.js';
+import { settings } from './seams/playerSettings.js';
 
 /**
  * Build the engine and give it the player's volume levels (the Options sliders' indices,
- * as the browser persisted them; there are no sliders natively yet).
+ * as persisted — by the browser or by the native Options, `optionsModel.ts`). After
+ * `initNativeSettings`, which loads them.
  * restates src/app/playerSettings.ts `export function applyVolumeSettings(` @ a87618fd2222
  */
 export function initSound(): void {
   initAudio();
-  const settings = loadSettings();
   for (const bus of ['effect', 'voice', 'music'] as const) {
     audio.setBusGain(bus, busMultiplier(bus, settings.volume[bus]));
   }
-  musicVolume = VOLUMES[Math.max(0, Math.min(VOLUMES.length - 1, settings.volume.music))]!;
 }
 
 /**
@@ -37,7 +35,8 @@ export function initSound(): void {
  * restates src/app/playerSettings.ts `export function musicLevel(` @ 2b2fb2bb6a51
  */
 export function musicLevel(): number {
-  return musicVolume; // no cheats natively, so never the silent film's 0
+  // No cheats natively, so never the silent film's 0.
+  return VOLUMES[Math.max(0, Math.min(VOLUMES.length - 1, settings.volume.music))]!;
 }
 
 /**

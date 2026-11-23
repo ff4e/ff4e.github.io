@@ -21,15 +21,15 @@
  * The default selection is the room last played if it can still be selected, else the
  * first room not yet solved — so resuming is one press of Ⓐ.
  *
- * Of the corner buttons, Intro and Credits are selectable: Ⓐ on one does what a click on it
- * does (`dispatchMapCorner`) — the intro movie (`introScreen.ts`), or the credits roll over
- * the map (`creditsScreen.ts`), which any button closes. Options and Exit are not: their
- * screens do not exist natively, and a target that does nothing is worse than none. They join
- * `NATIVE_CORNERS` as their screens arrive; the geometry already handles them.
+ * Of the corner buttons, Intro, Credits and Options are selectable: Ⓐ on one does what a
+ * click on it does (`dispatchMapCorner`) — the intro movie (`introScreen.ts`), the credits
+ * roll over the map (`creditsScreen.ts`), which any button closes, or the native Options
+ * (`menus.ts`). Exit is left out, as the controller spec leaves it out: Back at the map is the
+ * way out (`uiInput.ts`).
  *
- * The host (native/host/main.c) turns the gamepad into key codes, so this reads one stream:
- * IJKL (d-pad, left stick), WASD (right stick) and the arrows are directions; Space (Ⓐ) and
- * Enter press; Escape (Ⓑ) backs out.
+ * The router (`uiInput.ts`) hands this key codes for the keyboard, the pad and the remote
+ * alike: IJKL, WASD and the arrows are directions; Space (Ⓐ) and Enter press; Escape (Ⓑ)
+ * backs out.
  */
 import { INFO_FAZE_MS, INFO_SETTLE_FAZE, type InfoButton } from '../../src/render/mapInfo.js';
 import { paintAiMap } from '../../src/render/mapPaintAi.js';
@@ -41,7 +41,7 @@ import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { branchOfRoom, depthOfRoom } from '../../src/data/world.js';
 import { ui } from '../../src/app/screenState.js';
 import { subLang } from './seams/playerSettings.js';
-import { loadAiPlaque, loadMapArt, paintParchmentAi, type MapArt, type MapIo } from './mapArt.js';
+import { loadAiPlaque, loadDesky, loadMapArt, paintParchmentAi, type MapArt, type MapIo } from './mapArt.js';
 import { NativeSurface, decodeImage, type NativeImage } from './nativeSurface.js';
 import { readBytes } from './shims.js';
 import { DirRepeat } from './dirRepeat.js';
@@ -62,10 +62,12 @@ export interface MapScreenHost {
   readonly dismissLegImage: () => void;
   /** The room last played (0 for none), for the default selection. */
   readonly lastRoom: () => number;
+  /** Ⓐ on a corner button (one of `NATIVE_CORNERS`). */
+  readonly openCorner: (action: MapAction) => void;
 }
 
 /** The corner buttons a native host can act on: see the header. */
-const NATIVE_CORNERS: readonly MapAction[] = ['intro', 'credits'];
+const NATIVE_CORNERS: readonly MapAction[] = ['intro', 'credits', 'options'];
 
 const DIRS: Readonly<Record<string, MapStep>> = {
   KeyI: 'up', KeyK: 'down', KeyJ: 'left', KeyL: 'right',
@@ -108,6 +110,35 @@ export function ensureMapArt(): Promise<void> {
   return (artLoad ??= loadMapArt(io, subLang()).then((a) => {
     art = a;
   }));
+}
+
+/**
+ * The subtitle language changed (the native Options): the plaques follow it, as the
+ * browser's `ensureDeskyData` reloads them.
+ */
+export function mapLanguageChanged(): void {
+  const lang = subLang();
+  void ensureMapArt().then(async () => {
+    const desky = await loadDesky(io, lang);
+    if (art && subLang() === lang) art.desky = desky;
+  });
+  for (const p of plaques.values()) if (p) __native.releaseTexture((p.img as NativeImage).id);
+  plaques.clear();
+}
+
+/** Is the map not taking input — its art still loading, or a room launching? */
+export function mapBusy(): boolean {
+  return launch !== null || !art;
+}
+
+/** Is a record panel open over the map? (Back closes it rather than leaving.) */
+export function mapPanelOpen(): boolean {
+  return ui.mapInfoRoom !== null;
+}
+
+/** The selected corner button, if the selection is on one (the legend shows Ⓐ: Options). */
+export function mapSelectedCorner(): MapAction | null {
+  return sel?.kind === 'corner' ? sel.action : null;
 }
 
 /** The map has just come up (`showMap`): pick the selection afresh, drop held input. */
@@ -231,7 +262,7 @@ function press(): void {
 
 /**
  * Ⓐ on a corner button: what a click on it does (daIntro, daCredits, UMain.pas:1064-1135).
- * Options and Exit are not selectable natively (`NATIVE_CORNERS`), so they never get here.
+ * Exit is not selectable natively (`NATIVE_CORNERS`), so it never gets here.
  * restates src/app/mapNav.ts `export function dispatchMapCorner(` @ 39aefac50d91
  */
 function dispatchMapCorner(action: MapAction): void {
@@ -241,6 +272,9 @@ function dispatchMapCorner(action: MapAction): void {
       break;
     case 'credits':
       void openCredits();
+      break;
+    case 'options': // openMapOptions: the native Options (`menus.ts`), through the host
+      host.openCorner(action);
       break;
     default:
       break;
@@ -299,12 +333,17 @@ function plaqueFor(room: number): Awaited<ReturnType<typeof loadAiPlaque>> {
   }
   if (art && !plaqueLoading.has(room)) {
     plaqueLoading.add(room);
-    void loadAiPlaque(io, art, room, subLang())
+    const lang = subLang();
+    void loadAiPlaque(io, art, room, lang)
       .catch((e: unknown) => {
         console.warn(`the AI plaque for room ${room} did not load; the 640×480 one stands in`, e);
         return null;
       })
       .then((p) => {
+        if (subLang() !== lang) {
+          if (p) __native.releaseTexture((p.img as NativeImage).id); // the language changed meanwhile
+          return;
+        }
         plaques.set(room, p);
         while (plaques.size > PLAQUE_CACHE_MAX) {
           const [oldest, old] = plaques.entries().next().value!;

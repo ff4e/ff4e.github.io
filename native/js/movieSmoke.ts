@@ -15,7 +15,8 @@ import { ui } from '../../src/app/screenState.js';
 import { initGame } from './game.js';
 import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
 import { intro, introFrame, loadIntroArt, openSession, playIntroMovies } from './introScreen.js';
-import { routeEvent } from './keyRoute.js';
+import { routeEvent, setExitHandler } from './uiInput.js';
+import { legendItems, legendScreen } from './legend.js';
 import { pinRandom } from './scene.js';
 import { soundPoll } from './sound.js';
 
@@ -25,7 +26,7 @@ const settle = async (n = 20): Promise<void> => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-/** A key press and release, routed as the interactive loop routes them (`keyRoute.ts`). */
+/** A key press and release, routed as the interactive loop routes them (`uiInput.ts`). */
 async function tap(code: string): Promise<void> {
   routeEvent(`+${code}`);
   routeEvent(`-${code}`);
@@ -75,10 +76,11 @@ export async function runMovieSmoke(): Promise<number> {
     openSession();
     check(ui.screen === 'intro' && intro.playing && intro.gated, 'a first run opens on the intro\'s start splash');
     check((await frame()) !== 0, '...which is drawn');
-    for (const k of ['Escape', 'KeyI', 'ArrowDown', 'Backspace']) await tap(k);
+    for (const k of ['PadB', 'PadUp', 'PadDown', 'PadX', 'Escape', 'RemoteBack', 'RemoteLeft']) await tap(k);
     await frame();
-    check(intro.gated && !intro.movie, 'nothing but Ⓐ leaves the splash (Ⓑ, a stick, a d-pad, Ⓧ are ignored)');
-    await tap('Space');
+    check(legendScreen(null, false, false) === null, 'no button legend over the intro (A4: it has its own hint)');
+    check(intro.gated && !intro.movie, 'nothing but Ⓐ leaves the splash (Ⓑ, a stick, a d-pad, Ⓧ, Esc, the remote\'s Back and an edge click are ignored)');
+    await tap('PadA');
     check(!intro.gated && intro.movie?.url === '/data/Movie/logo_ai.mp4', 'Ⓐ starts the AI logo movie');
     check(__native.audioVoices() === 0, '...with the game\'s sound killed (the movie carries its own)');
 
@@ -114,8 +116,8 @@ export async function runMovieSmoke(): Promise<number> {
     check(worst <= 1e-5 && at === Math.round(4 * 22050) * ch,
       `the sound played is the movie's own track from its first sample: ${at / ch} frames in 4 s, max |Δ| ${worst.toExponential(1)}`);
 
-    await tap('KeyB');
-    check(intro.movie?.url === '/data/Movie/intro_ai.mp4' && __native.movieClock() === 0, 'any button skips the logo to the intro, from its start');
+    await tap('RemoteBack');
+    check(intro.movie?.url === '/data/Movie/intro_ai.mp4' && __native.movieClock() === 0, 'any button (the remote\'s Back) skips the logo to the intro, from its start');
     __native.movieAdvance(500);
     await frame();
     check(intro.movie!.pts >= 0 && intro.movie!.pts <= 0.5, `the intro shows its own frames (${intro.movie!.pts.toFixed(3)} s at 0.5 s)`);
@@ -183,8 +185,12 @@ export async function runMovieSmoke(): Promise<number> {
     await settle(50);
     const roll = await frame();
     check(ui.mapOverlay === 'credits' && roll !== 0, 'Ⓐ on it opens the credits roll over the map');
-    await tap('KeyK');
-    check(ui.mapOverlay === 'none' && ui.screen === 'map', 'any button closes it');
+    check(legendItems(legendScreen(null, false, false)!, 'pad').map((i) => i.label).join() === 'Continue',
+      'the legend over the roll is A4\'s "Ⓐ Continue"');
+    let exits = 0;
+    setExitHandler(() => exits++);
+    await tap('RemoteBack');
+    check(ui.mapOverlay === 'none' && ui.screen === 'map' && exits === 0, 'any button closes it — Back too, without leaving the game');
     await tap('Space');
     await settle(50);
     await frame();

@@ -41,6 +41,7 @@ const STEPS = [
   { name: 'compile', build: true, run: arm64('ninja', ['-C', 'native/build/cmake']) },
   { name: 'smoke', run: [host, [...game, '--smoke', 'all', '--smoke-player', '13,70', '--store', 'native/build/smoke-store.json']] },
   { name: 'map-smoke', run: [host, [...game, '--smoke-map', '--store', 'native/build/smoke-map-store.json']] },
+  { name: 'menu-smoke', run: [host, [...game, '--smoke-menus', '--store', 'native/build/smoke-menus-store.json']] },
   { name: 'audio-smoke', run: [host, [...game, '--smoke-audio', '--store', 'native/build/smoke-audio-store.json']] },
   { name: 'movie-smoke', run: [host, [...game, '--smoke-movie', '--store', 'native/build/smoke-movie-store.json']] },
   { name: 'chromium', run: ['npx', ['playwright', 'install', 'chromium']] },

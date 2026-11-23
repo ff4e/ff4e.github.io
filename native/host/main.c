@@ -573,7 +573,7 @@ static void letterbox(int w, int h, Uint32 sw, Uint32 sh, float *ox, float *oy, 
  * the same rect at one texel per window pixel, premultiplied — the subtitles, laid out
  * for exactly that rect (`presentRect`) — and submit the frame.
  */
-static void present_tex(SDL_GPUTexture *src, int w, int h, int overlay, bool overlay_window) {
+static void present_tex(SDL_GPUTexture *src, int w, int h, int overlay, bool overlay_window, int ui) {
   flush_surf();
   end_composite();
   /* Nothing recorded this frame (a surface painted once and shown again, a movie frame
@@ -615,27 +615,48 @@ static void present_tex(SDL_GPUTexture *src, int w, int h, int overlay, bool ove
       SDL_BindGPUFragmentSamplers(rp, 0, &ob, 1);
       SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
     }
+    /* The UI layer (menus, the button legend): the whole window, one texel per pixel. */
+    SDL_GPUTexture *uit = tex_by_id(ui);
+    if (uit) {
+      SDL_GPUViewport full = {0, 0, (float)sw, (float)sh, 0, 1};
+      SDL_SetGPUViewport(rp, &full);
+      SDL_BindGPUGraphicsPipeline(rp, p_overlay);
+      OverlayU uu = {{0, 0}, {tex_w[ui], tex_h[ui]}};
+      SDL_PushGPUFragmentUniformData(cmd, 0, &uu, sizeof uu);
+      SDL_GPUTextureSamplerBinding ub = {uit, s_nearest};
+      SDL_BindGPUFragmentSamplers(rp, 0, &ub, 1);
+      SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
+    }
     SDL_EndGPURenderPass(rp);
   }
   SDL_SubmitGPUCommandBuffer(cmd);
   cmd = NULL;
 }
 
-/* GlAiScreen.present: the composite into the window, with an optional overlay surface. */
+/* The optional texture-id argument `i`: 0 (none) when absent or undefined. */
+static int opt_id(JSContext *ctx, int argc, JSValueConst *argv, int i) {
+  int32_t v = 0;
+  if (argc > i && !JS_IsUndefined(argv[i]) && !JS_IsNull(argv[i])) JS_ToInt32(ctx, &v, argv[i]);
+  return v;
+}
+
+/* GlAiScreen.present: the composite into the window, with an optional overlay surface
+   over the room's rect and an optional UI surface over the whole window. */
 static JSValue n_present(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-  present_tex(comp, comp_w, comp_h, argc > 0 ? ARGI(0) : 0, false);
+  present_tex(comp, comp_w, comp_h, opt_id(ctx, argc, argv, 0), false, opt_id(ctx, argc, argv, 1));
   return JS_UNDEFINED;
 }
 
 /*
  * A Surface2D (the map, a story page) or a movie frame into the window, the same way, with
- * an optional overlay surface the size of the whole WINDOW over it (a movie's hint).
+ * an optional overlay surface the size of the whole WINDOW over it (a movie's hint) and an
+ * optional UI surface over that (the menus and the legend, `uiLayer.ts`).
  */
 static JSValue n_presentTexture(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int id = ARGI(0);
   SDL_GPUTexture *t = tex_by_id(id);
   if (!t) return JS_ThrowTypeError(ctx, "presentTexture: unknown texture");
-  present_tex(t, tex_w[id], tex_h[id], argc > 1 ? ARGI(1) : 0, true);
+  present_tex(t, tex_w[id], tex_h[id], opt_id(ctx, argc, argv, 1), true, opt_id(ctx, argc, argv, 2));
   return JS_UNDEFINED;
 }
 
@@ -649,6 +670,57 @@ static JSValue n_windowSize(JSContext *ctx, JSValueConst self, int argc, JSValue
   JS_SetPropertyUint32(ctx, a, 1, JS_NewInt32(ctx, sh));
   JS_SetPropertyUint32(ctx, a, 2, JS_NewFloat64(ctx, density > 0 ? density : 1));
   return a;
+}
+
+/*
+ * Whether the system owns Back right now (argv[0]: the game is at its top level, the plain
+ * world map). On tvOS that is where App Review requires the remote's Menu/Back to go Home, and
+ * a game must not quit itself: SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS hands controller input to
+ * the system's UI there (SDL_uikitviewcontroller.m), and takes it back everywhere else. Returns
+ * whether the system now owns Back; elsewhere (macOS) it never does, and the game quits.
+ * Unverified until it runs on an Apple TV.
+ */
+static JSValue n_systemBack(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+#ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
+  static int owned = -1;
+  int want = argc > 0 && JS_ToBool(ctx, argv[0]) ? 1 : 0;
+  if (want != owned) {
+    SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, want ? "1" : "0");
+    owned = want;
+  }
+  return JS_NewBool(ctx, want);
+#else
+  (void)argc;
+  (void)argv;
+  return JS_FALSE;
+#endif
+}
+
+/* A text file by plain path (not under --root): the UI layout snapshot. Null when absent. */
+static JSValue n_readText(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  const char *path = JS_ToCString(ctx, argv[0]);
+  if (!path) return JS_EXCEPTION;
+  size_t size = 0;
+  char *data = SDL_LoadFile(path, &size);
+  JS_FreeCString(ctx, path);
+  if (!data) return JS_NULL;
+  JSValue s = JS_NewStringLen(ctx, data, size);
+  SDL_free(data);
+  return s;
+}
+
+/* Write a text file by plain path. Throws when it cannot. */
+static JSValue n_writeText(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  const char *path = JS_ToCString(ctx, argv[0]);
+  if (!path) return JS_EXCEPTION;
+  size_t len = 0;
+  const char *text = JS_ToCStringLen(ctx, &len, argv[1]);
+  if (!text) { JS_FreeCString(ctx, path); return JS_EXCEPTION; }
+  bool ok = SDL_SaveFile(path, text, len);
+  JSValue r = ok ? JS_UNDEFINED : JS_ThrowTypeError(ctx, "could not write %s: %s", path, SDL_GetError());
+  JS_FreeCString(ctx, text);
+  JS_FreeCString(ctx, path);
+  return r;
 }
 
 /* [x, y, w, h, density]: where `present` puts content of w×h in the window, in its pixels. */
@@ -975,24 +1047,29 @@ static SDL_GPUGraphicsPipeline *surf_pipeline(bool dest_in) {
 
 /* ── input ─────────────────────────────────────────────────────────────────────── */
 /*
- * Key transitions for the JS router, as the DOM KeyboardEvent.code strings the browser
- * game's router already reads ("+KeyI" down, "-KeyI" up). The gamepad is mapped onto the
- * same codes, so the game has one router and the controller is "a keyboard":
+ * Input transitions for the JS router ("+Code" down, "-Code" up), oldest first. Three
+ * sources, told apart by the code alone, so the JS side knows which glyphs to show
+ * (native/js/uiInput.ts reads them, and decides what each does on each screen):
  *
- *   d-pad / left stick  little fish  KeyI KeyK KeyJ KeyL
- *   right stick         big fish     KeyW KeyS KeyA KeyD
- *   A (south)           switch fish  Space
- *   Y (north)           undo         Minus
- *   X (west)            restart      Backspace
- *   LB / RB             save / load  F2 / F3
- *   B (east)            back         Escape
+ *   keyboard   the DOM KeyboardEvent.code the browser game's router reads ("KeyI", "F2"…)
+ *   gamepad    Pad*: PadUp PadDown PadLeft PadRight (d-pad and left stick, folded),
+ *              PadRUp PadRDown PadRLeft PadRRight (right stick), PadA PadB PadX PadY,
+ *              PadLB PadRB, PadMenu (☰ start), PadView (⧉ back)
+ *   TV remote  Remote*: RemoteUp RemoteDown RemoteLeft RemoteRight (a click on an edge),
+ *              RemoteSelect (a click in the centre), RemotePlayPause, RemoteBack, and
+ *              RemoteSwipeUp… (a swipe: down and up together, no hold)
  *
- * On the world map the same codes steer the selection (IJKL, WASD), open (Space) and back
- * out (Escape) — native/js/mapScreen.ts.
+ * The Siri Remote reaches SDL on tvOS as a gamepad (SDL_HINT_TV_REMOTE_AS_JOYSTICK, on by
+ * default): its click is A, Play/Pause is X, Menu/Back is B, and the touch surface (or the
+ * click ring's touch) is the left stick's two axes (SDL_mfijoystick.m). A gamepad whose name says
+ * "Remote" is read as one. That mapping is read from SDL's source and has NOT been run on an
+ * Apple TV. On a Mac, `--remote-keys` makes the keyboard a remote instead — see
+ * `remote_key` — so the remote's scheme can be played and tested without one.
  */
 #define EVQ 128
 static char evq[EVQ][24];
 static int evq_n;
+static bool remote_keys; /* --remote-keys */
 
 static void push_event(bool down, const char *code) {
   if (evq_n >= EVQ) return;
@@ -1030,9 +1107,29 @@ static const char *code_of(SDL_Scancode sc, SDL_Keycode key) {
   }
 }
 
+/*
+ * `--remote-keys`: the keyboard as a Siri Remote, for a Mac with no Apple TV. Arrows click
+ * an edge (held = held), Return clicks the centre, P is Play/Pause, Esc or Backspace is
+ * Back, and Shift+arrow swipes. `*swipe` says the code is a swipe (no hold).
+ */
+static const char *remote_key(SDL_Scancode sc, SDL_Keymod mod, bool *swipe) {
+  bool shift = (mod & SDL_KMOD_SHIFT) != 0;
+  *swipe = false;
+  switch (sc) {
+    case SDL_SCANCODE_UP: *swipe = shift; return shift ? "RemoteSwipeUp" : "RemoteUp";
+    case SDL_SCANCODE_DOWN: *swipe = shift; return shift ? "RemoteSwipeDown" : "RemoteDown";
+    case SDL_SCANCODE_LEFT: *swipe = shift; return shift ? "RemoteSwipeLeft" : "RemoteLeft";
+    case SDL_SCANCODE_RIGHT: *swipe = shift; return shift ? "RemoteSwipeRight" : "RemoteRight";
+    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: return "RemoteSelect";
+    case SDL_SCANCODE_P: return "RemotePlayPause";
+    case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_BACKSPACE: return "RemoteBack";
+    default: return NULL;
+  }
+}
+
 /* The gamepad's codes are reference-counted, so the d-pad and the left stick — both the
    little fish — cannot release a direction the other is still holding. */
-#define NPADKEYS 16
+#define NPADKEYS 24
 static struct { const char *code; int held; } padkeys[NPADKEYS];
 
 static void pad_key(const char *code, bool down) {
@@ -1046,16 +1143,18 @@ static void pad_key(const char *code, bool down) {
 
 static const char *button_code(Uint8 b) {
   switch (b) {
-    case SDL_GAMEPAD_BUTTON_DPAD_UP: return "KeyI";
-    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return "KeyK";
-    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return "KeyJ";
-    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return "KeyL";
-    case SDL_GAMEPAD_BUTTON_SOUTH: return "Space";
-    case SDL_GAMEPAD_BUTTON_NORTH: return "Minus";
-    case SDL_GAMEPAD_BUTTON_WEST: return "Backspace";
-    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return "F2";
-    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return "F3";
-    case SDL_GAMEPAD_BUTTON_EAST: return "Escape";
+    case SDL_GAMEPAD_BUTTON_DPAD_UP: return "PadUp";
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return "PadDown";
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return "PadLeft";
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return "PadRight";
+    case SDL_GAMEPAD_BUTTON_SOUTH: return "PadA";
+    case SDL_GAMEPAD_BUTTON_EAST: return "PadB";
+    case SDL_GAMEPAD_BUTTON_WEST: return "PadX";
+    case SDL_GAMEPAD_BUTTON_NORTH: return "PadY";
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return "PadLB";
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return "PadRB";
+    case SDL_GAMEPAD_BUTTON_START: return "PadMenu";
+    case SDL_GAMEPAD_BUTTON_BACK: return "PadView";
     default: return NULL;
   }
 }
@@ -1068,30 +1167,147 @@ static const char *button_code(Uint8 b) {
  */
 typedef struct { SDL_GamepadAxis x, y; const char *code[4]; int held; } Stick; /* held: 0 none, 1..4 = up/down/left/right */
 static Stick sticks[2] = {
-    {SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, {"KeyI", "KeyK", "KeyJ", "KeyL"}, 0},
-    {SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, {"KeyW", "KeyS", "KeyA", "KeyD"}, 0},
+    {SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, {"PadUp", "PadDown", "PadLeft", "PadRight"}, 0},
+    {SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, {"PadRUp", "PadRDown", "PadRLeft", "PadRRight"}, 0},
 };
+static const int STICK_PRESS = 16384, STICK_RELEASE = 11469; /* 0.5 and 0.35 of 32767 */
+
+/* The direction (1..4 up/down/left/right, 0 none) a stick at (ax, ay) holds, given the one it held. */
+static int stick_dir(int ax, int ay, int held) {
+  int dir = 0;
+  if (SDL_abs(ax) >= SDL_abs(ay)) {
+    if (ax <= -STICK_PRESS) dir = 3; else if (ax >= STICK_PRESS) dir = 4;
+  } else {
+    if (ay <= -STICK_PRESS) dir = 1; else if (ay >= STICK_PRESS) dir = 2;
+  }
+  if (!dir && held) {
+    int v = held <= 2 ? ay : ax;
+    if (SDL_abs(v) > STICK_RELEASE && ((held == 1 || held == 3) ? v < 0 : v > 0)) dir = held;
+  }
+  return dir;
+}
 
 static void poll_sticks(void) {
-  const int press = 16384, release = 11469; /* 0.5 and 0.35 of 32767 */
   for (int i = 0; i < 2; i++) {
     Stick *st = &sticks[i];
     int ax = pad ? SDL_GetGamepadAxis(pad, st->x) : 0, ay = pad ? SDL_GetGamepadAxis(pad, st->y) : 0;
-    int dir = 0;
-    if (SDL_abs(ax) >= SDL_abs(ay)) {
-      if (ax <= -press) dir = 3; else if (ax >= press) dir = 4;
-    } else {
-      if (ay <= -press) dir = 1; else if (ay >= press) dir = 2;
-    }
-    if (!dir && st->held) {
-      int v = st->held <= 2 ? ay : ax;
-      if (SDL_abs(v) > release && ((st->held == 1 || st->held == 3) ? v < 0 : v > 0)) dir = st->held;
-    }
+    int dir = stick_dir(ax, ay, st->held);
     if (dir == st->held) continue;
     if (st->held) pad_key(st->code[st->held - 1], false);
     if (dir) pad_key(st->code[dir - 1], true);
     st->held = dir;
   }
+}
+
+/*
+ * The Siri Remote (see the section header), as SDL 3.4 presents it on tvOS 14+ through
+ * `physicalInputProfile` (SDL_mfijoystick.m, IOS_JoystickGetGamepadMapping):
+ *
+ *   - 2nd/3rd generation (a click ring): a click on the ring's edge is that d-pad button
+ *     ("Cardinal Direction Pad Up"… -> DPAD_UP…), a click in the centre is "Button Center"
+ *     -> SOUTH; GCInputButtonA, which fires for any click, is left unmapped by SDL.
+ *   - 1st generation (a touch surface, clickable anywhere): no d-pad buttons; the click is
+ *     GCInputButtonA -> SOUTH, and where the thumb is decides: past half the travel on one
+ *     axis it is that edge, else the centre. That needs ABSOLUTE d-pad values
+ *     (`GCMicroGamepad.reportsAbsoluteDpadValues = YES`), which SDL does not set — by default
+ *     the values are relative to where the thumb first touched, so a click with a resting
+ *     thumb reads as the centre. A tvOS target has to set it (an Objective-C shim); until
+ *     then only a slide-then-click is an edge on that remote.
+ *
+ * A remote with d-pad buttons in its mapping is the ring kind (`SDL_GamepadHasButton`). The
+ * click pressed is the one released, whichever button sent it.
+ *
+ * A deflection with no click is a swipe — but only once it has lasted SWIPE_MS with no click,
+ * because a slide toward an edge and a click there is one press, not a swipe and then a click
+ * (which would step a menu twice). A click inside that window takes the slide's direction.
+ * With absolute values a resting thumb would also read as a deflection; swipes should then
+ * come from motion rather than position. Both are open for the tvOS step: nothing here has met
+ * a real remote.
+ */
+static SDL_Gamepad *remote;
+static const char *remote_click; /* the code the click in progress sent */
+static int remote_swipe;          /* the deflection held, as `Stick.held` */
+static int remote_pending;        /* a deflection not yet sent as a swipe (0 none) */
+static Uint64 remote_pending_at;
+static bool remote_playpause, remote_back; /* held, so a removed remote can let go */
+#define SWIPE_MS 120
+static const char *const REMOTE_EDGE[4] = {"RemoteUp", "RemoteDown", "RemoteLeft", "RemoteRight"};
+static const char *const REMOTE_SWIPE[4] = {"RemoteSwipeUp", "RemoteSwipeDown", "RemoteSwipeLeft", "RemoteSwipeRight"};
+
+/* A click went down as `code` (an edge or the centre), or `code`'s click came up. */
+static void remote_click_edge(const char *code, bool down) {
+  if (down) {
+    if (remote_click) return; /* one click at a time: the ring cannot be pressed twice */
+    remote_pending = 0;       /* a slide just before was this click's, not a swipe */
+    remote_click = code;
+    push_event(true, code);
+  } else if (remote_click == code) {
+    push_event(false, code);
+    remote_click = NULL;
+  }
+}
+
+static void remote_button(Uint8 b, bool down) {
+  switch (b) {
+    case SDL_GAMEPAD_BUTTON_DPAD_UP: remote_click_edge(REMOTE_EDGE[0], down); return;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: remote_click_edge(REMOTE_EDGE[1], down); return;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: remote_click_edge(REMOTE_EDGE[2], down); return;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: remote_click_edge(REMOTE_EDGE[3], down); return;
+    case SDL_GAMEPAD_BUTTON_SOUTH:
+      if (down) {
+        if (remote_click) return;
+        int dir = 0;
+        if (!SDL_GamepadHasButton(remote, SDL_GAMEPAD_BUTTON_DPAD_UP)) { /* 1st gen: where the thumb is */
+          int ax = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY);
+          dir = stick_dir(ax, ay, 0);
+          if (!dir) dir = remote_pending;
+        }
+        remote_click_edge(dir ? REMOTE_EDGE[dir - 1] : "RemoteSelect", true);
+      } else if (remote_click) {
+        remote_click_edge(remote_click, false); /* whatever this click sent */
+      }
+      return;
+    case SDL_GAMEPAD_BUTTON_WEST:
+      remote_playpause = down;
+      push_event(down, "RemotePlayPause");
+      return;
+    case SDL_GAMEPAD_BUTTON_EAST:
+      remote_back = down;
+      push_event(down, "RemoteBack");
+      return;
+    default:
+      return;
+  }
+}
+
+static void poll_remote(void) {
+  if (!remote || remote_click) return; /* a thumb pressing to click is not a swipe */
+  int dir = stick_dir(SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY), remote_swipe);
+  if (dir && dir != remote_swipe) {
+    remote_pending = dir;
+    remote_pending_at = SDL_GetTicks();
+  }
+  remote_swipe = dir;
+  if (remote_pending && SDL_GetTicks() - remote_pending_at >= SWIPE_MS) {
+    push_event(true, REMOTE_SWIPE[remote_pending - 1]);
+    push_event(false, REMOTE_SWIPE[remote_pending - 1]);
+    remote_pending = 0;
+  }
+}
+
+/* A removed remote sends no button-up: let go of whatever it held. */
+static void remote_release_all(void) {
+  if (remote_click) push_event(false, remote_click);
+  if (remote_playpause) push_event(false, "RemotePlayPause");
+  if (remote_back) push_event(false, "RemoteBack");
+  remote_click = NULL;
+  remote_playpause = remote_back = false;
+  remote_swipe = remote_pending = 0;
+}
+
+static bool is_remote(SDL_Gamepad *g) {
+  const char *name = SDL_GetGamepadName(g);
+  return name && SDL_strcasestr(name, "remote") != NULL;
 }
 
 static JSValue n_events(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
@@ -1194,12 +1410,15 @@ static void poll_events(void) {
       case SDL_EVENT_QUIT: quit_requested = true; break;
       /* Unfocused, a held key's keyup never arrives: the game drops it (main.ts's blur). */
       case SDL_EVENT_WINDOW_FOCUS_LOST: push_event(false, "!blur"); break;
-      case SDL_EVENT_GAMEPAD_ADDED:
-        if (!pad) {
-          pad = SDL_OpenGamepad(e.gdevice.which);
-          if (pad) SDL_Log("gamepad: %s", SDL_GetGamepadName(pad));
-        }
+      case SDL_EVENT_GAMEPAD_ADDED: {
+        SDL_Gamepad *g = SDL_OpenGamepad(e.gdevice.which);
+        if (!g) break;
+        if (is_remote(g) && !remote) remote = g;
+        else if (!is_remote(g) && !pad) pad = g;
+        else { SDL_CloseGamepad(g); break; }
+        SDL_Log("%s: %s", g == remote ? "remote" : "gamepad", SDL_GetGamepadName(g));
         break;
+      }
       case SDL_EVENT_GAMEPAD_REMOVED:
         if (pad && SDL_GetGamepadID(pad) == e.gdevice.which) {
           SDL_CloseGamepad(pad);
@@ -1208,25 +1427,43 @@ static void poll_events(void) {
           for (int i = 0; i < NPADKEYS && padkeys[i].code; i++)
             if (padkeys[i].held) { padkeys[i].held = 0; push_event(false, padkeys[i].code); }
           sticks[0].held = sticks[1].held = 0;
+        } else if (remote && SDL_GetGamepadID(remote) == e.gdevice.which) {
+          SDL_CloseGamepad(remote);
+          remote = NULL;
+          remote_release_all();
         }
         break;
       case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
       case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+        bool down = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+        if (remote && SDL_GetGamepadID(remote) == e.gbutton.which) {
+          remote_button(e.gbutton.button, down);
+          break;
+        }
         const char *code = button_code(e.gbutton.button);
-        if (code) pad_key(code, e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
+        if (code) pad_key(code, down);
         break;
       }
       case SDL_EVENT_KEY_DOWN:
       case SDL_EVENT_KEY_UP: {
         if (e.key.repeat) break; /* the game repeats a held key itself (KeyRoom) */
+        bool down = e.type == SDL_EVENT_KEY_DOWN, swipe = false;
+        /* A release is never a swipe, so an edge held while Shift went down still lets go. */
+        const char *rc = remote_keys ? remote_key(e.key.scancode, down ? e.key.mod : 0, &swipe) : NULL;
+        if (rc && swipe) {
+          if (down) { push_event(true, rc); push_event(false, rc); }
+          break;
+        }
+        if (rc) { push_event(down, rc); break; }
         const char *code = code_of(e.key.scancode, e.key.key);
-        if (code) push_event(e.type == SDL_EVENT_KEY_DOWN, code);
+        if (code) push_event(down, code);
         break;
       }
       default: break;
     }
   }
   poll_sticks();
+  poll_remote();
 }
 
 /* The subtitle overlay over the presented composite: premultiplied source-over. */
@@ -1308,8 +1545,8 @@ static void install(JSContext *ctx) {
       {"surfQuad", n_surfQuad, 16},     {"surfClear", n_surfClear, 1},
       {"surfPut", n_surfPut, 2},        {"presentTexture", n_presentTexture, 1},
       {"saveTexture", n_saveTexture, 2}, {"presentRect", n_presentRect, 2},
-      {"windowSize", n_windowSize, 0},
-      {"locale", n_locale, 0},
+      {"locale", n_locale, 0},         {"windowSize", n_windowSize, 0},
+      {"readText", n_readText, 1},     {"systemBack", n_systemBack, 1},     {"writeText", n_writeText, 2},
       {"events", n_events, 0},
       {"storeLoad", n_storeLoad, 1},   {"storeSave", n_storeSave, 2},
       {"storePath", n_storePath, 0},
@@ -1338,8 +1575,15 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[i], "--root") && i + 1 < argc) SDL_strlcpy(root, argv[i + 1], sizeof root);
     if (!strcmp(argv[i], "--store") && i + 1 < argc) SDL_strlcpy(store_path, argv[i + 1], sizeof store_path);
     if (!strcmp(argv[i], "--headless")) headless = true;
+    if (!strcmp(argv[i], "--remote-keys")) remote_keys = true;
   }
 
+#ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
+  /* The design reads the Siri Remote as a gamepad (the input section); stated, not left to
+     SDL's default. Back at the top level goes to the system: `systemBack`. */
+  SDL_SetHint(SDL_HINT_TV_REMOTE_AS_JOYSTICK, "1");
+  SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, "0");
+#endif
   /* The GPU device needs the video subsystem even when no window is ever opened. */
   if (!SDL_Init(headless ? SDL_INIT_VIDEO : (SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))) die("SDL_Init");
   dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, false, NULL);

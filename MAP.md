@@ -65,7 +65,13 @@ others are small enough to read.
   `mapNav.ts`'s intro flow, restated, with the start splash) over `movie.ts` and
   `native/host/movie.c` (the player; the platform decoder behind `movie.h`, AVFoundation in
   `movie_apple.m`); the credits are `native/js/creditsScreen.ts` (`creditsAi.ts`'s roll as one
-  flipped quad).
+  flipped quad). The TV menus:
+  `uiInput.ts` routes the keyboard, pad and remote for every screen, `menus.ts` is the pause
+  menu / confirm / Options / Help state, `optionsModel.ts` persists and applies the options,
+  `uiLayer.ts` draws the window-sized UI layer — `menuPaint.ts`, `optionsPaint.ts` (the original
+  Options face), `helpPaint.ts` (the help typeset from `helpText.ts`), `legend.ts` — through
+  `uiDraw.ts` (which also has the intro splash's shape and text helpers), and `menuSmoke.ts`
+  gates them with `native/ui-layout.snap.json`.
 
 ### Map of `src/app/`
 
