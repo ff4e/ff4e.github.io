@@ -31,6 +31,7 @@ import { blink, darkFlicker, engine, loadmode, setChatter, undoHistory } from '.
 import { step } from '../../src/app/logicTick.js';
 import { heldKeyState } from '../../src/app/movement.js';
 import { armSolve, setSolvemode, solveStatus } from '../../src/app/solveMode.js';
+import { loadSubtitleAssets, subtitleOverlay } from './roomSubtitles.js';
 import { advance, draw, enterRoom, initGame, keyDown, keyUp, nextRoom, roomReady, saveExists, type LeaveReason } from './game.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { pinRandom } from './scene.js';
@@ -58,12 +59,18 @@ async function untilReady(num: number): Promise<void> {
 /**
  * Exercise the draw path on the real flow's state; the pixels are compare.mjs's business.
  * With `--smoke-out DIR` the composite is kept (`DIR/<room>-<what>.rgba`, as compare.mjs
- * writes them) for a look; otherwise it is submitted to no window and dropped.
+ * writes them) for a look, with the subtitles on screen at that moment as a 1280×720 window
+ * would show them (`-subs.rgba`); otherwise it is submitted to no window and dropped.
  */
 function drawOnce(target: NativeAiScreen, num: number, what: string): void {
   if (!draw(target, 0.5)) throw new SmokeFailure(`${name(num)} had nothing to draw in a ready room`);
+  // The subtitles too, as a 1280×720 window would show this room: there is no window.
+  const s = Math.min(1280 / target.width, 720 / target.height);
+  const w = Math.floor(target.width * s), h = Math.floor(target.height * s);
+  const subs = subtitleOverlay(target.width, target.height, 0.5, [Math.floor((1280 - w) / 2), Math.floor((720 - h) / 2), w, h, 1]);
   const args = __native.args();
   const dir = args.includes('--smoke-out') ? args[args.indexOf('--smoke-out') + 1] : undefined;
+  if (dir && subs) __native.saveTexture(subs.id, `${dir}/${num}-${what}-subs.rgba`);
   if (dir) __native.saveComposite(`${dir}/${num}-${what}.rgba`);
   else __native.present();
 }
@@ -180,6 +187,7 @@ export async function runSmoke(spec: string | undefined, target: NativeAiScreen)
   }
   localStorage.clear();
   const store = initGame({ verbose: false, demo: false, onLeave: (num, why) => { left = { num, why }; } });
+  await loadSubtitleAssets();
   const args = __native.args();
   const solves = rooms(spec);
   const players = args.includes('--smoke-player') ? rooms(args[args.indexOf('--smoke-player') + 1]) : [];

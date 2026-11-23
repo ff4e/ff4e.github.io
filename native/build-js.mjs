@@ -36,7 +36,7 @@ const PLATFORM_SEAMS = new Set([...SEAMED].filter((n) => n.startsWith('platform-
  * — through the seams — at every import depth. Adding one here is a claim that it is.
  */
 const REAL = new Set([
-  'fishFrame', 'frameClock', 'gameState', 'initQuiet', 'keyTables', 'logicTick', 'movement',
+  'fishFrame', 'frameClock', 'gameState', 'initQuiet', 'keyTables', 'layout', 'logicTick', 'movement',
   'paintClock', 'panelLight', 'persist', 'phoneUndoFocus', 'replayMode', 'roomActionEvent',
   'roomGates', 'roomLoad', 'saveMigration', 'screenState', 'solveMode', 'undo',
 ]);

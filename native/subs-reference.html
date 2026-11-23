@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>ff4e native — subtitle reference (the browser's DOM subtitles)</title>
+<style>
+  html, body { margin: 0; background: #000; }
+  /* What src/app/dom.ts reads at import. None of it is shown. */
+  #screen, #panel, #panelcol, #room, #info { display: none; }
+</style>
+<canvas id="screen"></canvas>
+<div id="panelcol"><canvas id="panel"></canvas></div>
+<select id="room"></select>
+<div id="info"></div>
+<script type="module" src="/native/js/subsReference.ts"></script>

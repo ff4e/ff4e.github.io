@@ -8,6 +8,15 @@ export interface NativeTexture {
   readonly height: number;
 }
 
+export interface GlyphRaster {
+  readonly w: number;
+  readonly h?: number;
+  readonly x?: number;
+  readonly y?: number;
+  readonly fill?: ArrayBuffer;
+  readonly stroke?: ArrayBuffer;
+}
+
 export interface NativeApi {
   print(s: string): void;
   /** Milliseconds on a monotonic clock. */
@@ -48,8 +57,12 @@ export interface NativeApi {
   /** GlAiScreen.mirrorGlass's pass, with its uniforms in the same order (MIRROR_FS). */
   mirror(mask: number, rx0: number, rx1: number, ry0: number, ry1: number, dx0: number, dx1: number,
     k: number, mx: number, my: number, mw: number, mh: number): void;
-  /** Show the composite in the window (box-filtered to fit). */
-  present(): void;
+  /**
+   * Show the composite in the window (box-filtered to fit, letterboxed). `overlay` is a
+   * surface drawn over the same rect at one texel per window pixel, premultiplied — the
+   * subtitles, laid out for the rect `presentRect` reports.
+   */
+  present(overlay?: number): void;
   /** Write the composite's RGBA (top-down) to `path`, prefixed by u32 w, u32 h. */
   saveComposite(path: string): void;
 
@@ -74,6 +87,28 @@ export interface NativeApi {
   presentTexture(id: number): void;
   /** `saveComposite` for a surface's texture. */
   saveTexture(id: number, path: string): void;
+  /**
+   * Where `present` puts content of `w`×`h` in the window right now: `[x, y, w, h, density]`
+   * in window pixels, `density` being pixels per point. Null without a window (headless).
+   */
+  presentRect(w: number, h: number): [number, number, number, number, number] | null;
+
+  // ── Subtitle text (native/host/text.c, FreeType). Read by native/js/subtitleFonts.ts. ──
+  /** Load a TrueType face; a variable one is set to `weight` on its `wght` axis. Returns its id. */
+  fontLoad(bytes: ArrayBuffer, weight: number): number;
+  /** Each code point's unhinted advance, in em. */
+  fontAdvances(font: number, codepoints: number[]): number[];
+  /** `[ascent, descent, lineGap]` in em, from the face's hhea — what a CSS line box is built of. */
+  fontMetrics(font: number): [number, number, number];
+  /**
+   * One glyph at `px` pixels per em, its pen at (`fx`, `fy`) inside a pixel (y down), as two
+   * `w`×`h` coverage masks (one byte a pixel, top row first) whose top-left is (`x`, `y`)
+   * pixels from the pen's pixel. `fill` is the glyph; `stroke` is the glyph and a stroke of
+   * radius `r` centred on its outline, together. `w` is 0 for a glyph that inks nothing.
+   */
+  fontGlyph(font: number, cp: number, px: number, r: number, fx: number, fy: number): GlyphRaster;
+  /** The user's preferred language as a BCP 47 tag (`cs-CZ`), or null. */
+  locale(): string | null;
 
   // ── Input. ──
   /**

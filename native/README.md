@@ -7,8 +7,8 @@
 > consumes it.
 
 The game **without a browser**. It plays a whole game now — from the world map, room after
-room, with undo, saves, the record panel's Replay and the leg story pages — on the
-AI-upscaled tier, without menus, subtitles or sound yet:
+room, with undo, saves, the record panel's Replay, the leg story pages and the subtitles —
+on the AI-upscaled tier, without menus or sound yet:
 
 - **QuickJS-ng** runs the game's own TypeScript. Nothing is ported: the room, its script and
   the step engine (`src/core/`), the AI-tier room walk (`src/render/`), and the game's own
@@ -24,6 +24,8 @@ AI-upscaled tier, without menus, subtitles or sound yet:
   (`src/render/surface2d.ts`), which is implemented on **SDL GPU** too
   (`native/js/nativeSurface.ts`, `fs_surf` in `native/host/shaders.metal`): see
   "The world map" below.
+- The subtitles are drawn natively too, through `Surface2D` with glyphs from FreeType: see
+  "Subtitles" below.
 - The off-screen canvases the AI tier builds — the classic-sprite fallback for art with
   no AI file, the mirror's glass mask, LODE's wreck — come from an injected factory
   (`src/render/scratchCanvas.ts`). The browser keeps `document.createElement('canvas')`;
@@ -113,17 +115,66 @@ The corner buttons (Intro, Credits, Options, Exit) are not selectable yet: none 
 screens exists natively, and a target that does nothing is worse than none
 (`NATIVE_CORNERS`). The story pages are the upscaled ones (`/enhanced-ai/_story/`).
 
+### Subtitles (`native/js/subtitleLayout.ts`, `subtitleDraw.ts`, `roomSubtitles.ts`)
+
+Native only: the web keeps its DOM subtitles (`src/app/subtitleDom.ts`), unchanged.
+
+What is said, and where its rows are, is the game's own and shared: the talk hook puts each
+line into the room's `SubtitleSystem` (`src/render/subtitles.ts`) exactly as the browser's
+`scriptTalk` does — in the player's language, nothing during a Replay — and `logicTick.step`
+scrolls and expires the rows. That system wraps the text against the original bitmap font
+and resolves the speaker's colour; `src/render/subtitleGeom.ts` holds every rule the vector
+renderer measures from (size, readable band, fit-to-room, baseline, wave, stroke, bevel).
+Both are imported, not restated.
+
+`subtitleLayout.ts` restates the part of `syncDomSubtitles` that composes those rules — its
+desktop branch (a TV is neither a phone nor a tablet): the font size held in the band, one
+fit per message decided when its rows first appear, the glyphs laid out one advance at a time
+and centred, the baseline, the wave as the compositor runs it (`waveDy` sampled into 25
+keyframes and interpolated), the bevel placed as the CSS gradient lands on the fill span, and
+the `ai` tier's shrink about the layer's bottom centre. In the web renderer that arithmetic is
+welded to DOM mechanics (a hidden span measures, `text-align` centres, Web Animations wave,
+a CSS transform shrinks), so it is pinned rather than shared: `test/native-restated.test.ts`
+fails on any change to `syncDomSubtitles` until the copy is re-read. A unit test
+(`test/native-subtitle-layout.test.ts`) holds the copy to `subtitleGeom`.
+
+`subtitleDraw.ts` draws that layout with `Surface2D.fillMask` — a quad whose texel alpha is
+coverage, filled with a colour — the one operation added to the interface for it. Each glyph is
+two coverage masks from **FreeType** (`native/host/text.c`): the glyph, and the glyph with the
+outline `-webkit-text-stroke` paints under it (its stroker, centred, Skia's miter limit). They
+are rasterised at the size they are shown at, the pen kept to a quarter pixel, and cached in an
+atlas; the outline goes down in `rgb(5,5,12)`, then the fill one colour per device row (the
+bevel is a vertical gradient), glyph by glyph as the browser layers them. FreeType rather than
+stb_truetype because the faces are variable fonts drawn at weight 500 and stb_truetype draws
+only a font's default instance (Mulish's is a hairline 200); FreeType 2.15.0 is fetched and
+pinned by SHA-256 like the other dependencies, built without its optional libraries.
+
+In the game the layer is laid out for the rect the window shows the room in (`presentRect`):
+the room's on-screen box, the text sized from a stage that is the whole window (no panel, no
+margins: `computeStageScale`), at one texel per window pixel, and `present(overlay)` draws it
+over the room. The subtitle language and on/off are the browser's `ff.options` from the store,
+defaulting as the browser does on a device that is not a desktop: Czech on a Czech system
+(`locale`), else English. The face is `ff.subfont`, the browser's pick, Mulish by default.
+There is no way to change either natively yet (the Options screen is not built).
+
+Approximate by nature, against the browser's own shaping and scaler — see
+`compare-subs.mjs` below for how close, and how a wrong one is caught. Also not reproduced:
+the browser eases a row's 2 px scroll over a tick (a CSS transition); natively a row steps,
+and the wave runs on the game's clock plus the frame's fraction of a tick rather than on the
+compositor's.
+
 ## Build and run (macOS, Apple silicon)
 
     brew install cmake ninja
     npm run typecheck:native                                   # native/js against current src/
     node native/build-js.mjs                                   # -> native/build/game.js
     cmake -S native -B native/build/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
-    ninja -C native/build/cmake                                # QuickJS-ng, SDL3, libwebp
+    ninja -C native/build/cmake                                # QuickJS-ng, SDL3, libwebp, FreeType
     native/build/cmake/ff4e-native native/build/game.js --root public --room 3
 
-CMake fetches and builds the three C dependencies at pinned versions (QuickJS-ng v0.17.0,
-SDL 3.4.20, libwebp 1.6.0), each from a source archive checked by SHA-256, statically. A clean configure and build
+CMake fetches and builds the four C dependencies at pinned versions (QuickJS-ng v0.17.0,
+SDL 3.4.20, libwebp 1.6.0, FreeType 2.15.0), each from a source archive checked by SHA-256,
+statically. A clean configure and build
 takes under a minute. Nothing from Homebrew but the build tools is used, so a package
 upgrade cannot change the pixels `compare.mjs` checks.
 
@@ -177,7 +228,10 @@ key through the router the keyboard and the gamepad use, with a save (F2), two u
 (F3) and an undo into the loaded history on the way, each landing checked against the
 record it must land on, and then finished: 72 runs. One frame per room is drawn from the
 real flow's state. `--store` is required and wiped: a smoke run never touches the player's
-progress. `--smoke-out DIR` keeps those frames.
+progress. `--smoke-out DIR` keeps those frames, and the subtitles on screen at that moment as a
+1280×720 window would show them (`-subs.rgba`): the smoke runs the subtitles too — every line
+the rooms say goes through the real `SubtitleSystem`, and each drawn frame lays them out and
+rasterises them.
 
 Each run starts as it would alone — Math.random seeded per room, the chatter history, blink
 state and the room's solved flag put back to rest — so `--smoke N` (or `--smoke-player N`)
@@ -270,12 +324,56 @@ room sweep.
 The story pages are one opaque nearest blit of the upscaled page — the exact path — and are
 not compared separately.
 
+## Is it the same text? `native/compare-subs.mjs`
+
+    node --import tsx native/compare-subs.mjs                  # or --cases wave,retina
+    node --import tsx native/compare-subs.mjs --self-test      # the gate must catch wrong frames
+
+Seven subtitle states (`native/js/subtitleScene.ts`): a room's palette and screen, lines from
+the game's subtitle files said at given ticks, shown at a given tick in a 1280×720 window. Each is
+built by the game's `SubtitleSystem` and drawn twice — by the browser's real renderer,
+`syncDomSubtitles`, in its real layer (`native/subs-reference.html`, screenshotted, every
+wave animation paused at the case's tick), and by the native one into a GPU surface — over a
+mid grey, so the dark outline counts.
+
+Text from two rasterisers is never byte-identical (CoreText draws the browser's, FreeType the
+native host's; Chromium also composites each glyph as a layer), so this is a tolerance gate,
+built to fail on the wrong text, place or colour rather than on two scalers disagreeing:
+
+- **lines**: the ink split into horizontal bands; the same number, each band's ink box within
+  1.5 CSS px of the browser's on every edge (extent, centring, baseline, size, how far a wave
+  has got);
+- **shape**: both blurred by a CSS pixel, the difference averaged over a 7×7-CSS-px window, the
+  worst window at most 38 of 255. Two scalers spread their disagreement thinly along every edge;
+  a wrong letter, a missing outline or a misplaced glyph concentrates it;
+- **colour**: each band's mean fill colour within 10 of 255 per channel.
+
+`--self-test` also draws each case wrong — one letter changed, the text two device pixels low,
+the speaker colour's channels swapped, the text 6% larger, no outline, and (mid-wave) the clock a
+tick late — and fails unless every one is rejected. Measured on an M-series Mac:
+
+| case | what it covers | box | local Δ | colour Δ |
+| --- | --- | --- | --- | --- |
+| two-speakers | Czech diacritics, both fish's colours | 0 | 17.8 | 3.7 |
+| wrapped | a room as big as the stage: long lines wrapped and stacked, each message fitted smaller; a digit-coded speaker | 1 | 24.8 | 5.2 |
+| quotes | `"` and `` ` `` drawn as … and ’ | 1 | 20.7 | 3.0 |
+| wave | mid-wave, letter by letter | 0 | 14.6 | 3.0 |
+| narrow | the narrowest room (285 px), wrapped to its width | 0 | 19.4 | 4.0 |
+| retina | two speakers at 2 pixels a point | 0.5 | 29.6 | 0.3 |
+| freesans | the original FreeSans Bold (a face with a line gap) | 1 | 21.1 | 4.2 |
+
+The wrong frames measure at least local Δ 47.1 (one letter, `o`→`e`), colour Δ 35.3 or box
+2 px: 36 of 36 caught. What it cannot see: a colour wrong by less than ~10/255, and anything
+the two rasterisers would both draw (it is not a check of the fonts themselves). CI runs it,
+with the self-test, after the map comparison.
+
 ## What it does not do yet
 
-- **Menus (Options, Credits, the intro), the panel, subtitles, sound, video.** The map's
-  corner buttons are therefore not selectable. A room's dialogue still runs
-  (scripts wait on it as they do in the browser), but every line lasts the browser's
-  fallback for a line without audio (`DEFAULT_LINE_TICKS`), is not shown, and is not heard.
+- **Menus (Options, Credits, the intro), the panel, sound, video.** The map's corner buttons
+  are therefore not selectable. A room's dialogue runs and is subtitled (scripts wait on it
+  as they do in the browser), but every line lasts the browser's fallback for a line without
+  audio (`DEFAULT_LINE_TICKS`) and is not heard. With no Options screen, the subtitle mode and
+  face can only come from the store.
   Room entry takes the path the browser's boot load does: art and room data only. Sound is
   the `AudioBackend` in `src/audio/audioBackend.ts` to implement: the policy in
   `src/audio/audio.ts` already talks to nothing else, and that file says what a mixer has to

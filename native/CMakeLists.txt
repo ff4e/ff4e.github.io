@@ -41,6 +41,23 @@ FetchContent_Declare(libwebp
   EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(SDL3 libwebp)
 
+# FreeType rasterises the subtitle glyphs (native/host/text.c). Not stb_truetype: the
+# subtitle faces are VARIABLE fonts drawn at weight 500, and stb_truetype renders only a
+# font's default instance (Mulish's is 200, a hairline). FreeType applies the weight axis
+# (gvar/HVAR), and its stroker draws the subtitle outline. Built without its optional
+# dependencies: the four faces are plain TrueType, read from memory.
+foreach(opt ZLIB BZIP2 PNG HARFBUZZ BROTLI)
+  set(FT_DISABLE_${opt} ON CACHE BOOL "" FORCE)
+endforeach()
+FetchContent_Declare(freetype
+  # The project's two release sites, tried in turn; the hash is the same file's.
+  URL https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz
+      https://downloads.sourceforge.net/project/freetype/freetype2/2.15.0/freetype-2.15.0.tar.xz
+  URL_HASH SHA256=93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(freetype)
+
 # The Metal shaders are compiled at runtime by SDL from MSL source, embedded here.
 set(SHADER_SRC ${CMAKE_CURRENT_SOURCE_DIR}/host/shaders.metal)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${SHADER_SRC})
@@ -48,6 +65,6 @@ file(READ ${SHADER_SRC} SHADER_HEX HEX)
 string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," SHADER_BYTES "${SHADER_HEX}")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/shaders_msl.h "static const char SHADERS_MSL[] = {${SHADER_BYTES} 0x00};\n")
 
-add_executable(ff4e-native host/main.c)
+add_executable(ff4e-native host/main.c host/text.c)
 target_include_directories(ff4e-native PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${libwebp_SOURCE_DIR}/src)
-target_link_libraries(ff4e-native PRIVATE qjs SDL3::SDL3-static webpdecoder)
+target_link_libraries(ff4e-native PRIVATE qjs SDL3::SDL3-static webpdecoder freetype)

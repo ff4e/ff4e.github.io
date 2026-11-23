@@ -27,15 +27,17 @@ import {
   BRANCHES, RES_REACHABLE, REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, computeResena, depthOfRoom,
 } from '../../src/data/world.js';
 import {
-  activeScript, engine, ffr, hracNespi, loadmode, pokus, poslMluv, prevKostra, room, clearUndoHistory, setActiveScript,
-  setCount, setDeathState, setEngine, setLoadmode, setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, talkIdx,
+  activeScript, count, engine, ffr, fftEntries, font, hracNespi, loadmode, pokus, poslMluv, prevKostra, room, subs,
+  clearUndoHistory, setActiveScript, setCount, setDeathState, setEngine, setLoadmode, setReplaymode, setRoom, setRoomDepth,
+  setScreenShoveX, setSubs, talkIdx,
 } from '../../src/app/gameState.js';
+import { SubtitleSystem } from '../../src/render/subtitles.js';
 import { initQuiet } from '../../src/app/initQuiet.js';
 import { MLUVI_PRIOR, KEYS, ARROWS, NOOP_SCRIPT } from '../../src/app/keyTables.js';
 import { armChatter, initLogicTick, step } from '../../src/app/logicTick.js';
 import { beginHeldMove, clearHeldKey, initMovement, releaseHeldKey, restartRoom, restore, wallShove } from '../../src/app/movement.js';
 import { openSaveStore } from '../../src/app/persist.js';
-import { replaySettleDue } from '../../src/app/replayMode.js';
+import { inReplay, replaySettleDue } from '../../src/app/replayMode.js';
 import { initRoomLoad, loadRoom } from '../../src/app/roomLoad.js';
 import { atRest, fishBusy } from '../../src/app/roomGates.js';
 import { ui } from '../../src/app/screenState.js';
@@ -47,7 +49,9 @@ import { endShowmode, inShowmode } from './seams/cutscene.js';
 import { roomLoading } from './seams/framePacing.js';
 import { onLeaveRoom, returnFromRoom } from './seams/mapNav.js';
 import { DEFAULT_LINE_TICKS, LOGIC_MS } from './seams/stageGeometry.js';
+import { initNativeSettings, subLang, subsOn } from './seams/playerSettings.js';
 import { aiFrame } from './frame.js';
+import { globalLine } from './roomSubtitles.js';
 import { closeLegPage, initMapScreen, mapArrived, openLegPage } from './mapScreen.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { loadStore } from './shims.js';
@@ -101,19 +105,29 @@ function setInfo(): void {
 }
 
 /**
- * dialogy's talk hook. With no audio there is no voice to time a line by, so every line is
- * the browser's fallback length for a line without audio (`DEFAULT_LINE_TICKS`).
+ * dialogy's talk hook: show the line's subtitle, as the browser's does. With no audio there
+ * is no voice to time a line by, so every line is the browser's fallback length for a line
+ * without audio (`DEFAULT_LINE_TICKS`). A best-solution replay shows nothing.
  * restates src/app/main.ts `function scriptTalk(` @ db999691d54e
  */
-function talk(_name: string, _prior: number): number {
+function talk(name: string, prior: number): number {
+  if (inReplay()) return DEFAULT_LINE_TICKS;
+  const entry = fftEntries.find((e) => e.name === name) ?? globalLine(name);
+  if (entry && subs && subsOn()) {
+    const t = subLang() === 'cz' ? entry.cz : entry.en;
+    // globtit (Talk, URoom.pas:654): LODE's announced coordinate goes in for the '@'.
+    const text =
+      t.text.includes('@') && activeScript ? t.text.replace('@', activeScript.s.globtit) : t.text;
+    if (text) subs.newSubtitle(text, t.color, count, prior);
+  }
   return DEFAULT_LINE_TICKS;
 }
 
 /**
  * `main.ts`'s `buildRoom`, minus what the native host does not have: audio (the restart's
  * KillExcept and the sound hooks), the cheats (sprite, water, silent film, hooks), the
- * subtitles, the store review and KUFRIK's demonstration and briefcase cutscene (their
- * script callbacks stay unset). Everything that decides how the room PLAYS is here, in
+ * store review and KUFRIK's demonstration and briefcase cutscene (their script callbacks
+ * stay unset). Everything that decides how the room PLAYS is here, in
  * the same order.
  * restates src/app/main.ts `function buildRoom(` @ 95a7c5e6b334
  */
@@ -127,8 +141,10 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
   hooks.clear();
   if (!carryPole) clearUndoHistory();
   setScreenShoveX(0);
+  const keptSubs = carried.length > 0 ? subs?.rebase(count) : undefined; // carried lines keep theirs
   setCount(0);
-  setSubs(null);
+  const wall = built.bitmaps[built.wallItem.bmp];
+  setSubs(keptSubs ?? (font && wall ? new SubtitleSystem(font, ffr.palette, ffr.width, wall.w, wall.h) : null));
   talkIdx.little = 0;
   talkIdx.big = 0;
   poslMluv.little = -1;
@@ -333,8 +349,7 @@ function leaveRoom(why: LeaveReason): void {
 
 /**
  * Show the world map, tearing the room down as the browser does — minus what is audio
- * (KillSnd, the menu music), the subtitles and the store review, which the native host has
- * not got.
+ * (KillSnd, the menu music) and the store review, which the native host has not got.
  * restates src/app/mapNav.ts `export function showMap(` @ 5407b541588e
  */
 export function showMap(): void {
@@ -348,6 +363,7 @@ export function showMap(): void {
   }
   ui.mapRevealStart = performance.now(); // restart the reveal animation (Depth := -3)
   activeScript?.s.clearDialog(); // zrus_dialogy: drop the pending speech queue
+  subs?.clear(); // ZrusTitulky: clear any on-screen subtitle
   poslMluv.little = -1;
   poslMluv.big = -1;
   mapArrived();
@@ -407,6 +423,7 @@ export async function showLegImage(leg: number, pending?: { room: number; replay
     engine.winCountdown = 0;
   }
   activeScript?.s.clearDialog(); // zrus_dialogy
+  subs?.clear(); // ZrusTitulky
 }
 
 /**
@@ -464,6 +481,7 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
   opts = o;
   loadStore(); // first, and loudly: persist.ts would swallow an unreadable store
   store = openSaveStore();
+  initNativeSettings(__native.locale());
   ui.screen = 'map';
   initMovement({ buildRoom, endShowmode, hracNespi, setInfo });
   initRoomLoad({ buildRoom, endShowmode, ffrUrl, solved: store.solved });

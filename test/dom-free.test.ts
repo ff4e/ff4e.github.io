@@ -7,7 +7,10 @@
  *     renderers;
  *   - `mapPaintAi.ts` and `zoomedInfoPanel.ts`: one frame of the `ai` world map, painted
  *     through `Surface2D` from state the caller hands in (`mapDraw.ts` is the page's caller);
- *   - `mapSelection.ts`: where a controller's selection goes on that map.
+ *   - `mapSelection.ts`: where a controller's selection goes on that map;
+ *   - `subtitles.ts` (the lines, their rows and speaker colours) and the native subtitle
+ *     layout and drawing built on it (native/js/subtitleLayout.ts, subtitleDraw.ts) — the
+ *     browser keeps DOM text, so nothing on the web would notice a document reach there.
  *
  * That only works while nothing a module pulls in at RUNTIME reaches for the document. A browser global used inside a
  * function would import cleanly in node and fail only when called, so this walks the
@@ -91,6 +94,9 @@ const DOM_FREE = [
   'src/render/mapPaintAi.ts',
   'src/render/zoomedInfoPanel.ts',
   'src/render/mapSelection.ts',
+  'src/render/subtitles.ts',
+  'native/js/subtitleLayout.ts',
+  'native/js/subtitleDraw.ts',
 ];
 
 describe('DOM-free drawing modules', () => {

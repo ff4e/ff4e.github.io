@@ -56,8 +56,11 @@ others are small enough to read.
 - **`test/`** — the unit and integration suites; **`test/ui/`** the browser probes. See
   [`TESTING.md`](TESTING.md).
 - **`native/`** — **experimental, not shipped**: a browser-free host spike (QuickJS-ng + SDL3 GPU)
-  that runs the AI tier from `src/` natively — rooms and the world map — aimed at Apple TV and
-  consoles. Nothing in `src/` imports it. See [`native/README.md`](native/README.md).
+  that runs the AI tier from `src/` natively — rooms, their subtitles and the world map — aimed
+  at Apple TV and consoles. Nothing in `src/` imports it. See [`native/README.md`](native/README.md):
+  the subtitles are `native/js/subtitleLayout.ts` (where the glyphs go, restating
+  `subtitleDom.ts`'s desktop layout), `subtitleDraw.ts` (FreeType glyphs, `native/host/text.c`,
+  through `Surface2D.fillMask`) and `roomSubtitles.ts` (the game's per-frame layer).
 
 ### Map of `src/app/`
 
@@ -155,7 +158,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and where an asset failure is turned into a surface — the fatal screen, the note or nothing, chosen by the asset's TIER. The screen is generic (its one action is Reload whichever file broke); the asset's name goes to the log. Only absence BY DESIGN still falls back quietly. |
 | `loadNote.ts` | 1.2 k | The `shouldHave` tier's surface: a non-blocking note in the `#notes` rail with Try again and Dismiss, for a load the game can continue without but the player would otherwise be misled about. |
-| `subtitleDom.ts` | 5.0 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. |
+| `subtitleDom.ts` | 5.0 k | Subtitles as DOM text, animated by the compositor — the renderer for every tier that does not bake them, one layer each for the room and a cutscene. Its desktop layout is restated, pinned, by the native host (`native/js/subtitleLayout.ts`). |
 | **Art, audio and settings** | | |
 | `art.ts` | 5.8 k | Which room's art is loaded, what has been remembered about it, and whether the frame is still holding for it. |
 | `enhancedLoad.ts` | 1.1 k | Fetching and decoding one room's enhanced art. A pure function of a room name — it remembers nothing. |
@@ -212,8 +215,8 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `glRoomAi.ts` | 8.2 k | The GPU compositor for the `ai` tier, from straight RGBA at ×S. Holds `BG_FS`, the water shader `tools/mutate-gl-room-ai.mjs` mutates. |
 | `glCommon.ts` | 1.1 k | The WebGL2 plumbing both of the above share. |
 | **Screens and chrome** | | |
-| `surface2d.ts` | 1.1 k | `Surface2D`, the 2D drawing interface the screens around the room draw through (today the `ai` world map, its record panel, plaques and parchment), cut so each operation is one GPU quad. Plus the injectable factory for its off-screen surfaces. |
-| `canvasSurface2d.ts` | 0.7 k | The web's `Surface2D`: each call is the canvas-2D call the screens made before, so the picture is unchanged by construction. |
+| `surface2d.ts` | 1.5 k | `Surface2D`, the 2D drawing interface the screens around the room draw through (today the `ai` world map, its record panel, plaques and parchment, and the native subtitles' glyphs via `fillMask`), cut so each operation is one GPU quad. Plus the injectable factory for its off-screen surfaces. |
+| `canvasSurface2d.ts` | 0.8 k | The web's `Surface2D`: each call is the canvas-2D call the screens made before, so the picture is unchanged by construction. `fillMask` (native text) goes through a scratch canvas; nothing on the web calls it. |
 | `worldMap.ts` | 2.3 k | The branch map (`UMain.pas PaintBox1Paint`). |
 | `mapInfo.ts` | 3.7 k | The map's record info panel (krokoměr), and the geometry + cutout for drawing it enlarged on a phone. |
 | `mapPaintAi.ts` | 2.2 k | One frame of the `ai` world map, painted through `Surface2D` from state the caller hands in — map, balls, panel art, plaque, the scaled-up native overlay, a controller's selection ring, the parchment. DOM-free at every depth, so the native host paints the same frame (`test/dom-free.test.ts`). |
