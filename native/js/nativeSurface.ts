@@ -113,6 +113,19 @@ export class NativeSurface implements Surface2D {
     this.quad(0, x, y, w, h, 0, 0, 1, 1, c(16), c(8), c(0), a);
   }
 
+  fillMask(
+    mask: Image2D,
+    sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    rgb: number,
+  ): void {
+    // The mask is premultiplied white × coverage, so the quad's colour multiplier is the
+    // whole of the tint: (c·r, c·g, c·b, c) at alpha 1.
+    const a = this.st.alpha;
+    const c = (shift: number): number => (((rgb >> shift) & 255) / 255) * a;
+    this.quad(texOf(mask), dx, dy, dw, dh, sx / mask.width, sy / mask.height, (sx + sw) / mask.width, (sy + sh) / mask.height, c(16), c(8), c(0), a);
+  }
+
   clear(): void {
     __native.surfClear(this.id);
   }

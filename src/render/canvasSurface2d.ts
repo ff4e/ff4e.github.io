@@ -78,6 +78,28 @@ export class CanvasSurface2D implements Surface2D {
     this.ctx.fillRect(x, y, w, h);
   }
 
+  /**
+   * Coverage × colour, through a scratch canvas: the mask's rect is copied there, tinted with
+   * 'source-in', and drawn back. Not a context call the screens made — nothing on the web
+   * draws through it (see `Surface2D.fillMask`).
+   */
+  fillMask(
+    mask: Image2D,
+    sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    rgb: number,
+  ): void {
+    const tint = createScratchCanvas();
+    tint.width = Math.max(1, Math.ceil(sw));
+    tint.height = Math.max(1, Math.ceil(sh));
+    const t = tint.getContext('2d')!;
+    t.drawImage(source(mask), sx, sy, sw, sh, 0, 0, sw, sh);
+    t.globalCompositeOperation = 'source-in';
+    t.fillStyle = `#${rgb.toString(16).padStart(6, '0')}`;
+    t.fillRect(0, 0, sw, sh);
+    this.ctx.drawImage(tint, 0, 0, sw, sh, dx, dy, dw, dh);
+  }
+
   clear(): void {
     this.ctx.save();
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);

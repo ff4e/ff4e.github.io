@@ -11,6 +11,10 @@
  *   - `drawImage` / `drawImageRect`: one textured quad, source rect → dest rect, through a
  *     nearest (`setSmoothing(false)`) or bilinear (`setSmoothing(true)`) sampler.
  *   - `fillRect`: one untextured quad in a solid colour.
+ *   - `fillMask`: one textured quad whose texel ALPHA is coverage, filled with a solid
+ *     colour — the same quad as `drawImageRect` with the colour as its multiplier. It is how
+ *     native subtitles draw text (native/js/subtitleDraw.ts): their glyphs are coverage
+ *     masks the host rasterises, and the speaker colour and the bevel are this op's colour.
  *   - `setAlpha`: multiplies every later quad's alpha (a uniform or a vertex colour).
  *   - `setBlend`: `'source-over'` is premultiplied over; `'destination-in'` keeps the
  *     destination only where the source is opaque — blend factors (src ZERO, dst SRC_ALPHA)
@@ -45,9 +49,15 @@
  *     alpha (aiPanelArt's shadow), which the canvas rounds through premultiplied storage.
  *     (native/js/nativeCanvas.ts already emulates that rounding for the room's scratch
  *     canvases; a GPU surface would need the same, or a tolerance.)
+ *   - `fillMask` is exact on a GPU (premultiplied coverage × colour) and only close on a
+ *     canvas, which composites it through a scratch canvas. Nothing on the web draws text
+ *     through it: web subtitles are DOM text (src/app/subtitleDom.ts). TEXT itself is never
+ *     identical across hosts — what a glyph covers is the host's rasteriser, not the
+ *     browser's shaping and scaler — so native subtitles are compared to the browser's
+ *     within a tolerance (native/compare-subs.mjs), not byte for byte.
  * Native parity tests should set their expectation per path accordingly.
  *
- * What is deliberately NOT here: paths, text, gradients, patterns, filters, shadows, any
+ * What is deliberately NOT here: paths, text layout, gradients, patterns, filters, shadows, any
  * other composite mode, reading pixels back. None of the ported screens need them, and each
  * one is a thing a native host would have to emulate rather than map. Add an operation when
  * a screen needs it, with the GPU mapping beside it in this list.
@@ -89,6 +99,16 @@ export interface Surface2D extends Image2D {
   ): void;
   /** A solid rectangle in `rgb` (0xRRGGBB), at the current alpha. */
   fillRect(x: number, y: number, w: number, h: number, rgb: number): void;
+  /**
+   * The source rect of `mask` used as coverage (its alpha), stretched onto the dest rect and
+   * filled with `rgb` (0xRRGGBB) at the current alpha. The mask's colour is ignored.
+   */
+  fillMask(
+    mask: Image2D,
+    sx: number, sy: number, sw: number, sh: number,
+    dx: number, dy: number, dw: number, dh: number,
+    rgb: number,
+  ): void;
   /** The whole surface to transparent, whatever the current transform. */
   clear(): void;
   /** Replace the whole surface with `rgba` (width × height × 4, unpremultiplied RGBA). */
