@@ -53,6 +53,9 @@ others are small enough to read.
   it before trusting its touch numbers. `measure-touchbar-edge.mjs` has the same problem.
 - **`test/`** — the unit and integration suites; **`test/ui/`** the browser probes. See
   [`TESTING.md`](TESTING.md).
+- **`native/`** — **experimental, not shipped**: a browser-free host spike (QuickJS-ng + SDL3 GPU)
+  that runs the AI tier from `src/` natively, aimed at Apple TV and consoles. Nothing in `src/`
+  imports it. See [`native/README.md`](native/README.md).
 
 ### Map of `src/app/`
 

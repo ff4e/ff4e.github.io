@@ -87,3 +87,39 @@ jobs:
       - run: npm run test
       # Not covered by typecheck: bundling, asset resolution, esbuild-only failures.
       - run: npm run build
+
+  # The experimental native host (native/README.md). Not shipped; built here so a change in
+  # src/ that breaks the native bundle shows up. macOS because the host's only shaders are
+  # MSL and SDL GPU drives Metal there.
+  #
+  # Hosted macOS runners do expose Metal, both to SDL GPU and to Chromium's ANGLE, and the
+  # two agree byte for byte there as they do locally — so the parity sweep is a real gate
+  # here, not a smoke test. It fails on any differing frame and on any room outside the
+  # spike's known gaps (KNOWN_GAPS in native/compare.mjs).
+  native-macos:
+    runs-on: macos-15
+    # ~10 min when green. compare.mjs times out each native run, but not the WebGL side.
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Build tools only: SDL3 and libwebp are fetched by native/CMakeLists.txt at pinned,
+      # hashed versions, so a Homebrew upgrade cannot move the parity result.
+      - run: brew install cmake ninja
+      - run: npm run typecheck:native
+      - run: node native/build-js.mjs
+      - run: cmake -S native -B native/build/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
+      - run: ninja -C native/build/cmake
+      - run: npx playwright install chromium
+      - name: Native vs WebGL parity, all 72 rooms
+        run: node --import tsx native/compare.mjs --all
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-compare
+          path: native/build/compare/
+          if-no-files-found: ignore
