@@ -139,3 +139,23 @@ fragment float4 fs_present(VSOut in [[stage_in]], texture2d<float> uTex [[textur
   }
   return float4(acc / (n * n), 1.0);
 }
+
+// SURFACE — Surface2D's one quad (src/render/surface2d.ts; flush_surf in main.c). Vertices
+// carry the dest corner in target pixels, the source texel coordinate (normalised), and a
+// premultiplied colour the premultiplied texel is multiplied by. Nearest or bilinear is
+// the sampler's business; the blend is the pipeline's.
+struct SurfIn { float2 pos [[attribute(0)]]; float2 uv [[attribute(1)]]; float4 col [[attribute(2)]]; };
+struct SurfOut { float4 pos [[position]]; float2 uv; float4 col; };
+struct SurfU { float2 size; float2 _pad; };
+
+vertex SurfOut vs_surf(SurfIn in [[stage_in]], constant SurfU& u [[buffer(0)]]) {
+  SurfOut o;
+  o.pos = float4(in.pos.x / u.size.x * 2.0 - 1.0, 1.0 - in.pos.y / u.size.y * 2.0, 0.0, 1.0);
+  o.uv = in.uv;
+  o.col = in.col;
+  return o;
+}
+
+fragment float4 fs_surf(SurfOut in [[stage_in]], texture2d<float> uTex [[texture(0)]], sampler smp [[sampler(0)]]) {
+  return uTex.sample(smp, in.uv) * in.col;
+}

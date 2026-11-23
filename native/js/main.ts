@@ -11,12 +11,18 @@
  *   ff4e-native <bundle.js> --root <public dir> --room N --headless --out f.rgba
  *     [--replay TICKS] [--still] [--alpha A] [--probe]
  *     renders ONE composite of the parity scene (`scene.ts`) for native/compare.mjs.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --map-scene CASE --out f.rgba
+ *     paints ONE case of the world-map parity scene (`mapScene.ts`) for native/compare-map.mjs.
  */
 import { runTimers, readBytes } from './shims.js';
 import { RANDPOLE } from '../../src/render/framebuffer.js';
 import { NativeAiScreen } from './nativeAiScreen.js';
 import { nativeScratchCanvas } from './nativeCanvas.js';
 import { setScratchCanvasFactory } from '../../src/render/scratchCanvas.js';
+import { setSurfaceFactory } from '../../src/render/surface2d.js';
+import { NativeSurface, decodeImage, nativeSurface } from './nativeSurface.js';
+import { loadMapScene, paintMapCase } from './mapScene.js';
+import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { compositeSize, frameFor, loadScene, pinRandom, probeFrame, replaySolution } from './scene.js';
 import { advance, blur, draw, enterRoom, firstRoom, initGame, keyDown, keyUp } from './game.js';
 import { runSmoke } from './smoke.js';
@@ -33,9 +39,14 @@ const g = globalThis as Record<string, unknown>;
 async function main(): Promise<void> {
   __native.setRandTable(RANDPOLE.slice().buffer);
   setScratchCanvasFactory(nativeScratchCanvas);
+  setSurfaceFactory(nativeSurface);
   const target = new NativeAiScreen();
   if (flag('--smoke') || flag('--smoke-player')) {
     __native.quit(await runSmoke(arg('--smoke'), target));
+    return;
+  }
+  if (flag('--map-scene')) {
+    await renderMapCase(arg('--map-scene')!);
     return;
   }
   if (flag('--headless')) {
@@ -62,6 +73,18 @@ async function renderParityFrame(target: NativeAiScreen): Promise<void> {
   target.begin(w, h);
   scene.ai.drawInto(target, scene.room, f);
   __native.saveComposite(arg('--out') ?? 'composite.rgba');
+  __native.quit();
+}
+
+/** One case of the world-map parity scene (`mapScene.ts`), for native/compare-map.mjs. */
+async function renderMapCase(name: string): Promise<void> {
+  const scene = await loadMapScene({
+    bytes: readBytes,
+    image: async (url) => decodeImage((await readBytes(url)).slice().buffer),
+  });
+  const screen = new NativeSurface(AI_MAP_W, AI_MAP_H);
+  paintMapCase(screen, scene, name);
+  __native.saveTexture(screen.id, arg('--out') ?? 'map.rgba');
   __native.quit();
 }
 

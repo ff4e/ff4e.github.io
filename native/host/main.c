@@ -42,6 +42,7 @@ static SDL_GPUTexture *band_tex;  /* the ZX stripes: one RGBA texel per native r
 static int band_w;
 
 static SDL_GPUTexture **textures; /* id -> texture; slot 0 unused */
+static int *tex_w, *tex_h;        /* id -> its size (a surface's is its render target's) */
 static int tex_count, tex_cap;
 
 static SDL_GPUTexture *comp;      /* the ×S composite (AiTarget's backing store) */
@@ -152,12 +153,16 @@ static void upload(SDL_GPUTexture *t, const void *px, int w, int h, int bpp) {
   upload_region(t, px, 0, 0, w, h, bpp);
 }
 
-static int add_texture(SDL_GPUTexture *t) {
+static int add_texture(SDL_GPUTexture *t, int w, int h) {
   if (tex_count + 1 >= tex_cap) {
     tex_cap = tex_cap ? tex_cap * 2 : 256;
     textures = SDL_realloc(textures, sizeof *textures * (size_t)tex_cap);
+    tex_w = SDL_realloc(tex_w, sizeof *tex_w * (size_t)tex_cap);
+    tex_h = SDL_realloc(tex_h, sizeof *tex_h * (size_t)tex_cap);
   }
   textures[++tex_count] = t;
+  tex_w[tex_count] = w;
+  tex_h[tex_count] = h;
   return tex_count;
 }
 
@@ -166,7 +171,10 @@ static SDL_GPUTexture *tex_by_id(int id) {
 }
 
 /* Bind a pipeline once per run of same-pipeline draws inside the composite pass. */
+static void open_composite(SDL_GPULoadOp load);
+
 static void use(SDL_GPUGraphicsPipeline *p) {
+  if (!pass) open_composite(SDL_GPU_LOADOP_LOAD); /* a Surface2D flush closed it mid-frame */
   if (bound != p) {
     SDL_BindGPUGraphicsPipeline(pass, p);
     bound = p;
@@ -235,7 +243,7 @@ static JSValue n_decodeWebp(JSContext *ctx, JSValueConst self, int argc, JSValue
   upload(t, rgba, w, h, 4);
   WebPFree(rgba);
   JSValue o = JS_NewObject(ctx);
-  JS_SetPropertyStr(ctx, o, "id", JS_NewInt32(ctx, add_texture(t)));
+  JS_SetPropertyStr(ctx, o, "id", JS_NewInt32(ctx, add_texture(t, w, h)));
   JS_SetPropertyStr(ctx, o, "width", JS_NewInt32(ctx, w));
   JS_SetPropertyStr(ctx, o, "height", JS_NewInt32(ctx, h));
   return o;
@@ -264,7 +272,7 @@ static JSValue n_createTexture(JSContext *ctx, JSValueConst self, int argc, JSVa
   SDL_GPUTexture *t = make_texture(mask ? SDL_GPU_TEXTUREFORMAT_R32_FLOAT : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h,
                                    SDL_GPU_TEXTUREUSAGE_SAMPLER);
   upload(t, p, w, h, 4);
-  return JS_NewInt32(ctx, add_texture(t));
+  return JS_NewInt32(ctx, add_texture(t, w, h));
 }
 
 /* texSubImage2D: replace a rect of an RGBA8 texture (LODE's wreck patch, or the whole canvas). */
@@ -278,8 +286,11 @@ static JSValue n_updateTexture(JSContext *ctx, JSValueConst self, int argc, JSVa
   return JS_UNDEFINED;
 }
 
+static void flush_surf(void);
+
 static JSValue n_releaseTexture(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int id = ARGI(0);
+  flush_surf(); /* a staged Surface2D draw may still name it */
   SDL_GPUTexture *t = tex_by_id(id);
   if (t) { SDL_ReleaseGPUTexture(dev, t); textures[id] = NULL; }
   return JS_UNDEFINED;
@@ -306,6 +317,7 @@ static void open_composite(SDL_GPULoadOp load) {
 /* GlAiScreen.begin: size the ×S buffer and clear it to transparent black. */
 static JSValue n_begin(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int w = ARGI(0), h = ARGI(1);
+  flush_surf();
   end_composite();
   if (!comp || comp_w != w || comp_h != h) {
     if (comp) SDL_ReleaseGPUTexture(dev, comp);
@@ -468,15 +480,16 @@ static JSValue n_mirror(JSContext *ctx, JSValueConst self, int argc, JSValueCons
 
 typedef struct { float size[2], origin[2], footprint[2]; int32_t taps, pad; } PresentU;
 
-/* GlAiScreen.present: box-filter the composite into the window, letterboxed. */
-static JSValue n_present(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+/* Box-filter `src` (w×h) into the window, letterboxed, and submit the frame. */
+static void present_tex(SDL_GPUTexture *src, int w, int h) {
+  flush_surf();
   end_composite();
-  if (!cmd) return JS_UNDEFINED;
+  if (!cmd) return;
   SDL_GPUTexture *swap = NULL;
   Uint32 sw = 0, sh = 0;
-  if (win && SDL_WaitAndAcquireGPUSwapchainTexture(cmd, win, &swap, &sw, &sh) && swap) {
-    float scale = SDL_min((float)sw / (float)comp_w, (float)sh / (float)comp_h);
-    float dw = SDL_floorf((float)comp_w * scale), dh = SDL_floorf((float)comp_h * scale);
+  if (src && win && SDL_WaitAndAcquireGPUSwapchainTexture(cmd, win, &swap, &sw, &sh) && swap) {
+    float scale = SDL_min((float)sw / (float)w, (float)sh / (float)h);
+    float dw = SDL_floorf((float)w * scale), dh = SDL_floorf((float)h * scale);
     float ox = SDL_floorf(((float)sw - dw) / 2), oy = SDL_floorf(((float)sh - dh) / 2);
     SDL_GPUColorTargetInfo ct = {0};
     ct.texture = swap;
@@ -486,33 +499,46 @@ static JSValue n_present(JSContext *ctx, JSValueConst self, int argc, JSValueCon
     SDL_GPUViewport vp = {ox, oy, dw, dh, 0, 1};
     SDL_SetGPUViewport(rp, &vp);
     SDL_BindGPUGraphicsPipeline(rp, p_present);
-    float rx = (float)comp_w / dw, ry = (float)comp_h / dh;
+    float rx = (float)w / dw, ry = (float)h / dh;
     int taps = (int)SDL_ceilf(SDL_max(rx, ry));
     taps = taps < 1 ? 1 : taps > 4 ? 4 : taps;
-    PresentU u = {{dw, dh}, {ox, oy}, {rx / (float)comp_w, ry / (float)comp_h}, taps, 0};
+    PresentU u = {{dw, dh}, {ox, oy}, {rx / (float)w, ry / (float)h}, taps, 0};
     SDL_PushGPUFragmentUniformData(cmd, 0, &u, sizeof u);
-    SDL_GPUTextureSamplerBinding b = {comp, s_linear};
+    SDL_GPUTextureSamplerBinding b = {src, s_linear};
     SDL_BindGPUFragmentSamplers(rp, 0, &b, 1);
     SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
     SDL_EndGPURenderPass(rp);
   }
   SDL_SubmitGPUCommandBuffer(cmd);
   cmd = NULL;
+}
+
+/* GlAiScreen.present: the composite into the window. */
+static JSValue n_present(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  present_tex(comp, comp_w, comp_h);
   return JS_UNDEFINED;
 }
 
-/* GlAiScreen.readback: the composite, top-down RGBA, written as u32 w, u32 h, pixels. */
-static JSValue n_saveComposite(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-  const char *path = JS_ToCString(ctx, argv[0]);
-  if (!path) return JS_EXCEPTION;
+/* A Surface2D (the map, a story page) into the window, the same way. */
+static JSValue n_presentTexture(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  int id = ARGI(0);
+  SDL_GPUTexture *t = tex_by_id(id);
+  if (!t) return JS_ThrowTypeError(ctx, "presentTexture: unknown texture");
+  present_tex(t, tex_w[id], tex_h[id]);
+  return JS_UNDEFINED;
+}
+
+/* Read `t` (w×h) back, top-down RGBA, and write it as u32 w, u32 h, pixels. */
+static JSValue save_tex(JSContext *ctx, SDL_GPUTexture *t, int w, int h, const char *path) {
+  flush_surf();
   end_composite();
-  Uint32 size = (Uint32)(comp_w * comp_h * 4);
+  Uint32 size = (Uint32)(w * h * 4);
   SDL_GPUTransferBufferCreateInfo ti = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = size};
   SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(dev, &ti);
   if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(dev);
   SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
-  SDL_GPUTextureRegion src = {.texture = comp, .w = (Uint32)comp_w, .h = (Uint32)comp_h, .d = 1};
-  SDL_GPUTextureTransferInfo dst = {.transfer_buffer = tb, .pixels_per_row = (Uint32)comp_w, .rows_per_layer = (Uint32)comp_h};
+  SDL_GPUTextureRegion src = {.texture = t, .w = (Uint32)w, .h = (Uint32)h, .d = 1};
+  SDL_GPUTextureTransferInfo dst = {.transfer_buffer = tb, .pixels_per_row = (Uint32)w, .rows_per_layer = (Uint32)h};
   SDL_DownloadFromGPUTexture(cp, &src, &dst);
   SDL_EndGPUCopyPass(cp);
   SDL_GPUFence *fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
@@ -524,17 +550,276 @@ static JSValue n_saveComposite(JSContext *ctx, JSValueConst self, int argc, JSVa
   bool ok = false;
   FILE *f = px ? fopen(path, "wb") : NULL;
   if (f) {
-    Uint32 hdr[2] = {(Uint32)comp_w, (Uint32)comp_h};
+    Uint32 hdr[2] = {(Uint32)w, (Uint32)h};
     ok = fwrite(hdr, sizeof hdr, 1, f) == 1 && fwrite(px, size, 1, f) == 1;
     ok = (fclose(f) == 0) && ok;
   }
   if (px) SDL_UnmapGPUTransferBuffer(dev, tb);
   if (tb) SDL_ReleaseGPUTransferBuffer(dev, tb);
-  JSValue r = JS_UNDEFINED;
-  if (ok) fprintf(stdout, "wrote %dx%d composite to %s\n", comp_w, comp_h, path);
-  else r = JS_ThrowTypeError(ctx, "could not write composite to %s", path);
+  if (ok) fprintf(stdout, "wrote %dx%d composite to %s\n", w, h, path);
+  return ok ? JS_UNDEFINED : JS_ThrowTypeError(ctx, "could not write composite to %s", path);
+}
+
+/* GlAiScreen.readback: the composite. */
+static JSValue n_saveComposite(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  const char *path = JS_ToCString(ctx, argv[0]);
+  if (!path) return JS_EXCEPTION;
+  JSValue r = save_tex(ctx, comp, comp_w, comp_h, path);
   JS_FreeCString(ctx, path);
   return r;
+}
+
+/* The same readback of a Surface2D's texture. Stored premultiplied: exact for opaque pixels. */
+static JSValue n_saveTexture(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  int id = ARGI(0);
+  SDL_GPUTexture *t = tex_by_id(id);
+  if (!t) return JS_ThrowTypeError(ctx, "saveTexture: unknown texture");
+  const char *path = JS_ToCString(ctx, argv[1]);
+  if (!path) return JS_EXCEPTION;
+  JSValue r = save_tex(ctx, t, tex_w[id], tex_h[id], path);
+  JS_FreeCString(ctx, path);
+  return r;
+}
+
+/* ── Surface2D on the GPU (src/render/surface2d.ts; native/js/nativeSurface.ts) ──────
+ *
+ * A surface is an RGBA8 render target holding PREMULTIPLIED colour, as a 2D canvas's
+ * backing store does; every image a surface draws is premultiplied too (decodeImage,
+ * surfPut), with the canvas's rounding — round(c·a/255) — so what reaches the blend is
+ * the same 8-bit value a canvas would hand it.
+ *
+ * The batcher: `surfQuad` only STAGES a quad (six vertices in a CPU array), merging it into
+ * the previous draw when target, texture, filter and blend all match. Everything that has
+ * to happen in order with those quads — a clear, a pixel upload, a readback, presenting,
+ * the room's own passes, releasing a texture — flushes first: one vertex upload for all of
+ * them, then one render pass per run of draws into the same target. All of it is recorded
+ * on the frame's command buffer, so an upload lands between the draws before and after it
+ * exactly as a canvas's putImageData does, even into a surface already drawn this frame.
+ */
+typedef struct { float x, y, u, v, r, g, b, a; } SurfVert;
+typedef struct { int target, tex, linear, blend; Uint32 first, count; } SurfDraw;
+static SurfVert *sv;
+static Uint32 sv_n, sv_cap;
+static SurfDraw *sd;
+static int sd_n, sd_cap;
+static SDL_GPUGraphicsPipeline *p_surf[2]; /* [0] source-over, [1] destination-in */
+static SDL_GPUTexture *white_tex;          /* what a fillRect samples */
+
+static void flush_surf(void) {
+  if (!sd_n) return;
+  end_composite();
+  if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(dev);
+  Uint32 size = sv_n * (Uint32)sizeof(SurfVert);
+  SDL_GPUBufferCreateInfo bi = {.usage = SDL_GPU_BUFFERUSAGE_VERTEX, .size = size};
+  SDL_GPUBuffer *vb = SDL_CreateGPUBuffer(dev, &bi);
+  SDL_GPUTransferBufferCreateInfo ti = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = size};
+  SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(dev, &ti);
+  if (!vb || !tb) die("surface vertex buffer");
+  memcpy(SDL_MapGPUTransferBuffer(dev, tb, false), sv, size);
+  SDL_UnmapGPUTransferBuffer(dev, tb);
+  SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+  SDL_GPUTransferBufferLocation from = {.transfer_buffer = tb};
+  SDL_GPUBufferRegion to = {.buffer = vb, .size = size};
+  SDL_UploadToGPUBuffer(cp, &from, &to, false);
+  SDL_EndGPUCopyPass(cp);
+  for (int i = 0; i < sd_n;) {
+    int t = sd[i].target;
+    SDL_GPUColorTargetInfo ct = {0};
+    ct.texture = tex_by_id(t);
+    ct.load_op = SDL_GPU_LOADOP_LOAD;
+    ct.store_op = SDL_GPU_STOREOP_STORE;
+    SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+    SDL_GPUBufferBinding vbind = {vb, 0};
+    SDL_BindGPUVertexBuffers(rp, 0, &vbind, 1);
+    float u[4] = {(float)tex_w[t], (float)tex_h[t], 0, 0};
+    SDL_PushGPUVertexUniformData(cmd, 0, u, sizeof u);
+    for (; i < sd_n && sd[i].target == t; i++) {
+      SDL_BindGPUGraphicsPipeline(rp, p_surf[sd[i].blend]);
+      SDL_GPUTexture *src = sd[i].tex ? tex_by_id(sd[i].tex) : white_tex;
+      SDL_GPUTextureSamplerBinding b = {src, sd[i].linear ? s_linear : s_nearest};
+      SDL_BindGPUFragmentSamplers(rp, 0, &b, 1);
+      SDL_DrawGPUPrimitives(rp, sd[i].count, 1, sd[i].first, 0);
+    }
+    SDL_EndGPURenderPass(rp);
+  }
+  SDL_ReleaseGPUTransferBuffer(dev, tb); /* both deferred by SDL until `cmd` has run */
+  SDL_ReleaseGPUBuffer(dev, vb);
+  sv_n = 0;
+  sd_n = 0;
+}
+
+/* Clear a render target to transparent black, in order with everything staged before. */
+static void clear_target(SDL_GPUTexture *t) {
+  flush_surf();
+  end_composite();
+  if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(dev);
+  SDL_GPUColorTargetInfo ct = {0};
+  ct.texture = t;
+  ct.load_op = SDL_GPU_LOADOP_CLEAR;
+  ct.store_op = SDL_GPU_STOREOP_STORE;
+  SDL_EndGPURenderPass(SDL_BeginGPURenderPass(cmd, &ct, 1, NULL));
+}
+
+/* The canvas's premultiply: round(c·a/255), in place. */
+static void premultiply(uint8_t *px, size_t n) {
+  for (size_t i = 0; i < n; i += 4) {
+    unsigned a = px[i + 3];
+    if (a == 255) continue;
+    for (int c = 0; c < 3; c++) px[i + c] = (uint8_t)((px[i + c] * a + 127) / 255);
+  }
+}
+
+static JSValue n_surfCreate(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  int w = ARGI(0), h = ARGI(1);
+  if (w <= 0 || h <= 0) return JS_ThrowTypeError(ctx, "surfCreate: bad size %dx%d", w, h);
+  SDL_GPUTexture *t = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h,
+                                   SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+  clear_target(t); /* a new canvas is transparent; new GPU memory is whatever it was */
+  return JS_NewInt32(ctx, add_texture(t, w, h));
+}
+
+/*
+ * Stage one quad: dest rect (x0,y0)-(x1,y1) in the target's pixels, source rect in the
+ * texture's normalised coordinates, and a premultiplied colour the texel is multiplied by
+ * (alpha, alpha, alpha, alpha for an image; the fill colour for texture 0, a white texel).
+ */
+static JSValue n_surfQuad(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  int target = ARGI(0), tex = ARGI(1), linear = JS_ToBool(ctx, argv[2]) ? 1 : 0, blend = ARGI(3) ? 1 : 0;
+  if (!tex_by_id(target) || (tex && !tex_by_id(tex))) return JS_ThrowTypeError(ctx, "surfQuad: unknown texture");
+  if (tex == target) return JS_ThrowTypeError(ctx, "surfQuad: a surface cannot draw itself");
+  float x0 = (float)ARGF(4), y0 = (float)ARGF(5), x1 = (float)ARGF(6), y1 = (float)ARGF(7);
+  float u0 = (float)ARGF(8), v0 = (float)ARGF(9), u1 = (float)ARGF(10), v1 = (float)ARGF(11);
+  float r = (float)ARGF(12), g = (float)ARGF(13), b = (float)ARGF(14), a = (float)ARGF(15);
+  if (sv_n + 6 > sv_cap) {
+    sv_cap = sv_cap ? sv_cap * 2 : 1024;
+    sv = SDL_realloc(sv, sizeof *sv * sv_cap);
+  }
+  SurfVert q[4] = {{x0, y0, u0, v0, r, g, b, a}, {x1, y0, u1, v0, r, g, b, a},
+                   {x0, y1, u0, v1, r, g, b, a}, {x1, y1, u1, v1, r, g, b, a}};
+  static const int tri[6] = {0, 1, 2, 2, 1, 3};
+  for (int i = 0; i < 6; i++) sv[sv_n + (Uint32)i] = q[tri[i]];
+  SurfDraw *last = sd_n ? &sd[sd_n - 1] : NULL;
+  if (last && last->target == target && last->tex == tex && last->linear == linear && last->blend == blend) {
+    last->count += 6;
+  } else {
+    if (sd_n == sd_cap) {
+      sd_cap = sd_cap ? sd_cap * 2 : 64;
+      sd = SDL_realloc(sd, sizeof *sd * (size_t)sd_cap);
+    }
+    sd[sd_n++] = (SurfDraw){target, tex, linear, blend, sv_n, 6};
+  }
+  sv_n += 6;
+  return JS_UNDEFINED;
+}
+
+static JSValue n_surfClear(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  SDL_GPUTexture *t = tex_by_id(ARGI(0));
+  if (!t) return JS_ThrowTypeError(ctx, "surfClear: unknown texture");
+  clear_target(t);
+  return JS_UNDEFINED;
+}
+
+/* putImageData of the whole surface: straight RGBA in, premultiplied as a canvas stores it. */
+static JSValue n_surfPut(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  int id = ARGI(0);
+  SDL_GPUTexture *t = tex_by_id(id);
+  size_t n = 0;
+  uint8_t *p = JS_GetArrayBuffer(ctx, &n, argv[1]);
+  if (!t || !p || n != (size_t)tex_w[id] * (size_t)tex_h[id] * 4) return JS_ThrowTypeError(ctx, "surfPut: bad args");
+  flush_surf();
+  end_composite();
+  if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(dev);
+  uint8_t *px = SDL_malloc(n);
+  memcpy(px, p, n);
+  premultiply(px, n);
+  copy_rect(cmd, t, px, 0, 0, tex_w[id], tex_h[id], 4);
+  SDL_free(px);
+  return JS_UNDEFINED;
+}
+
+/*
+ * Decode a WebP or a PNG to a premultiplied texture — how a canvas holds an ImageBitmap it
+ * draws. (decodeWebp keeps the straight alpha the room's AiTarget passes expect.)
+ */
+static JSValue n_decodeImage(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  size_t n = 0;
+  uint8_t *p = JS_GetArrayBuffer(ctx, &n, argv[0]);
+  if (!p) return JS_EXCEPTION;
+  int w = 0, h = 0;
+  uint8_t *rgba = NULL;
+  if (n >= 8 && !memcmp(p, "\x89PNG", 4)) {
+    SDL_Surface *png = SDL_LoadPNG_IO(SDL_IOFromConstMem(p, n), true);
+    SDL_Surface *conv = png ? SDL_ConvertSurface(png, SDL_PIXELFORMAT_RGBA32) : NULL;
+    if (png) SDL_DestroySurface(png);
+    if (!conv) return JS_ThrowTypeError(ctx, "PNG decode failed: %s", SDL_GetError());
+    w = conv->w;
+    h = conv->h;
+    rgba = SDL_malloc((size_t)w * (size_t)h * 4);
+    for (int y = 0; y < h; y++) memcpy(rgba + (size_t)y * (size_t)w * 4, (uint8_t *)conv->pixels + (size_t)y * (size_t)conv->pitch, (size_t)w * 4);
+    SDL_DestroySurface(conv);
+  } else {
+    uint8_t *webp = WebPDecodeRGBA(p, n, &w, &h);
+    if (!webp) return JS_ThrowTypeError(ctx, "WebP decode failed");
+    rgba = SDL_malloc((size_t)w * (size_t)h * 4);
+    memcpy(rgba, webp, (size_t)w * (size_t)h * 4);
+    WebPFree(webp);
+  }
+  premultiply(rgba, (size_t)w * (size_t)h * 4);
+  SDL_GPUTexture *t = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+  upload(t, rgba, w, h, 4);
+  SDL_free(rgba);
+  JSValue o = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, o, "id", JS_NewInt32(ctx, add_texture(t, w, h)));
+  JS_SetPropertyStr(ctx, o, "width", JS_NewInt32(ctx, w));
+  JS_SetPropertyStr(ctx, o, "height", JS_NewInt32(ctx, h));
+  return o;
+}
+
+static SDL_GPUGraphicsPipeline *surf_pipeline(bool dest_in) {
+  SDL_GPUShaderCreateInfo vi = {0}, fi = {0};
+  vi.code = fi.code = (const Uint8 *)SHADERS_MSL;
+  vi.code_size = fi.code_size = sizeof(SHADERS_MSL) - 1;
+  vi.format = fi.format = SDL_GPU_SHADERFORMAT_MSL;
+  vi.entrypoint = "vs_surf";
+  vi.stage = SDL_GPU_SHADERSTAGE_VERTEX;
+  vi.num_uniform_buffers = 1;
+  fi.entrypoint = "fs_surf";
+  fi.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+  fi.num_samplers = 1;
+  SDL_GPUShader *v = SDL_CreateGPUShader(dev, &vi), *f = SDL_CreateGPUShader(dev, &fi);
+  if (!v || !f) die("surface shaders");
+  SDL_GPUColorTargetDescription ct = {0};
+  ct.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+  ct.blend_state.enable_blend = true;
+  /* source-over on premultiplied colour: (ONE, ONE_MINUS_SRC_ALPHA). destination-in keeps
+     the destination where the source is opaque: (ZERO, SRC_ALPHA). Colour and alpha alike. */
+  SDL_GPUBlendFactor sf = dest_in ? SDL_GPU_BLENDFACTOR_ZERO : SDL_GPU_BLENDFACTOR_ONE;
+  SDL_GPUBlendFactor df = dest_in ? SDL_GPU_BLENDFACTOR_SRC_ALPHA : SDL_GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+  ct.blend_state.src_color_blendfactor = ct.blend_state.src_alpha_blendfactor = sf;
+  ct.blend_state.dst_color_blendfactor = ct.blend_state.dst_alpha_blendfactor = df;
+  ct.blend_state.color_blend_op = ct.blend_state.alpha_blend_op = SDL_GPU_BLENDOP_ADD;
+  SDL_GPUVertexBufferDescription vb = {.slot = 0, .pitch = sizeof(SurfVert), .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX};
+  SDL_GPUVertexAttribute attrs[3] = {
+      {.location = 0, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = 0},
+      {.location = 1, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, .offset = 8},
+      {.location = 2, .buffer_slot = 0, .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, .offset = 16},
+  };
+  SDL_GPUGraphicsPipelineCreateInfo pi = {0};
+  pi.vertex_shader = v;
+  pi.fragment_shader = f;
+  pi.vertex_input_state.vertex_buffer_descriptions = &vb;
+  pi.vertex_input_state.num_vertex_buffers = 1;
+  pi.vertex_input_state.vertex_attributes = attrs;
+  pi.vertex_input_state.num_vertex_attributes = 3;
+  pi.primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST;
+  pi.rasterizer_state.cull_mode = SDL_GPU_CULLMODE_NONE;
+  pi.target_info.color_target_descriptions = &ct;
+  pi.target_info.num_color_targets = 1;
+  SDL_GPUGraphicsPipeline *gp = SDL_CreateGPUGraphicsPipeline(dev, &pi);
+  if (!gp) die("surface pipeline");
+  SDL_ReleaseGPUShader(dev, v);
+  SDL_ReleaseGPUShader(dev, f);
+  return gp;
 }
 
 /* ── input ─────────────────────────────────────────────────────────────────────── */
@@ -837,6 +1122,10 @@ static void install(JSContext *ctx) {
       {"background", n_background, 12}, {"setBands", n_setBands, 2},
       {"disintegrate", n_disintegrate, 8},
       {"present", n_present, 0},       {"saveComposite", n_saveComposite, 1},
+      {"decodeImage", n_decodeImage, 1}, {"surfCreate", n_surfCreate, 2},
+      {"surfQuad", n_surfQuad, 16},     {"surfClear", n_surfClear, 1},
+      {"surfPut", n_surfPut, 2},        {"presentTexture", n_presentTexture, 1},
+      {"saveTexture", n_saveTexture, 2},
       {"events", n_events, 0},
       {"storeLoad", n_storeLoad, 1},   {"storeSave", n_storeSave, 2},
       {"storePath", n_storePath, 0},
@@ -895,6 +1184,10 @@ int main(int argc, char **argv) {
   band_tex = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, 1, 1, SDL_GPU_TEXTUREUSAGE_SAMPLER);
   band_w = 1;
   upload(band_tex, (const uint8_t[4]){0, 0, 0, 255}, 1, 1, 4);
+  p_surf[0] = surf_pipeline(false);
+  p_surf[1] = surf_pipeline(true);
+  white_tex = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, 1, 1, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+  upload(white_tex, (const uint8_t[4]){255, 255, 255, 255}, 1, 1, 4);
 
   JSRuntime *rt = JS_NewRuntime();
   JS_SetMaxStackSize(rt, 8 * 1024 * 1024);

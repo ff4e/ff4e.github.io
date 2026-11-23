@@ -95,7 +95,8 @@ jobs:
   # Hosted macOS runners do expose Metal, both to SDL GPU and to Chromium's ANGLE, and the
   # two agree byte for byte there as they do locally — so the parity sweep is a real gate
   # here, not a smoke test. It fails on any differing frame and on any room outside the
-  # spike's known gaps (KNOWN_GAPS in native/compare.mjs).
+  # spike's known gaps (KNOWN_GAPS in native/compare.mjs). The world map's parity
+  # (native/compare-map.mjs, native GPU Surface2D vs the browser's 2D canvas) runs after it.
   #
   # Before it, the smoke gate (native/js/smoke.ts): every room with a recorded solution
   # played headless through the game's real flow modules as the native host wires them,
@@ -134,9 +135,14 @@ jobs:
       - run: npx playwright install chromium
       - name: Native vs WebGL parity, all 72 rooms
         run: node --import tsx native/compare.mjs --all
+      - name: Native vs canvas parity, the world map
+        if: success() || failure()
+        run: node --import tsx native/compare-map.mjs
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: native-compare
-          path: native/build/compare/
+          path: |
+            native/build/compare/
+            native/build/compare-map/
           if-no-files-found: ignore
