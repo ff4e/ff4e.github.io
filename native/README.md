@@ -38,7 +38,7 @@ build x86_64.
 
 ## Is it the same picture? `native/compare.mjs`
 
-    node --import tsx native/compare.mjs --rooms 1,3,10      # or $(seq -s, 1 72)
+    node --import tsx native/compare.mjs --rooms 1,3,10      # or --all for the 72 rooms
 
 This renders the same scene state twice and diffs the two ×S composites:
 
@@ -53,6 +53,15 @@ It checks three states per room:
 
 For the comparison to be fair, `Math.random` is pinned on both sides (`pinRandom`). Room
 scripts draw from it, and V8 and QuickJS have different generators.
+
+It exits non-zero on any differing frame and on any room that fails natively, except the
+rooms in its `KNOWN_GAPS` list (9, 66, 68, 72). A known gap that starts rendering
+identically also fails, so the list has to be updated with the fix. Differing frames
+leave `-native`, `-webgl` and `-diff` PNGs in `native/build/compare/`.
+
+Current result: **68 of 72 rooms byte-identical** in all three states (204 of 204
+frames), the same as when the spike was written. CI runs `--all` on a hosted macOS
+runner, whose Metal device gives the same bytes.
 
 ## What the spike does not do yet
 

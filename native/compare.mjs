@@ -2,9 +2,12 @@
 // through the browser's real WebGL backend (GlAiScreen) and through the native host
 // (SDL GPU / Metal), and diffs the two ×S composites.
 //
-//   node --import tsx native/compare.mjs [--rooms 1,3,10] [--out dir] [--keep]
+//   node --import tsx native/compare.mjs [--rooms 1,3,10 | --all] [--out dir] [--keep]
 //
 // Needs native/build/game.js and the host binary (see native/README.md).
+//
+// Exits non-zero on any differing frame, and on any room that fails natively unless it is
+// a KNOWN_GAP. A known gap that starts rendering fails too, so the list cannot go stale.
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
@@ -17,7 +20,13 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..');
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
-const ROOMS = opt('--rooms', '1').split(',').filter(Boolean).map(Number);
+const ROOMS = args.includes('--all')
+  ? Array.from({ length: 72 }, (_, i) => i + 1)
+  : opt('--rooms', '1').split(',').filter(Boolean).map(Number);
+// Rooms the spike cannot render natively yet (native/README.md, "What the spike does not do
+// yet"): 66 throws on backgroundZx; 9, 68 and 72 reach a path in src/render/roomAi.ts that
+// builds a canvas through the DOM ("document is not defined").
+const KNOWN_GAPS = new Set([9, 66, 68, 72]);
 const OUT = opt('--out', join(here, 'build', 'compare'));
 const HOST = join(here, 'build', 'cmake', 'ff4e-native');
 const BUNDLE = join(here, 'build', 'game.js');
@@ -61,6 +70,8 @@ function diff(a, b, w, h) {
 
 let worst = 0;
 const tally = { identical: 0, differing: 0, failed: 0 };
+const unexpected = new Set(); // a differing frame, or a native failure outside KNOWN_GAPS
+const failed = new Set();     // any case of the room did not render natively
 for (const room of ROOMS) {
   for (const c of CASES) {
     const ref = await page.evaluate((o) => window.__ref(o), { room, ...c });
@@ -77,16 +88,19 @@ for (const room of ROOMS) {
       console.log(`#${String(room).padEnd(2)} ${ref.jmeno.padEnd(9)} ${c.name.padEnd(7)} NATIVE FAILED: ${(why.match(/spike: [^\n]*|Error: [^\n]*/) ?? [why.trim().split('\n').pop()])[0]}`);
       worst = Math.max(worst, 999);
       tally.failed++;
+      failed.add(room);
+      if (!KNOWN_GAPS.has(room)) unexpected.add(room);
       continue;
     }
     const nat = readFileSync(raw);
     rmSync(raw);
     const w = nat.readUInt32LE(0), h = nat.readUInt32LE(4);
     const natPx = nat.subarray(8);
-    if (w !== ref.w || h !== ref.h) { console.log(`#${room} ${c.name}: SIZE MISMATCH native ${w}x${h} vs webgl ${ref.w}x${ref.h}`); worst = 999; continue; }
+    if (w !== ref.w || h !== ref.h) { console.log(`#${room} ${c.name}: SIZE MISMATCH native ${w}x${h} vs webgl ${ref.w}x${ref.h}`); worst = 999; tally.differing++; unexpected.add(room); continue; }
     const d = diff(natPx, refPx, w, h);
     worst = Math.max(worst, d.max);
     tally[d.max === 0 ? 'identical' : 'differing']++;
+    if (d.max > 0) unexpected.add(room);
     // Images only where they are evidence: a differing frame, or everything with --keep.
     if (d.max > 0 || args.includes('--keep')) {
       writeFileSync(join(OUT, `${room}-${c.name}-native.png`), encodePng(new Uint8Array(natPx), w, h));
@@ -101,3 +115,9 @@ await browser.close();
 await server.close();
 console.log(`frames: ${tally.identical} identical, ${tally.differing} differing, ${tally.failed} not renderable natively`);
 console.log(worst === 0 ? 'IDENTICAL: native and WebGL composites match byte for byte' : `worst max Δ = ${worst}`);
+const clean = (r) => !failed.has(r) && !unexpected.has(r);
+console.log(`rooms: ${ROOMS.filter(clean).length}/${ROOMS.length} byte-identical in every case`);
+const healed = ROOMS.filter((r) => KNOWN_GAPS.has(r) && clean(r));
+if (unexpected.size) console.log(`REGRESSION in room(s) ${[...unexpected].join(', ')}`);
+if (healed.length) console.log(`known gap(s) ${healed.join(', ')} now render identically: remove them from KNOWN_GAPS`);
+process.exitCode = unexpected.size || healed.length ? 1 : 0;

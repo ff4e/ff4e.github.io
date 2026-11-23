@@ -91,6 +91,11 @@ jobs:
   # The experimental native host (native/README.md). Not shipped; built here so a change in
   # src/ that breaks the native bundle shows up. macOS because the host's only shaders are
   # MSL and SDL GPU drives Metal there.
+  #
+  # Hosted macOS runners do expose Metal, both to SDL GPU and to Chromium's ANGLE, and the
+  # two agree byte for byte there as they do locally — so the parity sweep is a real gate
+  # here, not a smoke test. It fails on any differing frame and on any room outside the
+  # spike's known gaps (KNOWN_GAPS in native/compare.mjs).
   native-macos:
     runs-on: macos-15
     steps:
@@ -105,9 +110,12 @@ jobs:
       - run: node native/build-js.mjs
       - run: cmake -S native -B native/build/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: ninja -C native/build/cmake
-      - name: Probe Metal (exploratory)
-        continue-on-error: true
-        run: |
-          native/build/cmake/ff4e-native native/build/game.js --root public --room 1 --headless --out "$RUNNER_TEMP/r1.rgba"
-          npx playwright install chromium
-          node --import tsx native/compare.mjs --rooms 1,3,66
+      - run: npx playwright install chromium
+      - name: Native vs WebGL parity, all 72 rooms
+        run: node --import tsx native/compare.mjs --all
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-compare
+          path: native/build/compare/
+          if-no-files-found: ignore
