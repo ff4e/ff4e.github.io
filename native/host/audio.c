@@ -147,6 +147,137 @@ static bool open_device(void) {
   return true;
 }
 
+/* ── The movie's track (audio.h) ─────────────────────────────────────────────────── */
+
+static SDL_AudioStream *mstream; /* on the mixer's output; NULL headless */
+static struct {
+  float *pcm;
+  int64_t frames, pos, fed_before;
+  int channels, rate;
+  bool on;
+  Uint64 request_ns;
+} mv;
+static float *mchunk;
+static int mchunk_cap;
+
+/* Copy `n` frames of the track from its position into `out` (silence past its end), with `lock` held. */
+static void movie_pull(float *out, int64_t n) {
+  int ch = mv.channels;
+  int64_t have = mv.frames - mv.pos;
+  if (have < 0) have = 0;
+  if (have > n) have = n;
+  if (paused) have = 0;
+  if (have) SDL_memcpy(out, mv.pcm + mv.pos * ch, (size_t)(have * ch) * sizeof *out);
+  SDL_memset(out + have * ch, 0, (size_t)((n - have) * ch) * sizeof *out);
+  if (!paused) mv.pos += n; /* the clock runs on past the end: the picture may be longer */
+}
+
+static void SDLCALL feed_movie(void *user, SDL_AudioStream *s, int additional, int total) {
+  (void)user;
+  (void)total;
+  SDL_LockMutex(lock);
+  if (!mv.on) {
+    SDL_UnlockMutex(lock);
+    return;
+  }
+  int bpf = mv.channels * (int)sizeof(float);
+  int n = (additional + bpf - 1) / bpf;
+  if (n * mv.channels > mchunk_cap) {
+    float *grown = SDL_realloc(mchunk, (size_t)(n * mv.channels) * sizeof *mchunk);
+    if (!grown) {
+      SDL_UnlockMutex(lock);
+      return;
+    }
+    mchunk = grown;
+    mchunk_cap = n * mv.channels;
+  }
+  mv.fed_before = mv.pos;
+  mv.request_ns = SDL_GetTicksNS();
+  movie_pull(mchunk, n);
+  SDL_UnlockMutex(lock);
+  SDL_PutAudioStreamData(s, mchunk, n * bpf);
+}
+
+void audio_movie_stop(void) {
+  if (mstream) SDL_DestroyAudioStream(mstream); /* closes its device: no callback runs after */
+  mstream = NULL;
+  SDL_LockMutex(lock);
+  SDL_free(mv.pcm);
+  SDL_zero(mv);
+  SDL_UnlockMutex(lock);
+}
+
+bool audio_movie_play(float *pcm, int64_t frames, int channels, int rate, char *err, size_t errlen) {
+  audio_movie_stop();
+  if (!mode) {
+    SDL_free(pcm);
+    SDL_snprintf(err, errlen, "the mixer is not open");
+    return false;
+  }
+  SDL_LockMutex(lock);
+  mv.pcm = pcm;
+  mv.frames = frames;
+  mv.channels = channels;
+  mv.rate = rate;
+  mv.on = true;
+  SDL_UnlockMutex(lock);
+  if (SDL_strcmp(mode, "manual") == 0) return true;
+  /* A logical device of its own on the same output (SDL mixes logical devices): the mixer's
+     was opened with SDL_OpenAudioDeviceStream, whose bindings SDL does not let change. */
+  const SDL_AudioSpec spec = {SDL_AUDIO_F32, channels, rate};
+  mstream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, feed_movie, NULL);
+  if (!mstream || !SDL_ResumeAudioStreamDevice(mstream)) {
+    SDL_snprintf(err, errlen, "cannot open the movie's audio stream: %s", SDL_GetError());
+    audio_movie_stop();
+    return false;
+  }
+  return true;
+}
+
+double audio_movie_position(void) {
+  SDL_LockMutex(lock);
+  double r = -1;
+  if (mv.on) {
+    if (mstream) {
+      double fed = (double)mv.pos / mv.rate;
+      r = mv.request_ns ? (double)mv.fed_before / mv.rate + (double)(SDL_GetTicksNS() - mv.request_ns) / 1e9 : 0;
+      if (paused) r = (double)mv.fed_before / mv.rate;
+      if (r > fed) r = fed;
+    } else {
+      r = (double)mv.pos / mv.rate;
+    }
+  }
+  SDL_UnlockMutex(lock);
+  return r;
+}
+
+int audio_movie_rate(int *channels) {
+  SDL_LockMutex(lock);
+  int r = mv.on ? mv.rate : 0;
+  *channels = mv.channels;
+  SDL_UnlockMutex(lock);
+  return r;
+}
+
+bool audio_movie_advance(int64_t frames, float **capture) {
+  if (!mode || SDL_strcmp(mode, "manual") != 0 || frames < 0) return false;
+  SDL_LockMutex(lock);
+  if (!mv.on) {
+    SDL_UnlockMutex(lock);
+    return false;
+  }
+  float *cap = capture ? SDL_malloc((size_t)((frames ? frames : 1) * mv.channels) * sizeof(float)) : NULL;
+  if (capture && !cap) {
+    SDL_UnlockMutex(lock);
+    return false;
+  }
+  if (cap) movie_pull(cap, frames);
+  else if (!paused) mv.pos += frames;
+  SDL_UnlockMutex(lock);
+  if (capture) *capture = cap;
+  return true;
+}
+
 /* ── JS bindings ─────────────────────────────────────────────────────────────────── */
 
 static Buf *buf_by_id(JSContext *ctx, JSValueConst v) {
@@ -392,6 +523,7 @@ void audio_install(JSContext *ctx, JSValue native, bool device) {
 }
 
 void audio_shutdown(void) {
+  audio_movie_stop();
   if (stream) SDL_DestroyAudioStream(stream); /* stops the callback before the state goes */
   stream = NULL;
 }

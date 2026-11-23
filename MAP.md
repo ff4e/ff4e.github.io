@@ -56,11 +56,16 @@ others are small enough to read.
 - **`test/`** — the unit and integration suites; **`test/ui/`** the browser probes. See
   [`TESTING.md`](TESTING.md).
 - **`native/`** — **experimental, not shipped**: a browser-free host spike (QuickJS-ng + SDL3 GPU)
-  that runs the AI tier from `src/` natively — rooms, their subtitles and the world map — aimed
-  at Apple TV and consoles. Nothing in `src/` imports it. See [`native/README.md`](native/README.md):
-  the subtitles are `native/js/subtitleLayout.ts` (where the glyphs go, restating
-  `subtitleDom.ts`'s desktop layout), `subtitleDraw.ts` (FreeType glyphs, `native/host/text.c`,
-  through `Surface2D.fillMask`) and `roomSubtitles.ts` (the game's per-frame layer).
+  that runs the AI tier from `src/` natively — rooms, their subtitles, the world map, the intro
+  movies and the credits — aimed at Apple TV and consoles. Nothing in `src/` imports it. See
+  [`native/README.md`](native/README.md): the subtitles are `native/js/subtitleLayout.ts` (where
+  the glyphs go, restating `subtitleDom.ts`'s desktop layout), `subtitleDraw.ts` (FreeType
+  glyphs, `native/host/text.c`, through `Surface2D.fillMask`) and `roomSubtitles.ts` (the game's
+  per-frame layer); the movies are `native/js/introScreen.ts` (`intro.ts`'s player and
+  `mapNav.ts`'s intro flow, restated, with the start splash) over `movie.ts` and
+  `native/host/movie.c` (the player; the platform decoder behind `movie.h`, AVFoundation in
+  `movie_apple.m`); the credits are `native/js/creditsScreen.ts` (`creditsAi.ts`'s roll as one
+  flipped quad).
 
 ### Map of `src/app/`
 
@@ -154,7 +159,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `cutsceneClose.ts` | | The briefcase demo's Skip button: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `replayMode.ts` | 2.4 k | The map's "Replay" of a stored best solution: one move per settled tick (run undrawn, with the held-key speed-up carried, so it moves as smoothly as the KUFRIK demo), a `busy`-dropped move retried, and KUFRIK's story and tutorial demonstration never started (their moves are already in the record). |
-| `intro.ts` | 1.2 k | Intro-movie playback. |
+| `intro.ts` | 1.2 k | Intro-movie playback. Its player is restated, pinned, by the native host (`native/js/introScreen.ts`). |
 | `introOverlay.ts` | 1.2 k | The logo and intro movies, plus `aiSubScale` (how much smaller the `ai` tier draws its subtitles). |
 | `loadingUi.ts` | 2.3 k | The loading overlay, the resize handler, and where an asset failure is turned into a surface — the fatal screen, the note or nothing, chosen by the asset's TIER. The screen is generic (its one action is Reload whichever file broke); the asset's name goes to the log. Only absence BY DESIGN still falls back quietly. |
 | `loadNote.ts` | 1.2 k | The `shouldHave` tier's surface: a non-blocking note in the `#notes` rail with Try again and Dismiss, for a load the game can continue without but the player would otherwise be misled about. |
@@ -209,7 +214,7 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `scratchCanvas.ts` | 0.4 k | Where the off-screen scratch canvases come from: the DOM, unless a host without one (`native/`) injects its own. |
 | `worldMapAi.ts` | 1.6 k | The `ai` world map. |
 | `panelAi.ts` | 1.7 k | The `ai` control panel. |
-| `creditsAi.ts` | 1.8 k | The `ai` end credits (GPU-composited). |
+| `creditsAi.ts` | 1.8 k | The `ai` end credits (GPU-composited). The native host paints the same roll from its `creditsTranslate` (`native/js/creditsScreen.ts`). |
 | **WebGL** | | |
 | `glScreen.ts` | 10.9 k | The GPU compositor for classic/enhanced, from palette-INDEX art through an MRT colour+index framebuffer. |
 | `glRoomAi.ts` | 8.2 k | The GPU compositor for the `ai` tier, from straight RGBA at ×S. Holds `BG_FS`, the water shader `tools/mutate-gl-room-ai.mjs` mutates. |

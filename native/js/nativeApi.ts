@@ -8,6 +8,15 @@ export interface NativeTexture {
   readonly height: number;
 }
 
+export interface MovieInfo {
+  readonly id: number;
+  readonly width: number;
+  readonly height: number;
+  /** Seconds: the longer of its tracks, as a <video> reports it. */
+  readonly duration: number;
+  readonly frameRate: number;
+}
+
 export interface GlyphRaster {
   readonly w: number;
   readonly h?: number;
@@ -23,6 +32,10 @@ export interface NativeApi {
   now(): number;
   /** A file under the asset root (the repo's `public/`), or null when absent. */
   readFile(path: string): ArrayBuffer | null;
+  /** Whether a file is under the asset root (the browser's HEAD probe), without reading it. */
+  fileExists(path: string): boolean;
+  /** Write `bytes` to `path` (as given, not under the asset root): output for the parity harnesses. */
+  writeFile(path: string, bytes: ArrayBuffer): void;
   utf8(buf: ArrayBuffer): string;
   /** Decode a WebP to straight-alpha RGBA8 and upload it as a GPU texture. */
   decodeWebp(buf: ArrayBuffer): NativeTexture;
@@ -83,8 +96,13 @@ export interface NativeApi {
   surfClear(target: number): void;
   /** Replace the whole surface with straight RGBA (width × height × 4), premultiplied on the way. */
   surfPut(target: number, rgba: ArrayBuffer): void;
-  /** Show a surface in the window, as `present` shows the composite. */
-  presentTexture(id: number): void;
+  /**
+   * Show a surface (or a movie frame) in the window, as `present` shows the composite, with
+   * `overlay` — a premultiplied surface the size of the whole WINDOW — drawn over it 1:1.
+   */
+  presentTexture(id: number, overlay?: number): void;
+  /** `[w, h, density]`: the window's size in pixels, and pixels per point. Null headless. */
+  windowSize(): [number, number, number] | null;
   /** `saveComposite` for a surface's texture. */
   saveTexture(id: number, path: string): void;
   /**
@@ -148,6 +166,26 @@ export interface NativeApi {
   audioVoices(): number;
   /** `manual` only: mix `frames` more; with `capture`, return them (float32). */
   audioAdvance(frames: number, capture?: boolean): ArrayBuffer | undefined;
+
+  // ── Movies (native/host/movie.c over the platform decoder; native/js/movie.ts). ──
+  /** Open a movie under the asset root to read its frames from `start` s. Throws when it cannot. */
+  movieOpen(path: string, start?: number): MovieInfo;
+  /**
+   * `[texture, pts, last]`: the frame shown at `t` s — the last whose time is not after `t` —
+   * decoded forward to and uploaded into a BGRA texture (0 while none is due yet), its time,
+   * and whether it is the movie's last frame.
+   */
+  movieFrame(id: number, t: number): [number, number, boolean];
+  /** Decode the movie's sound and start it now, beside the mixer at gain 1. False: it has none. */
+  moviePlay(id: number): boolean;
+  /** Seconds into the playing movie's sound — the A/V clock — or null with none playing. */
+  movieClock(): number | null;
+  /** Headless only: play `ms` more of the movie's sound; with `capture`, return it (interleaved float32). */
+  movieAdvance(ms: number, capture?: boolean): ArrayBuffer | undefined;
+  /** The movie's audio track decoded on its own: `[interleaved float32, channels, rate]`, or null. */
+  movieAudioPcm(path: string): [ArrayBuffer, number, number] | null;
+  /** Close a movie: its decoder, its texture, and its sound if it is the one playing. */
+  movieClose(id: number): void;
 
   // ── Persistence: the localStorage shim's backing file (shims.ts). ──
   /**
