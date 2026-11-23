@@ -43,10 +43,12 @@ const STEPS = [
   { name: 'map-smoke', run: [host, [...game, '--smoke-map', '--store', 'native/build/smoke-map-store.json']] },
   { name: 'menu-smoke', run: [host, [...game, '--smoke-menus', '--store', 'native/build/smoke-menus-store.json']] },
   { name: 'audio-smoke', run: [host, [...game, '--smoke-audio', '--store', 'native/build/smoke-audio-store.json']] },
+  { name: 'movie-smoke', run: [host, [...game, '--smoke-movie', '--store', 'native/build/smoke-movie-store.json']] },
   { name: 'chromium', run: ['npx', ['playwright', 'install', 'chromium']] },
   { name: 'rooms', run: ['node', ['--import', 'tsx', 'native/compare.mjs', '--all']] },
   { name: 'map', run: ['node', ['--import', 'tsx', 'native/compare-map.mjs']] },
   { name: 'subs', run: ['node', ['--import', 'tsx', 'native/compare-subs.mjs', '--self-test']] },
+  { name: 'media', run: ['node', ['--import', 'tsx', 'native/compare-media.mjs', '--self-test']] },
 ];
 
 const onlyArg = process.argv.indexOf('--only');

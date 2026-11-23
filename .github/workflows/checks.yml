@@ -153,6 +153,11 @@ jobs:
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-audio --store native/build/smoke-audio-store.json
+      - name: Native movies, the intro, its splash and the credits through the real flow
+        timeout-minutes: 2
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless
+          --smoke-movie --store native/build/smoke-movie-store.json
       - run: npx playwright install chromium
       - name: Native vs WebGL parity, all 72 rooms
         run: node --import tsx native/compare.mjs --all
@@ -162,6 +167,9 @@ jobs:
       - name: Native vs DOM subtitles, within tolerance, and the tolerance catching wrong text
         if: success() || failure()
         run: node --import tsx native/compare-subs.mjs --self-test
+      - name: Native vs browser movies (frames, sound) and credits, within tolerance, and the tolerance catching wrong ones
+        if: success() || failure()
+        run: node --import tsx native/compare-media.mjs --self-test
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -170,4 +178,5 @@ jobs:
             native/build/compare/
             native/build/compare-map/
             native/build/compare-subs/
+            native/build/compare-media/
           if-no-files-found: ignore

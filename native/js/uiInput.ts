@@ -17,6 +17,17 @@
  *     record panel, or, at the root, leaves the game (tvOS requires Back at the top level to
  *     go Home). The pad's Ⓑ does nothing on the plain map, on purpose (A3).
  *
+ *   - the intro (`introScreen.ts`, #215's rules): on the start splash only Ⓐ — the pad's Ⓐ,
+ *     the remote's click, Space or Enter — starts; during a movie any button skips it;
+ *   - the credits roll over the map: any button closes it (Back included — it never leaves
+ *     the game from there).
+ *
+ * Each event goes to the screen up when it arrives — one can change the screen. A release
+ * off the room always reaches the map's router, the intro included: a direction held while
+ * Ⓐ starts a movie and let go during it must not stay held on the map (`mapKeyUp` only
+ * forgets a held key, so it is harmless anywhere else). The interactive loop and every smoke
+ * gate route through here, so a gate sees the routing a player does.
+ *
  * The last source pressed picks the legend's glyphs (`legend.ts`).
  */
 import { cutscene, loadmode, replaymode, room, showmode } from '../../src/app/gameState.js';
@@ -26,6 +37,7 @@ import { blur as roomBlur, keyDown as roomKeyDown, keyUp as roomKeyUp } from './
 import { mapBlur, mapBusy, mapKeyDown, mapKeyUp, mapPanelOpen } from './mapScreen.js';
 import { menuAct, menuOpen, openConfirm, openOptions, openPause, type MenuAct } from './menus.js';
 import { roomLoading } from './seams/framePacing.js';
+import { introKeyDown } from './introScreen.js';
 
 export type InputSource = 'key' | 'pad' | 'remote';
 
@@ -55,8 +67,11 @@ let systemOwnsBack = false;
 
 /** The plain map: no record panel, no menu, no launch, no story page. */
 function atMapRoot(): boolean {
-  return ui.screen === 'map' && !menuOpen() && !mapPanelOpen() && !mapBusy();
+  return ui.screen === 'map' && !menuOpen() && !mapPanelOpen() && !mapBusy() && !creditsUp();
 }
+
+/** The credits roll is over the map, or loading to be. */
+const creditsUp = (): boolean => ui.mapOverlay === 'credits' || ui.creditsLoading;
 
 export function setExitHandler(fn: () => void): void {
   exitApp = fn;
@@ -229,13 +244,14 @@ const MAP_KEYS: Readonly<Record<string, string>> = {
 };
 
 function mapKey(down: boolean, code: string): void {
-  if (ui.screen === 'legimage') {
-    if (down) mapKeyDown(code); // any button continues
+  if (ui.screen === 'legimage' || ui.mapOverlay === 'credits') {
+    if (down) mapKeyDown(code); // any button continues, or closes the roll
+    else mapKeyUp(code);
     return;
   }
   const back = code === 'RemoteBack' || code === 'Escape';
   if (back || code === 'PadMenu' || code === 'RemotePlayPause') {
-    if (!down || mapBusy()) return;
+    if (!down || mapBusy() || ui.creditsLoading) return;
     if (!back) openOptions();
     else if (mapPanelOpen()) mapKeyDown('Escape'); // daCancel
     else if (!systemOwnsBack) exitApp(); // Back at the root; on tvOS the system takes it Home
@@ -247,10 +263,15 @@ function mapKey(down: boolean, code: string): void {
   else mapKeyUp(key);
 }
 
+// ── The intro ───────────────────────────────────────────────────────────────────────
+
+/** The splash's start button, from the pad and the remote (the keyboard's Space/Enter pass as they are). */
+const INTRO_START: Readonly<Record<string, string>> = { PadA: 'Space', RemoteSelect: 'Space' };
+
 // ── Entry points ────────────────────────────────────────────────────────────────────
 
 /** One event from `__native.events()`: `+Code`, `-Code` or `!blur`. */
-export function routeEvent(ev: string, now: number): void {
+export function routeEvent(ev: string, now: number = __native.now()): void {
   if (ev === '!blur') {
     inputBlur();
     return;
@@ -264,6 +285,7 @@ export function routeEvent(ev: string, now: number): void {
   }
   if (menuOpen() || menuHeld.includes(code)) menuKey(down, code, now);
   else if (ui.screen === 'room') roomKey(down, code, now);
+  else if (ui.screen === 'intro' && down) introKeyDown(INTRO_START[code] ?? code);
   else mapKey(down, code);
 }
 

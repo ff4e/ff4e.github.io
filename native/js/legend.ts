@@ -255,7 +255,8 @@ export function drawLegend(ui: Ui, items: readonly LegendItem[], w: number, h: n
 export function legendScreen(top: { kind: string } | null, mapPanel: boolean, launching: boolean): LegendScreen | null {
   if (top) return top.kind === 'confirm' ? null : (top.kind as LegendScreen);
   if (ui.screen === 'room') return 'room';
-  if (ui.screen === 'legimage') return 'legimage';
+  if (ui.screen === 'legimage' || ui.mapOverlay === 'credits') return 'legimage'; // A4: "A: Continue"
+  if (ui.screen === 'intro') return null; // A4: no legend during the intro (it has its skip hint)
   if (launching) return null;
   return mapPanel ? 'panel' : 'map';
 }

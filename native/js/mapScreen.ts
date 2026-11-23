@@ -21,15 +21,15 @@
  * The default selection is the room last played if it can still be selected, else the
  * first room not yet solved — so resuming is one press of Ⓐ.
  *
- * Of the corner buttons, Options is selectable: Ⓐ on it opens the native Options
- * (`menus.ts`). Intro and Credits are not yet — neither screen exists natively, and a target
- * that does nothing is worse than none. They join `NATIVE_CORNERS` as their screens arrive;
- * the geometry already handles them. Exit is left out, as the controller spec leaves it out
- * (Back at the map is the way out, `uiInput.ts`).
+ * Of the corner buttons, Intro, Credits and Options are selectable: Ⓐ on one does what a
+ * click on it does (`dispatchMapCorner`) — the intro movie (`introScreen.ts`), the credits
+ * roll over the map (`creditsScreen.ts`), which any button closes, or the native Options
+ * (`menus.ts`). Exit is left out, as the controller spec leaves it out: Back at the map is the
+ * way out (`uiInput.ts`).
  *
- * The host (native/host/main.c) turns the gamepad into key codes, so this reads one stream:
- * IJKL (d-pad, left stick), WASD (right stick) and the arrows are directions; Space (Ⓐ) and
- * Enter press; Escape (Ⓑ) backs out.
+ * The router (`uiInput.ts`) hands this key codes for the keyboard, the pad and the remote
+ * alike: IJKL, WASD and the arrows are directions; Space (Ⓐ) and Enter press; Escape (Ⓑ)
+ * backs out.
  */
 import { INFO_FAZE_MS, INFO_SETTLE_FAZE, type InfoButton } from '../../src/render/mapInfo.js';
 import { paintAiMap } from '../../src/render/mapPaintAi.js';
@@ -45,6 +45,8 @@ import { loadAiPlaque, loadDesky, loadMapArt, paintParchmentAi, type MapArt, typ
 import { NativeSurface, decodeImage, type NativeImage } from './nativeSurface.js';
 import { readBytes } from './shims.js';
 import { DirRepeat } from './dirRepeat.js';
+import { creditsFrame, creditsKeyDown, openCredits } from './creditsScreen.js';
+import { replayIntro } from './introScreen.js';
 
 /** What the map needs of the game: the player's record, and the way into a room. */
 export interface MapScreenHost {
@@ -65,7 +67,7 @@ export interface MapScreenHost {
 }
 
 /** The corner buttons a native host can act on: see the header. */
-const NATIVE_CORNERS: readonly MapAction[] = ['options'];
+const NATIVE_CORNERS: readonly MapAction[] = ['intro', 'credits', 'options'];
 
 const DIRS: Readonly<Record<string, MapStep>> = {
   KeyI: 'up', KeyK: 'down', KeyJ: 'left', KeyL: 'right',
@@ -250,12 +252,33 @@ function press(): void {
     return;
   }
   if (sel?.kind === 'corner') {
-    host.openCorner(sel.action);
+    dispatchMapCorner(sel.action);
     return;
   }
-  if (sel?.kind !== 'node') return;
+  if (!sel) return;
   if (host.solved.has(sel.room) || host.cheated.has(sel.room)) openMapInfo(sel.room);
   else launch = { room: sel.room };
+}
+
+/**
+ * Ⓐ on a corner button: what a click on it does (daIntro, daCredits, UMain.pas:1064-1135).
+ * Exit is not selectable natively (`NATIVE_CORNERS`), so it never gets here.
+ * restates src/app/mapNav.ts `export function dispatchMapCorner(` @ 39aefac50d91
+ */
+function dispatchMapCorner(action: MapAction): void {
+  switch (action) {
+    case 'intro':
+      replayIntro();
+      break;
+    case 'credits':
+      void openCredits();
+      break;
+    case 'options': // openMapOptions: the native Options (`menus.ts`), through the host
+      host.openCorner(action);
+      break;
+    default:
+      break;
+  }
 }
 
 function steer(now: number): void {
@@ -268,6 +291,10 @@ function steer(now: number): void {
 export function mapKeyDown(code: string): void {
   if (ui.screen === 'legimage') {
     host.dismissLegImage(); // any button continues
+    return;
+  }
+  if (ui.mapOverlay === 'credits') {
+    creditsKeyDown(); // any button closes the roll
     return;
   }
   if (launch || !art) return; // a launch blocks input, as on the web
@@ -360,6 +387,10 @@ export function mapFrame(now: number): NativeSurface | null {
       legPage.surface.drawImage(legPage.img, 0, 0);
     }
     return legPage.surface;
+  }
+  if (ui.mapOverlay === 'credits') {
+    const roll = creditsFrame(now);
+    if (roll) return roll;
   }
   if (!art) return null;
   syncSelection();
