@@ -247,8 +247,10 @@ the native GPU `Surface2D` — from the same art, loaded through one reader
 `src/render/surface2d.ts` says which paths a GPU can match byte for byte (nearest draws at
 any integer scale, opaque blits and uploads, a binary destination-in mask) and which only
 approximately (smoothing, a fractional alpha, a partial-alpha upload). Cases built from the
-first are gated at Δ0; the rest are reported and held to a loose limit, so a broken path
-still fails. Current result:
+first are gated at Δ0. The rest must be byte-identical outside the region only their
+approximate path draws, and inside it within Δ2 on at most 0.5% of the frame — just above
+what is measured — so a regression in what only they draw still fails. An unknown `--cases`
+name fails too. Current result:
 
 | case | what it covers | result |
 | --- | --- | --- |

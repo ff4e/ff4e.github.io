@@ -12,6 +12,7 @@ import { paintAiMap, type AiMapPaint } from '../../src/render/mapPaintAi.js';
 import type { Surface2D } from '../../src/render/surface2d.js';
 import { createSurface } from '../../src/render/surface2d.js';
 import { MAP_H, MAP_W } from '../../src/render/worldMap.js';
+import { ICON_H, ICON_W, ICON_Y, INFO_BUTTONS, PANEL_H, PANEL_W, infoPanelOrigin } from '../../src/render/mapInfo.js';
 import { loadAiPlaque, loadMapArt, paintParchmentAi, type MapArt, type MapIo } from './mapArt.js';
 
 type Plaque = AiMapPaint['aiPlaque'];
@@ -40,7 +41,18 @@ interface MapCase {
   readonly exact: boolean;
   /** What the case exercises, for the report. */
   readonly what: string;
+  /**
+   * For an approximate case, the map-space rect (640×480) that only its approximate path
+   * draws. Outside it the frame must still be byte-identical.
+   */
+  readonly region?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   readonly state: (s: MapScene) => Partial<AiMapPaint>;
+}
+
+/** The enlarged panel's map-space bounds, a pixel wider each way for the smoothed edge. */
+function zoomedPanelRect(zoom: number): NonNullable<MapCase['region']> {
+  const o = infoPanelOrigin(zoom);
+  return { x: o.x - 1, y: o.y - 1, w: Math.ceil(PANEL_W * zoom) + 2, h: Math.ceil(PANEL_H * zoom) + 2 };
 }
 
 const solvedTo = (n: number): Set<number> => new Set(Array.from({ length: n }, (_, i) => i + 1));
@@ -81,6 +93,7 @@ export const MAP_CASES: readonly MapCase[] = [
   },
   {
     name: 'panel-noreplay', exact: false, what: 'disabled Replay: a 0.55-alpha black wash',
+    region: { x: INFO_BUTTONS.replay.x, y: ICON_Y, w: ICON_W, h: ICON_H },
     state: (s) => ({
       solved: solvedTo(6), unlit: true, plaqueRoom: 3, aiPlaque: s.plaques.get(3) ?? null,
       panel: { room: 3, count: 42, hover: 'cancel', faze: 27, replayEnabled: false },
@@ -88,6 +101,7 @@ export const MAP_CASES: readonly MapCase[] = [
   },
   {
     name: 'panel-zoomed', exact: false, what: "the phone's enlarged panel: smoothed mask, partial-alpha shadow, fractional scale",
+    region: zoomedPanelRect(1.5),
     state: (s) => ({
       solved: solvedTo(6), unlit: true, zoom: 1.5, plaqueRoom: 1, aiPlaque: s.plaques.get(1) ?? null,
       panel: { room: 1, count: 1234, hover: 'run', faze: 27, replayEnabled: true },

@@ -41,7 +41,7 @@ const markers = tsFiles(join(repo, 'native', 'js')).flatMap((file) => {
 describe('native restated code', () => {
   it('pins every copy it knows of', () => {
     // A deleted marker must not pass for a clean check.
-    expect(markers.length).toBeGreaterThanOrEqual(19);
+    expect(markers.length).toBeGreaterThanOrEqual(38);
   });
 
   it.each(markers)('$at is still the copy of $source `$anchor`', ({ at, source, anchor, pinned }) => {

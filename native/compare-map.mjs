@@ -9,9 +9,10 @@
 //
 // A case marked `exact` must be byte-identical. The others go through paths the interface
 // does not promise to reproduce (smoothing, fractional alpha, partial-alpha uploads — see
-// src/render/surface2d.ts); they are reported, and held to APPROX_LIMIT so a broken path
-// still fails. Exits non-zero on any exact case that differs, any approximate case past its
-// limit, and any native failure.
+// src/render/surface2d.ts): they must be byte-identical OUTSIDE the region only that path
+// draws (the case's `region`), and inside it within APPROX_LIMIT, set just above what is
+// measured, so a real regression in what only those cases draw still fails. Exits non-zero
+// on any of that, on an unknown or empty `--cases`, and on any native failure.
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
@@ -27,9 +28,17 @@ const repo = join(here, '..');
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
 const only = opt('--cases', '').split(',').filter(Boolean);
+const unknown = only.filter((n) => !MAP_CASES.some((c) => c.name === n));
+if (unknown.length || (args.includes('--cases') && !only.length)) {
+  console.error(`no such map case(s): ${unknown.join(', ') || '(none given)'}; the cases are ${MAP_CASES.map((c) => c.name).join(', ')}`);
+  process.exit(2);
+}
 const CASES = only.length ? MAP_CASES.filter((c) => only.includes(c.name)) : MAP_CASES;
-/** How far an approximate case may drift: a share of differing pixels, and a per-channel Δ. */
-const APPROX_LIMIT = { pct: 2, max: 48 };
+/**
+ * How far an approximate case may drift inside its region: a per-channel Δ, and a share of
+ * the FRAME's pixels. Measured worst: Δ1 on 0.215% (panel-zoomed).
+ */
+const APPROX_LIMIT = { pct: 0.5, max: 2 };
 const RUN_TIMEOUT_MS = 60_000;
 const OUT = opt('--out', join(here, 'build', 'compare-map'));
 const HOST = join(here, 'build', 'cmake', 'ff4e-native');
@@ -69,7 +78,16 @@ for (const c of CASES) {
   }
   const natPx = nat.subarray(8);
   const d = diff(natPx, refPx, w, h);
-  const ok = c.exact ? d.max === 0 : d.pct <= APPROX_LIMIT.pct && d.max <= APPROX_LIMIT.max;
+  // Differing pixels outside the approximate region, read off the diff's visualisation.
+  const s = w / 640;
+  const r = c.region ? { x0: c.region.x * s, y0: c.region.y * s, x1: (c.region.x + c.region.w) * s, y1: (c.region.y + c.region.h) * s } : null;
+  let outside = 0;
+  for (let p = 0; p < w * h; p++) {
+    if (!d.vis[p * 4]) continue;
+    const x = p % w, y = (p - x) / w;
+    if (!r || x < r.x0 || x >= r.x1 || y < r.y0 || y >= r.y1) outside++;
+  }
+  const ok = c.exact ? d.max === 0 : outside === 0 && d.pct <= APPROX_LIMIT.pct && d.max <= APPROX_LIMIT.max;
   if (!ok) bad.push(c.name);
   if (d.max > 0 || args.includes('--keep')) {
     writeFileSync(join(OUT, `${c.name}-native.png`), encodePng(new Uint8Array(natPx), w, h));
@@ -77,12 +95,12 @@ for (const c of CASES) {
     if (d.max > 0) writeFileSync(join(OUT, `${c.name}-diff.png`), encodePng(d.vis, w, h));
   }
   console.log(`${c.name.padEnd(15)} ${c.exact ? 'exact ' : 'approx'} max Δ ${String(d.max).padStart(3)}  differing px ${d.differing} ` +
-    `(${d.pct.toFixed(3)}%)  PSNR ${d.psnr === Infinity ? '∞' : d.psnr.toFixed(1) + ' dB'}  ${ok ? 'ok' : 'FAIL'}  — ${c.what}`);
+    `(${d.pct.toFixed(3)}%${c.exact ? '' : `, ${outside} outside its region`})  PSNR ${d.psnr === Infinity ? '∞' : d.psnr.toFixed(1) + ' dB'}  ${ok ? 'ok' : 'FAIL'}  — ${c.what}`);
 }
 await browser.close();
 await server.close();
 const exact = CASES.filter((c) => c.exact);
 console.log(`map: ${exact.filter((c) => !bad.includes(c.name)).length}/${exact.length} exact cases byte-identical, ` +
-  `${CASES.length - exact.length} approximate within limits: ${CASES.filter((c) => !c.exact && !bad.includes(c.name)).length}`);
+  `${CASES.filter((c) => !c.exact && !bad.includes(c.name)).length}/${CASES.length - exact.length} approximate within limits`);
 if (bad.length) console.log(`FAILED: ${bad.join(', ')}`);
 process.exitCode = bad.length ? 1 : 0;

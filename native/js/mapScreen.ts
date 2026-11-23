@@ -150,7 +150,13 @@ function syncSelection(): void {
   ui.mapHoverRoom = sel?.kind === 'node' ? sel.room : null;
 }
 
-/** Open the record panel (daInfo, UMain.pas:1008), with its first usable button highlighted. */
+/**
+ * Open the record panel (daInfo, UMain.pas:1008). One deliberate difference from the
+ * browser's: the hover starts on Run rather than on nothing, because a controller has no
+ * pointer to put it anywhere — the controller spec's record panel always has a highlighted
+ * button (#165's mapSelect.ts does the same).
+ * restates src/app/mapDraw.ts `export function openMapInfo(` @ c05f081eae9a
+ */
 function openMapInfo(room: number): void {
   ui.mapInfoRoom = room;
   ui.mapInfoHover = usableButtons(room)[0]!;
@@ -158,6 +164,11 @@ function openMapInfo(room: number): void {
   ui.mapInfoOpenAt = performance.now();
 }
 
+/**
+ * Close the record panel (daCancel, UMain.pas:1018). The repaint invalidation the browser's
+ * does has no counterpart: the native map is painted every frame.
+ * restates src/app/mapDraw.ts `export function closeMapInfo(` @ 3299a0b72470
+ */
 function closeMapInfo(): void {
   ui.mapInfoRoom = null;
   ui.mapInfoHover = null;
@@ -311,7 +322,8 @@ export function mapFrame(now: number): NativeSurface | null {
   if (!art) return null;
   syncSelection();
   if (!launch) steer(now);
-  // The odometer rolls on wall-clock time, one faze per INFO_FAZE_MS (renderLoop.ts).
+  // The odometer rolls on wall-clock time, one faze per INFO_FAZE_MS.
+  // restates src/app/renderLoop.ts `if (ui.mapInfoRoom !== null && ui.mapInfoFaze < INFO_SETTLE_FAZE) {` @ 1653a8adf9d4
   if (ui.mapInfoRoom !== null && ui.mapInfoFaze < INFO_SETTLE_FAZE) {
     ui.mapInfoFaze = Math.min(Math.floor((now - ui.mapInfoOpenAt) / INFO_FAZE_MS), INFO_SETTLE_FAZE);
   }

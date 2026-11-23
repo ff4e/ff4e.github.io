@@ -18,7 +18,7 @@
  *     PRECONDITION for `'destination-in'`: the draw must cover the WHOLE surface. Canvas
  *     also clears everything outside the drawn rect, which a blended quad does not touch;
  *     the two agree only when there is no outside. Both uses today are full-surface
- *     (worldMapAi.ts `rebuildBase`, mapInfoZoom.ts `aiPanelArt`). A partial
+ *     (worldMapAi.ts `rebuildBase`, zoomedInfoPanel.ts `aiPanelArt`). A partial
  *     `'destination-in'` draw is outside this contract — add a clear of the rest, or a
  *     full-surface helper, before relying on one.
  *   - `translate` / `scale`: an AXIS-ALIGNED affine, applied to dest rects on the CPU. No
@@ -30,7 +30,7 @@
  *
  * A new surface starts in the canvas defaults: transparent, identity transform, alpha 1,
  * smoothing ON, `'source-over'`. A native implementation has to start there too — some
- * callers rely on the default (mapInfoZoom.ts scales a mask up smoothly without asking).
+ * callers rely on the default (zoomedInfoPanel.ts scales a mask up smoothly without asking).
  *
  * ── What a native implementation can match byte for byte, and what it cannot ──
  * "Directly" is not "identically". A canvas stores premultiplied 8-bit colour, and its
