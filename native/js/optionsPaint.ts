@@ -43,13 +43,19 @@ export function ensureOptionsArt(): Promise<void> {
     const man = JSON.parse(new TextDecoder().decode(await readBytes(`${dir}ai.json`))) as { scale?: number };
     const img = async (name: string): Promise<Image2D> => decodeImage((await readBytes(dir + name)).slice().buffer);
     const images = await Promise.all(Array.from({ length: PANEL_IMAGES }, (_, i) => img(`img${String(i).padStart(2, '0')}.webp`)));
-    art = { images, cudl: await img('cudl.webp'), scale: Number(man.scale) || 4 }; // panelAi.ts AI_PANEL_SCALE
+    art = { images, cudl: await img('cudl.webp'), scale: Number(man.scale) || AI_PANEL_SCALE };
   })());
 }
 
-/** Subtitle-highlight left edge per mode — hud.ts SUBTITLE_HIGHLIGHT_X. */
+/** The shipped panel art's upscale when its manifest does not say (panelAi.ts imports the DOM's decoder, so not imported). */
+// restates src/render/panelAi.ts `export const AI_PANEL_SCALE =` @ 3b71f037787a
+const AI_PANEL_SCALE = 4;
+
+/** Subtitle-highlight left edge per mode (Uovl.pas:465-467). */
+// restates src/render/hud.ts `const SUBTITLE_HIGHLIGHT_X:` @ da6eb22f2d31
 const SUBTITLE_HIGHLIGHT_X: Record<'cz' | 'en' | 'off', number> = { cz: 5, en: 52, off: 100 };
-/** Slider-handle Y per bus — hud.ts HANDLE_Y. */
+/** Slider-handle Y per bus (Cudlik …, 85/134/183; Uovl.pas:470-472). */
+// restates src/render/hud.ts `const HANDLE_Y =` @ ccfbdcc24290
 const HANDLE_Y = { effect: 85, voice: 134, music: 183 } as const;
 
 /** Each row's box on the face, in panel pixels [x1, y1, x2, y2]: its hit region (hud.ts OBLMYSI). */

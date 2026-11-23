@@ -585,6 +585,30 @@ static JSValue n_windowSize(JSContext *ctx, JSValueConst self, int argc, JSValue
   return a;
 }
 
+/*
+ * Whether the system owns Back right now (argv[0]: the game is at its top level, the plain
+ * world map). On tvOS that is where App Review requires the remote's Menu/Back to go Home, and
+ * a game must not quit itself: SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS hands controller input to
+ * the system's UI there (SDL_uikitviewcontroller.m), and takes it back everywhere else. Returns
+ * whether the system now owns Back; elsewhere (macOS) it never does, and the game quits.
+ * Unverified until it runs on an Apple TV.
+ */
+static JSValue n_systemBack(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+#ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
+  static int owned = -1;
+  int want = argc > 0 && JS_ToBool(ctx, argv[0]) ? 1 : 0;
+  if (want != owned) {
+    SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, want ? "1" : "0");
+    owned = want;
+  }
+  return JS_NewBool(ctx, want);
+#else
+  (void)argc;
+  (void)argv;
+  return JS_FALSE;
+#endif
+}
+
 /* A text file by plain path (not under --root): the UI layout snapshot. Null when absent. */
 static JSValue n_readText(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   const char *path = JS_ToCString(ctx, argv[0]);
@@ -1089,12 +1113,22 @@ static void poll_sticks(void) {
 }
 
 /*
- * The Siri Remote (see the section header). A click reads where the thumb is: past half the
- * travel on one axis it is that edge, else the centre. That needs ABSOLUTE d-pad values
- * (`GCMicroGamepad.reportsAbsoluteDpadValues = YES`), which SDL does not set — by default
- * the values are relative to where the thumb first touched, so a click with a resting thumb
- * reads as the centre. A tvOS target has to set it (an Objective-C shim); until then only a
- * slide-then-click is an edge. The edge pressed is the one released.
+ * The Siri Remote (see the section header), as SDL 3.4 presents it on tvOS 14+ through
+ * `physicalInputProfile` (SDL_mfijoystick.m, IOS_JoystickGetGamepadMapping):
+ *
+ *   - 2nd/3rd generation (a click ring): a click on the ring's edge is that d-pad button
+ *     ("Cardinal Direction Pad Up"… -> DPAD_UP…), a click in the centre is "Button Center"
+ *     -> SOUTH; GCInputButtonA, which fires for any click, is left unmapped by SDL.
+ *   - 1st generation (a touch surface, clickable anywhere): no d-pad buttons; the click is
+ *     GCInputButtonA -> SOUTH, and where the thumb is decides: past half the travel on one
+ *     axis it is that edge, else the centre. That needs ABSOLUTE d-pad values
+ *     (`GCMicroGamepad.reportsAbsoluteDpadValues = YES`), which SDL does not set — by default
+ *     the values are relative to where the thumb first touched, so a click with a resting
+ *     thumb reads as the centre. A tvOS target has to set it (an Objective-C shim); until
+ *     then only a slide-then-click is an edge on that remote.
+ *
+ * A remote with d-pad buttons in its mapping is the ring kind (`SDL_GamepadHasButton`). The
+ * click pressed is the one released, whichever button sent it.
  *
  * A deflection with no click is a swipe — but only once it has lasted SWIPE_MS with no click,
  * because a slide toward an edge and a click there is one press, not a swipe and then a click
@@ -1113,19 +1147,37 @@ static bool remote_playpause, remote_back; /* held, so a removed remote can let 
 static const char *const REMOTE_EDGE[4] = {"RemoteUp", "RemoteDown", "RemoteLeft", "RemoteRight"};
 static const char *const REMOTE_SWIPE[4] = {"RemoteSwipeUp", "RemoteSwipeDown", "RemoteSwipeLeft", "RemoteSwipeRight"};
 
+/* A click went down as `code` (an edge or the centre), or `code`'s click came up. */
+static void remote_click_edge(const char *code, bool down) {
+  if (down) {
+    if (remote_click) return; /* one click at a time: the ring cannot be pressed twice */
+    remote_pending = 0;       /* a slide just before was this click's, not a swipe */
+    remote_click = code;
+    push_event(true, code);
+  } else if (remote_click == code) {
+    push_event(false, code);
+    remote_click = NULL;
+  }
+}
+
 static void remote_button(Uint8 b, bool down) {
   switch (b) {
+    case SDL_GAMEPAD_BUTTON_DPAD_UP: remote_click_edge(REMOTE_EDGE[0], down); return;
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: remote_click_edge(REMOTE_EDGE[1], down); return;
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: remote_click_edge(REMOTE_EDGE[2], down); return;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: remote_click_edge(REMOTE_EDGE[3], down); return;
     case SDL_GAMEPAD_BUTTON_SOUTH:
       if (down) {
-        int ax = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY);
-        int dir = stick_dir(ax, ay, 0);
-        if (!dir) dir = remote_pending;
-        remote_pending = 0; /* the slide was this click's, not a swipe */
-        remote_click = dir ? REMOTE_EDGE[dir - 1] : "RemoteSelect";
-        push_event(true, remote_click);
+        if (remote_click) return;
+        int dir = 0;
+        if (!SDL_GamepadHasButton(remote, SDL_GAMEPAD_BUTTON_DPAD_UP)) { /* 1st gen: where the thumb is */
+          int ax = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY);
+          dir = stick_dir(ax, ay, 0);
+          if (!dir) dir = remote_pending;
+        }
+        remote_click_edge(dir ? REMOTE_EDGE[dir - 1] : "RemoteSelect", true);
       } else if (remote_click) {
-        push_event(false, remote_click);
-        remote_click = NULL;
+        remote_click_edge(remote_click, false); /* whatever this click sent */
       }
       return;
     case SDL_GAMEPAD_BUTTON_WEST:
@@ -1406,7 +1458,7 @@ static void install(JSContext *ctx) {
       {"surfPut", n_surfPut, 2},        {"presentTexture", n_presentTexture, 1},
       {"saveTexture", n_saveTexture, 2}, {"presentRect", n_presentRect, 2},
       {"locale", n_locale, 0},         {"windowSize", n_windowSize, 0},
-      {"readText", n_readText, 1},     {"writeText", n_writeText, 2},
+      {"readText", n_readText, 1},     {"systemBack", n_systemBack, 1},     {"writeText", n_writeText, 2},
       {"events", n_events, 0},
       {"storeLoad", n_storeLoad, 1},   {"storeSave", n_storeSave, 2},
       {"storePath", n_storePath, 0},
@@ -1437,6 +1489,12 @@ int main(int argc, char **argv) {
     if (!strcmp(argv[i], "--remote-keys")) remote_keys = true;
   }
 
+#ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
+  /* The design reads the Siri Remote as a gamepad (the input section); stated, not left to
+     SDL's default. Back at the top level goes to the system: `systemBack`. */
+  SDL_SetHint(SDL_HINT_TV_REMOTE_AS_JOYSTICK, "1");
+  SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, "0");
+#endif
   /* The GPU device needs the video subsystem even when no window is ever opened. */
   if (!SDL_Init(headless ? SDL_INIT_VIDEO : (SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))) die("SDL_Init");
   dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, false, NULL);

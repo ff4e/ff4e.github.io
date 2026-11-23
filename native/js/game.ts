@@ -650,7 +650,9 @@ let lastAlpha = 0;
 /** Pause or resume the room for a menu. Pausing lets go of held keys: their keyups go to the menu. */
 export function setPaused(on: boolean): void {
   if (on && !paused) clearHeldKey();
-  if (!on && paused) acc = 0; // resume on a fresh tick, not with the time the menu was up
+  // Resume where the frame stood, so a sliding fish does not jump back to the tick's start —
+  // and not with the time the menu was up.
+  if (!on && paused) acc = lastAlpha * LOGIC_MS;
   paused = on;
 }
 
@@ -670,7 +672,7 @@ export function advance(dt: number): number {
   if (acc > LOGIC_MS * 2) acc = LOGIC_MS;
   if (!roomReady()) return 0;
   if (paused) {
-    acc = 0;
+    acc = lastAlpha * LOGIC_MS;
     return lastAlpha;
   }
   if (acc >= LOGIC_MS) {

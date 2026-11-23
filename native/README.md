@@ -190,7 +190,9 @@ game the keys the browser's router reads — so every gate of that router still 
   Restart ask first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no), then send
   F2, F3 or Backspace down the room's router, so a save mid-move or during a replay is refused
   exactly as F2 is on the web. Save and Load are greyed (and skipped by the highlight) when they
-  cannot act, by the touch buttons' rule (`buttonAvailability.ts`).
+  cannot act, by the touch buttons' rule (`buttonAvailability.ts`, pinned): never during
+  the KUFRIK demonstration, which teaches them (not played natively yet). On Resume the room
+  continues from the frame it stopped on.
 - **Options** is the original game's Options face — the AI-upscaled panel art the tablets show,
   composited as `AiPanel.drawOptions` composites it — scaled to most of the window, with a focus
   ring on the row and a caption card beside it naming the row and its value. Rows: effect, talk
@@ -211,9 +213,17 @@ game the keys the browser's router reads — so every gate of that router still 
   remote, "Switch fish" carries the active fish's picture (B3: the touch badge's art and its
   visibility rule), the only cue to which fish an edge click moves.
 - **At the map's root, Back leaves the game** (the keyboard's Esc, the remote's Back): tvOS
-  requires Back at the top level to go Home. On macOS that quits; a tvOS build should instead
-  hand the button to the system (`SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS`) at the root. The
-  pad's Ⓑ still does nothing on the plain map, on purpose.
+  requires Back at the top level to go Home, and App Review rejects a game that quits itself.
+  So on macOS it quits, and on tvOS the game does nothing with it: each frame the router tells
+  the host whether the plain map is up (no record panel, menu, launch or story page), and the
+  host turns `SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS` on there — the remote's Menu goes to the
+  system, which goes Home — and off everywhere else (`systemBack`, `native/host/main.c`). The
+  host also sets `SDL_HINT_TV_REMOTE_AS_JOYSTICK` to 1 on tvOS rather than rely on SDL's
+  default. Both are written from SDL 3.4's source and **unverified until there is a device**.
+  The pad's Ⓑ still does nothing on the plain map, on purpose.
+- **☰ in a room opens the pause menu**, on every native platform. The controller spec's A3
+  has the pad's ☰ open Options directly; its B4 has it open the pause menu on tvOS. A deliberate
+  deviation from A3: one native TV UI everywhere, and Options is one row away.
 
 Everything is drawn through `uiDraw.ts`: rectangles, procedurally rasterised glyph shapes
 (coverage masks, tinted by `fillMask`), FreeType text in Mulish and images. It also records
@@ -330,11 +340,13 @@ Controls: keyboard, gamepad (SDL maps any supported controller to an Xbox layout
 Remote. The host sends each as its own codes (`native/host/main.c`); `native/js/uiInput.ts`
 decides what they do. The remote is modelled from SDL's source — on tvOS SDL presents it as a
 gamepad (`SDL_HINT_TV_REMOTE_AS_JOYSTICK`): the click is A, Play/Pause X, Back B, the touch
-surface (or click ring) the left stick — and has **not** been run on an Apple TV. One gap is
-known: an edge click is read from where the thumb rests, which needs absolute d-pad values
-(`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL leaves them relative, so a tvOS target must
-set it (with absolute values, swipes should then come from motion rather than position). A
-slide followed by a click within 120 ms is one edge click, not a swipe and a click. On a Mac,
+surface the left stick; on a 2nd/3rd-generation remote a click on the ring's edge is that
+d-pad button and a centre click is A — and has **not** been run on an Apple TV. One gap is
+known, on the 1st-generation remote (no ring): its edge click is read from where the thumb
+rests, which needs absolute d-pad values (`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL
+leaves them relative, so a tvOS target must set it (with absolute values, swipes should then
+come from motion rather than position). A slide followed by a click within 120 ms is one
+click, not a swipe and a click. On a Mac,
 `--remote-keys` makes the keyboard a remote: arrows click an edge, Return clicks the centre,
 `P` is Play/Pause, Esc or Backspace is Back, Shift+arrow swipes.
 
@@ -568,8 +580,7 @@ with the self-test, after the map comparison.
 - **Credits, the intro, video**, and so the map's Intro and Credits corners. The faithful
   side panel is not drawn: a TV plays from the legend and the pause menu.
 - **A tvOS build.** The remote's scheme is built and gated on a Mac (`--remote-keys`), but
-  its SDL mapping has not met a real remote, and Back at the map's root quits rather than
-  handing the button to the system.
+  its SDL mapping, and Back at the map's root going to the system, have not met a real remote.
 - **Sound, beyond the rooms and the map:** the intro's and the cutscene's (neither is
   played); an audio session for tvOS (interruptions, routing — `onGesture`/`onVisible` are
   no-ops here). The AAC is decoded on the main thread as a room is entered (~1.2 s for all

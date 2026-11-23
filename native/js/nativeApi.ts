@@ -88,6 +88,12 @@ export interface NativeApi {
   presentTexture(id: number, ui?: number): void;
   /** The window's size in its pixels and its pixels per point, `[w, h, density]`; null headless. */
   windowSize(): [number, number, number] | null;
+  /**
+   * Whether the system owns Back now, given that the game is (`atRoot`) or is not at its top
+   * level: true only on tvOS at the top level, where Back must go Home and the game must not
+   * quit itself (native/host/main.c, `n_systemBack`).
+   */
+  systemBack(atRoot: boolean): boolean;
   /** A text file by plain path (not under the asset root), or null when absent. */
   readText(path: string): string | null;
   /** Write a text file by plain path. Throws when it cannot. */

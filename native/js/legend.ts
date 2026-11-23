@@ -16,7 +16,6 @@ import { cutscene, engine, loadmode, replaymode, room, showmode } from '../../sr
 import { roomEntryHeld } from '../../src/app/roomLoad.js';
 import { ui } from '../../src/app/screenState.js';
 import { inSolvemode } from '../../src/app/solveMode.js';
-import { undoAvailable } from '../../src/app/undo.js';
 import type { Image2D } from '../../src/render/surface2d.js';
 import { aiRoomReady } from './seams/art.js';
 import { roomLoading } from './seams/framePacing.js';
@@ -109,15 +108,15 @@ export function legendItems(screen: LegendScreen, source: InputSource): LegendIt
     case 'room':
       if (remote) {
         return [item([EDGE], 'Move'), item([CLICK], 'Switch fish', true, activeFishPicture()),
-          item([PLAY], 'Undo', undoAvailable()), item([BACK], 'Menu')];
+          item([PLAY], 'Undo', verbAvailable('undo')), item([BACK], 'Menu')];
       }
       if (pad) {
         return [item([L], 'Little'), item([R], 'Big'), item([B], 'Map'),
           item([LB], 'Save', verbAvailable('save')), item([RB], 'Load', verbAvailable('load')),
-          item([X], 'Restart'), item([MENU], 'Menu'), item([Y], 'Undo', undoAvailable())];
+          item([X], 'Restart'), item([MENU], 'Menu'), item([Y], 'Undo', verbAvailable('undo'))];
       }
       return [item([key('IJKL')], 'Little'), item([key('WASD')], 'Big'), item([key('Space')], 'Switch'),
-        item([key('−')], 'Undo', undoAvailable()), item([key('F2')], 'Save', verbAvailable('save')),
+        item([key('−')], 'Undo', verbAvailable('undo')), item([key('F2')], 'Save', verbAvailable('save')),
         item([key('F3')], 'Load', verbAvailable('load')), item([key('Bksp')], 'Restart'), item([key('Esc')], 'Menu')];
     case 'map':
       if (remote) return [item([EDGE], 'Choose'), item([CLICK], 'Open'), item([PLAY], 'Options'), item([BACK], 'Exit')];

@@ -46,6 +46,17 @@ const sourceOf = (code: string): InputSource =>
 
 /** What leaves the game at the map's root. The smoke gate swaps it to watch for it. */
 let exitApp: () => void = () => __native.quit();
+/**
+ * Does the system own Back right now? On tvOS at the map's root it does — the remote's
+ * Menu/Back goes Home, and a game must not quit itself (App Review) — so the game does
+ * nothing with it there. Refreshed every frame (`inputFrame`).
+ */
+let systemOwnsBack = false;
+
+/** The plain map: no record panel, no menu, no launch, no story page. */
+function atMapRoot(): boolean {
+  return ui.screen === 'map' && !menuOpen() && !mapPanelOpen() && !mapBusy();
+}
 
 export function setExitHandler(fn: () => void): void {
   exitApp = fn;
@@ -94,7 +105,10 @@ function menuKey(down: boolean, code: string, now: number): void {
 // ── The remote's held Play/Pause: undo, and repeat while held ───────────────────────
 
 // The touch Undo's hold (undoButton.ts): a press that is released early is one undo; held,
-// it undoes after HOLD_DELAY_MS and then every REPEAT_MS, and the release adds nothing.
+// it undoes after HOLD_DELAY_MS and then every REPEAT_MS, and the release adds nothing. The
+// pointer-down / tick / pointer-up / click-suppression of `bindUndoHold` becomes
+// `undoHoldDown` / `undoHoldTick` / `undoHoldUp` below.
+// restates src/app/undoButton.ts `export function bindUndoHold(` @ b86a83c33198
 // restates src/app/undoButton.ts `const HOLD_DELAY_MS = 350;` @ eae3855a24a3
 const HOLD_DELAY_MS = 350;
 // restates src/app/undoButton.ts `const REPEAT_MS = 80;` @ cdaaf951096a
@@ -224,7 +238,7 @@ function mapKey(down: boolean, code: string): void {
     if (!down || mapBusy()) return;
     if (!back) openOptions();
     else if (mapPanelOpen()) mapKeyDown('Escape'); // daCancel
-    else exitApp(); // Back at the root
+    else if (!systemOwnsBack) exitApp(); // Back at the root; on tvOS the system takes it Home
     return;
   }
   const key = MAP_KEYS[code] ?? (sourceOf(code) === 'key' ? code : null);
@@ -253,8 +267,9 @@ export function routeEvent(ev: string, now: number): void {
   else mapKey(down, code);
 }
 
-/** Once a frame: menu repeat, the held undo. */
+/** Once a frame: who owns Back, menu repeat, the held undo. */
 export function inputFrame(now: number): void {
+  systemOwnsBack = __native.systemBack(atMapRoot());
   if (menuOpen()) menuSteer(now);
   else if (menuHeld.length) {
     menuHeld.length = 0; // the menu closed under a held direction
