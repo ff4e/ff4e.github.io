@@ -7,15 +7,18 @@
 > consumes it.
 
 The game **without a browser**. It plays a whole game now — from the world map, room after
-room, with undo, saves, the record panel's Replay and the leg story pages — on the
-AI-upscaled tier, without menus, subtitles or sound yet:
+room, with undo, saves, the record panel's Replay and the leg story pages, and with its
+sound — on the AI-upscaled tier, without menus or subtitles yet:
 
 - **QuickJS-ng** runs the game's own TypeScript. Nothing is ported: the room, its script and
   the step engine (`src/core/`), the AI-tier room walk (`src/render/`), and the game's own
   flow from `src/app/` — `roomLoad` enters a room, `logicTick.step` is the 80 ms game step,
   `movement`'s held-key state machine turns keys into moves, `undo` takes them back,
   `persist` keeps the solved rooms, scores and best records.
-- **SDL3** provides the window, the keyboard, the gamepad and the GPU.
+- **SDL3** provides the window, the keyboard, the gamepad, the GPU and the audio output.
+- The sound is the browser's own policy (`src/audio/audio.ts`) over the `AudioBackend` seam
+  (`src/audio/audioBackend.ts`), implemented by a small **C mixer** behind an SDL audio
+  stream, with **Apple's decoder** for the AAC: see "Sound" below.
 - The AI tier's `AiTarget` seam (`src/render/aiTarget.ts`) is implemented on **SDL GPU**
   (`native/js/nativeAiScreen.ts`, `native/host/shaders.metal`). That is the one thing a
   native host has to own.
@@ -40,7 +43,8 @@ same host is the shape of an Apple TV build and an Xbox build.
 `src/` is not changed for the native host and does not know about it. The flow modules
 above are bundled as they are; the handful of modules they import that reach the document,
 Web Audio or the page layout are swapped, at bundle time, for a module of the same name in
-`native/js/seams/` — the move the unit tests make with `vi.mock`, made once for the whole
+`native/js/seams/` (`platform-<name>.ts` for `src/platform/`, `audio-<name>.ts` for
+`src/audio/`) — the move the unit tests make with `vi.mock`, made once for the whole
 bundle by an esbuild plugin in `native/build-js.mjs`. Each seam is typed against the module
 it replaces (`typeof import(...)`), so `npm run typecheck:native` catches a changed
 signature, and the constants it restates are checked against the real literal types.
@@ -113,6 +117,94 @@ The corner buttons (Intro, Credits, Options, Exit) are not selectable yet: none 
 screens exists natively, and a target that does nothing is worse than none
 (`NATIVE_CORNERS`). The story pages are the upscaled ones (`/enhanced-ai/_story/`).
 
+## Sound
+
+The policy is the browser's, unchanged: `AudioEngine` (`src/audio/audio.ts`) decides what
+plays, on which priority, and what `playing()` / `talking()` tell the game. The native host
+supplies only the `AudioBackend` under it (`native/js/sdlAudioBackend.ts`, handed over by
+`seams/audioEngine.ts`; the browser's Web Audio backend is seamed out of the bundle by
+`seams/audio-webAudioBackend.ts`).
+
+- **The mixer** (`native/host/audio.c`) runs at **22050 Hz, mono** — the rate of every sound
+  the game ships (the 1998 effects, the staged speech, the music). So it resamples nothing: a
+  voice advances one sample per frame, a loop point is a sample index, and a buffer lasts
+  exactly `frames / 22050` s, which is what `audioBackend.ts` requires of `duration`. Voices
+  have a gain; buses (effect, voice, music) have the Options levels, read from the browser's
+  persisted settings (there are no sliders natively yet); then `MASTER_GAIN`. A loop plays
+  `[0, loopEnd)` once, then `[loopStart, loopEnd)` for ever, with Web Audio's rules for
+  out-of-range points. The mix is clamped to ±1, as an audio destination clips.
+- **The one resampling** — 22050 Hz to the device's rate — is SDL's audio stream, on SDL's
+  audio thread, in the SDL version `CMakeLists.txt` pins: deterministic for a given device
+  rate. It is not Chromium's (which interpolates each source linearly), and nothing the game
+  decides depends on it: the clock and every length are counted before it, in source samples.
+- **The clock** (`now()`) is the frames mixed so far. A voice started at `now()` plays its
+  last sample as the clock reaches `now() + duration`, which is exactly when the policy's
+  `playing()` turns false. It stands still while paused, which `audioBackend.ts` allows.
+- **`onEnded`** — a voice's end, or a `stop` — is queued by the mixer and delivered by the
+  next poll (once a frame), never from inside `start` or `stop`.
+- **Decoding**: the 1998 `.ffs` effects keep the game's own decoder (`src/audio/ffs.ts`, to
+  PCM, then `fromPcm16`). The AAC — every speech segment (`decodeSegment`) and the music
+  (`decode`) — goes to **Audio Toolbox** (`native/host/audio_decode_apple.c`, ExtAudioFile
+  reading from memory), behind one host function (`audio_decode` in `audio.h`) that Media
+  Foundation would replace on Windows and Xbox. Each MP4 is first passed through
+  `src/platform/nativeAudioTiming.ts`: Core Audio honours the movie's millisecond-rounded
+  edit and would cut up to a millisecond off a file (7 samples off `rybky08`'s loop).
+  Restated in the media timescale, every one of the 1 797 speech sounds decodes to exactly
+  its `delka` and every music track to exactly the original's sample count, aligned with the
+  original samples at lag 0 (the gate below checks both). A segment is
+  then trimmed to `delka`, as the browser's `trimToSamples` does.
+- **Line timing** is the browser's: the talk hook (`game.ts`'s `talk`, restating
+  `scriptTalk`) holds a line for `delka` less Talking()'s lead, so a line never depends on
+  the mixer. The fish's mouths move with `talking()` (`updateLipSync`, restated in
+  `native/js/sound.ts`), so the talking heads came with the sound.
+- **With an output** (the interactive game) the device's consumption drives the mixer; when
+  none can be opened, SDL's `dummy` driver keeps the clock running in real time, silently.
+  The 5-second stat line prints the mixer clock against the wall's (×1.000 when healthy).
+  **Headless** (`--headless`: the smoke gates) no output is opened and the game drives the
+  mixer itself, 1764 frames per 80 ms step (`soundTime` in `sound.ts`), so a headless run
+  hears the timeline a player would, tick for tick, at any speed, with no device in it.
+
+`roomLoad` fetches and installs each room's voice package and starts its music, as in the
+browser (`seams/stageState.ts` reports the boot as done, so every entry takes that path), and
+a room is not ticked until its sound is in, as the browser does not present one. The global
+packages (x00 effects, x03 chatter, x02 death lines, the restored lines) are loaded before
+the first room (`loadGlobalSounds`). The map plays the menu music; the story pages `rybky11`.
+
+`--audio-log` prints the policy's sound log (every sound started) to stdout.
+
+### Does it sound right? `--smoke-audio`
+
+    native/build/cmake/ff4e-native native/build/game.js --root public --headless \
+      --smoke-audio --store native/build/smoke-audio-store.json
+
+`native/js/audioSmoke.ts`, 79 checks in ~8 s:
+
+1. the mixer on synthetic buffers, sample for sample: gains, the loop region (and Web Audio's
+   rules for odd loop points), `stop`, `onEnded` after the mix and never inside
+   `start`/`stop`, a bus gain applied live, pause, and 80 ms = 1764 frames;
+2. every staged speech package (76), all 1 797 sounds (~100 minutes): the decoder alone,
+   untrimmed, gives exactly `delka` samples (the policy's own path trims to `delka`, so it
+   could not show a decode that runs long), and so does the policy's path (`decodeFfs2`);
+   and one sound of every package aligns with the 1998 samples it was encoded from
+   (`src/audio/ffs.ts`) at lag 0, no whole-frame or fine shift fitting better — what a
+   decoder that kept the AAC priming would fail even if cut back to the right length;
+3. every music track (17): exactly the original's sample count, aligned at lag 0 with the
+   original WAV the same way, and the looping voice plays `[loopEnd − 4096, loopEnd)` then
+   `[loopStart, loopStart + 4096)` of the track sample for sample against the same track
+   played straight through, with the loop points computed as `playMusic` computes them;
+4. PRVNI's opening through the real flow, the native twin of `tools/test-voices.mjs`'s
+   browser assertion: `1st-v-netusim` starts exactly `1st-m-cotobylo`'s talk ticks + 6 after
+   it (14 + 6: ticks 18 and 38), both buffers are `delka` long, `playing()` turns false on
+   the tick the mixer plays the last sample, the room is audible, and the little fish's
+   mouth moves.
+
+CI runs it after the map smoke. The room smoke and the map smoke run with the sound on too —
+every voice, effect and music track of every room, on the headless clock.
+
+Not proven by a gate: how it sounds through a real device. It has been run with an output on
+a Mac (the mixer clock tracks the wall at ×1.001–1.002), not listened to critically, and the
+SDL resampler's output has not been compared with Chromium's.
+
 ## Build and run (macOS, Apple silicon)
 
     brew install cmake ninja
@@ -123,7 +215,8 @@ screens exists natively, and a target that does nothing is worse than none
     native/build/cmake/ff4e-native native/build/game.js --root public --room 3
 
 CMake fetches and builds the three C dependencies at pinned versions (QuickJS-ng v0.17.0,
-SDL 3.4.20, libwebp 1.6.0), each from a source archive checked by SHA-256, statically. A clean configure and build
+SDL 3.4.20, libwebp 1.6.0), each from a source archive checked by SHA-256, statically; the
+AAC decoder is the system's Audio Toolbox. A clean configure and build
 takes under a minute. Nothing from Homebrew but the build tools is used, so a package
 upgrade cannot change the pixels `compare.mjs` checks.
 
@@ -159,6 +252,7 @@ Other flags:
   from where the store says the player left off.
 - `--seconds N` quits after N seconds.
 - `--store FILE` keeps progress and save slots in FILE instead of the user's.
+- `--audio-log` prints every sound the game starts.
 
 From a Rosetta shell, prefix the commands with `arch -arm64`, or the universal tools
 build x86_64.
@@ -176,14 +270,17 @@ DRAKAR1 and 70 DISKETA, two that carry script state through undo, are also TYPED
 key through the router the keyboard and the gamepad use, with a save (F2), two undos, a load
 (F3) and an undo into the loaded history on the way, each landing checked against the
 record it must land on, and then finished: 72 runs. One frame per room is drawn from the
-real flow's state. `--store` is required and wiped: a smoke run never touches the player's
-progress. `--smoke-out DIR` keeps those frames.
+real flow's state. The sound is on — each room's voices, effects and music, on the headless
+mixer clock (see "Sound"), so a script that waits for a sound to end waits as it would in
+play. `--store` is required and wiped: a smoke run never touches the player's progress.
+`--smoke-out DIR` keeps those frames.
 
 Each run starts as it would alone — Math.random seeded per room, the chatter history, blink
 state and the room's solved flag put back to rest — so `--smoke N` (or `--smoke-player N`)
 reproduces what `--smoke all` reported for room N.
 
-~25 s locally, ~40 s on CI, which runs it in the `native-macos` job before the parity sweep.
+~27 s locally with the sound on, ~40 s on CI, which runs it in the `native-macos` job before
+the parity sweep.
 
 The map has a smoke gate of its own (`native/js/mapSmoke.ts`, `--smoke-map --store F`): the
 map driven key by key through the real flow — a fresh session opens on the map with room 1
@@ -272,19 +369,17 @@ not compared separately.
 
 ## What it does not do yet
 
-- **Menus (Options, Credits, the intro), the panel, subtitles, sound, video.** The map's
-  corner buttons are therefore not selectable. A room's dialogue still runs
-  (scripts wait on it as they do in the browser), but every line lasts the browser's
-  fallback for a line without audio (`DEFAULT_LINE_TICKS`), is not shown, and is not heard.
-  Room entry takes the path the browser's boot load does: art and room data only. Sound is
-  the `AudioBackend` in `src/audio/audioBackend.ts` to implement: the policy in
-  `src/audio/audio.ts` already talks to nothing else, and that file says what a mixer has to
-  match.
+- **Menus (Options, Credits, the intro), the panel, subtitles, video.** The map's
+  corner buttons are therefore not selectable, and the volume levels are the ones the
+  browser persisted (the defaults, natively). A room's lines are heard and timed as in the
+  browser, but not shown.
+- **Sound, beyond the rooms and the map:** the intro's and the cutscene's (neither is
+  played); an audio session for tvOS (interruptions, routing — `onGesture`/`onVisible` are
+  no-ops here). The AAC is decoded on the main thread as a room is entered (~1.2 s for all
+  100 minutes of speech, so a few tens of ms a room); decoded music stays cached for the
+  session, as the browser's does (mono float32 at 22050 Hz: ~10 MB a track).
 - **KUFRIK's briefcase cutscene and its tutorial demonstration.** The room plays; the
   demonstration is not shown.
-- **Talking heads.** The fish blink and a dark room's silhouettes wink out (that is
-  `logicTick`'s `tickBlink`, which now runs), but the mouths follow the audio's lip sync,
-  and there is no audio.
 - **Cheats** (no way to type one), the fishing hooks they enable, and haptics.
 - **Quitting** is closing the window: on the map Ⓑ does nothing, by design, and Esc is the
   same key. On tvOS the system's Home and Back will own it.

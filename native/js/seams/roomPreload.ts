@@ -1,7 +1,8 @@
 /**
  * Seam for `src/app/roomPreload.ts`: what a room's play can demand beyond its art — KUFRIK's
- * briefcase cutscene and the leg-final story pages. The native host shows neither yet, and
- * `roomLoad`'s boot-load path (see `stageState.ts` here) already asks for none of it.
+ * briefcase cutscene and the leg-final story pages, which `roomLoad` asks for after the art.
+ * The native host plays no cutscene, and loads its story pages when it shows them
+ * (`mapScreen.ts`), so there is nothing to preload and nothing to hold an entry for.
  */
 import type * as Real from '../../../src/app/roomPreload.js';
 
