@@ -1,17 +1,18 @@
 /**
- * The spike's game scene: one room, its script, the step engine and the AI-tier art —
- * built from the SAME modules the browser game runs, so the native host and the browser
- * reference (`reference.ts`) render identical state and any pixel difference between
- * them belongs to the backends, not to the scene.
+ * The parity scene `compare.mjs` renders on both sides: one room, its script, the step
+ * engine and the AI-tier art, built from the SAME modules the browser game runs, so the
+ * native host and the browser reference (`reference.ts`) render identical state and any
+ * pixel difference between them belongs to the backends, not to the scene.
  *
- * Deliberately NOT `src/app/`: that layer is the DOM game shell (menus, panel, subtitles,
- * audio), which a native host would rebuild. Only the pieces below it are reused — plus
- * the two DOM-free app modules the fish pose needs: `fishFrame.ts` and the `gameState.ts`
- * it reads (see `publish`).
+ * This is NOT how the native game plays (that is `game.ts`, on the game's own flow
+ * modules). It is a fixed, headless, deterministic state for a pixel comparison, and it
+ * runs in the browser too, where the native bundle's seams do not exist — so it stays
+ * below `src/app/` except for `gameState.ts` and `fishFrame.ts`, which the shared frame
+ * (`frame.ts`) reads.
  */
 import { Room } from '../../src/core/room.js';
 import { Script } from '../../src/core/script.js';
-import { StepEngine, MOVE_FRAMES, FALL_FRAMES } from '../../src/core/stepEngine.js';
+import { StepEngine } from '../../src/core/stepEngine.js';
 import { decodeMoves } from '../../src/core/solutionMoves.js';
 import { roomScript } from '../../src/rooms/index.js';
 import { ROOM_SOLUTIONS } from '../../src/rooms/solutions.js';
@@ -19,13 +20,10 @@ import { parseFfr } from '../../src/data/ffr.js';
 import { ROOMS } from '../../src/data/roomTable.js';
 import { loadAiRoom, type AiRoom, type AiRoomFrame } from '../../src/render/roomAi.js';
 import { TL_PLAV, TL_NAHORU, HL_TLACI, HL_MRK } from '../../src/render/renderRoom.js';
-import { fishFrameFor } from '../../src/app/fishFrame.js';
 import { setCount, setEngine, setRoom } from '../../src/app/gameState.js';
+import { aiFrame } from './frame.js';
 
-/** `src/app/stageGeometry.ts` EXIT_CELLS, restated: that module imports the DOM-bound art layer. */
-const EXIT_CELLS = 5;
-
-export type Which = 'little' | 'big';
+type Which = 'little' | 'big';
 
 export interface Scene {
   readonly num: number;
@@ -35,8 +33,6 @@ export interface Scene {
   readonly engine: StepEngine;
   readonly ai: AiRoom;
   count: number;
-  /** The fish the player is steering (the game's `aktivni`). */
-  active: Which;
 }
 
 /** Deterministic RNG, the same one test/solutionsHarness.ts uses, so replays never vary. */
@@ -84,15 +80,14 @@ export async function loadScene(num: number, readBytes: (url: string) => Promise
   }
   const ai = await loadAiRoom('/', jmeno);
   if (!ai) throw new Error(`room #${num} ${jmeno} has no AI art`);
-  return { num, jmeno, room, script, engine, ai, count: 0, active: 'little' };
+  return { num, jmeno, room, script, engine, ai, count: 0 };
 }
 
 /**
- * One logic tick, in the order the browser loop and the solution harness use: Programky
- * and motion first, then (only on a tick that STARTED at rest) the player's command.
- * Returns whether the command was taken.
+ * One logic tick, in the order the solution harness uses: Programky and motion first, then
+ * (only on a tick that STARTED at rest) the recorded command. Returns whether it was taken.
  */
-export function tick(s: Scene, cmd: { which: Which; dir: number } | null): boolean {
+function tick(s: Scene, cmd: { which: Which; dir: number } | null): boolean {
   s.count++;
   const idleAtStart = s.engine.phase === 'idle';
   s.engine.runScript(s.count, 0);
@@ -106,7 +101,7 @@ export function tick(s: Scene, cmd: { which: Which; dir: number } | null): boole
 }
 
 /** The room's recorded solution as commands, or [] when it has none. */
-export function solutionSteps(s: Scene): { which: Which; dir: number }[] {
+function solutionSteps(s: Scene): { which: Which; dir: number }[] {
   const moves = ROOM_SOLUTIONS[s.jmeno];
   return moves ? decodeMoves(moves).map((st) => ({ which: st.which, dir: st.dir })) : [];
 }
@@ -122,32 +117,19 @@ export function replaySolution(s: Scene, ticks: number): number {
 }
 
 /**
- * Hand the scene to `gameState.ts`, which is where the game's own `fishFrameFor` reads the
- * room, the engine and the tick from. Done per frame rather than once, so the pose can
- * never be computed from a stale tick.
+ * Hand the scene to `gameState.ts`, which is where the shared frame (`frame.ts`) and the
+ * game's own `fishFrameFor` read the room, the engine and the tick from.
  *
- * The rest of what `fishFrameFor` reads stays at its initial value here, and is NOT the
- * game's behaviour yet: `blink` and `darkFlicker` are advanced by `tickBlink` in
- * `src/app/logicTick.ts`, and `poslMluv` by the lip sync in `src/app/main.ts` from the
- * audio engine — neither module is DOM-free. So the native fish never blink, never talk,
- * and a darkness room's silhouette never winks out.
+ * The rest of what `fishFrameFor` reads stays at rest here, deliberately: `blink`,
+ * `darkFlicker` and `poslMluv` are the game loop's and the audio's, and this scene is a
+ * fixed state for a pixel comparison, not a game. (`game.ts` runs the real loop, where
+ * the fish do blink.)
  */
-function publish(s: Scene): void {
+export function frameFor(s: Scene, alpha: number): AiRoomFrame {
   setRoom(s.room);
   setEngine(s.engine);
   setCount(s.count);
-}
-
-/** The frame description `AiRoom.drawInto` takes — slide as in src/app/framePainter.ts:66. */
-export function frameFor(s: Scene, alpha: number): AiRoomFrame {
-  const { engine } = s;
-  const sub = engine.animFrame + alpha;
-  let slide = 0;
-  if (engine.phase === 'move') slide = sub / (engine.cellFrames ?? MOVE_FRAMES);
-  else if (engine.phase === 'fall') slide = sub / FALL_FRAMES;
-  else if (engine.phase === 'exit') slide = (sub / engine.exitFrames) * EXIT_CELLS;
-  publish(s);
-  return { count: s.count, alpha, slide, fishAnim: { little: fishFrameFor('little'), big: fishFrameFor('big') } };
+  return aiFrame(alpha);
 }
 
 /** The fixed probe frame both sides render for the parity check (mirrors __ff.aiGlParity's pose). */

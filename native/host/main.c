@@ -4,7 +4,10 @@
  * The JS side calls the functions installed on `__native` (native/js/nativeApi.ts is the
  * contract); the AI tier's AiTarget primitives become SDL GPU passes.
  *
- *   ff4e-native <bundle.js> --root <public dir> [--room N] [--headless --out f.rgba ...]
+ *   ff4e-native <bundle.js> --root <public dir> [--room N] [--store F] [--headless ...]
+ *
+ * native/js/main.ts reads the rest of the arguments; the host only needs --root (the asset
+ * root), --headless (no window, no gamepad) and --store (the key-value file).
  */
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -43,7 +46,7 @@ static SDL_GPURenderPass *pass;   /* open on `comp` between begin() and present/
 static SDL_GPUGraphicsPipeline *bound;
 
 static SDL_Gamepad *pad;
-static int pressed_bits;
+static char store_path[2048];
 
 /* ── helpers ───────────────────────────────────────────────────────────────────── */
 static void die(const char *what) {
@@ -529,25 +532,155 @@ static JSValue n_saveComposite(JSContext *ctx, JSValueConst self, int argc, JSVa
 }
 
 /* ── input ─────────────────────────────────────────────────────────────────────── */
-static JSValue n_heldDir(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-  const bool *k = SDL_GetKeyboardState(NULL);
-  int up = k[SDL_SCANCODE_UP], down = k[SDL_SCANCODE_DOWN], left = k[SDL_SCANCODE_LEFT], right = k[SDL_SCANCODE_RIGHT];
-  if (pad) {
-    const Sint16 dz = 16000;
-    Sint16 ax = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY);
-    up |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_UP) || ay < -dz;
-    down |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_DOWN) || ay > dz;
-    left |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || ax < -dz;
-    right |= SDL_GetGamepadButton(pad, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || ax > dz;
-  }
-  /* Dir values from src/core/dir.ts: up 1, down 2, left 3, right 4. */
-  return JS_NewInt32(ctx, up ? 1 : down ? 2 : left ? 3 : right ? 4 : 0);
+/*
+ * Key transitions for the JS router, as the DOM KeyboardEvent.code strings the browser
+ * game's router already reads ("+KeyI" down, "-KeyI" up). The gamepad is mapped onto the
+ * same codes, so the game has one router and the controller is "a keyboard":
+ *
+ *   d-pad / left stick  little fish  KeyI KeyK KeyJ KeyL
+ *   right stick         big fish     KeyW KeyS KeyA KeyD
+ *   A (south)           switch fish  Space
+ *   Y (north)           undo         Minus
+ *   X (west)            restart      Backspace
+ *   LB / RB             save / load  F2 / F3
+ *   B (east)            back         Escape
+ */
+#define EVQ 128
+static char evq[EVQ][24];
+static int evq_n;
+
+static void push_event(bool down, const char *code) {
+  if (evq_n >= EVQ) return;
+  if (code[0] == '!') SDL_strlcpy(evq[evq_n++], code, sizeof evq[0]); /* not a key: "!blur" */
+  else SDL_snprintf(evq[evq_n++], sizeof evq[0], "%c%s", down ? '+' : '-', code);
 }
 
-static JSValue n_pressed(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-  int b = pressed_bits;
-  pressed_bits = 0;
-  return JS_NewInt32(ctx, b);
+/* The codes a keyboard can send that the router reads, or NULL. */
+static const char *code_of(SDL_Scancode sc) {
+  static char buf[16];
+  if (sc >= SDL_SCANCODE_A && sc <= SDL_SCANCODE_Z) { SDL_snprintf(buf, sizeof buf, "Key%c", 'A' + (sc - SDL_SCANCODE_A)); return buf; }
+  if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) { SDL_snprintf(buf, sizeof buf, "Digit%c", '1' + (sc - SDL_SCANCODE_1)); return buf; }
+  if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F12) { SDL_snprintf(buf, sizeof buf, "F%d", 1 + (sc - SDL_SCANCODE_F1)); return buf; }
+  switch (sc) {
+    case SDL_SCANCODE_0: return "Digit0";
+    case SDL_SCANCODE_UP: return "ArrowUp";
+    case SDL_SCANCODE_DOWN: return "ArrowDown";
+    case SDL_SCANCODE_LEFT: return "ArrowLeft";
+    case SDL_SCANCODE_RIGHT: return "ArrowRight";
+    case SDL_SCANCODE_SPACE: return "Space";
+    case SDL_SCANCODE_TAB: return "Tab";
+    case SDL_SCANCODE_BACKSPACE: return "Backspace";
+    case SDL_SCANCODE_ESCAPE: return "Escape";
+    case SDL_SCANCODE_MINUS: return "Minus";
+    case SDL_SCANCODE_KP_MINUS: return "NumpadSubtract";
+    default: return NULL;
+  }
+}
+
+/* The gamepad's codes are reference-counted, so the d-pad and the left stick — both the
+   little fish — cannot release a direction the other is still holding. */
+#define NPADKEYS 16
+static struct { const char *code; int held; } padkeys[NPADKEYS];
+
+static void pad_key(const char *code, bool down) {
+  int i = 0;
+  while (i < NPADKEYS && padkeys[i].code && strcmp(padkeys[i].code, code)) i++;
+  if (i == NPADKEYS) return;
+  padkeys[i].code = code;
+  if (down && padkeys[i].held++ == 0) push_event(true, code);
+  if (!down && padkeys[i].held > 0 && --padkeys[i].held == 0) push_event(false, code);
+}
+
+static const char *button_code(Uint8 b) {
+  switch (b) {
+    case SDL_GAMEPAD_BUTTON_DPAD_UP: return "KeyI";
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return "KeyK";
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return "KeyJ";
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return "KeyL";
+    case SDL_GAMEPAD_BUTTON_SOUTH: return "Space";
+    case SDL_GAMEPAD_BUTTON_NORTH: return "Minus";
+    case SDL_GAMEPAD_BUTTON_WEST: return "Backspace";
+    case SDL_GAMEPAD_BUTTON_LEFT_SHOULDER: return "F2";
+    case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return "F3";
+    case SDL_GAMEPAD_BUTTON_EAST: return "Escape";
+    default: return NULL;
+  }
+}
+
+/*
+ * A stick as four keys: the dominant axis past the dead zone is the one direction held,
+ * and a held direction lets go only below a lower threshold, so a thumb resting near the
+ * edge does not chatter between press and release.
+ */
+typedef struct { SDL_GamepadAxis x, y; const char *code[4]; int held; } Stick; /* held: 0 none, 1..4 = up/down/left/right */
+static Stick sticks[2] = {
+    {SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, {"KeyI", "KeyK", "KeyJ", "KeyL"}, 0},
+    {SDL_GAMEPAD_AXIS_RIGHTX, SDL_GAMEPAD_AXIS_RIGHTY, {"KeyW", "KeyS", "KeyA", "KeyD"}, 0},
+};
+
+static void poll_sticks(void) {
+  const int press = 16000, release = 10000;
+  for (int i = 0; i < 2; i++) {
+    Stick *st = &sticks[i];
+    int ax = pad ? SDL_GetGamepadAxis(pad, st->x) : 0, ay = pad ? SDL_GetGamepadAxis(pad, st->y) : 0;
+    int dir = 0;
+    if (SDL_abs(ax) >= SDL_abs(ay)) {
+      if (ax <= -press) dir = 3; else if (ax >= press) dir = 4;
+    } else {
+      if (ay <= -press) dir = 1; else if (ay >= press) dir = 2;
+    }
+    if (!dir && st->held) {
+      int v = st->held <= 2 ? ay : ax;
+      if (SDL_abs(v) > release && ((st->held == 1 || st->held == 3) ? v < 0 : v > 0)) dir = st->held;
+    }
+    if (dir == st->held) continue;
+    if (st->held) pad_key(st->code[st->held - 1], false);
+    if (dir) pad_key(st->code[dir - 1], true);
+    st->held = dir;
+  }
+}
+
+static JSValue n_events(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  JSValue a = JS_NewArray(ctx);
+  for (int i = 0; i < evq_n; i++) JS_SetPropertyUint32(ctx, a, (uint32_t)i, JS_NewString(ctx, evq[i]));
+  evq_n = 0;
+  return a;
+}
+
+/* ── persistence: the localStorage shim's file ─────────────────────────────────── */
+/* --store, or store.json in the user's app-support dir (created on first use). */
+static const char *store_file(void) {
+  if (!store_path[0]) {
+    char *dir = SDL_GetPrefPath("ff4e", "Fish Fillets 4ever");
+    if (!dir) return NULL;
+    SDL_snprintf(store_path, sizeof store_path, "%sstore.json", dir);
+    SDL_free(dir);
+  }
+  return store_path;
+}
+
+static JSValue n_storeLoad(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  const char *path = store_file();
+  size_t size = 0;
+  char *data = path ? SDL_LoadFile(path, &size) : NULL;
+  if (!data) return JS_NULL;
+  JSValue s = JS_NewStringLen(ctx, data, size);
+  SDL_free(data);
+  return s;
+}
+
+/* Written to a sibling and renamed over, so a crash mid-write cannot leave half a store. */
+static JSValue n_storeSave(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  const char *path = store_file();
+  if (!path) return JS_ThrowTypeError(ctx, "no place to keep the store: %s", SDL_GetError());
+  size_t len = 0;
+  const char *json = JS_ToCStringLen(ctx, &len, argv[0]);
+  if (!json) return JS_EXCEPTION;
+  char tmp[2100];
+  SDL_snprintf(tmp, sizeof tmp, "%s.tmp", path);
+  bool ok = SDL_SaveFile(tmp, json, len) && SDL_RenamePath(tmp, path);
+  JS_FreeCString(ctx, json);
+  return ok ? JS_UNDEFINED : JS_ThrowTypeError(ctx, "could not write %s: %s", path, SDL_GetError());
 }
 
 static JSValue n_args(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
@@ -567,6 +700,8 @@ static void poll_events(void) {
   while (SDL_PollEvent(&e)) {
     switch (e.type) {
       case SDL_EVENT_QUIT: quit_requested = true; break;
+      /* Unfocused, a held key's keyup never arrives: the game drops it (main.ts's blur). */
+      case SDL_EVENT_WINDOW_FOCUS_LOST: push_event(false, "!blur"); break;
       case SDL_EVENT_GAMEPAD_ADDED:
         if (!pad) {
           pad = SDL_OpenGamepad(e.gdevice.which);
@@ -574,20 +709,32 @@ static void poll_events(void) {
         }
         break;
       case SDL_EVENT_GAMEPAD_REMOVED:
-        if (pad && SDL_GetGamepadID(pad) == e.gdevice.which) { SDL_CloseGamepad(pad); pad = NULL; }
+        if (pad && SDL_GetGamepadID(pad) == e.gdevice.which) {
+          SDL_CloseGamepad(pad);
+          pad = NULL;
+          /* An unplugged pad sends no button-up: let go of whatever it held. */
+          for (int i = 0; i < NPADKEYS && padkeys[i].code; i++)
+            if (padkeys[i].held) { padkeys[i].held = 0; push_event(false, padkeys[i].code); }
+          sticks[0].held = sticks[1].held = 0;
+        }
         break;
       case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-        if (e.gbutton.button == SDL_GAMEPAD_BUTTON_SOUTH) pressed_bits |= 1;
-        if (e.gbutton.button == SDL_GAMEPAD_BUTTON_EAST) pressed_bits |= 2;
+      case SDL_EVENT_GAMEPAD_BUTTON_UP: {
+        const char *code = button_code(e.gbutton.button);
+        if (code) pad_key(code, e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
         break;
+      }
       case SDL_EVENT_KEY_DOWN:
-        if (e.key.repeat) break;
-        if (e.key.scancode == SDL_SCANCODE_SPACE) pressed_bits |= 1;
-        if (e.key.scancode == SDL_SCANCODE_ESCAPE) pressed_bits |= 2;
+      case SDL_EVENT_KEY_UP: {
+        if (e.key.repeat) break; /* the game repeats a held key itself (KeyRoom) */
+        const char *code = code_of(e.key.scancode);
+        if (code) push_event(e.type == SDL_EVENT_KEY_DOWN, code);
         break;
+      }
       default: break;
     }
   }
+  poll_sticks();
 }
 
 /* ── JS runtime plumbing ───────────────────────────────────────────────────────── */
@@ -640,7 +787,8 @@ static void install(JSContext *ctx) {
       {"background", n_background, 12}, {"setBands", n_setBands, 2},
       {"disintegrate", n_disintegrate, 8},
       {"present", n_present, 0},       {"saveComposite", n_saveComposite, 1},
-      {"heldDir", n_heldDir, 0},       {"pressed", n_pressed, 0},
+      {"events", n_events, 0},
+      {"storeLoad", n_storeLoad, 0},   {"storeSave", n_storeSave, 1},
       {"args", n_args, 0},             {"quit", n_quit, 0},
   };
   JSValue g = JS_GetGlobalObject(ctx);
@@ -653,7 +801,7 @@ static void install(JSContext *ctx) {
 
 int main(int argc, char **argv) {
   if (argc < 2) {
-    fprintf(stderr, "usage: %s <bundle.js> --root <public dir> [--room N] [--headless --out f.rgba]\n", argv[0]);
+    fprintf(stderr, "usage: %s <bundle.js> --root <public dir> [--room N] [--store F] [--headless ...]\n", argv[0]);
     return 2;
   }
   js_argc = argc - 2;
@@ -661,6 +809,7 @@ int main(int argc, char **argv) {
   SDL_strlcpy(root, "public", sizeof root);
   for (int i = 2; i < argc; i++) {
     if (!strcmp(argv[i], "--root") && i + 1 < argc) SDL_strlcpy(root, argv[i + 1], sizeof root);
+    if (!strcmp(argv[i], "--store") && i + 1 < argc) SDL_strlcpy(store_path, argv[i + 1], sizeof store_path);
     if (!strcmp(argv[i], "--headless")) headless = true;
   }
 
@@ -671,7 +820,7 @@ int main(int argc, char **argv) {
   SDL_Log("GPU driver: %s", SDL_GetGPUDeviceDriver(dev));
   SDL_GPUTextureFormat swap_fmt = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
   if (!headless) {
-    win = SDL_CreateWindow("Fish Fillets 4ever — native spike", 1280, 800, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    win = SDL_CreateWindow("Fish Fillets 4ever", 1280, 800, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!win || !SDL_ClaimWindowForGPUDevice(dev, win)) die("window");
     swap_fmt = SDL_GetGPUSwapchainTextureFormat(dev, win);
   }

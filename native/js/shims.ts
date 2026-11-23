@@ -113,6 +113,35 @@ g.createImageBitmap = async (blob: BlobShim): Promise<NativeBitmap> => {
   return bmp;
 };
 
+// ── localStorage over the host's key-value file ───────────────────────────────────────
+// `persist.ts` (solved rooms, scores, best records, play time), the save slots and the save
+// migration all speak localStorage. Natively it is one JSON object in a file the host owns
+// (`__native.storeLoad/storeSave`: the user's app-support dir, or `--store <path>`), read on
+// first use — so a run that never touches it (compare.mjs) never opens the file — and
+// rewritten whole on every change. Writes are rare (a solve, a save, leaving a room) and
+// small, and a whole-file write keeps a crash from leaving half a store behind.
+class StorageShim {
+  private items: Map<string, string> | null = null;
+  private map(): Map<string, string> {
+    if (!this.items) {
+      const raw = __native.storeLoad();
+      const parsed: unknown = raw ? JSON.parse(raw) : {};
+      this.items = new Map(Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
+    }
+    return this.items;
+  }
+  private flush(): void {
+    __native.storeSave(JSON.stringify(Object.fromEntries(this.map())));
+  }
+  get length(): number { return this.map().size; }
+  key(i: number): string | null { return [...this.map().keys()][i] ?? null; }
+  getItem(k: string): string | null { return this.map().get(k) ?? null; }
+  setItem(k: string, v: string): void { this.map().set(k, String(v)); this.flush(); }
+  removeItem(k: string): void { if (this.map().delete(k)) this.flush(); }
+  clear(): void { this.map().clear(); this.flush(); }
+}
+g.localStorage = new StorageShim();
+
 /** Read a file through the same door `fetch` uses (for the FFR room data). */
 export async function readBytes(url: string): Promise<Uint8Array> {
   const buf = __native.readFile(url);
