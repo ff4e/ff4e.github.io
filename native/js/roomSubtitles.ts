@@ -46,14 +46,21 @@ export function subtitleOverlay(
   compW: number, compH: number, alpha: number,
   rect: readonly [number, number, number, number, number] | null = __native.presentRect(compW, compH),
 ): NativeSurface | null {
-  if (!subs?.active || !face || !layout || !rect) return null;
+  if (!face || !layout) return null;
+  // Nothing said: forget the rows' fits, as the browser tears its layer down
+  // (`clearDomSubtitles('room')`). The next system's row ids start again at 1.
+  if (!subs?.active) {
+    layout.reset();
+    return null;
+  }
+  if (!rect) return null;
   const [ox, oy, dw, dh, density] = rect;
   const { w: screenW, h: screenH } = subs.vectorScreen;
   const cssW = dw / density, cssH = dh / density;
   const boxScale = cssW / screenW;
   // No panel column and no margins natively: the stage is the whole window.
   const stage = computeStageScale((dw + 2 * ox) / density, (dh + 2 * oy) / density, false);
-  const frame = layout.layout(subs.debugLines(), screenW, screenH, count + alpha, {
+  const frame = layout.layout(subs, count + alpha, {
     cssW, cssH, boxScale, textScale: subtitleScale(stage, boxScale), tier: AI_SUB_SCALE,
   }, face.name);
   if (!overlay || overlay.width !== dw || overlay.height !== dh) overlay = new NativeSurface(dw, dh);

@@ -60,6 +60,9 @@ export interface SubtitleBox {
   readonly tier: number;
 }
 
+/** What the layout reads from a subtitle system: its rows and the native box they centre in. */
+export type SubtitleSource = Pick<SubtitleSystem, 'debugLines' | 'vectorScreen'>;
+
 export interface LaidGlyph {
   readonly ch: string;
   /** The glyph's pen (left edge, baseline), CSS px, before the wave. */
@@ -132,7 +135,13 @@ interface Built {
  * lives, and a change of font or fit budget rebuilds them all.
  */
 export class SubtitleLayout {
+  /**
+   * By row id — and row ids are only unique within one `SubtitleSystem` (each starts at 1),
+   * and a room entry or a restart makes a new one. So the cache belongs to `source`, and is
+   * dropped when the source changes or shows nothing (`reset`).
+   */
   private readonly built = new Map<number, Built>();
+  private source: SubtitleSource | null = null;
   private lastFont = '';
   private lastFitW = 0;
 
@@ -145,7 +154,11 @@ export class SubtitleLayout {
    * restates src/app/subtitleDom.ts `export function syncDomSubtitles(` @ 637f141f0c4d
    * — its desktop branch: `detached` and `tablet` false, the layer at the room's box.
    */
-  layout(rows: readonly SubtitleRow[], screenW: number, screenH: number, now: number, box: SubtitleBox, fontKey = ''): SubtitleFrame {
+  layout(source: SubtitleSource, now: number, box: SubtitleBox, fontKey = ''): SubtitleFrame {
+    if (source !== this.source) this.reset();
+    this.source = source;
+    const rows = source.debugLines();
+    const { w: screenW, h: screenH } = source.vectorScreen;
     const textScale = clampTextScale(box.textScale, box.boxScale);
     const fontPx = VECTOR_GEOM.fontPx * textScale;
     const fontCss = Number(fontPx.toFixed(2));
@@ -211,7 +224,21 @@ export class SubtitleLayout {
     return { lines, tier: box.tier, originX: box.cssW / 2, originY: box.cssH + 1 };
   }
 
-  /** `measureTextWidth`: one run of the text, unkerned. */
+  /**
+   * Forget every row: `clearDomSubtitles`, which the browser calls whenever the room shows no
+   * subtitle (framePainter.ts `updateRoomSubtitles`) and which drops the layer's rows with it.
+   */
+  reset(): void {
+    this.built.clear();
+    this.source = null;
+    this.lastFont = '';
+    this.lastFitW = 0;
+  }
+
+  /**
+   * `measureTextWidth`: one run of the text, unkerned.
+   * restates src/app/subtitleDom.ts `function measureTextWidth(` @ 88dfd694f3ec
+   */
   private width(text: string, fontPx: number): number {
     return this.face.advances([...text], fontPx).reduce((s, a) => s + a, 0);
   }
@@ -221,6 +248,9 @@ export class SubtitleLayout {
    * `bevelSpan`, written as percentages of the line box the baseline was measured in, and
    * applied to the fill span — an inline box, whose background is its content area (ascent
    * + descent, no line gap). The two agree for a face with no line gap; FreeSans has one.
+   * The inset and box height are `measureBaseline`'s, from the face's metrics (half the line
+   * gap above the ascent, as CSS splits it).
+   * restates src/app/subtitleDom.ts `function measureBaseline(` @ 6bffafa1dbd0
    */
   private bevel(fs: number, fontCss: number): { top: number; bottom: number } {
     const [asc, desc, gap] = this.face.metrics(fontCss);

@@ -72,8 +72,6 @@ export const SUB_CASES: readonly SubCase[] = [
 export interface SubScene {
   readonly sys: SubtitleSystem;
   readonly count: number;
-  readonly screenW: number;
-  readonly screenH: number;
   readonly box: SubtitleBox;
   /** The room's box in device pixels — the surface the native side draws. */
   readonly devW: number;
@@ -121,5 +119,5 @@ export async function buildSubScene(c: SubCase, bytes: (url: string) => Promise<
     sys.tick(tick);
   }
   const { box, devW, devH } = roomBox(wall.w, wall.h, c.win, c.density, AI_SUB_SCALE);
-  return { sys, count: c.count, screenW: wall.w, screenH: wall.h, box, devW, devH, density: c.density, face: c.face ?? null };
+  return { sys, count: c.count, box, devW, devH, density: c.density, face: c.face ?? null };
 }

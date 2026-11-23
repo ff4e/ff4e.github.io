@@ -2,11 +2,13 @@
  * Seam for `src/app/playerSettings.ts` (persisted options, read through the audio engine, the
  * device gate and the DOM shell's host). The subtitle half is real: the same `ff.options`
  * the browser keeps, loaded from the native store, deciding whether a line is shown and in
- * which language. The volumes wait for the native audio.
+ * which language. The volume levels are read by `native/js/sound.ts`.
  *
- * The default language follows the browser's rule for a device that is not a desktop — a
- * TV or a console is not — which is the system's: Czech on a Czech system, else English
- * (`defaultSettings`). The host reports it (`locale`).
+ * With no language stored, the native host follows the SYSTEM language — Czech on a Czech
+ * system, else English (`defaultSettings`, given the host's `locale`). That is a deliberate
+ * difference from the browser, which gives every desktop English whatever its locale
+ * (`initPlayerSettings`, #149): a TV or a console has no browser language picker, and its
+ * system language is the player's own choice.
  */
 import type * as Real from '../../../src/app/playerSettings.js';
 import { defaultSettings, loadSettings, type Settings } from '../../../src/core/settings.js';

@@ -11,10 +11,11 @@
  *   - `drawImage` / `drawImageRect`: one textured quad, source rect → dest rect, through a
  *     nearest (`setSmoothing(false)`) or bilinear (`setSmoothing(true)`) sampler.
  *   - `fillRect`: one untextured quad in a solid colour.
- *   - `fillMask`: one textured quad whose texel ALPHA is coverage, filled with a solid
- *     colour — the same quad as `drawImageRect` with the colour as its multiplier. It is how
- *     native subtitles draw text (native/js/subtitleDraw.ts): their glyphs are coverage
- *     masks the host rasterises, and the speaker colour and the bevel are this op's colour.
+ *   - `fillMask`: one textured quad whose texels are premultiplied white × coverage, filled
+ *     with a solid colour — the same quad as `drawImageRect`, with the colour as its
+ *     multiplier. It is how native subtitles draw text (native/js/subtitleDraw.ts): their
+ *     glyphs are coverage masks the host rasterises, and the speaker colour and the bevel
+ *     are this op's colour.
  *   - `setAlpha`: multiplies every later quad's alpha (a uniform or a vertex colour).
  *   - `setBlend`: `'source-over'` is premultiplied over; `'destination-in'` keeps the
  *     destination only where the source is opaque — blend factors (src ZERO, dst SRC_ALPHA)
@@ -100,8 +101,10 @@ export interface Surface2D extends Image2D {
   /** A solid rectangle in `rgb` (0xRRGGBB), at the current alpha. */
   fillRect(x: number, y: number, w: number, h: number, rgb: number): void;
   /**
-   * The source rect of `mask` used as coverage (its alpha), stretched onto the dest rect and
-   * filled with `rgb` (0xRRGGBB) at the current alpha. The mask's colour is ignored.
+   * The source rect of `mask` used as coverage, stretched onto the dest rect and filled with
+   * `rgb` (0xRRGGBB) at the current alpha. `mask` must be premultiplied WHITE × coverage
+   * (every channel equal to its alpha): a GPU multiplies the texel by the colour, so any other
+   * colour in the mask would tint the fill.
    */
   fillMask(
     mask: Image2D,

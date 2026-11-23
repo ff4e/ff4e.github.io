@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SubtitleLayout, sampledWaveDy, type SubtitleBox, type SubtitleFace, type SubtitleRow } from '../native/js/subtitleLayout.js';
+import { SubtitleLayout, sampledWaveDy, type SubtitleBox, type SubtitleFace, type SubtitleRow, type SubtitleSource } from '../native/js/subtitleLayout.js';
 import { VECTOR_GEOM, bevelBottomRgb, bevelSpan, clampTextScale, lineOffset, waveDy } from '../src/render/subtitleGeom.js';
 
 /** Every character half an em wide; no line gap, so the bevel is `bevelSpan` exactly. */
@@ -15,11 +15,14 @@ let seq = 0;
 const row = (obsah: string, o: Partial<SubtitleRow> = {}): SubtitleRow => ({
   obsah, barva: 'M', ys: -26, cilys: -26, startcount: 0, id: ++seq, block: seq, rgb: [200, 150, 60], ...o,
 });
+/** A subtitle system showing `rows`. */
+const sys = (...rows: SubtitleRow[]): SubtitleSource => ({ debugLines: () => rows, vectorScreen: { w: SCREEN_W, h: SCREEN_H } });
+const FULL = Number((VECTOR_GEOM.fontPx * clampTextScale(box.textScale, box.boxScale)).toFixed(2));
 
 describe('native subtitle layout', () => {
   it('centres a settled line in the box, on the browser baseline, in the speaker bevel', () => {
     const t = row('Ahoj', { ys: -52 });
-    const f = new SubtitleLayout(face).layout([t], SCREEN_W, SCREEN_H, 100, box);
+    const f = new SubtitleLayout(face).layout(sys(t), 100, box);
     const scale = clampTextScale(box.textScale, box.boxScale);
     const px = Number((VECTOR_GEOM.fontPx * scale).toFixed(2));
     const [line] = f.lines;
@@ -38,21 +41,21 @@ describe('native subtitle layout', () => {
   });
 
   it('draws the FFT quote bytes as an ellipsis and a closing quote, and inks no spaces', () => {
-    const f = new SubtitleLayout(face).layout([row('a "b`')], SCREEN_W, SCREEN_H, 100, box);
+    const f = new SubtitleLayout(face).layout(sys(row('a "b`')), 100, box);
     expect(f.lines[0]!.glyphs.map((g) => g.ch).join('')).toBe('a\u2026b\u2019');
   });
 
   it('shows glyph i once the wave reaches it, riding the keyframed curve until it settles', () => {
     const t = row('abcdef', { startcount: 10 });
     const L = new SubtitleLayout(face);
-    expect(L.layout([t], SCREEN_W, SCREEN_H, 10, box).lines[0]!.glyphs).toEqual([]);
+    expect(L.layout(sys(t), 10, box).lines[0]!.glyphs).toEqual([]);
     // Half a tick in: p = 2.5 - (i + 1), so glyphs 0 and 1 have started.
-    const mid = L.layout([t], SCREEN_W, SCREEN_H, 10.5, box).lines[0]!.glyphs;
+    const mid = L.layout(sys(t), 10.5, box).lines[0]!.glyphs;
     expect(mid.map((g) => g.ch).join('')).toBe('ab');
     const amp = (VECTOR_GEOM.under * VECTOR_GEOM.scale - -26 * VECTOR_GEOM.scale) * clampTextScale(box.textScale, box.boxScale);
     expect(mid[0]!.dy).toBeCloseTo(sampledWaveDy(1.5, amp), 9);
     expect(mid[0]!.dy).not.toBe(0);
-    expect(L.layout([t], SCREEN_W, SCREEN_H, 30, box).lines[0]!.glyphs.every((g) => g.dy === 0)).toBe(true);
+    expect(L.layout(sys(t), 30, box).lines[0]!.glyphs.every((g) => g.dy === 0)).toBe(true);
   });
 
   it('samples the wave as the compositor runs it: waveDy at each keyframe, straight between', () => {
@@ -68,12 +71,31 @@ describe('native subtitle layout', () => {
     const wide = row('x'.repeat(120), { block: 900 });
     const short = row('xx', { block: 900, ys: 0 });
     const L = new SubtitleLayout(face);
-    const [a, b] = L.layout([wide, short], SCREEN_W, SCREEN_H, 100, box).lines;
+    const rows = [wide, short];
+    const one: SubtitleSource = { debugLines: () => rows, vectorScreen: { w: SCREEN_W, h: SCREEN_H } };
+    const [a, b] = L.layout(one, 100, box).lines;
     expect(a!.fontPx).toBeLessThan(VECTOR_GEOM.fontPx * clampTextScale(box.textScale, box.boxScale));
     expect(b!.fontPx).toBe(a!.fontPx);
     // A later, short message in its own block is full size; the built ones do not change.
     const next = row('yy', { ys: 26 });
-    const again = L.layout([wide, short, next], SCREEN_W, SCREEN_H, 101, box).lines;
-    expect(again.map((l) => l.fontPx)).toEqual([a!.fontPx, a!.fontPx, Number((VECTOR_GEOM.fontPx * clampTextScale(box.textScale, box.boxScale)).toFixed(2))]);
+    rows.push(next);
+    const again = L.layout(one, 101, box).lines;
+    expect(again.map((l) => l.fontPx)).toEqual([a!.fontPx, a!.fontPx, FULL]);
+  });
+
+  it('forgets the fits when the subtitle system changes or is torn down: row ids start again at 1', () => {
+    const L = new SubtitleLayout(face);
+    const wide = row('x'.repeat(120), { id: 1, block: 1 });
+    expect(L.layout(sys(wide), 100, box).lines[0]!.fontPx).toBeLessThan(FULL);
+    // A restart or a room entry: a new system, whose first row is id 1 again.
+    expect(L.layout(sys(row('Ahoj', { id: 1, block: 1 })), 100, box).lines[0]!.fontPx).toBe(FULL);
+    // Torn down while nothing is shown (`reset`, the browser's clearDomSubtitles): even the
+    // same source no longer remembers the fit row 1 was built with.
+    const rows = [wide];
+    const same: SubtitleSource = { debugLines: () => rows, vectorScreen: { w: SCREEN_W, h: SCREEN_H } };
+    expect(L.layout(same, 100, box).lines[0]!.fontPx).toBeLessThan(FULL);
+    L.reset();
+    rows[0] = row('Ahoj', { id: 1, block: 1 });
+    expect(L.layout(same, 100, box).lines[0]!.fontPx).toBe(FULL);
   });
 });

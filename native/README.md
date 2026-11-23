@@ -143,8 +143,8 @@ a CSS transform shrinks), so it is pinned rather than shared: `test/native-resta
 fails on any change to `syncDomSubtitles` until the copy is re-read. A unit test
 (`test/native-subtitle-layout.test.ts`) holds the copy to `subtitleGeom`.
 
-`subtitleDraw.ts` draws that layout with `Surface2D.fillMask` — a quad whose texel alpha is
-coverage, filled with a colour — the one operation added to the interface for it. Each glyph is
+`subtitleDraw.ts` draws that layout with `Surface2D.fillMask` — a quad whose texels are
+premultiplied white × coverage, filled with a colour — the one operation added to the interface for it. Each glyph is
 two coverage masks from **FreeType** (`native/host/text.c`): the glyph, and the glyph with the
 outline `-webkit-text-stroke` paints under it (its stroker, centred, Skia's miter limit). They
 are rasterised at the size they are shown at, the pen kept to a quarter pixel, and cached in an
@@ -157,10 +157,13 @@ pinned by SHA-256 like the other dependencies, built without its optional librar
 In the game the layer is laid out for the rect the window shows the room in (`presentRect`):
 the room's on-screen box, the text sized from a stage that is the whole window (no panel, no
 margins: `computeStageScale`), at one texel per window pixel, and `present(overlay)` draws it
-over the room. The subtitle language and on/off are the browser's `ff.options` from the store,
-defaulting as the browser does on a device that is not a desktop: Czech on a Czech system
-(`locale`), else English. The face is `ff.subfont`, the browser's pick, Mulish by default.
-There is no way to change either natively yet (the Options screen is not built).
+over the room. The subtitle language and on/off are the browser's `ff.options` from the store.
+With none stored, the native host follows the **system language** — Czech on a Czech system
+(`locale`), else English. That is a deliberate difference from the browser, which gives a
+desktop English whatever its locale (#149): a TV or a console has no browser language picker,
+and its system language is the player's choice. The face is `ff.subfont`, the browser's pick,
+Mulish by default. There is no way to change either natively yet (the Options screen is not
+built).
 
 Approximate by nature, against the browser's own shaping and scaler — see
 `compare-subs.mjs` below for how close, and how a wrong one is caught. Also not reproduced:

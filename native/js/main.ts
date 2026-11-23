@@ -139,7 +139,8 @@ async function renderSubsCase(name: string): Promise<void> {
   const rows = scene.sys.debugLines().map((t, i) => mutateRow(t, i, mutate));
   const box = mutate === 'size' ? { ...scene.box, textScale: scene.box.textScale * 1.06 } : scene.box;
   const now = mutate === 'late' ? scene.count - 1 : scene.count;
-  let frame = new SubtitleLayout(face).layout(rows, scene.screenW, scene.screenH, now, box, face.name);
+  const source = { debugLines: () => rows, vectorScreen: scene.sys.vectorScreen };
+  let frame = new SubtitleLayout(face).layout(source, now, box, face.name);
   if (mutate === 'shift') frame = { ...frame, lines: frame.lines.map((l) => ({ ...l, baseline: l.baseline + 2 / scene.density / frame.tier })) };
   if (mutate === 'outline') frame = { ...frame, lines: frame.lines.map((l) => ({ ...l, strokeW: 0 })) };
   const screen = new NativeSurface(scene.devW, scene.devH);
