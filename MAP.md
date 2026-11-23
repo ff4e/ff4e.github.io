@@ -60,7 +60,12 @@ others are small enough to read.
   at Apple TV and consoles. Nothing in `src/` imports it. See [`native/README.md`](native/README.md):
   the subtitles are `native/js/subtitleLayout.ts` (where the glyphs go, restating
   `subtitleDom.ts`'s desktop layout), `subtitleDraw.ts` (FreeType glyphs, `native/host/text.c`,
-  through `Surface2D.fillMask`) and `roomSubtitles.ts` (the game's per-frame layer).
+  through `Surface2D.fillMask`) and `roomSubtitles.ts` (the game's per-frame layer). The TV
+  menus: `uiInput.ts` routes the keyboard, pad and remote, `menus.ts` is the pause menu /
+  confirm / Options / Help state, `optionsModel.ts` persists and applies the options,
+  `uiLayer.ts` draws the window-sized UI layer — `menuPaint.ts`, `optionsPaint.ts` (the original
+  Options face), `helpPaint.ts` (the help typeset from `helpText.ts`), `legend.ts` — through
+  `uiDraw.ts`, and `menuSmoke.ts` gates them with `native/ui-layout.snap.json`.
 
 ### Map of `src/app/`
 

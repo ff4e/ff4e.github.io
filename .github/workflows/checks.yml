@@ -105,7 +105,9 @@ jobs:
   # played headless through the game's real flow modules as the native host wires them,
   # plus two rooms typed key by key through save, undo and load. ~40 s here. Then the map
   # smoke (native/js/mapSmoke.ts): the world map, its record panel and story pages, driven
-  # key by key. A few seconds. Then the sound gate (native/js/audioSmoke.ts): the mixer, every
+  # key by key. A few seconds. Then the menu smoke (native/js/menuSmoke.ts): the pause menu,
+  # confirm prompt, Options, Help and the Siri Remote's room mapping, driven by input events,
+  # and the UI layout snapshot (native/ui-layout.snap.json). Then the sound gate (native/js/audioSmoke.ts): the mixer, every
   # speech and music decode (length and alignment against the originals), and PRVNI's
   # dialogue timing against the browser's. ~8 s. All three are headless: no audio device, the game itself drives the mixer.
   native-macos:
@@ -141,6 +143,11 @@ jobs:
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-map --store native/build/smoke-map-store.json
+      - name: Native menus, the pause menu, Options, Help and the remote, and the UI layout snapshot
+        timeout-minutes: 2
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless
+          --smoke-menus --store native/build/smoke-menus-store.json
       - name: Native sound, the mixer, every decode and PRVNI's dialogue timing
         timeout-minutes: 2
         run: >-

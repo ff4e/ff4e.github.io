@@ -53,6 +53,7 @@ import { initNativeSettings, subLang, subsOn } from './seams/playerSettings.js';
 import { aiFrame } from './frame.js';
 import { closeLegPage, initMapScreen, mapArrived, openLegPage } from './mapScreen.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
+import type { MapAction } from '../../src/render/worldMap.js';
 import { loadStore } from './shims.js';
 import { initSound, loadGlobalSounds, musicLevel, soundTime, startMenuMusic, updateLipSync } from './sound.js';
 import { MUSIC_PRIOR, TALKING_MEZ_SEC } from '../../src/audio/audio.js';
@@ -73,6 +74,8 @@ export interface GameOptions {
   readonly demo: boolean;
   /** Called when a room is left, instead of going to the map (the smoke gate). */
   readonly onLeave?: (num: number, why: LeaveReason) => void;
+  /** Ⓐ on a map corner button: the native Options (`menus.ts`), which the map cannot import. */
+  readonly openCorner?: (action: MapAction) => void;
 }
 
 /** The game's state that `main.ts` keeps at module scope. One native session = one game. */
@@ -551,6 +554,7 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
     showLegImage: (leg, pending) => void showLegImage(leg, pending),
     dismissLegImage,
     lastRoom: () => roomNum,
+    openCorner: (action) => opts.openCorner?.(action),
   });
   return store;
 }
@@ -639,6 +643,20 @@ export function blur(): void {
 // ── The frame (renderLoop.ts `loop`, the logic half; framePainter.ts, the AI draw) ─────
 
 let acc = 0;
+/** A menu is over the room (`menus.ts`): no step runs, and the frame holds its alpha. */
+let paused = false;
+let lastAlpha = 0;
+
+/** Pause or resume the room for a menu. Pausing lets go of held keys: their keyups go to the menu. */
+export function setPaused(on: boolean): void {
+  if (on && !paused) clearHeldKey();
+  if (!on && paused) acc = 0; // resume on a fresh tick, not with the time the menu was up
+  paused = on;
+}
+
+export function isPaused(): boolean {
+  return paused;
+}
 
 /**
  * Advance the game by the wall-clock time since the last frame: at most one 80 ms step,
@@ -651,12 +669,16 @@ export function advance(dt: number): number {
   acc += dt;
   if (acc > LOGIC_MS * 2) acc = LOGIC_MS;
   if (!roomReady()) return 0;
+  if (paused) {
+    acc = 0;
+    return lastAlpha;
+  }
   if (acc >= LOGIC_MS) {
     acc -= LOGIC_MS;
     if (step()) acc = 0;
     else if (replaySettleDue() && step()) acc = 0;
   }
-  return Math.min(acc / LOGIC_MS, 1);
+  return (lastAlpha = Math.min(acc / LOGIC_MS, 1));
 }
 
 /** Composite the current room into `target`; false when there is nothing to draw yet. */

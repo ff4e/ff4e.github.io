@@ -25,12 +25,12 @@ export interface MapArt {
   readonly worldMap: WorldMap;
   readonly ai: AiWorldMap;
   readonly assets: InfoPanelAssets;
-  readonly desky: DeskyData;
+  desky: DeskyData;
   /** The upscaled plaques' placement, by file name (`en01.png`…). */
   readonly plaques: Record<string, { room: number; x: number; y: number }>;
 }
 
-/** The plaque language — the subtitle language, which the native host fixes at `en`. */
+/** The plaque language — the subtitle language (`subLang`). */
 export type PlaqueLang = 'cz' | 'en';
 
 export async function loadMapArt(io: MapIo, lang: PlaqueLang): Promise<MapArt> {
@@ -40,9 +40,7 @@ export async function loadMapArt(io: MapIo, lang: PlaqueLang): Promise<MapArt> {
   const bmps = await Promise.all(files.map(bmp));
   const worldMap = new WorldMap(bmps[0]!, bmps[1]!, bmps[2]!, bmps.slice(3));
   const [krokomer, ikonky, cisla] = await Promise.all(['krokomer.BMP', 'ikonky.BMP', 'cisla.BMP'].map(bmp));
-  // restates src/app/mapDraw.ts `export async function ensureDeskyData(` @ ccf4dff4d819
-  const n = lang === 'cz' ? '1' : '2';
-  const desky = parseDesky(await io.bytes(`/data/Menu/popdesk${n}.dat`), await io.bytes(`/data/Menu/desky${n}.dat`));
+  const desky = await loadDesky(io, lang);
   // restates src/render/worldMapAi.ts `export async function loadAiWorldMap(` @ 146803054ba3
   const ai = await Promise.all(
     ['mapa-0_ai.webp', 'mapa-1_ai.webp', 'krokomer_ai.webp', 'ikonky_ai.webp', 'loading_ai.webp',
@@ -59,6 +57,15 @@ export async function loadMapArt(io: MapIo, lang: PlaqueLang): Promise<MapArt> {
     desky,
     plaques: geom.plaques,
   };
+}
+
+/**
+ * The room-name plaque data for a language: popdesk<n>.dat + desky<n>.dat, n = 1 (cz) / 2 (en).
+ * restates src/app/mapDraw.ts `export async function ensureDeskyData(` @ ccf4dff4d819
+ */
+export async function loadDesky(io: MapIo, lang: PlaqueLang): Promise<DeskyData> {
+  const n = lang === 'cz' ? '1' : '2';
+  return parseDesky(await io.bytes(`/data/Menu/popdesk${n}.dat`), await io.bytes(`/data/Menu/desky${n}.dat`));
 }
 
 /**

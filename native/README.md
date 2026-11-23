@@ -9,7 +9,8 @@
 
 The game **without a browser**. It plays a whole game now — from the world map, room after
 room, with undo, saves, the record panel's Replay and the leg story pages, and with its
-sound and subtitles — on the AI-upscaled tier, without menus yet:
+sound and subtitles, and with the TV menus a console needs — a pause menu, Options, Help, a
+button legend — playable from a keyboard, a gamepad or a Siri Remote, on the AI-upscaled tier:
 
 - **QuickJS-ng** runs the game's own TypeScript. Nothing is ported: the room, its script and
   the step engine (`src/core/`), the AI-tier room walk (`src/render/`), and the game's own
@@ -30,6 +31,8 @@ sound and subtitles — on the AI-upscaled tier, without menus yet:
   "The world map" below.
 - The subtitles are drawn natively too, through `Surface2D` with glyphs from FreeType: see
   "Subtitles" below.
+- The menus and the button legend are native-only (the web keeps its HTML UI): one
+  window-sized `Surface2D` layer over the room or the map — see "The TV menus" below.
 - The off-screen canvases the AI tier builds — the classic-sprite fallback for art with
   no AI file, the mirror's glass mask, LODE's wreck — come from an injected factory
   (`src/render/scratchCanvas.ts`). The browser keeps `document.createElement('canvas')`;
@@ -116,9 +119,10 @@ geometry is `src/render/mapSelection.ts`, from the Xbox branch, #165):
 - Ⓑ on the plain map does nothing, on purpose; the default selection is the room last
   played if it is still selectable, else the first room not yet solved.
 
-The corner buttons (Intro, Credits, Options, Exit) are not selectable yet: none of their
-screens exists natively, and a target that does nothing is worse than none
-(`NATIVE_CORNERS`). The story pages are the upscaled ones (`/enhanced-ai/_story/`).
+Of the corner buttons, Options is selectable and opens the native Options. Intro and Credits
+are not yet: neither screen exists natively, and a target that does nothing is worse than
+none (`NATIVE_CORNERS`). Exit is left out, as the controller spec leaves it out: Back at the
+map is the way out. The story pages are the upscaled ones (`/enhanced-ai/_story/`).
 
 ### Subtitles (`native/js/subtitleLayout.ts`, `subtitleDraw.ts`, `roomSubtitles.ts`)
 
@@ -163,14 +167,57 @@ With none stored, the native host follows the **system language** — Czech on a
 (`locale`), else English. That is a deliberate difference from the browser, which gives a
 desktop English whatever its locale (#149): a TV or a console has no browser language picker,
 and its system language is the player's choice. The face is `ff.subfont`, the browser's pick,
-Mulish by default. There is no way to change either natively yet (the Options screen is not
-built).
+Mulish by default. Both can be changed in the native Options (below), which writes the same
+keys.
 
 Approximate by nature, against the browser's own shaping and scaler — see
 `compare-subs.mjs` below for how close, and how a wrong one is caught. Also not reproduced:
 the browser eases a row's 2 px scroll over a tick (a CSS transition); natively a row steps,
 and the wave runs on the game's clock plus the frame's fraction of a tick rather than on the
 compositor's.
+
+### The TV menus (`native/js/uiInput.ts`, `menus.ts`, `uiLayer.ts`)
+
+Native only: the web keeps its HTML UI. Built to the controller spec (#165's, extended for the
+Siri Remote; A3–A6 and B1–B5 in it): every press goes through one router (`uiInput.ts`), which
+knows the source from the host's code (`Pad…`, `Remote…`, or a DOM key code), and hands the
+game the keys the browser's router reads — so every gate of that router still applies.
+
+- **The pause menu** — Resume · World map · Save · Load · Restart · Options · Help — opens on
+  Back in a room (Esc, the pad's ☰, the remote's Back): tvOS requires Back during play to pause
+  and show a menu. While any menu is over a room the room is **paused**: no logic step runs and
+  the sound holds its place (`setModalPause`, as the browser's Help does). Save, Load and
+  Restart ask first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no), then send
+  F2, F3 or Backspace down the room's router, so a save mid-move or during a replay is refused
+  exactly as F2 is on the web. Save and Load are greyed (and skipped by the highlight) when they
+  cannot act, by the touch buttons' rule (`buttonAvailability.ts`).
+- **Options** is the original game's Options face — the AI-upscaled panel art the tablets show,
+  composited as `AiPanel.drawOptions` composites it — scaled to most of the window, with a focus
+  ring on the row and a caption card beside it naming the row and its value. Rows: effect, talk
+  and music volume (left/right step the 0..12 slider), subtitles (Čeština / English / off),
+  the subtitle font (the one control the 1998 face has no place for, so it lives in the card,
+  shown in its own face), Help, and Exit options. Every change is persisted to the browser's
+  keys (`ff.options`, `ff.subfont`) and applied at once: the bus gain, the next line's language
+  and the map's plaques, the subtitle face (`optionsModel.ts`).
+- **Help** is the browser's ten pages (`src/data/helpText.ts`, ALTAR's text and the cropped
+  diagrams), typeset natively into the original 640×480 page box by the stylesheet's rules
+  (`helpPaint.ts`); left/right page (wrapping), anything else closes. Approximate by nature: the
+  line breaks are a greedy wrap's, and there is no italic face natively, so the emphasised
+  phrases and the notes are upright.
+- **The legend** (A4) shows what each button does on the screen that is up, in the glyphs of
+  the last input used — keycaps, an Xbox pad's coloured chips, or the remote's outlines — in
+  the letterbox margin beside the picture when it fits there (left edge or top, whichever covers
+  less otherwise), about a tenth of the window tall. Items that cannot act are greyed. With the
+  remote, "Switch fish" carries the active fish's picture (B3: the touch badge's art and its
+  visibility rule), the only cue to which fish an edge click moves.
+- **At the map's root, Back leaves the game** (the keyboard's Esc, the remote's Back): tvOS
+  requires Back at the top level to go Home. On macOS that quits; a tvOS build should instead
+  hand the button to the system (`SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS`) at the root. The
+  pad's Ⓑ still does nothing on the plain map, on purpose.
+
+Everything is drawn through `uiDraw.ts`: rectangles, procedurally rasterised glyph shapes
+(coverage masks, tinted by `fillMask`), FreeType text in Mulish and images. It also records
+what it drew, which is the layout snapshot the menu smoke checks.
 
 ## Sound
 
@@ -184,8 +231,8 @@ supplies only the `AudioBackend` under it (`native/js/sdlAudioBackend.ts`, hande
   the game ships (the 1998 effects, the staged speech, the music). So it resamples nothing: a
   voice advances one sample per frame, a loop point is a sample index, and a buffer lasts
   exactly `frames / 22050` s, which is what `audioBackend.ts` requires of `duration`. Voices
-  have a gain; buses (effect, voice, music) have the Options levels, read from the browser's
-  persisted settings (there are no sliders natively yet); then `MASTER_GAIN`. A loop plays
+  have a gain; buses (effect, voice, music) have the Options levels — the browser's persisted
+  settings, which the native Options sliders change live — then `MASTER_GAIN`. A loop plays
   `[0, loopEnd)` once, then `[loopStart, loopEnd)` for ever, with Web Audio's rules for
   out-of-range points. The mix is clamped to ±1, as an audio destination clips.
 - **The one resampling** — 22050 Hz to the device's rate — is SDL's audio stream, on SDL's
@@ -276,32 +323,48 @@ takes under a minute. Nothing from Homebrew but the build tools is used, so a pa
 upgrade cannot change the pixels `compare.mjs` checks.
 
 **The whole gate in one command:** `npm run native:check` (`native/check.mjs`) runs the
-typecheck, the bundle, the build, the room, map and sound smokes and the three comparisons
+typecheck, the bundle, the build, the room, map, menu and sound smokes and the three comparisons
 below, in the CI job's order, one summary line per step (logs in `native/build/check/`).
 `-- --only smoke,subs` reruns just those steps after a build. Quote its summary in the PR.
-Controls, keyboard and gamepad (SDL maps any supported controller to this layout; the
-gamepad is turned into the same key codes in `native/host/main.c`, so there is one stream
-of keys, read by the room's router in a room and by the map's on the map):
+Controls: keyboard, gamepad (SDL maps any supported controller to an Xbox layout) and Siri
+Remote. The host sends each as its own codes (`native/host/main.c`); `native/js/uiInput.ts`
+decides what they do. The remote is modelled from SDL's source — on tvOS SDL presents it as a
+gamepad (`SDL_HINT_TV_REMOTE_AS_JOYSTICK`): the click is A, Play/Pause X, Back B, the touch
+surface (or click ring) the left stick — and has **not** been run on an Apple TV. One gap is
+known: an edge click is read from where the thumb rests, which needs absolute d-pad values
+(`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL leaves them relative, so a tvOS target must
+set it (with absolute values, swipes should then come from motion rather than position). A
+slide followed by a click within 120 ms is one edge click, not a swipe and a click. On a Mac,
+`--remote-keys` makes the keyboard a remote: arrows click an edge, Return clicks the centre,
+`P` is Play/Pause, Esc or Backspace is Back, Shift+arrow swipes.
 
-| in a room | keyboard | gamepad |
-| --- | --- | --- |
-| little fish | `I` `J` `K` `L` | d-pad, left stick |
-| big fish | `W` `A` `S` `D` | right stick |
-| active fish | arrows | |
-| switch fish | Space, Tab (`1`/`2` select) | Ⓐ |
-| undo one move | `-` (the character, wherever the layout puts it) | Ⓨ |
-| restart the room | Backspace | Ⓧ |
-| save / load | F2 / F3 | LB / RB |
-| back to the map | Esc | Ⓑ |
+| in a room | keyboard | gamepad | Siri Remote |
+| --- | --- | --- | --- |
+| little fish | `I` `J` `K` `L` | d-pad, left stick | |
+| big fish | `W` `A` `S` `D` | right stick | |
+| active fish | arrows | | click an edge (held: keeps moving) |
+| switch fish | Space, Tab (`1`/`2` select) | Ⓐ | click the centre |
+| undo one move | `-` (the character, wherever the layout puts it) | Ⓨ | Play/Pause (held: repeats) |
+| restart the room | Backspace | Ⓧ, then Ⓐ to confirm | pause menu |
+| save / load | F2 / F3 | LB / RB, then Ⓐ to confirm | pause menu |
+| back to the map | | Ⓑ, ⧉ | pause menu |
+| pause menu | Esc | ☰ | Back |
+| — | | | a swipe does nothing (decided: a stray swipe must not cost a move) |
 
-| on the map | keyboard | gamepad |
-| --- | --- | --- |
-| move the selection | arrows, `IJKL`, `WASD` | d-pad, either stick |
-| open (panel / launch) / press a panel button | Space, Enter | Ⓐ |
-| close the record panel | Esc | Ⓑ |
-| continue from a story page | any key | any button |
+| on the map | keyboard | gamepad | Siri Remote |
+| --- | --- | --- | --- |
+| move the selection | arrows, `IJKL`, `WASD` | d-pad, either stick | swipe, or click an edge |
+| open (panel / launch / Options corner) / press a panel button | Space, Enter | Ⓐ | click the centre |
+| Options | (the corner) | ☰ | Play/Pause |
+| close the record panel | Esc | Ⓑ | Back |
+| leave the game | Esc | (nothing, on purpose) | Back |
+| continue from a story page | any key | any button | any button |
 
-Close the window to quit.
+| in a menu | keyboard | gamepad | Siri Remote |
+| --- | --- | --- | --- |
+| move / change a value / turn a help page | arrows, `IJKL`, `WASD` | d-pad, sticks; LB / RB page | swipe, or click an edge |
+| press | Enter, Space | Ⓐ | click the centre |
+| back (resume, decline, close) | Esc (in Help: any other key) | Ⓑ, ☰ | Back (in Help: a click too) |
 
 Other flags:
 
@@ -312,6 +375,7 @@ Other flags:
 - `--seconds N` quits after N seconds.
 - `--store FILE` keeps progress and save slots in FILE instead of the user's.
 - `--audio-log` prints every sound the game starts.
+- `--remote-keys` makes the keyboard a Siri Remote (above) and starts the legend in its glyphs.
 
 From a Rosetta shell, prefix the commands with `arch -arm64`, or the universal tools
 build x86_64.
@@ -350,7 +414,34 @@ selected, Ⓑ does nothing, Ⓐ launches it, its win comes back with it still se
 direction moves the selection, the record panel opens on Run and cycles Run → Replay →
 Cancel, Ⓑ closes it, Replay plays the best record and comes back, a leg-final room's win
 and its Run both show the story page, and Ⓑ in a room goes back to the map. 21 checks, a
-few seconds; CI runs it after the room smoke.
+few seconds; CI runs it after the room smoke. Its input goes through the same router as the
+window's (`uiInput.ts`).
+
+The menus have one too (`native/js/menuSmoke.ts`, `--smoke-menus --store F`): input events
+through the router, checked against the game's own state and the store, never against what
+a menu says about itself. On the map: the pad's ☰ opens Options; a volume step is persisted to
+`ff.options` and reaches the mixer's bus at once; the subtitle language and its `tit_def` are
+persisted; the font is persisted to `ff.subfont` and loaded; Help opens over Options, pages
+and closes; the pad's Ⓑ at the root does nothing while Esc and the remote's Back leave; the
+Options corner is selectable and opens Options. In a room, with the remote: the centre click
+switches fish, an edge click moves the active one, a swipe moves nothing, Play/Pause undoes
+one move and, held, repeats (350 ms, then every 80 ms) with nothing added on release; Back
+opens the pause menu and the room stops stepping; Load is greyed and skipped with no save;
+Save asks, Back declines, a click saves the move record; Load restores it; Options and Help
+open from the pause menu and close back to it; Restart starts over; a save mid-move is
+refused as F2 is. With the pad: Ⓧ asks to restart and Ⓑ declines, RB with no save opens
+nothing, LB → Ⓐ saves, ☰ opens and closes the pause menu, Ⓑ goes to the map; Esc opens and
+closes the pause menu; its World map leaves the room. A Play/Pause hold released inside the
+pause menu ends there. 58 checks, ~6 s.
+
+It also checks the **UI layout snapshot**: at 13 states the UI layer is drawn into a 1280×720
+window and the list of what it drew — every rectangle, shape, image and string, with its
+position and size in whole pixels — must equal `native/ui-layout.snap.json`. A layout change
+fails with the first op that moved and writes the new list to
+`native/build/ui-layout.snap.new.json`; if intended, rerun with `--update-snapshot` and review
+the file's diff. It is not a pixel comparison (the web has no such screens to compare with):
+it catches a moved, resized, missing or reworded element, not a wrong colour inside one.
+`--smoke-out DIR` keeps each state's pixels (`DIR/ui-<state>.rgba`).
 
 ## Is it the same picture? `native/compare.mjs`
 
@@ -474,10 +565,11 @@ with the self-test, after the map comparison.
 
 ## What it does not do yet
 
-- **Menus (Options, Credits, the intro), the panel, video.** The map's corner buttons are
-  therefore not selectable, and the volume levels are the ones the browser persisted (the
-  defaults, natively). With no Options screen, the subtitle mode and face can only come from
-  the store.
+- **Credits, the intro, video**, and so the map's Intro and Credits corners. The faithful
+  side panel is not drawn: a TV plays from the legend and the pause menu.
+- **A tvOS build.** The remote's scheme is built and gated on a Mac (`--remote-keys`), but
+  its SDL mapping has not met a real remote, and Back at the map's root quits rather than
+  handing the button to the system.
 - **Sound, beyond the rooms and the map:** the intro's and the cutscene's (neither is
   played); an audio session for tvOS (interruptions, routing — `onGesture`/`onVisible` are
   no-ops here). The AAC is decoded on the main thread as a room is entered (~1.2 s for all
@@ -486,11 +578,6 @@ with the self-test, after the map comparison.
 - **KUFRIK's briefcase cutscene and its tutorial demonstration.** The room plays; the
   demonstration is not shown.
 - **Cheats** (no way to type one), the fishing hooks they enable, and haptics.
-- **Quitting** is closing the window: on the map Ⓑ does nothing, by design, and Esc is the
-  same key. On tvOS the system's Home and Back will own it.
-- **The Siri Remote** (the controller spec's part B): the map and the panel would already
-  work from its d-pad and click, but the room's one-handed scheme and the pause menu are
-  not built.
 - The host queues at most 128 key transitions between two frames and drops the rest. A
   human cannot get near that in one frame; a long stall with keys being pressed throughout
   could, and would lose key-ups.

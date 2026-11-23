@@ -1,6 +1,6 @@
 /**
- * The map smoke gate: the native world map driven the way a player drives it — keys through
- * `mapScreen.ts`'s router (the gamepad sends the same codes), frames through `mapFrame` —
+ * The map smoke gate: the native world map driven the way a player drives it — input events
+ * through the router (`uiInput.ts`: keyboard codes, and the pad's Ⓐ/Ⓑ), frames through `mapFrame` —
  * over the real game flow, headless, against a store it wipes.
  *
  *   ff4e-native <bundle.js> --root public --headless --smoke-map --store F
@@ -19,8 +19,9 @@ import { step } from '../../src/app/logicTick.js';
 import { ui } from '../../src/app/screenState.js';
 import { armSolve, setSolvemode } from '../../src/app/solveMode.js';
 import { loadSubtitleAssets } from './roomSubtitles.js';
-import { currentRoom, enterRoom, initGame, keyDown, roomReady, showMap } from './game.js';
-import { ensureMapArt, mapFrame, mapKeyDown, mapKeyUp, mapPresented } from './mapScreen.js';
+import { currentRoom, enterRoom, initGame, roomReady, showMap } from './game.js';
+import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
+import { routeEvent } from './uiInput.js';
 import { pinRandom } from './scene.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
 import { soundTime } from './sound.js';
@@ -31,11 +32,10 @@ const settle = async (n = 20): Promise<void> => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-/** A key press and release, routed as the interactive loop routes it. */
+/** A press and release, routed as the interactive loop routes the host's events (`uiInput.ts`). */
 async function tap(code: string): Promise<void> {
-  if (ui.screen === 'room') keyDown(code);
-  else mapKeyDown(code);
-  if (ui.screen !== 'room') mapKeyUp(code);
+  routeEvent(`+${code}`, performance.now());
+  routeEvent(`-${code}`, performance.now());
   await settle();
 }
 
@@ -93,11 +93,11 @@ export async function runMapSmoke(): Promise<number> {
     showMap();
     await frame();
     check(ui.screen === 'map' && ui.mapHoverRoom === 1, 'a fresh session opens on the map with room 1 selected');
-    await tap('Escape');
+    await tap('PadB');
     await frame();
     check(ui.screen === 'map' && ui.mapInfoRoom === null && ui.mapHoverRoom === 1, 'Ⓑ on the plain map does nothing');
 
-    await tap('Space');
+    await tap('PadA');
     check(ui.screen === 'map', 'Ⓐ on an unsolved room arms a launch: the parchment frame comes first');
     await frame();
     check(ui.screen === 'room' && currentRoom() === 1, '...and the room is entered under it');
@@ -118,7 +118,7 @@ export async function runMapSmoke(): Promise<number> {
 
     showMap();
     await frame();
-    await tap('Space');
+    await tap('PadA');
     await frame();
     check(ui.mapInfoRoom === 1 && ui.mapInfoHover === 'run', 'Ⓐ on a solved room opens its record panel on Run');
     const order: (string | null)[] = [];
@@ -131,12 +131,12 @@ export async function runMapSmoke(): Promise<number> {
     check(ui.mapInfoHover === 'cancel', 'left cycles back');
     await tap('KeyI');
     check(ui.mapInfoHover === 'cancel' && ui.mapInfoRoom === 1, 'up and down do not move off the panel');
-    await tap('Escape');
+    await tap('PadB');
     check(ui.mapInfoRoom === null && ui.screen === 'map', 'Ⓑ closes the panel');
 
-    await tap('Space');
+    await tap('PadA');
     await tap('KeyL');
-    await tap('Space');
+    await tap('PadA');
     await frame();
     check(ui.screen === 'room' && currentRoom() === 1, 'Replay enters the room');
     await untilReady();
@@ -155,13 +155,13 @@ export async function runMapSmoke(): Promise<number> {
     check(ui.screen === 'map', 'any button dismisses it to the map');
     await frame();
     check(ui.mapHoverRoom === 29, 'with that room selected');
-    await tap('Space');
-    await tap('Space');
+    await tap('PadA');
+    await tap('PadA');
     check(ui.screen === 'legimage', 'Run on a solved leg-final room shows the story page first');
     await tap('Enter');
     check(ui.screen === 'room' && currentRoom() === 29, '...and dismissing it enters the room');
     await untilReady();
-    await tap('Escape');
+    await tap('PadB');
     check(ui.screen === 'map', 'Ⓑ in a room goes back to the map');
   } catch (e) {
     console.log(`map smoke FAILED: ${e instanceof MapSmokeFailure ? e.message : e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e)}`);

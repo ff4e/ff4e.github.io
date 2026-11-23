@@ -60,9 +60,10 @@ export interface NativeApi {
   /**
    * Show the composite in the window (box-filtered to fit, letterboxed). `overlay` is a
    * surface drawn over the same rect at one texel per window pixel, premultiplied — the
-   * subtitles, laid out for the rect `presentRect` reports.
+   * subtitles, laid out for the rect `presentRect` reports. `ui` is a surface drawn over the
+   * whole window at one texel per window pixel (the menus and the button legend, `uiLayer.ts`).
    */
-  present(overlay?: number): void;
+  present(overlay?: number, ui?: number): void;
   /** Write the composite's RGBA (top-down) to `path`, prefixed by u32 w, u32 h. */
   saveComposite(path: string): void;
 
@@ -83,8 +84,14 @@ export interface NativeApi {
   surfClear(target: number): void;
   /** Replace the whole surface with straight RGBA (width × height × 4), premultiplied on the way. */
   surfPut(target: number, rgba: ArrayBuffer): void;
-  /** Show a surface in the window, as `present` shows the composite. */
-  presentTexture(id: number): void;
+  /** Show a surface in the window, as `present` shows the composite, with an optional `ui` surface. */
+  presentTexture(id: number, ui?: number): void;
+  /** The window's size in its pixels and its pixels per point, `[w, h, density]`; null headless. */
+  windowSize(): [number, number, number] | null;
+  /** A text file by plain path (not under the asset root), or null when absent. */
+  readText(path: string): string | null;
+  /** Write a text file by plain path. Throws when it cannot. */
+  writeText(path: string, text: string): void;
   /** `saveComposite` for a surface's texture. */
   saveTexture(id: number, path: string): void;
   /**
@@ -112,10 +119,11 @@ export interface NativeApi {
 
   // ── Input. ──
   /**
-   * Key transitions since the last call, oldest first: `+Code` down, `-Code` up, where Code
-   * is the DOM `KeyboardEvent.code` the browser game's router reads (`KeyI`, `ArrowUp`,
-   * `Space`, `Minus`, `F2`…). The gamepad arrives as the same codes — see `pollGamepad` in
-   * native/host/main.c for the mapping — so there is one router for both.
+   * Input transitions since the last call, oldest first: `+Code` down, `-Code` up, and
+   * `!blur` when the window loses focus. A keyboard's Code is the DOM `KeyboardEvent.code`
+   * the browser game's router reads (`KeyI`, `ArrowUp`, `Space`, `Minus`, `F2`…); a
+   * gamepad's is `Pad…` and a TV remote's `Remote…` (the list is in native/host/main.c's
+   * input section). `uiInput.ts` routes them.
    */
   events(): string[];
 

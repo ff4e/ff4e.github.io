@@ -21,9 +21,11 @@
  * The default selection is the room last played if it can still be selected, else the
  * first room not yet solved — so resuming is one press of Ⓐ.
  *
- * The corner buttons (Intro, Credits, Options, Exit) are not selectable yet: none of their
- * screens exists natively, and a target that does nothing is worse than none. They join
- * `NATIVE_CORNERS` as their screens arrive; the geometry already handles them.
+ * Of the corner buttons, Options is selectable: Ⓐ on it opens the native Options
+ * (`menus.ts`). Intro and Credits are not yet — neither screen exists natively, and a target
+ * that does nothing is worse than none. They join `NATIVE_CORNERS` as their screens arrive;
+ * the geometry already handles them. Exit is left out, as the controller spec leaves it out
+ * (Back at the map is the way out, `uiInput.ts`).
  *
  * The host (native/host/main.c) turns the gamepad into key codes, so this reads one stream:
  * IJKL (d-pad, left stick), WASD (right stick) and the arrows are directions; Space (Ⓐ) and
@@ -39,7 +41,7 @@ import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { branchOfRoom, depthOfRoom } from '../../src/data/world.js';
 import { ui } from '../../src/app/screenState.js';
 import { subLang } from './seams/playerSettings.js';
-import { loadAiPlaque, loadMapArt, paintParchmentAi, type MapArt, type MapIo } from './mapArt.js';
+import { loadAiPlaque, loadDesky, loadMapArt, paintParchmentAi, type MapArt, type MapIo } from './mapArt.js';
 import { NativeSurface, decodeImage, type NativeImage } from './nativeSurface.js';
 import { readBytes } from './shims.js';
 import { DirRepeat } from './dirRepeat.js';
@@ -58,10 +60,12 @@ export interface MapScreenHost {
   readonly dismissLegImage: () => void;
   /** The room last played (0 for none), for the default selection. */
   readonly lastRoom: () => number;
+  /** Ⓐ on a corner button (one of `NATIVE_CORNERS`). */
+  readonly openCorner: (action: MapAction) => void;
 }
 
-/** The corner buttons a native host can act on. None yet: see the header. */
-const NATIVE_CORNERS: readonly MapAction[] = [];
+/** The corner buttons a native host can act on: see the header. */
+const NATIVE_CORNERS: readonly MapAction[] = ['options'];
 
 const DIRS: Readonly<Record<string, MapStep>> = {
   KeyI: 'up', KeyK: 'down', KeyJ: 'left', KeyL: 'right',
@@ -104,6 +108,35 @@ export function ensureMapArt(): Promise<void> {
   return (artLoad ??= loadMapArt(io, subLang()).then((a) => {
     art = a;
   }));
+}
+
+/**
+ * The subtitle language changed (the native Options): the plaques follow it, as the
+ * browser's `ensureDeskyData` reloads them.
+ */
+export function mapLanguageChanged(): void {
+  const lang = subLang();
+  void ensureMapArt().then(async () => {
+    const desky = await loadDesky(io, lang);
+    if (art && subLang() === lang) art.desky = desky;
+  });
+  for (const p of plaques.values()) if (p) __native.releaseTexture((p.img as NativeImage).id);
+  plaques.clear();
+}
+
+/** Is the map not taking input — its art still loading, or a room launching? */
+export function mapBusy(): boolean {
+  return launch !== null || !art;
+}
+
+/** Is a record panel open over the map? (Back closes it rather than leaving.) */
+export function mapPanelOpen(): boolean {
+  return ui.mapInfoRoom !== null;
+}
+
+/** The selected corner button, if the selection is on one (the legend shows Ⓐ: Options). */
+export function mapSelectedCorner(): MapAction | null {
+  return sel?.kind === 'corner' ? sel.action : null;
 }
 
 /** The map has just come up (`showMap`): pick the selection afresh, drop held input. */
@@ -216,7 +249,11 @@ function press(): void {
     activateInfoButton(ui.mapInfoRoom, ui.mapInfoHover);
     return;
   }
-  if (sel?.kind !== 'node') return; // no corner acts natively yet
+  if (sel?.kind === 'corner') {
+    host.openCorner(sel.action);
+    return;
+  }
+  if (sel?.kind !== 'node') return;
   if (host.solved.has(sel.room) || host.cheated.has(sel.room)) openMapInfo(sel.room);
   else launch = { room: sel.room };
 }
@@ -269,12 +306,17 @@ function plaqueFor(room: number): Awaited<ReturnType<typeof loadAiPlaque>> {
   }
   if (art && !plaqueLoading.has(room)) {
     plaqueLoading.add(room);
-    void loadAiPlaque(io, art, room, subLang())
+    const lang = subLang();
+    void loadAiPlaque(io, art, room, lang)
       .catch((e: unknown) => {
         console.warn(`the AI plaque for room ${room} did not load; the 640×480 one stands in`, e);
         return null;
       })
       .then((p) => {
+        if (subLang() !== lang) {
+          if (p) __native.releaseTexture((p.img as NativeImage).id); // the language changed meanwhile
+          return;
+        }
         plaques.set(room, p);
         while (plaques.size > PLAQUE_CACHE_MAX) {
           const [oldest, old] = plaques.entries().next().value!;

@@ -4,13 +4,18 @@
  *   ff4e-native <bundle.js> --root <public dir> [--room N] [--demo] [--seconds S] [--store F]
  *     the game (`game.ts`): starts on the world map (`mapScreen.ts`), or in room N, and
  *     comes back to the map after every room. --demo plays every room's recorded solution
- *     through the real loop instead of reading input, room after room. Controls:
- *     native/README.md.
+ *     through the real loop instead of reading input, room after room. --remote-keys makes
+ *     the keyboard a Siri Remote (native/host/main.c). Input: `uiInput.ts`; menus:
+ *     `menus.ts`. Controls: native/README.md.
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke ROOMS [--smoke-player ROOMS] --store F
  *     the smoke gate (`smoke.ts`): plays rooms through the real flow, headless, and exits
  *     non-zero unless each one is won.
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-map --store F
  *     the map smoke gate (`mapSmoke.ts`): the world map driven by keys through the real flow.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-menus --store F [--smoke-out DIR] [--update-snapshot]
+ *     the menu smoke gate (`menuSmoke.ts`): the pause menu, the confirm prompt, Options, Help,
+ *     the map's Options corner and the remote's room mapping, through the real flow, and the
+ *     UI layout snapshot (native/ui-layout.snap.json).
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-audio --store F
  *     the sound gate (`audioSmoke.ts`): the mixer, the decoder, and PRVNI's dialogue timing.
  *   ff4e-native <bundle.js> --root <public dir> --room N --headless --out f.rgba
@@ -31,8 +36,13 @@ import { NativeSurface, decodeImage, nativeSurface } from './nativeSurface.js';
 import { loadMapScene, paintMapCase } from './mapScene.js';
 import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { compositeSize, frameFor, loadScene, pinRandom, probeFrame, replaySolution } from './scene.js';
-import { advance, blur, draw, enterRoom, firstRoom, initGame, keyDown, keyUp, showMap } from './game.js';
-import { ensureMapArt, mapBlur, mapFrame, mapKeyDown, mapKeyUp, mapPresented } from './mapScreen.js';
+import { advance, draw, enterRoom, firstRoom, initGame, showMap } from './game.js';
+import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
+import { inputFrame, routeEvent, setLastInput } from './uiInput.js';
+import { openOptions } from './menus.js';
+import { initUiLayer, paintUi, windowLayout } from './uiLayer.js';
+import { ensureOptionsArt } from './optionsPaint.js';
+import { runMenuSmoke } from './menuSmoke.js';
 import { ui } from '../../src/app/screenState.js';
 import { runSmoke } from './smoke.js';
 import { runMapSmoke } from './mapSmoke.js';
@@ -64,6 +74,10 @@ async function main(): Promise<void> {
     __native.quit(await runAudioSmoke());
     return;
   }
+  if (flag('--smoke-menus')) {
+    __native.quit(await runMenuSmoke(target));
+    return;
+  }
   if (flag('--smoke-map')) {
     __native.quit(await runMapSmoke());
     return;
@@ -84,8 +98,11 @@ async function main(): Promise<void> {
     await renderParityFrame(target);
     return;
   }
-  initGame({ verbose: true, demo: flag('--demo') });
+  initGame({ verbose: true, demo: flag('--demo'), openCorner: () => openOptions() });
   await loadSubtitleAssets();
+  await initUiLayer();
+  void ensureOptionsArt();
+  if (flag('--remote-keys')) setLastInput('remote');
   console.log(`sound: ${mixer.mode}, mixing at ${MIX_RATE} Hz`);
   if (arg('--room')) await enterRoom(Number(arg('--room')));
   else if (flag('--demo')) await enterRoom(firstRoom());
@@ -169,18 +186,9 @@ function runInteractive(target: NativeAiScreen): void {
   let statSound = mixer.now();
   g.__frame = (): void => {
     const now = __native.now();
-    for (const ev of __native.events()) {
-      // Each event goes to the screen that is up when it arrives: one can change the screen.
-      const onRoom = ui.screen === 'room';
-      if (ev === '!blur') {
-        blur();
-        mapBlur();
-      } else if (ev[0] === '-') {
-        if (onRoom) keyUp(ev.slice(1));
-        else mapKeyUp(ev.slice(1));
-      } else if (onRoom) keyDown(ev.slice(1));
-      else mapKeyDown(ev.slice(1));
-    }
+    // Each event goes to the screen that is up when it arrives: one can change the screen.
+    for (const ev of __native.events()) routeEvent(ev, now);
+    inputFrame(now);
     if (now >= stopAt) {
       __native.quit();
       return;
@@ -192,13 +200,17 @@ function runInteractive(target: NativeAiScreen): void {
       // Nothing is presented while a room loads, so the map's parchment frame stays up.
       const drawn = draw(target, alpha);
       const subs = drawn ? subtitleOverlay(target.width, target.height, alpha) : null;
+      const win = drawn ? windowLayout(target.width, target.height) : null;
+      const layer = win ? paintUi(win.w, win.h, win.picture) : null;
       // Measured BEFORE present: present waits for vsync, which is idle time, not work.
       jsMs += __native.now() - now;
-      if (drawn) __native.present(subs?.id);
+      if (drawn) __native.present(subs?.id, layer?.surface.id);
     } else {
       const shown = mapFrame(now); // the map, or the story page over it
+      const win = shown ? windowLayout(shown.width, shown.height) : null;
+      const layer = win ? paintUi(win.w, win.h, win.picture) : null;
       jsMs += __native.now() - now;
-      if (shown) __native.presentTexture(shown.id);
+      if (shown) __native.presentTexture(shown.id, layer?.surface.id);
       mapPresented();
     }
     frames++;
