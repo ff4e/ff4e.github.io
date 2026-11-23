@@ -176,7 +176,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 
 ### Map of `src/render/`
 
-The renderer is 37 files and ~104 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
+The renderer is 37 files and ~109 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
 two axes at once (which **art tier**: classic / enhanced / `ai`; and which **backend**: CPU or WebGL), which
 is what makes it hard to guess where something lives. This table is the shortcut.
 

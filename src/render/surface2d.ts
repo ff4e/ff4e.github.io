@@ -6,7 +6,7 @@
  * subtitles and the TV menus later — was drawn straight onto a `CanvasRenderingContext2D`,
  * which a host without a browser (native/) does not have. This is the small subset of that
  * context those screens actually use, chosen so that every operation is one thing a GPU
- * quad batcher does EXACTLY, not approximately:
+ * quad batcher does directly, with nothing to emulate:
  *
  *   - `drawImage` / `drawImageRect`: one textured quad, source rect → dest rect, through a
  *     nearest (`setSmoothing(false)`) or bilinear (`setSmoothing(true)`) sampler.
@@ -15,6 +15,12 @@
  *   - `setBlend`: `'source-over'` is premultiplied over; `'destination-in'` keeps the
  *     destination only where the source is opaque — blend factors (src ZERO, dst SRC_ALPHA)
  *     on colour and alpha alike. Those are the only two the screens use.
+ *     PRECONDITION for `'destination-in'`: the draw must cover the WHOLE surface. Canvas
+ *     also clears everything outside the drawn rect, which a blended quad does not touch;
+ *     the two agree only when there is no outside. Both uses today are full-surface
+ *     (worldMapAi.ts `rebuildBase`, mapInfoZoom.ts `aiPanelArt`). A partial
+ *     `'destination-in'` draw is outside this contract — add a clear of the rest, or a
+ *     full-surface helper, before relying on one.
  *   - `translate` / `scale`: an AXIS-ALIGNED affine, applied to dest rects on the CPU. No
  *     rotation and no skew, so a quad's four corners always carry it.
  *   - `save` / `restore`: a stack of {transform, alpha, smoothing, blend} — exactly the
@@ -25,6 +31,21 @@
  * A new surface starts in the canvas defaults: transparent, identity transform, alpha 1,
  * smoothing ON, `'source-over'`. A native implementation has to start there too — some
  * callers rely on the default (mapInfoZoom.ts scales a mask up smoothly without asking).
+ *
+ * ── What a native implementation can match byte for byte, and what it cannot ──
+ * "Directly" is not "identically". A canvas stores premultiplied 8-bit colour, and its
+ * bilinear filter is the browser backend's own, so:
+ *   - BYTE-EXACT is reachable for nearest-neighbour draws (any integer scale), opaque
+ *     blits, opaque `putPixels`, and `'destination-in'` through a BINARY (0/255) mask —
+ *     which is the whole `ai` map base, the nodes, the plaques, the parchment, and the
+ *     native-resolution overlays (digits, Tetris).
+ *   - NOT byte-exact, only close: anything through `setSmoothing(true)` (aiPanelArt's
+ *     smoothed mask upscale, and the enlarged panel art drawn with `smooth`); fractional
+ *     alpha (`setAlpha(0.55)` on the disabled Replay icon); and `putPixels` of partial
+ *     alpha (aiPanelArt's shadow), which the canvas rounds through premultiplied storage.
+ *     (native/js/nativeCanvas.ts already emulates that rounding for the room's scratch
+ *     canvases; a GPU surface would need the same, or a tolerance.)
+ * Native parity tests should set their expectation per path accordingly.
  *
  * What is deliberately NOT here: paths, text, gradients, patterns, filters, shadows, any
  * other composite mode, reading pixels back. None of the ported screens need them, and each
@@ -52,6 +73,7 @@ export interface Surface2D extends Image2D {
   setSmoothing(on: boolean): void;
   /** Multiply the alpha of everything drawn after this by `alpha` (0..1). */
   setAlpha(alpha: number): void;
+  /** `'destination-in'` is only defined here for a draw covering the whole surface (see header). */
   setBlend(mode: SurfaceBlend): void;
   translate(x: number, y: number): void;
   scale(x: number, y: number): void;
