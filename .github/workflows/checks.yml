@@ -96,6 +96,10 @@ jobs:
   # two agree byte for byte there as they do locally — so the parity sweep is a real gate
   # here, not a smoke test. It fails on any differing frame and on any room outside the
   # spike's known gaps (KNOWN_GAPS in native/compare.mjs).
+  #
+  # Before it, the smoke gate (native/js/smoke.ts): every room with a recorded solution
+  # played headless through the game's real flow modules as the native host wires them,
+  # plus two rooms typed key by key through save, undo and load. ~40 s here.
   native-macos:
     # Once per change, not twice. The workflow fires on both `push` (every branch) and
     # `pull_request`, and the concurrency group above cannot merge the two runs: their refs
@@ -122,6 +126,11 @@ jobs:
       - run: node native/build-js.mjs
       - run: cmake -S native -B native/build/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: ninja -C native/build/cmake
+      - name: Native smoke, every recorded solution through the real game flow
+        timeout-minutes: 5
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless
+          --smoke all --smoke-player 13,70 --store native/build/smoke-store.json
       - run: npx playwright install chromium
       - name: Native vs WebGL parity, all 72 rooms
         run: node --import tsx native/compare.mjs --all

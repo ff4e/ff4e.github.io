@@ -53,11 +53,29 @@ export interface NativeApi {
   /** Write the composite's RGBA (top-down) to `path`, prefixed by u32 w, u32 h. */
   saveComposite(path: string): void;
 
-  // ── Input, sampled by the host from SDL each frame. ──
-  /** Held direction (0 none, 1 up, 2 down, 3 left, 4 right) — the game's Dir values. */
-  heldDir(): number;
-  /** Edge-triggered buttons since the last call: bit 0 = switch fish, bit 1 = quit. */
-  pressed(): number;
+  // ── Input. ──
+  /**
+   * Key transitions since the last call, oldest first: `+Code` down, `-Code` up, where Code
+   * is the DOM `KeyboardEvent.code` the browser game's router reads (`KeyI`, `ArrowUp`,
+   * `Space`, `Minus`, `F2`…). The gamepad arrives as the same codes — see `pollGamepad` in
+   * native/host/main.c for the mapping — so there is one router for both.
+   */
+  events(): string[];
+
+  // ── Persistence: the localStorage shim's backing file (shims.ts). ──
+  /**
+   * The whole store as last saved (a JSON object), or null when there is none yet. With
+   * `backup`, the store as it was before the last save (`<store>.bak`).
+   */
+  storeLoad(backup?: boolean): string | null;
+  /**
+   * Replace the store durably: write and fsync a sibling, keep the current store as the
+   * backup — unless `damaged`, when it is the unreadable store the reader fell back from —
+   * and rename the sibling into place. Throws when it cannot.
+   */
+  storeSave(json: string, damaged?: boolean): void;
+  /** Where the store is kept, for messages. */
+  storePath(): string | null;
   args(): string[];
   /** Leave the frame loop; the process exits with `code` (default 0). */
   quit(code?: number): void;
