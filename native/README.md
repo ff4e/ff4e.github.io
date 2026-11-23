@@ -30,7 +30,7 @@ product: one room, no menus, no audio, no subtitles.
     native/build/cmake/ff4e-native native/build/game.js --root public --room 3
 
 CMake fetches and builds the three C dependencies at pinned versions (QuickJS-ng v0.17.0,
-SDL 3.4.20, libwebp 1.6.0, the last two by SHA-256), statically. A clean configure and build
+SDL 3.4.20, libwebp 1.6.0), each from a source archive checked by SHA-256, statically. A clean configure and build
 takes under a minute. Nothing from Homebrew but the build tools is used, so a package
 upgrade cannot change the pixels `compare.mjs` checks.
 
@@ -61,8 +61,10 @@ It checks three states per room:
 For the comparison to be fair, `Math.random` is pinned on both sides (`pinRandom`). Room
 scripts draw from it, and V8 and QuickJS have different generators.
 
-It exits non-zero on any differing frame and on any room that fails natively, except the
-rooms in its `KNOWN_GAPS` list (9, 56, 66, 68, 72). A known gap that starts rendering
+It exits non-zero on any differing frame, on a missing or short composite, on a native run
+that takes over 60 s, and on any native failure not listed in `KNOWN_GAPS`. That list is
+keyed by room and case (all three cases of 9, 66, 68 and 72; only `played` for 56), and each
+entry names the error the failure must carry. A known gap that starts rendering
 identically also fails, so the list has to be updated with the fix. Differing frames
 leave `-native`, `-webgl` and `-diff` PNGs in `native/build/compare/`.
 

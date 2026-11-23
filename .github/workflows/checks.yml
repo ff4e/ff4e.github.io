@@ -98,6 +98,8 @@ jobs:
   # spike's known gaps (KNOWN_GAPS in native/compare.mjs).
   native-macos:
     runs-on: macos-15
+    # ~10 min when green. compare.mjs times out each native run, but not the WebGL side.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -393,19 +393,22 @@ static JSValue n_saveComposite(JSContext *ctx, JSValueConst self, int argc, JSVa
   cmd = NULL;
   SDL_WaitForGPUFences(dev, true, &fence, 1);
   SDL_ReleaseGPUFence(dev, fence);
-  const void *px = SDL_MapGPUTransferBuffer(dev, tb, false);
-  FILE *f = fopen(path, "wb");
+  const void *px = tb ? SDL_MapGPUTransferBuffer(dev, tb, false) : NULL;
+  /* Every step is checked: a short file must not reach compare.mjs as a finished frame. */
+  bool ok = false;
+  FILE *f = px ? fopen(path, "wb") : NULL;
   if (f) {
     Uint32 hdr[2] = {(Uint32)comp_w, (Uint32)comp_h};
-    fwrite(hdr, sizeof hdr, 1, f);
-    fwrite(px, size, 1, f);
-    fclose(f);
+    ok = fwrite(hdr, sizeof hdr, 1, f) == 1 && fwrite(px, size, 1, f) == 1;
+    ok = (fclose(f) == 0) && ok;
   }
-  SDL_UnmapGPUTransferBuffer(dev, tb);
-  SDL_ReleaseGPUTransferBuffer(dev, tb);
-  fprintf(stdout, "wrote %dx%d composite to %s\n", comp_w, comp_h, path);
+  if (px) SDL_UnmapGPUTransferBuffer(dev, tb);
+  if (tb) SDL_ReleaseGPUTransferBuffer(dev, tb);
+  JSValue r = JS_UNDEFINED;
+  if (ok) fprintf(stdout, "wrote %dx%d composite to %s\n", comp_w, comp_h, path);
+  else r = JS_ThrowTypeError(ctx, "could not write composite to %s", path);
   JS_FreeCString(ctx, path);
-  return f ? JS_UNDEFINED : JS_ThrowTypeError(ctx, "could not write composite");
+  return r;
 }
 
 /* ── input ─────────────────────────────────────────────────────────────────────── */

@@ -7,10 +7,11 @@ set(CMAKE_C_EXTENSIONS ON) # statement expressions in the argument helpers
 include(FetchContent)
 # QuickJS-ng, pinned. Built from source so the same engine builds for macOS, tvOS and
 # Windows/Xbox (it is CI-tested with MSVC) instead of depending on a host package.
+# v0.17.0, by the commit the tag points to and the archive's SHA-256: a tag can be moved.
 FetchContent_Declare(quickjs
-  GIT_REPOSITORY https://github.com/quickjs-ng/quickjs.git
-  GIT_TAG v0.17.0
-  GIT_SHALLOW TRUE
+  URL https://github.com/quickjs-ng/quickjs/archive/6d46d07d04041b40f4f49eaa7fdebe44c314c699.tar.gz
+  URL_HASH SHA256=a62cf1ff7d6d2f82b90a2d247a57e9eb56b81c03feb1f372a53923426e358cb0
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
   EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(quickjs)
 
