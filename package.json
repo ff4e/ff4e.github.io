@@ -21,6 +21,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "typecheck:native": "tsc -p native/tsconfig.json",
+    "native:check": "node native/check.mjs",
     "test": "NO_COLOR=1 vitest run",
     "test:watch": "vitest",
     "test:solutions": "NO_COLOR=1 vitest run test/solutions.test.ts test/solutionsCoverage.test.ts test/solutionsData.test.ts",

@@ -56,9 +56,12 @@ the risk:
 | Before opening a PR | the full `npm run test:ui` (~315 s) |
 | Render path | + the relevant `tools/mutate-*.mjs`, and report survivors |
 | Moving code between files | + `tools/capture-digest.mjs` against the base commit |
+| `native/`, or `src/` code the native bundle imports | + `npm run native:check` (macOS, ~5 min), and quote its summary in the PR |
 
 `npm run test:ui -- cheat options` runs only matching probes. A filtered run says `PARTIAL RUN` and is not
-a gate. CI runs `typecheck`, the unit suite and `vite build` on every push.
+a gate. CI runs `typecheck`, the unit suite and `vite build` on every push. The native gate is not run by CI
+on its own: hosted macOS runners queued too long to be worth waiting on, so it runs locally, and the CI job
+`native-macos` is there only for a manual run.
 
 ## Keeping this cheap to change
 
