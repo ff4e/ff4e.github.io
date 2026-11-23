@@ -27,16 +27,15 @@ const ROOMS = args.includes('--all')
   : opt('--rooms', '1').split(',').filter(Boolean).map(Number);
 // What the spike cannot render natively yet (native/README.md, "What the spike does not do
 // yet"), keyed `room:case`, with the error that failure must carry: anything else from the
-// same run is a regression. 66 throws on backgroundZx; 9, 68 and 72 reach a path in
-// src/render/roomAi.ts that builds a canvas through the DOM. 56 CHODBA does the same in its
+// same run is a regression. 9, 68 and 72 reach a path in src/render/roomAi.ts that builds
+// a canvas through the DOM. 56 CHODBA does the same in its
 // played case only: by tick 240 its lights are out (gspec=2), and the fish silhouette
 // (TL_TMA) has no AI art, so drawFish falls back to classicSprite. Its still and wobble
 // cases use the fixed probe pose and are checked like any other room.
 const NO_DOM = /ReferenceError: document is not defined/;
-const NO_ZX = /spike: backgroundZx \(gspec=42\) is not implemented natively yet/;
 const KNOWN_GAPS = new Map([
   ...['still', 'wobble', 'played'].flatMap((c) => [
-    [`9:${c}`, NO_DOM], [`66:${c}`, NO_ZX], [`68:${c}`, NO_DOM], [`72:${c}`, NO_DOM],
+    [`9:${c}`, NO_DOM], [`68:${c}`, NO_DOM], [`72:${c}`, NO_DOM],
   ]),
   ['56:played', NO_DOM],
 ]);

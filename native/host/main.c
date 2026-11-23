@@ -29,6 +29,8 @@ static char **js_argv;
 static SDL_GPUGraphicsPipeline *p_fill, *p_bg, *p_sprite, *p_disint, *p_present;
 static SDL_GPUSampler *s_nearest, *s_linear;
 static SDL_GPUTexture *rand_tex;
+static SDL_GPUTexture *band_tex;  /* the ZX stripes: one RGBA texel per native row */
+static int band_w;
 
 static SDL_GPUTexture **textures; /* id -> texture; slot 0 unused */
 static int tex_count, tex_cap;
@@ -106,20 +108,25 @@ static SDL_GPUTexture *make_texture(SDL_GPUTextureFormat fmt, int w, int h, SDL_
   return t;
 }
 
-static void upload(SDL_GPUTexture *t, const void *px, int w, int h, int bpp) {
+/* Record an upload of `px` into `t` on command buffer `c`. */
+static void copy_to(SDL_GPUCommandBuffer *c, SDL_GPUTexture *t, const void *px, int w, int h, int bpp) {
   Uint32 size = (Uint32)(w * h * bpp);
   SDL_GPUTransferBufferCreateInfo ti = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = size};
   SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(dev, &ti);
   memcpy(SDL_MapGPUTransferBuffer(dev, tb, false), px, size);
   SDL_UnmapGPUTransferBuffer(dev, tb);
-  SDL_GPUCommandBuffer *c = SDL_AcquireGPUCommandBuffer(dev);
   SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(c);
   SDL_GPUTextureTransferInfo src = {.transfer_buffer = tb, .pixels_per_row = (Uint32)w, .rows_per_layer = (Uint32)h};
   SDL_GPUTextureRegion dst = {.texture = t, .w = (Uint32)w, .h = (Uint32)h, .d = 1};
   SDL_UploadToGPUTexture(cp, &src, &dst, false);
   SDL_EndGPUCopyPass(cp);
+  SDL_ReleaseGPUTransferBuffer(dev, tb); /* deferred by SDL until `c` has run */
+}
+
+static void upload(SDL_GPUTexture *t, const void *px, int w, int h, int bpp) {
+  SDL_GPUCommandBuffer *c = SDL_AcquireGPUCommandBuffer(dev);
+  copy_to(c, t, px, w, h, bpp);
   SDL_SubmitGPUCommandBuffer(c);
-  SDL_ReleaseGPUTransferBuffer(dev, tb);
 }
 
 static int add_texture(SDL_GPUTexture *t) {
@@ -227,6 +234,15 @@ static JSValue n_setRandTable(JSContext *ctx, JSValueConst self, int argc, JSVal
   return JS_UNDEFINED;
 }
 
+static void open_composite(SDL_GPULoadOp load) {
+  if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(dev);
+  SDL_GPUColorTargetInfo ct = {0};
+  ct.texture = comp;
+  ct.load_op = load;
+  ct.store_op = SDL_GPU_STOREOP_STORE;
+  pass = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+}
+
 /* GlAiScreen.begin: size the ×S buffer and clear it to transparent black. */
 static JSValue n_begin(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int w = ARGI(0), h = ARGI(1);
@@ -238,12 +254,31 @@ static JSValue n_begin(JSContext *ctx, JSValueConst self, int argc, JSValueConst
     comp_w = w;
     comp_h = h;
   }
+  open_composite(SDL_GPU_LOADOP_CLEAR);
+  return JS_UNDEFINED;
+}
+
+/*
+ * GlAiScreen.backgroundZx's texImage2D: replace the band texture with `n` RGBA texels.
+ * It lands mid-frame, and a copy pass cannot run inside a render pass, so the composite
+ * pass is closed, the copy recorded on the SAME command buffer (so it is ordered before
+ * the draw that samples it), and the pass reopened with LOAD to keep what is drawn.
+ */
+static JSValue n_setBands(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  size_t len = 0;
+  uint8_t *p = JS_GetArrayBuffer(ctx, &len, argv[0]);
+  int n = ARGI(1);
+  if (!p || n < 1 || len < (size_t)n * 4) return JS_ThrowTypeError(ctx, "setBands: need n RGBA texels");
+  bool reopen = pass != NULL;
+  end_composite();
+  if (band_w != n) {
+    SDL_ReleaseGPUTexture(dev, band_tex);
+    band_tex = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, n, 1, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    band_w = n;
+  }
   if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(dev);
-  SDL_GPUColorTargetInfo ct = {0};
-  ct.texture = comp;
-  ct.load_op = SDL_GPU_LOADOP_CLEAR;
-  ct.store_op = SDL_GPU_STOREOP_STORE;
-  pass = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+  copy_to(cmd, band_tex, p, n, 1, 4);
+  if (reopen) open_composite(SDL_GPU_LOADOP_LOAD);
   return JS_UNDEFINED;
 }
 
@@ -286,7 +321,8 @@ static JSValue n_blit(JSContext *ctx, JSValueConst self, int argc, JSValueConst 
 
 typedef struct {
   int32_t scale, bgW, wobble, ripN;
-  float amp, per, phase, pad;
+  float amp, per, phase;
+  int32_t zx;
   float rip[3][4];
   float ripPh[4];
 } BgU;
@@ -302,6 +338,7 @@ static JSValue n_background(JSContext *ctx, JSValueConst self, int argc, JSValue
   u.per = (float)ARGF(6);
   u.phase = (float)ARGF(7);
   u.ripN = ARGI(8);
+  u.zx = JS_ToBool(ctx, argv[11]) ? 1 : 0;
   for (int i = 0; i < 12; i++) {
     JSValue v = JS_GetPropertyUint32(ctx, argv[9], (uint32_t)i);
     double d = 0;
@@ -318,8 +355,9 @@ static JSValue n_background(JSContext *ctx, JSValueConst self, int argc, JSValue
   }
   use(p_bg);
   SDL_PushGPUFragmentUniformData(cmd, 0, &u, sizeof u);
-  SDL_GPUTextureSamplerBinding b[2] = {{bg, s_nearest}, {wall, s_nearest}};
-  SDL_BindGPUFragmentSamplers(pass, 0, b, 2);
+  /* The band texture is bound on every pass, ZX or not, as GlAiScreen.bgPass does. */
+  SDL_GPUTextureSamplerBinding b[3] = {{bg, s_nearest}, {wall, s_nearest}, {band_tex, s_nearest}};
+  SDL_BindGPUFragmentSamplers(pass, 0, b, 3);
   SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
   return JS_UNDEFINED;
 }
@@ -518,7 +556,8 @@ static void install(JSContext *ctx) {
       {"setRandTable", n_setRandTable, 1},
       {"begin", n_begin, 2},           {"fill", n_fill, 3},
       {"fillRect", n_fillRect, 7},     {"blit", n_blit, 6},
-      {"background", n_background, 11}, {"disintegrate", n_disintegrate, 8},
+      {"background", n_background, 12}, {"setBands", n_setBands, 2},
+      {"disintegrate", n_disintegrate, 8},
       {"present", n_present, 0},       {"saveComposite", n_saveComposite, 1},
       {"heldDir", n_heldDir, 0},       {"pressed", n_pressed, 0},
       {"args", n_args, 0},             {"quit", n_quit, 0},
@@ -558,7 +597,7 @@ int main(int argc, char **argv) {
 
   const SDL_GPUTextureFormat rgba = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
   p_fill = pipeline("vs_rect", 1, "fs_fill", 0, rgba, false, true);
-  p_bg = pipeline("vs_full", 0, "fs_bg", 2, rgba, false, false);
+  p_bg = pipeline("vs_full", 0, "fs_bg", 3, rgba, false, false);
   p_sprite = pipeline("vs_rect", 1, "fs_sprite", 1, rgba, true, true);
   p_disint = pipeline("vs_rect", 1, "fs_disint", 2, rgba, true, true);
   p_present = pipeline("vs_full", 0, "fs_present", 1, swap_fmt, false, false);
@@ -569,6 +608,11 @@ int main(int argc, char **argv) {
   s_nearest = SDL_CreateGPUSampler(dev, &si);
   si.min_filter = si.mag_filter = SDL_GPU_FILTER_LINEAR;
   s_linear = SDL_CreateGPUSampler(dev, &si);
+  /* A real 1x1 texel, not nothing: the band texture is bound on every background pass
+     (GlAiScreen gives its uBands the same 1x1 black for the same reason). */
+  band_tex = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, 1, 1, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+  band_w = 1;
+  upload(band_tex, (const uint8_t[4]){0, 0, 0, 255}, 1, 1, 4);
 
   JSRuntime *rt = JS_NewRuntime();
   JS_SetMaxStackSize(rt, 8 * 1024 * 1024);

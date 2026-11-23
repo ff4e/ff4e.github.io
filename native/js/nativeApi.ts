@@ -29,9 +29,12 @@ export interface NativeApi {
   /**
    * Wall over wobbled background. `rip` is RIPPLE_GPU_SLOTS×(c, halfW, amp, k), `ripPh`
    * the carriers' phases — computed in JS by the shared `activeRipples`, as GlAiScreen does.
+   * `zx` paints the wall's silhouette with the band texture last set by `setBands` (gspec=42).
    */
   background(bg: number, wall: number, scale: number, bgW: number, wobble: boolean, amp: number, per: number,
-    phase: number, ripN: number, rip: number[], ripPh: number[]): void;
+    phase: number, ripN: number, rip: number[], ripPh: number[], zx: boolean): void;
+  /** Replace the ZX band texture: `n` RGBA texels, one per native row. */
+  setBands(rgba: ArrayBuffer, n: number): void;
   disintegrate(tex: number, x: number, y: number, w: number, h: number, scale: number, nativeW: number, rozpad: number): void;
   /** Show the composite in the window (box-filtered to fit). */
   present(): void;

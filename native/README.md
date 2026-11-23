@@ -2,8 +2,9 @@
 
 > **Experimental. Not shipped, not part of the web or iOS build, and `src/` does not depend on
 > it.** Nothing under `native/` is imported by the game; it only imports *from* `src/`. CI
-> builds it (the `native-macos` job in `.github/workflows/checks.yml`) so a change in `src/`
-> that breaks the native bundle is visible, but no release consumes it.
+> builds it (the `native-macos` job in `.github/workflows/checks.yml`, on pull requests and
+> on main) so a change in `src/` that breaks the native bundle is visible, but no release
+> consumes it.
 
 A proof of concept for running the game **without a browser**:
 
@@ -63,26 +64,28 @@ scripts draw from it, and V8 and QuickJS have different generators.
 
 It exits non-zero on any differing frame, on a missing or short composite, on a native run
 that takes over 60 s, and on any native failure not listed in `KNOWN_GAPS`. That list is
-keyed by room and case (all three cases of 9, 66, 68 and 72; only `played` for 56), and each
+keyed by room and case (all three cases of 9, 68 and 72; only `played` for 56), and each
 entry names the error the failure must carry. A known gap that starts rendering
 identically also fails, so the list has to be updated with the fix. Differing frames
 leave `-native`, `-webgl` and `-diff` PNGs in `native/build/compare/`.
 
-Current result: **67 of 72 rooms byte-identical** in all three states; 203 of the 216
-frames are identical and the other 13 cannot be rendered natively. None differ. CI runs
+Current result: **68 of 72 rooms byte-identical** in all three states; 206 of the 216
+frames are identical and the other 10 cannot be rendered natively. None differ. CI runs
 `--all` on a hosted macOS runner, whose Metal device gives the same bytes.
 
 The spike was written at 68/72. Room 56 CHODBA left the list when `scene.ts` stopped
 restating `fishFrameFor` and imported the game's: at tick 240 CHODBA is dark, and the
 restated copy had no darkness case, so both sides drew a lit idle fish there and agreed
 on a wrong picture. The game draws a dark silhouette, which the native host cannot yet
-(see below).
+(see below). Room 66 ZX joined when `backgroundZx` (gspec=42) was ported: the same
+background pass as every other room, with the wall's silhouette taking its loading-stripe
+colour from a one-texel-per-native-row band texture, as `GlAiScreen` does.
 
 ## What the spike does not do yet
 
-- `backgroundZx` (gspec=42), `mirrorGlass` (the spec=1 mirror), LODE's wreck, and items
-  with no AI art (the classic-sprite fallback). The last three build canvases through
-  the DOM in `src/render/roomAi.ts`; the native target throws on the first two.
+- `mirrorGlass` (the spec=1 mirror), LODE's wreck, and items with no AI art (the
+  classic-sprite fallback). The last two build canvases through the DOM in
+  `src/render/roomAi.ts`; the native target throws on the first.
 - The darkness silhouette (gspec=2, CHODBA). The pose is right now, but `TL_TMA` has no
   AI art, so it takes the same classic-sprite fallback and throws natively, in the
   interactive window as well as in `compare.mjs`.

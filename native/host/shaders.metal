@@ -38,7 +38,8 @@ fragment float4 fs_fill(VSOut in [[stage_in]], constant FillU& u [[buffer(0)]]) 
   return float4(u.color.rgb, 1.0);
 }
 
-// BG_FS — wall over the water-wobbled background (ZX bands not ported in the spike).
+// BG_FS — wall over the water-wobbled background; with `zx` set, the gspec=42 ZX
+// composite (GlAiScreen.backgroundZx goes through the same program the same way).
 // `sin`/`exp` are Metal's DEFAULT (fast-math) variants on purpose: that is what ANGLE's
 // GLSL→MSL translation emits, so it is what the browser runs on Apple GPUs. With
 // `precise::` the composite drifted by 1/255 on a few dozen pixels (SCHODY after 240
@@ -46,13 +47,13 @@ fragment float4 fs_fill(VSOut in [[stage_in]], constant FillU& u [[buffer(0)]]) 
 #define RIPPLE_GPU_SLOTS 3
 struct BgU {
   int scale; int bgW; int wobble; int ripN;
-  float amp; float per; float phase; float _pad;
+  float amp; float per; float phase; int zx;
   float4 rip[RIPPLE_GPU_SLOTS];
   float4 ripPh;                                   // .xyz = uRipPh[0..2]
 };
 fragment float4 fs_bg(VSOut in [[stage_in]],
                       texture2d<float> uBg [[texture(0)]], texture2d<float> uWall [[texture(1)]],
-                      constant BgU& u [[buffer(0)]]) {
+                      texture2d<float> uBands [[texture(2)]], constant BgU& u [[buffer(0)]]) {
   int x = int(in.pos.x);
   int y = int(in.pos.y);
   float3 bg;
@@ -73,7 +74,10 @@ fragment float4 fs_bg(VSOut in [[stage_in]],
     bg = uBg.read(uint2(x, y)).rgb;
   }
   float4 w = uWall.read(uint2(x, y));
-  return float4(w.rgb * w.a + bg * (1.0 - w.a), 1.0);
+  // gspec=42: the wall keeps its SHAPE and takes the loading-stripe colour of its NATIVE
+  // row (y / scale); the blend is unchanged. `uBands` is one texel per native row.
+  float3 wrgb = (u.zx == 1) ? uBands.read(uint2(y / u.scale, 0)).rgb : w.rgb;
+  return float4(wrgb * w.a + bg * (1.0 - w.a), 1.0);
 }
 
 // SPRITE_FS — straight-RGBA sprite; uMirror flips within [uX, uX+uW-1] (KresliRev).

@@ -97,6 +97,14 @@ jobs:
   # here, not a smoke test. It fails on any differing frame and on any room outside the
   # spike's known gaps (KNOWN_GAPS in native/compare.mjs).
   native-macos:
+    # Once per change, not twice. The workflow fires on both `push` (every branch) and
+    # `pull_request`, and the concurrency group above cannot merge the two runs: their refs
+    # differ (refs/heads/<branch> vs refs/pull/<n>/merge). That is fine for the cheap Linux
+    # `check`, which stays on every push so a branch without a PR still gets feedback; it is
+    # not fine for ~10 min of macOS. So this job runs on `pull_request` (which tests the
+    # merge result, the thing that lands) and on `push` only to main (which keeps main
+    # covered after the merge). A branch pushed without a PR is not swept until one is opened.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: macos-15
     # ~10 min when green. compare.mjs times out each native run, but not the WebGL side.
     timeout-minutes: 25

@@ -20,6 +20,7 @@ export class NativeAiScreen implements AiTarget {
   height = 0;
   private readonly rip = new Array<number>(RIPPLE_GPU_SLOTS * 4).fill(0);
   private readonly ripPh = new Array<number>(RIPPLE_GPU_SLOTS).fill(0);
+  private bandBuf = new Uint8Array(0);
 
   begin(w: number, h: number): void {
     this.width = w;
@@ -41,8 +42,38 @@ export class NativeAiScreen implements AiTarget {
   }
 
   background(_sig: string, bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number): void {
+    this.bgPass(bg, wall, wobble, scale, false);
+  }
+
+  /**
+   * GlAiScreen.backgroundZx: one RGBA texel per NATIVE row, palette-resolved here, then
+   * the same pass as `background` with `zx` selecting the band colour for the wall.
+   * The bands are consumed as given — re-deriving them would advance the room's band state.
+   */
+  backgroundZx(
+    bg: AiImage,
+    wall: AiImage,
+    bands: Uint8Array,
+    palette: ReadonlyArray<{ r: number; g: number; b: number }>,
+    wobble: AiWobble | null,
+    scale: number,
+  ): void {
+    const n = bands.length;
+    if (this.bandBuf.length !== n * 4) this.bandBuf = new Uint8Array(n * 4);
+    for (let i = 0; i < n; i++) {
+      const c = palette[bands[i]!] ?? { r: 0, g: 0, b: 0 };
+      this.bandBuf[i * 4] = c.r;
+      this.bandBuf[i * 4 + 1] = c.g;
+      this.bandBuf[i * 4 + 2] = c.b;
+      this.bandBuf[i * 4 + 3] = 255;
+    }
+    __native.setBands(this.bandBuf.buffer as ArrayBuffer, n);
+    this.bgPass(bg, wall, wobble, scale, true);
+  }
+
+  /** Exactly GlAiScreen.bgPass's uniforms (src/render/glRoomAi.ts). */
+  private bgPass(bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number, zx: boolean): void {
     const b = texOf(bg);
-    // Exactly GlAiScreen.bgPass's uniforms (src/render/glRoomAi.ts:618-650).
     const rips = wobble ? activeRipples(wobble, Math.max(1, Math.round(b.height / scale))) : [];
     for (let i = 0; i < RIPPLE_GPU_SLOTS; i++) {
       const r = rips[i];
@@ -56,12 +87,8 @@ export class NativeAiScreen implements AiTarget {
     __native.background(
       b.id, texOf(wall).id, scale, b.width, wobble !== null,
       wobble ? wobble.wamp / 2 : 0, wobble ? wobble.wper : 1, wobble ? wobblePhase(wobble) : 0,
-      Math.min(rips.length, RIPPLE_GPU_SLOTS), this.rip, this.ripPh,
+      Math.min(rips.length, RIPPLE_GPU_SLOTS), this.rip, this.ripPh, zx,
     );
-  }
-
-  backgroundZx(): void {
-    throw new Error('spike: backgroundZx (gspec=42) is not implemented natively yet');
   }
 
   disintegrate(src: AiImage, x: number, y: number, scale: number, rozpad: number): void {
