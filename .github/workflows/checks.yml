@@ -99,7 +99,7 @@ jobs:
   #
   # Before it, the smoke gate (native/js/smoke.ts): every room with a recorded solution
   # played headless through the game's real flow modules as the native host wires them,
-  # plus two rooms typed key by key through save, undo and load. ~20 s locally.
+  # plus two rooms typed key by key through save, undo and load. ~40 s here.
   native-macos:
     # Once per change, not twice. The workflow fires on both `push` (every branch) and
     # `pull_request`, and the concurrency group above cannot merge the two runs: their refs

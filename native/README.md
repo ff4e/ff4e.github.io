@@ -45,19 +45,27 @@ bundle — so a `src/` change that adds an edge from the flow into the DOM shell
 build loudly instead of shipping a module that throws on its first `document`.
 
 What `src/app/main.ts` owns and does not export is restated in `native/js/game.ts`, the
-native composition root, each part marked with where it comes from: building a room
-(`buildRoom`), the save slots (`saveGame`/`loadGame`), the win bookkeeping, the room part of
-the keyboard router, and the frame loop's step (`renderLoop.ts`'s one-step-per-frame rule).
+native composition root: building a room (`buildRoom`), the save slots
+(`saveGame`/`loadGame`), the win bookkeeping, the room part of the keyboard router, and the
+frame loop's step (`renderLoop.ts`'s one-step-per-frame rule); a few seams restate small
+functions too. Each copy carries a `restates <file> \`<anchor>\` @ <hash>` marker, and
+`test/native-restated.test.ts` hashes the source span it names (comments and spacing
+ignored): any change to the source fails `npm run test` until the copy has been re-read
+against it and the pin updated — the failure prints the new hash.
 `localStorage` is a JSON file the host owns (`--store FILE`, by default `store.json` in the
 user's app-support directory — `~/Library/Application Support/ff4e/Fish Fillets 4ever/` on
-macOS), so progress and save slots use the browser game's keys and format.
+macOS), so progress and save slots use the browser game's keys and format. Each write is
+flushed to disk before it replaces the store, and the previous store is kept as
+`store.json.bak`. A damaged store falls back to the backup; with both damaged the game
+refuses to start and says so, rather than run without saving or overwrite them.
 
 With no map, a solved room leads to the next: the lowest-numbered room above it that the
 map would offer (reachable by the map's own unlock rule, `computeResena`, and not yet
 solved), else the lowest-numbered such room; with every registered room solved, the finale
 (ZAVER); after ZAVER the game ends. Rooms are numbered leg by leg, so within a leg this is
-simply the next room. A session starts where the store says the player left off, or in
-`--room N`.
+simply the next room. A finished game (ZAVER solved too) is being replayed: it goes on room
+by room in number order, from room 1, and never replays the finale on its own. A session
+starts where the store says the player left off, or in `--room N`.
 
 ## Build and run (macOS, Apple silicon)
 
@@ -82,7 +90,7 @@ gamepad is turned into the same key codes in `native/host/main.c`, so there is o
 | big fish | `W` `A` `S` `D` | right stick |
 | active fish | arrows | |
 | switch fish | Space, Tab (`1`/`2` select) | Ⓐ |
-| undo one move | `-` | Ⓨ |
+| undo one move | `-` (the character, wherever the layout puts it) | Ⓨ |
 | restart the room | Backspace | Ⓧ |
 | save / load | F2 / F3 | LB / RB |
 | quit (there is no map to go back to) | Esc | Ⓑ |
@@ -109,11 +117,15 @@ auto-return — and must be left by a win, with `ff.solved` on disk saying so. R
 DRAKAR1 and 70 DISKETA, two that carry script state through undo, are also TYPED key by
 key through the router the keyboard and the gamepad use, with a save (F2), two undos, a load
 (F3) and an undo into the loaded history on the way, each landing checked against the
-record it must land on, and then finished. One frame per room is drawn from the real
-flow's state. `--store` is required and wiped: a smoke run never touches the player's
+record it must land on, and then finished: 72 runs. One frame per room is drawn from the
+real flow's state. `--store` is required and wiped: a smoke run never touches the player's
 progress. `--smoke-out DIR` keeps those frames.
 
-~20 s locally for all of it. CI runs it in the `native-macos` job, before the parity sweep.
+Each run starts as it would alone — Math.random seeded per room, the chatter history, blink
+state and the room's solved flag put back to rest — so `--smoke N` (or `--smoke-player N`)
+reproduces what `--smoke all` reported for room N.
+
+~25 s locally, ~40 s on CI, which runs it in the `native-macos` job before the parity sweep.
 
 ## Is it the same picture? `native/compare.mjs`
 
@@ -170,6 +182,9 @@ one-texel-per-native-row band texture, as `GlAiScreen` does.
   and there is no audio.
 - **Cheats** (no way to type one), the fishing hooks they enable, and haptics.
 - **Escape quits** rather than going back to a map.
+- The host queues at most 128 key transitions between two frames and drops the rest. A
+  human cannot get near that in one frame; a long stall with keys being pressed throughout
+  could, and would lose key-ups.
 - A gated check of LODE's wreck in `compare.mjs`. It runs natively (the smoke gate plays
   LODE to the end), but `compare.mjs` never reaches it: the first swap is at tick 3770,
   after the whole recorded solution. A one-off run of the same harness at ticks 3780 and

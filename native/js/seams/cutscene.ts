@@ -17,6 +17,7 @@ export const cutsceneCaption: typeof Real.cutsceneCaption = () => DEFAULT_LINE_T
  * `endShowmode`, restated: every playback a room change, restart or load must end. All of
  * it is `gameState` and `solveMode`, but it lives in the DOM-bound module, so the native
  * composition root takes it from here.
+ * restates src/app/cutscene.ts `export function endShowmode(` @ 035b357a265c
  */
 export const endShowmode: typeof Real.endShowmode = () => {
   setShowmode(null);
@@ -31,4 +32,5 @@ export const endShowmode: typeof Real.endShowmode = () => {
   if (activeScript) activeScript.s.showmode = false;
 };
 
+// restates src/app/cutscene.ts `export function inShowmode(` @ 8e718edd67d9
 export const inShowmode: typeof Real.inShowmode = () => showmode !== null || showmodeLoading;

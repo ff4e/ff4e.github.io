@@ -119,19 +119,64 @@ g.createImageBitmap = async (blob: BlobShim): Promise<NativeBitmap> => {
 // (`__native.storeLoad/storeSave`: the user's app-support dir, or `--store <path>`), read on
 // first use — so a run that never touches it (compare.mjs) never opens the file — and
 // rewritten whole on every change. Writes are rare (a solve, a save, leaving a room) and
-// small, and a whole-file write keeps a crash from leaving half a store behind.
+// small; the host writes each one durably and keeps the previous store as a backup.
+//
+// An unreadable store is never papered over. `persist.ts` catches storage errors (a browser
+// can refuse localStorage), so a throw from here alone would let the game run on, saving
+// nothing — or, worse, overwrite the damaged file with an empty one. So `loadStore()` is
+// called explicitly before the game opens its save store: it falls back to the backup
+// when the store is damaged, and refuses to start when both are; and a refused store is
+// never written.
+
+/** The parsed store, or why it is not usable. */
+function parseStore(raw: string | null): Map<string, string> | string {
+  if (raw === null) return 'missing';
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return 'not a JSON object';
+    return new Map(Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
+  } catch (e) {
+    return raw.trim() === '' ? 'empty' : `not JSON (${(e as Error).message})`;
+  }
+}
+
 class StorageShim {
   private items: Map<string, string> | null = null;
-  private map(): Map<string, string> {
-    if (!this.items) {
-      const raw = __native.storeLoad();
-      const parsed: unknown = raw ? JSON.parse(raw) : {};
-      this.items = new Map(Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v)]));
+  private refused: string | null = null;
+  /** Running from the backup: the store on disk is the damaged one, not a backup to keep. */
+  private damaged = false;
+  /** Read the store (see above). Throws, and disables every later write, if it is unusable. */
+  load(): void {
+    if (this.items) return;
+    if (this.refused) throw new Error(this.refused);
+    const main = __native.storeLoad();
+    const store = parseStore(main);
+    if (typeof store !== 'string') {
+      this.items = store;
+      return;
     }
-    return this.items;
+    const backup = parseStore(__native.storeLoad(true));
+    if (typeof backup !== 'string') {
+      console.warn(`store ${__native.storePath()} is ${store}: using its backup (${__native.storePath()}.bak)`);
+      this.items = backup;
+      this.damaged = main !== null;
+      return;
+    }
+    if (main === null && backup === 'missing') {
+      this.items = new Map(); // a first run
+      return;
+    }
+    this.refused = `store ${__native.storePath()} is ${store} and its backup is ${backup}. ` +
+      'Refusing to start rather than overwrite it: move it aside to start with no progress.';
+    throw new Error(this.refused);
+  }
+  private map(): Map<string, string> {
+    this.load();
+    return this.items!;
   }
   private flush(): void {
-    __native.storeSave(JSON.stringify(Object.fromEntries(this.map())));
+    __native.storeSave(JSON.stringify(Object.fromEntries(this.map())), this.damaged);
+    this.damaged = false;
   }
   get length(): number { return this.map().size; }
   key(i: number): string | null { return [...this.map().keys()][i] ?? null; }
@@ -140,7 +185,13 @@ class StorageShim {
   removeItem(k: string): void { if (this.map().delete(k)) this.flush(); }
   clear(): void { this.map().clear(); this.flush(); }
 }
-g.localStorage = new StorageShim();
+const storage = new StorageShim();
+
+/** Open the store before anything reads it; throws (with the reason) when it is unusable. */
+export function loadStore(): void {
+  storage.load();
+}
+g.localStorage = storage;
 
 /** Read a file through the same door `fetch` uses (for the FFR room data). */
 export async function readBytes(url: string): Promise<Uint8Array> {

@@ -15,6 +15,7 @@ export let curNum: typeof Real.curNum = 0;
 export let aiRoom: AiRoom | null = null;
 let aiRoomNum = 0;
 
+// restates src/app/art.ts `export function beginRoomArt(` @ 149608405d4f
 export const beginRoomArt: typeof Real.beginRoomArt = (num) => {
   curNum = num;
 };
@@ -30,6 +31,7 @@ export function aiRoomReady(): boolean {
 /**
  * `roomLoad` does not await this — the browser holds the FRAME on it instead — so a failure
  * is handled here, as the browser's `ensureAiRoom` handles its own: the entry fails.
+ * restates src/app/art.ts `export async function ensureAiRoom(` @ 9cc99fe2827d
  */
 export const ensureAiRoom: typeof Real.ensureAiRoom = async (num) => {
   if (aiRoom && aiRoomNum === num) return; // a restart keeps the art it already has

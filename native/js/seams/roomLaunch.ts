@@ -7,6 +7,7 @@
 import type * as Real from '../../../src/app/roomLaunch.js';
 
 export const mapLaunching: typeof Real.mapLaunching = () => null;
+// restates src/app/roomLaunch.ts `export function failRoomEntry(` @ 844490c3c2cf
 export const failRoomEntry: typeof Real.failRoomEntry = (num, err) => {
   console.error(`room ${num} could not be entered:`, err);
   __native.quit(1);

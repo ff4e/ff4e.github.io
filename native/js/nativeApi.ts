@@ -63,10 +63,19 @@ export interface NativeApi {
   events(): string[];
 
   // ── Persistence: the localStorage shim's backing file (shims.ts). ──
-  /** The whole store as last saved (a JSON object), or null when there is none yet. */
-  storeLoad(): string | null;
-  /** Replace the store, atomically (write a sibling, then rename over). */
-  storeSave(json: string): void;
+  /**
+   * The whole store as last saved (a JSON object), or null when there is none yet. With
+   * `backup`, the store as it was before the last save (`<store>.bak`).
+   */
+  storeLoad(backup?: boolean): string | null;
+  /**
+   * Replace the store durably: write and fsync a sibling, keep the current store as the
+   * backup — unless `damaged`, when it is the unreadable store the reader fell back from —
+   * and rename the sibling into place. Throws when it cannot.
+   */
+  storeSave(json: string, damaged?: boolean): void;
+  /** Where the store is kept, for messages. */
+  storePath(): string | null;
   args(): string[];
   /** Leave the frame loop; the process exits with `code` (default 0). */
   quit(code?: number): void;

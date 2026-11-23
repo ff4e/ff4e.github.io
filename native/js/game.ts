@@ -45,6 +45,7 @@ import { onLeaveRoom, returnFromRoom } from './seams/mapNav.js';
 import { DEFAULT_LINE_TICKS, LOGIC_MS } from './seams/stageGeometry.js';
 import { aiFrame } from './frame.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
+import { loadStore } from './shims.js';
 
 export type Which = 'little' | 'big';
 
@@ -69,6 +70,7 @@ let roomNum = 0;
 /**
  * The fishing hooks (Hacky). Only the `ultraviolence` cheat ever adds one, and the native
  * host has no way to type a cheat, so `killByHook` is unreachable here.
+ * restates src/app/main.ts `const hooks = new HookSystem(` @ e8aaaa2d3751
  */
 const hooks = new HookSystem({ killByHook: () => {} });
 
@@ -93,6 +95,7 @@ function setInfo(): void {
 /**
  * dialogy's talk hook. With no audio there is no voice to time a line by, so every line is
  * the browser's fallback length for a line without audio (`DEFAULT_LINE_TICKS`).
+ * restates src/app/main.ts `function scriptTalk(` @ db999691d54e
  */
 function talk(_name: string, _prior: number): number {
   return DEFAULT_LINE_TICKS;
@@ -104,6 +107,7 @@ function talk(_name: string, _prior: number): number {
  * subtitles, the store review and KUFRIK's demonstration and briefcase cutscene (their
  * script callbacks stay unset). Everything that decides how the room PLAYS is here, in
  * the same order.
+ * restates src/app/main.ts `function buildRoom(` @ 95a7c5e6b334
  */
 function buildRoom(carryPole = false, carried: readonly number[] = []): void {
   if (!ffr) return;
@@ -157,11 +161,13 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
 
 // ── Fish selection (main.ts `peekAtPlayer`, `swapActive`, `selectFish`) ────────────────
 
+// restates src/app/main.ts `function peekAtPlayer(` @ c17cfe7989ba
 function peekAtPlayer(which: Which): void {
   if (!engine || inShowmode() || loadmode) return;
   engine.startKuk(which);
 }
 
+// restates src/app/main.ts `function swapActive(` @ 60c1695cea31
 function swapActive(): boolean {
   if (!room || !engine || ui.screen !== 'room') return false;
   const other = engine.active === 'little' ? 'big' : 'little';
@@ -173,6 +179,7 @@ function swapActive(): boolean {
   return true;
 }
 
+// restates src/app/main.ts `function selectFish(` @ d43eed8c096b
 function selectFish(which: Which): void {
   if (!room || !engine || ui.screen !== 'room' || !room.alive[which]) return;
   if (fishBusy(which)) return;
@@ -184,12 +191,15 @@ function selectFish(which: Which): void {
 
 // ── Save slots and the win (main.ts `saveGame`, `loadGame`, `onWinBookkeeping`) ──────
 
+// restates src/app/main.ts `const saveKey = (` @ d8549da01f3c
 const saveKey = (): string => `ff.save.${roomNum}`;
 
+// restates src/app/main.ts `function canSave(` @ e3221a0959aa
 export function canSave(): boolean {
   return !!room && room.canSave;
 }
 
+// restates src/app/main.ts `function saveExists(` @ 1d71d939694c
 export function saveExists(): boolean {
   try {
     return localStorage.getItem(saveKey()) !== null;
@@ -198,7 +208,10 @@ export function saveExists(): boolean {
   }
 }
 
-/** The move record, the script state and the undo history; the history yields if it must. */
+/**
+ * The move record, the script state and the undo history; the history yields if it must.
+ * restates src/app/main.ts `function saveGame(` @ c66c3dea8c42
+ */
 export function saveGame(): void {
   if (!canSave()) return;
   const snapshot = activeScript?.s.snapshot() ?? null;
@@ -215,7 +228,10 @@ export function saveGame(): void {
   setInfo();
 }
 
-/** Load and re-simulate the saved record (animated, as the player's F3 is). */
+/**
+ * Load and re-simulate the saved record (animated, as the player's F3 is).
+ * restates src/app/main.ts `function loadGame(` @ b660c12a48c6
+ */
 export function loadGame(): void {
   if (!saveExists()) return;
   const raw = localStorage.getItem(saveKey());
@@ -237,6 +253,7 @@ export function loadGame(): void {
   restore(rec, snapshot, false, true, true);
 }
 
+// restates src/app/main.ts `function onWinBookkeeping(` @ 1c135eaa688c
 function onWinBookkeeping(): void {
   if (!store.solved.has(roomNum)) {
     store.solved.add(roomNum);
@@ -251,15 +268,27 @@ function onWinBookkeeping(): void {
 // ── Where the game goes next ───────────────────────────────────────────────────────
 
 /**
- * The room after `cur`, with no map to choose from: the first room the map would offer
- * (reachable and not yet solved, by the map's own unlock rule, `computeResena`) numbered
- * above `cur`, else the lowest-numbered one. Rooms are numbered leg by leg, so within a leg
- * this is simply the next room. With every registered room solved it is the finale, ZAVER,
- * and after ZAVER there is nothing: null.
+ * The room after `cur`, with no map to choose from:
+ *
+ * - the first room the map would offer (reachable and not yet solved, by the map's own
+ *   unlock rule, `computeResena`) numbered above `cur`, else the lowest-numbered one. Rooms
+ *   are numbered leg by leg, so within a leg this is simply the next room;
+ * - with every registered room solved, the finale, ZAVER — once: a game whose ZAVER is
+ *   solved too is a finished game being replayed, and goes on to the next registered room
+ *   by number, wrapping to room 1 (so a new session of a finished game starts in room 1,
+ *   rather than replaying the finale every time);
+ * - after ZAVER itself, nothing: null, and the session ends.
+ *
+ * `cur` 0 asks where a session starts.
+ * restates src/app/mapNav.ts `export function returnFromRoom(` @ 346eda134c13
  */
 export function nextRoom(cur: number, solved: ReadonlySet<number>, cheated: ReadonlySet<number> = new Set()): number | null {
   if (cur === ZAVER_ROOM) return null;
-  if (REGISTERED_ROOMS.every((r) => solved.has(r) || cheated.has(r))) return ZAVER_ROOM;
+  const done = (n: number): boolean => solved.has(n) || cheated.has(n);
+  if (REGISTERED_ROOMS.every(done)) {
+    if (!done(ZAVER_ROOM)) return ZAVER_ROOM;
+    return REGISTERED_ROOMS.find((n) => n > cur) ?? REGISTERED_ROOMS[0] ?? null;
+  }
   const resena = computeResena(solved, cheated);
   const open: number[] = [];
   BRANCHES.forEach((b, i) => {
@@ -269,6 +298,7 @@ export function nextRoom(cur: number, solved: ReadonlySet<number>, cheated: Read
   return open.find((n) => n > cur) ?? open[0] ?? null;
 }
 
+// restates src/app/mapNav.ts `export function showMap(` @ 5407b541588e
 function leaveRoom(why: LeaveReason): void {
   const left = roomNum;
   store.stopRoomClock();
@@ -281,7 +311,7 @@ function leaveRoom(why: LeaveReason): void {
   }
   const next = nextRoom(left, store.solved, store.cheated);
   if (next === null) {
-    console.log(left === ZAVER_ROOM ? 'The end. Every room is solved.' : 'No room left to play.');
+    console.log(left === ZAVER_ROOM ? 'The end.' : 'No room left to play.');
     __native.quit();
     return;
   }
@@ -291,6 +321,7 @@ function leaveRoom(why: LeaveReason): void {
 /**
  * `main.ts`'s `startRoom`, for the native host: there is no map to launch from, so the
  * stage is the room's at once, and `loadRoom` does the rest exactly as it does there.
+ * restates src/app/main.ts `function startRoom(` @ 90ab370483c0
  */
 export async function enterRoom(num: number): Promise<void> {
   store.stopRoomClock();
@@ -316,6 +347,7 @@ function armDemo(): void {
  */
 export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
   opts = o;
+  loadStore(); // first, and loudly: persist.ts would swallow an unreadable store
   store = openSaveStore();
   ui.screen = 'map';
   initMovement({ buildRoom, endShowmode, hracNespi, setInfo });
@@ -337,7 +369,10 @@ export function roomReady(): boolean {
 
 // ── Input (the room part of main.ts's keydown/keyup router) ─────────────────────────
 
-/** Returns false when the key asks the session to end (Escape: there is no map to go back to). */
+/**
+ * Returns false when the key asks the session to end (Escape: there is no map to go back to).
+ * restates src/app/main.ts `window.addEventListener('keydown',` @ 6ff168e62d28
+ */
 export function keyDown(code: string): boolean {
   if (code === 'Escape') {
     cancelSolve();
@@ -382,11 +417,15 @@ export function keyDown(code: string): boolean {
   return true;
 }
 
+// restates src/app/main.ts `window.addEventListener('keyup',` @ 0b500e289a81
 export function keyUp(code: string): void {
   releaseHeldKey(code);
 }
 
-/** The window lost focus, so a held key's keyup will never arrive: drop it (main.ts's blur). */
+/**
+ * The window lost focus, so a held key's keyup will never arrive: drop it (main.ts's blur).
+ * restates src/app/main.ts `window.addEventListener('blur',` @ 273b73a2b08d
+ */
 export function blur(): void {
   clearHeldKey();
 }
@@ -399,6 +438,7 @@ let acc = 0;
  * Advance the game by the wall-clock time since the last frame: at most one 80 ms step,
  * dropping a backlog rather than fast-forwarding (`MAX_STEPS_PER_FRAME`, renderLoop.ts);
  * paused while the room is loading or its art has not landed. Returns the sub-tick alpha.
+ * restates src/app/renderLoop.ts `export function loop(` @ 93dcdefa23f9
  */
 export function advance(dt: number): number {
   acc += dt;

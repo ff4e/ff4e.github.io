@@ -5,7 +5,7 @@
  *     the game (`game.ts`): starts in room N, or where the store says the player left off,
  *     and goes on to the next room on every win. --demo plays every room's recorded
  *     solution through the real loop instead of reading input. Controls: native/README.md.
- *   ff4e-native <bundle.js> --root <public dir> --headless --smoke ROOMS --store F
+ *   ff4e-native <bundle.js> --root <public dir> --headless --smoke ROOMS [--smoke-player ROOMS] --store F
  *     the smoke gate (`smoke.ts`): plays rooms through the real flow, headless, and exits
  *     non-zero unless each one is won.
  *   ff4e-native <bundle.js> --root <public dir> --room N --headless --out f.rgba
@@ -34,8 +34,8 @@ async function main(): Promise<void> {
   __native.setRandTable(RANDPOLE.slice().buffer);
   setScratchCanvasFactory(nativeScratchCanvas);
   const target = new NativeAiScreen();
-  if (arg('--smoke') !== undefined) {
-    __native.quit(await runSmoke(arg('--smoke')!, target));
+  if (flag('--smoke') || flag('--smoke-player')) {
+    __native.quit(await runSmoke(arg('--smoke'), target));
     return;
   }
   if (flag('--headless')) {

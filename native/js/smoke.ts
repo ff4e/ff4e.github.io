@@ -27,7 +27,7 @@ import { decodeMoves } from '../../src/core/solutionMoves.js';
 import { Dir } from '../../src/core/dir.js';
 import { ROOMS } from '../../src/data/roomTable.js';
 import { solutionFor } from '../../src/rooms/index.js';
-import { engine, loadmode, undoHistory } from '../../src/app/gameState.js';
+import { blink, darkFlicker, engine, loadmode, setChatter, undoHistory } from '../../src/app/gameState.js';
 import { step } from '../../src/app/logicTick.js';
 import { heldKeyState } from '../../src/app/movement.js';
 import { armSolve, setSolvemode, solveStatus } from '../../src/app/solveMode.js';
@@ -173,21 +173,36 @@ async function playerRun(num: number, target: NativeAiScreen): Promise<number> {
 }
 
 /** Returns the process exit code: 0 only if every room was won. */
-export async function runSmoke(spec: string, target: NativeAiScreen): Promise<number> {
+export async function runSmoke(spec: string | undefined, target: NativeAiScreen): Promise<number> {
   if (!__native.args().includes('--store')) {
     console.error('--smoke needs --store <file>: it wipes the store, so it must never be the player\'s');
     return 2;
   }
   localStorage.clear();
-  pinRandom(1); // the rooms draw from Math.random: a failure must reproduce
   const store = initGame({ verbose: false, demo: false, onLeave: (num, why) => { left = { num, why }; } });
   const args = __native.args();
   const solves = rooms(spec);
   const players = args.includes('--smoke-player') ? rooms(args[args.indexOf('--smoke-player') + 1]) : [];
   let failed = 0;
   const t0 = __native.now();
+  /**
+   * Each run starts from the state a run of that room alone would, so `--smoke N` reproduces
+   * what `--smoke all` reported for N. Math.random is reseeded per room (the rooms draw from
+   * it); and what a room change carries over in the browser — the chatter timer's history,
+   * the fish's blink state, whether this room was solved before — is put back to rest.
+   */
+  const isolate = (num: number, kind: string): void => {
+    pinRandom(kind === 'solve' ? num : 1000 + num);
+    setChatter(null);
+    if (store.solved.delete(num)) store.saveSolved(); // and on disk, so the win must write it again
+    for (const w of ['little', 'big'] as const) {
+      blink[w] = 0;
+      darkFlicker[w] = false;
+    }
+  };
   const run = async (num: number, kind: string, fn: (n: number, t: NativeAiScreen) => Promise<number>): Promise<void> => {
     const t = __native.now();
+    isolate(num, kind);
     try {
       const ticks = await fn(num, target);
       console.log(`${name(num)} ${kind.padEnd(6)} won in ${String(ticks).padStart(5)} ticks, ${((__native.now() - t) / 1000).toFixed(1)} s; the game would go on to room ${nextRoom(num, store.solved, store.cheated) ?? '-'}`);
@@ -199,6 +214,6 @@ export async function runSmoke(spec: string, target: NativeAiScreen): Promise<nu
   for (const n of solves) await run(n, 'solve', solveRun);
   for (const n of players) await run(n, 'player', playerRun);
   const total = solves.length + players.length;
-  console.log(`smoke: ${total - failed}/${total} won in ${((__native.now() - t0) / 1000).toFixed(1)} s`);
+  console.log(`smoke: ${total - failed}/${total} runs won (${solves.length} rooms solved, ${players.length} typed) in ${((__native.now() - t0) / 1000).toFixed(1)} s`);
   return failed || total === 0 ? 1 : 0;
 }

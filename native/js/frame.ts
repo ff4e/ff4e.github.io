@@ -10,6 +10,7 @@ import { fishFrameFor } from '../../src/app/fishFrame.js';
 import { count, engine } from '../../src/app/gameState.js';
 import { EXIT_CELLS } from './seams/stageGeometry.js';
 
+// restates src/app/framePainter.ts `export function draw(` @ c887b3c4ef04
 export function aiFrame(alpha: number): AiRoomFrame {
   const phase = engine?.phase ?? 'idle';
   const sub = (engine?.animFrame ?? 0) + alpha;
