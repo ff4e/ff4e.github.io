@@ -1,6 +1,6 @@
 /**
  * The native game: the composition root that `src/app/main.ts` is for the browser, minus
- * everything that is the browser's (the DOM, audio, the map, the menus, the panel).
+ * everything that is the browser's (the DOM, audio, the menus, the panel).
  *
  * What runs here is the game's own flow, unmodified: `roomLoad` enters a room,
  * `logicTick.step` is one 80 ms game step, `movement`'s held-key state machine turns keys
@@ -10,7 +10,9 @@
  * bookkeeping, the room part of the keyboard router, the frame loop's step — each marked
  * with where it comes from, and kept to what the native host can use.
  *
- * With no map, a solved room leads to the next one (`nextRoom`).
+ * A session starts on the world map (`mapScreen.ts`) and comes back to it after a room,
+ * through the story pages where the browser shows them. `--demo` and the smoke gate keep
+ * going from room to room instead (`nextRoom`).
  */
 import { Room } from '../../src/core/room.js';
 import { Script } from '../../src/core/script.js';
@@ -18,13 +20,15 @@ import type { ScriptSnapshot } from '../../src/core/script.js';
 import { StepEngine } from '../../src/core/stepEngine.js';
 import { HookSystem } from '../../src/core/hooks.js';
 import { newDeathState } from '../../src/core/deathlines.js';
-import { lengthOfRecord } from '../../src/core/record.js';
+import { lengthOfRecord, movesOf } from '../../src/core/record.js';
 import { roomScript } from '../../src/rooms/index.js';
 import { ROOMS } from '../../src/data/roomTable.js';
-import { BRANCHES, RES_REACHABLE, REGISTERED_ROOMS, ZAVER_ROOM, computeResena, depthOfRoom } from '../../src/data/world.js';
+import {
+  BRANCHES, RES_REACHABLE, REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, computeResena, depthOfRoom,
+} from '../../src/data/world.js';
 import {
   activeScript, engine, ffr, hracNespi, loadmode, pokus, poslMluv, prevKostra, room, clearUndoHistory, setActiveScript,
-  setCount, setDeathState, setEngine, setLoadmode, setRoom, setRoomDepth, setScreenShoveX, setSubs, talkIdx,
+  setCount, setDeathState, setEngine, setLoadmode, setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, talkIdx,
 } from '../../src/app/gameState.js';
 import { initQuiet } from '../../src/app/initQuiet.js';
 import { MLUVI_PRIOR, KEYS, ARROWS, NOOP_SCRIPT } from '../../src/app/keyTables.js';
@@ -44,6 +48,7 @@ import { roomLoading } from './seams/framePacing.js';
 import { onLeaveRoom, returnFromRoom } from './seams/mapNav.js';
 import { DEFAULT_LINE_TICKS, LOGIC_MS } from './seams/stageGeometry.js';
 import { aiFrame } from './frame.js';
+import { closeLegPage, initMapScreen, mapArrived, openLegPage } from './mapScreen.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { loadStore } from './shims.js';
 
@@ -55,9 +60,12 @@ export type LeaveReason = 'won' | 'replayEnded';
 export interface GameOptions {
   /** Print the info line whenever it changes (`main.ts`'s `setInfo`, to the console). */
   readonly verbose: boolean;
-  /** Arm a solution replay (`solvemode`) on every room entry: the game plays itself. */
+  /**
+   * Arm a solution replay (`solvemode`) on every room entry: the game plays itself, and a
+   * won room leads straight to the next (`nextRoom`) rather than to the map.
+   */
   readonly demo: boolean;
-  /** Called when a room is left; the default goes to `nextRoom`. */
+  /** Called when a room is left, instead of going to the map (the smoke gate). */
   readonly onLeave?: (num: number, why: LeaveReason) => void;
 }
 
@@ -298,38 +306,145 @@ export function nextRoom(cur: number, solved: ReadonlySet<number>, cheated: Read
   return open.find((n) => n > cur) ?? open[0] ?? null;
 }
 
-// restates src/app/mapNav.ts `export function showMap(` @ 5407b541588e
+/** Where a room is left to: `mapNav`'s two exits, handed over by its seam. */
 function leaveRoom(why: LeaveReason): void {
-  const left = roomNum;
-  store.stopRoomClock();
-  ui.screen = 'map'; // no room on screen: `step` and the undo sampler stand down
-  clearHeldKey();
-  endShowmode();
-  if (opts.onLeave) {
-    opts.onLeave(left, why);
+  if (opts.onLeave || opts.demo) {
+    const left = roomNum;
+    store.stopRoomClock();
+    ui.screen = 'map'; // no room on screen: `step` and the undo sampler stand down
+    clearHeldKey();
+    endShowmode();
+    if (opts.onLeave) {
+      opts.onLeave(left, why);
+      return;
+    }
+    const next = nextRoom(left, store.solved, store.cheated);
+    if (next === null) {
+      console.log(left === ZAVER_ROOM ? 'The end.' : 'No room left to play.');
+      __native.quit();
+      return;
+    }
+    void enterRoom(next);
     return;
   }
-  const next = nextRoom(left, store.solved, store.cheated);
-  if (next === null) {
-    console.log(left === ZAVER_ROOM ? 'The end.' : 'No room left to play.');
-    __native.quit();
-    return;
-  }
-  void enterRoom(next);
+  if (why === 'won') afterWin();
+  else showMap();
 }
 
 /**
- * `main.ts`'s `startRoom`, for the native host: there is no map to launch from, so the
- * stage is the room's at once, and `loadRoom` does the rest exactly as it does there.
+ * Show the world map, tearing the room down as the browser does — minus what is audio
+ * (KillSnd, the menu music), the subtitles and the store review, which the native host has
+ * not got.
+ * restates src/app/mapNav.ts `export function showMap(` @ 5407b541588e
+ */
+export function showMap(): void {
+  store.stopRoomClock(); // bank this visit's play time before the room goes away
+  ui.screen = 'map';
+  clearHeldKey(); // drop any held movement key when leaving the room
+  endShowmode(); // leaving the room ends any KUFRIK demonstration
+  if (engine) {
+    engine.swim = null;
+    engine.winCountdown = 0;
+  }
+  ui.mapRevealStart = performance.now(); // restart the reveal animation (Depth := -3)
+  activeScript?.s.clearDialog(); // zrus_dialogy: drop the pending speech queue
+  poslMluv.little = -1;
+  poslMluv.big = -1;
+  mapArrived();
+}
+
+/** chybi=0 (USoutez.pas:729): every registered room genuinely solved. */
+// restates src/app/mapNav.ts `export function allRegisteredSolved(` @ c8fc8d640d91
+function allRegisteredSolved(): boolean {
+  return REGISTERED_ROOMS.every((r) => store.solved.has(r));
+}
+
+/**
+ * Back to the map after a win: through the leg's story page when the room ends a leg, into
+ * ZAVER when that win finishes the game, and to the map through the closing page after
+ * ZAVER itself. The reasons for each are on the original.
+ * restates src/app/mapNav.ts `export function returnFromRoom(` @ 346eda134c13
+ */
+function afterWin(): void {
+  const finale = REGISTERED_ROOMS.includes(roomNum) && depthOfRoom(roomNum) === 15 && allRegisteredSolved();
+  if (store.solved.has(roomNum) && depthOfRoom(roomNum) === 15) {
+    const leg = branchOfRoom(roomNum);
+    if (leg >= 1 && leg <= 8) {
+      void showLegImage(leg, finale ? { room: ZAVER_ROOM } : undefined);
+      return;
+    }
+  }
+  if (finale) {
+    void enterRoom(ZAVER_ROOM);
+    return;
+  }
+  if (roomNum === ZAVER_ROOM) {
+    void showLegImage(ZAVER_LEG); // no `pending` ⇒ dismisses to the map
+    return;
+  }
+  showMap();
+}
+
+/** What dismissing the story page on screen does: enter the room it deferred, or the map. */
+let legPending: { room: number; replay?: string | undefined } | null = null;
+
+/**
+ * zobraz_obrazek (UMain.pas:831): a leg's story page, the AI-upscaled one. A page that
+ * cannot be shown completes the transition without it, as the browser's does.
+ * restates src/app/mapNav.ts `export async function showLegImage(` @ 376a76f28cb9
+ */
+export async function showLegImage(leg: number, pending?: { room: number; replay?: string | undefined }): Promise<void> {
+  if (!(await openLegPage(leg))) {
+    if (pending) void enterRoom(pending.room, pending.replay);
+    else showMap();
+    return;
+  }
+  legPending = pending ?? null;
+  clearHeldKey();
+  endShowmode();
+  if (engine) {
+    engine.swim = null;
+    engine.winCountdown = 0;
+  }
+  activeScript?.s.clearDialog(); // zrus_dialogy
+}
+
+/**
+ * zrus_obrazek (UMain.pas:847): any button on the story page.
+ * restates src/app/mapNav.ts `export function dismissLegImage(` @ 241d9e41502a
+ */
+export function dismissLegImage(): void {
+  closeLegPage();
+  const pending = legPending;
+  legPending = null;
+  if (pending) void enterRoom(pending.room, pending.replay);
+  else showMap();
+}
+
+/**
+ * `main.ts`'s `startRoom`, for the native host: the stage is the room's at once — the map's
+ * parchment frame stays in the window until the room's first frame replaces it
+ * (`mapScreen.ts`) — and `loadRoom` does the rest exactly as it does there, with a `replay`
+ * record armed once the room is built (the map's Replay).
  * restates src/app/main.ts `function startRoom(` @ 90ab370483c0
  */
-export async function enterRoom(num: number): Promise<void> {
+export async function enterRoom(num: number, replay?: string): Promise<void> {
   store.stopRoomClock();
   ui.screen = 'room';
   store.startRoomClock(num);
+  ui.mapHoverCorner = null;
+  ui.mapHoverRoom = null;
   roomNum = num;
-  await loadRoom(num);
-  if (opts.demo) armDemo();
+  const p = loadRoom(num);
+  if (replay) {
+    // movesOf: this replay drives the real game loop (tryStep), as the browser's does.
+    const moves = movesOf(replay);
+    void p.then(() => {
+      if (moves.length) setReplaymode({ moves, idx: 0 });
+    });
+  }
+  await p;
+  if (opts.demo && !replay) armDemo();
 }
 
 function armDemo(): void {
@@ -354,10 +469,20 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
   initRoomLoad({ buildRoom, endShowmode, ffrUrl, solved: store.solved });
   initLogicTick({ buildRoom, casHry: store.casHry, hooks, updateLipSync: () => {} });
   onLeaveRoom(leaveRoom);
+  initMapScreen({
+    solved: store.solved,
+    cheated: store.cheated,
+    scores: store.scores,
+    bestRecord: store.bestRecord,
+    enterRoom: (room, replay) => void enterRoom(room, replay),
+    showLegImage: (leg, pending) => void showLegImage(leg, pending),
+    dismissLegImage,
+    lastRoom: () => roomNum,
+  });
   return store;
 }
 
-/** The room a new session starts in: where the player left off. */
+/** The room a `--demo` session starts in: where the player left off. */
 export function firstRoom(): number {
   return nextRoom(0, store.solved, store.cheated) ?? 1;
 }
@@ -370,51 +495,53 @@ export function roomReady(): boolean {
 // ── Input (the room part of main.ts's keydown/keyup router) ─────────────────────────
 
 /**
- * Returns false when the key asks the session to end (Escape: there is no map to go back to).
+ * A key down while a room is up (the map's are `mapScreen.ts`'s). Escape — the gamepad's Ⓑ —
+ * goes back to the map, as the browser's does.
  * restates src/app/main.ts `window.addEventListener('keydown',` @ 6ff168e62d28
  */
-export function keyDown(code: string): boolean {
+export function keyDown(code: string): void {
   if (code === 'Escape') {
-    cancelSolve();
-    return false;
+    cancelSolve(); // always an escape hatch: an auto-play the player cannot stop is a trap
+    if (ui.screen === 'room') showMap();
+    return;
   }
-  if (ui.screen !== 'room') return true;
+  if (ui.screen !== 'room') return;
   hracNespi(); // TRoom.FormKeyDown's first statement (URoom.pas:26787)
   if (code === 'Backspace') {
     restartRoom();
-    return true;
+    return;
   }
   if (code === 'F2') {
     if (atRest() && !inAutoPlay() && canSave()) saveGame();
-    return true;
+    return;
   }
   if (code === 'F3') {
     if (atRest() && !inAutoPlay() && saveExists()) loadGame();
-    return true;
+    return;
   }
   if (code === 'Minus' || code === 'NumpadSubtract') {
     undoMove();
-    return true;
+    return;
   }
-  if (activeScript?.s.natvrdo === 1) return true; // possessed by ZELVA
-  if (activeScript?.s.zavermode) return true; // ZAVER finale
-  if (inShowmode() || inAutoPlay() || loadmode) return true;
+  if (activeScript?.s.natvrdo === 1) return; // possessed by ZELVA
+  if (activeScript?.s.zavermode) return; // ZAVER finale
+  if (inShowmode() || inAutoPlay() || loadmode) return;
   if (code === 'Space' || code === 'Tab') {
     swapActive();
-    return true;
+    return;
   }
   if (code === 'Digit1' || code === 'Digit2') {
     selectFish(code === 'Digit1' ? 'little' : 'big');
-    return true;
+    return;
   }
   const arrow = ARROWS[code];
   if (arrow !== undefined) {
     beginHeldMove(code, true, engine?.active ?? 'little', arrow);
-    return true;
+    return;
   }
   const map = KEYS[code];
   if (map) beginHeldMove(code, false, map.which, map.dir);
-  return true;
+  return;
 }
 
 // restates src/app/main.ts `window.addEventListener('keyup',` @ 0b500e289a81

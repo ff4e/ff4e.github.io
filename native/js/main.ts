@@ -2,12 +2,15 @@
  * Native entry, driven by the C host (native/host/main.c). Three modes:
  *
  *   ff4e-native <bundle.js> --root <public dir> [--room N] [--demo] [--seconds S] [--store F]
- *     the game (`game.ts`): starts in room N, or where the store says the player left off,
- *     and goes on to the next room on every win. --demo plays every room's recorded
- *     solution through the real loop instead of reading input. Controls: native/README.md.
+ *     the game (`game.ts`): starts on the world map (`mapScreen.ts`), or in room N, and
+ *     comes back to the map after every room. --demo plays every room's recorded solution
+ *     through the real loop instead of reading input, room after room. Controls:
+ *     native/README.md.
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke ROOMS [--smoke-player ROOMS] --store F
  *     the smoke gate (`smoke.ts`): plays rooms through the real flow, headless, and exits
  *     non-zero unless each one is won.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-map --store F
+ *     the map smoke gate (`mapSmoke.ts`): the world map driven by keys through the real flow.
  *   ff4e-native <bundle.js> --root <public dir> --room N --headless --out f.rgba
  *     [--replay TICKS] [--still] [--alpha A] [--probe]
  *     renders ONE composite of the parity scene (`scene.ts`) for native/compare.mjs.
@@ -24,8 +27,11 @@ import { NativeSurface, decodeImage, nativeSurface } from './nativeSurface.js';
 import { loadMapScene, paintMapCase } from './mapScene.js';
 import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { compositeSize, frameFor, loadScene, pinRandom, probeFrame, replaySolution } from './scene.js';
-import { advance, blur, draw, enterRoom, firstRoom, initGame, keyDown, keyUp } from './game.js';
+import { advance, blur, draw, enterRoom, firstRoom, initGame, keyDown, keyUp, showMap } from './game.js';
+import { ensureMapArt, mapBlur, mapFrame, mapKeyDown, mapKeyUp, mapPresented } from './mapScreen.js';
+import { ui } from '../../src/app/screenState.js';
 import { runSmoke } from './smoke.js';
+import { runMapSmoke } from './mapSmoke.js';
 
 const argv = __native.args();
 const arg = (name: string): string | undefined => {
@@ -41,6 +47,10 @@ async function main(): Promise<void> {
   setScratchCanvasFactory(nativeScratchCanvas);
   setSurfaceFactory(nativeSurface);
   const target = new NativeAiScreen();
+  if (flag('--smoke-map')) {
+    __native.quit(await runMapSmoke());
+    return;
+  }
   if (flag('--smoke') || flag('--smoke-player')) {
     __native.quit(await runSmoke(arg('--smoke'), target));
     return;
@@ -54,7 +64,12 @@ async function main(): Promise<void> {
     return;
   }
   initGame({ verbose: true, demo: flag('--demo') });
-  await enterRoom(arg('--room') ? Number(arg('--room')) : firstRoom());
+  if (arg('--room')) await enterRoom(Number(arg('--room')));
+  else if (flag('--demo')) await enterRoom(firstRoom());
+  else {
+    await ensureMapArt();
+    showMap();
+  }
   runInteractive(target);
 }
 
@@ -97,12 +112,16 @@ function runInteractive(target: NativeAiScreen): void {
   g.__frame = (): void => {
     const now = __native.now();
     for (const ev of __native.events()) {
-      if (ev === '!blur') blur();
-      else if (ev[0] === '-') keyUp(ev.slice(1));
-      else if (!keyDown(ev.slice(1))) {
-        __native.quit();
-        return;
-      }
+      // Each event goes to the screen that is up when it arrives: one can change the screen.
+      const onRoom = ui.screen === 'room';
+      if (ev === '!blur') {
+        blur();
+        mapBlur();
+      } else if (ev[0] === '-') {
+        if (onRoom) keyUp(ev.slice(1));
+        else mapKeyUp(ev.slice(1));
+      } else if (onRoom) keyDown(ev.slice(1));
+      else mapKeyDown(ev.slice(1));
     }
     if (now >= stopAt) {
       __native.quit();
@@ -110,13 +129,21 @@ function runInteractive(target: NativeAiScreen): void {
     }
     const alpha = advance(now - last);
     last = now;
-    const drawn = draw(target, alpha);
-    // Measured BEFORE present: present waits for vsync, which is idle time, not work.
-    jsMs += __native.now() - now;
-    if (drawn) __native.present();
+    if (ui.screen === 'room') {
+      // Nothing is presented while a room loads, so the map's parchment frame stays up.
+      const drawn = draw(target, alpha);
+      // Measured BEFORE present: present waits for vsync, which is idle time, not work.
+      jsMs += __native.now() - now;
+      if (drawn) __native.present();
+    } else {
+      const shown = mapFrame(now); // the map, or the story page over it
+      jsMs += __native.now() - now;
+      if (shown) __native.presentTexture(shown.id);
+      mapPresented();
+    }
     frames++;
     if (now - statAt >= 5000) {
-      console.log(`${(frames * 1000 / (now - statAt)).toFixed(0)} fps, game logic + room walk + GPU command encoding ${(jsMs / frames).toFixed(2)} ms/frame`);
+      console.log(`${(frames * 1000 / (now - statAt)).toFixed(0)} fps, game logic + drawing + GPU command encoding ${(jsMs / frames).toFixed(2)} ms/frame`);
       frames = 0;
       jsMs = 0;
       statAt = now;

@@ -6,8 +6,9 @@
 > on main) so a change in `src/` that breaks the native bundle is visible, but no release
 > consumes it.
 
-The game **without a browser**. It plays a whole game now — room after room, with undo and
-saves — on the AI-upscaled tier, without menus, subtitles or sound yet:
+The game **without a browser**. It plays a whole game now — from the world map, room after
+room, with undo, saves, the record panel's Replay and the leg story pages — on the
+AI-upscaled tier, without menus, subtitles or sound yet:
 
 - **QuickJS-ng** runs the game's own TypeScript. Nothing is ported: the room, its script and
   the step engine (`src/core/`), the AI-tier room walk (`src/render/`), and the game's own
@@ -18,6 +19,11 @@ saves — on the AI-upscaled tier, without menus, subtitles or sound yet:
 - The AI tier's `AiTarget` seam (`src/render/aiTarget.ts`) is implemented on **SDL GPU**
   (`native/js/nativeAiScreen.ts`, `native/host/shaders.metal`). That is the one thing a
   native host has to own.
+- The screens around the room — the world map with its record panel, name plaques,
+  room-entry parchment and selection ring, and the story pages — draw through `Surface2D`
+  (`src/render/surface2d.ts`), which is implemented on **SDL GPU** too
+  (`native/js/nativeSurface.ts`, `fs_surf` in `native/host/shaders.metal`): see
+  "The world map" below.
 - The off-screen canvases the AI tier builds — the classic-sprite fallback for art with
   no AI file, the mirror's glass mask, LODE's wreck — come from an injected factory
   (`src/render/scratchCanvas.ts`). The browser keeps `document.createElement('canvas')`;
@@ -59,13 +65,53 @@ flushed to disk before it replaces the store, and the previous store is kept as
 `store.json.bak`. A damaged store falls back to the backup; with both damaged the game
 refuses to start and says so, rather than run without saving or overwrite them.
 
-With no map, a solved room leads to the next: the lowest-numbered room above it that the
-map would offer (reachable by the map's own unlock rule, `computeResena`, and not yet
-solved), else the lowest-numbered such room; with every registered room solved, the finale
-(ZAVER); after ZAVER the game ends. Rooms are numbered leg by leg, so within a leg this is
-simply the next room. A finished game (ZAVER solved too) is being replayed: it goes on room
-by room in number order, from room 1, and never replays the finale on its own. A session
-starts where the store says the player left off, or in `--room N`.
+A session starts on the world map (or in `--room N`), and every room is left back to it the
+way the browser leaves one: a win goes to the map — through the leg's story page when the
+room ends a leg, into ZAVER when that win finishes the game, and through the closing page
+after ZAVER — the end of a Replay goes to the map, and so does Escape (Ⓑ). `showMap` and
+`returnFromRoom` (`mapNav.ts`), the story pages and the record panel's buttons
+(`main.ts`'s `clickMapAt`) are restated in `game.ts` and `mapScreen.ts`, pinned like the
+rest.
+
+`--demo` (and the smoke gate) keep the old map-less order instead: a solved room leads to
+the lowest-numbered room above it that the map would offer (reachable by the map's own
+unlock rule, `computeResena`, and not yet solved), else the lowest-numbered such room; with
+every registered room solved, the finale (ZAVER); after ZAVER the run ends. A finished game
+(ZAVER solved too) goes on room by room in number order, from room 1.
+
+### The world map (`native/js/mapScreen.ts`)
+
+The picture is the browser's: `src/render/mapPaintAi.ts` paints one `ai` map frame through
+`Surface2D` from state the caller hands in, and both `src/app/mapDraw.ts` and the native
+map screen call it (`test/dom-free.test.ts` keeps it, and everything it imports, off the
+page). The native `Surface2D` holds premultiplied colour in an RGBA8 render target, as a
+canvas does, decodes images premultiplied with the canvas's rounding, keeps the canvas's
+state (axis-aligned transform, alpha, smoothing, blend, save/restore) in JS, and hands the
+host quads, which it batches: one vertex upload and one render pass per run of draws into
+a target, with clears, uploads and readbacks ordered among them on the frame's command
+buffer.
+
+What replaces the pointer is the controller spec's (A3 "World map", "Record panel"; the
+geometry is `src/render/mapSelection.ts`, from the Xbox branch, #165):
+
+- a selection always exists — a room node a click could reach — shown with its name plaque,
+  as a hover shows it, and a ring (opaque pixels only, so it is drawn identically
+  everywhere);
+- a direction moves it to the nearest target that way, one step on the press, a repeat
+  after 340 ms, then every 140 ms (`native/js/dirRepeat.ts`); a stick engages at 0.5 of its
+  travel and lets go below 0.35;
+- Ⓐ opens it: a solved or cheated room's record panel, or an unsolved room — launched as
+  the original does, with one frame of the map unlit under the plaque and the parchment,
+  which stays in the window while the room loads;
+- in the panel, left/right cycle Run → Replay → Cancel (Replay skipped with no record), Ⓐ
+  presses, Ⓑ closes; Run or Replay of a solved leg-final room shows the leg's story page
+  first, and any button continues from it;
+- Ⓑ on the plain map does nothing, on purpose; the default selection is the room last
+  played if it is still selectable, else the first room not yet solved.
+
+The corner buttons (Intro, Credits, Options, Exit) are not selectable yet: none of their
+screens exists natively, and a target that does nothing is worse than none
+(`NATIVE_CORNERS`). The story pages are the upscaled ones (`/enhanced-ai/_story/`).
 
 ## Build and run (macOS, Apple silicon)
 
@@ -82,9 +128,10 @@ takes under a minute. Nothing from Homebrew but the build tools is used, so a pa
 upgrade cannot change the pixels `compare.mjs` checks.
 
 Controls, keyboard and gamepad (SDL maps any supported controller to this layout; the
-gamepad is turned into the same key codes in `native/host/main.c`, so there is one router):
+gamepad is turned into the same key codes in `native/host/main.c`, so there is one stream
+of keys, read by the room's router in a room and by the map's on the map):
 
-| | keyboard | gamepad |
+| in a room | keyboard | gamepad |
 | --- | --- | --- |
 | little fish | `I` `J` `K` `L` | d-pad, left stick |
 | big fish | `W` `A` `S` `D` | right stick |
@@ -93,12 +140,23 @@ gamepad is turned into the same key codes in `native/host/main.c`, so there is o
 | undo one move | `-` (the character, wherever the layout puts it) | Ⓨ |
 | restart the room | Backspace | Ⓧ |
 | save / load | F2 / F3 | LB / RB |
-| quit (there is no map to go back to) | Esc | Ⓑ |
+| back to the map | Esc | Ⓑ |
+
+| on the map | keyboard | gamepad |
+| --- | --- | --- |
+| move the selection | arrows, `IJKL`, `WASD` | d-pad, either stick |
+| open (panel / launch) / press a panel button | Space, Enter | Ⓐ |
+| close the record panel | Esc | Ⓑ |
+| continue from a story page | any key | any button |
+
+Close the window to quit.
 
 Other flags:
 
+- `--room N` starts in room N instead of on the map.
 - `--demo` plays every room's recorded solution through the real loop (the browser's
-  dev-only `solvemode`) instead of reading input: the game plays itself, room after room.
+  dev-only `solvemode`) instead of reading input: the game plays itself, room after room,
+  from where the store says the player left off.
 - `--seconds N` quits after N seconds.
 - `--store FILE` keeps progress and save slots in FILE instead of the user's.
 
@@ -126,6 +184,14 @@ state and the room's solved flag put back to rest — so `--smoke N` (or `--smok
 reproduces what `--smoke all` reported for room N.
 
 ~25 s locally, ~40 s on CI, which runs it in the `native-macos` job before the parity sweep.
+
+The map has a smoke gate of its own (`native/js/mapSmoke.ts`, `--smoke-map --store F`): the
+map driven key by key through the real flow — a fresh session opens on the map with room 1
+selected, Ⓑ does nothing, Ⓐ launches it, its win comes back with it still selected, a
+direction moves the selection, the record panel opens on Run and cycles Run → Replay →
+Cancel, Ⓑ closes it, Replay plays the best record and comes back, a leg-final room's win
+and its Run both show the story page, and Ⓑ in a room goes back to the map. 21 checks, a
+few seconds; CI runs it after the room smoke.
 
 ## Is it the same picture? `native/compare.mjs`
 
@@ -169,19 +235,57 @@ Room 66 ZX joined when `backgroundZx` (gspec=42) was ported: the same background
 every other room, with the wall's silhouette taking its loading-stripe colour from a
 one-texel-per-native-row band texture, as `GlAiScreen` does.
 
+## Is it the same map? `native/compare-map.mjs`
+
+    node --import tsx native/compare-map.mjs                  # or --cases fresh,panel
+
+Eight states of the `ai` world map (`native/js/mapScene.ts`), each painted by
+`paintAiMap` twice — on a plain 2D canvas in Chromium, as the browser's `#screen` is, and on
+the native GPU `Surface2D` — from the same art, loaded through one reader
+(`native/js/mapArt.ts`), and diffed.
+
+`src/render/surface2d.ts` says which paths a GPU can match byte for byte (nearest draws at
+any integer scale, opaque blits and uploads, a binary destination-in mask) and which only
+approximately (smoothing, a fractional alpha, a partial-alpha upload). Cases built from the
+first are gated at Δ0; the rest are reported and held to a loose limit, so a broken path
+still fails. Current result:
+
+| case | what it covers | result |
+| --- | --- | --- |
+| fresh | base map (lit-region mask), reachable balls | identical |
+| progress | lit paths, solved/cheat/pulsing balls, corner hover, upscaled plaque, selection ring | identical |
+| native-plaque | the 640×480 overlay scaled ×4 nearest | identical |
+| panel | unlit map, record panel art, hovered Run, settled odometer, plaque | identical |
+| panel-rolling | the odometer mid-roll, hovered Replay | identical |
+| launch | unlit map, plaque, parchment | identical |
+| panel-noreplay (approx.) | the disabled Replay's 0.55-alpha wash | identical in practice |
+| panel-zoomed (approx.) | the phone's enlarged panel: smoothed mask, partial-alpha shadow, ×1.5 | max Δ 1 on 0.2% of pixels |
+
+The enlarged panel is a phone's and never drawn natively; it is there because it is the
+one place the interface's approximate paths are all used. CI runs the comparison after the
+room sweep.
+
+The story pages are one opaque nearest blit of the upscaled page — the exact path — and are
+not compared separately.
+
 ## What it does not do yet
 
-- **Menus, the map, the panel, subtitles, sound, video.** A room's dialogue still runs
+- **Menus (Options, Credits, the intro), the panel, subtitles, sound, video.** The map's
+  corner buttons are therefore not selectable. A room's dialogue still runs
   (scripts wait on it as they do in the browser), but every line lasts the browser's
   fallback for a line without audio (`DEFAULT_LINE_TICKS`), is not shown, and is not heard.
   Room entry takes the path the browser's boot load does: art and room data only.
-- **KUFRIK's briefcase cutscene and its tutorial demonstration**, and the leg-final story
-  pages. The room plays; the demonstration and the pages are not shown.
+- **KUFRIK's briefcase cutscene and its tutorial demonstration.** The room plays; the
+  demonstration is not shown.
 - **Talking heads.** The fish blink and a dark room's silhouettes wink out (that is
   `logicTick`'s `tickBlink`, which now runs), but the mouths follow the audio's lip sync,
   and there is no audio.
 - **Cheats** (no way to type one), the fishing hooks they enable, and haptics.
-- **Escape quits** rather than going back to a map.
+- **Quitting** is closing the window: on the map Ⓑ does nothing, by design, and Esc is the
+  same key. On tvOS the system's Home and Back will own it.
+- **The Siri Remote** (the controller spec's part B): the map and the panel would already
+  work from its d-pad and click, but the room's one-handed scheme and the pause menu are
+  not built.
 - The host queues at most 128 key transitions between two frames and drops the rest. A
   human cannot get near that in one frame; a long stall with keys being pressed throughout
   could, and would lose key-ups.

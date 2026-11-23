@@ -12,9 +12,9 @@
 import { parseBmp } from '../../src/data/bmp.js';
 import { DESKA_X_OFFSET, DESKA_Y_OFFSET, parseDesky, type DeskyData } from '../../src/data/desky.js';
 import type { InfoPanelAssets } from '../../src/render/mapInfo.js';
-import type { Image2D } from '../../src/render/surface2d.js';
+import type { Image2D, Surface2D } from '../../src/render/surface2d.js';
 import { WorldMap } from '../../src/render/worldMap.js';
-import { AiWorldMap } from '../../src/render/worldMapAi.js';
+import { AI_MAP_SCALE, AiWorldMap } from '../../src/render/worldMapAi.js';
 
 export interface MapIo {
   bytes(url: string): Promise<Uint8Array>;
@@ -77,4 +77,13 @@ export async function loadAiPlaque(
   if (!g) return null;
   const img = await io.image(`/enhanced-ai/_desky/${key.replace(/\.png$/, '.webp')}`);
   return { img, x: g.x + DESKA_X_OFFSET, y: g.y + DESKA_Y_OFFSET };
+}
+
+/**
+ * The room-entry parchment from the upscaled art.
+ * restates src/app/roomLaunch.ts `export function blitParchmentAi(` @ 04f242c00cfa
+ */
+export function paintParchmentAi(target: Surface2D, art: MapArt): void {
+  target.setSmoothing(false);
+  target.drawImage(art.ai.loading, 227 * AI_MAP_SCALE, 160 * AI_MAP_SCALE);
 }

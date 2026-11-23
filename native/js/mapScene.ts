@@ -9,11 +9,10 @@
  * the canvas filters and rounds in its own way.
  */
 import { paintAiMap, type AiMapPaint } from '../../src/render/mapPaintAi.js';
-import { AI_MAP_SCALE } from '../../src/render/worldMapAi.js';
 import type { Surface2D } from '../../src/render/surface2d.js';
 import { createSurface } from '../../src/render/surface2d.js';
 import { MAP_H, MAP_W } from '../../src/render/worldMap.js';
-import { loadAiPlaque, loadMapArt, type MapArt, type MapIo } from './mapArt.js';
+import { loadAiPlaque, loadMapArt, paintParchmentAi, type MapArt, type MapIo } from './mapArt.js';
 
 type Plaque = AiMapPaint['aiPlaque'];
 
@@ -33,15 +32,6 @@ export async function loadMapScene(io: MapIo): Promise<MapScene> {
     if (p) plaques.set(r, p);
   }
   return { art, plaques };
-}
-
-/**
- * The room-entry parchment from the upscaled art.
- * restates src/app/roomLaunch.ts `export function blitParchmentAi(` @ 04f242c00cfa
- */
-export function paintParchmentAi(target: Surface2D, art: MapArt): void {
-  target.setSmoothing(false);
-  target.drawImage(art.ai.loading, 227 * AI_MAP_SCALE, 160 * AI_MAP_SCALE);
 }
 
 interface MapCase {

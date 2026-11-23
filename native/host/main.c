@@ -835,6 +835,9 @@ static SDL_GPUGraphicsPipeline *surf_pipeline(bool dest_in) {
  *   X (west)            restart      Backspace
  *   LB / RB             save / load  F2 / F3
  *   B (east)            back         Escape
+ *
+ * On the world map the same codes steer the selection (IJKL, WASD), open (Space) and back
+ * out (Escape) — native/js/mapScreen.ts.
  */
 #define EVQ 128
 static char evq[EVQ][24];
@@ -870,6 +873,8 @@ static const char *code_of(SDL_Scancode sc, SDL_Keycode key) {
     case SDL_SCANCODE_TAB: return "Tab";
     case SDL_SCANCODE_BACKSPACE: return "Backspace";
     case SDL_SCANCODE_ESCAPE: return "Escape";
+    case SDL_SCANCODE_RETURN: return "Enter"; /* Ⓐ on the map, beside Space */
+    case SDL_SCANCODE_KP_ENTER: return "NumpadEnter";
     default: return NULL;
   }
 }
@@ -907,7 +912,8 @@ static const char *button_code(Uint8 b) {
 /*
  * A stick as four keys: the dominant axis past the dead zone is the one direction held,
  * and a held direction lets go only below a lower threshold, so a thumb resting near the
- * edge does not chatter between press and release.
+ * edge does not chatter between press and release. Engage at 0.5 of full deflection,
+ * release below 0.35 (the controller spec's thresholds, from #165's gamepad.ts).
  */
 typedef struct { SDL_GamepadAxis x, y; const char *code[4]; int held; } Stick; /* held: 0 none, 1..4 = up/down/left/right */
 static Stick sticks[2] = {
@@ -916,7 +922,7 @@ static Stick sticks[2] = {
 };
 
 static void poll_sticks(void) {
-  const int press = 16000, release = 10000;
+  const int press = 16384, release = 11469; /* 0.5 and 0.35 of 32767 */
   for (int i = 0; i < 2; i++) {
     Stick *st = &sticks[i];
     int ax = pad ? SDL_GetGamepadAxis(pad, st->x) : 0, ay = pad ? SDL_GetGamepadAxis(pad, st->y) : 0;
