@@ -102,7 +102,9 @@ jobs:
   # played headless through the game's real flow modules as the native host wires them,
   # plus two rooms typed key by key through save, undo and load. ~40 s here. Then the map
   # smoke (native/js/mapSmoke.ts): the world map, its record panel and story pages, driven
-  # key by key. A few seconds.
+  # key by key. A few seconds. Then the sound gate (native/js/audioSmoke.ts): the mixer, every
+  # speech and music decode, and PRVNI's dialogue timing against the browser's. A few
+  # seconds. All three are headless: no audio device, the game itself drives the mixer.
   native-macos:
     # Once per change, not twice. The workflow fires on both `push` (every branch) and
     # `pull_request`, and the concurrency group above cannot merge the two runs: their refs
@@ -139,6 +141,11 @@ jobs:
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-map --store native/build/smoke-map-store.json
+      - name: Native sound, the mixer, every decode and PRVNI's dialogue timing
+        timeout-minutes: 2
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless
+          --smoke-audio --store native/build/smoke-audio-store.json
       - run: npx playwright install chromium
       - name: Native vs WebGL parity, all 72 rooms
         run: node --import tsx native/compare.mjs --all

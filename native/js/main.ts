@@ -11,6 +11,8 @@
  *     non-zero unless each one is won.
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-map --store F
  *     the map smoke gate (`mapSmoke.ts`): the world map driven by keys through the real flow.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-audio --store F
+ *     the sound gate (`audioSmoke.ts`): the mixer, the decoder, and PRVNI's dialogue timing.
  *   ff4e-native <bundle.js> --root <public dir> --room N --headless --out f.rgba
  *     [--replay TICKS] [--still] [--alpha A] [--probe]
  *     renders ONE composite of the parity scene (`scene.ts`) for native/compare.mjs.
@@ -32,6 +34,10 @@ import { ensureMapArt, mapBlur, mapFrame, mapKeyDown, mapKeyUp, mapPresented } f
 import { ui } from '../../src/app/screenState.js';
 import { runSmoke } from './smoke.js';
 import { runMapSmoke } from './mapSmoke.js';
+import { runAudioSmoke } from './audioSmoke.js';
+import { soundPoll } from './sound.js';
+import { mixer } from './seams/audioEngine.js';
+import { MIX_RATE } from './sdlAudioBackend.js';
 
 const argv = __native.args();
 const arg = (name: string): string | undefined => {
@@ -47,6 +53,10 @@ async function main(): Promise<void> {
   setScratchCanvasFactory(nativeScratchCanvas);
   setSurfaceFactory(nativeSurface);
   const target = new NativeAiScreen();
+  if (flag('--smoke-audio')) {
+    __native.quit(await runAudioSmoke());
+    return;
+  }
   if (flag('--smoke-map')) {
     __native.quit(await runMapSmoke());
     return;
@@ -64,6 +74,7 @@ async function main(): Promise<void> {
     return;
   }
   initGame({ verbose: true, demo: flag('--demo') });
+  console.log(`sound: ${mixer.mode}, mixing at ${MIX_RATE} Hz`);
   if (arg('--room')) await enterRoom(Number(arg('--room')));
   else if (flag('--demo')) await enterRoom(firstRoom());
   else {
@@ -109,6 +120,7 @@ function runInteractive(target: NativeAiScreen): void {
   let jsMs = 0;
   let frames = 0;
   let statAt = last;
+  let statSound = mixer.now();
   g.__frame = (): void => {
     const now = __native.now();
     for (const ev of __native.events()) {
@@ -127,6 +139,7 @@ function runInteractive(target: NativeAiScreen): void {
       __native.quit();
       return;
     }
+    soundPoll();
     const alpha = advance(now - last);
     last = now;
     if (ui.screen === 'room') {
@@ -143,7 +156,11 @@ function runInteractive(target: NativeAiScreen): void {
     }
     frames++;
     if (now - statAt >= 5000) {
-      console.log(`${(frames * 1000 / (now - statAt)).toFixed(0)} fps, game logic + drawing + GPU command encoding ${(jsMs / frames).toFixed(2)} ms/frame`);
+      // The mixer's clock against the wall's: ~1.000 when the output consumes in real time.
+      const sound = mixer.now();
+      console.log(`${(frames * 1000 / (now - statAt)).toFixed(0)} fps, game logic + drawing + GPU command encoding ${(jsMs / frames).toFixed(2)} ms/frame; ` +
+        `sound clock ×${((sound - statSound) / (now - statAt)).toFixed(3)} of wall, ${__native.audioVoices()} voices`);
+      statSound = sound;
       frames = 0;
       jsMs = 0;
       statAt = now;
