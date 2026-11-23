@@ -31,7 +31,9 @@ others are small enough to read.
 - **`src/rooms/`** — 74 independent room scripts, one file per room. Large in total; a change
   touches one file.
 - **`src/audio/`**, **`src/intro/`** — sound packages and playback; the intro and briefcase
-  cutscene players.
+  cutscene players. In `src/audio/`, `audio.ts` is the sound POLICY (packages, priorities,
+  `playing()`/`talking()`, music) and talks only to an `AudioBackend` (`audioBackend.ts`);
+  `webAudioBackend.ts` is the browser's, including the iOS interruption repair.
 - **`src/platform/`** — the two things that talk to the outside world: `feedback.ts` (what a
   player's report may contain, and the three links out — pure) and `analytics.ts`.
 - **`tools/`** — the CLIs and harnesses. `dump-ffr.ts` / `render-room.ts` are the M0/M1

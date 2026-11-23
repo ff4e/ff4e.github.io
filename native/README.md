@@ -174,7 +174,10 @@ one-texel-per-native-row band texture, as `GlAiScreen` does.
 - **Menus, the map, the panel, subtitles, sound, video.** A room's dialogue still runs
   (scripts wait on it as they do in the browser), but every line lasts the browser's
   fallback for a line without audio (`DEFAULT_LINE_TICKS`), is not shown, and is not heard.
-  Room entry takes the path the browser's boot load does: art and room data only.
+  Room entry takes the path the browser's boot load does: art and room data only. Sound is
+  the `AudioBackend` in `src/audio/audioBackend.ts` to implement: the policy in
+  `src/audio/audio.ts` already talks to nothing else, and that file says what a mixer has to
+  match.
 - **KUFRIK's briefcase cutscene and its tutorial demonstration**, and the leg-final story
   pages. The room plays; the demonstration and the pages are not shown.
 - **Talking heads.** The fish blink and a dark room's silhouettes wink out (that is

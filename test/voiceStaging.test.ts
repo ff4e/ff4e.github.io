@@ -39,6 +39,7 @@ import { buildFfs2, FFS2_EXT, isFfs2, isRawPkg, parseFfs2, voiceUrl } from '../s
 import { FFS_SAMPLE_RATE } from '../src/audio/ffs.js';
 import { parseFft, type FftSubtitle } from '../src/data/fft.js';
 import { decodeFfs2 } from '../src/audio/ffs2Decode.js';
+import type { AudioBackend } from '../src/audio/audioBackend.js';
 import { soundsOf, voicePackages } from '../tools/stage-voices.js';
 
 /** A record with no subtitle, for the synthetic entries below. */
@@ -92,17 +93,17 @@ describe('the staged voice packages vs the 1998 originals', () => {
     // Throwing puts it on the room-entry failure path, where every other missing asset is.
     const entry = { name: 'ghost', cz: EMPTY_SUB, en: EMPTY_SUB, zvuk: 1234, kompr: 0, delka: 22050 };
     const empty = buildFfs2(FFS_SAMPLE_RATE, []);
-    // No `decodeAudioData` is reached, so the context is never touched.
-    const ctx = {} as unknown as BaseAudioContext;
-    await expect(decodeFfs2(ctx, new Map([[entry.name, entry]]), empty)).rejects.toThrow(/no segment for ghost/);
+    // No segment is decoded, so the backend is never touched.
+    const backend = {} as unknown as AudioBackend;
+    await expect(decodeFfs2(backend, new Map([[entry.name, entry]]), empty)).rejects.toThrow(/no segment for ghost/);
   });
 
   it('skips a record with no samples rather than refusing the package', async () => {
     // The other half of the same branch: `delka <= 0` is legitimate (`hasPackaged` already
     // requires `delka > 0`), so it must NOT be treated as a malformed package.
     const entry = { name: 'silent', cz: EMPTY_SUB, en: EMPTY_SUB, zvuk: 7, kompr: 0, delka: 0 };
-    const ctx = {} as unknown as BaseAudioContext;
-    const out = await decodeFfs2(ctx, new Map([[entry.name, entry]]), buildFfs2(FFS_SAMPLE_RATE, []));
+    const backend = {} as unknown as AudioBackend;
+    const out = await decodeFfs2(backend, new Map([[entry.name, entry]]), buildFfs2(FFS_SAMPLE_RATE, []));
     expect(out.size).toBe(0);
   });
 

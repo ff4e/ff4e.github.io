@@ -60,51 +60,26 @@
 import { FFS_SAMPLE_RATE } from './ffs.js';
 import { parseFfs2 } from './ffs2.js';
 import type { FftEntry } from '../data/fft.js';
-import { decodeAudioData } from '../platform/audioDecode.js';
+import type { AudioBackend, SoundBuffer } from './audioBackend.js';
 
 /**
- * A copy of `buf` holding exactly the audio of `samples` samples at `FFS_SAMPLE_RATE`.
+ * Decode every segment of a staged package, keyed by the sound name that asks for it.
  *
- * AAC codes in 1024-sample frames, so a decode runs up to 1023 samples long and that tail
- * is encoder padding, not speech (`tools/stage-voices.ts --verify` measures it).
- * `startTracked` writes `activeUntil` from `buf.duration`, so an untrimmed buffer would
- * hold `playing(prior)` true for up to two extra logic ticks on EVERY line. `delka` is the
- * length the 1998 data agrees on and what `duration()` already reports, so the buffer is
- * cut to exactly that. The music path made the same call for the same reason (`playMusic`
- * takes `loopEnd` from the table's `frames`, not from `buf.duration`).
- *
- * Measured, this is a no-op in Chromium: it honours the MP4 edit list and hands back
- * EXACTLY `delka` samples at lag 0 (`tools/test-voices.mjs` asserts both, in the browser,
- * against an independent port of `Decompres`). ffmpeg's decoder pads. So this is here for
- * the decoders that are not Chromium rather than for the one that is — which is the whole
- * reason the probe measures it rather than trusting it.
- *
- * The count is in the 1998 data's rate, the buffer is at the context's, hence the ratio.
- * The `Math.min` is not decoration: exactly one of the 1 797 shipped sounds decodes SHORT
- * through ffmpeg (`011/deu-m-bojovat`, by 10 samples of -51 dBFS silence, which `--verify`
- * gate 3 allows on purpose). Without the clamp that would be a read past the end; with it,
- * the buffer is simply as long as the decode really was.
+ * The decode itself — AAC to exactly `delka` samples — is the backend's
+ * (`decodeSegment`; the browser's trims in `webAudioBackend.ts`'s `trimToSamples`). What
+ * is here is the package: its rate, and the rule that every record has a segment.
  */
-export function trimToSamples(ctx: BaseAudioContext, buf: AudioBuffer, samples: number): AudioBuffer {
-  const want = Math.min(buf.length, Math.round((samples * ctx.sampleRate) / FFS_SAMPLE_RATE));
-  if (want === buf.length) return buf;
-  const out = ctx.createBuffer(1, Math.max(1, want), ctx.sampleRate);
-  out.copyToChannel(buf.getChannelData(0).subarray(0, want), 0);
-  return out;
-}
-
-/** Decode every segment of a staged package, keyed by the sound name that asks for it. */
 export async function decodeFfs2(
-  ctx: BaseAudioContext,
+  backend: Pick<AudioBackend, 'decodeSegment'>,
   entries: ReadonlyMap<string, FftEntry>,
   body: Uint8Array,
-): Promise<Map<string, AudioBuffer>> {
+): Promise<Map<string, SoundBuffer>> {
   const index = parseFfs2(body);
   // `delka` is a sample count and means nothing without the rate it counts in, so the
   // package states it and this refuses a mismatch rather than making every duration(),
   // every lip-sync and every TALKING_MEZ_SEC wrong by that ratio, silently.
   if (index.rate !== FFS_SAMPLE_RATE) throw new Error(`sound package is ${index.rate} Hz, expected ${FFS_SAMPLE_RATE}`);
-  const out = new Map<string, AudioBuffer>();
+  const out = new Map<string, SoundBuffer>();
   // In parallel: each `decodeAudioData` is native and off the main thread, and a room
   // holds ~24 of them. Serial would be ~24 round trips through the event loop for no
   // gain, inside a room entry the player is waiting on.
@@ -126,7 +101,7 @@ export async function decodeFfs2(
         body.byteOffset + seg.offset,
         body.byteOffset + seg.offset + seg.length,
       ) as ArrayBuffer;
-      out.set(e.name, trimToSamples(ctx, await decodeAudioData(ctx, ab), e.delka));
+      out.set(e.name, await backend.decodeSegment(ab, e.delka));
     }),
   );
   return out;
