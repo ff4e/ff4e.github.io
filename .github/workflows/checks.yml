@@ -103,8 +103,8 @@ jobs:
   # plus two rooms typed key by key through save, undo and load. ~40 s here. Then the map
   # smoke (native/js/mapSmoke.ts): the world map, its record panel and story pages, driven
   # key by key. A few seconds. Then the sound gate (native/js/audioSmoke.ts): the mixer, every
-  # speech and music decode, and PRVNI's dialogue timing against the browser's. A few
-  # seconds. All three are headless: no audio device, the game itself drives the mixer.
+  # speech and music decode (length and alignment against the originals), and PRVNI's
+  # dialogue timing against the browser's. ~8 s. All three are headless: no audio device, the game itself drives the mixer.
   native-macos:
     # Once per change, not twice. The workflow fires on both `push` (every branch) and
     # `pull_request`, and the concurrency group above cannot merge the two runs: their refs

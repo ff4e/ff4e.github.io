@@ -150,7 +150,8 @@ supplies only the `AudioBackend` under it (`native/js/sdlAudioBackend.ts`, hande
   `src/platform/nativeAudioTiming.ts`: Core Audio honours the movie's millisecond-rounded
   edit and would cut up to a millisecond off a file (7 samples off `rybky08`'s loop).
   Restated in the media timescale, every one of the 1 797 speech sounds decodes to exactly
-  its `delka` and every music track to exactly the original's sample count. A segment is
+  its `delka` and every music track to exactly the original's sample count, aligned with the
+  original samples at lag 0 (the gate below checks both). A segment is
   then trimmed to `delka`, as the browser's `trimToSamples` does.
 - **Line timing** is the browser's: the talk hook (`game.ts`'s `talk`, restating
   `scriptTalk`) holds a line for `delka` less Talking()'s lead, so a line never depends on
@@ -176,17 +177,21 @@ the first room (`loadGlobalSounds`). The map plays the menu music; the story pag
     native/build/cmake/ff4e-native native/build/game.js --root public --headless \
       --smoke-audio --store native/build/smoke-audio-store.json
 
-`native/js/audioSmoke.ts`, 60 checks in ~2 s:
+`native/js/audioSmoke.ts`, 79 checks in ~8 s:
 
 1. the mixer on synthetic buffers, sample for sample: gains, the loop region (and Web Audio's
    rules for odd loop points), `stop`, `onEnded` after the mix and never inside
    `start`/`stop`, a bus gain applied live, pause, and 80 ms = 1764 frames;
-2. every staged speech package (76) decoded as the policy decodes it: all 1 797 sounds
-   exactly `delka` samples (~100 minutes of speech, ~1.2 s);
-3. every music track (17): at least the original's sample count (measured: exactly it), and
-   the looping voice plays `[loopEnd − 4096, loopEnd)` then `[loopStart, loopStart + 4096)`
-   of the track sample for sample against the same track played straight through, with the
-   loop points computed as `playMusic` computes them;
+2. every staged speech package (76), all 1 797 sounds (~100 minutes): the decoder alone,
+   untrimmed, gives exactly `delka` samples (the policy's own path trims to `delka`, so it
+   could not show a decode that runs long), and so does the policy's path (`decodeFfs2`);
+   and one sound of every package aligns with the 1998 samples it was encoded from
+   (`src/audio/ffs.ts`) at lag 0, no whole-frame or fine shift fitting better — what a
+   decoder that kept the AAC priming would fail even if cut back to the right length;
+3. every music track (17): exactly the original's sample count, aligned at lag 0 with the
+   original WAV the same way, and the looping voice plays `[loopEnd − 4096, loopEnd)` then
+   `[loopStart, loopStart + 4096)` of the track sample for sample against the same track
+   played straight through, with the loop points computed as `playMusic` computes them;
 4. PRVNI's opening through the real flow, the native twin of `tools/test-voices.mjs`'s
    browser assertion: `1st-v-netusim` starts exactly `1st-m-cotobylo`'s talk ticks + 6 after
    it (14 + 6: ticks 18 and 38), both buffers are `delka` long, `playing()` turns false on

@@ -5,12 +5,15 @@
  *   1. The mixer, on synthetic buffers, sample for sample: gains, the loop region, `stop`,
  *      `onEnded` delivered after the mix and never from inside `start`/`stop`, bus gains
  *      live, pause, and the clock (80 ms of game time is 1764 frames).
- *   2. Every staged speech package (the 72 rooms', x01-x03, the restored lines) decoded the
- *      way the policy decodes it (`decodeFfs2`): every sound exactly `delka` samples long.
- *   3. Every music track: it decodes to at least the original's sample count, so the loop
- *      ends where `playMusic` says (the table's `frames`, not the codec's padding); and the
- *      looping voice plays exactly [loopEnd - K, loopEnd) then [loopStart, loopStart + K) of
- *      the track, compared against the same track played straight through.
+ *   2. Every staged speech package (the 72 rooms', x01-x03, the restored lines): every sound
+ *      decodes, untrimmed, to exactly `delka` samples (the policy's path trims to `delka`, so
+ *      it alone would hide a decode that runs long), and so does the policy's path
+ *      (`decodeFfs2`); and one sound a package aligns at lag 0 with the 1998 samples it was
+ *      encoded from (a decode that kept the priming is shifted, whatever its length).
+ *   3. Every music track: it decodes to exactly the original's sample count and aligns at
+ *      lag 0 with the original WAV; and the looping voice plays exactly [loopEnd - K, loopEnd)
+ *      then [loopStart, loopStart + K) of the track, compared against the same track played
+ *      straight through.
  *   4. PRVNI's opening through the real flow, as `tools/test-voices.mjs` measures it in the
  *      browser: the second line starts exactly the first line's talk ticks + 6 after it, each
  *      voice is `delka` long, `playing()` turns false on the tick the mixer plays the last
@@ -18,7 +21,9 @@
  */
 import { MASTER_GAIN } from '../../src/audio/audioBackend.js';
 import { decodeFfs2 } from '../../src/audio/ffs2Decode.js';
-import { voiceUrl } from '../../src/audio/ffs2.js';
+import { parseFfs2, voiceUrl } from '../../src/audio/ffs2.js';
+import { decodeSound } from '../../src/audio/ffs.js';
+import { nativeAudioTiming } from '../../src/platform/nativeAudioTiming.js';
 import { musicByName, musicNames, musicSeconds, musicUrl } from '../../src/audio/music.js';
 import { indexFft, parseFft } from '../../src/data/fft.js';
 import { count, poslMluv } from '../../src/app/gameState.js';
@@ -115,47 +120,135 @@ function mixerMechanics(): void {
   ok(__native.audioVoices() === 0, 'every voice of the checks is gone');
 }
 
+/**
+ * The decoded samples of a buffer, read back through the mixer (a lone voice at gain 1 on the
+ * voice bus, whose level is 1 by default) — the first `n` of them, as floats.
+ */
+function samplesOf(buf: MixBuffer, n: number): Float32Array {
+  const want = Math.min(n, buf.frames);
+  const v = mixer.start(buf, { gain: 1, bus: 'voice' });
+  const out = mixed(want);
+  mixer.stop(v);
+  mixer.poll();
+  const g = gainOf(1, 1);
+  return out.map((x) => x / g);
+}
+
+/**
+ * Where a decode sits against the samples it was encoded from: the SNR at lag 0, and the best
+ * of whole-frame and fine shifts (`tools/test-voices.mjs`'s measure, natively, plus Apple's
+ * usual 2112-frame priming). A decoder that kept the AAC priming sits shifted against the
+ * original — even when the buffer is cut back to the right LENGTH, which is why the lengths
+ * alone cannot prove it.
+ */
+const LAGS = [-2112, -2048, -1024, -512, -256, -64, -16, -8, -4, -2, -1, 0, 1, 2, 4, 8, 16, 64, 256, 512, 1024, 2048, 2112];
+function alignment(dec: Float32Array, orig: Int16Array): { snr0: number; bestLag: number; bestSnr: number } {
+  const snr = (lag: number): number => {
+    const n = Math.min(dec.length, orig.length, 40000);
+    let se = 0;
+    let so = 0;
+    for (let i = 200; i < n; i++) {
+      const oi = i - lag;
+      const o = oi >= 0 && oi < orig.length ? orig[oi]! / 32768 : 0;
+      const d = dec[i]!;
+      se += (d - o) * (d - o);
+      so += o * o;
+    }
+    return 10 * Math.log10(so / Math.max(se, 1e-12));
+  };
+  let best = { lag: 0, snr: -Infinity };
+  for (const lag of LAGS) {
+    const v = snr(lag);
+    if (v > best.snr) best = { lag, snr: v };
+  }
+  return { snr0: snr(0), bestLag: best.lag, bestSnr: best.snr };
+}
+const aligned = (a: { snr0: number; bestLag: number }): boolean => a.bestLag === 0 && a.snr0 > 5;
+const fmt = (a: { snr0: number; bestLag: number; bestSnr: number }): string =>
+  `${a.snr0.toFixed(1)} dB at lag 0, best lag ${a.bestLag} (${a.bestSnr.toFixed(1)} dB)`;
+
 async function speechPackages(): Promise<void> {
-  const pkgs: Array<[string, string, string]> = [
-    ...Array.from({ length: 72 }, (_, i): [string, string, string] => {
+  const pkgs: Array<[string, string, string, string]> = [
+    ...Array.from({ length: 72 }, (_, i): [string, string, string, string] => {
       const id = String(i + 1).padStart(3, '0');
-      return [id, `/data/Title/${id}.fft`, voiceUrl(id)];
+      return [id, `/data/Title/${id}.fft`, voiceUrl(id), `/data/Sound/${id}.ffs`];
     }),
-    ['x01', '/data/Title/x01.fft', voiceUrl('x01')],
-    ['x02', '/data/Title/x02.fft', voiceUrl('x02')],
-    ['x03', '/data/Title/x03.fft', voiceUrl('x03')],
-    ['restored', '/restored/restored.fft', voiceUrl('restored', '/restored')],
+    ['x01', '/data/Title/x01.fft', voiceUrl('x01'), '/data/Sound/x01.ffs'],
+    ['x02', '/data/Title/x02.fft', voiceUrl('x02'), '/data/Sound/x02.ffs'],
+    ['x03', '/data/Title/x03.fft', voiceUrl('x03'), '/data/Sound/x03.ffs'],
+    ['restored', '/restored/restored.fft', voiceUrl('restored', '/restored'), '/restored/restored.ffs'],
   ];
   const t0 = __native.now();
   let sounds = 0;
   let seconds = 0;
-  const wrong: string[] = [];
-  for (const [id, fft, body] of pkgs) {
-    const entries = indexFft(parseFft(await readBytes(fft)));
-    const bufs = await decodeFfs2(mixer, entries, await readBytes(body));
+  const untrimmed: string[] = [];
+  const trimmed: string[] = [];
+  const shifted: string[] = [];
+  let worst = Infinity;
+  for (const [id, fftUrl, bodyUrl, ffsUrl] of pkgs) {
+    const entries = indexFft(parseFft(await readBytes(fftUrl)));
+    const body = await readBytes(bodyUrl);
+    // The decoder alone, untrimmed: the length it produces must already be delka. The
+    // policy's path below trims to delka, which would hide a decode that runs LONG.
+    const index = parseFfs2(body);
+    for (const e of entries.values()) {
+      if (e.delka <= 0) continue;
+      const seg = index.segments.get(e.zvuk)!;
+      const ab = body.buffer.slice(body.byteOffset + seg.offset, body.byteOffset + seg.offset + seg.length) as ArrayBuffer;
+      const [bid, frames] = __native.audioDecode(nativeAudioTiming(ab), 0);
+      __native.audioRelease(bid);
+      if (frames !== e.delka) untrimmed.push(`${id}/${e.name}: ${frames} of ${e.delka}`);
+    }
+    // The policy's own path (decodeFfs2 -> decodeSegment), and where its samples sit.
+    const bufs = await decodeFfs2(mixer, entries, body);
+    const ffs = await readBytes(ffsUrl);
+    let first = true;
     for (const e of entries.values()) {
       if (e.delka <= 0) continue;
       const b = bufs.get(e.name) as MixBuffer | undefined;
       sounds++;
       seconds += e.delka / MIX_RATE;
-      if (b?.frames !== e.delka) wrong.push(`${id}/${e.name}: ${b?.frames ?? 'none'} of ${e.delka}`);
+      if (b?.frames !== e.delka) trimmed.push(`${id}/${e.name}: ${b?.frames ?? 'none'} of ${e.delka}`);
+      if (first && b) {
+        // One sound a package, against the 1998 samples it was encoded from.
+        first = false;
+        const a = alignment(samplesOf(b, 42_048), decodeSound(ffs, e.zvuk, e.delka));
+        worst = Math.min(worst, a.snr0);
+        if (!aligned(a)) shifted.push(`${id}/${e.name}: ${fmt(a)}`);
+      }
     }
   }
-  console.log(`       ${sounds} sounds, ${(seconds / 60).toFixed(1)} min of speech, decoded in ${((__native.now() - t0) / 1000).toFixed(1)} s`);
-  ok(wrong.length === 0 && sounds > 1700,
-    `every staged sound decodes to exactly its delka (${sounds} in ${pkgs.length} packages)${wrong.length ? `: ${wrong.slice(0, 5).join(', ')}` : ''}`);
+  console.log(`       ${sounds} sounds, ${(seconds / 60).toFixed(1)} min of speech, decoded twice in ${((__native.now() - t0) / 1000).toFixed(1)} s`);
+  ok(untrimmed.length === 0 && sounds > 1700,
+    `the decoder alone, untrimmed, gives every staged sound exactly its delka (${sounds} in ${pkgs.length} packages)${untrimmed.length ? `: ${untrimmed.slice(0, 5).join(', ')}` : ''}`);
+  ok(trimmed.length === 0, `...and so does the policy's path, decodeFfs2${trimmed.length ? `: ${trimmed.slice(0, 5).join(', ')}` : ''}`);
+  ok(shifted.length === 0,
+    `one sound of every package aligns with its 1998 samples at lag 0, no shift fitting better (worst ${worst.toFixed(1)} dB)${shifted.length ? `: ${shifted.slice(0, 5).join('; ')}` : ''}`);
+}
+
+/** The 16-bit mono samples of a canonical RIFF/WAVE file (the music originals). */
+function wavSamples(bytes: Uint8Array): Int16Array {
+  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let at = 12; at + 8 <= bytes.length; ) {
+    const id = String.fromCharCode(...bytes.subarray(at, at + 4));
+    const size = dv.getUint32(at + 4, true);
+    if (id === 'data') return new Int16Array(bytes.slice(at + 8, at + 8 + size).buffer);
+    at += 8 + size + (size & 1);
+  }
+  throw new Error('no data chunk');
 }
 
 async function musicLoops(): Promise<void> {
   const K = 4096;
   const t0 = __native.now();
-  const lengths: string[] = [];
   for (const name of musicNames()) {
     const desc = musicByName(name)!;
     const bytes = await readBytes(musicUrl(name));
     const buf = (await mixer.decode(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)) as MixBuffer;
-    lengths.push(`${name} +${buf.frames - desc.frames}`);
-    ok(buf.frames >= desc.frames, `${name} decodes to at least the original's ${desc.frames} samples (${buf.frames}), so its loop ends at the original's end`);
+    ok(buf.frames === desc.frames, `${name} decodes to exactly the original's ${desc.frames} samples (${buf.frames})`);
+    const orig = wavSamples(await readBytes(`/data/Music/${name}.wav`));
+    const a = alignment(samplesOf(buf, 42_048), orig);
+    ok(orig.length === desc.frames && aligned(a), `${name} aligns with its original WAV at lag 0 (${fmt(a)})`);
     // The policy's own arithmetic (`playMusic`): loopStart from the table, loopEnd the table's frames.
     const loopStart = desc.loopSample > 0 ? musicSeconds(desc.loopSample) : 0;
     const loopEnd = Math.min(musicSeconds(desc.frames), buf.duration);
@@ -173,7 +266,7 @@ async function musicLoops(): Promise<void> {
     ok(equal(seam.subarray(0, K), tail) && equal(seam.subarray(K), head),
       `${name} loops from sample ${desc.frames} back to ${desc.loopSample}, sample for sample`);
   }
-  console.log(`       decoded and looped in ${((__native.now() - t0) / 1000).toFixed(1)} s; frames past the original: ${lengths.join(', ')}`);
+  console.log(`       decoded, aligned and looped in ${((__native.now() - t0) / 1000).toFixed(1)} s`);
 }
 
 interface Started {
