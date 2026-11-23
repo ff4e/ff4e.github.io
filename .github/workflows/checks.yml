@@ -35,6 +35,7 @@ on:
   push:
     branches: ['**']
   pull_request:
+  workflow_dispatch:
 
 # A newer push to the same branch makes an in-flight run pointless.
 concurrency:
@@ -108,14 +109,11 @@ jobs:
   # speech and music decode (length and alignment against the originals), and PRVNI's
   # dialogue timing against the browser's. ~8 s. All three are headless: no audio device, the game itself drives the mixer.
   native-macos:
-    # Once per change, not twice. The workflow fires on both `push` (every branch) and
-    # `pull_request`, and the concurrency group above cannot merge the two runs: their refs
-    # differ (refs/heads/<branch> vs refs/pull/<n>/merge). That is fine for the cheap Linux
-    # `check`, which stays on every push so a branch without a PR still gets feedback; it is
-    # not fine for ~10 min of macOS. So this job runs on `pull_request` (which tests the
-    # merge result, the thing that lands) and on `push` only to main (which keeps main
-    # covered after the merge). A branch pushed without a PR is not swept until one is opened.
-    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
+    # Manual only (Actions -> checks -> Run workflow). The same gate runs locally as
+    # `npm run native:check` (native/check.mjs), which is what a PR touching native/ quotes.
+    # Hosted macOS runners routinely queued 10-40 min before this ~10 min job even started,
+    # so every PR waited on it for nothing a Mac on the desk cannot tell in a few minutes.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-15
     # ~10 min when green. compare.mjs times out each native run, but not the WebGL side.
     timeout-minutes: 25

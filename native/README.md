@@ -1,10 +1,11 @@
 # Native host (macOS today; tvOS and Xbox are the point)
 
 > **Experimental. Not shipped, not part of the web or iOS build, and `src/` does not depend on
-> it.** Nothing under `native/` is imported by the game; it only imports *from* `src/`. CI
-> builds it (the `native-macos` job in `.github/workflows/checks.yml`, on pull requests and
-> on main) so a change in `src/` that breaks the native bundle is visible, but no release
-> consumes it.
+> it.** Nothing under `native/` is imported by the game; it only imports *from* `src/`. Its
+> whole gate runs locally as `npm run native:check` (below), which a change to `native/` or to
+> `src/` code the bundle imports runs before its PR. The same steps are the `native-macos` job
+> in `.github/workflows/checks.yml`, which runs only when started by hand: hosted macOS runners
+> queued too long to wait on. No release consumes it.
 
 The game **without a browser**. It plays a whole game now — from the world map, room after
 room, with undo, saves, the record panel's Replay and the leg story pages, and with its
@@ -274,6 +275,10 @@ statically; the AAC decoder is the system's Audio Toolbox. A clean configure and
 takes under a minute. Nothing from Homebrew but the build tools is used, so a package
 upgrade cannot change the pixels `compare.mjs` checks.
 
+**The whole gate in one command:** `npm run native:check` (`native/check.mjs`) runs the
+typecheck, the bundle, the build, the room, map and sound smokes and the three comparisons
+below, in the CI job's order, one summary line per step (logs in `native/build/check/`).
+`-- --only smoke,subs` reruns just those steps after a build. Quote its summary in the PR.
 Controls, keyboard and gamepad (SDL maps any supported controller to this layout; the
 gamepad is turned into the same key codes in `native/host/main.c`, so there is one stream
 of keys, read by the room's router in a room and by the map's on the map):
