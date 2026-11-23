@@ -1,0 +1,140 @@
+/**
+ * The world-map parity scene: a fixed set of map states, painted through the shared
+ * `paintAiMap` (src/render/mapPaintAi.ts) onto a `Surface2D` — the browser's canvas in
+ * native/reference.ts, the GPU natively — and diffed by native/compare-map.mjs.
+ *
+ * Each case says whether it can be byte-exact. Per the header of src/render/surface2d.ts:
+ * nearest-neighbour draws, opaque blits and uploads and a binary destination-in mask can;
+ * anything smoothed, a fractional alpha, or a partial-alpha upload is only close, because
+ * the canvas filters and rounds in its own way.
+ */
+import { paintAiMap, type AiMapPaint } from '../../src/render/mapPaintAi.js';
+import type { Surface2D } from '../../src/render/surface2d.js';
+import { createSurface } from '../../src/render/surface2d.js';
+import { MAP_H, MAP_W } from '../../src/render/worldMap.js';
+import { ICON_H, ICON_W, ICON_Y, INFO_BUTTONS, PANEL_H, PANEL_W, infoPanelOrigin } from '../../src/render/mapInfo.js';
+import { loadAiPlaque, loadMapArt, paintParchmentAi, type MapArt, type MapIo } from './mapArt.js';
+
+type Plaque = AiMapPaint['aiPlaque'];
+
+export interface MapScene {
+  readonly art: MapArt;
+  readonly plaques: ReadonlyMap<number, NonNullable<Plaque>>;
+}
+
+/** The rooms whose upscaled plaques the cases show. */
+const PLAQUE_ROOMS = [1, 3, 4, 6];
+
+export async function loadMapScene(io: MapIo): Promise<MapScene> {
+  const art = await loadMapArt(io, 'en');
+  const plaques = new Map<number, NonNullable<Plaque>>();
+  for (const r of PLAQUE_ROOMS) {
+    const p = await loadAiPlaque(io, art, r, 'en');
+    if (p) plaques.set(r, p);
+  }
+  return { art, plaques };
+}
+
+interface MapCase {
+  readonly name: string;
+  /** Can a GPU match the canvas byte for byte here? (See the header.) */
+  readonly exact: boolean;
+  /** What the case exercises, for the report. */
+  readonly what: string;
+  /**
+   * For an approximate case, the map-space rect (640×480) that only its approximate path
+   * draws. Outside it the frame must still be byte-identical.
+   */
+  readonly region?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  readonly state: (s: MapScene) => Partial<AiMapPaint>;
+}
+
+/** The enlarged panel's map-space bounds, a pixel wider each way for the smoothed edge. */
+function zoomedPanelRect(zoom: number): NonNullable<MapCase['region']> {
+  const o = infoPanelOrigin(zoom);
+  return { x: o.x - 1, y: o.y - 1, w: Math.ceil(PANEL_W * zoom) + 2, h: Math.ceil(PANEL_H * zoom) + 2 };
+}
+
+const solvedTo = (n: number): Set<number> => new Set(Array.from({ length: n }, (_, i) => i + 1));
+
+export const MAP_CASES: readonly MapCase[] = [
+  { name: 'fresh', exact: true, what: 'base map (binary lit mask), reachable balls', state: () => ({}) },
+  {
+    name: 'progress', exact: true, what: 'lit paths, solved/cheat/pulsing balls, corner hover, AI plaque, selection ring',
+    state: (s) => ({
+      solved: solvedTo(10), cheated: new Set([12]), pulse: 3, hoverCorner: 'credits',
+      plaqueRoom: 4, aiPlaque: s.plaques.get(4) ?? null, selectRoom: 4,
+    }),
+  },
+  {
+    name: 'native-plaque', exact: true, what: 'the 640×480 overlay (a plaque with no upscale) scaled ×4 nearest',
+    state: () => ({ solved: solvedTo(6), pulse: 1, plaqueRoom: 5, aiPlaque: null, selectRoom: 5 }),
+  },
+  {
+    name: 'panel', exact: true, what: 'unlit map, record panel art, hovered Run, odometer digits, AI plaque',
+    state: (s) => ({
+      solved: solvedTo(6), unlit: true, plaqueRoom: 1, aiPlaque: s.plaques.get(1) ?? null, selectRoom: 1,
+      panel: { room: 1, count: 1234, hover: 'run', faze: 27, replayEnabled: true },
+    }),
+  },
+  {
+    name: 'panel-rolling', exact: true, what: 'the odometer mid-roll, hovered Replay',
+    state: (s) => ({
+      solved: solvedTo(6), unlit: true, plaqueRoom: 1, aiPlaque: s.plaques.get(1) ?? null,
+      panel: { room: 1, count: 98765, hover: 'replay', faze: 9, replayEnabled: true },
+    }),
+  },
+  {
+    name: 'launch', exact: true, what: 'a launch: unlit, plaque, parchment',
+    state: (s) => ({
+      solved: solvedTo(6), unlit: true, plaqueRoom: 6, aiPlaque: s.plaques.get(6) ?? null,
+      parchment: (t) => paintParchmentAi(t, s.art),
+    }),
+  },
+  {
+    name: 'panel-noreplay', exact: false, what: 'disabled Replay: a 0.55-alpha black wash',
+    region: { x: INFO_BUTTONS.replay.x, y: ICON_Y, w: ICON_W, h: ICON_H },
+    state: (s) => ({
+      solved: solvedTo(6), unlit: true, plaqueRoom: 3, aiPlaque: s.plaques.get(3) ?? null,
+      panel: { room: 3, count: 42, hover: 'cancel', faze: 27, replayEnabled: false },
+    }),
+  },
+  {
+    name: 'panel-zoomed', exact: false, what: "the phone's enlarged panel: smoothed mask, partial-alpha shadow, fractional scale",
+    region: zoomedPanelRect(1.5),
+    state: (s) => ({
+      solved: solvedTo(6), unlit: true, zoom: 1.5, plaqueRoom: 1, aiPlaque: s.plaques.get(1) ?? null,
+      panel: { room: 1, count: 1234, hover: 'run', faze: 27, replayEnabled: true },
+    }),
+  },
+];
+
+let layer: Surface2D | null = null;
+
+/** Paint case `name` onto `target` (AI_MAP_W × AI_MAP_H). */
+export function paintMapCase(target: Surface2D, scene: MapScene, name: string): void {
+  const c = MAP_CASES.find((m) => m.name === name);
+  if (!c) throw new Error(`no map case ${name}`);
+  const { art } = scene;
+  paintAiMap(target, {
+    map: art.ai,
+    worldMap: art.worldMap,
+    solved: new Set(),
+    cheated: new Set(),
+    pulse: 0,
+    depth: Number.MAX_SAFE_INTEGER,
+    hoverCorner: null,
+    unlit: false,
+    zoom: 1,
+    plaqueRoom: null,
+    aiPlaque: null,
+    desky: art.desky,
+    assets: art.assets,
+    panel: null,
+    minigame: null,
+    layer: () => (layer ??= createSurface(MAP_W, MAP_H)),
+    parchment: null,
+    selectRoom: null,
+    ...c.state(scene),
+  });
+}

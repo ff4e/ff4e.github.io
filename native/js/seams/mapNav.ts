@@ -1,7 +1,9 @@
 /**
- * Seam for `src/app/mapNav.ts` (the world map). There is no map natively: leaving a room —
+ * Seam for `src/app/mapNav.ts` (on and off the world map, the page's way). Leaving a room —
  * the win's auto-return (`logicTick`), or the end of a map "Replay" (`replayMode`) — is
- * handed to the native composition root, which picks the next room (`game.ts`).
+ * handed to the native composition root (`game.ts`), which goes back to the native map
+ * (`mapScreen.ts`) through the story pages where the browser shows them, or, for `--demo`
+ * and the smoke gate, on to the next room.
  */
 import type * as Real from '../../../src/app/mapNav.js';
 

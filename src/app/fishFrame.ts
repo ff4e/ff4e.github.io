@@ -3,7 +3,7 @@
  *
  * DOM-free, including everything it imports: it reads the live room and the
  * per-fish animation state from `gameState.ts` and nothing from the document, so a
- * host without a browser can import it instead of restating it. `test/fishFrame.test.ts`
+ * host without a browser can import it instead of restating it. `test/dom-free.test.ts`
  * holds that line.
  */
 import { Dir } from '../core/dir.js';

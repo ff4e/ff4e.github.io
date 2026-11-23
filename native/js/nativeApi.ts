@@ -53,6 +53,28 @@ export interface NativeApi {
   /** Write the composite's RGBA (top-down) to `path`, prefixed by u32 w, u32 h. */
   saveComposite(path: string): void;
 
+  // ── Surface2D (native/js/nativeSurface.ts). Surfaces and their images are PREMULTIPLIED. ──
+  /** Decode a WebP or PNG to a premultiplied texture, as a canvas holds an image it draws. */
+  decodeImage(buf: ArrayBuffer): NativeTexture;
+  /** A new transparent `w`×`h` render target; returns its texture id. */
+  surfCreate(w: number, h: number): number;
+  /**
+   * Stage one quad into `target`: dest rect in its pixels, source rect of `tex` normalised
+   * (0 = a white texel, for fills), filtered bilinearly or not, blended source-over (0) or
+   * destination-in (1), multiplied by the premultiplied colour (r, g, b, a). Consecutive
+   * quads with the same target, texture, filter and blend become one draw call.
+   */
+  surfQuad(target: number, tex: number, linear: boolean, blend: number,
+    x0: number, y0: number, x1: number, y1: number, u0: number, v0: number, u1: number, v1: number,
+    r: number, g: number, b: number, a: number): void;
+  surfClear(target: number): void;
+  /** Replace the whole surface with straight RGBA (width × height × 4), premultiplied on the way. */
+  surfPut(target: number, rgba: ArrayBuffer): void;
+  /** Show a surface in the window, as `present` shows the composite. */
+  presentTexture(id: number): void;
+  /** `saveComposite` for a surface's texture. */
+  saveTexture(id: number, path: string): void;
+
   // ── Input. ──
   /**
    * Key transitions since the last call, oldest first: `+Code` down, `-Code` up, where Code
