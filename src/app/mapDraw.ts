@@ -16,7 +16,8 @@ import { MAP_H, MAP_W } from '../render/worldMap.js';
 import { aiWorldMap, mapPresented, setMapPresented } from './art.js';
 import { blitParchment, blitParchmentAi, mapLaunching, markParchmentPainted } from './roomLaunch.js';
 import { blitTetris, tetris, tetrisArt, tetrisTick } from './cheats.js';
-import { canvas, ctx } from './dom.js';
+import { canvas, screenSurface } from './dom.js';
+import { createSurface, type Surface2D } from '../render/surface2d.js';
 import { contentScaleFor, scalingFilterFor } from './stageGeometry.js';
 import { graphics } from './renderSettings.js';
 import { perfPaint, setPerfPaint } from './framePacing.js';
@@ -153,7 +154,7 @@ export function drawMap(): void {
   if (useAi) {
     // Hi-res AI base + nodes, then the record panel / name plaque overlaid at native
     // resolution and nearest-neighbour-scaled up (keeps digits + names crisp).
-    aiWorldMap!.draw(ctx, {
+    aiWorldMap!.draw(screenSurface, {
       solved: host.solved,
       pulse,
       depth,
@@ -167,40 +168,35 @@ export function drawMap(): void {
     // digits + name plaque still ride the crisp NN overlay below so text stays sharp.
     // On a phone the same artwork is drawn enlarged, lifted off the map (mapInfoZoom.ts).
     if (panelOpen && ui.infoPanelAssets && ui.mapInfoRoom !== null) {
-      ctx.save();
-      applyInfoZoom(ctx, AI_MAP_SCALE, infoZoom);
+      screenSurface.save();
+      applyInfoZoom(screenSurface, AI_MAP_SCALE, infoZoom);
       const krokomer = zoomed ? aiPanelArt(aiWorldMap!.krokomer) : aiWorldMap!.krokomer;
-      drawInfoPanelArtAi(ctx, AI_MAP_SCALE, krokomer, aiWorldMap!.ikonky, ui.mapInfoHover, replayEnabled, zoomed);
-      ctx.restore();
+      drawInfoPanelArtAi(screenSurface, AI_MAP_SCALE, krokomer, aiWorldMap!.ikonky, ui.mapInfoHover, replayEnabled, zoomed);
+      screenSurface.restore();
     }
     // Name plaque from the upscaled art, drawn straight on the hi-res ctx. Falls back
     // to the native overlay below whenever its art is missing or still loading.
     const plaqueRoom = mapLaunching() ?? ui.mapInfoRoom ?? ui.mapHoverRoom;
     const plaque = plaqueRoom !== null ? aiPlaqueFor(plaqueRoom) : null;
     if (plaque) {
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(plaque.bmp, plaque.x * AI_MAP_SCALE, plaque.y * AI_MAP_SCALE);
+      screenSurface.setSmoothing(false);
+      screenSurface.drawImage(plaque.bmp, plaque.x * AI_MAP_SCALE, plaque.y * AI_MAP_SCALE);
     }
     const overlay = new Uint8ClampedArray(MAP_W * MAP_H * 4); // transparent; only drawn cells become opaque
     if (drawMapOverlays(overlay, true, plaque !== null, zoomedPanel)) {
-      if (!ui.mapOverlayCanvas) {
-        ui.mapOverlayCanvas = document.createElement('canvas');
-        ui.mapOverlayCanvas.width = MAP_W;
-        ui.mapOverlayCanvas.height = MAP_H;
-        ui.mapOverlayCtx = ui.mapOverlayCanvas.getContext('2d');
-      }
-      ui.mapOverlayCtx!.putImageData(new ImageData(overlay, MAP_W, MAP_H), 0, 0);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(ui.mapOverlayCanvas, 0, 0, cw, ch);
+      const layer = overlayLayer();
+      layer.putPixels(overlay);
+      screenSurface.setSmoothing(false);
+      screenSurface.drawImage(layer, 0, 0, cw, ch);
     }
     if (zoomedPanel) {
-      drawZoomedInfoPanel(AI_MAP_SCALE, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, true);
+      drawZoomedInfoPanel(screenSurface, AI_MAP_SCALE, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, true);
       drawLateMinigame(AI_MAP_SCALE);
     }
     // Last, over the plaque: Delphi draws the plaque and then the parchment
     // (UMain.pas:1484 then :1489), and the two rectangles overlap.
     if (launching) {
-      blitParchmentAi(ctx);
+      blitParchmentAi(screenSurface);
       markParchmentPainted(); // daRun -> daRealyRun: the load may now start
     }
     return;
@@ -211,9 +207,9 @@ export function drawMap(): void {
     blitParchment(rgba);
     markParchmentPainted(); // daRun -> daRealyRun: the load may now start
   }
-  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), MAP_W, MAP_H), 0, 0);
+  screenSurface.putPixels(new Uint8ClampedArray(rgba));
   if (zoomedPanel) {
-    drawZoomedInfoPanel(1, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, false);
+    drawZoomedInfoPanel(screenSurface, 1, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, false);
     drawLateMinigame(1);
   }
 }
@@ -226,15 +222,15 @@ function drawLateMinigame(scale: number): void {
   if (!tetris || !tetrisArt) return;
   const layer = new Uint8ClampedArray(MAP_W * MAP_H * 4);
   blitTetris(layer, MAP_W, MAP_H);
-  if (!ui.mapOverlayCanvas) {
-    ui.mapOverlayCanvas = document.createElement('canvas');
-    ui.mapOverlayCanvas.width = MAP_W;
-    ui.mapOverlayCanvas.height = MAP_H;
-    ui.mapOverlayCtx = ui.mapOverlayCanvas.getContext('2d');
-  }
-  ui.mapOverlayCtx!.putImageData(new ImageData(layer, MAP_W, MAP_H), 0, 0);
-  ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(ui.mapOverlayCanvas, 0, 0, MAP_W * scale, MAP_H * scale);
+  const overlay = overlayLayer();
+  overlay.putPixels(layer);
+  screenSurface.setSmoothing(false);
+  screenSurface.drawImage(overlay, 0, 0, MAP_W * scale, MAP_H * scale);
+}
+
+/** The map-sized layer the native-resolution overlays are drawn into, then scaled up. */
+function overlayLayer(): Surface2D {
+  return (ui.mapOverlayLayer ??= createSurface(MAP_W, MAP_H));
 }
 
 /**

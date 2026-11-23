@@ -32,6 +32,7 @@ import type { FfpPanel } from '../data/ffp.js';
 import type { InfoButton, InfoPanelAssets } from '../render/mapInfo.js';
 import type { Credits } from '../render/credits.js';
 import type { MapAction, WorldMap } from '../render/worldMap.js';
+import type { Surface2D } from '../render/surface2d.js';
 import type { VolumeBus } from '../core/settings.js';
 import type { FeedbackUi } from './feedback.js';
 
@@ -118,8 +119,7 @@ export const ui = {
   // present (else the map falls back to the faithful CPU composite). The overlay
   // canvas draws the record panel + name plaques at native res, nearest-neighbour-
   // scaled over the hi-res map so digits/text stay crisp.
-  mapOverlayCanvas: null as HTMLCanvasElement | null,
-  mapOverlayCtx: null as CanvasRenderingContext2D | null,
+  mapOverlayLayer: null as Surface2D | null,
   screen: 'room' as 'map' | 'room' | 'intro' | 'legimage', // which screen is showing
   // Leg-completion story image (obrazek, UMain.pas:831 zobraz_obrazek): the full-screen
   // "case file" page shown over a frozen map when the last room of a leg (depth 15) is

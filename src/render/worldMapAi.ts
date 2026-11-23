@@ -19,9 +19,14 @@
  *
  * This is only used when `graphics === 'ai'` AND every AI asset loaded; otherwise
  * the map falls back to the faithful CPU composite. classic/enhanced never touch it.
+ *
+ * It draws through `Surface2D` (surface2d.ts) and builds its caches with
+ * `createSurface`, so a host without a DOM can composite the same map; only
+ * `loadAiWorldMap` is the browser's (it decodes with `createImageBitmap`).
  */
 import { MAP_W, MAP_H, type MapAction, type WorldMap } from './worldMap.js';
 import { decodeAsset, requiredBlob } from './assetFetch.js';
+import { createSurface, type Image2D, type Surface2D } from './surface2d.js';
 
 /** Upscale factor of the committed AI art (must match tools/build-map-ai.mjs AI_SCALE). */
 export const AI_MAP_SCALE = 4;
@@ -67,33 +72,32 @@ export async function loadAiWorldMap(base: string, wm: WorldMap): Promise<AiWorl
 }
 
 export class AiWorldMap {
-  private readonly base = makeCanvas(AI_MAP_W, AI_MAP_H);
-  private readonly tmp = makeCanvas(AI_MAP_W, AI_MAP_H);
-  private readonly maskNative = makeCanvas(MAP_W, MAP_H);
-  private readonly maskImage: ImageData;
+  private readonly base = createSurface(AI_MAP_W, AI_MAP_H);
+  private readonly tmp = createSurface(AI_MAP_W, AI_MAP_H);
+  private readonly maskNative = createSurface(MAP_W, MAP_H);
+  /** The native mask's pixels: RGB stays 0, only alpha is written. */
+  private readonly maskImage = new Uint8ClampedArray(MAP_W * MAP_H * 4);
   /** Signature of the RTable the cached base was built for (rebuild only on change). */
   private baseSig: string | null = null;
 
   constructor(
     private readonly wm: WorldMap,
-    private readonly mapa0: ImageBitmap,
-    private readonly mapa1: ImageBitmap,
-    private readonly nodes: readonly ImageBitmap[],
+    private readonly mapa0: Image2D,
+    private readonly mapa1: Image2D,
+    private readonly nodes: readonly Image2D[],
     /** AI record-panel background (krokoměr) + highlighted button icons (ikonky). */
-    readonly krokomer: ImageBitmap,
-    readonly ikonky: ImageBitmap,
+    readonly krokomer: Image2D,
+    readonly ikonky: Image2D,
     /** AI room-entry parchment (Menu/loading.BMP, blitted at 227,160 during a launch). */
-    readonly loading: ImageBitmap,
-  ) {
-    this.maskImage = this.maskNative.ctx.createImageData(MAP_W, MAP_H);
-  }
+    readonly loading: Image2D,
+  ) {}
 
   /**
-   * Composite the base + room-ball nodes for `state` onto `ctx` at (0,0), hi-res.
+   * Composite the base + room-ball nodes for `state` onto `target` at (0,0), hi-res.
    * The base (the expensive per-region layer select) is cached and only rebuilt when
    * the lit-region table changes; nodes are cheap sprite blits redrawn every frame.
    */
-  draw(ctx: CanvasRenderingContext2D, state: AiMapState): void {
+  draw(target: Surface2D, state: AiMapState): void {
     const rtable = this.wm.computeRtable(
       state.solved,
       state.depth,
@@ -106,11 +110,11 @@ export class AiWorldMap {
       this.rebuildBase(rtable);
       this.baseSig = sig;
     }
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.base.canvas, 0, 0);
+    target.setSmoothing(false);
+    target.drawImage(this.base, 0, 0);
     if (state.drawNodes) {
       for (const nd of this.wm.nodeDrawList(state.solved, state.pulse, state.depth, state.cheated)) {
-        ctx.drawImage(this.nodes[nd.sprite]!, nd.x0 * AI_MAP_SCALE, nd.y0 * AI_MAP_SCALE);
+        target.drawImage(this.nodes[nd.sprite]!, nd.x0 * AI_MAP_SCALE, nd.y0 * AI_MAP_SCALE);
       }
     }
   }
@@ -123,41 +127,28 @@ export class AiWorldMap {
   private rebuildBase(rtable: Uint8Array): void {
     // 1. Native lit-region alpha mask: opaque where this pixel's branch/corner is lit.
     const mask = this.wm.maskPixels;
-    const px = this.maskImage.data;
+    const px = this.maskImage;
     for (let i = 0; i < MAP_W * MAP_H; i++) {
       px[i * 4 + 3] = rtable[mask[i]!] ? 255 : 0;
     }
-    this.maskNative.ctx.putImageData(this.maskImage, 0, 0);
+    this.maskNative.putPixels(this.maskImage);
 
     // 2. base = mapa-0 (dark); then paint mapa-1 (lit) through the NN-scaled mask.
-    const b = this.base.ctx;
-    b.imageSmoothingEnabled = false;
-    b.globalCompositeOperation = 'source-over';
-    b.clearRect(0, 0, AI_MAP_W, AI_MAP_H);
+    const b = this.base;
+    b.setSmoothing(false);
+    b.setBlend('source-over');
+    b.clear();
     b.drawImage(this.mapa0, 0, 0, AI_MAP_W, AI_MAP_H);
 
-    const t = this.tmp.ctx;
-    t.imageSmoothingEnabled = false;
-    t.globalCompositeOperation = 'source-over';
-    t.clearRect(0, 0, AI_MAP_W, AI_MAP_H);
+    const t = this.tmp;
+    t.setSmoothing(false);
+    t.setBlend('source-over');
+    t.clear();
     t.drawImage(this.mapa1, 0, 0, AI_MAP_W, AI_MAP_H);
-    t.globalCompositeOperation = 'destination-in';
-    t.drawImage(this.maskNative.canvas, 0, 0, AI_MAP_W, AI_MAP_H); // NN up-scale of the lit mask
-    t.globalCompositeOperation = 'source-over';
+    t.setBlend('destination-in');
+    t.drawImage(this.maskNative, 0, 0, AI_MAP_W, AI_MAP_H); // NN up-scale of the lit mask
+    t.setBlend('source-over');
 
-    b.drawImage(this.tmp.canvas, 0, 0);
+    b.drawImage(this.tmp, 0, 0);
   }
-}
-
-interface Surface {
-  canvas: HTMLCanvasElement;
-  ctx: CanvasRenderingContext2D;
-}
-
-function makeCanvas(w: number, h: number): Surface {
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext('2d', { willReadFrequently: false })!;
-  return { canvas, ctx };
 }

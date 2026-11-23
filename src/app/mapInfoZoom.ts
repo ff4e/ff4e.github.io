@@ -21,7 +21,7 @@ import {
   type InfoButton,
 } from '../render/mapInfo.js';
 import { MAP_H, MAP_W } from '../render/worldMap.js';
-import { ctx } from './dom.js';
+import { createSurface, type Image2D, type Surface2D } from '../render/surface2d.js';
 import { phoneUi } from './touchButtons.js';
 import { ui } from './screenState.js';
 
@@ -46,15 +46,7 @@ function panelCutout(): Uint8ClampedArray | null {
   return cutout;
 }
 
-/** A canvas of `w×h`, with its context. */
-function makeCanvas(w: number, h: number): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
-  const canvas = document.createElement('canvas');
-  canvas.width = w;
-  canvas.height = h;
-  return { canvas, ctx: canvas.getContext('2d')! };
-}
-
-let infoLayer: ReturnType<typeof makeCanvas> | null = null;
+let infoLayer: Surface2D | null = null;
 /** The layer's pixels, reused: the panel repaints every frame of its ~2.7 s digit roll. */
 let infoPixels: Uint8ClampedArray<ArrayBuffer> | null = null;
 
@@ -66,6 +58,7 @@ let infoPixels: Uint8ClampedArray<ArrayBuffer> | null = null;
  * is drawn scaled about the panel's centre, nearest-neighbour so the numerals stay crisp.
  */
 export function drawZoomedInfoPanel(
+  target: Surface2D,
   scale: number,
   zoom: number,
   count: number | null,
@@ -99,16 +92,16 @@ export function drawZoomedInfoPanel(
       }
     }
   }
-  infoLayer ??= makeCanvas(MAP_W, MAP_H);
-  infoLayer.ctx.putImageData(new ImageData(layer, MAP_W, MAP_H), 0, 0);
-  ctx.save();
-  ctx.imageSmoothingEnabled = false;
-  applyInfoZoom(ctx, scale, zoom);
-  ctx.drawImage(infoLayer.canvas, 0, 0, MAP_W * scale, MAP_H * scale);
-  ctx.restore();
+  infoLayer ??= createSurface(MAP_W, MAP_H);
+  infoLayer.putPixels(layer);
+  target.save();
+  target.setSmoothing(false);
+  applyInfoZoom(target, scale, zoom);
+  target.drawImage(infoLayer, 0, 0, MAP_W * scale, MAP_H * scale);
+  target.restore();
 }
 
-let aiArt: { source: ImageBitmap; canvas: HTMLCanvasElement } | null = null;
+let aiArt: { source: Image2D; art: Surface2D } | null = null;
 
 /**
  * The AI-upscaled krokomer with the same cutout applied, for drawing enlarged: the
@@ -116,21 +109,21 @@ let aiArt: { source: ImageBitmap; canvas: HTMLCanvasElement } | null = null;
  * rather than 4×4 steps), over the cutout's shadow. Same size as `krokomer`, so it is a
  * drop-in source for `drawInfoPanelArtAi`. Built once per bitmap.
  */
-export function aiPanelArt(krokomer: ImageBitmap): CanvasImageSource {
+export function aiPanelArt(krokomer: Image2D): Image2D {
   const cut = panelCutout();
   if (!cut) return krokomer;
-  if (aiArt?.source === krokomer) return aiArt.canvas;
+  if (aiArt?.source === krokomer) return aiArt.art;
   const w = krokomer.width;
   const h = krokomer.height;
-  const device = makeCanvas(PANEL_W, PANEL_H);
+  const device = createSurface(PANEL_W, PANEL_H);
   const mask = new Uint8ClampedArray(PANEL_W * PANEL_H * 4);
   for (let i = 3; i < mask.length; i += 4) mask[i] = cut[i] === 255 ? 255 : 0;
-  device.ctx.putImageData(new ImageData(mask, PANEL_W, PANEL_H), 0, 0);
-  const art = makeCanvas(w, h);
-  art.ctx.drawImage(krokomer, 0, 0);
-  art.ctx.globalCompositeOperation = 'destination-in';
-  art.ctx.drawImage(device.canvas, 0, 0, w, h);
-  const out = makeCanvas(w, h);
+  device.putPixels(mask);
+  const art = createSurface(w, h);
+  art.drawImage(krokomer, 0, 0);
+  art.setBlend('destination-in');
+  art.drawImage(device, 0, 0, w, h);
+  const out = createSurface(w, h);
   // Under the device the backdrop is black, not the device's own native pixels: those
   // would bleed out past the soft mask edge as a blurred low-res rim, where black only
   // deepens the outline the artwork already has.
@@ -138,10 +131,10 @@ export function aiPanelArt(krokomer: ImageBitmap): CanvasImageSource {
   for (let i = 3; i < shadow.length; i += 4) {
     if (shadow[i] === 255) shadow[i - 3] = shadow[i - 2] = shadow[i - 1] = 0;
   }
-  const small = makeCanvas(PANEL_W, PANEL_H);
-  small.ctx.putImageData(new ImageData(shadow, PANEL_W, PANEL_H), 0, 0);
-  out.ctx.drawImage(small.canvas, 0, 0, w, h);
-  out.ctx.drawImage(art.canvas, 0, 0);
-  aiArt = { source: krokomer, canvas: out.canvas };
-  return out.canvas;
+  const small = createSurface(PANEL_W, PANEL_H);
+  small.putPixels(shadow);
+  out.drawImage(small, 0, 0, w, h);
+  out.drawImage(art, 0, 0);
+  aiArt = { source: krokomer, art: out };
+  return out;
 }

@@ -21,9 +21,12 @@
  *     styles — and `main.ts` calls it at exactly the point that code used to run.
  * Keep that division. Moving one `appendChild` up here would be silent and wrong.
  */
+import { CanvasSurface2D } from '../render/canvasSurface2d.js';
 
 export const canvas = document.getElementById('screen') as HTMLCanvasElement;
 export const ctx = canvas.getContext('2d')!;
+/** The same canvas as a `Surface2D`, for the screens that draw through that interface. */
+export const screenSurface = new CanvasSurface2D(canvas, ctx);
 // WebGL present surface (P3): a canvas stacked exactly over #screen, shown only
 // while the WebGL backend is active (renderer==='webgl'). #screen stays the
 // layout anchor; this overlay covers it when the GPU presents. Created here so
