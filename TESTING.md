@@ -360,7 +360,7 @@ change that could touch them:
 
 - **audio across an interruption** — switch to another app and back, take a call, or invoke
   Siri; the music and effects must come back on their own, with no touch. See the long
-  comment on `onStateChange` in `src/audio/audio.ts` for why the context cannot simply be
+  comment on `onStateChange` in `src/audio/webAudioBackend.ts` for why the context cannot simply be
   asked whether it is healthy.
 - **the launch screen**, which the Simulator never draws.
 - **haptics** — push a fish into a wall; the blocked move should tap back.

@@ -1,5 +1,10 @@
 /**
- * Web Audio playback of decoded FFS sounds.
+ * The game's sound policy: what plays, and what the game is told about it.
+ *
+ * The playing itself is an `AudioBackend`'s (`audioBackend.ts`) — the browser's Web Audio
+ * in `webAudioBackend.ts`, along with everything it takes to keep iOS audible. What is
+ * here is independent of any of that: packages and names, priorities and `KSnd`,
+ * `playing()` / `talking()`, the music channel.
  *
  * Mirrors the original's model (RSound.pas Sound/Search): sounds live in a set
  * of loaded packages (the room's NNN package plus the global x00 effects), each
@@ -12,9 +17,6 @@
  *     package is installed, into `Pkg.buffers`. See `decodeFfs2` (ffs2Decode.ts) for why
  *     all of it, up front, rather than on first play.
  *   - the 1998 `.ffs` (`x00`, the effects) — `decodeSound` on first use, into `cache`.
- *
- * Browsers gate audio behind a user gesture; the context is created lazily and
- * resumed on the first play triggered by input.
  */
 import { indexFft, parseFft, type FftEntry } from '../data/fft.js';
 import { requiredBytes } from '../render/assetFetch.js';
@@ -23,7 +25,8 @@ import { isFfs2 } from './ffs2.js';
 import { decodeFfs2 } from './ffs2Decode.js';
 import { musicByName, musicSeconds } from './music.js';
 import type { VolumeBus } from '../core/settings.js';
-import { decodeAudioData } from '../platform/audioDecode.js';
+import type { AudioBackend, AudioBackendEvents, SoundBuffer, Voice } from './audioBackend.js';
+import { WebAudioBackend } from './webAudioBackend.js';
 
 /**
  * Talking() lead time (RSound.pas:933, `mez=10000`): the original reports a voice
@@ -37,27 +40,6 @@ const TALKING_MEZ_MS = TALKING_MEZ_SEC * 1000;
  *  reports whether the room track is sounding; `KSnd(-999)` stops it. */
 export const MUSIC_PRIOR = -999;
 
-/** How long to let iOS finish restoring the audio session before opening a new context
- *  over the interrupted one (see `scheduleRebuild`). Long enough that the device is ready,
- *  short enough that the gap is heard as the app animating back rather than as a fault. */
-const REBUILD_DELAY_MS = 400;
-/** How long to give a rebuilt context to prove its clock is moving (`verifyAudible`).
- *  A working context advances within a frame or two; this is generous on purpose. */
-const VERIFY_DELAY_MS = 500;
-/** Rebuild attempts per interruption. A device that has not come back by the third try is
- *  not coming back, and retrying for ever would be a leak dressed up as a repair. */
-const REBUILD_ATTEMPTS = 3;
-
-/** Whether the page is on screen, for the audio log. The suspicion these lines exist to
- *  settle is that iOS announces the end of an interruption before the app is actually
- *  back, so a repair can spend its whole budget while nothing can play yet — which is
- *  only readable if each attempt says where it stood. `document` is not a given: the
- *  engine is also exercised under the test runner's node environment. */
-function pageVisibility(): string {
-  const d = (globalThis as { document?: Document }).document;
-  return d ? (d.hidden ? 'hidden' : 'visible') : 'n/a';
-}
-
 interface Pkg {
   /** Package id, as the original names its files: '025', 'x01', 'restored'. */
   id: string;
@@ -65,18 +47,10 @@ interface Pkg {
   /** The 1998 delta-coded bodies, for a package that still ships as `.ffs` (x00). */
   ffs: Uint8Array | null;
   /** Decoded segments by sound name, for a staged `.ffs2`. See `decodeFfs2`. */
-  buffers: Map<string, AudioBuffer>;
+  buffers: Map<string, SoundBuffer>;
 }
 
 export class AudioEngine {
-  private ctx: AudioContext | null = null;
-  private master: GainNode | null = null;
-  /** Per-category output buses (effects / voices / music), each a GainNode the
-   *  Options sliders adjust (NastavZvuk, Uovl.pas:280). Every sound routes through
-   *  the bus matching its category, so a slider scales just that category live. */
-  private buses: Record<VolumeBus, GainNode | null> = { effect: null, voice: null, music: null };
-  /** The slider-driven gain multiplier per bus (1.0 = the category's default level). */
-  private busGain: Record<VolumeBus, number> = { effect: 1, voice: 1, music: 1 };
   private globals: Pkg[] = [];
   /** The current room's own 0NN package. */
   private roomPkg: Pkg | null = null;
@@ -87,7 +61,7 @@ export class AudioEngine {
    * and survive a room change, where a shared cache would drop them for good (nothing
    * could decode them again synchronously).
    */
-  private cache = new Map<string, AudioBuffer>();
+  private cache = new Map<string, SoundBuffer>();
   /** Active voices by priority, with the wall-clock time they finish. */
   private activeUntil = new Map<number, number>();
   /**
@@ -108,12 +82,11 @@ export class AudioEngine {
   private pending = new Map<number, Set<number>>();
   private nextReservation = 0;
   /** Every currently-playing one-shot source (for KillSnd). */
-  private voices = new Set<AudioBufferSourceNode>();
+  private voices = new Set<Voice>();
   /** Sources tracked per priority, so a single priority can be stopped (KSnd). */
-  private priorSources = new Map<number, Set<AudioBufferSourceNode>>();
+  private priorSources = new Map<number, Set<Voice>>();
   /** The looping room-music source (MusicCycle, prior -999) + its identity. */
-  private musicSrc: AudioBufferSourceNode | null = null;
-  private musicGain: GainNode | null = null;
+  private musicSrc: Voice | null = null;
   private musicName = '';
   /** Track downloads started OUTSIDE this engine (room entry), so starts can join them. */
   private musicLoads = new Map<string, Promise<void>>();
@@ -124,38 +97,38 @@ export class AudioEngine {
   /** Bumped by every start and every stop, so an in-flight start can tell whether it
    *  is still the current intent by the time its decode resolves (see playMusic). */
   private musicGen = 0;
-  /** True while a modal overlay has deliberately suspended the context (setModalPause). */
-  private modalPaused = false;
   /** The last looping track and where it came from, so a rebuilt context can put it back
-   *  without the caller having to notice a rebuild happened (see rebuildCtx). */
+   *  without the caller having to notice a rebuild happened (see outputLost). */
   private musicUrl = '';
   private musicLoop = 0;
-  /** Set when this context has been interrupted and is therefore no longer to be trusted,
-   *  whatever it says about itself afterwards. See `onStateChange`. */
-  private interrupted = false;
-  /** Guards against queueing two rebuilds for one interruption. */
-  private rebuildQueued = false;
   /** Wall-clock time the modal pause began, so `activeUntil` can be carried across it. */
   private modalPausedAt = 0;
-  private musicBufs = new Map<string, AudioBuffer>();
+  private musicBufs = new Map<string, SoundBuffer>();
   /** Debug: recent play names with a timestamp (ring buffer) + a console line so the
    *  source of any glitch can be identified live in the browser console. */
   soundLog: Array<{ name: string; vol: number; t: number }> = [];
   logToConsole = true;
   /** Debug: the audio's LIFETIME, on the same switch as the sound log.
    *
-   *  Everything below about surviving an interruption happens on a timer, invisibly, and
+   *  Everything the backend does to survive an interruption happens on a timer, invisibly, and
    *  ends either in sound or in a silence that no longer tries. That silence used to leave
    *  no trace at all — the one bug report it could produce was "sometimes I have to touch
    *  the screen", with nothing to read. These lines are what makes it a fact instead. */
   private logAudio(msg: string): void {
-    if (this.logToConsole) console.log(`\u{1F39B}\uFE0F [audio] ${msg}  @${Math.round(performance.now())}ms`);
+    if (this.logToConsole) console.log(`\u{1F39B}\uFE0F [audio] ${msg}  @${Math.round(this.backend.now())}ms`);
   }
   private logSound(name: string, vol: number): void {
-    const t = Math.round(performance.now());
+    const t = Math.round(this.backend.now());
     this.soundLog.push({ name, vol, t });
     if (this.soundLog.length > 200) this.soundLog.shift();
     if (this.logToConsole) console.log(`🔊 [sound] ${name}  vol=${vol.toFixed(2)}  @${t}ms`);
+  }
+
+  /** What makes the noise. The browser's unless a host supplies its own. */
+  private readonly backend: AudioBackend;
+
+  constructor(backend: (events: AudioBackendEvents) => AudioBackend = (events) => new WebAudioBackend(events)) {
+    this.backend = backend({ outputLost: () => this.outputLost(), log: (msg) => this.logAudio(msg) });
   }
 
   /** A persistent global package (e.g. x00 effects). */
@@ -201,7 +174,8 @@ export class AudioEngine {
   private async makePkg(id: string, fftBytes: Uint8Array, body: Uint8Array): Promise<Pkg> {
     const entries = indexFft(parseFft(fftBytes));
     if (!isFfs2(body)) return { id, entries, ffs: body, buffers: new Map() };
-    return { id, entries, ffs: null, buffers: await decodeFfs2(this.ensureCtx(), entries, body) };
+    this.backend.wake();
+    return { id, entries, ffs: null, buffers: await decodeFfs2(this.backend, entries, body) };
   }
 
   /**
@@ -252,239 +226,35 @@ export class AudioEngine {
     return this.roomPkg ? [this.roomPkg, ...this.globals] : this.globals;
   }
 
-  private ensureCtx(): AudioContext {
-    if (!this.ctx) {
-      this.ctx = new AudioContext();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = 0.8;
-      this.master.connect(this.ctx.destination);
-      // The one warning iOS gives that the audio has been taken away. See onStateChange.
-      // The context is passed in because a rebuild leaves the old one's listener alive
-      // until it is collected, and by then `this.ctx` names its replacement.
-      const ctx = this.ctx;
-      ctx.addEventListener('statechange', () => this.onStateChange(ctx));
-      // The three category buses sit between the per-sound gains and the master,
-      // so a slider change scales a whole category at once (NastavZvuk).
-      for (const bus of ['effect', 'voice', 'music'] as const) {
-        const g = this.ctx.createGain();
-        g.gain.value = this.busGain[bus];
-        g.connect(this.master);
-        this.buses[bus] = g;
-      }
-    }
-    // Browsers start the context suspended until a gesture unlocks it, so any call
-    // that is about to make a sound nudges it awake. `modalPaused` is the one state
-    // where a suspended context is DELIBERATE (see setModalPause): without this guard
-    // the next play()/busNode() from anywhere would silently un-pause the whole game.
-    //
-    // Only `'suspended'`. iOS has a third state — backgrounding moves the context to
-    // `'interrupted'`, a WebKit extension absent from `AudioContextState` — and resuming
-    // one of those rejects with "Failed to start the audio device". That state belongs to
-    // the rebuild path (onStateChange), which replaces the context instead of arguing with
-    // it; nudging it from here would only add an unhandled rejection to the ~400 ms before
-    // the replacement lands. `'closed'` never happens outside rebuildCtx.
-    //
-    // The rejection is caught because this nudge is speculative. iOS refuses a resume that
-    // is not inside a user gesture, and this runs from anything about to make a sound —
-    // including the boot music, before the player has touched anything. Unhandled, that
-    // refusal reaches the boot error handler and puts the fatal overlay over a game that
-    // is fine. There is nothing to do about it here: `handleGesture` unlocks the context
-    // on the first touch, which is the browser's own bargain.
-    if (this.ctx.state === 'suspended' && !this.modalPaused) {
-      void this.ctx.resume().catch(() => undefined);
-    }
-    return this.ctx;
-  }
-
-  /**
-   * Notice that iOS has taken the audio away, and put it back when it is willing.
-   *
-   * Backgrounding the app moves the context to `'interrupted'` — a WebKit state the spec
-   * does not have, so `AudioContextState` does not name it — and coming back moves it to
-   * `'running'` again. That second transition is a lie, and it is the whole bug. Measured
-   * on an iPhone 12 (iOS 26.6.1), across an app-switch away and back:
-   *
-   *     statechange -> interrupted  currentTime 38.42
-   *     statechange -> running      currentTime 38.42     <- and it never moves again
-   *
-   * The context reports itself running for ever after while its clock stands still and it
-   * plays nothing. So NOTHING the context says about itself can be used to decide whether
-   * the game can be heard, which is why two earlier attempts at this failed: resuming an
-   * interrupted context rejects with "Failed to start the audio device", and by the time
-   * a finger arrives the state reads 'running' and looks fine.
-   *
-   * What is reliable is that the interruption itself is announced. So remember it, and
-   * when iOS says it has finished, replace the context rather than believe it.
-   */
-  private onStateChange(ctx: AudioContext): void {
-    // A dead context's last statechange must not be answered with its replacement's
-    // state — rebuildCtx closes the old one, and that close is itself a statechange.
-    if (ctx !== this.ctx) return;
-    const state: string = ctx.state;
-    this.logAudio(`statechange -> ${state}  clock=${ctx.currentTime.toFixed(2)}`);
-    if (state === 'interrupted') {
-      this.interrupted = true;
-      return;
-    }
-    // Out the other side. `'closed'` is us, in rebuildCtx, and must not re-trigger.
-    if (this.interrupted && state !== 'closed') this.scheduleRebuild();
-  }
-
-  /**
-   * Replace the context shortly after iOS hands it back.
-   *
-   * Not immediately: the transition out of `'interrupted'` is the moment iOS starts
-   * putting the audio session back, not the moment it has, and a context opened into the
-   * middle of that can fail to start — which would trade one silence for another. The
-   * delay is a guess, so `verifyAudible` checks the guess rather than trusting it.
-   */
-  private scheduleRebuild(): void {
-    if (this.rebuildQueued) return;
-    this.rebuildQueued = true;
-    setTimeout(() => {
-      this.rebuildQueued = false;
-      // Came back to a help overlay: stay silent on purpose, but stay OWED. Clearing
-      // `interrupted` here would leave setModalPause resuming the dead context when the
-      // overlay closes, and nothing afterwards could tell it was dead — it reports
-      // `'running'` for ever. That is the original bug, on the path that fixes it.
-      if (this.modalPaused) {
-        this.logAudio('rebuild deferred: modal pause, interruption still owed');
-        return;
-      }
-      this.logAudio(`rebuild 1/${REBUILD_ATTEMPTS}  page=${pageVisibility()}`);
-      this.rebuildCtx(); // clears `interrupted`
-      this.verifyAudible(1);
-    }, REBUILD_DELAY_MS);
-  }
-
-  /**
-   * Check that the new context is really playing, and try again if it is not.
-   *
-   * A context that cannot reach the audio device still says `'running'`, so the only
-   * honest test is whether its clock moves: `currentTime` is driven by the device, and
-   * stands still exactly when nothing can be heard. Bounded, because a device that will
-   * not come back must not be retried for the rest of the session.
-   */
-  private verifyAudible(attempt: number): void {
-    const started = this.ctx?.currentTime ?? 0;
-    setTimeout(() => {
-      const ctx = this.ctx;
-      if (!ctx) return;
-      // A modal opened mid-verify. Hand the unfinished repair back rather than dropping
-      // it: `interrupted` is what setModalPause and handleGesture both read.
-      if (this.modalPaused) {
-        this.interrupted = true;
-        return;
-      }
-      if (ctx.currentTime > started) {
-        this.logAudio(`audible after ${attempt} rebuild(s)  state=${ctx.state as string}`);
-        return; // the clock is moving: it can be heard
-      }
-      if (attempt >= REBUILD_ATTEMPTS) {
-        // Out of attempts, so stop rebuilding — but stay OWED. The context that is left is
-        // dead and says `'running'`, and `interrupted` is the only record of that; dropping
-        // it here would tell every later repair that there is nothing to repair. Kept, the
-        // next trigger of any kind — a touch, a late announcement from iOS, the app coming
-        // back on screen again — finds the debt and pays it.
-        this.interrupted = true;
-        this.logAudio(
-          `SILENT after ${attempt} rebuild(s), still owed  ` +
-            `state=${ctx.state as string}  page=${pageVisibility()}`,
-        );
-        return;
-      }
-      this.logAudio(`silent, rebuild ${attempt + 1}/${REBUILD_ATTEMPTS}  page=${pageVisibility()}`);
-      this.rebuildCtx();
-      this.verifyAudible(attempt + 1);
-    }, VERIFY_DELAY_MS);
-  }
-
-  /**
-   * The app is back on screen. Repair the audio if it is owed one. Wired to
-   * `visibilitychange` in boot.
-   *
-   * This is the trigger that is always there, and it had to be measured to be believed.
-   * iOS announces the START of an interruption every single time; it announces the END
-   * only sometimes. Six app switches on an iPhone 12 produced six `-> interrupted`
-   * events and two announcements back (a `'suspended'`, 10.3 s and 3.2 s later). The
-   * other four produced NO statechange at all between the interruption and the player
-   * touching the screen — so the automatic repair, which hangs off that announcement,
-   * simply never ran. The player came back to a silent game four times out of six and
-   * had to touch it to wake it up.
-   *
-   * The reason this was passed over the first time is real, but it is an argument about
-   * ACTING, not about LISTENING: `visibilitychange` fires while the app is still animating
-   * back, when a fresh context can still fail to start. That is why this goes through
-   * `scheduleRebuild` like every other trigger — 400 ms before opening anything, then
-   * `verifyAudible` checking the guess against the clock and trying again. Being early is
-   * what that machinery is for. Being absent is what nothing can fix.
-   *
-   * The announcement path stays. It is faster when it comes, `rebuildQueued` collapses the
-   * two into one rebuild when both come, and a phone call ending while the app is already
-   * on screen never changes visibility at all.
-   */
+  /** The app is back on screen: the backend repairs its output if it is owed a repair
+   *  (`WebAudioBackend.onVisible`). Wired to `visibilitychange` in boot. */
   handleVisible(): void {
-    if (!this.interrupted) return;
-    this.logAudio('back on screen with an interruption owed');
-    this.scheduleRebuild();
+    this.backend.onVisible();
   }
 
-  /**
-   * Repair the audio from inside a user gesture. Wired to pointerdown/keydown in boot.
-   *
-   * The belt to `onStateChange`'s brace: if the transition out of `'interrupted'` never
-   * arrives, the interruption stays remembered and the next touch acts on it. A gesture is
-   * also the one context in which iOS will honour a `resume()`, which is what the ordinary
-   * non-iOS case below needs.
-   */
+  /** A user gesture: the moment a browser lets audio start, and repairs it
+   *  (`WebAudioBackend.onGesture`). Wired to pointerdown/keydown in boot. */
   handleGesture(): void {
-    const ctx = this.ctx;
-    if (!ctx || this.modalPaused) return;
-    this.logAudio(`gesture  state=${ctx.state as string}  interrupted=${this.interrupted}`);
-    if (this.interrupted) {
-      this.interrupted = false;
-      this.rebuildCtx();
-      this.verifyAudible(1);
-      return;
-    }
-    // The ordinary suspended context — a gesture unlock, or a browser that parked it.
-    // Resuming keeps every sound's place, so prefer it while it still works.
-    if ((ctx.state as string) !== 'running') {
-      void ctx.resume().catch(() => {
-        // It refused, so it is the iOS case after all and only a new context will do.
-        this.rebuildCtx();
-        this.verifyAudible(1);
-      });
-    }
+    this.backend.onGesture();
   }
 
   /**
-   * Throw the context away and build another one, then put the room music back.
-   *
-   * Everything sounding is lost — there is no way to move a playing source to another
-   * context — so this is the expensive repair and `handleGesture` is careful about when
-   * it is worth it. The decoded buffers are NOT thrown away: an `AudioBuffer` is data
-   * rather than a piece of the graph, so the ~13 MB of speech a room decoded on the way
-   * in stays valid, which is the difference between a rebuild costing a moment and
-   * costing a reload.
+   * The backend's output was lost and is being replaced (`AudioBackendEvents.outputLost`):
+   * forget everything that was sounding, and hand back how to put the room music back
+   * on the new one.
    */
-  private rebuildCtx(): void {
-    const old = this.ctx;
+  private outputLost(): () => void {
     // killAll() clears these, so take them first: the point of the rebuild is that the
     // player hears the room again, and the room is mostly its music.
     const name = this.musicName;
     const url = this.musicUrl;
     const loop = this.musicLoop;
     this.killAll();
-    this.ctx = null;
-    this.master = null;
-    this.buses = { effect: null, voice: null, music: null };
-    this.interrupted = false;
-    if (old) void old.close().catch(() => undefined);
-    this.ensureCtx();
-    if (name && url) {
-      void this.playMusic(name, url, loop).catch(() => undefined);
-    }
+    return () => {
+      if (name && url) {
+        void this.playMusic(name, url, loop).catch(() => undefined);
+      }
+    };
   }
 
   /**
@@ -499,12 +269,10 @@ export class AudioEngine {
    * covers the whole play area while the game is still notionally running.
    */
   setModalPause(on: boolean): void {
-    if (this.modalPaused === on) return;
-    this.modalPaused = on;
-    const ctx = this.ctx;
+    if (this.backend.paused === on) return;
     if (on) {
-      this.modalPausedAt = performance.now();
-      if (ctx) void ctx.suspend();
+      this.modalPausedAt = this.backend.now();
+      this.backend.setPaused(true);
       return;
     }
     // Suspending stops the AUDIO clock; `activeUntil` is bookkeeping on the WALL clock
@@ -519,7 +287,7 @@ export class AudioEngine {
     // (looping effects, MusicCycle) is left alone. A one-shot STARTED during the pause
     // would be over-held by up to the pause length, which is the safe direction and is
     // unreachable anyway: the logic tick is frozen, so nothing is calling play().
-    const delta = performance.now() - this.modalPausedAt;
+    const delta = this.backend.now() - this.modalPausedAt;
     if (delta > 0) {
       for (const [prior, until] of this.activeUntil) {
         if (until !== Infinity && until > this.modalPausedAt) {
@@ -527,36 +295,20 @@ export class AudioEngine {
         }
       }
     }
-    // An interruption that landed while the overlay was up was deliberately left owed
-    // (scheduleRebuild, verifyAudible). Resuming would hand back a context that says
-    // `'running'` and plays nothing, so pay the debt instead.
-    if (this.interrupted) {
-      this.rebuildCtx();
-      this.verifyAudible(1);
-      return;
-    }
-    if (ctx) void ctx.resume();
+    this.backend.setPaused(false);
   }
 
   /** Set a category bus gain multiplier (a slider index -> level, via settings). */
   setBusGain(bus: VolumeBus, gain: number): void {
-    this.busGain[bus] = gain;
-    const g = this.buses[bus];
-    if (g) g.gain.value = gain;
-  }
-
-  /** The output node a sound of the given category should connect to. */
-  private busNode(bus: VolumeBus): GainNode {
-    this.ensureCtx();
-    return this.buses[bus] ?? this.master!;
+    this.backend.setBusGain(bus, gain);
   }
 
   /** Resume the AudioContext (browsers gate it behind a user gesture). */
   resume(): void {
-    this.ensureCtx();
+    this.backend.wake();
   }
 
-  private buffer(name: string): AudioBuffer | null {
+  private buffer(name: string): SoundBuffer | null {
     const cached = this.cache.get(name);
     if (cached) return cached;
     for (const pkg of this.pkgs) {
@@ -569,10 +321,8 @@ export class AudioEngine {
       const e = pkg.entries.get(name);
       if (e && e.delka > 0) {
         const pcm = decodeSound(pkg.ffs, e.zvuk, e.delka);
-        const ctx = this.ensureCtx();
-        const buf = ctx.createBuffer(1, pcm.length, FFS_SAMPLE_RATE);
-        const ch = buf.getChannelData(0);
-        for (let i = 0; i < pcm.length; i++) ch[i] = pcm[i]! / 32768;
+        this.backend.wake();
+        const buf = this.backend.fromPcm16(pcm, FFS_SAMPLE_RATE);
         this.cache.set(name, buf);
         return buf;
       }
@@ -611,17 +361,10 @@ export class AudioEngine {
       this.startTracked(buf, prior, false, volume, bus);
       return;
     }
-    const ctx = this.ensureCtx();
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    const g = ctx.createGain();
-    g.gain.value = volume;
-    src.connect(g);
-    g.connect(this.busNode(bus));
-    src.start();
+    this.backend.wake();
+    const src = this.backend.start(buf, { gain: volume, bus }, () => this.voices.delete(src));
     // Track the source so KillSnd can stop it when leaving a room.
     this.voices.add(src);
-    src.addEventListener('ended', () => this.voices.delete(src));
   }
 
   /**
@@ -639,21 +382,17 @@ export class AudioEngine {
 
   /** Start a buffer as a priority-tracked source (shared by snd / musicSnd). */
   private startTracked(
-    buf: AudioBuffer,
+    buf: SoundBuffer,
     prior: number,
     loop: boolean,
     volume: number,
     bus: VolumeBus = 'effect',
   ): void {
-    const ctx = this.ensureCtx();
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.loop = loop;
-    const g = ctx.createGain();
-    g.gain.value = volume;
-    src.connect(g);
-    g.connect(this.busNode(bus));
-    src.start();
+    this.backend.wake();
+    const src = this.backend.start(buf, { gain: volume, bus, loop }, () => {
+      this.voices.delete(src);
+      this.priorSources.get(prior)?.delete(src);
+    });
     this.voices.add(src);
     let set = this.priorSources.get(prior);
     if (!set) {
@@ -661,11 +400,7 @@ export class AudioEngine {
       this.priorSources.set(prior, set);
     }
     set.add(src);
-    src.addEventListener('ended', () => {
-      this.voices.delete(src);
-      this.priorSources.get(prior)?.delete(src);
-    });
-    this.activeUntil.set(prior, loop ? Infinity : performance.now() + buf.duration * 1000);
+    this.activeUntil.set(prior, loop ? Infinity : this.backend.now() + buf.duration * 1000);
   }
 
   /**
@@ -751,7 +486,7 @@ export class AudioEngine {
   ): Promise<void> {
     // The context is opened here, before anything awaits, because `decodeMusic` needs one
     // and a start that reaches it only after a download would open it late.
-    this.ensureCtx();
+    this.backend.wake();
     // Claim the priority before the first await, so `playing(prior)` is true from the
     // tick that asked for the track — see reserve(). KORALY is the room that showed
     // why: it cues `music('rybky08', 10)` at score-step 19 (koraly.ts:373) and its own
@@ -840,11 +575,7 @@ export class AudioEngine {
     const set = this.priorSources.get(prior);
     if (set) {
       for (const src of set) {
-        try {
-          src.stop();
-        } catch {
-          /* already stopped */
-        }
+        this.backend.stop(src);
         this.voices.delete(src);
       }
       this.priorSources.delete(prior);
@@ -857,13 +588,7 @@ export class AudioEngine {
   killVoices(except: readonly number[] = []): void {
     const kept = except.map((p) => [p, this.priorSources.get(p), this.activeUntil.get(p)] as const);
     for (const [, set] of kept) for (const src of set ?? []) this.voices.delete(src);
-    for (const src of this.voices) {
-      try {
-        src.stop();
-      } catch {
-        /* already stopped */
-      }
-    }
+    for (const src of this.voices) this.backend.stop(src);
     // Cancel every start still fetching/decoding — otherwise a track requested a
     // moment before this KillSnd installs itself after it, under the next room. The
     // room-music channel is exempt because THIS port's killVoices() is not the
@@ -900,7 +625,7 @@ export class AudioEngine {
     // back as silent (see reserve).
     if (this.pending.has(prior)) return true;
     const until = this.activeUntil.get(prior);
-    return until !== undefined && performance.now() < until;
+    return until !== undefined && this.backend.now() < until;
   }
 
   /**
@@ -913,7 +638,7 @@ export class AudioEngine {
     const until = this.activeUntil.get(prior);
     if (until === undefined) return false;
     if (until === Infinity) return true;
-    return performance.now() < until - TALKING_MEZ_MS;
+    return this.backend.now() < until - TALKING_MEZ_MS;
   }
 
   /** Play a random one of `names` (e.g. sp-zuch1 / sp-zuch2). */
@@ -977,9 +702,9 @@ export class AudioEngine {
    */
   async decodeMusic(name: string, bytes: Uint8Array): Promise<void> {
     if (this.musicBufs.has(name)) return;
-    const ctx = this.ensureCtx();
+    this.backend.wake();
     const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
-    this.musicBufs.set(name, await decodeAudioData(ctx, ab));
+    this.musicBufs.set(name, await this.backend.decode(ab));
   }
   async playMusic(name: string, url: string, loopSample: number): Promise<void> {
     if (this.musicName === name && this.musicSrc) {
@@ -1017,7 +742,7 @@ export class AudioEngine {
     // the only one holding it; `musicGen` is what tells it whether it still is.
     const claim = this.reserve(MUSIC_PRIOR);
     try {
-      const ctx = this.ensureCtx();
+      this.backend.wake();
       let buf = this.musicBufs.get(name);
       if (!buf) {
         // Join a download the room entry already started rather than opening a second one
@@ -1030,7 +755,7 @@ export class AudioEngine {
       }
       if (!buf) {
         const bytes = await requiredBytes(url, 'the music', 'mustHave', { init: { priority: 'low' } as RequestInit });
-        buf = await decodeAudioData(ctx, bytes.buffer.slice(0) as ArrayBuffer);
+        buf = await this.backend.decode(bytes.buffer.slice(0) as ArrayBuffer);
         this.musicBufs.set(name, buf);
       }
       // Superseded while decoding (room changed, music stopped, or a newer start for
@@ -1040,10 +765,7 @@ export class AudioEngine {
       if (this.musicGen !== gen) return;
       this.release(MUSIC_PRIOR, claim); // handed over to the source started below
       this.logSound(name + ' (music-loop)', 1);
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.loop = true;
-      src.loopStart = loopSample > 0 ? musicSeconds(loopSample) : 0;
+      const loopStart = loopSample > 0 ? musicSeconds(loopSample) : 0;
       // The END of the loop, in the original's samples — NOT `buf.duration`.
       //
       // A lossy codec does not decode to exactly the sample count it was given: AAC codes
@@ -1056,14 +778,9 @@ export class AudioEngine {
       // test/musicStaging.test.ts), so this ends the loop where the music ends. Falling
       // back to `buf.duration` keeps a name the table does not know playable.
       const frames = musicByName(name)?.frames;
-      src.loopEnd = frames !== undefined ? Math.min(musicSeconds(frames), buf.duration) : buf.duration;
-      const g = ctx.createGain();
-      g.gain.value = 0.45; // music sits under the voices/effects
-      src.connect(g);
-      g.connect(this.busNode('music'));
-      src.start();
-      this.musicSrc = src;
-      this.musicGain = g;
+      const loopEnd = frames !== undefined ? Math.min(musicSeconds(frames), buf.duration) : buf.duration;
+      // music sits under the voices/effects
+      this.musicSrc = this.backend.start(buf, { gain: 0.45, bus: 'music', loop: true, loopStart, loopEnd });
       this.activeUntil.set(MUSIC_PRIOR, Infinity); // MusicCycle(-999): playing(-999) true
     } catch (e) {
       // The track could not be fetched or decoded, so nothing will ever sound on this
@@ -1098,16 +815,10 @@ export class AudioEngine {
   /** Stop the looping room music (on room change). */
   stopMusic(): void {
     if (this.musicSrc) {
-      try {
-        this.musicSrc.stop();
-      } catch {
-        /* already stopped */
-      }
-      this.musicSrc.disconnect();
-      this.musicGain?.disconnect();
+      this.backend.stop(this.musicSrc);
+      this.backend.detach(this.musicSrc);
     }
     this.musicSrc = null;
-    this.musicGain = null;
     this.musicName = '';
     this.clearReserved(MUSIC_PRIOR); // any in-flight start is cancelled below
     // Invalidate any in-flight start: without this, a decode that resolves after this
