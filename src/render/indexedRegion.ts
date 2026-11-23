@@ -1,3 +1,5 @@
+import { createScratchCanvas } from './scratchCanvas.js';
+
 /**
  * Draw a rectangle of INDEXED game art onto a 2D context, scaled up with nearest-
  * neighbour.
@@ -59,7 +61,7 @@ export function drawIndexedRegion(
   scale: number,
 ): void {
   const { x, y, w, h } = region;
-  scratch ??= document.createElement('canvas');
+  scratch ??= createScratchCanvas();
   if (scratch.width !== w || scratch.height !== h) {
     scratch.width = w;
     scratch.height = h;

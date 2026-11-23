@@ -18,6 +18,15 @@ export interface NativeApi {
   /** Decode a WebP to straight-alpha RGBA8 and upload it as a GPU texture. */
   decodeWebp(buf: ArrayBuffer): NativeTexture;
   releaseTexture(id: number): void;
+  /** The same decode to CPU memory, straight RGBA8 — for the scratch canvas's drawImage. */
+  decodeWebpRgba(buf: ArrayBuffer): ArrayBuffer;
+  /**
+   * A texture from CPU pixels (`w`×`h`×4 bytes): RGBA8, or with `mask` one FP32 per texel
+   * (a mirror's glass mask, as GlAiScreen uploads it). Returns its id.
+   */
+  createTexture(px: ArrayBuffer, w: number, h: number, mask: boolean): number;
+  /** Replace a `w`×`h` rect of an RGBA8 texture at (x,y) — `texSubImage2D`. */
+  updateTexture(id: number, x: number, y: number, w: number, h: number, px: ArrayBuffer): void;
   /** RANDPOLE (256 bytes), for the dissolve pass. Called once. */
   setRandTable(buf: ArrayBuffer): void;
 
@@ -36,6 +45,9 @@ export interface NativeApi {
   /** Replace the ZX band texture: `n` RGBA texels, one per native row. */
   setBands(rgba: ArrayBuffer, n: number): void;
   disintegrate(tex: number, x: number, y: number, w: number, h: number, scale: number, nativeW: number, rozpad: number): void;
+  /** GlAiScreen.mirrorGlass's pass, with its uniforms in the same order (MIRROR_FS). */
+  mirror(mask: number, rx0: number, rx1: number, ry0: number, ry1: number, dx0: number, dx1: number,
+    k: number, mx: number, my: number, mw: number, mh: number): void;
   /** Show the composite in the window (box-filtered to fit). */
   present(): void;
   /** Write the composite's RGBA (top-down) to `path`, prefixed by u32 w, u32 h. */

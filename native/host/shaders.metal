@@ -101,6 +101,28 @@ fragment float4 fs_disint(VSOut in [[stage_in]], texture2d<float> uSprite [[text
   return uSprite.read(uint2(col, row));
 }
 
+// MIRROR_FS — KresliZrcadlo's reflection under the mirror's glass. `uSrc` is the
+// composite as it was before this pass (see n_mirror in main.c).
+struct MirrorU { int rx0; int rx1; int ry0; int ry1; int dx0; int dx1; int k; int mx; int my; int mw; int mh; int _p; };
+fragment float4 fs_mirror(VSOut in [[stage_in]], texture2d<float> uSrc [[texture(0)]],
+                          texture2d<float> uMask [[texture(1)]], constant MirrorU& u [[buffer(0)]]) {
+  int D = int(in.pos.x);
+  int sy = int(in.pos.y);
+  float4 col = uSrc.read(uint2(D, sy));
+  int my = sy - u.my;
+  int mx = D - u.mx;
+  if (sy >= u.ry0 && sy < u.ry1 && D >= u.dx0 && D < u.dx1 &&
+      my >= 0 && my < u.mh && mx >= 0 && mx < u.mw) {
+    float g = uMask.read(uint2(mx, my)).r;
+    int sX = u.k - D;
+    if (g > 0.0 && sX >= u.rx0 && sX < u.rx1) {
+      float4 src = uSrc.read(uint2(sX, sy));
+      col = float4(g >= 1.0 ? src.rgb : src.rgb * g + col.rgb * (1.0 - g), 1.0);
+    }
+  }
+  return col;
+}
+
 // PRESENT_FS — box-downsample the ×S composite into the window. `origin` is the
 // letterboxed viewport's top-left in drawable pixels ([[position]] is target-relative).
 struct PresentU { float2 size; float2 origin; float2 footprint; int taps; int _p; };

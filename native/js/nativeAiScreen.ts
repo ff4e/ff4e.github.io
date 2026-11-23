@@ -5,22 +5,61 @@
  * WebGL backend calls, so the only thing the native side owns is the shader that
  * consumes those numbers. That is what keeps the two backends comparable.
  */
-import { RIPPLE_GPU_SLOTS, activeRipples, wobblePhase } from '../../src/render/aiTarget.js';
+import { RIPPLE_GPU_SLOTS, activeRipples, aiImagePatch, aiImageRevision, wobblePhase } from '../../src/render/aiTarget.js';
 import type { AiImage, AiTarget, AiWobble } from '../../src/render/aiTarget.js';
 import type { NativeTexture } from './nativeApi.js';
+import { NativeCanvas } from './nativeCanvas.js';
 
-function texOf(img: AiImage): NativeTexture {
-  const t = img as unknown as NativeTexture;
-  if (typeof t.id !== 'number') throw new Error('native target was handed an image it did not decode (a DOM canvas?)');
-  return t;
+/** The bytes of a typed-array view as a whole ArrayBuffer, which is what the host reads. */
+function bytesOf(v: ArrayBufferView): ArrayBuffer {
+  const whole = v.byteOffset === 0 && v.byteLength === v.buffer.byteLength;
+  return (whole ? v.buffer : v.buffer.slice(v.byteOffset, v.byteOffset + v.byteLength)) as ArrayBuffer;
 }
+
+/** Frees a scratch canvas's or a mask's texture once nothing references the source. */
+const reclaim = typeof FinalizationRegistry === 'function'
+  ? new FinalizationRegistry<number>((id) => __native.releaseTexture(id))
+  : null;
 
 export class NativeAiScreen implements AiTarget {
   width = 0;
   height = 0;
+  /**
+   * Textures for the scratch canvases the room hands over (classic-sprite fallbacks,
+   * LODE's wreck background), by identity plus `aiImageRevision` — the rule of
+   * GlAiScreen.texture, including taking the last patch when exactly one revision behind.
+   */
+  private readonly canvasTex = new WeakMap<NativeCanvas, { id: number; revision: number }>();
+  private readonly maskTex = new WeakMap<Float32Array, number>();
   private readonly rip = new Array<number>(RIPPLE_GPU_SLOTS * 4).fill(0);
   private readonly ripPh = new Array<number>(RIPPLE_GPU_SLOTS).fill(0);
   private bandBuf = new Uint8Array(0);
+
+  private texOf(img: AiImage): NativeTexture {
+    if (!(img instanceof NativeCanvas)) {
+      const t = img as unknown as NativeTexture;
+      if (typeof t.id !== 'number') throw new Error('native target was handed an image it did not decode (a DOM canvas?)');
+      return t;
+    }
+    const revision = aiImageRevision(img);
+    const hit = this.canvasTex.get(img);
+    if (!hit) {
+      const id = __native.createTexture(bytesOf(img.data), img.width, img.height, false);
+      reclaim?.register(img, id);
+      this.canvasTex.set(img, { id, revision });
+      return { id, width: img.width, height: img.height };
+    }
+    if (hit.revision !== revision) {
+      const patch = aiImagePatch(img);
+      if (patch && patch.revision === revision && hit.revision === revision - 1) {
+        __native.updateTexture(hit.id, patch.x, patch.y, patch.w, patch.h, bytesOf(patch.data));
+      } else {
+        __native.updateTexture(hit.id, 0, 0, img.width, img.height, bytesOf(img.data));
+      }
+      hit.revision = revision;
+    }
+    return { id: hit.id, width: img.width, height: img.height };
+  }
 
   begin(w: number, h: number): void {
     this.width = w;
@@ -37,7 +76,7 @@ export class NativeAiScreen implements AiTarget {
   }
 
   blit(src: AiImage, x: number, y: number, mirror: boolean): void {
-    const t = texOf(src);
+    const t = this.texOf(src);
     __native.blit(t.id, x, y, t.width, t.height, mirror);
   }
 
@@ -73,7 +112,7 @@ export class NativeAiScreen implements AiTarget {
 
   /** Exactly GlAiScreen.bgPass's uniforms (src/render/glRoomAi.ts). */
   private bgPass(bg: AiImage, wall: AiImage, wobble: AiWobble | null, scale: number, zx: boolean): void {
-    const b = texOf(bg);
+    const b = this.texOf(bg);
     const rips = wobble ? activeRipples(wobble, Math.max(1, Math.round(b.height / scale))) : [];
     for (let i = 0; i < RIPPLE_GPU_SLOTS; i++) {
       const r = rips[i];
@@ -85,18 +124,32 @@ export class NativeAiScreen implements AiTarget {
       this.ripPh[i] = r ? r.phase : 0;
     }
     __native.background(
-      b.id, texOf(wall).id, scale, b.width, wobble !== null,
+      b.id, this.texOf(wall).id, scale, b.width, wobble !== null,
       wobble ? wobble.wamp / 2 : 0, wobble ? wobble.wper : 1, wobble ? wobblePhase(wobble) : 0,
       Math.min(rips.length, RIPPLE_GPU_SLOTS), this.rip, this.ripPh, zx,
     );
   }
 
   disintegrate(src: AiImage, x: number, y: number, scale: number, rozpad: number): void {
-    const t = texOf(src);
+    const t = this.texOf(src);
     __native.disintegrate(t.id, x, y, t.width, t.height, scale, Math.max(1, Math.round(t.width / scale)), rozpad);
   }
 
-  mirrorGlass(): void {
-    throw new Error('spike: mirrorGlass (spec=1 mirror) is not implemented natively yet');
+  /** GlAiScreen.mirrorGlass: the same window arithmetic, then the MIRROR_FS pass. */
+  mirrorGlass(X: number, Y: number, w: number, h: number, S: number, mask: Float32Array, MW: number, MH: number): void {
+    const CW = this.width, CH = this.height;
+    const rx0 = Math.max(0, Math.min(X, X + 4 - w) * S);
+    const rx1 = Math.min(CW, Math.max(X + w, X + 4) * S);
+    const ry0 = Math.max(0, Y * S), ry1 = Math.min(CH, (Y + h) * S);
+    if (rx1 <= rx0 || ry1 <= ry0) return;
+    const dx0 = Math.max(rx0, X * S), dx1 = Math.min(rx1, (X + w) * S);
+    if (dx1 <= dx0) return;
+    let id = this.maskTex.get(mask);
+    if (id === undefined) {
+      id = __native.createTexture(bytesOf(mask), MW, MH, true);
+      reclaim?.register(mask, id);
+      this.maskTex.set(mask, id);
+    }
+    __native.mirror(id, rx0, rx1, ry0, ry1, dx0, dx1, S * (2 * X + 4) - 1, X * S, Y * S, MW, MH);
   }
 }

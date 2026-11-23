@@ -24,6 +24,7 @@
  * reproduces rather than exposing GL's bottom-up convention upward.
  */
 import { RANDPOLE, delphiRound, waterShift, waterShiftAtPhase } from './framebuffer.js';
+import { createScratchCanvas, scratchCanvasAvailable } from './scratchCanvas.js';
 
 /**
  * The water wobble as the two `ai` backends receive it: the room's FFR wave data, plus
@@ -539,13 +540,14 @@ export class Canvas2dAiTarget implements AiTarget {
     // The faithful integer shift table, derived here rather than handed down: this target
     // is the only consumer of it now (the GPU samples the wave continuously instead).
     const shifts = wobble ? faithfulWobbleShifts(wobble, Math.max(1, Math.round(bg.height / scale))) : null;
-    // No DOM (unit tests drive this with a recording context) ⇒ paint straight through.
+    // No scratch canvas (unit tests drive this with a recording context and no DOM) ⇒
+    // paint straight through.
     // The cache is a rendering optimisation, not behaviour: the composite it produces is
     // identical either way, so the uncached path is the correct fallback.
-    if (typeof document === 'undefined') { this.paint(ctx, bg, wall, shifts, scale); return; }
+    if (!scratchCanvasAvailable()) { this.paint(ctx, bg, wall, shifts, scale); return; }
     const key = `${sig}|${W}x${H}`;
     if (!this.bgCanvas || this.bgSig !== key) {
-      if (!this.bgCanvas) this.bgCanvas = document.createElement('canvas');
+      if (!this.bgCanvas) this.bgCanvas = createScratchCanvas();
       if (this.bgCanvas.width !== W || this.bgCanvas.height !== H) {
         this.bgCanvas.width = W;
         this.bgCanvas.height = H;
@@ -587,10 +589,10 @@ export class Canvas2dAiTarget implements AiTarget {
     const H = ctx.canvas.height;
     const shifts = wobble ? faithfulWobbleShifts(wobble, Math.max(1, Math.round(bg.height / scale))) : null;
     this.paintBg(ctx, bg, shifts, scale);
-    if (typeof document === 'undefined') return; // no DOM ⇒ no scratch canvas; background only
+    if (!scratchCanvasAvailable()) return; // no scratch canvas (no DOM, no injected one) ⇒ background only
     let cv = this.zxCanvas;
     if (!cv || cv.width !== W || cv.height !== H) {
-      cv = document.createElement('canvas');
+      cv = createScratchCanvas();
       cv.width = W;
       cv.height = H;
       this.zxCanvas = cv;
@@ -668,7 +670,7 @@ export class Canvas2dAiTarget implements AiTarget {
     const nh = Math.max(1, Math.round(src.height / scale));
     let cv = this.dissolveCanvas;
     if (!cv || cv.width !== src.width || cv.height !== src.height) {
-      cv = document.createElement('canvas');
+      cv = createScratchCanvas();
       cv.width = src.width; cv.height = src.height;
       this.dissolveCanvas = cv;
     }

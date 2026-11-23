@@ -2,7 +2,7 @@
  * ff4e native spike host: QuickJS-ng runs the game's own JS bundle; SDL3 provides the
  * window, input and the GPU (Metal here, D3D12 on Windows/Xbox GDK, Vulkan elsewhere).
  * The JS side calls the functions installed on `__native` (native/js/nativeApi.ts is the
- * contract); the AI tier's seven AiTarget primitives become SDL GPU passes.
+ * contract); the AI tier's AiTarget primitives become SDL GPU passes.
  *
  *   ff4e-native <bundle.js> --root <public dir> [--room N] [--headless --out f.rgba ...]
  */
@@ -26,7 +26,7 @@ static char root[1024];
 static int js_argc;
 static char **js_argv;
 
-static SDL_GPUGraphicsPipeline *p_fill, *p_bg, *p_sprite, *p_disint, *p_present;
+static SDL_GPUGraphicsPipeline *p_fill, *p_bg, *p_sprite, *p_disint, *p_mirror, *p_present;
 static SDL_GPUSampler *s_nearest, *s_linear;
 static SDL_GPUTexture *rand_tex;
 static SDL_GPUTexture *band_tex;  /* the ZX stripes: one RGBA texel per native row */
@@ -36,6 +36,7 @@ static SDL_GPUTexture **textures; /* id -> texture; slot 0 unused */
 static int tex_count, tex_cap;
 
 static SDL_GPUTexture *comp;      /* the ×S composite (AiTarget's backing store) */
+static SDL_GPUTexture *comp_snap; /* the pre-mirror copy the mirror pass reads (GlAiScreen's ping-pong) */
 static int comp_w, comp_h;
 static SDL_GPUCommandBuffer *cmd; /* the frame being composited */
 static SDL_GPURenderPass *pass;   /* open on `comp` between begin() and present/save */
@@ -108,8 +109,8 @@ static SDL_GPUTexture *make_texture(SDL_GPUTextureFormat fmt, int w, int h, SDL_
   return t;
 }
 
-/* Record an upload of `px` into `t` on command buffer `c`. */
-static void copy_to(SDL_GPUCommandBuffer *c, SDL_GPUTexture *t, const void *px, int w, int h, int bpp) {
+/* Record an upload of `px` into the (x, y, w, h) rect of `t` on command buffer `c`. */
+static void copy_rect(SDL_GPUCommandBuffer *c, SDL_GPUTexture *t, const void *px, int x, int y, int w, int h, int bpp) {
   Uint32 size = (Uint32)(w * h * bpp);
   SDL_GPUTransferBufferCreateInfo ti = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = size};
   SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(dev, &ti);
@@ -117,16 +118,29 @@ static void copy_to(SDL_GPUCommandBuffer *c, SDL_GPUTexture *t, const void *px, 
   SDL_UnmapGPUTransferBuffer(dev, tb);
   SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(c);
   SDL_GPUTextureTransferInfo src = {.transfer_buffer = tb, .pixels_per_row = (Uint32)w, .rows_per_layer = (Uint32)h};
-  SDL_GPUTextureRegion dst = {.texture = t, .w = (Uint32)w, .h = (Uint32)h, .d = 1};
+  SDL_GPUTextureRegion dst = {.texture = t, .x = (Uint32)x, .y = (Uint32)y, .w = (Uint32)w, .h = (Uint32)h, .d = 1};
   SDL_UploadToGPUTexture(cp, &src, &dst, false);
   SDL_EndGPUCopyPass(cp);
   SDL_ReleaseGPUTransferBuffer(dev, tb); /* deferred by SDL until `c` has run */
 }
 
-static void upload(SDL_GPUTexture *t, const void *px, int w, int h, int bpp) {
+static void copy_to(SDL_GPUCommandBuffer *c, SDL_GPUTexture *t, const void *px, int w, int h, int bpp) {
+  copy_rect(c, t, px, 0, 0, w, h, bpp);
+}
+
+/*
+ * Upload on a command buffer of its own, submitted now. Called from JS before the draw
+ * that samples `t` is recorded, so it is also submitted — and run — before that draw's
+ * frame command buffer.
+ */
+static void upload_region(SDL_GPUTexture *t, const void *px, int x, int y, int w, int h, int bpp) {
   SDL_GPUCommandBuffer *c = SDL_AcquireGPUCommandBuffer(dev);
-  copy_to(c, t, px, w, h, bpp);
+  copy_rect(c, t, px, x, y, w, h, bpp);
   SDL_SubmitGPUCommandBuffer(c);
+}
+
+static void upload(SDL_GPUTexture *t, const void *px, int w, int h, int bpp) {
+  upload_region(t, px, 0, 0, w, h, bpp);
 }
 
 static int add_texture(SDL_GPUTexture *t) {
@@ -218,6 +232,43 @@ static JSValue n_decodeWebp(JSContext *ctx, JSValueConst self, int argc, JSValue
   return o;
 }
 
+/* The same decode, to CPU: the pixels the native scratch canvas draws (native/js/nativeCanvas.ts). */
+static JSValue n_decodeWebpRgba(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  size_t n = 0;
+  uint8_t *p = JS_GetArrayBuffer(ctx, &n, argv[0]);
+  if (!p) return JS_EXCEPTION;
+  int w = 0, h = 0;
+  uint8_t *rgba = WebPDecodeRGBA(p, n, &w, &h);
+  if (!rgba) return JS_ThrowTypeError(ctx, "WebP decode failed");
+  JSValue buf = JS_NewArrayBufferCopy(ctx, rgba, (size_t)w * (size_t)h * 4);
+  WebPFree(rgba);
+  return buf;
+}
+
+/* A texture from CPU pixels: RGBA8 (a scratch canvas) or R32F (a mirror's glass mask). */
+static JSValue n_createTexture(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  size_t n = 0;
+  uint8_t *p = JS_GetArrayBuffer(ctx, &n, argv[0]);
+  int w = ARGI(1), h = ARGI(2);
+  bool mask = JS_ToBool(ctx, argv[3]);
+  if (!p || w <= 0 || h <= 0 || n != (size_t)w * (size_t)h * 4) return JS_ThrowTypeError(ctx, "createTexture: bad pixels");
+  SDL_GPUTexture *t = make_texture(mask ? SDL_GPU_TEXTUREFORMAT_R32_FLOAT : SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h,
+                                   SDL_GPU_TEXTUREUSAGE_SAMPLER);
+  upload(t, p, w, h, 4);
+  return JS_NewInt32(ctx, add_texture(t));
+}
+
+/* texSubImage2D: replace a rect of an RGBA8 texture (LODE's wreck patch, or the whole canvas). */
+static JSValue n_updateTexture(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  SDL_GPUTexture *t = tex_by_id(ARGI(0));
+  int x = ARGI(1), y = ARGI(2), w = ARGI(3), h = ARGI(4);
+  size_t n = 0;
+  uint8_t *p = JS_GetArrayBuffer(ctx, &n, argv[5]);
+  if (!t || !p || w <= 0 || h <= 0 || n != (size_t)w * (size_t)h * 4) return JS_ThrowTypeError(ctx, "updateTexture: bad args");
+  upload_region(t, p, x, y, w, h, 4);
+  return JS_UNDEFINED;
+}
+
 static JSValue n_releaseTexture(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int id = ARGI(0);
   SDL_GPUTexture *t = tex_by_id(id);
@@ -251,6 +302,7 @@ static JSValue n_begin(JSContext *ctx, JSValueConst self, int argc, JSValueConst
     if (comp) SDL_ReleaseGPUTexture(dev, comp);
     comp = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h,
                         SDL_GPU_TEXTUREUSAGE_COLOR_TARGET | SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    if (comp_snap) { SDL_ReleaseGPUTexture(dev, comp_snap); comp_snap = NULL; }
     comp_w = w;
     comp_h = h;
   }
@@ -375,6 +427,33 @@ static JSValue n_disintegrate(JSContext *ctx, JSValueConst self, int argc, JSVal
   SDL_GPUTextureSamplerBinding b[2] = {{t, s_nearest}, {rand_tex, s_nearest}};
   SDL_BindGPUFragmentSamplers(pass, 0, b, 2);
   SDL_DrawGPUPrimitives(pass, 4, 1, 0, 0);
+  return JS_UNDEFINED;
+}
+
+typedef struct { int32_t rx0, rx1, ry0, ry1, dx0, dx1, k, mx, my, mw, mh, pad; } MirrorU;
+
+/*
+ * GlAiScreen.mirrorGlass: the reflection reads the composite as it was before the pass,
+ * so GL renders into the other half of a ping-pong pair. Here the composite is copied
+ * aside instead and the pass draws back over it — the same pixels, one texture fewer
+ * to keep current.
+ */
+static JSValue n_mirror(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  SDL_GPUTexture *mask = tex_by_id(ARGI(0));
+  if (!mask || !comp) return JS_ThrowTypeError(ctx, "mirror: unknown mask");
+  MirrorU u = {ARGI(1), ARGI(2), ARGI(3), ARGI(4), ARGI(5), ARGI(6), ARGI(7), ARGI(8), ARGI(9), ARGI(10), ARGI(11), 0};
+  end_composite();
+  if (!comp_snap) comp_snap = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, comp_w, comp_h, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+  SDL_GPUCopyPass *cp = SDL_BeginGPUCopyPass(cmd);
+  SDL_GPUTextureLocation from = {.texture = comp}, to = {.texture = comp_snap};
+  SDL_CopyGPUTextureToTexture(cp, &from, &to, (Uint32)comp_w, (Uint32)comp_h, 1, false);
+  SDL_EndGPUCopyPass(cp);
+  open_composite(SDL_GPU_LOADOP_LOAD);
+  use(p_mirror);
+  SDL_PushGPUFragmentUniformData(cmd, 0, &u, sizeof u);
+  SDL_GPUTextureSamplerBinding b[2] = {{comp_snap, s_nearest}, {mask, s_nearest}};
+  SDL_BindGPUFragmentSamplers(pass, 0, b, 2);
+  SDL_DrawGPUPrimitives(pass, 3, 1, 0, 0);
   return JS_UNDEFINED;
 }
 
@@ -553,6 +632,8 @@ static void install(JSContext *ctx) {
       {"print", n_print, 1},           {"now", n_now, 0},
       {"readFile", n_readFile, 1},     {"utf8", n_utf8, 1},
       {"decodeWebp", n_decodeWebp, 1}, {"releaseTexture", n_releaseTexture, 1},
+      {"decodeWebpRgba", n_decodeWebpRgba, 1}, {"createTexture", n_createTexture, 4},
+      {"updateTexture", n_updateTexture, 6}, {"mirror", n_mirror, 12},
       {"setRandTable", n_setRandTable, 1},
       {"begin", n_begin, 2},           {"fill", n_fill, 3},
       {"fillRect", n_fillRect, 7},     {"blit", n_blit, 6},
@@ -600,6 +681,7 @@ int main(int argc, char **argv) {
   p_bg = pipeline("vs_full", 0, "fs_bg", 3, rgba, false, false);
   p_sprite = pipeline("vs_rect", 1, "fs_sprite", 1, rgba, true, true);
   p_disint = pipeline("vs_rect", 1, "fs_disint", 2, rgba, true, true);
+  p_mirror = pipeline("vs_full", 0, "fs_mirror", 2, rgba, false, false);
   p_present = pipeline("vs_full", 0, "fs_present", 1, swap_fmt, false, false);
   SDL_GPUSamplerCreateInfo si = {0};
   si.min_filter = si.mag_filter = SDL_GPU_FILTER_NEAREST;

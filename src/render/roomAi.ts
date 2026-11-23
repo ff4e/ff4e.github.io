@@ -59,6 +59,7 @@ import { forEachWreckPixel, wreckFrame } from '../core/room.js';
 import type { Room, Item, WreckSwap } from '../core/room.js';
 import { FFR_EXTRA, type FfrBitmap } from '../data/ffr.js';
 import { advanceZxBands, bandRows } from './zxBands.js';
+import { createScratchCanvas, scratchCanvasAvailable } from './scratchCanvas.js';
 
 /** Upscale factor of the committed AI room art (must match tools/build-room-ai.mjs AI_SCALE). */
 export const AI_ROOM_SCALE = 4;
@@ -618,14 +619,14 @@ export class AiRoom {
   wreckDigest(): { replayed: number; revision: number; hash: number; damage: WreckDamage | null } | null {
     const cv = this.wreckBg;
     const base = this.bg[0];
-    if (!cv || !base || typeof document === 'undefined') return null;
+    if (!cv || !base || !scratchCanvasAvailable()) return null;
     const g = cv.getContext('2d', { willReadFrequently: true });
     if (!g) return null;
     const now = g.getImageData(0, 0, cv.width, cv.height).data;
     let hash = 2166136261;
     for (let i = 0; i < now.length; i++) hash = Math.imul(hash ^ now[i]!, 16777619);
 
-    const ref = document.createElement('canvas');
+    const ref = createScratchCanvas();
     ref.width = cv.width;
     ref.height = cv.height;
     const rg = ref.getContext('2d', { willReadFrequently: true });
@@ -844,8 +845,8 @@ export class AiRoom {
    * patch the GPU updates its texture from. Reading the whole 25 MB canvas back per swap,
    * or re-uploading it whole, would each cost more than a frame.
    *
-   * Requires a DOM; the unit tests drive `planWreckBatch` and `applyWreckSwapScaled`
-   * directly instead.
+   * Requires a scratch canvas (src/render/scratchCanvas.ts: the DOM, or a native host's);
+   * the unit tests drive `planWreckBatch` and `applyWreckSwapScaled` directly instead.
    */
   private syncWreck(room: Room): void {
     const swaps = room.wreckSwaps;
@@ -857,7 +858,7 @@ export class AiRoom {
       if (this.wreckBg) this.resetWreckBg();
     }
     if (this.wreckCursor >= swaps.length) return;
-    if (typeof document === 'undefined') return;
+    if (!scratchCanvasAvailable()) return;
     const base = this.bg[0];
     if (!base) return;
     const canvas = this.wreckBg ?? this.makeWreckBg(base);
@@ -898,7 +899,7 @@ export class AiRoom {
 
   /** The mutable ×S background copy, created on the first swap. */
   private makeWreckBg(base: ImageBitmap): HTMLCanvasElement | null {
-    const cv = document.createElement('canvas');
+    const cv = createScratchCanvas();
     cv.width = base.width;
     cv.height = base.height;
     const g = cv.getContext('2d', { willReadFrequently: true });
@@ -932,10 +933,10 @@ export class AiRoom {
   private wreckSprite(room: Room, phase: number): AiWreckSurface | null {
     const hit = this.wreckSprites.get(phase);
     if (hit) return hit;
-    if (typeof document === 'undefined') return null;
+    if (!scratchCanvasAvailable()) return null;
     const src = wreckFrame(this.objects, room.itemCount, phase);
     if (!src) return null;
-    const cv = document.createElement('canvas');
+    const cv = createScratchCanvas();
     cv.width = src.width;
     cv.height = src.height;
     const g = cv.getContext('2d', { willReadFrequently: true });
@@ -1026,7 +1027,7 @@ export class AiRoom {
   private glassMask(spr: ImageBitmap): Float32Array | null {
     const cached = this.glassCache.get(spr);
     if (cached) return cached;
-    const cv = document.createElement('canvas');
+    const cv = createScratchCanvas();
     cv.width = spr.width; cv.height = spr.height;
     const g2 = cv.getContext('2d', { willReadFrequently: true });
     if (!g2) return null;
@@ -1092,7 +1093,7 @@ export class AiRoom {
     const hit = this.classicCache.get(key);
     if (hit) return hit;
     const S = this.scale;
-    const nat = document.createElement('canvas');
+    const nat = createScratchCanvas();
     nat.width = bmp.w; nat.height = bmp.h;
     const ng = nat.getContext('2d');
     if (!ng) return null;
@@ -1105,7 +1106,7 @@ export class AiRoom {
       img.data[i * 4] = c.r; img.data[i * 4 + 1] = c.g; img.data[i * 4 + 2] = c.b; img.data[i * 4 + 3] = 255;
     }
     ng.putImageData(img, 0, 0);
-    const cv = document.createElement('canvas');
+    const cv = createScratchCanvas();
     cv.width = bmp.w * S; cv.height = bmp.h * S;
     const cg = cv.getContext('2d');
     if (!cg) return null;
