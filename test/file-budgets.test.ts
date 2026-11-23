@@ -375,7 +375,10 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // one and the answer to it — early is survivable, absent is not — is the whole point.
   // 1115 -> 1119: `killVoices(except)`, so an undo can leave a room's carried sounds
   // playing (RoomScript.carriedSounds) while it silences everything else.
-  ['src/audio/audio.ts', 1119],
+  // 1119 -> 830: the Web Audio half — the context, its buses, and the whole iOS
+  // interruption repair — moved to `src/audio/webAudioBackend.ts` behind `AudioBackend`,
+  // so the native host can supply its own. What is left is the policy.
+  ['src/audio/audio.ts', 830],
 ];
 
 /** Slack below which a budget is stale enough to be worth lowering. */

@@ -42,7 +42,7 @@
  *      measured over the shipped set, the weakest correct encode scores 0.9821, the same
  *      sound shifted by one AAC frame scores 0.859, and a different sound entirely 0.69.
  *   3. **Length** — the decode must be at least `delka` samples long, because the runtime
- *      TRIMS to `delka` (`src/audio/ffs2Decode.ts`) and a short decode would be trimming
+ *      TRIMS to `delka` (`src/audio/webAudioBackend.ts`) and a short decode would be trimming
  *      silence into the end of a spoken line. AAC codes in 1024-sample frames, so a decode
  *      usually runs 0-1023 samples LONG, and that tail is encoder padding. One sound in
  *      1 797 comes out SHORT (`011/deu-m-bojovat`, by 10 samples = 0.45 ms), so a

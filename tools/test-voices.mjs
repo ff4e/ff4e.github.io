@@ -5,7 +5,7 @@
  * `.ffs2` files. That is most of the question and none of the risk, because ffmpeg is not
  * what plays them. The part only a browser can answer is whether ITS `decodeAudioData`
  * honours the MP4 edit list that carries the AAC encoder's priming delay. If it does not,
- * every spoken line starts ~1024-2048 samples (46-93 ms) late, `src/audio/ffs2Decode.ts`
+ * every spoken line starts ~1024-2048 samples (46-93 ms) late, `src/audio/webAudioBackend.ts`
  * trims that much off the END while it is at it, and the result is a game where every fish
  * speaks a beat behind its own mouth. Nothing else in the suite would see it: the room
  * would enter, the line would play, the subtitle would show.
@@ -25,7 +25,7 @@
  * them), so this probe reads something a player never can — which is fine, and is the same
  * arrangement `test/musicStaging.test.ts` has with the `.wav` originals.
  */
-import { withApp } from './ui-lib.mjs';
+import { tickBudget, withApp } from './ui-lib.mjs';
 
 /**
  * x01, the eight leg-final remarks: 8 sounds, 0.71 MB of `.ffs` and 0.14 MB staged.
@@ -153,7 +153,7 @@ const MEASURE = async ({ pkg, rate }) => {
  * Named from the LAST sound-log entry rather than the newest matching one: `play`/`snd`
  * log immediately before `createBufferSource()` with nothing logging in between, so the
  * newest entry is always the sound being started. Searching backwards for a name would
- * file a later sound under an earlier one.
+ * file a later sound under an earlier one. `count` is the game tick the source started on.
  */
 const VOICE_SPY = () => {
   window.__voices = [];
@@ -163,7 +163,7 @@ const VOICE_SPY = () => {
     if (!this.loop && this.buffer) {
       const log = window.__ff?.soundLog?.() ?? [];
       const last = log[log.length - 1];
-      if (last) window.__voices.push({ name: last.name, duration: this.buffer.duration });
+      if (last) window.__voices.push({ name: last.name, duration: this.buffer.duration, count: window.__ff.count() });
     }
     return start.apply(this, args);
   };
@@ -240,6 +240,31 @@ await withApp(async ({ p, expect }) => {
       `${v.name}: the buffer the engine played is delka long, within 32 samples ` +
         `(want ${wanted.toFixed(6)}s, got ${v.duration.toFixed(6)}s). A longer one is AAC ` +
         `encoder padding that was not trimmed, and it holds playing(prior) true past the line.`,
+    );
+  }
+
+  // ── The dialogue's pacing, end to end ──────────────────────────────────────
+  // PRVNI opens `addm(15+r, '1st-m-cotobylo'); addv(6, '1st-v-netusim')` (prvni.ts), so the
+  // second voice must start exactly the first line's talk ticks plus 6 queue ticks after
+  // the first: the talk hook holds a line for `round((delka/22050 - 10000/22050) / 0.08)`
+  // ticks (Talking()'s mez, RSound.pas:933; TRoom.Jedeme's 80 ms step), then `dialogy`
+  // counts the delay down one tick at a time. Measured where the source STARTS in the
+  // mixer, on the game's own tick counter, against `delka` from the `.fft` — so this is
+  // the whole path a line takes, with nothing here asked of the engine. The wait is the
+  // first line (~2-3 s) plus its 6 ticks, with room to spare.
+  await p
+    .waitForFunction(() => (window.__voices ?? []).some((v) => v.name === '1st-v-netusim'), null, { timeout: tickBudget(100) })
+    .catch(() => {});
+  const opening = (await p.evaluate(() => window.__voices)).filter((v) => v.name.startsWith('1st-'));
+  const first = opening.find((v) => v.name === '1st-m-cotobylo');
+  const second = opening.find((v) => v.name === '1st-v-netusim');
+  expect(first && second, `PRVNI speaks its first two lines (saw ${opening.map((v) => v.name).join(', ')})`);
+  if (first && second) {
+    const talkTicks = Math.max(1, Math.round((want[first.name] - 10000 / RATE) / 0.08));
+    expect(
+      second.count - first.count === talkTicks + 6,
+      `${second.name} starts ${talkTicks} + 6 ticks after ${first.name} ` +
+        `(started at ${first.count} and ${second.count})`,
     );
   }
 });
