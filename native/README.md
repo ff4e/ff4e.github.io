@@ -16,6 +16,13 @@ A proof of concept for running the game **without a browser**:
   native host has to own.
 - The fish pose is the game's own `fishFrameFor` (`src/app/fishFrame.ts`, DOM-free), fed
   through `src/app/gameState.ts`.
+- The off-screen canvases the AI tier builds — the classic-sprite fallback for art with
+  no AI file, the mirror's glass mask, LODE's wreck — come from an injected factory
+  (`src/render/scratchCanvas.ts`). The browser keeps `document.createElement('canvas')`;
+  this host injects `native/js/nativeCanvas.ts`, a CPU buffer that implements only the
+  2D calls those canvases make, and rounds translucent pixels through Chromium's
+  premultiplied storage exactly as the browser's canvas does (without that, room 9's
+  mirror is off by one on three pixels).
 
 SDL GPU drives Metal on macOS and tvOS, and D3D12 on Windows and Xbox (GDK). So this
 same host is the shape of an Apple TV build and an Xbox build. It is a spike, not a
@@ -64,31 +71,29 @@ scripts draw from it, and V8 and QuickJS have different generators.
 
 It exits non-zero on any differing frame, on a missing or short composite, on a native run
 that takes over 60 s, and on any native failure not listed in `KNOWN_GAPS`. That list is
-keyed by room and case (all three cases of 9, 68 and 72; only `played` for 56), and each
-entry names the error the failure must carry. A known gap that starts rendering
-identically also fails, so the list has to be updated with the fix. Differing frames
-leave `-native`, `-webgl` and `-diff` PNGs in `native/build/compare/`.
+keyed by room and case and is empty today; each entry names the error the failure must
+carry. A known gap that starts rendering identically also fails, so the list has to be
+updated with the fix. Differing frames leave `-native`, `-webgl` and `-diff` PNGs in
+`native/build/compare/`.
 
-Current result: **68 of 72 rooms byte-identical** in all three states; 206 of the 216
-frames are identical and the other 10 cannot be rendered natively. None differ. CI runs
-`--all` on a hosted macOS runner, whose Metal device gives the same bytes.
+Current result: **72 of 72 rooms byte-identical** in all three states: all 216 frames.
+CI runs `--all` on a hosted macOS runner, whose Metal device gives the same bytes.
 
 The spike was written at 68/72. Room 56 CHODBA left the list when `scene.ts` stopped
 restating `fishFrameFor` and imported the game's: at tick 240 CHODBA is dark, and the
 restated copy had no darkness case, so both sides drew a lit idle fish there and agreed
-on a wrong picture. The game draws a dark silhouette, which the native host cannot yet
-(see below). Room 66 ZX joined when `backgroundZx` (gspec=42) was ported: the same
-background pass as every other room, with the wall's silhouette taking its loading-stripe
-colour from a one-texel-per-native-row band texture, as `GlAiScreen` does.
+on a wrong picture. The game draws a dark silhouette, which the native host could not
+draw until the scratch-canvas factory landed: rooms 9, 56, 68 and 72 healed with it.
+Room 66 ZX joined when `backgroundZx` (gspec=42) was ported: the same background pass as
+every other room, with the wall's silhouette taking its loading-stripe colour from a
+one-texel-per-native-row band texture, as `GlAiScreen` does.
 
 ## What the spike does not do yet
 
-- `mirrorGlass` (the spec=1 mirror), LODE's wreck, and items with no AI art (the
-  classic-sprite fallback). The last two build canvases through the DOM in
-  `src/render/roomAi.ts`; the native target throws on the first.
-- The darkness silhouette (gspec=2, CHODBA). The pose is right now, but `TL_TMA` has no
-  AI art, so it takes the same classic-sprite fallback and throws natively, in the
-  interactive window as well as in `compare.mjs`.
+- A gated check of LODE's wreck. It runs natively now, but `compare.mjs` never reaches
+  it: the first swap is at tick 3770, after the whole recorded solution. A one-off run of
+  the same harness at ticks 3780 and 3900 was byte-identical. Each run starts a fresh
+  process, so the in-place patch upload (one revision behind) is not exercised there.
 - Blink, talking heads and the darkness wink-out. `fishFrameFor` handles them, but the
   state it reads for them stays at rest here: `blink` and `darkFlicker` are advanced by
   `tickBlink` in `src/app/logicTick.ts`, and `poslMluv` by the lip sync in

@@ -201,6 +201,7 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | **The `ai` tier** | | |
 | `roomAi.ts` | 12.8 k | The hi-res AI room compositor — the largest file here, and the one whose rules the mutation harness pins. |
 | `aiTarget.ts` | 7.4 k | The surface `roomAi` paints onto: the canvas-2D target, plus the water wobble and ripple maths. |
+| `scratchCanvas.ts` | 0.4 k | Where the off-screen scratch canvases come from: the DOM, unless a host without one (`native/`) injects its own. |
 | `worldMapAi.ts` | 1.6 k | The `ai` world map. |
 | `panelAi.ts` | 1.7 k | The `ai` control panel. |
 | `creditsAi.ts` | 1.8 k | The `ai` end credits (GPU-composited). |

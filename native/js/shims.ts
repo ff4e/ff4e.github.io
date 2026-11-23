@@ -7,7 +7,7 @@
  * WebP straight to a GPU texture, and timers run on the host's frame clock. Nothing here
  * is a general browser.
  */
-import type { NativeTexture } from './nativeApi.js';
+import { rememberBitmapSource, type NativeBitmap } from './nativeCanvas.js';
 
 declare const __CP1250_HIGH__: string;
 
@@ -103,10 +103,14 @@ g.fetch = async (url: string): Promise<unknown> => {
 };
 
 // ── createImageBitmap: WebP → GPU texture. The "bitmap" IS the texture handle. ───────
-g.createImageBitmap = async (blob: BlobShim): Promise<NativeTexture & { close(): void }> => {
+// The WebP bytes are kept beside it: the few bitmaps a scratch canvas draws (a mirror's
+// glass, LODE's wreck) are decoded again to CPU pixels when that happens.
+g.createImageBitmap = async (blob: BlobShim): Promise<NativeBitmap> => {
   if (blob.type !== 'image/webp') throw new Error(`spike decodes WebP only, got ${blob.type}`);
   const t = __native.decodeWebp(blob.__bytes);
-  return { id: t.id, width: t.width, height: t.height, close: () => __native.releaseTexture(t.id) };
+  const bmp = { id: t.id, width: t.width, height: t.height, close: () => __native.releaseTexture(t.id) };
+  rememberBitmapSource(bmp, blob.__bytes);
+  return bmp;
 };
 
 /** Read a file through the same door `fetch` uses (for the FFR room data). */

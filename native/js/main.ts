@@ -12,6 +12,8 @@
 import { runTimers, readBytes } from './shims.js';
 import { RANDPOLE } from '../../src/render/framebuffer.js';
 import { NativeAiScreen } from './nativeAiScreen.js';
+import { nativeScratchCanvas } from './nativeCanvas.js';
+import { setScratchCanvasFactory } from '../../src/render/scratchCanvas.js';
 import { compositeSize, frameFor, loadScene, pinRandom, probeFrame, replaySolution, solutionSteps, tick, type Scene } from './scene.js';
 
 const LOGIC_MS = 80; // src/app/stageGeometry.ts LOGIC_MS — TRoom.Jedeme's 0.08 s step
@@ -28,6 +30,7 @@ const g = globalThis as Record<string, unknown>;
 async function main(): Promise<void> {
   const num = Number(arg('--room') ?? 1);
   __native.setRandTable(RANDPOLE.slice().buffer);
+  setScratchCanvasFactory(nativeScratchCanvas);
   if (flag('--headless')) pinRandom(1); // identical state to the browser reference
   const t0 = __native.now();
   const scene = await loadScene(num, readBytes);
