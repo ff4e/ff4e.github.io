@@ -125,8 +125,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `keyTables.ts` | 0.6 k | Which key moves which fish, which key swaps them (Space, or a bare Tab outside a focused control), the minigame's key map, which panel region each touch button sends, and two constants the room scripts read. |
 | **Screens** | | |
 | `mapNav.ts` | 4.6 k | On and off the world map; the leg story pages, the first-run intro and the credits roll. |
-| `mapDraw.ts` | 4.0 k | Drawing the world map: the branch map, the room-name plaques, the record panel. |
-| `mapInfoZoom.ts` | 1.4 k | The record panel enlarged 1.5x on a phone, lifted off the map it was baked onto, and the zoom-aware button hit test the pointer routers use. |
+| `mapDraw.ts` | 3.5 k | Drawing the world map: deciding what is on it (panel, plaque, launch, the repaint signature), the faithful 640×480 composite, and the plaque loaders. The `ai` frame itself is painted by `render/mapPaintAi.ts`. |
+| `mapInfoZoom.ts` | 0.2 k | Whether the record panel is enlarged (only on a phone), and the zoom-aware button hit test the pointer routers use. The enlarged drawing is `render/zoomedInfoPanel.ts`. |
 | `panel.ts` | 2.9 k | The side panel the game is actually played through, plus the options sub-panel and help. Hidden during touch gameplay; phones and tablets reuse its Options face in the touch overlay. |
 | `panelLight.ts` | | Which panel button a keyboard command lights: set by the held move on each rest tick and by Space/F2/F3/Backspace, out at the first rest tick with nothing dispatched (the original's AktualizujPanel). |
 | `touchButtons.ts` | | Shared touch/phone mode transitions, stage relayout and Options cleanup; tablet buttons dispatch through the panel's own `panelAction` table. |
@@ -176,7 +176,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 
 ### Map of `src/render/`
 
-The renderer is 37 files and ~109 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
+The renderer is 40 files and ~109 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
 two axes at once (which **art tier**: classic / enhanced / `ai`; and which **backend**: CPU or WebGL), which
 is what makes it hard to guess where something lives. This table is the shortcut.
 
@@ -214,6 +214,9 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `canvasSurface2d.ts` | 0.7 k | The web's `Surface2D`: each call is the canvas-2D call the screens made before, so the picture is unchanged by construction. |
 | `worldMap.ts` | 2.3 k | The branch map (`UMain.pas PaintBox1Paint`). |
 | `mapInfo.ts` | 3.7 k | The map's record info panel (krokoměr), and the geometry + cutout for drawing it enlarged on a phone. |
+| `mapPaintAi.ts` | 2.2 k | One frame of the `ai` world map, painted through `Surface2D` from state the caller hands in — map, balls, panel art, plaque, the scaled-up native overlay, a controller's selection ring, the parchment. DOM-free at every depth, so the native host paints the same frame (`test/dom-free.test.ts`). |
+| `mapSelection.ts` | 0.9 k | Where a controller's selection can go on the world map (exactly what a click can reach) and where a push moves it — pure geometry, from the Xbox branch (#165). |
+| `zoomedInfoPanel.ts` | 1.1 k | The record panel drawn enlarged, lifted off the map it was baked onto, through `Surface2D`. DOM-free, like `mapPaintAi.ts`. |
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |
 | `credits.ts` | 0.8 k | The scrolling end credits. |
 | `creditsAsset.ts` | 0.9 k | Loads a credits image (lossless WebP, 19.7x smaller than the BMP) and rebuilds its palette indices, so `credits.ts` stays index-exact and unchanged. Throws on a colour outside the palette rather than mis-indexing it. |

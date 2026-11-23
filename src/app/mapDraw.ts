@@ -8,10 +8,11 @@
  * RECORD (solved, cheated, best move count, best solution), never what the game is doing
  * right now.
  */
-import { AI_MAP_H, AI_MAP_SCALE, AI_MAP_W } from '../render/worldMapAi.js';
+import { AI_MAP_H, AI_MAP_W } from '../render/worldMapAi.js';
 import { assetCoolingDown, decodeAsset, isTransient, requiredBlob, requiredBytes, requiredJson } from '../render/assetFetch.js';
-import { DESKA_X_OFFSET, DESKA_Y_OFFSET, blitDeska, parseDesky } from '../data/desky.js';
-import { INFO_SETTLE_FAZE, applyInfoZoom, drawInfoDigits, drawInfoPanel, drawInfoPanelArtAi } from '../render/mapInfo.js';
+import { DESKA_X_OFFSET, DESKA_Y_OFFSET, parseDesky } from '../data/desky.js';
+import { INFO_SETTLE_FAZE } from '../render/mapInfo.js';
+import { composeMapOverlays, paintAiMap, paintLateMinigame, type MapPanel } from '../render/mapPaintAi.js';
 import { MAP_H, MAP_W } from '../render/worldMap.js';
 import { aiWorldMap, mapPresented, setMapPresented } from './art.js';
 import { blitParchment, blitParchmentAi, mapLaunching, markParchmentPainted } from './roomLaunch.js';
@@ -21,7 +22,8 @@ import { createSurface, type Surface2D } from '../render/surface2d.js';
 import { contentScaleFor, scalingFilterFor } from './stageGeometry.js';
 import { graphics } from './renderSettings.js';
 import { perfPaint, setPerfPaint } from './framePacing.js';
-import { aiPanelArt, drawZoomedInfoPanel, infoPanelZoom } from './mapInfoZoom.js';
+import { infoPanelZoom } from './mapInfoZoom.js';
+import { drawZoomedInfoPanel } from '../render/zoomedInfoPanel.js';
 import { subLang } from './playerSettings.js';
 import { ui } from './screenState.js';
 import { wake } from './frameClock.js';
@@ -152,53 +154,32 @@ export function drawMap(): void {
   // RTable when InfoMode>0, UMain.pas:1446), hiding the lit paths + node artwork so
   // only the name plaque and panel stand out. Nodes (balls) are skipped too.
   if (useAi) {
-    // Hi-res AI base + nodes, then the record panel / name plaque overlaid at native
-    // resolution and nearest-neighbour-scaled up (keeps digits + names crisp).
-    aiWorldMap!.draw(screenSurface, {
-      solved: host.solved,
-      pulse,
-      depth,
-      cheated: host.cheated,
-      hoverCorner: ui.mapHoverCorner,
-      drawNodes: !unlit,
-      litRegions: !unlit,
-    });
-    // Record-panel *artwork* (krokoměr bg + hovered icon + disabled-Replay grey) is
-    // drawn straight onto the hi-res ctx from the AI-upscaled bitmaps; the odometer
-    // digits + name plaque still ride the crisp NN overlay below so text stays sharp.
-    // On a phone the same artwork is drawn enlarged, lifted off the map (mapInfoZoom.ts).
-    if (panelOpen && ui.infoPanelAssets && ui.mapInfoRoom !== null) {
-      screenSurface.save();
-      applyInfoZoom(screenSurface, AI_MAP_SCALE, infoZoom);
-      const krokomer = zoomed ? aiPanelArt(aiWorldMap!.krokomer) : aiWorldMap!.krokomer;
-      drawInfoPanelArtAi(screenSurface, AI_MAP_SCALE, krokomer, aiWorldMap!.ikonky, ui.mapInfoHover, replayEnabled, zoomed);
-      screenSurface.restore();
-    }
-    // Name plaque from the upscaled art, drawn straight on the hi-res ctx. Falls back
-    // to the native overlay below whenever its art is missing or still loading.
+    // The painting itself is render/mapPaintAi.ts, which a host without the page shares.
+    const panel: MapPanel | null = panelOpen
+      ? { room: ui.mapInfoRoom!, count: infoCount, hover: ui.mapInfoHover, faze: ui.mapInfoFaze, replayEnabled }
+      : null;
     const plaqueRoom = mapLaunching() ?? ui.mapInfoRoom ?? ui.mapHoverRoom;
     const plaque = plaqueRoom !== null ? aiPlaqueFor(plaqueRoom) : null;
-    if (plaque) {
-      screenSurface.setSmoothing(false);
-      screenSurface.drawImage(plaque.bmp, plaque.x * AI_MAP_SCALE, plaque.y * AI_MAP_SCALE);
-    }
-    const overlay = new Uint8ClampedArray(MAP_W * MAP_H * 4); // transparent; only drawn cells become opaque
-    if (drawMapOverlays(overlay, true, plaque !== null, zoomedPanel)) {
-      const layer = overlayLayer();
-      layer.putPixels(overlay);
-      screenSurface.setSmoothing(false);
-      screenSurface.drawImage(layer, 0, 0, cw, ch);
-    }
-    if (zoomedPanel) {
-      drawZoomedInfoPanel(screenSurface, AI_MAP_SCALE, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, true);
-      drawLateMinigame(AI_MAP_SCALE);
-    }
-    // Last, over the plaque: Delphi draws the plaque and then the parchment
-    // (UMain.pas:1484 then :1489), and the two rectangles overlap.
-    if (launching) {
-      blitParchmentAi(screenSurface);
-      markParchmentPainted(); // daRun -> daRealyRun: the load may now start
-    }
+    paintAiMap(screenSurface, {
+      map: aiWorldMap!,
+      worldMap: ui.worldMap,
+      solved: host.solved,
+      cheated: host.cheated,
+      pulse,
+      depth,
+      hoverCorner: ui.mapHoverCorner,
+      unlit,
+      zoom: infoZoom,
+      plaqueRoom,
+      aiPlaque: plaque && { img: plaque.bmp, x: plaque.x, y: plaque.y },
+      desky: ui.deskyData,
+      assets: ui.infoPanelAssets,
+      panel,
+      minigame: minigame(),
+      layer: overlayLayer,
+      parchment: launching ? blitParchmentAi : null,
+    });
+    if (launching) markParchmentPainted(); // daRun -> daRealyRun: the load may now start
     return;
   }
   const rgba = ui.worldMap.render(host.solved, pulse, depth, host.cheated, ui.mapHoverCorner, !unlit, !unlit);
@@ -209,23 +190,21 @@ export function drawMap(): void {
   }
   screenSurface.putPixels(new Uint8ClampedArray(rgba));
   if (zoomedPanel) {
-    drawZoomedInfoPanel(screenSurface, 1, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, false);
+    drawZoomedInfoPanel(
+      screenSurface, 1, infoZoom, infoCount, ui.mapInfoHover, replayEnabled, false, ui.mapInfoFaze, ui.worldMap, ui.infoPanelAssets,
+    );
     drawLateMinigame(1);
   }
 }
 
-/**
- * The minigame, over a panel that was drawn enlarged after the overlay layer it
- * normally rides (see `skipPanel`), so the layering stays plaque → panel → minigame.
- */
+/** The minigame over the phone's enlarged panel (see `paintLateMinigame`). */
 function drawLateMinigame(scale: number): void {
-  if (!tetris || !tetrisArt) return;
-  const layer = new Uint8ClampedArray(MAP_W * MAP_H * 4);
-  blitTetris(layer, MAP_W, MAP_H);
-  const overlay = overlayLayer();
-  overlay.putPixels(layer);
-  screenSurface.setSmoothing(false);
-  screenSurface.drawImage(overlay, 0, 0, MAP_W * scale, MAP_H * scale);
+  paintLateMinigame(screenSurface, overlayLayer(), scale, minigame());
+}
+
+/** The cheat minigame's blit into a map-sized buffer, while it is up. */
+function minigame(): ((rgba: Uint8ClampedArray) => void) | null {
+  return tetris && tetrisArt ? (rgba) => blitTetris(rgba, MAP_W, MAP_H) : null;
 }
 
 /** The map-sized layer the native-resolution overlays are drawn into, then scaled up. */
@@ -233,18 +212,6 @@ function overlayLayer(): Surface2D {
   return (ui.mapOverlayLayer ??= createSurface(MAP_W, MAP_H));
 }
 
-/**
- * Composite the record panel + name plaque onto a map-sized RGBA buffer (the faithful
- * path passes the base map; the AI path passes a transparent buffer to overlay). The
- * name plaque (KresliDesku, UMain.pas:1484) is drawn for the open panel's room or the
- * hovered room node; the record panel (krokoměr) is drawn when a room panel is open.
- * `aiDigitsOnly` (the AI path) draws only the panel's odometer digits, not its bg/icon
- * artwork — that is drawn straight on the hi-res ctx from the AI bitmaps instead.
- * `skipPanel` leaves the record panel out entirely, and the minigame with it: the phone's
- * enlarged panel is drawn after this layer, by `drawZoomedInfoPanel`, and the minigame
- * after that, by `drawLateMinigame`.
- * Returns whether anything was drawn.
- */
 /**
  * AI-upscaled world-map name plaques (_desky).
  *
@@ -335,35 +302,34 @@ export async function loadAiPlaque(key: string): Promise<void> {
   }
 }
 
+/**
+ * The native-resolution overlays (plaque, record panel, minigame) onto a map-sized RGBA
+ * buffer, from the map's state now — `composeMapOverlays` (render/mapPaintAi.ts) has the
+ * rules. Returns whether anything was drawn.
+ */
 export function drawMapOverlays(rgba: Uint8ClampedArray, aiDigitsOnly = false, skipPlaque = false, skipPanel = false): boolean {
   if (!ui.worldMap) return false;
-  let drew = false;
-  const plaqueRoom = mapLaunching() ?? ui.mapInfoRoom ?? ui.mapHoverRoom;
-  if (plaqueRoom !== null && ui.deskyData && !skipPlaque) {
-    const deska = ui.deskyData.byRoom.get(plaqueRoom);
-    if (deska) {
-      blitDeska(rgba, MAP_W, MAP_H, deska, ui.deskyData.atlas, ui.worldMap.palette);
-      drew = true;
-    }
-  }
-  if (ui.mapInfoRoom !== null && ui.infoPanelAssets && !skipPanel) {
-    const count = host.scores.get(ui.mapInfoRoom) ?? null; // best (nej) count; null = cheat-only
-    if (aiDigitsOnly) {
-      drawInfoDigits(rgba, MAP_W, MAP_H, ui.infoPanelAssets.cisla, count, ui.mapInfoFaze);
-    } else {
-      const replayEnabled = host.bestRecord(ui.mapInfoRoom) !== undefined;
-      drawInfoPanel(rgba, MAP_W, MAP_H, ui.infoPanelAssets, count, ui.mapInfoHover, ui.mapInfoFaze, replayEnabled);
-    }
-    drew = true;
-  }
-  // The Tetris minigame overlays the map when the cheat opens it. It goes through
-  // this shared overlay buffer so BOTH map paths get it — the AI path scales the
-  // buffer up like the plaque/digits rather than needing its own hi-res blit.
-  if (tetris && tetrisArt && !skipPanel) {
-    blitTetris(rgba, MAP_W, MAP_H);
-    drew = true;
-  }
-  return drew;
+  const room = ui.mapInfoRoom;
+  return composeMapOverlays(
+    rgba,
+    {
+      worldMap: ui.worldMap,
+      plaqueRoom: mapLaunching() ?? room ?? ui.mapHoverRoom,
+      desky: ui.deskyData,
+      assets: ui.infoPanelAssets,
+      panel: room === null ? null : {
+        room,
+        count: host.scores.get(room) ?? null, // best (nej) count; null = cheat-only
+        hover: ui.mapInfoHover,
+        faze: ui.mapInfoFaze,
+        replayEnabled: host.bestRecord(room) !== undefined,
+      },
+      minigame: minigame(),
+    },
+    aiDigitsOnly,
+    skipPlaque,
+    skipPanel,
+  );
 }
 
 /** The menu/map music (SpustHudbu, UMain.pas:217): `menu`, looped at sample 419772. */
