@@ -14,7 +14,7 @@
  * The timing is the browser's (mapNav.ts `drawCredits`): the roll advances continuously off
  * the wall clock at CREDIT_SPEED native px per CREDIT_TICK_MS, settles at `maxScroll`, and
  * closes itself once the stepped `creditMode` passes `closeAt`; any button closes it first
- * (FormKeyDown → DoneCredits). native/compare-credits.mjs holds the picture to the browser's
+ * (FormKeyDown → DoneCredits). native/compare-media.mjs holds the picture to the browser's
  * at fixed offsets.
  */
 import { ui } from '../../src/app/screenState.js';

@@ -349,7 +349,8 @@ has no native counterpart yet.
     native/build/cmake/ff4e-native native/build/game.js --root public --headless \
       --smoke-movie --store native/build/smoke-movie-store.json
 
-`native/js/movieSmoke.ts`, 23 checks in ~8 s, through the real routers and frames: a first
+`native/js/movieSmoke.ts`, 25 checks in ~10 s, through the real key routing (`keyRoute.ts`, shared
+with the interactive loop) and frames: a first
 run opens on the splash, which Ⓑ, a stick, a d-pad and Ⓧ do not leave and Ⓐ does, into the
 AI logo with the game's sound killed; four seconds of the logo at 60 refreshes a second on
 the headless clock, where **every frame shown is the one the sound has reached** (its time not
@@ -359,7 +360,9 @@ decode: Apple's AAC decoder is not bit-for-bit repeatable; a one-sample shift di
 more); any button skips to the intro from its start, a modifier does not, and skipping it
 reaches the map with `introSeen` saved, the movie's sound gone and the menu music back; the
 next session opens on the map; the Intro corner is reached by directions and plays the intro
-without the splash, which played to its end shows its last frame and returns to the map; the
+without the splash, which played to its end shows its last frame and returns to the map, where
+a direction held as Ⓐ started it and let go during it is not still steering (the key-up reaches
+the map's router during the intro, and the map forgets held keys when it comes back); the
 Credits corner opens the roll, any button closes it, and it closes itself once it has
 settled; a movie that cannot be read counts as ended.
 

@@ -37,8 +37,8 @@ import { NativeSurface, decodeImage, nativeSurface } from './nativeSurface.js';
 import { loadMapScene, paintMapCase } from './mapScene.js';
 import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { compositeSize, frameFor, loadScene, pinRandom, probeFrame, replaySolution } from './scene.js';
-import { advance, blur, draw, enterRoom, firstRoom, initGame, keyDown, keyUp } from './game.js';
-import { ensureMapArt, mapBlur, mapFrame, mapKeyDown, mapKeyUp, mapPresented } from './mapScreen.js';
+import { advance, draw, enterRoom, firstRoom, initGame } from './game.js';
+import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
 import { ui } from '../../src/app/screenState.js';
 import { runSmoke } from './smoke.js';
 import { runMapSmoke } from './mapSmoke.js';
@@ -50,7 +50,8 @@ import { loadSubtitleAssets, subtitleOverlay } from './roomSubtitles.js';
 import { runAudioSmoke } from './audioSmoke.js';
 import { runMovieSmoke } from './movieSmoke.js';
 import { renderCreditsScene, renderMovieAudio, renderMovieFrames } from './mediaScene.js';
-import { introFrame, introKeyDown, loadIntroArt, openSession } from './introScreen.js';
+import { introFrame, loadIntroArt, openSession } from './introScreen.js';
+import { routeEvent } from './keyRoute.js';
 import { soundPoll } from './sound.js';
 import { mixer } from './seams/audioEngine.js';
 import { MIX_RATE } from './sdlAudioBackend.js';
@@ -199,19 +200,7 @@ function runInteractive(target: NativeAiScreen): void {
   let statSound = mixer.now();
   g.__frame = (): void => {
     const now = __native.now();
-    for (const ev of __native.events()) {
-      // Each event goes to the screen that is up when it arrives: one can change the screen.
-      const onRoom = ui.screen === 'room';
-      if (ev === '!blur') {
-        blur();
-        mapBlur();
-      } else if (ev[0] === '-') {
-        if (onRoom) keyUp(ev.slice(1));
-        else if (ui.screen !== 'intro') mapKeyUp(ev.slice(1));
-      } else if (onRoom) keyDown(ev.slice(1));
-      else if (ui.screen === 'intro') introKeyDown(ev.slice(1));
-      else mapKeyDown(ev.slice(1));
-    }
+    for (const ev of __native.events()) routeEvent(ev);
     if (now >= stopAt) {
       __native.quit();
       return;

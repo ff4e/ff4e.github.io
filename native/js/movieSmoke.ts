@@ -13,8 +13,9 @@
  */
 import { ui } from '../../src/app/screenState.js';
 import { initGame } from './game.js';
-import { ensureMapArt, mapFrame, mapKeyDown, mapKeyUp, mapPresented } from './mapScreen.js';
-import { intro, introFrame, introKeyDown, loadIntroArt, openSession, playIntroMovies } from './introScreen.js';
+import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
+import { intro, introFrame, loadIntroArt, openSession, playIntroMovies } from './introScreen.js';
+import { routeEvent } from './keyRoute.js';
 import { pinRandom } from './scene.js';
 import { soundPoll } from './sound.js';
 
@@ -24,11 +25,10 @@ const settle = async (n = 20): Promise<void> => {
   for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0));
 };
 
-/** A key press and release, routed as the interactive loop routes it. */
+/** A key press and release, routed as the interactive loop routes them (`keyRoute.ts`). */
 async function tap(code: string): Promise<void> {
-  if (ui.screen === 'intro') introKeyDown(code);
-  else mapKeyDown(code);
-  if (ui.screen !== 'intro' && ui.screen !== 'room') mapKeyUp(code);
+  routeEvent(`+${code}`);
+  routeEvent(`-${code}`);
   await settle();
 }
 
@@ -142,9 +142,17 @@ export async function runMovieSmoke(): Promise<number> {
       return ui.mapHoverCorner === action;
     };
     check(await reach('intro', ['ArrowUp', 'ArrowLeft']), 'the Intro corner can be selected');
+    // A direction held while Ⓐ starts the intro (up: nothing that way from the top-left
+    // corner, so the selection stays on it), and let go during the movie.
+    routeEvent('+ArrowUp');
+    await frame();
+    check(ui.mapHoverCorner === 'intro', '...and a direction with nothing that way leaves it there');
     await tap('Space');
     check(ui.screen === 'intro' && !intro.gated && intro.movie?.url === '/data/Movie/intro_ai.mp4',
       'Ⓐ on it plays the intro at once, with no splash');
+    __native.movieAdvance(1000);
+    await frame();
+    routeEvent('-ArrowUp');
     const movie = intro.movie!;
     let lastPts = -1;
     let clock = 0;
@@ -157,6 +165,17 @@ export async function runMovieSmoke(): Promise<number> {
     check(ui.screen === 'map' && clock >= movie.info.duration && clock < movie.info.duration + 0.25,
       `played to its end, the intro returns to the map (${movie.info.duration.toFixed(3)} s long; ended at ${clock.toFixed(3)} s)`);
     check(lastPts >= movie.info.duration - 2 / movie.info.frameRate, `...having shown its last frame (${lastPts.toFixed(3)} s)`);
+    // A direction let go during the movie is not still steering the map: well past the
+    // 340 ms repeat delay, the selection has not moved.
+    await frame();
+    const before = `${ui.mapHoverCorner}|${ui.mapHoverRoom}`;
+    const until = performance.now() + 700;
+    while (performance.now() < until) {
+      await new Promise((r) => setTimeout(r, 20));
+      await frame();
+    }
+    check(`${ui.mapHoverCorner}|${ui.mapHoverRoom}` === before,
+      `a direction released during the intro does not steer the map after it (${before} → ${ui.mapHoverCorner}|${ui.mapHoverRoom})`);
 
     await frame();
     check(await reach('credits', ['ArrowRight', 'ArrowUp', 'ArrowDown']), 'the Credits corner can be selected');
