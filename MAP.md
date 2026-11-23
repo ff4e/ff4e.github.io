@@ -176,7 +176,7 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 
 ### Map of `src/render/`
 
-The renderer is 34 files and ~102 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
+The renderer is 37 files and ~109 k tokens. (`src/rooms` and `src/app` are larger by total size, but those are 72 independent room scripts and the app shell respectively; this is the one dense area.) The split runs along
 two axes at once (which **art tier**: classic / enhanced / `ai`; and which **backend**: CPU or WebGL), which
 is what makes it hard to guess where something lives. This table is the shortcut.
 
@@ -210,6 +210,8 @@ Start with `roomWalk.ts` and `artSource.ts`: between them they answer "what is d
 | `glRoomAi.ts` | 8.2 k | The GPU compositor for the `ai` tier, from straight RGBA at ×S. Holds `BG_FS`, the water shader `tools/mutate-gl-room-ai.mjs` mutates. |
 | `glCommon.ts` | 1.1 k | The WebGL2 plumbing both of the above share. |
 | **Screens and chrome** | | |
+| `surface2d.ts` | 1.1 k | `Surface2D`, the 2D drawing interface the screens around the room draw through (today the `ai` world map, its record panel, plaques and parchment), cut so each operation is one GPU quad. Plus the injectable factory for its off-screen surfaces. |
+| `canvasSurface2d.ts` | 0.7 k | The web's `Surface2D`: each call is the canvas-2D call the screens made before, so the picture is unchanged by construction. |
 | `worldMap.ts` | 2.3 k | The branch map (`UMain.pas PaintBox1Paint`). |
 | `mapInfo.ts` | 3.7 k | The map's record info panel (krokoměr), and the geometry + cutout for drawing it enlarged on a phone. |
 | `hud.ts` | 2.3 k | The control panel (TOvl): compositing and hit-testing. |

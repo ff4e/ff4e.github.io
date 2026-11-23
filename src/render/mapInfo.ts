@@ -19,6 +19,7 @@
  * map baked into its bitmap so it can be scaled at all. At zoom 1 nothing changes.
  */
 import type { Bmp } from '../data/bmp.js';
+import type { Image2D, Surface2D } from './surface2d.js';
 
 export const PANEL_X = 193;
 export const PANEL_Y = 141;
@@ -86,15 +87,15 @@ export function infoPanelOrigin(zoom: number): { x: number; y: number } {
 }
 
 /**
- * Apply the panel zoom to a 2D context whose backing store is `scale`× map space, so
+ * Apply the panel zoom to a 2D surface whose backing store is `scale`× map space, so
  * anything drawn afterwards at the panel's FAITHFUL map coordinates lands on the
  * enlarged panel. The caller brackets it with save/restore.
  */
-export function applyInfoZoom(ctx: CanvasRenderingContext2D, scale: number, zoom: number): void {
+export function applyInfoZoom(surface: Surface2D, scale: number, zoom: number): void {
   const o = infoPanelOrigin(zoom);
-  ctx.translate(o.x * scale, o.y * scale);
-  ctx.scale(zoom, zoom);
-  ctx.translate(-PANEL_X * scale, -PANEL_Y * scale);
+  surface.translate(o.x * scale, o.y * scale);
+  surface.scale(zoom, zoom);
+  surface.translate(-PANEL_X * scale, -PANEL_Y * scale);
 }
 
 /** How far a panel pixel may stray from a pure darkening of the map and still be shadow. */
@@ -346,7 +347,7 @@ export function drawInfoPanel(
 
 /**
  * Draw the record panel's *artwork* (background frame + hovered button highlight +
- * disabled-Replay greying) onto a 2D context at `scale`, sourcing the AI-upscaled
+ * disabled-Replay greying) onto a 2D surface at `scale`, sourcing the AI-upscaled
  * krokomer/ikonky ImageBitmaps (already `scale`× the native size). The odometer
  * digits are NOT drawn here — the caller overlays them crisply (see drawInfoDigits)
  * so numerals stay legible. Mirrors drawInfoPanel's bg/icon logic exactly.
@@ -355,21 +356,21 @@ export function drawInfoPanel(
  * uneven stair-steps.
  */
 export function drawInfoPanelArtAi(
-  ctx: CanvasRenderingContext2D,
+  surface: Surface2D,
   scale: number,
-  krokomer: CanvasImageSource,
-  ikonky: CanvasImageSource,
+  krokomer: Image2D,
+  ikonky: Image2D,
   hover: InfoButton | null,
   replayEnabled: boolean,
   smooth = false,
 ): void {
-  ctx.imageSmoothingEnabled = smooth;
+  surface.setSmoothing(smooth);
   // Panel background (the AI bitmap is the whole 268×186 region at `scale`×).
-  ctx.drawImage(krokomer, PANEL_X * scale, PANEL_Y * scale, PANEL_W * scale, PANEL_H * scale);
+  surface.drawImage(krokomer, PANEL_X * scale, PANEL_Y * scale, PANEL_W * scale, PANEL_H * scale);
   // Hovered button highlight (Replay only if enabled).
   if (hover && !(hover === 'replay' && !replayEnabled)) {
     const b = INFO_BUTTONS[hover];
-    ctx.drawImage(
+    surface.drawImageRect(
       ikonky,
       b.srcX * scale, 0, ICON_W * scale, ICON_H * scale,
       b.x * scale, ICON_Y * scale, ICON_W * scale, ICON_H * scale,
@@ -377,10 +378,9 @@ export function drawInfoPanelArtAi(
   }
   // Grey out a disabled Replay icon (same 0.45 factor as darkenRect → 55% black wash).
   if (!replayEnabled) {
-    ctx.save();
-    ctx.globalAlpha = 0.55;
-    ctx.fillStyle = '#000';
-    ctx.fillRect(INFO_BUTTONS.replay.x * scale, ICON_Y * scale, ICON_W * scale, ICON_H * scale);
-    ctx.restore();
+    surface.save();
+    surface.setAlpha(0.55);
+    surface.fillRect(INFO_BUTTONS.replay.x * scale, ICON_Y * scale, ICON_W * scale, ICON_H * scale, 0x000000);
+    surface.restore();
   }
 }

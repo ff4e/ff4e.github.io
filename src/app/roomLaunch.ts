@@ -37,6 +37,7 @@
 import { parseBmp, bmpToRgba } from '../data/bmp.js';
 import { MAP_W } from '../render/worldMap.js';
 import { AI_MAP_SCALE } from '../render/worldMapAi.js';
+import { createSurface, type Surface2D } from '../render/surface2d.js';
 import { curNum } from './art.js';
 import { ROOMS } from '../data/roomTable.js';
 import { isAssetError, isTransient, requiredBytes } from '../render/assetFetch.js';
@@ -79,8 +80,8 @@ const PARCHMENT_X = 227;
 const PARCHMENT_Y = 160;
 /** The native parchment (null until boot decodes it, or if it is missing). */
 let parchment: { w: number; h: number; rgba: Uint8ClampedArray } | null = null;
-/** The native parchment as a canvas, for the `ai` path's fallback blit (built on demand). */
-let parchmentCanvas: HTMLCanvasElement | null = null;
+/** The native parchment as a surface, for the `ai` path's fallback blit (built on demand). */
+let parchmentSurface: Surface2D | null = null;
 
 /**
  * Decode the parchment art. Awaited by boot.
@@ -137,7 +138,7 @@ export function blitParchment(rgba: Uint8ClampedArray): void {
 }
 
 /**
- * Blit the parchment onto the hi-res `ai` map context.
+ * Blit the parchment onto the hi-res `ai` map surface.
  *
  * Prefers the upscaled asset, which is built by the map's OWN pipeline
  * (tools/build-map-ai.mjs, Real-ESRGAN x4plus, the same model mapa-0/mapa-1 use) and
@@ -149,24 +150,20 @@ export function blitParchment(rgba: Uint8ClampedArray): void {
  * missing, which is the same shape as the name plaques' fallback: the `ai` tier is
  * additive, and a missing asset costs resolution, never the indicator.
  */
-export function blitParchmentAi(c: CanvasRenderingContext2D): void {
+export function blitParchmentAi(c: Surface2D): void {
   const ai = host.aiWorldMap?.loading;
-  c.imageSmoothingEnabled = false;
+  c.setSmoothing(false);
   if (ai) {
     c.drawImage(ai, PARCHMENT_X * AI_MAP_SCALE, PARCHMENT_Y * AI_MAP_SCALE);
     return;
   }
   if (!parchment) return;
-  if (!parchmentCanvas) {
-    parchmentCanvas = document.createElement('canvas');
-    parchmentCanvas.width = parchment.w;
-    parchmentCanvas.height = parchment.h;
-    parchmentCanvas
-      .getContext('2d')!
-      .putImageData(new ImageData(new Uint8ClampedArray(parchment.rgba), parchment.w, parchment.h), 0, 0);
+  if (!parchmentSurface) {
+    parchmentSurface = createSurface(parchment.w, parchment.h);
+    parchmentSurface.putPixels(new Uint8ClampedArray(parchment.rgba));
   }
   c.drawImage(
-    parchmentCanvas,
+    parchmentSurface,
     PARCHMENT_X * AI_MAP_SCALE,
     PARCHMENT_Y * AI_MAP_SCALE,
     parchment.w * AI_MAP_SCALE,
