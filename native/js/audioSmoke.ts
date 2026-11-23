@@ -30,6 +30,7 @@ import { count, poslMluv } from '../../src/app/gameState.js';
 import { MLUVI_PRIOR } from '../../src/app/keyTables.js';
 import { step } from '../../src/app/logicTick.js';
 import { enterRoom, initGame, roomReady } from './game.js';
+import { loadSubtitleAssets } from './roomSubtitles.js';
 import { audio, mixer } from './seams/audioEngine.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
 import { MIX_RATE, type MixBuffer } from './sdlAudioBackend.js';
@@ -351,6 +352,7 @@ export async function runAudioSmoke(): Promise<number> {
   }
   localStorage.clear();
   initGame({ verbose: false, demo: false, onLeave: () => {} });
+  await loadSubtitleAssets(); // as the game does: the timeline below is subtitled, and must not move for it
   const t0 = __native.now();
   try {
     mixerMechanics();

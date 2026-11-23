@@ -18,6 +18,7 @@ import { replaymode } from '../../src/app/gameState.js';
 import { step } from '../../src/app/logicTick.js';
 import { ui } from '../../src/app/screenState.js';
 import { armSolve, setSolvemode } from '../../src/app/solveMode.js';
+import { loadSubtitleAssets } from './roomSubtitles.js';
 import { currentRoom, enterRoom, initGame, keyDown, roomReady, showMap } from './game.js';
 import { ensureMapArt, mapFrame, mapKeyDown, mapKeyUp, mapPresented } from './mapScreen.js';
 import { pinRandom } from './scene.js';
@@ -79,6 +80,7 @@ export async function runMapSmoke(): Promise<number> {
   localStorage.clear();
   pinRandom(1);
   const store = initGame({ verbose: false, demo: false });
+  await loadSubtitleAssets();
   let n = 0;
   const check = (ok: boolean, what: string): void => {
     n++;

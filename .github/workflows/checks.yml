@@ -96,7 +96,9 @@ jobs:
   # two agree byte for byte there as they do locally — so the parity sweep is a real gate
   # here, not a smoke test. It fails on any differing frame and on any room outside the
   # spike's known gaps (KNOWN_GAPS in native/compare.mjs). The world map's parity
-  # (native/compare-map.mjs, native GPU Surface2D vs the browser's 2D canvas) runs after it.
+  # (native/compare-map.mjs, native GPU Surface2D vs the browser's 2D canvas) runs after it,
+  # then the subtitles' (native/compare-subs.mjs: FreeType text vs the browser's DOM text,
+  # a tolerance gate, with its self-test of wrong frames it must reject).
   #
   # Before it, the smoke gate (native/js/smoke.ts): every room with a recorded solution
   # played headless through the game's real flow modules as the native host wires them,
@@ -124,7 +126,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # Build tools only: SDL3 and libwebp are fetched by native/CMakeLists.txt at pinned,
+      # Build tools only: SDL3, libwebp and FreeType are fetched by native/CMakeLists.txt at pinned,
       # hashed versions, so a Homebrew upgrade cannot move the parity result.
       - run: brew install cmake ninja
       - run: npm run typecheck:native
@@ -152,6 +154,9 @@ jobs:
       - name: Native vs canvas parity, the world map
         if: success() || failure()
         run: node --import tsx native/compare-map.mjs
+      - name: Native vs DOM subtitles, within tolerance, and the tolerance catching wrong text
+        if: success() || failure()
+        run: node --import tsx native/compare-subs.mjs --self-test
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
@@ -159,4 +164,5 @@ jobs:
           path: |
             native/build/compare/
             native/build/compare-map/
+            native/build/compare-subs/
           if-no-files-found: ignore

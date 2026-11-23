@@ -27,10 +27,11 @@ import {
   BRANCHES, RES_REACHABLE, REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, computeResena, depthOfRoom,
 } from '../../src/data/world.js';
 import {
-  activeScript, count, engine, ffr, hracNespi, linesSpoken, loadmode, pokus, poslMluv, prevKostra, room, clearUndoHistory,
-  setActiveScript, setCount, setDeathState, setEngine, setLastLine, setLinesSpoken, setLoadmode, setReplaymode, setRoom,
-  setRoomDepth, setScreenShoveX, setSubs, talkIdx,
+  activeScript, count, engine, ffr, fftEntries, font, hracNespi, linesSpoken, loadmode, pokus, poslMluv, prevKostra, room,
+  subs, clearUndoHistory, setActiveScript, setCount, setDeathState, setEngine, setLastLine, setLinesSpoken, setLoadmode,
+  setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, talkIdx,
 } from '../../src/app/gameState.js';
+import { SubtitleSystem } from '../../src/render/subtitles.js';
 import { initQuiet } from '../../src/app/initQuiet.js';
 import { MLUVI_PRIOR, KEYS, ARROWS, NOOP_SCRIPT } from '../../src/app/keyTables.js';
 import { armChatter, initLogicTick, step } from '../../src/app/logicTick.js';
@@ -48,6 +49,7 @@ import { endShowmode, inShowmode } from './seams/cutscene.js';
 import { roomLoading } from './seams/framePacing.js';
 import { onLeaveRoom, returnFromRoom } from './seams/mapNav.js';
 import { DEFAULT_LINE_TICKS, EFFECT_VOL, LOGIC_MS, LOGIC_SEC } from './seams/stageGeometry.js';
+import { initNativeSettings, subLang, subsOn } from './seams/playerSettings.js';
 import { aiFrame } from './frame.js';
 import { closeLegPage, initMapScreen, mapArrived, openLegPage } from './mapScreen.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
@@ -105,16 +107,29 @@ function setInfo(): void {
 }
 
 /**
- * dialogy's talk hook: play the voice, return its length in game ticks — the FFT record's
- * `delka`, less Talking()'s lead (RSound mez), never anything the mixer reports. A best-
- * solution replay plays it silently, as the original's loadmode replay does. Minus the
- * subtitle, which the native host does not draw yet, and the browser's dialogue hint.
+/**
+ * dialogy's talk hook: show the subtitle and play the voice, as the browser's does, and
+ * return the line's length in game ticks — the FFT record's `delka`, less Talking()'s lead
+ * (RSound mez), never anything the mixer reports. The subtitle's own timing is the subtitle
+ * system's (its length in characters), as in the browser. A best-solution replay neither
+ * shows nor plays it, as the original's loadmode replay does. Minus the browser's dialogue
+ * hint.
  * restates src/app/main.ts `function scriptTalk(` @ db999691d54e
  */
 function talk(name: string, prior: number): number {
   if (inReplay()) {
     const dur = audio.duration(name);
     return dur > 0 ? Math.max(1, Math.round((dur - TALKING_MEZ_SEC) / LOGIC_SEC)) : DEFAULT_LINE_TICKS;
+  }
+  // The room's FFT arrives before its voice package, so it is consulted directly; the global
+  // packages (chatter, death lines, border remarks, the restored lines) through the engine.
+  const entry = fftEntries.find((e) => e.name === name) ?? audio.entry(name);
+  if (entry && subs && subsOn()) {
+    const t = subLang() === 'cz' ? entry.cz : entry.en;
+    // globtit (Talk, URoom.pas:654): LODE's announced coordinate goes in for the '@'.
+    const text =
+      t.text.includes('@') && activeScript ? t.text.replace('@', activeScript.s.globtit) : t.text;
+    if (text) subs.newSubtitle(text, t.color, count, prior);
   }
   audio.play(name, 1, prior, 'voice');
   setLastLine({ name, count });
@@ -125,9 +140,9 @@ function talk(name: string, prior: number): number {
 
 /**
  * `main.ts`'s `buildRoom`, minus what the native host does not have: the cheats (sprite,
- * water, silent film, hooks), the subtitles, the store review and KUFRIK's demonstration and
- * briefcase cutscene (their script callbacks stay unset). Everything that decides how the
- * room PLAYS — and, now, how it sounds — is here, in the same order.
+ * water, silent film, hooks), the store review and KUFRIK's demonstration and briefcase
+ * cutscene (their script callbacks stay unset). Everything that decides how the room PLAYS
+ * — and how it sounds, and what it subtitles — is here, in the same order.
  * restates src/app/main.ts `function buildRoom(` @ 95a7c5e6b334
  */
 function buildRoom(carryPole = false, carried: readonly number[] = []): void {
@@ -141,8 +156,10 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
   hooks.clear();
   if (!carryPole) clearUndoHistory();
   setScreenShoveX(0);
+  const keptSubs = carried.length > 0 ? subs?.rebase(count) : undefined; // carried lines keep theirs
   setCount(0);
-  setSubs(null);
+  const wall = built.bitmaps[built.wallItem.bmp];
+  setSubs(keptSubs ?? (font && wall ? new SubtitleSystem(font, ffr.palette, ffr.width, wall.w, wall.h) : null));
   talkIdx.little = 0;
   talkIdx.big = 0;
   poslMluv.little = -1;
@@ -373,7 +390,7 @@ function leaveRoom(why: LeaveReason): void {
 
 /**
  * Show the world map, tearing the room down as the browser does — KillSnd, then the menu
- * music — minus the subtitles and the store review, which the native host has not got.
+ * music — minus the store review, which the native host has not got.
  * restates src/app/mapNav.ts `export function showMap(` @ 5407b541588e
  */
 export function showMap(): void {
@@ -388,6 +405,7 @@ export function showMap(): void {
   ui.mapRevealStart = performance.now(); // restart the reveal animation (Depth := -3)
   audio.killAll(); // KillSnd: stop room music + every voice/effect
   activeScript?.s.clearDialog(); // zrus_dialogy: drop the pending speech queue
+  subs?.clear(); // ZrusTitulky: clear any on-screen subtitle
   poslMluv.little = -1;
   poslMluv.big = -1;
   startMenuMusic();
@@ -448,6 +466,7 @@ export async function showLegImage(leg: number, pending?: { room: number; replay
     engine.winCountdown = 0;
   }
   activeScript?.s.clearDialog(); // zrus_dialogy
+  subs?.clear(); // ZrusTitulky
   audio.killAll(); // Killsnd
   void audio.playMusic('rybky11', musicUrl('rybky11'), 0); // Music('rybky11')
 }
@@ -509,6 +528,7 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
   opts = o;
   loadStore(); // first, and loudly: persist.ts would swallow an unreadable store
   store = openSaveStore();
+  initNativeSettings(__native.locale());
   initSound(); // reads the persisted volumes, so after the save migration
   globalSounds = loadGlobalSounds();
   // Fatal, as on the browser's boot path: a room entry waits on this, so a failure left

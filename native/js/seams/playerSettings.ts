@@ -1,9 +1,33 @@
 /**
- * Seam for `src/app/playerSettings.ts` (persisted options, read through the audio engine and
- * the device gate). The native host draws no subtitles yet, so they are off; the language
- * is what a line's text would be taken in if they were on.
+ * Seam for `src/app/playerSettings.ts` (persisted options, read through the audio engine, the
+ * device gate and the DOM shell's host). The subtitle half is real: the same `ff.options`
+ * the browser keeps, loaded from the native store, deciding whether a line is shown and in
+ * which language. The volume levels are read by `native/js/sound.ts`.
+ *
+ * With no language stored, the native host follows the SYSTEM language — Czech on a Czech
+ * system, else English (`defaultSettings`, given the host's `locale`). That is a deliberate
+ * difference from the browser, which gives every desktop English whatever its locale
+ * (`initPlayerSettings`, #149): a TV or a console has no browser language picker, and its
+ * system language is the player's own choice.
  */
 import type * as Real from '../../../src/app/playerSettings.js';
+import { defaultSettings, loadSettings, type Settings } from '../../../src/core/settings.js';
 
-export const subsOn: typeof Real.subsOn = () => false;
-export const subLang: typeof Real.subLang = () => 'en';
+export let settings: Settings = defaultSettings();
+
+/**
+ * `initPlayerSettings`' load, without the host it hands over: the native host has no plaque
+ * reload or info line to refresh. After the store is loaded (`initGame`).
+ */
+export function initNativeSettings(language: string | null): void {
+  settings = loadSettings(language ?? undefined);
+}
+
+/**
+ * Whether dialogue text is shown. The browser's also shows it in silent-film mode, a cheat
+ * the native host cannot type.
+ * restates src/app/playerSettings.ts `export function subsOn(` @ 2803d6071dae
+ */
+export const subsOn: typeof Real.subsOn = () => settings.subtitles !== 'off';
+/** restates src/app/playerSettings.ts `export function subLang(` @ 35881fad1b32 */
+export const subLang: typeof Real.subLang = () => (settings.subtitles === 'off' ? settings.titDef : settings.subtitles);

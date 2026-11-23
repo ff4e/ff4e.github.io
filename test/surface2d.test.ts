@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CanvasSurface2D } from '../src/render/canvasSurface2d.js';
 import { createSurface, setSurfaceFactory, type Surface2D } from '../src/render/surface2d.js';
+import { setScratchCanvasFactory } from '../src/render/scratchCanvas.js';
 
 /** A 2D context that records what it was asked, with the state the surface writes. */
 function recorder(w = 8, h = 4) {
@@ -38,6 +39,27 @@ describe('CanvasSurface2D', () => {
       ['=fillStyle', '#000000'],
       ['=fillStyle', '#0a0b0c'],
     ]);
+  });
+
+  it('fills a mask with a colour through a scratch canvas, then draws that onto the surface', () => {
+    const r = recorder(8, 4);
+    const tint = recorder(1, 1);
+    const tintCanvas = { width: 0, height: 0, getContext: () => tint.s.ctx } as unknown as HTMLCanvasElement;
+    setScratchCanvasFactory(() => tintCanvas);
+    try {
+      const mask = { width: 16, height: 16 };
+      r.s.fillMask(mask, 2, 3, 4, 5, 10, 20, 8, 10, 0x05050c);
+      expect([tintCanvas.width, tintCanvas.height]).toEqual([4, 5]);
+      expect(tint.calls).toEqual([
+        ['drawImage', mask, 2, 3, 4, 5, 0, 0, 4, 5],
+        ['=globalCompositeOperation', 'source-in'],
+        ['=fillStyle', '#05050c'],
+        ['fillRect', 0, 0, 4, 5],
+      ]);
+      expect(r.calls).toEqual([['drawImage', tintCanvas, 0, 0, 4, 5, 10, 20, 8, 10]]);
+    } finally {
+      setScratchCanvasFactory(null);
+    }
   });
 
   it('clears the whole surface whatever the transform', () => {

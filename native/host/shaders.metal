@@ -140,6 +140,16 @@ fragment float4 fs_present(VSOut in [[stage_in]], texture2d<float> uTex [[textur
   return float4(acc / (n * n), 1.0);
 }
 
+// OVERLAY — a Surface2D drawn over the presented composite at one texel per window pixel
+// (the subtitles; present_tex in main.c). Premultiplied; the pipeline blends it over.
+struct OverlayU { float2 origin; int2 size; };
+fragment float4 fs_overlay(VSOut in [[stage_in]], texture2d<float> uTex [[texture(0)]],
+                           sampler smp [[sampler(0)]], constant OverlayU& u [[buffer(0)]]) {
+  int2 p = int2(floor(in.pos.xy - u.origin));
+  if (p.x < 0 || p.y < 0 || p.x >= u.size.x || p.y >= u.size.y) return float4(0.0);
+  return uTex.read(uint2(p));
+}
+
 // SURFACE — Surface2D's one quad (src/render/surface2d.ts; flush_surf in main.c). Vertices
 // carry the dest corner in target pixels, the source texel coordinate (normalised), and a
 // premultiplied colour the premultiplied texel is multiplied by. Nearest or bilinear is

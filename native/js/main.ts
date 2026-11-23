@@ -18,6 +18,8 @@
  *     renders ONE composite of the parity scene (`scene.ts`) for native/compare.mjs.
  *   ff4e-native <bundle.js> --root <public dir> --headless --map-scene CASE --out f.rgba
  *     paints ONE case of the world-map parity scene (`mapScene.ts`) for native/compare-map.mjs.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --subs-scene CASE --out f.rgba
+ *     draws ONE case of the subtitle parity scene (`subtitleScene.ts`) for native/compare-subs.mjs.
  */
 import { runTimers, readBytes } from './shims.js';
 import { RANDPOLE } from '../../src/render/framebuffer.js';
@@ -34,6 +36,11 @@ import { ensureMapArt, mapBlur, mapFrame, mapKeyDown, mapKeyUp, mapPresented } f
 import { ui } from '../../src/app/screenState.js';
 import { runSmoke } from './smoke.js';
 import { runMapSmoke } from './mapSmoke.js';
+import { SUB_CASES, buildSubScene } from './subtitleScene.js';
+import { SubtitleLayout } from './subtitleLayout.js';
+import { loadFace } from './subtitleFonts.js';
+import { GlyphAtlas, drawSubtitles } from './subtitleDraw.js';
+import { loadSubtitleAssets, subtitleOverlay } from './roomSubtitles.js';
 import { runAudioSmoke } from './audioSmoke.js';
 import { soundPoll } from './sound.js';
 import { mixer } from './seams/audioEngine.js';
@@ -69,11 +76,16 @@ async function main(): Promise<void> {
     await renderMapCase(arg('--map-scene')!);
     return;
   }
+  if (flag('--subs-scene')) {
+    await renderSubsCase(arg('--subs-scene')!);
+    return;
+  }
   if (flag('--headless')) {
     await renderParityFrame(target);
     return;
   }
   initGame({ verbose: true, demo: flag('--demo') });
+  await loadSubtitleAssets();
   console.log(`sound: ${mixer.mode}, mixing at ${MIX_RATE} Hz`);
   if (arg('--room')) await enterRoom(Number(arg('--room')));
   else if (flag('--demo')) await enterRoom(firstRoom());
@@ -114,6 +126,40 @@ async function renderMapCase(name: string): Promise<void> {
   __native.quit();
 }
 
+/**
+ * One case of the subtitle parity scene (`subtitleScene.ts`), for native/compare-subs.mjs.
+ * `--mutate KIND` draws it deliberately wrong, for the comparison's self-test (`MUTATIONS`).
+ */
+async function renderSubsCase(name: string): Promise<void> {
+  const c = SUB_CASES.find((x) => x.name === name);
+  if (!c) throw new Error(`no subtitle case ${name}`);
+  const scene = await buildSubScene(c, readBytes);
+  const face = await loadFace(scene.face, readBytes);
+  const mutate = arg('--mutate');
+  const rows = scene.sys.debugLines().map((t, i) => mutateRow(t, i, mutate));
+  const box = mutate === 'size' ? { ...scene.box, textScale: scene.box.textScale * 1.06 } : scene.box;
+  const now = mutate === 'late' ? scene.count - 1 : scene.count;
+  const source = { debugLines: () => rows, vectorScreen: scene.sys.vectorScreen };
+  let frame = new SubtitleLayout(face).layout(source, now, box, face.name);
+  if (mutate === 'shift') frame = { ...frame, lines: frame.lines.map((l) => ({ ...l, baseline: l.baseline + 2 / scene.density / frame.tier })) };
+  if (mutate === 'outline') frame = { ...frame, lines: frame.lines.map((l) => ({ ...l, strokeW: 0 })) };
+  const screen = new NativeSurface(scene.devW, scene.devH);
+  drawSubtitles(screen, frame, face, new GlyphAtlas(), scene.density);
+  __native.saveTexture(screen.id, arg('--out') ?? 'subs.rgba');
+  __native.quit();
+}
+
+/** The self-test's wrong rows: another fish's colour, or one letter changed. */
+function mutateRow<T extends { obsah: string; rgb: [number, number, number] }>(t: T, i: number, kind: string | undefined): T {
+  if (i !== 0) return t;
+  if (kind === 'colour') return { ...t, rgb: [t.rgb[2], t.rgb[1], t.rgb[0]] };
+  if (kind === 'letter') {
+    const at = t.obsah.search(/[a-z]/);
+    return { ...t, obsah: t.obsah.slice(0, at) + (t.obsah[at] === 'e' ? 'a' : 'e') + t.obsah.slice(at + 1) };
+  }
+  return t;
+}
+
 function runInteractive(target: NativeAiScreen): void {
   const stopAt = arg('--seconds') ? __native.now() + Number(arg('--seconds')) * 1000 : Infinity;
   let last = __native.now();
@@ -145,9 +191,10 @@ function runInteractive(target: NativeAiScreen): void {
     if (ui.screen === 'room') {
       // Nothing is presented while a room loads, so the map's parchment frame stays up.
       const drawn = draw(target, alpha);
+      const subs = drawn ? subtitleOverlay(target.width, target.height, alpha) : null;
       // Measured BEFORE present: present waits for vsync, which is idle time, not work.
       jsMs += __native.now() - now;
-      if (drawn) __native.present();
+      if (drawn) __native.present(subs?.id);
     } else {
       const shown = mapFrame(now); // the map, or the story page over it
       jsMs += __native.now() - now;
