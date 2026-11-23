@@ -52,6 +52,7 @@ import { DEFAULT_LINE_TICKS, EFFECT_VOL, LOGIC_MS, LOGIC_SEC } from './seams/sta
 import { initNativeSettings, subLang, subsOn } from './seams/playerSettings.js';
 import { aiFrame } from './frame.js';
 import { closeLegPage, initMapScreen, mapArrived, openLegPage } from './mapScreen.js';
+import { initIntroScreen } from './introScreen.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { loadStore } from './shims.js';
 import { initSound, loadGlobalSounds, musicLevel, soundTime, startMenuMusic, updateLipSync } from './sound.js';
@@ -542,6 +543,7 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
   initRoomLoad({ buildRoom, endShowmode, ffrUrl, solved: store.solved });
   initLogicTick({ buildRoom, casHry: store.casHry, hooks, updateLipSync });
   onLeaveRoom(leaveRoom);
+  initIntroScreen({ showMap });
   initMapScreen({
     solved: store.solved,
     cheated: store.cheated,

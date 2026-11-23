@@ -21,8 +21,10 @@
  * The default selection is the room last played if it can still be selected, else the
  * first room not yet solved — so resuming is one press of Ⓐ.
  *
- * The corner buttons (Intro, Credits, Options, Exit) are not selectable yet: none of their
- * screens exists natively, and a target that does nothing is worse than none. They join
+ * Of the corner buttons, Intro and Credits are selectable: Ⓐ on one does what a click on it
+ * does (`dispatchMapCorner`) — the intro movie (`introScreen.ts`), or the credits roll over
+ * the map (`creditsScreen.ts`), which any button closes. Options and Exit are not: their
+ * screens do not exist natively, and a target that does nothing is worse than none. They join
  * `NATIVE_CORNERS` as their screens arrive; the geometry already handles them.
  *
  * The host (native/host/main.c) turns the gamepad into key codes, so this reads one stream:
@@ -43,6 +45,8 @@ import { loadAiPlaque, loadMapArt, paintParchmentAi, type MapArt, type MapIo } f
 import { NativeSurface, decodeImage, type NativeImage } from './nativeSurface.js';
 import { readBytes } from './shims.js';
 import { DirRepeat } from './dirRepeat.js';
+import { creditsFrame, creditsKeyDown, openCredits } from './creditsScreen.js';
+import { replayIntro } from './introScreen.js';
 
 /** What the map needs of the game: the player's record, and the way into a room. */
 export interface MapScreenHost {
@@ -60,8 +64,8 @@ export interface MapScreenHost {
   readonly lastRoom: () => number;
 }
 
-/** The corner buttons a native host can act on. None yet: see the header. */
-const NATIVE_CORNERS: readonly MapAction[] = [];
+/** The corner buttons a native host can act on: see the header. */
+const NATIVE_CORNERS: readonly MapAction[] = ['intro', 'credits'];
 
 const DIRS: Readonly<Record<string, MapStep>> = {
   KeyI: 'up', KeyK: 'down', KeyJ: 'left', KeyL: 'right',
@@ -216,9 +220,31 @@ function press(): void {
     activateInfoButton(ui.mapInfoRoom, ui.mapInfoHover);
     return;
   }
-  if (sel?.kind !== 'node') return; // no corner acts natively yet
+  if (sel?.kind === 'corner') {
+    dispatchMapCorner(sel.action);
+    return;
+  }
+  if (!sel) return;
   if (host.solved.has(sel.room) || host.cheated.has(sel.room)) openMapInfo(sel.room);
   else launch = { room: sel.room };
+}
+
+/**
+ * Ⓐ on a corner button: what a click on it does (daIntro, daCredits, UMain.pas:1064-1135).
+ * Options and Exit are not selectable natively (`NATIVE_CORNERS`), so they never get here.
+ * restates src/app/mapNav.ts `export function dispatchMapCorner(` @ 39aefac50d91
+ */
+function dispatchMapCorner(action: MapAction): void {
+  switch (action) {
+    case 'intro':
+      replayIntro();
+      break;
+    case 'credits':
+      void openCredits();
+      break;
+    default:
+      break;
+  }
 }
 
 function steer(now: number): void {
@@ -231,6 +257,10 @@ function steer(now: number): void {
 export function mapKeyDown(code: string): void {
   if (ui.screen === 'legimage') {
     host.dismissLegImage(); // any button continues
+    return;
+  }
+  if (ui.mapOverlay === 'credits') {
+    creditsKeyDown(); // any button closes the roll
     return;
   }
   if (launch || !art) return; // a launch blocks input, as on the web
@@ -318,6 +348,10 @@ export function mapFrame(now: number): NativeSurface | null {
       legPage.surface.drawImage(legPage.img, 0, 0);
     }
     return legPage.surface;
+  }
+  if (ui.mapOverlay === 'credits') {
+    const roll = creditsFrame(now);
+    if (roll) return roll;
   }
   if (!art) return null;
   syncSelection();

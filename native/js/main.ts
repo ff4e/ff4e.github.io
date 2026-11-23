@@ -1,8 +1,9 @@
 /**
  * Native entry, driven by the C host (native/host/main.c). Three modes:
  *
- *   ff4e-native <bundle.js> --root <public dir> [--room N] [--demo] [--seconds S] [--store F]
- *     the game (`game.ts`): starts on the world map (`mapScreen.ts`), or in room N, and
+ *   ff4e-native <bundle.js> --root <public dir> [--room N] [--demo] [--intro] [--seconds S] [--store F]
+ *     the game (`game.ts`): starts on the world map (`mapScreen.ts`) — behind the intro
+ *     movies on a first run, or with `--intro` (`introScreen.ts`) — or in room N, and
  *     comes back to the map after every room. --demo plays every room's recorded solution
  *     through the real loop instead of reading input, room after room. Controls:
  *     native/README.md.
@@ -20,6 +21,11 @@
  *     paints ONE case of the world-map parity scene (`mapScene.ts`) for native/compare-map.mjs.
  *   ff4e-native <bundle.js> --root <public dir> --headless --subs-scene CASE --out f.rgba
  *     draws ONE case of the subtitle parity scene (`subtitleScene.ts`) for native/compare-subs.mjs.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-movie --store F
+ *     the movie gate (`movieSmoke.ts`): the intro, its splash and the credits through the real flow.
+ *   ff4e-native <bundle.js> --root <public dir> --headless (--movie-frames URL --at T,… |
+ *     --movie-audio URL | --credits-scene P,…) --out PREFIX
+ *     movie frames, movie sound, or credits frames (`mediaScene.ts`) for native/compare-media.mjs.
  */
 import { runTimers, readBytes } from './shims.js';
 import { RANDPOLE } from '../../src/render/framebuffer.js';
@@ -31,7 +37,7 @@ import { NativeSurface, decodeImage, nativeSurface } from './nativeSurface.js';
 import { loadMapScene, paintMapCase } from './mapScene.js';
 import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { compositeSize, frameFor, loadScene, pinRandom, probeFrame, replaySolution } from './scene.js';
-import { advance, blur, draw, enterRoom, firstRoom, initGame, keyDown, keyUp, showMap } from './game.js';
+import { advance, blur, draw, enterRoom, firstRoom, initGame, keyDown, keyUp } from './game.js';
 import { ensureMapArt, mapBlur, mapFrame, mapKeyDown, mapKeyUp, mapPresented } from './mapScreen.js';
 import { ui } from '../../src/app/screenState.js';
 import { runSmoke } from './smoke.js';
@@ -42,6 +48,9 @@ import { loadFace } from './subtitleFonts.js';
 import { GlyphAtlas, drawSubtitles } from './subtitleDraw.js';
 import { loadSubtitleAssets, subtitleOverlay } from './roomSubtitles.js';
 import { runAudioSmoke } from './audioSmoke.js';
+import { runMovieSmoke } from './movieSmoke.js';
+import { renderCreditsScene, renderMovieAudio, renderMovieFrames } from './mediaScene.js';
+import { introFrame, introKeyDown, loadIntroArt, openSession } from './introScreen.js';
 import { soundPoll } from './sound.js';
 import { mixer } from './seams/audioEngine.js';
 import { MIX_RATE } from './sdlAudioBackend.js';
@@ -62,6 +71,26 @@ async function main(): Promise<void> {
   const target = new NativeAiScreen();
   if (flag('--smoke-audio')) {
     __native.quit(await runAudioSmoke());
+    return;
+  }
+  if (flag('--smoke-movie')) {
+    __native.quit(await runMovieSmoke());
+    return;
+  }
+  const nums = (s: string | undefined): number[] => (s ?? '').split(',').filter(Boolean).map(Number);
+  if (flag('--movie-frames')) {
+    await renderMovieFrames(arg('--movie-frames')!, nums(arg('--at')), arg('--out')!);
+    __native.quit();
+    return;
+  }
+  if (flag('--movie-audio')) {
+    await renderMovieAudio(arg('--movie-audio')!, arg('--out')!);
+    __native.quit();
+    return;
+  }
+  if (flag('--credits-scene')) {
+    await renderCreditsScene(nums(arg('--credits-scene')), arg('--out')!, arg('--mutate'));
+    __native.quit();
     return;
   }
   if (flag('--smoke-map')) {
@@ -91,7 +120,8 @@ async function main(): Promise<void> {
   else if (flag('--demo')) await enterRoom(firstRoom());
   else {
     await ensureMapArt();
-    showMap();
+    await loadIntroArt();
+    openSession(flag('--intro')); // the first run plays the logo and the intro before the map
   }
   runInteractive(target);
 }
@@ -177,8 +207,9 @@ function runInteractive(target: NativeAiScreen): void {
         mapBlur();
       } else if (ev[0] === '-') {
         if (onRoom) keyUp(ev.slice(1));
-        else mapKeyUp(ev.slice(1));
+        else if (ui.screen !== 'intro') mapKeyUp(ev.slice(1));
       } else if (onRoom) keyDown(ev.slice(1));
+      else if (ui.screen === 'intro') introKeyDown(ev.slice(1));
       else mapKeyDown(ev.slice(1));
     }
     if (now >= stopAt) {
@@ -195,8 +226,12 @@ function runInteractive(target: NativeAiScreen): void {
       // Measured BEFORE present: present waits for vsync, which is idle time, not work.
       jsMs += __native.now() - now;
       if (drawn) __native.present(subs?.id);
+    } else if (ui.screen === 'intro') {
+      const shown = introFrame(now); // the splash, or a movie frame with the skip hint over it
+      jsMs += __native.now() - now;
+      if (shown) __native.presentTexture(shown.tex, shown.overlay);
     } else {
-      const shown = mapFrame(now); // the map, or the story page over it
+      const shown = mapFrame(now); // the map, the credits over it, or the story page
       jsMs += __native.now() - now;
       if (shown) __native.presentTexture(shown.id);
       mapPresented();

@@ -9,7 +9,8 @@
 
 The game **without a browser**. It plays a whole game now — from the world map, room after
 room, with undo, saves, the record panel's Replay and the leg story pages, and with its
-sound and subtitles — on the AI-upscaled tier, without menus yet:
+sound and subtitles, the intro movies and the credits — on the AI-upscaled tier, without
+menus yet:
 
 - **QuickJS-ng** runs the game's own TypeScript. Nothing is ported: the room, its script and
   the step engine (`src/core/`), the AI-tier room walk (`src/render/`), and the game's own
@@ -30,6 +31,9 @@ sound and subtitles — on the AI-upscaled tier, without menus yet:
   "The world map" below.
 - The subtitles are drawn natively too, through `Surface2D` with glyphs from FreeType: see
   "Subtitles" below.
+- The intro and logo movies play through **the platform's movie decoder** (AVFoundation
+  here) behind a four-call host interface, with the picture following the movie's own sound,
+  and the AI credits roll is painted through `Surface2D`: see "Movies and credits" below.
 - The off-screen canvases the AI tier builds — the classic-sprite fallback for art with
   no AI file, the mirror's glass mask, LODE's wreck — come from an injected factory
   (`src/render/scratchCanvas.ts`). The browser keeps `document.createElement('canvas')`;
@@ -116,9 +120,10 @@ geometry is `src/render/mapSelection.ts`, from the Xbox branch, #165):
 - Ⓑ on the plain map does nothing, on purpose; the default selection is the room last
   played if it is still selectable, else the first room not yet solved.
 
-The corner buttons (Intro, Credits, Options, Exit) are not selectable yet: none of their
-screens exists natively, and a target that does nothing is worse than none
-(`NATIVE_CORNERS`). The story pages are the upscaled ones (`/enhanced-ai/_story/`).
+Of the corner buttons, **Intro** and **Credits** are selectable, and Ⓐ on one does what a
+click does (`dispatchMapCorner`): the intro movie, or the credits roll over the map (see
+"Movies and credits"). Options and Exit are not: neither screen exists natively, and a
+target that does nothing is worse than none (`NATIVE_CORNERS`). The story pages are the upscaled ones (`/enhanced-ai/_story/`).
 
 ### Subtitles (`native/js/subtitleLayout.ts`, `subtitleDraw.ts`, `roomSubtitles.ts`)
 
@@ -260,6 +265,140 @@ Not proven by a gate: how it sounds through a real device. It has been run with 
 a Mac (the mixer clock tracks the wall at ×1.001–1.002), not listened to critically, and the
 SDL resampler's output has not been compared with Chromium's.
 
+## Movies and credits
+
+### When they play (`native/js/introScreen.ts`)
+
+As in the browser (`boot.ts`, `mapNav.ts`): a **first run** opens on the start splash, and Ⓐ
+plays the ALTAR logo and then the intro, after which `introSeen` is saved in `ff.options` and
+later sessions open on the map; the map's **Intro** corner plays the intro alone, at once.
+The game's sound is killed first (KillSnd; the movie carries its own), and the map comes back
+after the last movie, with its menu music. `--intro` plays the first-run sequence anyway.
+
+The player is `src/app/intro.ts`'s `IntroPlayer` without the page, restated and pinned: a
+queue of movies, each URL resolved as it starts; a movie that cannot be opened or decoded
+counts as ended, as the browser's load error does, so a missing file cannot wedge a session.
+The AI encodes are used when they are there, as the web's `ai` tier picks them (the HEAD
+probe is a file check), else the faithful ones.
+
+Controls are the controller spec's (A3 "Intro movies", B2): on the splash **only Ⓐ** (Space,
+Enter) starts — anything else is ignored, as a stray key on the web's splash is, so mashing a
+button cannot lose the intro; during a movie **any button** skips it (logo → intro → map),
+except a bare modifier and Tab, as on the web. A gamepad's sticks arrive as keys (see
+Controls), so a stick pushed past its threshold skips too.
+
+What is drawn is the web's, in its CSS px at the window's density: the splash is the title
+cover (`/cover.webp`, min(88vw, 1100px) wide, 38% down, on black) and the start button under it
+— "▶ Press Ⓐ to start", Ⓐ as the controller's green chip (spec A4/A5); Mulish stands in for
+the web's `system-ui`, and the ▶ and the chip are drawn shapes (`native/js/uiDraw.ts`). A
+movie fills the window as `object-fit: contain` does (the host's letterboxed, box-filtered
+present), and the web's explicit Skip button is replaced, on a TV, by the hint "Press any
+button to skip" along the bottom (A4; no legend during the intro), drawn as an overlay the
+size of the window.
+
+### The player (`native/js/movie.ts`, `native/host/movie.c`, `movie.h`)
+
+The decoder is the platform's, behind the smallest interface the player needs
+(`native/host/movie.h`): open a file, the next frame in presentation order (BGRA, with its
+time), and the whole audio track as PCM. `movie_apple.m` implements it with **AVFoundation**'s
+`AVAssetReader` (VideoToolbox decodes the H.264, in hardware, and converts it by the file's
+colour description; Audio Toolbox the AAC, its priming dropped by the file's edit). Media
+Foundation would implement the same four calls on Windows and Xbox; nothing else is per
+platform.
+
+- **The clock is the sound.** The movie's audio track is the A/V clock, as a `<video>`'s is,
+  and each display refresh shows the last frame whose time is not after it (`movieFrame`):
+  decoded forward, uploaded only if it is new, and only the newest when several fell due at
+  once. The picture can neither run ahead of the sound nor fall behind it, and the pacing is
+  the display's — the loop runs once per vsync. A movie with no sound would run on the wall
+  clock. It has ended (the browser's `ended`) once the clock passes its duration, the longer
+  of its tracks; the last frame stays up until then.
+- **The sound** plays **beside** the mixer, not in it (`audio_movie_*` in `audio.c`): a second
+  logical SDL device on the same output, at the track's own rate and channels. The intro is
+  stereo, with more side signal than mid (measured), so the mixer's mono would have lost
+  much of it. It plays at gain 1, outside the Options buses and `MASTER_GAIN`, as a
+  `<video>` element is outside the page's Web Audio graph. With an output, the clock is the
+  frames SDL had taken before its latest request plus the time since that request, held
+  below what it has taken: what is being heard, give or take a device buffer (SDL reports no
+  output latency; on a TV over HDMI that is a known unknown). Headless, the track moves only
+  by `movieAdvance`, so the gates see exact instants.
+- **The picture** is a BGRA texture replaced whole once per new frame, through one cycled
+  transfer buffer (1920×1440: 11 MB, sixty times a second). Measured on an M-series Mac:
+  0.6–0.8 ms of the frame including the copy; the whole 73 s intro decodes headless in ~7 s.
+
+### The credits (`native/js/creditsScreen.ts`)
+
+The `ai` roll (`src/render/creditsAi.ts`) is two DOM layers in the browser — the scroll strip
+flipped and translated behind the static frame, moved by the compositor — because a canvas
+could not match the compositor byte for byte (#209). Natively there is no compositor to
+match, so the same picture is painted into a surface the art's size (2560×1920): the frame's
+top-left colour, the strip as ONE flipped quad at the browser's own translation
+(`creditsTranslate`, imported) sampled bilinearly as the compositor samples a layer at a
+fractional offset, and the static frame over it 1:1. It is presented as the map is.
+
+The timing is `drawCredits`', restated: the roll advances continuously off the wall clock at
+4 native px per 100 ms, settles at `maxScroll`, and closes itself once the original's stepped
+offset passes `closeAt`; any button closes it first (FormKeyDown → DoneCredits). It is reached
+from the map's Credits corner, its art loaded on the press, nothing shown until it is in, and
+released when it closes (the strip is ~135 MB decoded), as the browser detaches its layers.
+A load failure leaves the map as it was and says so on the console: the browser's load note
+has no native counterpart yet.
+
+### Does it play? `--smoke-movie`
+
+    native/build/cmake/ff4e-native native/build/game.js --root public --headless \
+      --smoke-movie --store native/build/smoke-movie-store.json
+
+`native/js/movieSmoke.ts`, 23 checks in ~8 s, through the real routers and frames: a first
+run opens on the splash, which Ⓑ, a stick, a d-pad and Ⓧ do not leave and Ⓐ does, into the
+AI logo with the game's sound killed; four seconds of the logo at 60 refreshes a second on
+the headless clock, where **every frame shown is the one the sound has reached** (its time not
+after the clock, the next one's after it) and every frame of the ~60 fps movie is shown, and
+**the sound played is the movie's own track from its first sample** (within 1e-5 of a second
+decode: Apple's AAC decoder is not bit-for-bit repeatable; a one-sample shift differs by
+more); any button skips to the intro from its start, a modifier does not, and skipping it
+reaches the map with `introSeen` saved, the movie's sound gone and the menu music back; the
+next session opens on the map; the Intro corner is reached by directions and plays the intro
+without the splash, which played to its end shows its last frame and returns to the map; the
+Credits corner opens the roll, any button closes it, and it closes itself once it has
+settled; a movie that cannot be read counts as ended.
+
+### Is it the same movie? `native/compare-media.mjs`
+
+    node --import tsx native/compare-media.mjs --self-test      # or --only frames,audio,credits
+
+Three comparisons with the browser's own (`native/media-reference.html`), all tolerance gates,
+each with a self-test that draws or plays the native side wrong and fails unless every wrong
+one is rejected:
+
+- **Frames**: at 11 fixed times across both AI movies (mid-frame, where the picture moves), the
+  frame Chromium's `<video>` shows after a seek, drawn 1:1, against the one the native player
+  shows decoding forward from the start as it plays. Two H.264 decoders are never
+  byte-identical, so: the worst 32×32 block's mean |Δ| at most 8, the frame's at most 1.5 (a
+  colour-matrix or range error moves every pixel). Measured: the same frame at most 2.7
+  (block) and 0.38 (frame) with Chromium on Metal, as the harness runs it (4.7 and 0.76 with Playwright's default GL); the
+  frame before or after, at these points, at least 20.4; red and blue swapped, far more.
+- **Sound**: the track as the native player plays it against Chromium's decode of the same
+  file, in 2-second windows across each movie: the best alignment within ±100 ms must be lag
+  0 — not one sample off — at a correlation of at least 0.999, and the decoded length within
+  1 ms. Measured: lag 0 everywhere, correlation 1.0000; lengths 671 798 / 671 800 (logo) and
+  1 616 993 / 1 616 992 (intro). The self-test shifts it by the AAC priming (1024 samples, 46
+  ms) either way and by 1 ms: each is found at its lag.
+- **Credits**: the roll at seven times after it opened (the start, fractional offsets mid-strip,
+  its end, settled) — the browser's real `AiCredits` layers screenshotted against the native
+  surface at 2560×1920: max Δ at most 10 and the worst block at most 0.8. Measured: identical at
+  the start, max Δ 6 and block 0.38 elsewhere (bilinear rounding). The self-test draws it a
+  native pixel (25 ms) late, the strip unflipped, the static frame missing and the wrong
+  backdrop: 23 of 23 rejected.
+
+~30 s. `npm run native:check` runs both gates (`movie-smoke`, `media`), as does the manual CI
+job.
+
+Not proven by a gate: lip sync through a real output (the clock's device-buffer estimate, and
+any TV's own latency), how the movie sounds after SDL's resampler, the letterboxed scaling of
+the movie and the splash's layout (looked at on a Mac, not compared), and a pad's stick
+skipping a movie.
+
 ## Build and run (macOS, Apple silicon)
 
     brew install cmake ninja
@@ -276,8 +415,8 @@ takes under a minute. Nothing from Homebrew but the build tools is used, so a pa
 upgrade cannot change the pixels `compare.mjs` checks.
 
 **The whole gate in one command:** `npm run native:check` (`native/check.mjs`) runs the
-typecheck, the bundle, the build, the room, map and sound smokes and the three comparisons
-below, in the CI job's order, one summary line per step (logs in `native/build/check/`).
+typecheck, the bundle, the build, the room, map, sound and movie smokes and the four
+comparisons, in the CI job's order, one summary line per step (logs in `native/build/check/`).
 `-- --only smoke,subs` reruns just those steps after a build. Quote its summary in the PR.
 Controls, keyboard and gamepad (SDL maps any supported controller to this layout; the
 gamepad is turned into the same key codes in `native/host/main.c`, so there is one stream
@@ -299,13 +438,19 @@ of keys, read by the room's router in a room and by the map's on the map):
 | move the selection | arrows, `IJKL`, `WASD` | d-pad, either stick |
 | open (panel / launch) / press a panel button | Space, Enter | Ⓐ |
 | close the record panel | Esc | Ⓑ |
-| continue from a story page | any key | any button |
+| continue from a story page, close the credits | any key | any button |
+
+| intro | keyboard | gamepad |
+| --- | --- | --- |
+| start, from the splash | Space, Enter | Ⓐ |
+| skip the movie | any key | any button |
 
 Close the window to quit.
 
 Other flags:
 
 - `--room N` starts in room N instead of on the map.
+- `--intro` plays the first-run intro (splash, logo, intro) before the map, as a first run does.
 - `--demo` plays every room's recorded solution through the real loop (the browser's
   dev-only `solvemode`) instead of reading input: the game plays itself, room after room,
   from where the store says the player left off.
@@ -474,17 +619,20 @@ with the self-test, after the map comparison.
 
 ## What it does not do yet
 
-- **Menus (Options, Credits, the intro), the panel, video.** The map's corner buttons are
-  therefore not selectable, and the volume levels are the ones the browser persisted (the
-  defaults, natively). With no Options screen, the subtitle mode and face can only come from
-  the store.
-- **Sound, beyond the rooms and the map:** the intro's and the cutscene's (neither is
-  played); an audio session for tvOS (interruptions, routing — `onGesture`/`onVisible` are
+- **Menus (Options), the panel.** The map's Options and Exit corners are therefore not
+  selectable, and the volume levels are the ones the browser persisted (the defaults,
+  natively). With no Options screen, the subtitle mode and face can only come from the store.
+- **Sound, beyond the rooms, the map and the movies:** the cutscene's (it is not played); an
+  audio session for tvOS (interruptions, routing — `onGesture`/`onVisible` are
   no-ops here). The AAC is decoded on the main thread as a room is entered (~1.2 s for all
   100 minutes of speech, so a few tens of ms a room); decoded music stays cached for the
   session, as the browser's does (mono float32 at 22050 Hz: ~10 MB a track).
 - **KUFRIK's briefcase cutscene and its tutorial demonstration.** The room plays; the
-  demonstration is not shown.
+  demonstration is not shown. (It is not an MP4: the browser paints it per game tick from the demo's
+  own frames, `src/app/cutscene.ts`, so the movie player does not bring it.)
+- **The faithful credits** (`src/render/credits.ts`): the native host is the AI tier, so it
+  rolls the AI credits only (and plays the faithful movies only where the AI encodes are
+  missing, as the web's `ai` tier does).
 - **Cheats** (no way to type one), the fishing hooks they enable, and haptics.
 - **Quitting** is closing the window: on the map Ⓑ does nothing, by design, and Esc is the
   same key. On tvOS the system's Home and Back will own it.
