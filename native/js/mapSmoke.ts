@@ -22,6 +22,8 @@ import { loadSubtitleAssets } from './roomSubtitles.js';
 import { currentRoom, enterRoom, initGame, keyDown, roomReady, showMap } from './game.js';
 import { ensureMapArt, mapFrame, mapKeyDown, mapKeyUp, mapPresented } from './mapScreen.js';
 import { pinRandom } from './scene.js';
+import { LOGIC_MS } from './seams/stageGeometry.js';
+import { soundTime } from './sound.js';
 
 class MapSmokeFailure extends Error {}
 
@@ -54,7 +56,10 @@ async function untilReady(): Promise<void> {
 
 /** Step the room until it is left (a win, or the end of a replay), then let the exit land. */
 async function playOut(what: string): Promise<void> {
-  for (let i = 0; i < 200_000 && ui.screen === 'room'; i++) step();
+  for (let i = 0; i < 200_000 && ui.screen === 'room'; i++) {
+    soundTime(LOGIC_MS); // the mixer's clock moves with game time: 80 ms a step
+    step();
+  }
   await settle();
   if (ui.screen === 'room') throw new MapSmokeFailure(`${what}: the room was never left`);
 }

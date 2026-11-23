@@ -65,6 +65,11 @@ file(READ ${SHADER_SRC} SHADER_HEX HEX)
 string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," SHADER_BYTES "${SHADER_HEX}")
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/shaders_msl.h "static const char SHADERS_MSL[] = {${SHADER_BYTES} 0x00};\n")
 
-add_executable(ff4e-native host/main.c host/text.c)
+# Sound: the mixer (host/audio.c) and the platform's AAC decoder — Audio Toolbox on Apple
+# platforms (host/audio_decode_apple.c); Media Foundation would take its place on Windows.
+add_executable(ff4e-native host/main.c host/text.c host/audio.c host/audio_decode_apple.c)
 target_include_directories(ff4e-native PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${libwebp_SOURCE_DIR}/src)
 target_link_libraries(ff4e-native PRIVATE qjs SDL3::SDL3-static webpdecoder freetype)
+if(APPLE)
+  target_link_libraries(ff4e-native PRIVATE "-framework AudioToolbox" "-framework CoreFoundation")
+endif()

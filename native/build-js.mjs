@@ -28,8 +28,9 @@ mkdirSync(dirname(out), { recursive: true });
 
 /** src/app/ modules replaced by native/js/seams/<same name>.ts. */
 const SEAMED = new Set(readdirSync(seamDir).filter((f) => f.endsWith('.ts')).map((f) => basename(f, '.ts')));
-/** src/platform/ modules replaced the same way (`platform-<name>.ts` in seams/). */
+/** src/platform/ and src/audio/ modules replaced the same way (`platform-<name>.ts`, `audio-<name>.ts`). */
 const PLATFORM_SEAMS = new Set([...SEAMED].filter((n) => n.startsWith('platform-')).map((n) => n.slice('platform-'.length)));
+const AUDIO_SEAMS = new Set([...SEAMED].filter((n) => n.startsWith('audio-')).map((n) => n.slice('audio-'.length)));
 
 /**
  * The src/app/ modules the native host runs for real. DOM-free at module scope, and
@@ -51,6 +52,7 @@ const seamPlugin = {
       const name = basename(target, '.js');
       if (dir === appDir && SEAMED.has(name)) return { path: join(seamDir, `${name}.ts`) };
       if (dir === join(repo, 'src', 'platform') && PLATFORM_SEAMS.has(name)) return { path: join(seamDir, `platform-${name}.ts`) };
+      if (dir === join(repo, 'src', 'audio') && AUDIO_SEAMS.has(name)) return { path: join(seamDir, `audio-${name}.ts`) };
       return undefined;
     });
   },
@@ -105,7 +107,11 @@ if (stray.length) {
   process.exit(1);
 }
 for (const s of SEAMED) {
-  if (!s.startsWith('platform-') && !existsSync(join(appDir, `${s}.ts`))) {
+  if (s.startsWith('audio-') && !existsSync(join(repo, 'src', 'audio', `${s.slice('audio-'.length)}.ts`))) {
+    console.error(`native/js/seams/${s}.ts stands in for src/audio/${s.slice('audio-'.length)}.ts, which no longer exists`);
+    process.exit(1);
+  }
+  if (!s.startsWith('platform-') && !s.startsWith('audio-') && !existsSync(join(appDir, `${s}.ts`))) {
     console.error(`native/js/seams/${s}.ts stands in for src/app/${s}.ts, which no longer exists`);
     process.exit(1);
   }

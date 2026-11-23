@@ -10,7 +10,6 @@
  * and drawn at one texel per window pixel (subtitleLayout.ts, subtitleDraw.ts).
  */
 import { FontData } from '../../src/render/font.js';
-import { indexFft, parseFft, type FftEntry } from '../../src/data/fft.js';
 import { subtitleScale } from '../../src/render/subtitleGeom.js';
 import { computeStageScale } from '../../src/app/layout.js';
 import { count, setFont, subs } from '../../src/app/gameState.js';
@@ -21,35 +20,18 @@ import { NativeSurface } from './nativeSurface.js';
 import { readBytes } from './shims.js';
 
 let face: NativeFace | null = null;
-const globalLines = new Map<string, FftEntry>();
 let layout: SubtitleLayout | null = null;
 const atlas = new GlyphAtlas();
 let overlay: NativeSurface | null = null;
 
 /**
- * The sound packages that are not a room's, whose lines the browser finds through its audio
- * engine (`audio.entry`, after the room's own): the idle chatter (x03), the death commentary
- * (x02), the two restored 1998 lines, and the leg-final rooms' border remarks (x01, which the
- * browser fetches on the first leg-final room — only those rooms say its lines). The native
- * host has no audio engine to hold them, so it keeps their subtitle indexes here.
- */
-const GLOBAL_FFT = ['/data/Title/x03.fft', '/data/Title/x02.fft', '/restored/restored.fft', '/data/Title/x01.fft'];
-
-/** A line from a package other than the room's, for the talk hook (`audio.entry`'s fallback). */
-export function globalLine(name: string): FftEntry | undefined {
-  return globalLines.get(name);
-}
-
-/**
  * The game's bitmap font (the subtitle wrap and the speaker colours are measured from it, as
- * in the browser, boot.ts), the global packages' lines, and the player's subtitle face
- * (`ff.subfont`, as stageState.ts reads it). Before the first room.
+ * in the browser, boot.ts) and the player's subtitle face (`ff.subfont`, as stageState.ts
+ * reads it). Before the first room. The lines themselves come from the room's subtitle file
+ * and the audio engine's global packages, through the talk hook (`game.ts`).
  */
 export async function loadSubtitleAssets(): Promise<void> {
   setFont(await FontData.load('/data/Intro'));
-  for (const url of GLOBAL_FFT) {
-    for (const [name, e] of indexFft(parseFft(await readBytes(url)))) if (!globalLines.has(name)) globalLines.set(name, e);
-  }
   face = await loadFace(localStorage.getItem('ff.subfont'), readBytes);
   layout = new SubtitleLayout(face);
 }

@@ -119,6 +119,36 @@ export interface NativeApi {
    */
   events(): string[];
 
+  // ── Sound: the mixer (native/host/audio.c), driven by sdlAudioBackend.ts. ──
+  // Everything is mono at 22050 Hz; frames are 22050 Hz samples. Buses: 0 effect, 1 voice, 2 music.
+  /**
+   * Open the mixer under `master` gain. Returns what drives it: `device` (the default
+   * output), `dummy` (no output could be opened: SDL's silent driver keeps real time), or
+   * `manual` (`--headless`: no output, the clock moves only by `audioAdvance`).
+   */
+  audioOpen(master: number): string;
+  /** A buffer from 16-bit PCM (`Int16Array` bytes). Returns its id. */
+  audioFromPcm16(pcm: ArrayBuffer): number;
+  /** Decode AAC in MP4 with the platform's decoder; `maxFrames` > 0 trims. Returns [id, frames]. */
+  audioDecode(bytes: ArrayBuffer, maxFrames: number): [number, number];
+  /** The JS side has let go of a buffer; its PCM is freed once no voice plays it. */
+  audioRelease(id: number): void;
+  /** Start a buffer from the next mixed block. Loop points in frames (0 end = the buffer's). Returns the voice id. */
+  audioStart(buf: number, gain: number, bus: number, loop: boolean, loopStart: number, loopEnd: number): number;
+  /** Stop a voice; its id is reported by `audioEnded`. Stopping an ended voice is a no-op. */
+  audioStop(voice: number): void;
+  audioBusGain(bus: number, gain: number): void;
+  /** Pause or resume the mix: paused, it outputs silence and its clock stands still. */
+  audioPause(on: boolean): void;
+  /** Frames mixed so far. */
+  audioClock(): number;
+  /** The voices that ended or were stopped since the last call. */
+  audioEnded(): number[];
+  /** How many voices are sounding. */
+  audioVoices(): number;
+  /** `manual` only: mix `frames` more; with `capture`, return them (float32). */
+  audioAdvance(frames: number, capture?: boolean): ArrayBuffer | undefined;
+
   // ── Persistence: the localStorage shim's backing file (shims.ts). ──
   /**
    * The whole store as last saved (a JSON object), or null when there is none yet. With

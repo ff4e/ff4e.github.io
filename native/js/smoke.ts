@@ -35,6 +35,8 @@ import { loadSubtitleAssets, subtitleOverlay } from './roomSubtitles.js';
 import { advance, draw, enterRoom, initGame, keyDown, keyUp, nextRoom, roomReady, saveExists, type LeaveReason } from './game.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { pinRandom } from './scene.js';
+import { LOGIC_MS } from './seams/stageGeometry.js';
+import { soundTime } from './sound.js';
 
 /** Ticks a room may take, solution and all: the longest recording is a few thousand moves. */
 const MAX_TICKS = 200_000;
@@ -97,6 +99,7 @@ async function solveRun(num: number, target: NativeAiScreen): Promise<number> {
   setSolvemode(armed);
   let ticks = 0;
   for (; ticks < MAX_TICKS && !left; ticks++) {
+    soundTime(LOGIC_MS); // the mixer's clock moves with game time: 80 ms a step
     step();
     if ((ticks === 1 || ticks === 240) && !left) drawOnce(target, num, `tick${ticks}`);
   }

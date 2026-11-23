@@ -1,6 +1,6 @@
 /**
  * The native game: the composition root that `src/app/main.ts` is for the browser, minus
- * everything that is the browser's (the DOM, audio, the menus, the panel).
+ * everything that is the browser's (the DOM, the menus, the panel).
  *
  * What runs here is the game's own flow, unmodified: `roomLoad` enters a room,
  * `logicTick.step` is one 80 ms game step, `movement`'s held-key state machine turns keys
@@ -27,9 +27,9 @@ import {
   BRANCHES, RES_REACHABLE, REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, computeResena, depthOfRoom,
 } from '../../src/data/world.js';
 import {
-  activeScript, count, engine, ffr, fftEntries, font, hracNespi, loadmode, pokus, poslMluv, prevKostra, room, subs,
-  clearUndoHistory, setActiveScript, setCount, setDeathState, setEngine, setLoadmode, setReplaymode, setRoom, setRoomDepth,
-  setScreenShoveX, setSubs, talkIdx,
+  activeScript, count, engine, ffr, fftEntries, font, hracNespi, linesSpoken, loadmode, pokus, poslMluv, prevKostra, room,
+  subs, clearUndoHistory, setActiveScript, setCount, setDeathState, setEngine, setLastLine, setLinesSpoken, setLoadmode,
+  setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, talkIdx,
 } from '../../src/app/gameState.js';
 import { SubtitleSystem } from '../../src/render/subtitles.js';
 import { initQuiet } from '../../src/app/initQuiet.js';
@@ -38,7 +38,7 @@ import { armChatter, initLogicTick, step } from '../../src/app/logicTick.js';
 import { beginHeldMove, clearHeldKey, initMovement, releaseHeldKey, restartRoom, restore, wallShove } from '../../src/app/movement.js';
 import { openSaveStore } from '../../src/app/persist.js';
 import { inReplay, replaySettleDue } from '../../src/app/replayMode.js';
-import { initRoomLoad, loadRoom } from '../../src/app/roomLoad.js';
+import { initRoomLoad, loadRoom, roomEntryHeld, roomVoicesSettled } from '../../src/app/roomLoad.js';
 import { atRest, fishBusy } from '../../src/app/roomGates.js';
 import { ui } from '../../src/app/screenState.js';
 import { armSolve, inAutoPlay, setSolvemode, cancelSolve } from '../../src/app/solveMode.js';
@@ -48,13 +48,15 @@ import { audio } from './seams/audioEngine.js';
 import { endShowmode, inShowmode } from './seams/cutscene.js';
 import { roomLoading } from './seams/framePacing.js';
 import { onLeaveRoom, returnFromRoom } from './seams/mapNav.js';
-import { DEFAULT_LINE_TICKS, LOGIC_MS } from './seams/stageGeometry.js';
+import { DEFAULT_LINE_TICKS, EFFECT_VOL, LOGIC_MS, LOGIC_SEC } from './seams/stageGeometry.js';
 import { initNativeSettings, subLang, subsOn } from './seams/playerSettings.js';
 import { aiFrame } from './frame.js';
-import { globalLine } from './roomSubtitles.js';
 import { closeLegPage, initMapScreen, mapArrived, openLegPage } from './mapScreen.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { loadStore } from './shims.js';
+import { initSound, loadGlobalSounds, musicLevel, soundTime, startMenuMusic, updateLipSync } from './sound.js';
+import { MUSIC_PRIOR, TALKING_MEZ_SEC } from '../../src/audio/audio.js';
+import { musicForCHud, musicUrl } from '../../src/audio/music.js';
 
 export type Which = 'little' | 'big';
 
@@ -105,14 +107,23 @@ function setInfo(): void {
 }
 
 /**
- * dialogy's talk hook: show the line's subtitle, as the browser's does. With no audio there
- * is no voice to time a line by, so every line is the browser's fallback length for a line
- * without audio (`DEFAULT_LINE_TICKS`). A best-solution replay shows nothing.
+/**
+ * dialogy's talk hook: show the subtitle and play the voice, as the browser's does, and
+ * return the line's length in game ticks — the FFT record's `delka`, less Talking()'s lead
+ * (RSound mez), never anything the mixer reports. The subtitle's own timing is the subtitle
+ * system's (its length in characters), as in the browser. A best-solution replay neither
+ * shows nor plays it, as the original's loadmode replay does. Minus the browser's dialogue
+ * hint.
  * restates src/app/main.ts `function scriptTalk(` @ db999691d54e
  */
 function talk(name: string, prior: number): number {
-  if (inReplay()) return DEFAULT_LINE_TICKS;
-  const entry = fftEntries.find((e) => e.name === name) ?? globalLine(name);
+  if (inReplay()) {
+    const dur = audio.duration(name);
+    return dur > 0 ? Math.max(1, Math.round((dur - TALKING_MEZ_SEC) / LOGIC_SEC)) : DEFAULT_LINE_TICKS;
+  }
+  // The room's FFT arrives before its voice package, so it is consulted directly; the global
+  // packages (chatter, death lines, border remarks, the restored lines) through the engine.
+  const entry = fftEntries.find((e) => e.name === name) ?? audio.entry(name);
   if (entry && subs && subsOn()) {
     const t = subLang() === 'cz' ? entry.cz : entry.en;
     // globtit (Talk, URoom.pas:654): LODE's announced coordinate goes in for the '@'.
@@ -120,21 +131,25 @@ function talk(name: string, prior: number): number {
       t.text.includes('@') && activeScript ? t.text.replace('@', activeScript.s.globtit) : t.text;
     if (text) subs.newSubtitle(text, t.color, count, prior);
   }
-  return DEFAULT_LINE_TICKS;
+  audio.play(name, 1, prior, 'voice');
+  setLastLine({ name, count });
+  setLinesSpoken(linesSpoken + 1);
+  const dur = audio.duration(name);
+  return dur > 0 ? Math.max(1, Math.round((dur - TALKING_MEZ_SEC) / LOGIC_SEC)) : DEFAULT_LINE_TICKS;
 }
 
 /**
- * `main.ts`'s `buildRoom`, minus what the native host does not have: audio (the restart's
- * KillExcept and the sound hooks), the cheats (sprite, water, silent film, hooks), the
- * store review and KUFRIK's demonstration and briefcase cutscene (their script callbacks
- * stay unset). Everything that decides how the room PLAYS is here, in
- * the same order.
+ * `main.ts`'s `buildRoom`, minus what the native host does not have: the cheats (sprite,
+ * water, silent film, hooks), the store review and KUFRIK's demonstration and briefcase
+ * cutscene (their script callbacks stay unset). Everything that decides how the room PLAYS
+ * — and how it sounds, and what it subtitles — is here, in the same order.
  * restates src/app/main.ts `function buildRoom(` @ 95a7c5e6b334
  */
 function buildRoom(carryPole = false, carried: readonly number[] = []): void {
   if (!ffr) return;
   clearHeldKey();
   const savedPole = carryPole && activeScript ? [...activeScript.s.roompole] : null;
+  if (carryPole) audio.killVoices(carried); // TRoom.Restart's KillExcept(-999), and `carriedSounds`
   const built = new Room(ffr);
   setRoom(built);
   setLoadmode(null);
@@ -152,12 +167,38 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
   prevKostra.little = false;
   prevKostra.big = false;
   const def = roomScript(ROOMS[roomNum - 1]?.jmeno ?? '');
+  const roomMusic = musicForCHud(ROOMS[roomNum - 1]?.cHud ?? -1);
   let initializing = true; // until `init` returns: see initQuiet
-  const s = new Script(built, talk, (prior) => audio.playing(prior), initQuiet(carried, () => initializing, {}), (prior) => audio.talking(prior));
+  const s = new Script(
+    built,
+    talk,
+    (prior) => audio.playing(prior),
+    initQuiet(carried, () => initializing, {
+      snd: (name, prior) => audio.snd(name, prior, false, EFFECT_VOL),
+      sndcyc: (name, prior) => audio.snd(name, prior, true, EFFECT_VOL),
+      sndvol: (name, prior, vol) => audio.snd(name, prior, false, Math.max(0, Math.min(1, vol / 64))),
+      ksnd: (prior) => audio.killVoice(prior),
+      music: (name, prior) => void audio.musicSnd(name, prior, musicUrl(name)),
+      musiccyc: (name, prior) => {
+        if (prior === MUSIC_PRIOR) {
+          if (roomMusic) void audio.playMusic(roomMusic.name, musicUrl(roomMusic.name), roomMusic.loopSample);
+        } else {
+          void audio.musicSnd(name, prior, musicUrl(name), 0.45, true);
+        }
+      },
+      talkNow: (name, prior) => talk(name, prior),
+      voicesReady: () => roomVoicesSettled,
+    }),
+    (prior) => audio.talking(prior),
+  );
   s.pokus = pokus;
+  s.musicVolume = musicLevel();
   if (savedPole) for (let i = 0; i < s.roompole.length; i++) s.roompole[i] = savedPole[i] ?? 0;
+  s.musName = roomMusic?.name ?? '';
   const eng = new StepEngine(built, s, def ?? NOOP_SCRIPT, {
     random: (n) => Math.floor(Math.random() * n),
+    onLanding: (kind) =>
+      audio.playRandom(kind === 1 ? ['sp-zuch1', 'sp-zuch2'] : ['sp-ocel1', 'sp-ocel2'], EFFECT_VOL),
     playSound: (name, which) => (which ? void talk(name, MLUVI_PRIOR[which]) : audio.play(name)),
     onBlockedMove: (which, dir) => wallShove(which, dir),
     onWin: () => onWinBookkeeping(),
@@ -348,8 +389,8 @@ function leaveRoom(why: LeaveReason): void {
 }
 
 /**
- * Show the world map, tearing the room down as the browser does — minus what is audio
- * (KillSnd, the menu music) and the store review, which the native host has not got.
+ * Show the world map, tearing the room down as the browser does — KillSnd, then the menu
+ * music — minus the store review, which the native host has not got.
  * restates src/app/mapNav.ts `export function showMap(` @ 5407b541588e
  */
 export function showMap(): void {
@@ -362,10 +403,12 @@ export function showMap(): void {
     engine.winCountdown = 0;
   }
   ui.mapRevealStart = performance.now(); // restart the reveal animation (Depth := -3)
+  audio.killAll(); // KillSnd: stop room music + every voice/effect
   activeScript?.s.clearDialog(); // zrus_dialogy: drop the pending speech queue
   subs?.clear(); // ZrusTitulky: clear any on-screen subtitle
   poslMluv.little = -1;
   poslMluv.big = -1;
+  startMenuMusic();
   mapArrived();
 }
 
@@ -424,6 +467,8 @@ export async function showLegImage(leg: number, pending?: { room: number; replay
   }
   activeScript?.s.clearDialog(); // zrus_dialogy
   subs?.clear(); // ZrusTitulky
+  audio.killAll(); // Killsnd
+  void audio.playMusic('rybky11', musicUrl('rybky11'), 0); // Music('rybky11')
 }
 
 /**
@@ -446,11 +491,13 @@ export function dismissLegImage(): void {
  * restates src/app/main.ts `function startRoom(` @ 90ab370483c0
  */
 export async function enterRoom(num: number, replay?: string): Promise<void> {
+  await globalSounds; // the browser's boot has these before its first room
   store.stopRoomClock();
   ui.screen = 'room';
   store.startRoomClock(num);
   ui.mapHoverCorner = null;
   ui.mapHoverRoom = null;
+  audio.killAll(); // stop the menu music + anything before the room starts its own
   roomNum = num;
   const p = loadRoom(num);
   if (replay) {
@@ -482,10 +529,18 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
   loadStore(); // first, and loudly: persist.ts would swallow an unreadable store
   store = openSaveStore();
   initNativeSettings(__native.locale());
+  initSound(); // reads the persisted volumes, so after the save migration
+  globalSounds = loadGlobalSounds();
+  // Fatal, as on the browser's boot path: a room entry waits on this, so a failure left
+  // pending would turn every later launch from the map into a silent no-op.
+  globalSounds.catch((e: unknown) => {
+    console.error('fatal: the global sound packages did not load:', e);
+    __native.quit(1);
+  });
   ui.screen = 'map';
   initMovement({ buildRoom, endShowmode, hracNespi, setInfo });
   initRoomLoad({ buildRoom, endShowmode, ffrUrl, solved: store.solved });
-  initLogicTick({ buildRoom, casHry: store.casHry, hooks, updateLipSync: () => {} });
+  initLogicTick({ buildRoom, casHry: store.casHry, hooks, updateLipSync });
   onLeaveRoom(leaveRoom);
   initMapScreen({
     solved: store.solved,
@@ -500,14 +555,20 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
   return store;
 }
 
+/** The global sound packages' load, started by `initGame`; a room entry waits for it. */
+let globalSounds: Promise<void> = Promise.resolve();
+
 /** The room a `--demo` session starts in: where the player left off. */
 export function firstRoom(): number {
   return nextRoom(0, store.solved, store.cheated) ?? 1;
 }
 
-/** Is a room on screen, built, with its art, and so ready to tick and draw? */
+/**
+ * Is a room on screen, built, with its art and its sound, and so ready to tick and draw? The
+ * browser does not hand a room the stage until it can be heard as well as seen either.
+ */
 export function roomReady(): boolean {
-  return ui.screen === 'room' && !roomLoading && aiRoomReady() && room !== null && engine !== null;
+  return ui.screen === 'room' && !roomLoading && aiRoomReady() && !roomEntryHeld() && room !== null && engine !== null;
 }
 
 // ── Input (the room part of main.ts's keydown/keyup router) ─────────────────────────
@@ -586,6 +647,7 @@ let acc = 0;
  * restates src/app/renderLoop.ts `export function loop(` @ 93dcdefa23f9
  */
 export function advance(dt: number): number {
+  soundTime(dt);
   acc += dt;
   if (acc > LOGIC_MS * 2) acc = LOGIC_MS;
   if (!roomReady()) return 0;
