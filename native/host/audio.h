@@ -22,6 +22,13 @@
  */
 void audio_install(JSContext *ctx, JSValue native, bool device);
 void audio_shutdown(void);
+/**
+ * The app went to the background (`on`) or came back. While suspended nothing is mixed and
+ * no clock moves — the mixer's nor the movie's — as while paused, but independently of the
+ * game's own pause (`audioPause`), which stays whatever the game set; the outputs are paused
+ * too. Safe from an SDL event watch (any thread holding no audio lock).
+ */
+void audio_suspend(bool on);
 
 /**
  * Decode an encoded file (AAC in MP4) to mono float PCM at AUDIO_RATE. On success `*out`

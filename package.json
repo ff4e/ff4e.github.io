@@ -16,6 +16,8 @@
     "run:sim": "node tools/run-simulator.mjs",
     "release:web": "node tools/release-web.mjs",
     "release:testflight": "node tools/release-testflight.mjs",
+    "release:testflight:tvos": "node tools/release-testflight-tvos.mjs",
+    "native:tvos": "node native/tvos/build.mjs",
     "check:ios-payload": "tsx tools/check-ios-payload.ts",
     "open:ios": "cap open ios",
     "preview": "vite preview",

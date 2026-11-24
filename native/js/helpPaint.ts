@@ -17,6 +17,7 @@ import type { Image2D } from '../../src/render/surface2d.js';
 import { decodeImage } from './nativeSurface.js';
 import { readBytes } from './shims.js';
 import type { Ui } from './uiDraw.js';
+import { scrim } from './menuPaint.js';
 
 const PAGE_W = 640;
 const PAGE_H = 480;
@@ -218,7 +219,7 @@ export function helpBox(w: number, h: number): [number, number, number, number] 
 export function paintHelp(ui: Ui, w: number, h: number, lang: HelpLang, page: number): [number, number, number, number] {
   const pages = helpPages(lang);
   const content: HelpPageContent = pages[page] ?? pages[0]!;
-  ui.rect(0, 0, w, h, 0x000000, 0.88);
+  scrim(ui, w, h, 0.88);
   const [ox, oy, pw, ph] = helpBox(w, h);
   const k = Math.min(pw / PAGE_W, ph / PAGE_H);
   ui.rect(ox, oy, pw, ph, HELP_BG);

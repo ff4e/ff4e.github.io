@@ -1,8 +1,47 @@
 cmake_minimum_required(VERSION 3.28)
+
+# The Apple TV app needs tvOS 27, which leaves out the two Apple TVs SDL GPU cannot drive.
+# SDL 3.4's Metal driver requires an A9 GPU or newer on tvOS (MTLGPUFamilyApple3, with no
+# way round it), and the Apple TV HD (A8) runs up to tvOS 26: it would install from the Store
+# and stop at launch with the no-GPU alert. tvOS 27 runs on the Apple TV 4K 2nd generation
+# (A12) and newer only — which also leaves out the 4K 1st generation (A10X), a GPU SDL could
+# drive. tvOS has no device capability that separates the A8 from the A9+, so the OS is the
+# floor. The one place this number lives: native/tvos/build.mjs reads it from here, and checks
+# the installed tvOS SDK is new enough before building anything. Set before project(): it is
+# the toolchain's deployment target, and Xcode turns it into the app's MinimumOSVersion.
+set(FF4E_TVOS_DEPLOYMENT_TARGET 27.0)
+if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+  if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET ${FF4E_TVOS_DEPLOYMENT_TARGET} CACHE STRING "" FORCE)
+  elseif(CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS FF4E_TVOS_DEPLOYMENT_TARGET)
+    message(FATAL_ERROR "tvOS ${CMAKE_OSX_DEPLOYMENT_TARGET} is below the app's floor, tvOS "
+      "${FF4E_TVOS_DEPLOYMENT_TARGET}: older Apple TVs would install it and fail at launch (see above).")
+  endif()
+endif()
+
 project(ff4e_native C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON) # statement expressions in the argument helpers
+
+# The Apple TV app is this same project, configured for tvOS with the Xcode generator
+# (native/tvos/build.mjs): one list of sources and one set of pinned dependencies for every
+# platform, and an Xcode project for what only Xcode does — signing, the asset catalog,
+# `xcodebuild archive`. Set before any target exists: the dependencies' static libraries are
+# not installed into an archive, only the app is.
+if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+  # Build against an SDK that knows the deployment target, or say what to install.
+  execute_process(COMMAND xcrun --sdk ${CMAKE_OSX_SYSROOT} --show-sdk-version
+    OUTPUT_VARIABLE TVOS_SDK_VERSION OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  if(NOT TVOS_SDK_VERSION OR TVOS_SDK_VERSION VERSION_LESS CMAKE_OSX_DEPLOYMENT_TARGET)
+    message(FATAL_ERROR "The installed tvOS SDK (${CMAKE_OSX_SYSROOT}: '${TVOS_SDK_VERSION}') is older "
+      "than the app's deployment target, tvOS ${CMAKE_OSX_DEPLOYMENT_TARGET}. Install an Xcode with the "
+      "tvOS ${CMAKE_OSX_DEPLOYMENT_TARGET} SDK (and its tvOS Simulator runtime: xcodebuild -downloadPlatform tvOS).")
+  endif()
+  set(CMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL YES)
+  set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY 3)
+  set(CMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE NO)
+endif()
 
 include(FetchContent)
 # QuickJS-ng, pinned. Built from source so the same engine builds for macOS, tvOS and
@@ -80,4 +119,36 @@ target_link_libraries(ff4e-native PRIVATE qjs SDL3::SDL3-static webpdecoder free
 if(APPLE)
   target_link_libraries(ff4e-native PRIVATE "-framework AudioToolbox" "-framework CoreFoundation"
     "-framework AVFoundation" "-framework CoreMedia" "-framework CoreVideo" "-framework Foundation")
+endif()
+
+# The Apple TV app (native/README.md, "Apple TV"): the host as an app bundle, with its
+# Info.plist, entitlements (iCloud key-value storage) and asset catalog (native/tvos/), the remote's absolute d-pad shim, and the game
+# — the bundle and the assets native/tvos/stage.mjs picked — copied in after the link, before
+# Xcode signs the app.
+if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
+  set(FF4E_TVOS_STAGE "${CMAKE_CURRENT_SOURCE_DIR}/build/tvos/bundle" CACHE PATH "the staged game (native/tvos/stage.mjs)")
+  set(FF4E_VERSION "1.0" CACHE STRING "CFBundleShortVersionString")
+  set(FF4E_BUILD "1" CACHE STRING "CFBundleVersion: the tvOS platform's own build number")
+  set(TVOS_ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/tvos/Assets.xcassets)
+  target_sources(ff4e-native PRIVATE host/platform_tvos.m ${TVOS_ASSETS})
+  set_source_files_properties(host/platform_tvos.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  set_source_files_properties(${TVOS_ASSETS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+  target_link_libraries(ff4e-native PRIVATE "-framework GameController" "-framework UIKit")
+  set_target_properties(ff4e-native PROPERTIES
+    MACOSX_BUNDLE TRUE
+    OUTPUT_NAME "FishFillets"
+    MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/tvos/Info.plist
+    XCODE_ATTRIBUTE_PRODUCT_NAME "FishFillets"
+    XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "io.github.ff4e.fishfillets4ever"
+    XCODE_ATTRIBUTE_MARKETING_VERSION "${FF4E_VERSION}"
+    XCODE_ATTRIBUTE_CURRENT_PROJECT_VERSION "${FF4E_BUILD}"
+    XCODE_ATTRIBUTE_ASSETCATALOG_COMPILER_APPICON_NAME "App Icon & Top Shelf Image"
+    XCODE_ATTRIBUTE_CODE_SIGN_STYLE Automatic
+    XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/tvos/FishFillets.entitlements"
+    XCODE_ATTRIBUTE_SKIP_INSTALL NO
+    XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
+    XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf-with-dsym")
+  add_custom_command(TARGET ff4e-native POST_BUILD
+    COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/tvos/copy-bundle.sh ${FF4E_TVOS_STAGE}
+    VERBATIM)
 endif()

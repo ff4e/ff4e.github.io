@@ -169,6 +169,11 @@ const r1 = (v: number): number => Math.round(v);
 /** A frame's drawing context: a surface, the fonts, and the record of what was drawn. */
 export class Ui {
   readonly ops: UiOp[] = [];
+  /**
+   * How far the window reaches past the area being laid out, `[left, top, right, bottom]`:
+   * the title-safe insets (`uiLayer.ts`). Only a scrim reaches into them (`scrim`).
+   */
+  bleed: readonly [number, number, number, number] = [0, 0, 0, 0];
 
   constructor(
     readonly s: Surface2D,

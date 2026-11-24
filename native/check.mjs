@@ -33,19 +33,27 @@ if (process.platform === 'darwin' && process.arch === 'x64') {
 const arm64 = (cmd, args) => (rosetta ? ['arch', ['-arm64', cmd, ...args]] : [cmd, args]);
 
 const host = 'native/build/cmake/ff4e-native';
+// Each smoke lists the assets it read here (the host's --read-log), for the tvos-assets step.
+const readDir = 'native/build/check/reads';
+mkdirSync(join(root, readDir), { recursive: true });
+const reads = (step) => ['--read-log', `${readDir}/${step}.log`];
 const game = ['native/build/game.js', '--root', 'public', '--headless'];
 const STEPS = [
   { name: 'typecheck', build: true, run: ['npx', ['tsc', '-p', 'native/tsconfig.json']] },
   { name: 'bundle', build: true, run: ['node', ['native/build-js.mjs']] },
   { name: 'configure', build: true, run: arm64('cmake', ['-S', 'native', '-B', 'native/build/cmake', '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release']) },
   { name: 'compile', build: true, run: arm64('ninja', ['-C', 'native/build/cmake']) },
-  { name: 'smoke', run: [host, [...game, '--smoke', 'all', '--smoke-player', '13,70', '--store', 'native/build/smoke-store.json']] },
-  { name: 'map-smoke', run: [host, [...game, '--smoke-map', '--store', 'native/build/smoke-map-store.json']] },
-  { name: 'menu-smoke', run: [host, [...game, '--smoke-menus', '--store', 'native/build/smoke-menus-store.json']] },
-  { name: 'audio-smoke', run: [host, [...game, '--smoke-audio', '--store', 'native/build/smoke-audio-store.json']] },
-  { name: 'movie-smoke', run: [host, [...game, '--smoke-movie', '--store', 'native/build/smoke-movie-store.json']] },
-  { name: 'kufrik-smoke', run: [host, [...game, '--smoke-kufrik', '--store', 'native/build/smoke-kufrik-store.json']] },
-  { name: 'store-smoke', run: [host, [...game, '--smoke-store', '--tv-store', 'native/build/smoke-tv', '--store', 'native/build/smoke-tv/store.json']] },
+  { name: 'startup', run: [host, [...game, '--startup-probe', '--store', 'native/build/startup-store.json']] },
+  { name: 'smoke', run: [host, [...game, '--smoke', 'all', '--smoke-player', '13,70', '--store', 'native/build/smoke-store.json', ...reads('smoke')]] },
+  { name: 'map-smoke', run: [host, [...game, '--smoke-map', '--store', 'native/build/smoke-map-store.json', ...reads('map-smoke')]] },
+  { name: 'menu-smoke', run: [host, [...game, '--smoke-menus', '--store', 'native/build/smoke-menus-store.json', ...reads('menu-smoke')]] },
+  { name: 'audio-smoke', run: [host, [...game, '--smoke-audio', '--store', 'native/build/smoke-audio-store.json', ...reads('audio-smoke')]] },
+  { name: 'movie-smoke', run: [host, [...game, '--smoke-movie', '--store', 'native/build/smoke-movie-store.json', ...reads('movie-smoke')]] },
+  { name: 'kufrik-smoke', run: [host, [...game, '--smoke-kufrik', '--store', 'native/build/smoke-kufrik-store.json', ...reads('kufrik-smoke')]] },
+  { name: 'store-smoke', run: [host, [...game, '--smoke-store', '--tv-store', 'native/build/smoke-tv', '--store', 'native/build/smoke-tv/store.json', ...reads('store-smoke')]] },
+  // The Apple TV app ships a subset of public/ (native/tvos/stage.mjs): everything the smokes
+  // above read must be in it.
+  { name: 'tvos-assets', run: ['node', ['native/tvos/stage.mjs', '--check', readDir]] },
   { name: 'chromium', run: ['npx', ['playwright', 'install', 'chromium']] },
   { name: 'rooms', run: ['node', ['--import', 'tsx', 'native/compare.mjs', '--all']] },
   { name: 'map', run: ['node', ['--import', 'tsx', 'native/compare-map.mjs']] },

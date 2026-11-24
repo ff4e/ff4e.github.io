@@ -56,9 +56,10 @@ export function warmMenuIcons(h: number, budget = Infinity): boolean {
 export const labelShadow = (u: number, h: number): { r: number; rgb: number; dy: number; alpha: number } =>
   ({ r: Math.max(1, 1.6 * u), rgb: 0x000000, dy: hairline(h), alpha: 0.7 });
 
-/** Dim everything under a menu. */
+/** Dim everything under a menu: the whole window, past the safe area the menu is laid out in. */
 export function scrim(ui: Ui, w: number, h: number, alpha: number): void {
-  ui.rect(0, 0, w, h, 0x000000, alpha);
+  const [l, t, r, b] = ui.bleed;
+  ui.rect(-l, -t, w + l + r, h + t + b, 0x000000, alpha);
 }
 
 /** A popup panel (`#phone-menu`'s look): the touch UI's popup glass, its edge and bevel. */

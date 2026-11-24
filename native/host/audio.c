@@ -57,6 +57,7 @@ static SDL_AudioStream *stream;
 static float master = 1.0f;
 static float bus_gain[NBUS] = {1, 1, 1};
 static bool paused;
+static bool suspended; /* the app is in the background (audio_suspend): held, as paused is */
 static int64_t clock_frames;
 static Voice voices[MAX_VOICES];
 static uint32_t next_voice = 1;
@@ -93,7 +94,7 @@ static void end_voice(Voice *v) {
 /* Mix `n` frames into `out`. Called with `lock` held. */
 static void mix(float *out, int n) {
   SDL_memset(out, 0, (size_t)n * sizeof *out);
-  if (paused) return;
+  if (paused || suspended) return;
   for (int k = 0; k < MAX_VOICES; k++) {
     Voice *v = &voices[k];
     if (!v->id) continue;
@@ -166,10 +167,10 @@ static void movie_pull(float *out, int64_t n) {
   int64_t have = mv.frames - mv.pos;
   if (have < 0) have = 0;
   if (have > n) have = n;
-  if (paused) have = 0;
+  if (paused || suspended) have = 0;
   if (have) SDL_memcpy(out, mv.pcm + mv.pos * ch, (size_t)(have * ch) * sizeof *out);
   SDL_memset(out + have * ch, 0, (size_t)((n - have) * ch) * sizeof *out);
-  if (!paused) mv.pos += n; /* the clock runs on past the end: the picture may be longer */
+  if (!paused && !suspended) mv.pos += n; /* the clock runs on past the end: the picture may be longer */
 }
 
 static void SDLCALL feed_movie(void *user, SDL_AudioStream *s, int additional, int total) {
@@ -241,7 +242,7 @@ double audio_movie_position(void) {
     if (mstream) {
       double fed = (double)mv.pos / mv.rate;
       r = mv.request_ns ? (double)mv.fed_before / mv.rate + (double)(SDL_GetTicksNS() - mv.request_ns) / 1e9 : 0;
-      if (paused) r = (double)mv.fed_before / mv.rate;
+      if (paused || suspended) r = (double)mv.fed_before / mv.rate;
       if (r > fed) r = fed;
     } else {
       r = (double)mv.pos / mv.rate;
@@ -520,6 +521,20 @@ void audio_install(JSContext *ctx, JSValue native, bool device) {
   };
   for (size_t i = 0; i < sizeof fns / sizeof fns[0]; i++)
     JS_SetPropertyStr(ctx, native, fns[i].name, JS_NewCFunction(ctx, fns[i].fn, fns[i].name, fns[i].len));
+}
+
+void audio_suspend(bool on) {
+  if (!lock) return;
+  SDL_LockMutex(lock);
+  suspended = on;
+  SDL_UnlockMutex(lock);
+  /* And stop the devices pulling at all (the mix would be silence): no work in the background. */
+  SDL_AudioStream *outs[2] = {stream, mstream};
+  for (int i = 0; i < 2; i++) {
+    if (!outs[i]) continue;
+    if (on) SDL_PauseAudioStreamDevice(outs[i]);
+    else SDL_ResumeAudioStreamDevice(outs[i]);
+  }
 }
 
 void audio_shutdown(void) {

@@ -108,6 +108,12 @@ export interface NativeApi {
   /** `[w, h, density]`: the window's size in pixels, and pixels per point. Null headless. */
   windowSize(): [number, number, number] | null;
   /**
+   * `[left, top, right, bottom]`: how far in from each edge of the window, in its pixels, what
+   * must be seen has to stay — a TV's title-safe insets (tvOS: the view's `safeAreaInsets`,
+   * 60 points above and below and 80 at the sides). Zeros on a desktop; null headless.
+   */
+  safeArea(): [number, number, number, number] | null;
+  /**
    * Whether the system owns Back now, given that the game is (`atRoot`) or is not at its top
    * level: true only on tvOS at the top level, where Back must go Home and the game must not
    * quit itself (native/host/main.c, `n_systemBack`).
@@ -144,10 +150,12 @@ export interface NativeApi {
 
   // ── Input. ──
   /**
-   * Input transitions since the last call, oldest first: `+Code` down, `-Code` up, and
-   * `!blur` when the window loses focus, `!kvs` when iCloud brings another device's progress.
-   * A keyboard's Code is the DOM `KeyboardEvent.code` the browser game's router reads
-   * (`KeyI`, `ArrowUp`, `Space`, `Minus`, `F2`…); a gamepad's is `Pad…` and a TV remote's `Remote…` (the list is in native/host/main.c's
+   * Input transitions since the last call, oldest first: `+Code` down, `-Code` up,
+   * `!blur` when the window loses focus, `!background` when the app left the foreground
+   * (delivered on its first frame back: nothing runs in between), and `!kvs` when iCloud
+   * brings another device's progress. A keyboard's Code is the DOM `KeyboardEvent.code`
+   * the browser game's router reads (`KeyI`, `ArrowUp`, `Space`, `Minus`, `F2`…); a
+   * gamepad's is `Pad…` and a TV remote's `Remote…` (the list is in native/host/main.c's
    * input section). `uiInput.ts` routes them.
    */
   events(): string[];
