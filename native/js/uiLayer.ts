@@ -28,22 +28,25 @@ export type Box = readonly [number, number, number, number];
 
 /**
  * Draw the layer for a `w`×`h` window whose picture (the room, the map, a story page) is
- * shown in `picture`. Returns the surface and what was drawn on it, or null before the
- * fonts have loaded.
+ * shown in `picture`. Returns the surface and what was drawn on it — no surface when there
+ * is nothing to draw (no menu, and no legend: the keyboard's case), so nothing is cleared
+ * or composited — or null before the fonts have loaded.
  */
-export function paintUi(w: number, h: number, picture: Box): { surface: NativeSurface; ops: readonly UiOp[] } | null {
+export function paintUi(w: number, h: number, picture: Box): { surface: NativeSurface | null; ops: readonly UiOp[] } | null {
   if (!fonts || w <= 0 || h <= 0) return null;
+  const top = topMenu();
+  const screen = legendScreen(top, mapPanelOpen(), mapBusy());
+  const legend = screen ? legendItems(screen, lastInput()) : [];
+  if (!top && legend.length === 0) return { surface: null, ops: [] };
   if (!surface || surface.width !== w || surface.height !== h) surface = new NativeSurface(w, h);
   surface.clear();
   const ui = new Ui(surface, fonts);
-  const top = topMenu();
   let box: Box = picture;
   if (top?.kind === 'pause') paintPause(ui, w, h, top.sel);
   else if (top?.kind === 'confirm') paintConfirm(ui, w, h, top.verb, lastInput());
   else if (top?.kind === 'options') box = paintOptions(ui, w, h, top.row);
   else if (top?.kind === 'help') box = paintHelp(ui, w, h, subLang(), helpScreens.page);
-  const screen = legendScreen(top, mapPanelOpen(), mapBusy());
-  if (screen) drawLegend(ui, legendItems(screen, lastInput()), w, h, box);
+  drawLegend(ui, legend, w, h, box);
   return { surface, ops: ui.ops };
 }
 

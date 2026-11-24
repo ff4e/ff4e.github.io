@@ -185,8 +185,9 @@ export async function runMovieSmoke(): Promise<number> {
     await settle(50);
     const roll = await frame();
     check(ui.mapOverlay === 'credits' && roll !== 0, 'Ⓐ on it opens the credits roll over the map');
-    check(legendItems(legendScreen(null, false, false)!, 'pad').map((i) => i.label).join() === 'Continue',
+    check(legendItems(legendScreen(null, false, false)!, 'pad').map((i) => i.key).join() === 'continue',
       'the legend over the roll is A4\'s "Ⓐ Continue"');
+    check(legendItems(legendScreen(null, false, false)!, 'key').length === 0, 'and the keyboard (the last input here) gets none');
     let exits = 0;
     setExitHandler(() => exits++);
     await tap('RemoteBack');

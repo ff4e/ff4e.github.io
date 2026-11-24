@@ -44,7 +44,7 @@ import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { compositeSize, frameFor, loadScene, pinRandom, probeFrame, replaySolution } from './scene.js';
 import { advance, draw, enterRoom, firstRoom, initGame, showMap } from './game.js';
 import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
-import { inputFrame, routeEvent, setLastInput } from './uiInput.js';
+import { inputFrame, routeEvent, setKeyboardIsRemote, setLastInput } from './uiInput.js';
 import { openOptions } from './menus.js';
 import { initUiLayer, paintUi, windowLayout } from './uiLayer.js';
 import { ensureOptionsArt } from './optionsPaint.js';
@@ -131,7 +131,10 @@ async function main(): Promise<void> {
   await loadSubtitleAssets();
   await initUiLayer();
   void ensureOptionsArt();
-  if (flag('--remote-keys')) setLastInput('remote');
+  // The legend needs a source before the first press: on tvOS the remote (the keyboard would
+  // show no hints at all); on a Mac the keyboard, unless it is standing in for a remote.
+  if (flag('--remote-keys') || __native.tv) setLastInput('remote');
+  if (flag('--remote-keys')) setKeyboardIsRemote(true);
   console.log(`sound: ${mixer.mode}, mixing at ${MIX_RATE} Hz`);
   if (arg('--room')) await enterRoom(Number(arg('--room')));
   else if (flag('--demo')) await enterRoom(firstRoom());
@@ -234,7 +237,7 @@ function runInteractive(target: NativeAiScreen): void {
       const layer = win ? paintUi(win.w, win.h, win.picture) : null;
       // Measured BEFORE present: present waits for vsync, which is idle time, not work.
       jsMs += __native.now() - now;
-      if (drawn) __native.present(subs?.id, layer?.surface.id);
+      if (drawn) __native.present(subs?.id, layer?.surface?.id);
     } else if (ui.screen === 'intro') {
       // The splash, or a movie frame with the skip hint over it. No legend (A4).
       const shown = introFrame(now);
@@ -245,7 +248,7 @@ function runInteractive(target: NativeAiScreen): void {
       const win = shown ? windowLayout(shown.width, shown.height) : null;
       const layer = win ? paintUi(win.w, win.h, win.picture) : null;
       jsMs += __native.now() - now;
-      if (shown) __native.presentTexture(shown.id, undefined, layer?.surface.id);
+      if (shown) __native.presentTexture(shown.id, undefined, layer?.surface?.id);
       mapPresented();
     }
     frames++;

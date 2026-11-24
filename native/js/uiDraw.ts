@@ -41,6 +41,11 @@ function uploadMask(w: number, h: number, cov: (x: number, y: number) => number)
   return { img: { id, width: w, height: h, premultiplied: true } as unknown as Image2D, w, h };
 }
 
+/** A `w`×`h` coverage array (0..1, row by row) as a mask texture, for `Ui.mask`. */
+export function coverageMask(w: number, h: number, cov: Float32Array): Image2D {
+  return uploadMask(w, h, (x, y) => cov[Math.floor(y) * w + Math.floor(x)]!).img;
+}
+
 /** Coverage from a signed distance (negative inside), one pixel of anti-aliasing. */
 const aa = (d: number): number => 0.5 - d;
 
@@ -200,6 +205,19 @@ export class Ui {
     this.s.restore();
   }
 
+  /** Record an op drawn by a helper through `mask` (the icons), so the snapshot names it. */
+  record(op: UiOp): void {
+    this.ops.push(op);
+  }
+
+  /** A coverage mask at its own size, at (x, y), tinted `rgb` at `alpha`. Not recorded. */
+  mask(img: Image2D, x: number, y: number, rgb: number, alpha = 1): void {
+    this.s.save();
+    this.s.setAlpha(alpha);
+    this.s.fillMask(img, 0, 0, img.width, img.height, r1(x), r1(y), img.width, img.height, rgb);
+    this.s.restore();
+  }
+
   /** An image into the box, nearest or smoothed. */
   image(img: Image2D, x: number, y: number, w: number, h: number, smooth = true, alpha = 1, name = 'image'): void {
     this.ops.push(['image', name, r1(x), r1(y), r1(w), r1(h)]);
@@ -226,8 +244,12 @@ export class Ui {
     return face.advances(chars, px).reduce((a, b) => a + b, 0) + spacing * chars.length;
   }
 
-  /** `text` with its baseline at `y`, aligned on `x`. Returns its width. */
-  text(text: string, x: number, y: number, px: number, rgb: number, opts: { align?: Align; bold?: boolean; alpha?: number; spacing?: number; face?: NativeFace } = {}): number {
+  /**
+   * `text` with its baseline at `y`, aligned on `x`. Returns its width. With `outline`, each
+   * glyph first gets a rim `r` pixels wide in `rgb` — moved down by `dy` and at `alpha`, it
+   * is the web's soft `text-shadow` rather than a subtitle's outline.
+   */
+  text(text: string, x: number, y: number, px: number, rgb: number, opts: { align?: Align; bold?: boolean; alpha?: number; spacing?: number; face?: NativeFace; outline?: { r: number; rgb: number; dy?: number; alpha?: number } } = {}): number {
     const face = opts.face ?? (opts.bold ? this.fonts.bold : this.fonts.regular);
     const chars = [...text];
     const adv = face.advances(chars, px);
@@ -240,7 +262,13 @@ export class Ui {
     const [y0, qy] = quarter(y);
     chars.forEach((ch, i) => {
       const [x0, qx] = quarter(pen);
-      const g = atlas.get(face, ch, px, 0, qx, qy);
+      const g = atlas.get(face, ch, px, opts.outline?.r ?? 0, qx, qy);
+      if (g.page && opts.outline) {
+        const o = opts.outline;
+        if (o.alpha !== undefined) this.s.setAlpha((opts.alpha ?? 1) * o.alpha);
+        this.s.fillMask(g.page, g.sx + g.w + 1, g.sy, g.w, g.h, x0 + g.x, y0 + g.y + r1(o.dy ?? 0), g.w, g.h, o.rgb);
+        if (o.alpha !== undefined) this.s.setAlpha(opts.alpha ?? 1);
+      }
       if (g.page) this.s.fillMask(g.page, g.sx, g.sy, g.w, g.h, x0 + g.x, y0 + g.y, g.w, g.h, rgb);
       pen += adv[i]! + spacing;
     });

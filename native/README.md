@@ -188,11 +188,28 @@ Siri Remote; A3–A6 and B1–B5 in it): every press goes through one router (`u
 knows the source from the host's code (`Pad…`, `Remote…`, or a DOM key code), and hands the
 game the keys the browser's router reads — so every gate of that router still applies.
 
+**The look is the web touch UI's** (`src/styles/nativeMenu.css`, commit af252e9, #158), in the
+room's colours: the same reviewed static hue per room (`src/data/nativeMenuHues.ts`) through
+the same `menuPalette` (`src/platform/nativeMenuPalette.ts`), imported and parsed into numbers
+(`uiPalette.ts`) — the room on screen, or the last one while a room loads and on the map.
+Surfaces are its translucent slate glass with the hairline edge and the inset bevel
+(`uiGlass.ts`); the pause menu and the confirm prompt carry its rustic carved icons
+(`src/styles/nativeMenuIcons.svg`, bundled as text and rasterised natively per colour role —
+`rusticIcons.ts`; Resume and Help, which the web has no button for, are drawn in the same
+hand); labels are its ink with its soft dark shadow. Focus is the touch UI's pressed state —
+how a held button looks — and, on the Options face, its touch Options' `--menu-accent` outline.
+
+**Every string is in the UI's language** (`uiStrings.ts`): Czech or English, the language the
+subtitles and the map's plaques are in (`subLang()`; subtitles off keep the last one chosen),
+which on a first run follows the system's. The web has no Czech UI chrome to reuse, so the
+Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech diacritics.
+
 - **The pause menu** — Resume · World map · Save · Load · Restart · Options · Help — opens on
   Back in a room (Esc, the pad's ☰, the remote's Back): tvOS requires Back during play to pause
   and show a menu. While any menu is over a room the room is **paused**: no logic step runs and
   the sound holds its place (`setModalPause`, as the browser's Help does). Save, Load and
-  Restart ask first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no), then send
+  Restart ask first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no; the card
+  shows the pad's or the remote's answers as the legend's small hints, the keyboard's none), then send
   F2, F3 or Backspace down the room's router, so a save mid-move or during a replay is refused
   exactly as F2 is on the web. Save and Load are greyed (and skipped by the highlight) when they
   cannot act, by the touch buttons' rule (`buttonAvailability.ts`, pinned): never during
@@ -200,7 +217,8 @@ game the keys the browser's router reads — so every gate of that router still 
   continues from the frame it stopped on.
 - **Options** is the original game's Options face — the AI-upscaled panel art the tablets show,
   composited as `AiPanel.drawOptions` composites it — scaled to most of the window, with a focus
-  ring on the row and a caption card beside it naming the row and its value. Rows: effect, talk
+  outline on the row and a caption card of the touch UI's glass beside it naming the row and
+  its value. Rows: effect, talk
   and music volume (left/right step the 0..12 slider), subtitles (Čeština / English / off),
   the subtitle font (the one control the 1998 face has no place for, so it lives in the card,
   shown in its own face), Help, and Exit options. Every change is persisted to the browser's
@@ -212,11 +230,24 @@ game the keys the browser's router reads — so every gate of that router still 
   line breaks are a greedy wrap's, and there is no italic face natively, so the emphasised
   phrases and the notes are upright.
 - **The legend** (A4) shows what each button does on the screen that is up, in the glyphs of
-  the last input used — keycaps, an Xbox pad's coloured chips, or the remote's outlines — in
-  the letterbox margin beside the picture when it fits there (left edge or top, whichever covers
-  less otherwise), about a tenth of the window tall. Items that cannot act are greyed. With the
-  remote, "Switch fish" carries the active fish's picture (B3: the touch badge's art and its
-  visibility rule), the only cue to which fish an edge click moves.
+  the last input used — an Xbox pad's or the remote's — as small "[chip] Word" hints shaped
+  like the first Xbox WebView prototype's (`xbox-port`'s `.pad-hints`, its 10-foot sizes at
+  1080 lines: a 26 px round chip, 18 px words, no card behind them, muted to 75 %), scaled
+  with the window and no smaller than at 720 lines. Each chip is the room's glass with its
+  symbol in the room's carved-icon colour; the pad's A/B/X/Y keep their hues at that
+  lightness, so they stay apart. It goes down the left letterbox margin as a short list when
+  that fits, else as one row in the top margin. Otherwise it lies over the picture: one row
+  along the top edge on a strip of the touch UI's popup glass, drawn at full strength there,
+  as muted light words vanish into the map's parchment. The top, not the bottom: the
+  subtitles have the room's bottom, and the map's bottom carries the selected level's name.
+  Where it goes depends on the window, the picture and the words only — never on the game's
+  state: "Switch fish" always reserves the wider fish picture (the little fish's), so
+  switching fish cannot move it between the margin and the top. Items that cannot act are dimmer. With the remote,
+  "Switch fish" carries the active fish's picture at the chip's height (B3: the touch badge's
+  art and its visibility rule), the only cue to which fish an edge click moves. **The keyboard
+  gets no legend, on any screen**, nor answer hints on the confirm prompt: its player knows
+  the keys, and keycaps would only cover the picture. With nothing to draw the UI layer is
+  not drawn at all.
 - **At the map's root, Back leaves the game** (the keyboard's Esc, the remote's Back): tvOS
   requires Back at the top level to go Home, and App Review rejects a game that quits itself.
   So on macOS it quits, and on tvOS the game does nothing with it: each frame the router tells
@@ -231,7 +262,7 @@ game the keys the browser's router reads — so every gate of that router still 
   deviation from A3: one native TV UI everywhere, and Options is one row away.
 
 Everything is drawn through `uiDraw.ts`: rectangles, procedurally rasterised glyph shapes
-(coverage masks, tinted by `fillMask`), FreeType text in Mulish and images. It also records
+and the carved icons (coverage masks, tinted by `fillMask`), FreeType text in Mulish and images. It also records
 what it drew, which is the layout snapshot the menu smoke checks.
 
 ## Sound
@@ -406,7 +437,7 @@ has no native counterpart yet.
     native/build/cmake/ff4e-native native/build/game.js --root public --headless \
       --smoke-movie --store native/build/smoke-movie-store.json
 
-`native/js/movieSmoke.ts`, 27 checks in ~10 s, through the real input routing (`uiInput.ts`, shared
+`native/js/movieSmoke.ts`, 28 checks in ~11 s, through the real input routing (`uiInput.ts`, shared
 with the interactive loop) and frames: a first
 run opens on the splash, which Ⓑ, a stick, a d-pad, Ⓧ, Esc and the remote's Back and edge click do not leave and Ⓐ does, into the
 AI logo with the game's sound killed; four seconds of the logo at 60 refreshes a second on
@@ -488,9 +519,17 @@ known, on the 1st-generation remote (no ring): its edge click is read from where
 rests, which needs absolute d-pad values (`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL
 leaves them relative, so a tvOS target must set it (with absolute values, swipes should then
 come from motion rather than position). A slide followed by a click within 120 ms is one
-click, not a swipe and a click. On a Mac,
-`--remote-keys` makes the keyboard a remote: arrows click an edge, Return clicks the centre,
-`P` is Play/Pause, Esc or Backspace is Back, Shift+arrow swipes.
+click, not a swipe and a click. On a Mac, `--remote-keys` makes the keyboard a remote, and
+the whole keyboard counts as the remote: any other key it sends (a letter, F2) leaves the
+remote the last input, so its hints stay up.
+
+| Siri Remote | with `--remote-keys` |
+| --- | --- |
+| click an edge (held: held) | arrows |
+| click the centre (switch fish, select, open) | Return, Space, Tab |
+| Play/Pause | `P` |
+| Back | Esc, Backspace |
+| swipe | Shift+arrow |
 
 | in a room | keyboard | gamepad | Siri Remote |
 | --- | --- | --- | --- |
@@ -535,7 +574,8 @@ Other flags:
 - `--seconds N` quits after N seconds.
 - `--store FILE` keeps progress and save slots in FILE instead of the user's.
 - `--audio-log` prints every sound the game starts.
-- `--remote-keys` makes the keyboard a Siri Remote (above) and starts the legend in its glyphs.
+- `--remote-keys` makes the keyboard a Siri Remote (above) and starts the legend in its glyphs,
+  as a tvOS build always starts (`__native.tv`); a Mac starts with the keyboard's: none.
 
 From a Rosetta shell, prefix the commands with `arch -arm64`, or the universal tools
 build x86_64.
@@ -591,17 +631,25 @@ Save asks, Back declines, a click saves the move record; Load restores it; Optio
 open from the pause menu and close back to it; Restart starts over; a save mid-move is
 refused as F2 is. With the pad: Ⓧ asks to restart and Ⓑ declines, RB with no save opens
 nothing, LB → Ⓐ saves, ☰ opens and closes the pause menu, Ⓑ goes to the map; Esc opens and
-closes the pause menu; its World map leaves the room. A Play/Pause hold released inside the
-pause menu ends there. 58 checks, ~6 s.
+closes the pause menu, and its Save prompt (the question alone) is declined by Esc and
+answered by Enter; its World map leaves the room. A Play/Pause hold released inside the
+pause menu ends there. With the keyboard last, no hints are drawn on any screen (and, on the
+map and in a room, no UI layer at all). At 81 window widths across the margin/top switch
+the legend is where it was with either fish active. With Czech subtitles the pause menu, the
+legend, the confirm prompt and Options are Czech. In windows the map, a room and a story page fill, the
+hints lie on their dark strip; in a letterbox margin, they do not. A room's first frame shows
+the remote's hints (room 1, and KUFRIK), and so does the room on leaving the pause menu; with
+`--remote-keys` a key the host leaves unmapped keeps them. 84 checks, ~10 s.
 
-It also checks the **UI layout snapshot**: at 13 states the UI layer is drawn into a 1280×720
-window and the list of what it drew — every rectangle, shape, image and string, with its
-position and size in whole pixels — must equal `native/ui-layout.snap.json`. A layout change
-fails with the first op that moved and writes the new list to
-`native/build/ui-layout.snap.new.json`; if intended, rerun with `--update-snapshot` and review
-the file's diff. It is not a pixel comparison (the web has no such screens to compare with):
+It also checks the **UI layout snapshot**: at 24 states (four of them Czech) the UI layer is drawn into a 1280×720
+window (three of them into windows the picture fills) and the list of what it drew — every
+rectangle, shape, image and string, with its position and size in whole pixels — must equal
+`native/ui-layout.snap.json`. A layout change fails with the first op that moved and writes
+the new list to `native/build/ui-layout.snap.new.json`; if intended, rerun with
+`--update-snapshot` and review the file's diff. It is not a pixel comparison (the web has no such screens to compare with):
 it catches a moved, resized, missing or reworded element, not a wrong colour inside one.
-`--smoke-out DIR` keeps each state's pixels (`DIR/ui-<state>.rgba`).
+`--smoke-out DIR` keeps each state's pixels (`DIR/ui-<state>.rgba`) and the picture under
+it (`DIR/pic-<state>.rgba`: the room's composite or the map), to look at together.
 
 ## Is it the same picture? `native/compare.mjs`
 

@@ -48,9 +48,19 @@ export function lastInput(): InputSource {
   return last;
 }
 
-/** Start as `source` before anything is pressed (`--remote-keys` starts as the remote). */
+/** Start as `source` before anything is pressed (tvOS and `--remote-keys` start as the remote). */
 export function setLastInput(source: InputSource): void {
   last = source;
+}
+
+/**
+ * `--remote-keys`: the keyboard stands in for the remote, so a key the host does not map to
+ * the remote (a cheat letter, F2) still leaves the remote the last input, and its hints up.
+ */
+let keyboardIsRemote = false;
+
+export function setKeyboardIsRemote(on: boolean): void {
+  keyboardIsRemote = on;
 }
 
 const sourceOf = (code: string): InputSource =>
@@ -278,7 +288,7 @@ export function routeEvent(ev: string, now: number = __native.now()): void {
   }
   const down = ev[0] === '+';
   const code = ev.slice(1);
-  if (down) last = sourceOf(code);
+  if (down) last = keyboardIsRemote && sourceOf(code) === 'key' ? 'remote' : sourceOf(code);
   if (!down && code === 'RemotePlayPause' && undoHold) {
     undoHoldUp(); // wherever the release lands — a menu, the map — the hold ends with it
     return;

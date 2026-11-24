@@ -22,7 +22,8 @@
  * and what it drew — every rectangle, glyph, image and string, with its position — is
  * compared with native/ui-layout.snap.json. A layout change fails here with the first op
  * that moved; `--update-snapshot` rewrites the file (review its diff), and `--smoke-out`
- * keeps each state's pixels (`DIR/ui-<state>.rgba`, as compare.mjs reads them).
+ * keeps each state's pixels (`DIR/ui-<state>.rgba`, as compare.mjs reads them) and the
+ * picture under it (`DIR/pic-<state>.rgba`: the room's composite or the map), to look at.
  */
 import { count, engine, loadmode } from '../../src/app/gameState.js';
 import { step } from '../../src/app/logicTick.js';
@@ -30,12 +31,12 @@ import { helpScreens, ui } from '../../src/app/screenState.js';
 import { atRest } from '../../src/app/roomGates.js';
 import { lengthOfRecord } from '../../src/core/record.js';
 import { busMultiplier, loadSettings } from '../../src/core/settings.js';
-import { advance, currentRoom, enterRoom, initGame, isPaused, roomReady, saveExists, showMap } from './game.js';
+import { advance, currentRoom, draw, enterRoom, initGame, isPaused, roomReady, saveExists, showLegImage, showMap } from './game.js';
 import { ensureMapArt, mapFrame, mapPresented, mapSelectedCorner } from './mapScreen.js';
 import { OPTIONS_ROWS, PAUSE_ITEMS, menuOpen, openMenus, openOptions, pauseItemEnabled, topMenu } from './menus.js';
 import { ensureOptionsArt } from './optionsPaint.js';
 import { preloadHelpFigures } from './helpPaint.js';
-import { preloadLegendArt } from './legend.js';
+import { confirmItems, legendItems, preloadLegendArt, type LegendScreen } from './legend.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { loadSubtitleAssets, subtitleFace } from './roomSubtitles.js';
 import { pinRandom } from './scene.js';
@@ -44,7 +45,8 @@ import { settings } from './seams/playerSettings.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
 import { soundTime } from './sound.js';
 import { SUB_FACES } from './subtitleFonts.js';
-import { inputFrame, lastInput, routeEvent, setExitHandler } from './uiInput.js';
+import { inputFrame, lastInput, routeEvent, setExitHandler, setKeyboardIsRemote } from './uiInput.js';
+import { t } from './uiStrings.js';
 import { initUiLayer, paintUi, type Box } from './uiLayer.js';
 import type { UiOp } from './uiDraw.js';
 
@@ -105,11 +107,11 @@ async function untilReady(): Promise<void> {
 
 const moves = (): number => lengthOfRecord(engine?.srecord ?? '');
 
-/** The picture's box in a 1280×720 window: the room's composite, or the map, letterboxed. */
-function pictureBox(cw: number, ch: number): Box {
-  const k = Math.min(WIN_W / cw, WIN_H / ch);
+/** The picture's box in a `ww`×`wh` window: the room's composite, or the map, letterboxed. */
+function pictureBox(cw: number, ch: number, ww: number, wh: number): Box {
+  const k = Math.min(ww / cw, wh / ch);
   const w = Math.floor(cw * k), h = Math.floor(ch * k);
-  return [Math.floor((WIN_W - w) / 2), Math.floor((WIN_H - h) / 2), w, h];
+  return [Math.floor((ww - w) / 2), Math.floor((wh - h) / 2), w, h];
 }
 
 export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
@@ -124,6 +126,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   pinRandom(1);
   let corners = 0;
   initGame({ verbose: false, demo: false, openCorner: () => { corners++; openOptions(); } });
+  // The snapshot is the English UI whatever this machine's language (a first run follows it).
+  settings.subtitles = 'en';
+  settings.titDef = 'en';
   await loadSubtitleAssets();
   await initUiLayer();
   await ensureOptionsArt();
@@ -147,13 +152,37 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     if (!ok) throw new MenuSmokeFailure(what);
   };
   const snaps: Record<string, readonly UiOp[]> = {};
-  const snap = (name: string): void => {
-    const box = ui.screen === 'room' ? pictureBox(target.width, target.height) : pictureBox(2560, 1920);
-    const r = paintUi(WIN_W, WIN_H, box);
+  /** Draw the UI layer at a state, into a `ww`×`wh` window (by default the snapshot's 1280×720). */
+  const snap = (name: string, ww = WIN_W, wh = WIN_H): void => {
+    // In a room, composite it first: the picture's box is the composite's size, as on screen.
+    const inRoom = ui.screen === 'room' && draw(target, 0);
+    const page = ui.screen === 'legimage' ? mapFrame(performance.now()) : null;
+    const box = inRoom ? pictureBox(target.width, target.height, ww, wh)
+      : page ? pictureBox(page.width, page.height, ww, wh) : pictureBox(2560, 1920, ww, wh);
+    const r = paintUi(ww, wh, box);
     if (!r) throw new MenuSmokeFailure(`the UI layer drew nothing for ${name}`);
     snaps[name] = r.ops;
-    if (outDir) __native.saveTexture(r.surface.id, `${outDir}/ui-${name}.rgba`);
+    if (!outDir) return;
+    if (r.surface) __native.saveTexture(r.surface.id, `${outDir}/ui-${name}.rgba`);
+    if (inRoom) __native.saveComposite(`${outDir}/pic-${name}.rgba`);
+    else {
+      const shown = mapFrame(performance.now());
+      if (shown) __native.saveTexture(shown.id, `${outDir}/pic-${name}.rgba`);
+    }
   };
+  /** Is the room's legend in `source`'s glyphs on screen now (its "Switch fish" / "Little")? */
+  const roomHints = (): boolean => {
+    const r = paintUi(WIN_W, WIN_H, pictureBox(target.width, target.height, WIN_W, WIN_H));
+    return !!r?.ops.some((op) => op[0] === 'text' && (op[1] === 'Switch fish' || op[1] === 'Little'));
+  };
+  /** Enter room `num` and return whether its first drawable frame shows the room's hints. */
+  const enterShowsHints = async (num: number): Promise<boolean> => {
+    await enterRoom(num);
+    for (let i = 0; i < 10_000 && !draw(target, 0); i++) await new Promise((r) => setTimeout(r, 0));
+    return roomHints();
+  };
+  /** Did state `name` draw the hints' dark strip (they lie over the picture)? */
+  const strip = (name: string): boolean => snaps[name]!.some((op) => op[0] === 'strip');
   const stored = (): ReturnType<typeof loadSettings> => loadSettings();
   const t0 = __native.now();
   try {
@@ -161,6 +190,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     showMap();
     await mapTick();
     snap('map-key');
+    check(snaps['map-key']!.length === 0, 'the keyboard on the map: no legend, and no UI layer drawn at all');
 
     // ── The map's Options, from the pad's ☰ ────────────────────────────────────────
     await tap('PadMenu');
@@ -211,6 +241,10 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     // ── Back at the root, and the Options corner ──────────────────────────────────
     await tap('PadB');
     check(exits === 0 && ui.screen === 'map', 'the pad\'s Ⓑ on the plain map does nothing');
+    snap('map-pad');
+    check(!strip('map-pad'), 'the pad\'s hints in the map\'s letterbox margin: muted, no strip');
+    snap('map-pad-fill', 960, 720);
+    check(strip('map-pad-fill'), 'with the map filling the window, the hints lie over it on a dark strip');
     await tap('Escape');
     check(exits === 1, 'the keyboard\'s Esc at the map\'s root leaves the game');
     await tap('RemoteBack');
@@ -229,7 +263,8 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(!menuOpen(), 'Esc closes it');
 
     // ── A room, with the remote ───────────────────────────────────────────────────
-    await enterRoom(1);
+    await tap('RemoteUp'); // on the map: the remote is the last input
+    check(lastInput() === 'remote' && await enterShowsHints(1), 'entering a room, its first frame shows the remote\'s hints');
     await untilReady();
     await tap('RemoteSelect'); // a press makes the remote the last input
     await tap('RemoteSelect'); // and switches back
@@ -252,6 +287,28 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     }
     check(movedBy !== '', `an edge click moves the active fish (${movedBy || 'no direction moved'})`);
     snap('room-remote');
+    check(!strip('room-remote'), 'the remote\'s hints in the room\'s letterbox margin: no strip');
+    snap('room-remote-fill', 800, 720);
+    check(strip('room-remote-fill'), 'with the room filling the window, the hints lie over it on a dark strip');
+    // Where the legend goes must not depend on which fish is active (the little fish's
+    // picture is wider than the big one's): across window widths spanning the margin/top
+    // switch, the same place with either fish.
+    const placements = (): string[] => {
+      const out: string[] = [];
+      for (let ww = 760; ww <= 1400; ww += 8) {
+        const r = paintUi(ww, WIN_H, pictureBox(target.width, target.height, ww, WIN_H));
+        const move = r?.ops.find((op) => op[0] === 'text' && op[1] === 'Move');
+        out.push(`${move?.[2]},${move?.[3]}`);
+      }
+      return out;
+    };
+    const fish0 = engine!.active, at0 = placements();
+    await tap('RemoteSelect');
+    const fish1 = engine!.active, at1 = placements();
+    await tap('RemoteSelect');
+    const rows = at0.filter((p) => Number(p.split(',')[1]) < 120).length;
+    check(fish0 !== fish1 && at0.join() === at1.join() && rows > 0 && rows < at0.length,
+      `switching fish never moves the legend: ${at0.length} window widths, ${rows} with the row on top, the same with either fish`);
     const before = moves();
     for (const sw of ['RemoteSwipeLeft', 'RemoteSwipeRight', 'RemoteSwipeUp', 'RemoteSwipeDown']) await tap(sw);
     steps(10);
@@ -306,6 +363,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     advance(LOGIC_MS * 1.5);
     check(count === c0, 'a paused room does not step');
     snap('pause-remote');
+    await tap('RemoteBack');
+    check(!menuOpen() && roomHints(), 'Back resumes, and the room\'s hints are up at once');
+    await tap('RemoteBack');
     const order: string[] = [];
     for (let i = 0; i < PAUSE_ITEMS.filter(pauseItemEnabled).length; i++) {
       await tap('RemoteSwipeDown');
@@ -388,13 +448,34 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     snap('room-pad');
     await tap('PadMenu');
     check(topMenu()?.kind === 'pause', 'the pad\'s ☰ opens the pause menu');
+    snap('pause-pad');
     await tap('PadMenu');
     check(!menuOpen(), 'and closes it');
     await tap('Escape');
     check(topMenu()?.kind === 'pause' && lastInput() === 'key', 'the keyboard\'s Esc opens the pause menu');
     snap('pause-key');
+    const screens: LegendScreen[] = ['room', 'map', 'panel', 'legimage', 'pause', 'options', 'help'];
+    check(screens.every((sc) => legendItems(sc, 'key').length === 0) && confirmItems('key').length === 0,
+      'the keyboard gets no button hints on any screen, nor on the confirm prompt');
+    check(screens.every((sc) => legendItems(sc, 'pad').length > 0 && legendItems(sc, 'remote').length > 0),
+      'the pad and the remote get them on every screen');
+    // The keyboard's confirm prompt: the question alone, answered by Esc and Enter.
+    localStorage.removeItem(`ff.save.${currentRoom()}`);
+    for (let i = 0; i < PAUSE_ITEMS.length && PAUSE_ITEMS[(topMenu() as { sel: number }).sel] !== 'save'; i++) await tap('ArrowDown');
+    await tap('Enter');
+    check(topMenu()?.kind === 'confirm' && lastInput() === 'key', 'Enter on Save asks first');
+    snap('confirm-save-key');
+    await tap('Escape');
+    check(topMenu()?.kind === 'pause' && !saveExists(), 'Esc declines: back on the pause menu, nothing saved');
+    await tap('Enter');
+    await tap('Enter');
+    check(!menuOpen() && !isPaused() && saveExists(), 'Enter says yes: saved, and the room resumes');
+    await tap('Escape');
+    check(topMenu()?.kind === 'pause', 'Esc opens the pause menu again');
     await tap('Escape');
     check(!menuOpen(), 'and Esc resumes');
+    snap('room-key');
+    check(snaps['room-key']!.length === 0, 'the keyboard in a room: no legend, and no UI layer drawn at all');
     await tap('PadB');
     check(ui.screen === 'map', 'the pad\'s Ⓑ goes straight to the map');
     await enterRoom(1);
@@ -402,6 +483,48 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await tap('RemoteBack');
     await select('map');
     check(ui.screen === 'map' && !menuOpen(), 'the pause menu\'s World map leaves the room');
+
+    // A story page filling the window: its "Continue" on the strip, and any button dismisses it.
+    check(lastInput() === 'remote', 'the remote is still the last input');
+    await showLegImage(1);
+    check(ui.screen === 'legimage', 'a story page is up');
+    snap('legimage-remote-fill', 960, 720);
+    check(strip('legimage-remote-fill'), 'its hint lies over the page on a dark strip');
+    await tap('RemoteSelect');
+    check(ui.screen === 'map', 'a click dismisses it');
+
+    // `--remote-keys`: the keyboard is the remote, every key of it. A key the host leaves
+    // unmapped (Space reaching the game as itself, a letter) keeps the remote's hints up.
+    setKeyboardIsRemote(true);
+    check(await enterShowsHints(2), 'back from the map into KUFRIK: its first frame shows the remote\'s hints');
+    await untilReady();
+    await tap('Space');
+    await tap('KeyQ');
+    check(lastInput() === 'remote' && roomHints(), 'with --remote-keys, Space and a letter keep the remote\'s hints');
+    setKeyboardIsRemote(false);
+    await tap('Space');
+    check(lastInput() === 'key' && !roomHints(), 'without it, Space is the keyboard: no hints');
+
+    // ── Czech: the UI follows the subtitles' language ────────────────────────────
+    settings.subtitles = 'cz';
+    settings.titDef = 'cz';
+    await tap('PadMenu');
+    snap('pause-pad-cz');
+    check(snaps['pause-pad-cz']!.some((op) => op[0] === 'text' && op[1] === 'Pauza'), 'with Czech subtitles the pause menu is Czech');
+    await tap('PadB');
+    snap('room-pad-cz');
+    check(snaps['room-pad-cz']!.some((op) => op[0] === 'text' && op[1] === 'Malá'), 'and so is the room\'s legend');
+    await tap('PadX');
+    snap('confirm-restart-pad-cz');
+    await tap('PadB');
+    openOptions();
+    snap('options-pad-cz');
+    await tap('PadB');
+    settings.subtitles = 'off';
+    check(t('paused') === 'Pauza', 'subtitles off: the UI keeps the last language chosen');
+    settings.subtitles = 'en';
+    settings.titDef = 'en';
+    check(t('paused') === 'Paused', 'and English with English subtitles');
 
     // ── The layout snapshot ──────────────────────────────────────────────────────
     const json = `${JSON.stringify(snaps, null, 0).replace(/\],\[/g, '],\n[').replace(/":\[\[/g, '":[\n[')}\n`;

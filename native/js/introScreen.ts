@@ -19,6 +19,7 @@
  * bottom (A4: "Press any button to skip"; no legend during the intro). Native is AI-tier only,
  * so the movies are the AI encodes when they are there, as the web's `ai` tier picks them.
  */
+import { t, uiLang } from './uiStrings.js';
 import { ui } from '../../src/app/screenState.js';
 import { saveSettings } from '../../src/core/settings.js';
 import { audio } from './seams/audioEngine.js';
@@ -228,10 +229,13 @@ function windowBox(): { w: number; h: number; dpr: number } {
   return ws ? { w: ws[0], h: ws[1], dpr: ws[2] } : { w: 1280, h: 800, dpr: 1 };
 }
 
-/** The web's start label for a TV, with Ⓐ as the controller's green chip (spec A5). */
-const START_BEFORE = 'Press ';
-const START_AFTER = ' to start';
-export const SKIP_HINT = 'Press any button to skip';
+/**
+ * The web's start label for a TV, with Ⓐ as the controller's green chip (spec A5), and its
+ * skip hint — in the UI's language (`uiStrings.ts`).
+ */
+const startBefore = (): string => t('pressToStartBefore');
+const startAfter = (): string => t('pressToStartAfter');
+export const skipHint = (): string => t('skipHint');
 
 /**
  * The splash: #intro-cover's title art over black, and #intro-start under it (bottom 20%,
@@ -252,7 +256,7 @@ export function paintSplash(s: NativeSurface, dpr: number): void {
   const chipD = Math.round(20 * dpr);
   const gap = 4 * dpr; // a space's worth either side of the chip
   const playW = Math.round(0.72 * px), playH = Math.round(0.8 * px);
-  const wBefore = textWidth(faces.label, START_BEFORE, px), wAfter = textWidth(faces.label, START_AFTER, px);
+  const wBefore = textWidth(faces.label, startBefore(), px), wAfter = textWidth(faces.label, startAfter(), px);
   const playGap = textWidth(faces.label, ' ', px);
   const contentW = playW + playGap + wBefore + chipD + gap + wAfter;
   const bw = Math.round(contentW + 2 * 28 * dpr + 2 * dpr);
@@ -266,7 +270,7 @@ export function paintSplash(s: NativeSurface, dpr: number): void {
   let x = bx + (bw - contentW) / 2;
   fillPlay(s, x, by + (bh - playH) / 2, playW, playH, 0xccdddd);
   x += playW + playGap;
-  fillText(s, atlas, faces.label, START_BEFORE, x, baseline, px, 0xccdddd);
+  fillText(s, atlas, faces.label, startBefore(), x, baseline, px, 0xccdddd);
   x += wBefore;
   const cy = by + (bh - chipD) / 2;
   fillDisc(s, x, cy, chipD, 0x3d9a1f);
@@ -275,7 +279,7 @@ export function paintSplash(s: NativeSurface, dpr: number): void {
   const [aa, ad] = faces.chip.metrics(apx);
   fillText(s, atlas, faces.chip, 'A', x + (chipD - aw) / 2, cy + chipD / 2 + (aa + ad) / 2 - 0.1 * apx, apx, 0xffffff);
   x += chipD + gap;
-  fillText(s, atlas, faces.label, START_AFTER, x, baseline, px, 0xccdddd);
+  fillText(s, atlas, faces.label, startAfter(), x, baseline, px, 0xccdddd);
 }
 
 /** The skip hint (#intro-hint on a TV): 12px #cdd at half opacity, centred, 18px off the bottom. */
@@ -284,10 +288,10 @@ export function paintHint(s: NativeSurface, dpr: number): void {
   if (!faces) return;
   s.setSmoothing(false);
   const px = 12 * dpr;
-  const w = textWidth(faces.hint, SKIP_HINT, px);
+  const w = textWidth(faces.hint, skipHint(), px);
   const [, desc] = faces.hint.metrics(px);
   s.setAlpha(0.5);
-  fillText(s, atlas, faces.hint, SKIP_HINT, (s.width - w) / 2, s.height - 18 * dpr + desc, px, 0xccdddd);
+  fillText(s, atlas, faces.hint, skipHint(), (s.width - w) / 2, s.height - 18 * dpr + desc, px, 0xccdddd);
   s.setAlpha(1);
 }
 
@@ -300,7 +304,7 @@ export function introFrame(now: number): { tex: number; overlay?: number } | nul
   intro.update(now);
   if (!intro.playing) return null;
   const { w, h, dpr } = windowBox();
-  const key = `${w}x${h}@${dpr}|${faces ? 1 : 0}`;
+  const key = `${w}x${h}@${dpr}|${faces ? 1 : 0}|${uiLang()}`;
   if (intro.gated) {
     if (!splashSurface || drawnFor !== key) {
       splashSurface = new NativeSurface(w, h);

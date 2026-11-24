@@ -6,6 +6,11 @@
  * (the face's sliders are small from a sofa), and holds the one control the 1998 face has no
  * place for: the subtitle font (`ff.subfont`), shown in its own face.
  *
+ * The chrome around the face is the web touch UI's, in the room's palette: the caption card
+ * is its popup glass (`uiGlass.ts`), and the focus is its touch Options' focus outline
+ * (`#touchopts :focus-visible`: `--menu-accent`, offset from the box) on the stone face, the
+ * ink on the card. The words are in the UI's language.
+ *
  * The face is composited exactly as `AiPanel.drawOptions` composites it — the base image,
  * the subtitle highlight, the three slider handles — at the face's scale rather than the
  * art's. The privacy link and the feedback strip are left out: a TV has no browser tab.
@@ -18,7 +23,10 @@ import { settings } from './seams/playerSettings.js';
 import { decodeImage } from './nativeSurface.js';
 import { readBytes } from './shims.js';
 import { OPTIONS_ROWS, type OptionsRow } from './menus.js';
-import { CARD_BORDER, CARD_RGB, focusRing, scrim } from './menuPaint.js';
+import { labelShadow, popup, scrim } from './menuPaint.js';
+import { currentPalette, ACCENT, INK } from './uiPalette.js';
+import { t, type UiString } from './uiStrings.js';
+import { hairline } from './uiGlass.js';
 import { subFontName } from './optionsModel.js';
 import { subtitleFace } from './roomSubtitles.js';
 import type { Ui } from './uiDraw.js';
@@ -68,11 +76,17 @@ const ROW_BOX: Readonly<Record<Exclude<OptionsRow, 'font'>, readonly [number, nu
   done: OBLMYSI[16]!.slice(1) as unknown as [number, number, number, number],
 };
 
-const ROW_NAME: Readonly<Record<OptionsRow, string>> = {
-  effect: 'Effect volume', voice: 'Talk volume', music: 'Music volume', subtitles: 'Subtitles',
-  font: 'Subtitle font', help: 'Help', done: 'Exit options',
+const ROW_NAME: Readonly<Record<OptionsRow, UiString>> = {
+  effect: 'effectVolume', voice: 'talkVolume', music: 'musicVolume', subtitles: 'subtitles',
+  font: 'subtitleFont', help: 'help', done: 'exitOptions',
 };
-const SUB_NAME = { cz: 'Čeština', en: 'English', off: 'Off' } as const;
+/** Each language in its own name; "off" in the UI's. */
+const subName = (mode: 'cz' | 'en' | 'off'): string => (mode === 'cz' ? 'Čeština' : mode === 'en' ? 'English' : t('subsOff'));
+
+/** A focus outline `t` thick, `off` outside the box, in `rgb`. */
+function focusOutline(ui: Ui, x: number, y: number, w: number, h: number, th: number, off: number, rgb: number, r: number): void {
+  ui.frame(x - off - th, y - off - th, w + 2 * (off + th), h + 2 * (off + th), th, rgb, 1, r);
+}
 
 function rowValue(row: OptionsRow): string {
   switch (row) {
@@ -81,13 +95,13 @@ function rowValue(row: OptionsRow): string {
     case 'music':
       return `${settings.volume[row]} / 12`;
     case 'subtitles':
-      return SUB_NAME[settings.subtitles];
+      return subName(settings.subtitles);
     case 'font':
       return `‹  ${subFontName()}  ›`;
     case 'help':
-      return 'The rules and the controls';
+      return t('helpValue');
     case 'done':
-      return screenUi.screen === 'room' ? 'Back to the menu' : 'Back to the map';
+      return t(screenUi.screen === 'room' ? 'backToMenu' : 'backToMap');
   }
 }
 
@@ -129,12 +143,20 @@ export function paintOptions(ui: Ui, w: number, h: number, row: number): [number
   const cardH = 150 * u;
   const cx = x0 + faceW + gap;
   const cy = Math.max(y0, Math.min(y0 + faceH - cardH, y0 + ((by1 + by2) / 2) * f - cardH / 2 + (focused === 'font' ? 160 * u : 0)));
-  ui.rect(cx, cy, cardW, cardH, CARD_RGB, 0.96, 16 * u);
-  ui.frame(cx, cy, cardW, cardH, Math.max(1, 2 * u), CARD_BORDER, 1, 16 * u);
-  ui.text(ROW_NAME[focused], cx + 28 * u, cy + 52 * u, 26 * u, 0x9fc4cc, { bold: true });
+  const pal = currentPalette();
+  popup(ui, cx, cy, cardW, cardH, u, h, pal);
+  ui.text(t(ROW_NAME[focused]), cx + 28 * u, cy + 52 * u, 26 * u, pal.symbol, { bold: true, outline: labelShadow(u, h) });
   const face = focused === 'font' ? subtitleFace() ?? undefined : undefined;
-  ui.text(rowValue(focused), cx + 28 * u, cy + 112 * u, 36 * u, 0xf2f6f8, { bold: !face, ...(face ? { face } : {}) });
-  if (focused === 'font') focusRing(ui, cx, cy, cardW, cardH, u);
-  else focusRing(ui, x0 + bx1 * f, y0 + by1 * f, (bx2 - bx1 + 1) * f, (by2 - by1 + 1) * f, u);
+  ui.text(rowValue(focused), cx + 28 * u, cy + 112 * u, 36 * u, INK, { bold: !face, outline: labelShadow(u, h), ...(face ? { face } : {}) });
+  // The touch Options' `outline: … var(--menu-accent); outline-offset: 2px`, thickened to be
+  // seen from a sofa, with the pressed button's ink border (`border-color: var(--menu-ink)`)
+  // inside it, so it reads on the bright stone and on the dark card alike.
+  const th = Math.max(3, Math.round(4 * u)), off = Math.max(2, Math.round(3 * u)), hair = hairline(h);
+  const ring = (x: number, y: number, rw: number, rh: number, r: number): void => {
+    focusOutline(ui, x, y, rw, rh, th, off, ACCENT, r);
+    focusOutline(ui, x, y, rw, rh, hair, off, INK, r);
+  };
+  if (focused === 'font') ring(cx, cy, cardW, cardH, 14 * u);
+  else ring(x0 + bx1 * f, y0 + by1 * f, (bx2 - bx1 + 1) * f, (by2 - by1 + 1) * f, 6 * u);
   return [x0, y0, faceW + gap + cardW, faceH];
 }
