@@ -3,6 +3,28 @@ import { join } from 'node:path';
 import { appReady, WAIT_BACKSTOP } from './ui-lib.mjs';
 import { tapPanel } from './ui-tablet-options.mjs';
 
+/**
+ * Wait until the badge shows `fish` and will keep showing it on the next frame.
+ *
+ * The badge is synced from the frame loop (syncActiveFishIndicator), so right after
+ * enterRoomAwait() or setGraphics() its DOM can still be the previous room's: visible,
+ * while a hold the loop has not seen yet (room audio, story preload, art) is about to
+ * hide it. Wait for every hold the badge obeys, then one more loop so the DOM read
+ * afterwards is one the loop produced with them clear.
+ */
+export async function waitFishBadge(p, fish) {
+  const shown = () => p.waitForFunction(fish => {
+    const el = document.getElementById('active-fish-indicator');
+    const f = window.__ff;
+    return !f.roomLoading() && !f.roomArtPending() && !f.roomAudioPending() && !f.roomPreloadPending() &&
+      el && !el.hidden && el.dataset.fish === fish && el.getBoundingClientRect().width > 0;
+  }, fish);
+  await shown();
+  const loop = await p.evaluate(() => window.__ff.throttleInfo().loops);
+  await p.waitForFunction(previous => window.__ff.throttleInfo().loops > previous, loop);
+  await shown();
+}
+
 /** Real pointer and keyboard activation must switch once, never swim or lose keyboard focus. */
 export async function checkFishSwitchButton(p, badge) {
   assert.equal(await badge.evaluate(el => el.tagName), 'BUTTON', 'fish indicator is a native button');
@@ -45,11 +67,7 @@ export async function checkTabletFishIndicator(browser, base, evidence, errors) 
     await p.goto(base, { waitUntil: 'domcontentloaded' });
     await appReady(p);
     const badge = p.locator('#active-fish-indicator');
-    const waitFish = (fish) => p.waitForFunction(fish => {
-      const el = document.getElementById('active-fish-indicator');
-      return !window.__ff.roomLoading() && !window.__ff.roomArtPending() &&
-        el && !el.hidden && el.dataset.fish === fish && el.getBoundingClientRect().width > 0;
-    }, fish);
+    const waitFish = (fish) => waitFishBadge(p, fish);
     const cases = [
       { name: 'ipad-portrait', width: 834, height: 1194, room: 7, edge: 'top', insets: [24, 0, 20, 0] },
       { name: 'ipad-landscape-left', width: 1194, height: 834, room: 6, edge: 'left', insets: [24, 0, 20, 0] },
