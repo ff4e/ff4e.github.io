@@ -498,9 +498,17 @@ known, on the 1st-generation remote (no ring): its edge click is read from where
 rests, which needs absolute d-pad values (`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL
 leaves them relative, so a tvOS target must set it (with absolute values, swipes should then
 come from motion rather than position). A slide followed by a click within 120 ms is one
-click, not a swipe and a click. On a Mac,
-`--remote-keys` makes the keyboard a remote: arrows click an edge, Return clicks the centre,
-`P` is Play/Pause, Esc or Backspace is Back, Shift+arrow swipes.
+click, not a swipe and a click. On a Mac, `--remote-keys` makes the keyboard a remote, and
+the whole keyboard counts as the remote: any other key it sends (a letter, F2) leaves the
+remote the last input, so its hints stay up.
+
+| Siri Remote | with `--remote-keys` |
+| --- | --- |
+| click an edge (held: held) | arrows |
+| click the centre (switch fish, select, open) | Return, Space, Tab |
+| Play/Pause | `P` |
+| Back | Esc, Backspace |
+| swipe | Shift+arrow |
 
 | in a room | keyboard | gamepad | Siri Remote |
 | --- | --- | --- | --- |
@@ -606,7 +614,9 @@ closes the pause menu, and its Save prompt (the question alone) is declined by E
 answered by Enter; its World map leaves the room. A Play/Pause hold released inside the
 pause menu ends there. With the keyboard last, no hints are drawn on any screen (and, on the
 map and in a room, no UI layer at all). In windows the map, a room and a story page fill, the
-hints lie on their dark strip; in a letterbox margin, they do not. 74 checks, ~8 s.
+hints lie on their dark strip; in a letterbox margin, they do not. A room's first frame shows
+the remote's hints (room 1, and KUFRIK), and so does the room on leaving the pause menu; with
+`--remote-keys` a key the host leaves unmapped keeps them. 79 checks, ~8 s.
 
 It also checks the **UI layout snapshot**: at 20 states the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills) and the list of what it drew — every

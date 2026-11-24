@@ -45,7 +45,7 @@ import { settings } from './seams/playerSettings.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
 import { soundTime } from './sound.js';
 import { SUB_FACES } from './subtitleFonts.js';
-import { inputFrame, lastInput, routeEvent, setExitHandler } from './uiInput.js';
+import { inputFrame, lastInput, routeEvent, setExitHandler, setKeyboardIsRemote } from './uiInput.js';
 import { initUiLayer, paintUi, type Box } from './uiLayer.js';
 import type { UiOp } from './uiDraw.js';
 
@@ -166,6 +166,17 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       if (shown) __native.saveTexture(shown.id, `${outDir}/pic-${name}.rgba`);
     }
   };
+  /** Is the room's legend in `source`'s glyphs on screen now (its "Switch fish" / "Little")? */
+  const roomHints = (): boolean => {
+    const r = paintUi(WIN_W, WIN_H, pictureBox(target.width, target.height, WIN_W, WIN_H));
+    return !!r?.ops.some((op) => op[0] === 'text' && (op[1] === 'Switch fish' || op[1] === 'Little'));
+  };
+  /** Enter room `num` and return whether its first drawable frame shows the room's hints. */
+  const enterShowsHints = async (num: number): Promise<boolean> => {
+    await enterRoom(num);
+    for (let i = 0; i < 10_000 && !draw(target, 0); i++) await new Promise((r) => setTimeout(r, 0));
+    return roomHints();
+  };
   /** Did state `name` draw the hints' dark strip (they lie over the picture)? */
   const strip = (name: string): boolean => snaps[name]!.some((op) => op[0] === 'rect' && op[5] === 0x10181e && op[6] === 78);
   const stored = (): ReturnType<typeof loadSettings> => loadSettings();
@@ -248,7 +259,8 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(!menuOpen(), 'Esc closes it');
 
     // ── A room, with the remote ───────────────────────────────────────────────────
-    await enterRoom(1);
+    await tap('RemoteUp'); // on the map: the remote is the last input
+    check(lastInput() === 'remote' && await enterShowsHints(1), 'entering a room, its first frame shows the remote\'s hints');
     await untilReady();
     await tap('RemoteSelect'); // a press makes the remote the last input
     await tap('RemoteSelect'); // and switches back
@@ -328,6 +340,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     advance(LOGIC_MS * 1.5);
     check(count === c0, 'a paused room does not step');
     snap('pause-remote');
+    await tap('RemoteBack');
+    check(!menuOpen() && roomHints(), 'Back resumes, and the room\'s hints are up at once');
+    await tap('RemoteBack');
     const order: string[] = [];
     for (let i = 0; i < PAUSE_ITEMS.filter(pauseItemEnabled).length; i++) {
       await tap('RemoteSwipeDown');
@@ -454,6 +469,18 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(strip('legimage-remote-fill'), 'its hint lies over the page on a dark strip');
     await tap('RemoteSelect');
     check(ui.screen === 'map', 'a click dismisses it');
+
+    // `--remote-keys`: the keyboard is the remote, every key of it. A key the host leaves
+    // unmapped (Space reaching the game as itself, a letter) keeps the remote's hints up.
+    setKeyboardIsRemote(true);
+    check(await enterShowsHints(2), 'back from the map into KUFRIK: its first frame shows the remote\'s hints');
+    await untilReady();
+    await tap('Space');
+    await tap('KeyQ');
+    check(lastInput() === 'remote' && roomHints(), 'with --remote-keys, Space and a letter keep the remote\'s hints');
+    setKeyboardIsRemote(false);
+    await tap('Space');
+    check(lastInput() === 'key' && !roomHints(), 'without it, Space is the keyboard: no hints');
 
     // ── The layout snapshot ──────────────────────────────────────────────────────
     const json = `${JSON.stringify(snaps, null, 0).replace(/\],\[/g, '],\n[').replace(/":\[\[/g, '":[\n[')}\n`;

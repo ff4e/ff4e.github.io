@@ -1109,8 +1109,9 @@ static const char *code_of(SDL_Scancode sc, SDL_Keycode key) {
 
 /*
  * `--remote-keys`: the keyboard as a Siri Remote, for a Mac with no Apple TV. Arrows click
- * an edge (held = held), Return clicks the centre, P is Play/Pause, Esc or Backspace is
- * Back, and Shift+arrow swipes. `*swipe` says the code is a swipe (no hold).
+ * an edge (held = held), Return, Space or Tab clicks the centre (Space and Tab are where a
+ * keyboard player switches fish), P is Play/Pause, Esc or Backspace is Back, and
+ * Shift+arrow swipes. `*swipe` says the code is a swipe (no hold).
  */
 static const char *remote_key(SDL_Scancode sc, SDL_Keymod mod, bool *swipe) {
   bool shift = (mod & SDL_KMOD_SHIFT) != 0;
@@ -1120,7 +1121,8 @@ static const char *remote_key(SDL_Scancode sc, SDL_Keymod mod, bool *swipe) {
     case SDL_SCANCODE_DOWN: *swipe = shift; return shift ? "RemoteSwipeDown" : "RemoteDown";
     case SDL_SCANCODE_LEFT: *swipe = shift; return shift ? "RemoteSwipeLeft" : "RemoteLeft";
     case SDL_SCANCODE_RIGHT: *swipe = shift; return shift ? "RemoteSwipeRight" : "RemoteRight";
-    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER: return "RemoteSelect";
+    case SDL_SCANCODE_RETURN: case SDL_SCANCODE_KP_ENTER:
+    case SDL_SCANCODE_SPACE: case SDL_SCANCODE_TAB: return "RemoteSelect";
     case SDL_SCANCODE_P: return "RemotePlayPause";
     case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_BACKSPACE: return "RemoteBack";
     default: return NULL;
