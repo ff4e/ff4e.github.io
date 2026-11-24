@@ -48,7 +48,7 @@ export function lastInput(): InputSource {
   return last;
 }
 
-/** Start as `source` before anything is pressed (`--remote-keys` starts as the remote). */
+/** Start as `source` before anything is pressed (tvOS and `--remote-keys` start as the remote). */
 export function setLastInput(source: InputSource): void {
   last = source;
 }

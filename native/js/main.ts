@@ -131,7 +131,9 @@ async function main(): Promise<void> {
   await loadSubtitleAssets();
   await initUiLayer();
   void ensureOptionsArt();
-  if (flag('--remote-keys')) setLastInput('remote');
+  // The legend needs a source before the first press: on tvOS the remote (the keyboard would
+  // show no hints at all); on a Mac the keyboard, unless it is standing in for a remote.
+  if (flag('--remote-keys') || __native.tv) setLastInput('remote');
   console.log(`sound: ${mixer.mode}, mixing at ${MIX_RATE} Hz`);
   if (arg('--room')) await enterRoom(Number(arg('--room')));
   else if (flag('--demo')) await enterRoom(firstRoom());

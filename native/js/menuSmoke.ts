@@ -410,6 +410,19 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       'the keyboard gets no button hints on any screen, nor on the confirm prompt');
     check(screens.every((sc) => legendItems(sc, 'pad').length > 0 && legendItems(sc, 'remote').length > 0),
       'the pad and the remote get them on every screen');
+    // The keyboard's confirm prompt: the question alone, answered by Esc and Enter.
+    localStorage.removeItem(`ff.save.${currentRoom()}`);
+    for (let i = 0; i < PAUSE_ITEMS.length && PAUSE_ITEMS[(topMenu() as { sel: number }).sel] !== 'save'; i++) await tap('ArrowDown');
+    await tap('Enter');
+    check(topMenu()?.kind === 'confirm' && lastInput() === 'key', 'Enter on Save asks first');
+    snap('confirm-save-key');
+    await tap('Escape');
+    check(topMenu()?.kind === 'pause' && !saveExists(), 'Esc declines: back on the pause menu, nothing saved');
+    await tap('Enter');
+    await tap('Enter');
+    check(!menuOpen() && !isPaused() && saveExists(), 'Enter says yes: saved, and the room resumes');
+    await tap('Escape');
+    check(topMenu()?.kind === 'pause', 'Esc opens the pause menu again');
     await tap('Escape');
     check(!menuOpen(), 'and Esc resumes');
     snap('room-key');

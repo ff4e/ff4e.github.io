@@ -103,6 +103,8 @@ export interface NativeApi {
    * `ui` (the menus and the legend, `uiLayer.ts`) over that.
    */
   presentTexture(id: number, overlay?: number, ui?: number): void;
+  /** Built for tvOS: the remote is the input until something else is pressed. */
+  readonly tv: boolean;
   /** `[w, h, density]`: the window's size in pixels, and pixels per point. Null headless. */
   windowSize(): [number, number, number] | null;
   /**

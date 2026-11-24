@@ -414,7 +414,7 @@ has no native counterpart yet.
     native/build/cmake/ff4e-native native/build/game.js --root public --headless \
       --smoke-movie --store native/build/smoke-movie-store.json
 
-`native/js/movieSmoke.ts`, 27 checks in ~10 s, through the real input routing (`uiInput.ts`, shared
+`native/js/movieSmoke.ts`, 28 checks in ~11 s, through the real input routing (`uiInput.ts`, shared
 with the interactive loop) and frames: a first
 run opens on the splash, which Ⓑ, a stick, a d-pad, Ⓧ, Esc and the remote's Back and edge click do not leave and Ⓐ does, into the
 AI logo with the game's sound killed; four seconds of the logo at 60 refreshes a second on
@@ -543,7 +543,8 @@ Other flags:
 - `--seconds N` quits after N seconds.
 - `--store FILE` keeps progress and save slots in FILE instead of the user's.
 - `--audio-log` prints every sound the game starts.
-- `--remote-keys` makes the keyboard a Siri Remote (above) and starts the legend in its glyphs.
+- `--remote-keys` makes the keyboard a Siri Remote (above) and starts the legend in its glyphs,
+  as a tvOS build always starts (`__native.tv`); a Mac starts with the keyboard's: none.
 
 From a Rosetta shell, prefix the commands with `arch -arm64`, or the universal tools
 build x86_64.
@@ -599,11 +600,12 @@ Save asks, Back declines, a click saves the move record; Load restores it; Optio
 open from the pause menu and close back to it; Restart starts over; a save mid-move is
 refused as F2 is. With the pad: Ⓧ asks to restart and Ⓑ declines, RB with no save opens
 nothing, LB → Ⓐ saves, ☰ opens and closes the pause menu, Ⓑ goes to the map; Esc opens and
-closes the pause menu; its World map leaves the room. A Play/Pause hold released inside the
+closes the pause menu, and its Save prompt (the question alone) is declined by Esc and
+answered by Enter; its World map leaves the room. A Play/Pause hold released inside the
 pause menu ends there. With the keyboard last, no hints are drawn on any screen (and, on the
-map and in a room, no UI layer at all). 62 checks, ~8 s.
+map and in a room, no UI layer at all). 66 checks, ~8 s.
 
-It also checks the **UI layout snapshot**: at 16 states the UI layer is drawn into a 1280×720
+It also checks the **UI layout snapshot**: at 17 states the UI layer is drawn into a 1280×720
 window and the list of what it drew — every rectangle, shape, image and string, with its
 position and size in whole pixels — must equal `native/ui-layout.snap.json`. A layout change
 fails with the first op that moved and writes the new list to

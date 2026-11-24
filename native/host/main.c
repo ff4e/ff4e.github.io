@@ -1556,6 +1556,11 @@ static void install(JSContext *ctx) {
   JSValue n = JS_NewObject(ctx);
   for (size_t i = 0; i < sizeof fns / sizeof fns[0]; i++)
     JS_SetPropertyStr(ctx, n, fns[i].name, JS_NewCFunction(ctx, fns[i].fn, fns[i].name, fns[i].len));
+#ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
+  JS_SetPropertyStr(ctx, n, "tv", JS_TRUE);
+#else
+  JS_SetPropertyStr(ctx, n, "tv", JS_FALSE);
+#endif
   install_text(ctx, n);
   install_movie(ctx, n);
   audio_install(ctx, n, !headless); /* headless: no output, the game advances the mixer */
