@@ -16,6 +16,10 @@
  * platform must be added to the app in App Store Connect (the app's page → "+" beside the
  * platforms → tvOS), or the upload is refused.
  *
+ * ── tvOS 27 ─────────────────────────────────────────────────────────────────
+ * The app requires tvOS 27 (Apple TV 4K 2nd generation and newer: native/CMakeLists.txt says
+ * why), so it needs an Xcode with the tvOS 27 SDK; the script stops at once without one.
+ *
  * ── Signing ─────────────────────────────────────────────────────────────────
  * Automatic, as the iOS lane: Xcode archives with a tvOS development profile it creates for
  * the bundle id (`-allowProvisioningUpdates`) and re-signs for App Store at export. The
@@ -35,7 +39,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 import { dieAs, findDistributionTeam, parseArgs, uploadArchive } from './testflight-lib.mjs';
-import { buildTvos } from '../native/tvos/build.mjs';
+import { DEPLOYMENT_TARGET, buildTvos, checkTvosSdk } from '../native/tvos/build.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const die = dieAs('release-testflight-tvos');
@@ -50,17 +54,24 @@ const v = args.indexOf('--version');
 const version = v !== -1 ? args[v + 1] : '1.0';
 if (!/^\d+(\.\d+){0,2}$/.test(version ?? '')) die(`--version ${version}: want MAJOR[.MINOR[.PATCH]]`);
 
+// Before anything else: without the tvOS SDK the app targets, nothing below can work.
+try {
+  checkTvosSdk();
+} catch (e) {
+  die(e.message);
+}
+
 const team = findDistributionTeam(die);
-console.log(`signing as distribution team ${team}, tvOS version ${version} build ${buildNumber}`);
+console.log(`signing as distribution team ${team}, tvOS version ${version} build ${buildNumber}, for tvOS ${DEPLOYMENT_TARGET}+`);
 
 const archiveDir = mkdtempSync(join(tmpdir(), 'ff4e-tvos-archive-'));
 const archivePath = join(archiveDir, `FishFillets-tvOS-${buildNumber}.xcarchive`);
 
 try {
   buildTvos({ archive: archivePath, team, build: buildNumber, version });
-} catch {
+} catch (e) {
   die(
-    'archive failed — the output above says why. "PLA Update available": accept the new Program\n' +
+    `archive failed (${e.message.split('\n')[0]}) — the output above says why. "PLA Update available": accept the new Program\n` +
       'License Agreement at developer.apple.com. "No profiles … were found" / "no devices": see\n' +
       'native/README.md, "Apple TV" → Signing.',
   );

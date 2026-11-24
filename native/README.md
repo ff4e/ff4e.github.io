@@ -687,7 +687,17 @@ for every platform — QuickJS-ng, SDL3, libwebp and FreeType all build for tvOS
 `FetchContent` pins with no change — and the generated project is what only Xcode can do:
 automatic signing, the asset catalog, `xcodebuild archive`. A second project would be a second
 list to keep in step. The dependencies' static libraries are marked `SKIP_INSTALL`, so an
-archive holds the app alone. tvOS 17 is the floor: every Apple TV Apple still supports, the HD included, runs it.
+archive holds the app alone.
+
+**tvOS 27 and up: the Apple TV 4K 2nd generation (A12) and newer**, the A19 model included.
+SDL 3.4's Metal GPU driver needs an A9 GPU or newer on tvOS (`MTLGPUFamilyApple3`, no
+opt-out), and the Apple TV HD (A8) runs up to tvOS 26; tvOS has no device capability that
+tells an A8 from an A9+, so the OS version is the floor. tvOS 27 also leaves out the 4K 1st
+generation (A10X), which SDL could drive — the price of keeping the HD out. The number lives
+once, in `native/CMakeLists.txt` (`FF4E_TVOS_DEPLOYMENT_TARGET`; Xcode makes it the app's
+`MinimumOSVersion`), which refuses a lower target. **It needs an Xcode with the tvOS 27 SDK:**
+`build.mjs`, the release lane and CMake itself stop at once, saying so, when the installed
+SDK is older. The no-GPU alert (below) stays, as a defence.
 
 **The app** (`native/tvos/`): `Info.plist` — the remote alone is enough
 (`GCSupportsControllerUserInteraction`; the micro and extended gamepad profiles supported,
@@ -742,8 +752,9 @@ rules are by directory and kind, and the check only ever adds to them.)
 - *The remote*: absolute d-pad values on every micro gamepad, swipes measured from the
   touch-down (see Controls).
 - *No GPU*: SDL GPU (Metal) does not start in the Apple TV Simulator ("Device does not meet
-  the hardware requirements"). The host then says so in an alert and quits, rather than
-  crash; with `--startup-probe` it carries on without one.
+  the hardware requirements"), nor on an A8 Apple TV — which tvOS 27 keeps from installing
+  the app. The host then says so in an alert and quits, rather than crash; with
+  `--startup-probe` it carries on without one.
 
 **What has run without a device.** In the Apple TV Simulator (tvOS 26.5, `Apple TV 4K (3rd
 generation)`): the app installs and launches, the alert above appears, and the startup probe
@@ -752,14 +763,19 @@ passes — the bundle evaluated in ~40 ms, `__native.tv` true, the store written
 
     xcrun simctl launch --console-pty <udid> io.github.ff4e.fishfillets4ever --startup-probe
 
-The device build compiles, links (arm64, tvOS 17) and archives with signing off. Everything
+With a temporary, uncommitted override of the target to 26.5 (this Mac has Xcode 26.6, tvOS
+26.5 SDK), the device build compiles, links (arm64) and archives with signing off, and the
+Simulator build runs the probe above; with the committed 27.0 the configured project's
+`TVOS_DEPLOYMENT_TARGET` is 27.0, and the build stops at the SDK check. Everything
 drawn, the remote, the lifecycle and the safe area wait for a device — and so does how the
 remote is told from a pad: by a name with "Remote" in it (`is_remote`); the Simulator's
 stand-in reports itself as "Gamepad".
 
 **Signing.** Automatic, for the paid team, as the iOS lane: the archive is signed with a tvOS
 development profile Xcode creates (`-allowProvisioningUpdates`) and re-signed for the App
-Store at export. On 2026-11-24 it stopped at the account: *"PLA Update available … agree to
+Store at export. **What the account holder must do first:** install an Xcode with the tvOS 27
+SDK; accept the current Program License Agreement; add the tvOS platform to the app in App
+Store Connect. On 2026-11-24 the archive stopped at the account: *"PLA Update available … agree to
 the latest Program License Agreement"* — Apple creates no new profile until the account
 holder accepts it at developer.apple.com — and so *"No profiles for
 'io.github.ff4e.fishfillets4ever' were found … tvOS App Development"*. After that, if Xcode

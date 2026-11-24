@@ -93,8 +93,11 @@ purchase), same team, same two stages, same `--upload` rule as §3.
 
 - **Build numbers are tvOS's own** — App Store Connect keeps each platform's versions and
   builds apart, so `N` starts at 1 and follows the last *tvOS* build, whatever iOS is at.
+- **The app requires tvOS 27** (Apple TV 4K 2nd gen and newer; `native/CMakeLists.txt` says
+  why), so it needs an **Xcode with the tvOS 27 SDK**. Every tvOS command stops at once,
+  naming what to install, when the selected Xcode's tvOS SDK is older.
 - **What the user must do in App Store Connect / the developer account first** (an agent
-  cannot): accept the current Program License Agreement at developer.apple.com (archives
+  cannot): install that Xcode; accept the current Program License Agreement at developer.apple.com (archives
   fail with "PLA Update available" until then — seen 2026-11-24), and add the tvOS platform
   to the app (app page → "+" beside the platforms → tvOS) before the first `--upload`. If
   Xcode then says the team has no devices for a development profile, pair the Apple TV in
@@ -135,7 +138,7 @@ xcrun simctl install "Apple TV 4K (3rd generation)" native/build/tvos/xcode-sim/
 xcrun simctl launch --console-pty "Apple TV 4K (3rd generation)" io.github.ff4e.fishfillets4ever --startup-probe
 ```
 
-It ends with `startup probe: ok — …`. Needs the tvOS Simulator runtime
+It ends with `startup probe: ok — …`. (Needs the tvOS 27 Simulator SDK and runtime, as above.) Needs the tvOS Simulator runtime
 (`xcodebuild -downloadPlatform tvOS`, ~3.8 GB) — which every tvOS build needs anyway: actool
 will not compile the asset catalog for tvOS without it.
 
