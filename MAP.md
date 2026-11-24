@@ -70,8 +70,9 @@ others are small enough to read.
   menu / confirm / Options / Help state, `optionsModel.ts` persists and applies the options,
   `uiLayer.ts` draws the window-sized UI layer — `menuPaint.ts`, `optionsPaint.ts` (the original
   Options face), `helpPaint.ts` (the help typeset from `helpText.ts`), `legend.ts` — through
-  `uiDraw.ts` (which also has the intro splash's shape and text helpers), and `menuSmoke.ts`
-  gates them with `native/ui-layout.snap.json`.
+  `uiDraw.ts` (which also has the intro splash's shape and text helpers), in the web touch UI's
+  room-toned paint (`uiPalette.ts`, `uiGlass.ts`, `rusticIcons.ts`) and the UI's language
+  (`uiStrings.ts`), and `menuSmoke.ts` gates them with `native/ui-layout.snap.json`.
 
 ### Map of `src/app/`
 

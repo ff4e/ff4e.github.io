@@ -15,7 +15,7 @@
 // breaks this build loudly instead of shipping a module that throws on its first
 // `document` at load.
 import { build } from 'esbuild';
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -41,6 +41,19 @@ const REAL = new Set([
   'paintClock', 'panelLight', 'persist', 'phoneUndoFocus', 'replayMode', 'roomActionEvent',
   'roomGates', 'roomLoad', 'saveMigration', 'screenState', 'solveMode', 'undo',
 ]);
+
+/**
+ * `import text from '….svg?raw'` — Vite's form, which the web uses for the touch menu's icons
+ * (src/platform/nativeMenuIcons.ts) — as the file's text. The native UI draws the same icons
+ * (native/js/rusticIcons.ts). Only the `?raw` form: a plain asset import still loads as nothing.
+ */
+const rawPlugin = {
+  name: 'raw-text',
+  setup(b) {
+    b.onResolve({ filter: /\?raw$/ }, (args) => ({ path: resolve(args.resolveDir, args.path.slice(0, -4)), namespace: 'raw' }));
+    b.onLoad({ filter: /.*/, namespace: 'raw' }, (args) => ({ contents: readFileSync(args.path, 'utf8'), loader: 'text' }));
+  },
+};
 
 const seamPlugin = {
   name: 'native-seams',
@@ -78,7 +91,7 @@ const result = await build({
   // be reported with its import chain, instead of as an esbuild loader error.
   loader: { '.webp': 'empty', '.png': 'empty', '.svg': 'empty', '.css': 'empty', '.woff2': 'empty' },
   define: { __CP1250_HIGH__: JSON.stringify(high) },
-  plugins: [seamPlugin],
+  plugins: [rawPlugin, seamPlugin],
   logLevel: 'warning',
 });
 

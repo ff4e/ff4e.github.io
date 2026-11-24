@@ -46,6 +46,7 @@ import { LOGIC_MS } from './seams/stageGeometry.js';
 import { soundTime } from './sound.js';
 import { SUB_FACES } from './subtitleFonts.js';
 import { inputFrame, lastInput, routeEvent, setExitHandler, setKeyboardIsRemote } from './uiInput.js';
+import { t } from './uiStrings.js';
 import { initUiLayer, paintUi, type Box } from './uiLayer.js';
 import type { UiOp } from './uiDraw.js';
 
@@ -125,6 +126,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   pinRandom(1);
   let corners = 0;
   initGame({ verbose: false, demo: false, openCorner: () => { corners++; openOptions(); } });
+  // The snapshot is the English UI whatever this machine's language (a first run follows it).
+  settings.subtitles = 'en';
+  settings.titDef = 'en';
   await loadSubtitleAssets();
   await initUiLayer();
   await ensureOptionsArt();
@@ -178,7 +182,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     return roomHints();
   };
   /** Did state `name` draw the hints' dark strip (they lie over the picture)? */
-  const strip = (name: string): boolean => snaps[name]!.some((op) => op[0] === 'rect' && op[5] === 0x10181e && op[6] === 78);
+  const strip = (name: string): boolean => snaps[name]!.some((op) => op[0] === 'strip');
   const stored = (): ReturnType<typeof loadSettings> => loadSettings();
   const t0 = __native.now();
   try {
@@ -286,6 +290,25 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(!strip('room-remote'), 'the remote\'s hints in the room\'s letterbox margin: no strip');
     snap('room-remote-fill', 800, 720);
     check(strip('room-remote-fill'), 'with the room filling the window, the hints lie over it on a dark strip');
+    // Where the legend goes must not depend on which fish is active (the little fish's
+    // picture is wider than the big one's): across window widths spanning the margin/top
+    // switch, the same place with either fish.
+    const placements = (): string[] => {
+      const out: string[] = [];
+      for (let ww = 760; ww <= 1400; ww += 8) {
+        const r = paintUi(ww, WIN_H, pictureBox(target.width, target.height, ww, WIN_H));
+        const move = r?.ops.find((op) => op[0] === 'text' && op[1] === 'Move');
+        out.push(`${move?.[2]},${move?.[3]}`);
+      }
+      return out;
+    };
+    const fish0 = engine!.active, at0 = placements();
+    await tap('RemoteSelect');
+    const fish1 = engine!.active, at1 = placements();
+    await tap('RemoteSelect');
+    const rows = at0.filter((p) => Number(p.split(',')[1]) < 120).length;
+    check(fish0 !== fish1 && at0.join() === at1.join() && rows > 0 && rows < at0.length,
+      `switching fish never moves the legend: ${at0.length} window widths, ${rows} with the row on top, the same with either fish`);
     const before = moves();
     for (const sw of ['RemoteSwipeLeft', 'RemoteSwipeRight', 'RemoteSwipeUp', 'RemoteSwipeDown']) await tap(sw);
     steps(10);
@@ -481,6 +504,27 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     setKeyboardIsRemote(false);
     await tap('Space');
     check(lastInput() === 'key' && !roomHints(), 'without it, Space is the keyboard: no hints');
+
+    // ── Czech: the UI follows the subtitles' language ────────────────────────────
+    settings.subtitles = 'cz';
+    settings.titDef = 'cz';
+    await tap('PadMenu');
+    snap('pause-pad-cz');
+    check(snaps['pause-pad-cz']!.some((op) => op[0] === 'text' && op[1] === 'Pauza'), 'with Czech subtitles the pause menu is Czech');
+    await tap('PadB');
+    snap('room-pad-cz');
+    check(snaps['room-pad-cz']!.some((op) => op[0] === 'text' && op[1] === 'Malá'), 'and so is the room\'s legend');
+    await tap('PadX');
+    snap('confirm-restart-pad-cz');
+    await tap('PadB');
+    openOptions();
+    snap('options-pad-cz');
+    await tap('PadB');
+    settings.subtitles = 'off';
+    check(t('paused') === 'Pauza', 'subtitles off: the UI keeps the last language chosen');
+    settings.subtitles = 'en';
+    settings.titDef = 'en';
+    check(t('paused') === 'Paused', 'and English with English subtitles');
 
     // ── The layout snapshot ──────────────────────────────────────────────────────
     const json = `${JSON.stringify(snaps, null, 0).replace(/\],\[/g, '],\n[').replace(/":\[\[/g, '":[\n[')}\n`;

@@ -188,6 +188,22 @@ Siri Remote; A3–A6 and B1–B5 in it): every press goes through one router (`u
 knows the source from the host's code (`Pad…`, `Remote…`, or a DOM key code), and hands the
 game the keys the browser's router reads — so every gate of that router still applies.
 
+**The look is the web touch UI's** (`src/styles/nativeMenu.css`, commit af252e9, #158), in the
+room's colours: the same reviewed static hue per room (`src/data/nativeMenuHues.ts`) through
+the same `menuPalette` (`src/platform/nativeMenuPalette.ts`), imported and parsed into numbers
+(`uiPalette.ts`) — the room on screen, or the last one while a room loads and on the map.
+Surfaces are its translucent slate glass with the hairline edge and the inset bevel
+(`uiGlass.ts`); the pause menu and the confirm prompt carry its rustic carved icons
+(`src/styles/nativeMenuIcons.svg`, bundled as text and rasterised natively per colour role —
+`rusticIcons.ts`; Resume and Help, which the web has no button for, are drawn in the same
+hand); labels are its ink with its soft dark shadow. Focus is the touch UI's pressed state —
+how a held button looks — and, on the Options face, its touch Options' `--menu-accent` outline.
+
+**Every string is in the UI's language** (`uiStrings.ts`): Czech or English, the language the
+subtitles and the map's plaques are in (`subLang()`; subtitles off keep the last one chosen),
+which on a first run follows the system's. The web has no Czech UI chrome to reuse, so the
+Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech diacritics.
+
 - **The pause menu** — Resume · World map · Save · Load · Restart · Options · Help — opens on
   Back in a room (Esc, the pad's ☰, the remote's Back): tvOS requires Back during play to pause
   and show a menu. While any menu is over a room the room is **paused**: no logic step runs and
@@ -201,7 +217,8 @@ game the keys the browser's router reads — so every gate of that router still 
   continues from the frame it stopped on.
 - **Options** is the original game's Options face — the AI-upscaled panel art the tablets show,
   composited as `AiPanel.drawOptions` composites it — scaled to most of the window, with a focus
-  ring on the row and a caption card beside it naming the row and its value. Rows: effect, talk
+  outline on the row and a caption card of the touch UI's glass beside it naming the row and
+  its value. Rows: effect, talk
   and music volume (left/right step the 0..12 slider), subtitles (Čeština / English / off),
   the subtitle font (the one control the 1998 face has no place for, so it lives in the card,
   shown in its own face), Help, and Exit options. Every change is persisted to the browser's
@@ -213,15 +230,19 @@ game the keys the browser's router reads — so every gate of that router still 
   line breaks are a greedy wrap's, and there is no italic face natively, so the emphasised
   phrases and the notes are upright.
 - **The legend** (A4) shows what each button does on the screen that is up, in the glyphs of
-  the last input used — an Xbox pad's chips or the remote's — as small "[chip] Word" hints in
-  the style of the first Xbox WebView prototype (`xbox-port`'s `.pad-hints`, its 10-foot
-  sizes at 1080 lines: a 26 px round chip, 18 px words, no card behind them, muted to 75 %),
-  scaled with the window and no smaller than at 720 lines. It goes down the left letterbox
-  margin as a short list when that fits, else as one row in the top margin. Otherwise it lies
-  over the picture: one row along the top edge on a slim dark translucent strip (`#10181e` at
-  78 %, the prototype's dark box), drawn at full strength there, as muted light words vanish
-  into the map's parchment. The top, not the bottom: the subtitles have the room's bottom, and
-  the map's bottom carries the selected level's name. Items that cannot act are dimmer. With the remote,
+  the last input used — an Xbox pad's or the remote's — as small "[chip] Word" hints shaped
+  like the first Xbox WebView prototype's (`xbox-port`'s `.pad-hints`, its 10-foot sizes at
+  1080 lines: a 26 px round chip, 18 px words, no card behind them, muted to 75 %), scaled
+  with the window and no smaller than at 720 lines. Each chip is the room's glass with its
+  symbol in the room's carved-icon colour; the pad's A/B/X/Y keep their hues at that
+  lightness, so they stay apart. It goes down the left letterbox margin as a short list when
+  that fits, else as one row in the top margin. Otherwise it lies over the picture: one row
+  along the top edge on a strip of the touch UI's popup glass, drawn at full strength there,
+  as muted light words vanish into the map's parchment. The top, not the bottom: the
+  subtitles have the room's bottom, and the map's bottom carries the selected level's name.
+  Where it goes depends on the window, the picture and the words only — never on the game's
+  state: "Switch fish" always reserves the wider fish picture (the little fish's), so
+  switching fish cannot move it between the margin and the top. Items that cannot act are dimmer. With the remote,
   "Switch fish" carries the active fish's picture at the chip's height (B3: the touch badge's
   art and its visibility rule), the only cue to which fish an edge click moves. **The keyboard
   gets no legend, on any screen**, nor answer hints on the confirm prompt: its player knows
@@ -241,7 +262,7 @@ game the keys the browser's router reads — so every gate of that router still 
   deviation from A3: one native TV UI everywhere, and Options is one row away.
 
 Everything is drawn through `uiDraw.ts`: rectangles, procedurally rasterised glyph shapes
-(coverage masks, tinted by `fillMask`), FreeType text in Mulish and images. It also records
+and the carved icons (coverage masks, tinted by `fillMask`), FreeType text in Mulish and images. It also records
 what it drew, which is the layout snapshot the menu smoke checks.
 
 ## Sound
@@ -613,12 +634,14 @@ nothing, LB → Ⓐ saves, ☰ opens and closes the pause menu, Ⓑ goes to the 
 closes the pause menu, and its Save prompt (the question alone) is declined by Esc and
 answered by Enter; its World map leaves the room. A Play/Pause hold released inside the
 pause menu ends there. With the keyboard last, no hints are drawn on any screen (and, on the
-map and in a room, no UI layer at all). In windows the map, a room and a story page fill, the
+map and in a room, no UI layer at all). At 81 window widths across the margin/top switch
+the legend is where it was with either fish active. With Czech subtitles the pause menu, the
+legend, the confirm prompt and Options are Czech. In windows the map, a room and a story page fill, the
 hints lie on their dark strip; in a letterbox margin, they do not. A room's first frame shows
 the remote's hints (room 1, and KUFRIK), and so does the room on leaving the pause menu; with
-`--remote-keys` a key the host leaves unmapped keeps them. 79 checks, ~8 s.
+`--remote-keys` a key the host leaves unmapped keeps them. 84 checks, ~10 s.
 
-It also checks the **UI layout snapshot**: at 20 states the UI layer is drawn into a 1280×720
+It also checks the **UI layout snapshot**: at 24 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills) and the list of what it drew — every
 rectangle, shape, image and string, with its position and size in whole pixels — must equal
 `native/ui-layout.snap.json`. A layout change fails with the first op that moved and writes

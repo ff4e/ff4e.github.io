@@ -1,26 +1,31 @@
 /**
  * The button legend (the controller spec's A4): what each button does on the screen that
- * is up, as small "[glyph] Label" hints — an Xbox-style pad's chips (A5) or the Siri
- * Remote's (B3). The look is the first Xbox WebView prototype's `.pad-hints` (the
- * `xbox-port` branch's index.html, its 10-foot `body.tv` sizes at 1080 lines): a round
- * chip, the word to its right, no card behind either, muted at 75 %. That is enough over
- * the black letterbox margin. Where the hints have to lie over the picture, muted light
- * words vanish into it (the map's parchment, above all), so there they sit on one slim dark
- * strip — the prototype's `.pad-box` dark, translucent — and are drawn at full strength.
+ * is up, as small "[glyph] Label" hints — an Xbox-style pad's buttons (A5) or the Siri
+ * Remote's (B3). The shape is the first Xbox WebView prototype's `.pad-hints` (the
+ * `xbox-port` branch's index.html, its 10-foot sizes at 1080 lines): a small round glyph,
+ * the word to its right, one row or a short list. The paint is the web touch UI's
+ * (`src/styles/nativeMenu.css`, `uiPalette.ts`): each glyph a little room-toned glass chip
+ * with its hairline edge and its symbol in the room's carved-icon colour, and the words in
+ * the touch UI's ink with its soft dark shadow. The pad's A/B/X/Y keep their colours, muted
+ * to the palette's lightness, so they stay apart at a glance.
  *
  * It goes in the letterbox margin beside the picture when it fits there — a short list
- * down the left margin, or one row in the top one — and otherwise as one row on its strip
- * along the top edge. The top, not the bottom: in a room the subtitles have the bottom, and
- * on the map the bottom holds the banner naming the selected level, which the player is
- * reading while choosing; the map's top centre is scenery (its corners, Intro and Exit, are
- * outside a centred row on any window wide enough to need a row).
+ * down the left margin, or one row in the top one, muted (75 %, as the prototype's) — and
+ * otherwise as one row along the top edge on a strip of the touch UI's popup glass, at full
+ * strength. The top, not the bottom: in a room the subtitles have the bottom, and on the
+ * map the bottom holds the banner naming the selected level.
+ *
+ * Where it goes depends on the window, the picture's box and the screen's words, never on
+ * the game's state: an item's width is fixed whatever it shows — the "switch fish" item
+ * reserves the wider of the two fish pictures — so switching fish, or an item greying, can
+ * never move the legend from the margin to the top and back.
  *
  * The keyboard gets no legend at all: a player at a keyboard knows its keys, and keycaps
  * on a TV picture only cover it. Items that cannot act now are dimmer (A6): Save while the
  * room cannot save, Load with no save, Undo with nothing to undo. With the remote, the
  * "switch fish" item carries the active fish's picture at the chip's height, after its word
- * (B3, TV only): the touch UI's badge art and its visibility rule. Nothing is drawn into the
- * room itself.
+ * (B3, TV only): the touch UI's badge art and its visibility rule. The words are in the UI's
+ * language (`uiStrings.ts`). Nothing is drawn into the room itself.
  */
 import { cutscene, engine, loadmode, replaymode, room, showmode } from '../../src/app/gameState.js';
 import { roomEntryHeld } from '../../src/app/roomLoad.js';
@@ -34,34 +39,40 @@ import { readBytes } from './shims.js';
 import type { Shape, Ui } from './uiDraw.js';
 import type { InputSource } from './uiInput.js';
 import { verbAvailable } from './menus.js';
+import { drawGlass, hairline } from './uiGlass.js';
+import { currentPalette, INK, type UiPalette } from './uiPalette.js';
+import { t, type UiString } from './uiStrings.js';
 
-/** One glyph of an item: a round chip (a pill when its text is wider) with something on it. */
+/**
+ * One glyph of an item: a round chip (a pill when its text is wider) with a letter on it —
+ * in the room's symbol colour, or `hue`'s (the pad's face buttons) — or a shape.
+ */
 export type Glyph =
-  | { readonly kind: 'chip'; readonly text: string; readonly rgb: number; readonly border: number }
+  | { readonly kind: 'chip'; readonly text: string; readonly hue?: number }
   | { readonly kind: 'shape'; readonly shape: Shape }
   | { readonly kind: 'clickpad'; readonly edge: boolean };
 
 export interface LegendItem {
   readonly glyphs: readonly Glyph[];
+  /** What the item says, as a `uiStrings` key. */
+  readonly key: UiString;
   readonly label: string;
   readonly enabled: boolean;
-  /** The active fish's picture (B3). */
+  /** The item has the active fish's picture after its word (B3): its slot is always there. */
+  readonly fishSlot?: boolean;
+  /** The picture in that slot now, or null while the badge would be hidden. */
   readonly picture?: Image2D | null;
 }
 
 /** Where the legend is: the screen it describes. */
 export type LegendScreen = 'room' | 'map' | 'panel' | 'legimage' | 'pause' | 'options' | 'help';
 
-// The prototype's chip: #2a2a3a with a #556 border, Ⓐ #1f6f3f / #2f9f5f, Ⓑ #7a2a2a / #b04040.
-// It had no Ⓧ or Ⓨ; theirs are the same muted treatment of the pad's blue and yellow.
-const CHIP_RGB = 0x2a2a3a;
-const CHIP_BORDER = 0x555566;
-const INK = 0xe8ecee;
-const chip = (text: string, rgb = CHIP_RGB, border = CHIP_BORDER): Glyph => ({ kind: 'chip', text, rgb, border });
-const A = chip('A', 0x1f6f3f, 0x2f9f5f);
-const B = chip('B', 0x7a2a2a, 0xb04040);
-const X = chip('X', 0x1f3f7a, 0x3f6fb0);
-const Y = chip('Y', 0x7a6418, 0xb09030);
+const chip = (text: string, hue?: number): Glyph => (hue === undefined ? { kind: 'chip', text } : { kind: 'chip', text, hue });
+// The pad's face-button hues (A green, B red, X blue, Y yellow), at the room symbol's lightness.
+const A = chip('A', 125);
+const B = chip('B', 2);
+const X = chip('X', 215);
+const Y = chip('Y', 46);
 const LB = chip('LB');
 const RB = chip('RB');
 const L = chip('L');
@@ -73,8 +84,9 @@ const EDGE: Glyph = { kind: 'clickpad', edge: true };
 const PLAY: Glyph = { kind: 'shape', shape: 'play' };
 const BACK: Glyph = { kind: 'shape', shape: 'chevron' };
 
-const item = (glyphs: readonly Glyph[], label: string, enabled = true, picture?: Image2D | null): LegendItem =>
-  ({ glyphs, label, enabled, ...(picture !== undefined ? { picture } : {}) });
+const item = (glyphs: readonly Glyph[], key: UiString, enabled = true): LegendItem => ({ glyphs, key, label: t(key), enabled });
+const fishItem = (glyphs: readonly Glyph[], key: UiString): LegendItem =>
+  ({ ...item(glyphs, key), fishSlot: true, picture: activeFishPicture() });
 
 // ── The active fish's picture (activeFishIndicator.ts) ────────────────────────────────
 
@@ -119,36 +131,36 @@ export function legendItems(screen: LegendScreen, source: InputSource): LegendIt
   switch (screen) {
     case 'room':
       if (remote) {
-        return [item([EDGE], 'Move'), item([CLICK], 'Switch fish', true, activeFishPicture()),
-          item([PLAY], 'Undo', verbAvailable('undo')), item([BACK], 'Menu')];
+        return [item([EDGE], 'move'), fishItem([CLICK], 'switchFish'),
+          item([PLAY], 'undo', verbAvailable('undo')), item([BACK], 'menu')];
       }
-      return [item([L], 'Little'), item([R], 'Big'), item([B], 'Map'),
-        item([LB], 'Save', verbAvailable('save')), item([RB], 'Load', verbAvailable('load')),
-        item([X], 'Restart'), item([MENU], 'Menu'), item([Y], 'Undo', verbAvailable('undo'))];
+      return [item([L], 'little'), item([R], 'big'), item([B], 'map'),
+        item([LB], 'save', verbAvailable('save')), item([RB], 'load', verbAvailable('load')),
+        item([X], 'restart'), item([MENU], 'menu'), item([Y], 'undo', verbAvailable('undo'))];
     case 'map':
-      if (remote) return [item([EDGE], 'Choose'), item([CLICK], 'Open'), item([PLAY], 'Options'), item([BACK], 'Exit')];
-      return [item([L], 'Choose'), item([A], 'Open'), item([MENU], 'Options')];
+      if (remote) return [item([EDGE], 'choose'), item([CLICK], 'open'), item([PLAY], 'options'), item([BACK], 'exit')];
+      return [item([L], 'choose'), item([A], 'open'), item([MENU], 'options')];
     case 'panel':
-      if (remote) return [item([EDGE], 'Choose'), item([CLICK], 'Select'), item([BACK], 'Cancel')];
-      return [item([L], 'Choose'), item([A], 'Select'), item([B], 'Cancel')];
+      if (remote) return [item([EDGE], 'choose'), item([CLICK], 'select'), item([BACK], 'cancel')];
+      return [item([L], 'choose'), item([A], 'select'), item([B], 'cancel')];
     case 'legimage':
-      return [item([remote ? CLICK : A], 'Continue')];
+      return [item([remote ? CLICK : A], 'continue')];
     case 'pause':
-      if (remote) return [item([EDGE], 'Choose'), item([CLICK], 'Select'), item([BACK], 'Resume')];
-      return [item([L], 'Choose'), item([A], 'Select'), item([B], 'Resume')];
+      if (remote) return [item([EDGE], 'choose'), item([CLICK], 'select'), item([BACK], 'resume')];
+      return [item([L], 'choose'), item([A], 'select'), item([B], 'resume')];
     case 'options':
-      if (remote) return [item([EDGE], 'Change'), item([CLICK], 'Select'), item([BACK], 'Done')];
-      return [item([DPAD], 'Change'), item([A], 'Select'), item([B], 'Done')];
+      if (remote) return [item([EDGE], 'change'), item([CLICK], 'select'), item([BACK], 'done')];
+      return [item([DPAD], 'change'), item([A], 'select'), item([B], 'done')];
     case 'help':
-      if (remote) return [item([EDGE], 'Page'), item([BACK], 'Close')];
-      return [item([LB, RB], 'Page'), item([B], 'Close')];
+      if (remote) return [item([EDGE], 'page'), item([BACK], 'close')];
+      return [item([LB, RB], 'page'), item([B], 'close')];
   }
 }
 
 /** The confirm prompt's answers (A3): Ⓐ Yes · Ⓑ No, or the remote's click and Back; none for the keyboard. */
 export function confirmItems(source: InputSource): LegendItem[] {
-  if (source === 'pad') return [item([A], 'Yes'), item([B], 'No')];
-  if (source === 'remote') return [item([CLICK], 'Yes'), item([BACK], 'No')];
+  if (source === 'pad') return [item([A], 'yes'), item([B], 'no')];
+  if (source === 'remote') return [item([CLICK], 'yes'), item([BACK], 'no')];
   return [];
 }
 
@@ -169,8 +181,8 @@ export interface HintMetrics {
   readonly line: number;
   /** Off the window's edges. */
   readonly margin: number;
-  /** The words' dark outline, as the subtitles carry one. */
-  readonly outline: number;
+  /** The web's 1 CSS px. */
+  readonly hair: number;
 }
 
 /**
@@ -179,20 +191,27 @@ export interface HintMetrics {
  */
 export function legendMetrics(h: number): HintMetrics {
   const u = Math.max(2 / 3, h / 1080);
-  return { u, glyph: 26 * u, label: 18 * u, labelGap: 8 * u, gap: 30 * u, line: 38 * u, margin: 24 * u, outline: Math.max(1, 1.5 * u) };
+  return { u, glyph: 26 * u, label: 18 * u, labelGap: 8 * u, gap: 30 * u, line: 38 * u, margin: 24 * u, hair: hairline(h) };
 }
 
-/** Over the black margin the hints are muted as the prototype's (`opacity: 0.75`), the greyed ones further. */
+/** Over the black margin the hints are muted as the prototype's (`opacity: 0.75`). */
 const ON_ALPHA = 0.75;
-const OFF_ALPHA = 0.3;
-/** On the strip over the picture: full strength, the greyed ones as dim as the margin's. */
+/** On the strip over the picture: full strength. */
 const STRIP_ON_ALPHA = 1;
-const STRIP_OFF_ALPHA = 0.4;
-/** The strip: the prototype's dark box colour, translucent. */
-const STRIP_RGB = 0x10181e;
-const STRIP_ALPHA = 0.78;
+/** Greyed (cannot act), anywhere: about the web's disabled touch button. */
+const OFF_ALPHA = 0.35;
+/** The widest fish picture's width / height (the little fish's 180×60): the slot reserved for either. */
+const FISH_SLOT_ASPECT = 3;
 
-const chipTextPx = (size: number): number => size * 0.58;
+const chipTextPx = (size: number): number => size * 0.56;
+
+/** A face button's letter: its hue at the room symbol's saturation and lightness. */
+const faceInk = (hue: number): number => {
+  const k = (n: number): number => (n + hue / 30) % 12;
+  const s = 0.5, l = 0.7, a = s * Math.min(l, 1 - l);
+  const f = (n: number): number => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)))));
+  return (f(0) << 16) | (f(8) << 8) | f(4);
+};
 
 function glyphWidth(ui: Ui, g: Glyph, size: number): number {
   // The prototype's `min-width` with `padding: 0 7px` (at 26 px): a pill for "LB".
@@ -204,30 +223,29 @@ function glyphsWidth(ui: Ui, it: LegendItem, size: number): number {
   return it.glyphs.reduce((a, g) => a + glyphWidth(ui, g, size), 0) + (it.glyphs.length - 1) * size * 0.2;
 }
 
-/** The word, and the picture after it, as wide as they draw. */
+/** The word, and the fish slot after it, as wide as they draw — whichever fish is in it. */
 function wordWidth(ui: Ui, it: LegendItem, m: HintMetrics): number {
-  return ui.measure(it.label, m.label) + (it.picture ? m.labelGap + pictureW(it.picture, m.glyph) : 0);
+  return ui.measure(it.label, m.label, true) + (it.fishSlot ? m.labelGap + FISH_SLOT_ASPECT * m.glyph : 0);
 }
-
-const pictureW = (img: Image2D, size: number): number => (img.width / img.height) * size;
 
 /** A baseline that centres capitals on `cy`. */
 const capBaseline = (cy: number, px: number): number => cy + px * 0.36;
 
-/** One glyph in its `size`-tall box at (x, y). Returns its width. */
-export function drawGlyph(ui: Ui, g: Glyph, x: number, y: number, size: number, alpha = 1): number {
+/** One glyph in its `size`-tall box at (x, y), in `pal`'s colours. Returns its width. */
+export function drawGlyph(ui: Ui, g: Glyph, x: number, y: number, size: number, pal: UiPalette, alpha = 1, hair = 1): number {
   const w = glyphWidth(ui, g, size);
-  const rgb = g.kind === 'chip' ? g.rgb : CHIP_RGB, border = g.kind === 'chip' ? g.border : CHIP_BORDER;
-  ui.rect(x, y, w, size, rgb, alpha, size / 2);
-  ui.frame(x, y, w, size, Math.max(1, size / 26), border, alpha, size / 2);
+  ui.rect(x, y, w, size, pal.glass.rgb, pal.glass.a * alpha, size / 2);
+  ui.frame(x, y, w, size, hair, pal.edge.rgb, pal.edge.a * alpha, size / 2);
   const cx = x + w / 2, cy = y + size / 2;
   switch (g.kind) {
-    case 'chip':
-      ui.text(g.text, cx, capBaseline(cy, chipTextPx(size)), chipTextPx(size), INK, { align: 'center', bold: true, alpha });
+    case 'chip': {
+      const ink = g.hue === undefined ? pal.symbol : faceInk(g.hue);
+      ui.text(g.text, cx, capBaseline(cy, chipTextPx(size)), chipTextPx(size), ink, { align: 'center', bold: true, alpha });
       break;
+    }
     case 'shape': {
       const s = size * 0.62;
-      ui.shape(g.shape, cx - s / 2, cy - s / 2, s, INK, alpha, Math.max(1.5, s * 0.12));
+      ui.shape(g.shape, cx - s / 2, cy - s / 2, s, pal.symbol, alpha, Math.max(1.5, s * 0.12));
       break;
     }
     case 'clickpad':
@@ -235,11 +253,11 @@ export function drawGlyph(ui: Ui, g: Glyph, x: number, y: number, size: number, 
         // The pad's four edges: what an edge click presses.
         const d = Math.max(2, size * 0.16);
         for (const [dx, dy] of [[0, -1], [0, 1], [-1, 0], [1, 0]] as const) {
-          ui.shape('disc', cx + dx * size * 0.29 - d / 2, cy + dy * size * 0.29 - d / 2, d, INK, alpha);
+          ui.shape('disc', cx + dx * size * 0.29 - d / 2, cy + dy * size * 0.29 - d / 2, d, pal.symbol, alpha);
         }
       } else {
         const d = size * 0.34;
-        ui.shape('disc', cx - d / 2, cy - d / 2, d, INK, alpha);
+        ui.shape('disc', cx - d / 2, cy - d / 2, d, pal.symbol, alpha);
       }
       break;
   }
@@ -250,22 +268,24 @@ export function drawGlyph(ui: Ui, g: Glyph, x: number, y: number, size: number, 
  * An item's glyphs, right-aligned to `glyphsRight`, then its word (and the active fish's
  * picture after it, so the words of a list stay in one column). Returns where it ends.
  */
-function drawItem(ui: Ui, it: LegendItem, glyphsRight: number, y: number, m: HintMetrics, strip: boolean): number {
-  const alpha = it.enabled ? (strip ? STRIP_ON_ALPHA : ON_ALPHA) : (strip ? STRIP_OFF_ALPHA : OFF_ALPHA);
+function drawItem(ui: Ui, it: LegendItem, glyphsRight: number, y: number, m: HintMetrics, pal: UiPalette, strip: boolean): number {
+  const alpha = it.enabled ? (strip ? STRIP_ON_ALPHA : ON_ALPHA) : OFF_ALPHA;
   let gx = glyphsRight - glyphsWidth(ui, it, m.glyph);
   it.glyphs.forEach((g, i) => {
-    gx += drawGlyph(ui, g, gx, y, m.glyph, alpha) + (i < it.glyphs.length - 1 ? m.glyph * 0.2 : 0);
+    gx += drawGlyph(ui, g, gx, y, m.glyph, pal, alpha, m.hair) + (i < it.glyphs.length - 1 ? m.glyph * 0.2 : 0);
   });
   let x = glyphsRight + m.labelGap;
-  x += ui.text(it.label, x, capBaseline(y + m.glyph / 2, m.label), m.label, INK, { alpha, outline: { r: m.outline, rgb: OUTLINE_RGB } });
-  if (!it.picture) return x;
-  const pw = pictureW(it.picture, m.glyph);
-  ui.image(it.picture, x + m.labelGap, y, pw, m.glyph, true, alpha, 'active-fish');
-  return x + m.labelGap + pw;
+  // The touch UI's label: bold ink with `text-shadow: 0 1px 2px #000`.
+  x += ui.text(it.label, x, capBaseline(y + m.glyph / 2, m.label), m.label, INK,
+    { alpha, bold: true, outline: { r: Math.max(1, 1.2 * m.u), rgb: 0x000000, dy: m.hair, alpha: 0.7 } });
+  if (!it.fishSlot) return x;
+  const slot = FISH_SLOT_ASPECT * m.glyph;
+  if (it.picture) {
+    const pw = Math.min(slot, (it.picture.width / it.picture.height) * m.glyph);
+    ui.image(it.picture, x + m.labelGap, y, pw, m.glyph, true, alpha, 'active-fish');
+  }
+  return x + m.labelGap + slot;
 }
-
-/** The subtitles' outline colour, rgb(5,5,12). */
-const OUTLINE_RGB = 0x05050c;
 
 const itemWidth = (ui: Ui, it: LegendItem, m: HintMetrics): number =>
   glyphsWidth(ui, it, m.glyph) + m.labelGap + wordWidth(ui, it, m);
@@ -277,16 +297,29 @@ export function hintRowWidth(ui: Ui, items: readonly LegendItem[], m: HintMetric
 
 /**
  * `items` as one row, from `x`, the chips' tops at `y`; `strip` when it lies on its strip
- * over the picture (full strength), not on a dark card or margin (muted).
+ * over the picture (full strength), not on a card or the margin (muted).
  */
-export function drawHintRow(ui: Ui, items: readonly LegendItem[], x: number, y: number, m: HintMetrics, strip = false): void {
-  for (const it of items) x = drawItem(ui, it, x + glyphsWidth(ui, it, m.glyph), y, m, strip) + m.gap;
+export function drawHintRow(ui: Ui, items: readonly LegendItem[], x: number, y: number, m: HintMetrics, pal: UiPalette, strip = false): void {
+  for (const it of items) x = drawItem(ui, it, x + glyphsWidth(ui, it, m.glyph), y, m, pal, strip) + m.gap;
 }
 
-/** The strip behind hints over the picture: the box `w`×`h` of hints at (x, y), padded. */
-function drawStrip(ui: Ui, x: number, y: number, w: number, h: number, m: HintMetrics): void {
+/** The strip behind hints over the picture: the touch UI's popup glass round the `w`×`h` box at (x, y). */
+function drawStrip(ui: Ui, x: number, y: number, w: number, h: number, m: HintMetrics, pal: UiPalette): void {
   const px = 14 * m.u, py = 6 * m.u;
-  ui.rect(x - px, y - py, w + 2 * px, h + 2 * py, STRIP_RGB, STRIP_ALPHA, (m.glyph + 2 * py) / 2);
+  ui.record(['strip', Math.round(x - px), Math.round(y - py), Math.round(w + 2 * px), Math.round(h + 2 * py)]);
+  drawGlass(ui, x - px, y - py, w + 2 * px, h + 2 * py, 10 * m.u, m.hair, pal, 'popup');
+}
+
+/** Where `drawLegend` puts `items`: a list down the margin, a row in the top margin, or a row (or list) on a strip. */
+export type LegendPlacement = 'list' | 'row' | 'row-strip' | 'list-strip';
+
+/** Where `items` go in the `w`×`h` window beside the picture's box `rect`. Pure: words, window and box only. */
+export function legendPlacement(ui: Ui, items: readonly LegendItem[], w: number, h: number, rect: readonly [number, number, number, number]): LegendPlacement {
+  const m = legendMetrics(h);
+  const listW = Math.max(...items.map((it) => glyphsWidth(ui, it, m.glyph))) + m.labelGap + Math.max(...items.map((it) => wordWidth(ui, it, m)));
+  if (m.margin + listW + m.margin <= rect[0]) return 'list';
+  if (hintRowWidth(ui, items, m) > w - 2 * m.margin) return 'list-strip';
+  return m.glyph + 2 * m.margin <= rect[1] ? 'row' : 'row-strip';
 }
 
 /**
@@ -297,32 +330,29 @@ function drawStrip(ui: Ui, x: number, y: number, w: number, h: number, m: HintMe
 export function drawLegend(ui: Ui, items: readonly LegendItem[], w: number, h: number, rect: readonly [number, number, number, number]): void {
   if (items.length === 0) return;
   const m = legendMetrics(h);
-  const glyphsW = Math.max(...items.map((it) => glyphsWidth(ui, it, m.glyph)));
-  const labelsW = Math.max(...items.map((it) => wordWidth(ui, it, m)));
-  const listW = glyphsW + m.labelGap + labelsW;
-  const rowW = hintRowWidth(ui, items, m);
-  const [rx, ry] = rect;
-  const listFits = m.margin + listW + m.margin <= rx;
-  if (listFits || rowW > w - 2 * m.margin) {
-    // A list, the chips in one column and the words in the next: in the margin, or (a window
-    // too narrow for the row) on a strip over the picture.
+  const pal = currentPalette();
+  const where = legendPlacement(ui, items, w, h, rect);
+  if (where === 'list' || where === 'list-strip') {
+    const glyphsW = Math.max(...items.map((it) => glyphsWidth(ui, it, m.glyph)));
+    const listW = glyphsW + m.labelGap + Math.max(...items.map((it) => wordWidth(ui, it, m)));
     const listH = (items.length - 1) * m.line + m.glyph;
     let y = Math.max(m.margin, (h - listH) / 2);
-    if (!listFits) drawStrip(ui, m.margin, y, listW, listH, m);
+    const strip = where === 'list-strip';
+    if (strip) drawStrip(ui, m.margin, y, listW, listH, m, pal);
     for (const it of items) {
-      drawItem(ui, it, m.margin + glyphsW, y, m, !listFits);
+      drawItem(ui, it, m.margin + glyphsW, y, m, pal, strip);
       y += m.line;
     }
     return;
   }
-  // A row, centred: in the middle of the top margin when it fits there, else on its strip.
+  const rowW = hintRowWidth(ui, items, m);
   const x = (w - rowW) / 2;
-  if (m.glyph + 2 * m.margin <= ry) {
-    drawHintRow(ui, items, x, (ry - m.glyph) / 2, m);
+  if (where === 'row') {
+    drawHintRow(ui, items, x, (rect[1] - m.glyph) / 2, m, pal);
     return;
   }
-  drawStrip(ui, x, m.margin, rowW, m.glyph, m);
-  drawHintRow(ui, items, x, m.margin, m, true);
+  drawStrip(ui, x, m.margin, rowW, m.glyph, m, pal);
+  drawHintRow(ui, items, x, m.margin, m, pal, true);
 }
 
 /** Which legend the screen shows, or null for none (a launch, the confirm prompt). */
