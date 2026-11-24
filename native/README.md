@@ -458,7 +458,9 @@ one 2880×2220 surface, repainted when the frame changes and presented as the ma
 read from the draw path four ahead, at most eight held, and released when the story ends or is
 skipped; until the base is in (a frame or two) the faithful frame shows, upscaled bilinearly.
 The captions are a layer of their own (`roomSubtitles.ts`, `cutsceneCaptionOverlay`), sized from
-the story's own box as `updateCutsceneCaptions` sizes them.
+the story's own box as `updateCutsceneCaptions` sizes them, and drawn into a surface that box's
+size, so rows still scrolling in from below are clipped to the picture as the browser's
+`overflow: hidden` layer clips them.
 
 Skipping is the controller spec's (A3, B2): the pad's Ⓑ, Ⓐ or ☰, the remote's click or Back,
 and the keyboard's Esc (the browser's `zrus_kufr`). Every other button is swallowed, as the
@@ -477,11 +479,13 @@ live run that does starts the demonstration, which restarts the room.
     native/build/cmake/ff4e-native native/build/game.js --root public --headless \
       --smoke-kufrik --store native/build/smoke-kufrik-store.json [--smoke-out DIR]
 
-`native/js/kufrikSmoke.ts`, 55 checks in ~20 s, through the real flow and input routing.
+`native/js/kufrikSmoke.ts`, 56 checks in ~20 s, through the real flow and input routing.
 Entering KUFRIK holds until the story and the recording are read. The solution's first moves,
 typed, knock the briefcase down, and the story starts by itself with the `kufrik` music; its
 narration is voiced on the voice bus and captioned, each line starting as the one before has
-sounded its `delka` (±1 tick); over 200 distinct pictures are shown, the upscaled frame decoded
+sounded its `delka` as the room's .fft gives it (±1 tick), and the long KD-ufo caption, scrolling
+in, leaves no ink outside the story's box in a window taller than the picture (read back from the
+GPU); over 200 distinct pictures are shown, the upscaled frame decoded
 on at least 90 % of ticks; it plays to its end, its art is released, the music plays on and the
 briefcase closes. Other buttons during it open nothing and move nothing; each of the six skips
 ends it, stops the narration and keeps the music. Fish at the tutorial spot (put there, as the
@@ -492,8 +496,9 @@ legend's Save and Load (and the remote's Menu) pulsing through help2, help7 and 
 other time, and the room handed back. The map's Replay of the solution drops the briefcase and
 walks both fish through the spot without the story or the demonstration, and wins.
 
-Not proven by a gate: the captions' pixels against the browser's (they are the room subtitles'
-renderer in a different box, which `compare-subs.mjs` covers, not compared over the story), and
+Not proven by a gate: the captions' pixels and positions against the browser's (they are the room
+subtitles' renderer in a different box, which `compare-subs.mjs` covers, not compared over the
+story), and
 help6, which the demonstration queues just before its scripted death and the restart drops
 (the restart builds a new script, as `main.ts`'s does; the browser's probe does not ask for it
 either).

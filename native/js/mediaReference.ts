@@ -14,7 +14,10 @@
  *     `native/js/storyScene.ts` runs it, painted as the browser's `ai` tier paints it
  *     (`drawCutscene`): the upscaled base, then the shown frame's upscale over the region —
  *     or, for a frame shipped without one, the original pixels through the game's own
- *     `drawIndexedRegion` — on a 2D canvas at the art's scale.
+ *     `drawIndexedRegion` — on a 2D canvas at the art's scale. Restated, not called:
+ *     `drawCutscene` paints the page's own `#screen` (dom.ts) and reads the booted page's
+ *     tier, renderer, font and stage state, none of which this reference page has.
+ *     restates src/app/cutscene.ts `export function drawCutscene(` @ b7f86f365c2e
  */
 import { AiCredits, loadAiCredits } from '../../src/render/creditsAi.js';
 import { KufrDemo } from '../../src/intro/kufrDemo.js';

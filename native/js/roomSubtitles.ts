@@ -26,6 +26,8 @@ let cutLayout: SubtitleLayout | null = null;
 const atlas = new GlyphAtlas();
 let overlay: NativeSurface | null = null;
 let cutOverlay: NativeSurface | null = null;
+/** The story's box: the captions are drawn here, so nothing outside the picture is (`#domsubs-cut`'s overflow: hidden). */
+let cutBox: NativeSurface | null = null;
 
 /**
  * The game's bitmap font (the subtitle wrap and the speaker colours are measured from it, as
@@ -93,7 +95,8 @@ export function subtitleOverlay(
  * The browser's `updateCutsceneCaptions`: the story's own box, and the text sized from the
  * story's own content scale rather than from the stage, because a cutscene has exactly one
  * size (720×555), so there is no room-to-room variation to normalise. The readable band and
- * the `ai` tier's shrink apply as they do to a room's lines (`SubtitleLayout`).
+ * the `ai` tier's shrink apply as they do to a room's lines (`SubtitleLayout`), and nothing is
+ * drawn outside the story's box, which the browser's layer clips (`overflow: hidden`).
  * restates src/app/cutscene.ts `export function updateCutsceneCaptions(` @ a88a4b7e1243
  */
 export function cutsceneCaptionOverlay(
@@ -111,11 +114,16 @@ export function cutsceneCaptionOverlay(
   const frame = cutLayout.layout(cutsceneSubs, count + alpha, {
     cssW, cssH, boxScale: cs, textScale: cs, tier: AI_SUB_SCALE,
   }, face.name);
+  // Drawn into a surface the picture's size, as the room's are, which clips what is laid out
+  // past its edges — a new line's rows start below the bottom and scroll up into it, and a
+  // glyph's wave starts below its baseline — then put 1:1 into the window-sized layer
+  // `presentTexture` draws over the window.
+  if (!cutBox || cutBox.width !== dw || cutBox.height !== dh) cutBox = new NativeSurface(dw, dh);
+  cutBox.clear();
+  drawSubtitles(cutBox, frame, face, atlas, density);
   if (!cutOverlay || cutOverlay.width !== winW || cutOverlay.height !== winH) cutOverlay = new NativeSurface(winW, winH);
   cutOverlay.clear();
-  cutOverlay.save();
-  cutOverlay.translate(ox, oy);
-  drawSubtitles(cutOverlay, frame, face, atlas, density);
-  cutOverlay.restore();
+  cutOverlay.setSmoothing(false);
+  cutOverlay.drawImage(cutBox, ox, oy);
   return cutOverlay;
 }

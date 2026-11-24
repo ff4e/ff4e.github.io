@@ -39,11 +39,14 @@ import { decodeMoves } from '../../src/core/solutionMoves.js';
 import { solutionFor } from '../../src/rooms/index.js';
 import { heldKeyState } from '../../src/app/movement.js';
 import { TALKING_MEZ_SEC } from '../../src/audio/audio.js';
+import { FFS_SAMPLE_RATE } from '../../src/audio/ffs.js';
+import { parseFft } from '../../src/data/fft.js';
+import { readBytes } from './shims.js';
 import { advance, enterRoom, initGame, keyDown, keyUp, roomReady, solutionRecord, type LeaveReason } from './game.js';
 import { cutsceneFrame, kufrArtState } from './cutsceneScreen.js';
 import { legendItems, legendScreen } from './legend.js';
 import { menuOpen, verbAvailable } from './menus.js';
-import { loadSubtitleAssets } from './roomSubtitles.js';
+import { cutsceneCaptionOverlay, loadSubtitleAssets } from './roomSubtitles.js';
 import { pinRandom } from './scene.js';
 import { audio } from './seams/audioEngine.js';
 import { showmodeRecording } from './seams/roomPreload.js';
@@ -140,6 +143,44 @@ const talkTicks = (name: string): number => {
   return d > 0 ? Math.max(1, Math.round((d - TALKING_MEZ_SEC) / LOGIC_SEC)) : 0;
 };
 
+/**
+ * Where a `winW`×`winH` window shows the story (`presentRect`'s letterbox, restated for the
+ * window the smoke has not got) — a window taller than the picture, so there is room below it.
+ */
+function storyRect(winW: number, winH: number, w: number, h: number): [number, number, number, number, number] {
+  const s = Math.min(winW / w, winH / h);
+  const dw = Math.floor(w * s), dh = Math.floor(h * s);
+  return [Math.floor((winW - dw) / 2), Math.floor((winH - dh) / 2), dw, dh, 1];
+}
+
+/**
+ * The caption layer's ink inside and outside the story's box, read back from the GPU. The
+ * file goes beside the bundle's build (`<root>/../native/build`), the one place both
+ * `saveTexture` (a plain path) and `readFile` (under the asset root) reach.
+ */
+function captionInk(winW: number, winH: number, rect: readonly [number, number, number, number, number]): { inside: number; outside: number } {
+  const caps = cutsceneCaptionOverlay(winW, winH, 0, rect);
+  if (!caps) return { inside: 0, outside: 0 };
+  const args = __native.args();
+  const root = args[args.indexOf('--root') + 1]!;
+  __native.saveTexture(caps.id, `${root}/../native/build/smoke-kufrik-captions.rgba`);
+  const buf = __native.readFile('/../native/build/smoke-kufrik-captions.rgba');
+  if (!buf) throw new KufrikSmokeFailure('the caption layer could not be read back');
+  const dv = new DataView(buf);
+  const w = dv.getUint32(0, true), h = dv.getUint32(4, true);
+  const px = new Uint8Array(buf, 8);
+  const [ox, oy, dw, dh] = rect;
+  let inside = 0, outside = 0;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      if (px[(y * w + x) * 4 + 3] === 0) continue;
+      if (x >= ox && x < ox + dw && y >= oy && y < oy + dh) inside++;
+      else outside++;
+    }
+  }
+  return { inside, outside };
+}
+
 async function storyToItsEnd(): Promise<void> {
   played.length = 0;
   await enterKufrik();
@@ -164,6 +205,9 @@ async function storyToItsEnd(): Promise<void> {
   const shownAt: number[] = [];
   let decoded = 0, wanted = 0;
   let keep = [40, 400, 900];
+  /** KD-ufo's six rows scroll in from below the picture: the caption layer must keep them in it. */
+  const WIN = [1280, 1100] as const;
+  let ufoSamples = 0, ufoInside = 0, ufoOutside = 0;
   for (let i = 0; i < 6000 && cutscene; i++) {
     const c = cutscene;
     const before = c.framesShown;
@@ -174,6 +218,13 @@ async function storyToItsEnd(): Promise<void> {
       const name = st.order[c.framesShown - 1];
       wanted++;
       if (name && st.frames.includes(name)) decoded++;
+    }
+    const line = [...played].reverse().find((p) => p.name.startsWith('KD-'));
+    if (cutscene && line?.name === 'KD-ufo' && (count - line.count) % 6 === 1 && (count - line.count) < 60) {
+      const ink = captionInk(WIN[0], WIN[1], storyRect(WIN[0], WIN[1], cutscene.width * 4, cutscene.height * 4));
+      ufoSamples++;
+      ufoInside += ink.inside;
+      ufoOutside += ink.outside;
     }
     const dir = out();
     if (dir && keep.length && count - start >= keep[0]!) {
@@ -189,15 +240,27 @@ async function storyToItsEnd(): Promise<void> {
   check(shownAt.length > 200, `its frames advanced: ${shownAt.length} distinct pictures shown`);
   check(wanted > 0 && decoded / wanted > 0.9, `the upscaled frame was decoded for ${decoded} of ${wanted} story ticks`);
   check(engine!.srecord === rec, 'no move was made while it played');
+  check(ufoSamples >= 8 && ufoInside > 0 && ufoOutside === 0,
+    `KD-ufo's caption, scrolling in, stays inside the story's box in a window taller than it (${ufoSamples} samples, ${ufoInside} px of ink in it, ${ufoOutside} outside)`);
   // Each line sounds for its FFT `delka`: the story waits ('w') for the voice to go quiet,
-  // so each line starts when the one before it has sounded for its whole length.
+  // so each line starts when the one before it has sounded for its whole length. The
+  // `delka` is read here from the room's .fft itself, not through the audio engine that
+  // timed the story.
+  const fft = new Map(parseFft(await readBytes('/data/Title/002.fft')).map((e) => [e.name, e.delka]));
   const kd = played.filter((p) => p.name.startsWith('KD-'));
+  const late: string[] = [];
   for (let i = 1; i < kd.length; i++) {
     const gap = kd[i]!.count - kd[i - 1]!.count;
-    const delka = Math.round(audio.duration(kd[i - 1]!.name) / LOGIC_SEC);
-    if (Math.abs(gap - delka) > 1) throw new KufrikSmokeFailure(`${kd[i]!.name} started ${gap} ticks after ${kd[i - 1]!.name}, whose delka is ${delka} ticks`);
+    const delka = fft.get(kd[i - 1]!.name);
+    if (delka === undefined || delka <= 0) {
+      late.push(`${kd[i - 1]!.name} has no delka in 002.fft`);
+      continue;
+    }
+    const want = Math.round(delka / FFS_SAMPLE_RATE / LOGIC_SEC);
+    if (Math.abs(gap - want) > 1) late.push(`${kd[i]!.name} started ${gap} ticks after ${kd[i - 1]!.name}, whose delka is ${want} ticks`);
   }
-  check(kd.length >= 10, `${kd.length} narration lines were voiced, each starting as the one before had sounded its FFT delka (±1 tick)`);
+  check(kd.length >= 10 && late.length === 0,
+    `${kd.length} narration lines were voiced, each starting as the one before had sounded its delka in 002.fft (±1 tick)${late.length ? `: ${late.join('; ')}` : ''}`);
   check(kufrArtState().art === false && kufrArtState().frames.length === 0, "the story's art was released at its end");
   check(audio.currentMusic === 'kufrik', "the 'kufrik' music keeps playing after the story (DoneKufrDemo never stops it)");
   await frames(80);
@@ -267,13 +330,14 @@ async function demonstration(): Promise<void> {
   check(room!.alive.little && room!.alive.big && ui.screen === 'room', 'the room is handed back with both fish alive');
   const help = played.filter((p) => /^help\d+$/.test(p.name));
   check(help.length >= 20 && help.every((p) => p.bus === 'voice'), `its ${help.length} help lines were voiced (${help.map((p) => p.name).join(',')})`);
+  const early: string[] = [];
   for (let i = 1; i < help.length; i++) {
     const gap = help[i]!.tick - help[i - 1]!.tick;
-    if (gap < talkTicks(help[i - 1]!.name)) {
-      throw new KufrikSmokeFailure(`${help[i]!.name} started ${gap} ticks after ${help[i - 1]!.name}, whose line holds the queue for ${talkTicks(help[i - 1]!.name)}`);
-    }
+    const hold = talkTicks(help[i - 1]!.name);
+    if (hold <= 0 || gap < hold) early.push(`${help[i]!.name} ${gap} ticks after ${help[i - 1]!.name}, which holds the queue ${hold}`);
   }
-  check(true, 'each help line started no sooner than the one before had held the queue for (its FFT delka)');
+  check(help.length > 1 && early.length === 0,
+    `each of the ${help.length - 1} help lines after the first started no sooner than the one before held the queue for (its FFT delka)${early.length ? `: ${early.join('; ')}` : ''}`);
   const cues = [...cued].sort().join(' ');
   check(cued.has('help2:save') && cued.has('help7:load') && cued.has('help11:load') && cued.has('help2:remote-menu') &&
     [...cued].every((c) => /^help(2|7|11):/.test(c)),
