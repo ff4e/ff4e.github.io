@@ -80,14 +80,61 @@ await withApp(async ({ p, expect }) => {
 
   // --- a Tab while the swap is blocked (load fast-forward) must not move focus off the
   // game, or every later Tab arrives from a focused control and stops swapping ---
+  //
+  // Replaying one recorded move is a single game tick (~80ms), so waiting to SEE the load
+  // from here was a race that the probe lost under load: the load could finish before the
+  // poll ever caught it. Instead, hold the page's frames between F3 and the Tab. F3 sets
+  // `loadmode` synchronously and the keydown's `wake()` puts the loop on
+  // requestAnimationFrame, so with that held no tick can advance the load in between.
+  // The keys stay real: a synthetic Tab never moves focus, so the check would pass vacuously.
   await p.keyboard.press('F2');
+  // As with ArrowLeft above: the move starts on a later tick, so `idle` alone can return
+  // before it has begun, and an F3 that then lands mid-move is refused (it needs rest).
+  const ax0 = await p.evaluate(() => window.__ff.state()[window.__ff.state().active].x);
   await p.keyboard.press('ArrowRight');
+  await p.waitForFunction(
+    (x0) => window.__ff.state()[window.__ff.state().active].x !== x0 || window.__ff.phase() !== 'idle',
+    ax0,
+  );
   await idle(p);
-  await p.keyboard.press('F3');
-  await p.waitForFunction(() => window.__ff.loading());
-  await p.keyboard.press('Tab');
-  expect(await p.evaluate(() => document.activeElement === document.body),
-    'a Tab during the load fast-forward leaves focus on the game');
+  await p.evaluate(() => {
+    const real = window.requestAnimationFrame;
+    const held = [];
+    window.requestAnimationFrame = (cb) => held.push(cb);
+    window.__probeHeldFrames = () => held.length;
+    window.__probeReleaseFrames = () => {
+      window.requestAnimationFrame = real;
+      for (const cb of held) real.call(window, cb);
+      return held.length;
+    };
+  });
+  let heldFrames = 0;
+  try {
+    // A frame requested before the hold went in is still real, and would run one more
+    // tick — enough to finish this load — after F3. So wait until the loop is parked:
+    // either on a held frame, or asleep on the idle timer, which F3's `wake()` swaps for
+    // a held frame. Interval polling, because 'raf' polling would wait on the hold itself.
+    await p.waitForFunction(
+      () => window.__probeHeldFrames() > 0 || window.__ff.throttleInfo().onTimer,
+      null,
+      { polling: 20 },
+    );
+    const phaseAtF3 = await p.evaluate(() => window.__ff.phase());
+    await p.keyboard.press('F3');
+    const loadingBeforeTab = await p.evaluate(() => window.__ff.loading());
+    await p.keyboard.press('Tab');
+    const afterTab = await p.evaluate(() => ({
+      loading: window.__ff.loading(),
+      onGame: document.activeElement === document.body,
+    }));
+    expect(loadingBeforeTab && afterTab.loading,
+      `the Tab arrived during the load fast-forward (phase at F3 ${phaseAtF3}, ` +
+        `loading before ${loadingBeforeTab}, after ${afterTab.loading})`);
+    expect(afterTab.onGame, 'a Tab during the load fast-forward leaves focus on the game');
+  } finally {
+    heldFrames = await p.evaluate(() => window.__probeReleaseFrames());
+  }
+  expect(heldFrames > 0, `the game loop was parked on a held frame during the load (${heldFrames})`);
   await p.waitForFunction(() => !window.__ff.loading());
   await idle(p);
   const beforeTab = (await state()).active;
