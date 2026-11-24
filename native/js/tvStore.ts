@@ -139,7 +139,13 @@ export class TvStore {
     this.device = base?.device || prefs?.device || newDeviceId(this.host.now());
     const merged = this.adopt(this.merged(), MIRRORED);
     // Write once if anything came from elsewhere, or the defaults copy is missing, damaged or behind.
-    if (merged.length || (base && base !== prefs && (!prefs || base.seq > prefs.seq))) this.persist();
+    if (merged.length || (base && base !== prefs && (!prefs || base.seq > prefs.seq))) {
+      try {
+        this.persist();
+      } catch {
+        /* logged by persist; the store is loaded, and the game must start */
+      }
+    }
     return this.items;
   }
 
@@ -184,7 +190,10 @@ export class TvStore {
   /**
    * Which options fields the player changed: those that differ from the value before. A first
    * write — nothing before it, as on a new device's first-run intro — changes no field: its
-   * values are the defaults, and must not outweigh settings made on another device.
+   * values are the defaults, and must not outweigh settings made on another device. Nor does
+   * a field the value before did not have (one a newer version adds, written as its default).
+   * A change is stamped later than the field's current stamp even if this clock is behind the
+   * device that stamped it: the newest change is the one made last HERE.
    */
   private stampFields(before: string | undefined, after: string, now: number): void {
     if (before === undefined) {
@@ -199,7 +208,9 @@ export class TvStore {
     } catch {
       return;
     }
-    for (const path of Object.keys(b)) if (JSON.stringify(a[path]) !== JSON.stringify(b[path])) this.fields[path] = now;
+    for (const path of Object.keys(b)) {
+      if (path in a && JSON.stringify(a[path]) !== JSON.stringify(b[path])) this.fields[path] = Math.max(now, (this.fields[path] ?? 0) + 1);
+    }
     for (const path of Object.keys(this.fields)) if (!(path in b)) delete this.fields[path];
   }
 
@@ -230,13 +241,21 @@ export class TvStore {
     const mine = { ...pt[this.device] };
     for (const [r, n] of Object.entries(this.ownPlay())) mine[r] = Math.max(mine[r] ?? 0, n);
     pt[this.device] = mine;
+    // Never below what the store holds: an iCloud that reads empty or lacks a device's copy
+    // (signed out, another account, an error) must not take that device's time away; the
+    // part it no longer accounts for stays with the others.
+    const local = playtimeOf(this.items.get('ff.playtime'));
     const total: Record<string, number> = {};
-    for (const r of Object.keys(playtimeOf(this.items.get('ff.playtime')))) total[r] = 0;
+    for (const r of Object.keys(local)) total[r] = 0;
     for (const rooms of Object.values(pt)) for (const [r, n] of Object.entries(rooms)) total[r] = (total[r] ?? 0) + n;
     const others: Record<string, number> = {};
     if (Object.keys(total).length) {
+      for (const r of Object.keys(total)) {
+        total[r] = Math.max(total[r]!, local[r] ?? 0);
+        const rest = Math.max(this.others[r] ?? 0, total[r]! - (mine[r] ?? 0));
+        if (rest > 0) others[r] = rest;
+      }
       p['ff.playtime'] = { v: JSON.stringify(total), t: p['ff.playtime']?.t ?? 0 };
-      for (const [r, n] of Object.entries(total)) if (n - (mine[r] ?? 0) > 0) others[r] = n - (mine[r] ?? 0);
     }
     return { p, pt, others };
   }
@@ -269,16 +288,26 @@ export class TvStore {
     const meta: Meta = { seq: this.seq, device: this.device, mtime: this.mtime, fields: this.fields, others: this.others };
     const prefs = blob({ ...meta, items: view.items });
     const size = utf8Length(prefs);
-    if (size > PREFS_LIMIT) throw new Error(`store: ${size} bytes is over the ${PREFS_LIMIT}-byte NSUserDefaults limit`);
-    this.host.prefsSave(prefs);
+    // A failed defaults write still writes the cache (with this write's number, so the next
+    // launch trusts it over the older defaults copy) and iCloud — then throws, as the file
+    // store does, so the game sees a failed write.
+    let failed: unknown = null;
+    try {
+      if (size > PREFS_LIMIT) throw new Error(`store: ${size} bytes is over the ${PREFS_LIMIT}-byte NSUserDefaults limit`);
+      this.host.prefsSave(prefs);
+    } catch (e) {
+      failed = e;
+      this.host.log(`store: NSUserDefaults not written (${(e as Error).message}); the cache will be`);
+    }
     this.last = { bytes: size, progressBytes: view.progressBytes, trimmed: view.trimmed, dropped: view.dropped };
     if (view.dropped.length) this.host.log(`store: kept progress over save slots; left out of NSUserDefaults: ${view.dropped.join(', ')}`);
     this.push();
     try {
       this.host.cacheSave(blob({ ...meta, items: this.items }));
     } catch (e) {
-      this.host.log(`store: the cache was not written (${(e as Error).message}); the defaults copy was`);
+      this.host.log(`store: the cache was not written (${(e as Error).message})`);
     }
+    if (failed) throw failed;
   }
 
   /** This device's copy to iCloud: the merge of every copy, so the others can be retired. */

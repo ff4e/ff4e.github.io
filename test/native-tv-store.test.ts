@@ -219,6 +219,22 @@ describe('the tvOS store budget', () => {
     expect(tv.logs.some((m) => m.includes('newer'))).toBe(true);
   });
 
+  it('a failed NSUserDefaults write still writes the cache, and never stops a launch', () => {
+    const tv = new FakeTv();
+    const a = new TvStore(tv);
+    a.load();
+    a.set('ff.solved', '[1]');
+    const save = tv.prefsSave.bind(tv);
+    tv.prefsSave = () => { throw new Error('not flushed'); };
+    expect(() => a.set('ff.solved', '[1,2]')).toThrow('not flushed');
+    expect((JSON.parse(tv.cache!) as { items: Record<string, string> }).items['ff.solved']).toBe('[1,2]');
+    tv.kvs[`${KVS_PREFIX}other`] = encodeCopy({ p: { 'ff.solved': { v: '[3]', t: 1 } }, pt: {} }); // a launch that must write
+    const b = new TvStore(tv);
+    expect(b.load().get('ff.solved')).toBe('[1,2,3]');
+    tv.prefsSave = save;
+    expect(new TvStore(tv).load().get('ff.solved')).toBe('[1,2,3]');
+  });
+
   it('refuses a slot that cannot fit even bare, as a browser quota does, and never refuses progress', () => {
     const tv = new FakeTv();
     const store = new TvStore(tv, 3_000, 1_000);
@@ -373,6 +389,65 @@ describe('progress in iCloud', () => {
     a.set('ff.solved', '[1]'); // a write, and its push, merge it but must not adopt it
     a.set('ff.playtime', '{"1":12}'); // the game's own clock: 2 more here
     expect(new TvStore(one).load().get('ff.playtime')).toBe('{"1":19}');
+  });
+
+  it('an empty or shrinking iCloud never lowers play time, live or at launch', () => {
+    const one = new FakeTv();
+    const a = new TvStore(one);
+    a.load();
+    a.set('ff.playtime', '{"1":10}');
+    const two = new FakeTv();
+    two.kvs = { ...one.kvs };
+    const b = new TvStore(two);
+    b.load();
+    b.set('ff.playtime', '{"1":15}');
+    two.kvs = {}; // signed out, or another account
+    expect(b.pullRemote()).toEqual([]);
+    expect(b.items.get('ff.playtime')).toBe('{"1":15}');
+    expect(new TvStore(two).load().get('ff.playtime')).toBe('{"1":15}');
+    // Back on the account: A's 10 is still counted once, B's own 6 added.
+    const b2 = new TvStore(two);
+    b2.load();
+    b2.set('ff.playtime', '{"1":16}');
+    two.kvs = { ...two.kvs, ...one.kvs };
+    expect(new TvStore(two).load().get('ff.playtime')).toBe('{"1":16}');
+  });
+
+  it('a field changed here outweighs one stamped by a device whose clock runs ahead', () => {
+    const OPT = (o: object): string => JSON.stringify({ subtitles: 'en', fitMode: 'medium', ...o });
+    const one = new FakeTv();
+    const a = new TvStore(one);
+    a.load();
+    a.set('ff.options', OPT({}));
+    const ahead = new FakeTv();
+    ahead.kvs = { ...one.kvs };
+    ahead.clock = 10_000_000; // its clock is far ahead
+    const b = new TvStore(ahead);
+    b.load();
+    b.set('ff.options', OPT({ subtitles: 'cz' }));
+    one.kvs = { ...one.kvs, ...ahead.kvs };
+    const a2 = new TvStore(one);
+    expect(JSON.parse(a2.load().get('ff.options')!).subtitles).toBe('cz');
+    a2.set('ff.options', OPT({ subtitles: 'off' })); // later, by the player, on the slow clock
+    ahead.kvs = { ...ahead.kvs, ...one.kvs };
+    expect(JSON.parse(new TvStore(ahead).load().get('ff.options')!).subtitles).toBe('off');
+  });
+
+  it('a field a newer version adds is not a change by the player', () => {
+    const one = new FakeTv();
+    const a = new TvStore(one);
+    a.load();
+    a.set('ff.options', '{"subtitles":"en"}');
+    a.set('ff.options', '{"subtitles":"en","fitMode":"large"}'); // updated first, then set by the player
+    a.set('ff.options', '{"subtitles":"en","fitMode":"fill"}');
+    const two = new FakeTv();
+    two.clock = 50_000; // B updates later
+    const b = new TvStore(two);
+    b.load();
+    b.set('ff.options', '{"subtitles":"en"}');
+    b.set('ff.options', '{"subtitles":"en","fitMode":"medium"}'); // its update writes the new default
+    two.kvs = { ...two.kvs, ...one.kvs };
+    expect(JSON.parse(new TvStore(two).load().get('ff.options')!).fitMode).toBe('fill');
   });
 
   it('a reinstall gets every room back from iCloud', () => {

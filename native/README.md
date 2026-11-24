@@ -912,7 +912,9 @@ speaks `localStorage` as on the web, and its save logic (`persist.ts`, `saveGame
    used whenever its number is not older: the same write (it is the fuller copy), or a newer
    one — NSUserDefaults lost writes the cache kept (it is fsynced; a power cut just after a
    save), and the NSUserDefaults copy is put right at once. A cache *older* than
-   NSUserDefaults missed a write and is not used. While tvOS leaves the cache alone a load
+   NSUserDefaults missed a write and is not used. A write NSUserDefaults refuses still goes to
+   the cache and iCloud (and the write is reported failed, as on a Mac); a launch is never
+   stopped by one. While tvOS leaves the cache alone a load
    resumes exactly what was saved; when it has been purged, the NSUserDefaults copy is the
    save.
 3. **iCloud's key-value store**: the progress only (`ff.solved`, `ff.cheated`, `ff.scores`,
@@ -928,8 +930,8 @@ speaks `localStorage` as on the web, and its save logic (`persist.ts`, `saveGame
    | `ff.solved`, `ff.cheated` | union |
    | `ff.scores` | the lowest move count per room |
    | `ff.best` | per room, the record of the copy with the lower score (a tie keeps this device's) |
-   | `ff.playtime` | per room, the sum of every device's *own* time: each copy also carries every device's own time it knows of (largest wins, as it only grows), so two Apple TVs playing offline add up and what one merged from another is not counted twice |
-   | `ff.options` | per field (`volume.music`, `subtitles`…), the newest *change*: a field carries the time the player last changed it; a first write — a new device's first-run intro writing the defaults — carries none, so it never outweighs settings made elsewhere |
+   | `ff.playtime` | per room, the sum of every device's *own* time: each copy also carries every device's own time it knows of (largest wins, as it only grows), so two Apple TVs playing offline add up and what one merged from another is not counted twice; never below what the store holds, so an iCloud that reads empty (signed out, another account) takes nothing away |
+   | `ff.options` | per field (`volume.music`, `subtitles`…), the newest *change*: a field carries the time the player last changed it; a first write — a new device's first-run intro writing the defaults — carries none, so it never outweighs settings made elsewhere, and nor does a field the value before lacked (added by a newer version, written as its default); a change is stamped after the field's current stamp, so a device whose clock runs ahead cannot hold a field |
    | `ff.subfont` | the newest write (only the player choosing a font writes it) |
 
    A value that is not what its key should hold loses to one that is. Each device's copy is
@@ -955,8 +957,10 @@ every room solved with 24 heavy saves under the budget, progress byte for byte; 
 a stale cache, and a cache newer than NSUserDefaults (which wins); a refused slot and a
 progress write that never is; a damaged defaults copy; the merge table; two Apple TVs writing
 only their own keys and taking in each other's; a new Apple TV's first-run defaults not
-resetting another's options, and per-field option changes from two devices both kept; play
-time on two Apple TVs offline adding up; a reinstall getting every room back. The store smoke (below) runs the real game in QuickJS
+resetting another's options, and per-field option changes from two devices both kept, a
+clock running ahead, a field a newer version adds; play time on two Apple TVs offline adding
+up, and never lowered by an empty iCloud; a failed NSUserDefaults write still writing the
+cache and not stopping a launch; a reinstall getting every room back. The store smoke (below) runs the real game in QuickJS
 over the host's stand-ins. **Needs a device:** that NSUserDefaults really keeps 500 KB on
 tvOS, the iCloud round trip and its notification timing (including the first download after
 a reinstall), and what tvOS actually purges.

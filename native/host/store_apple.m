@@ -27,8 +27,10 @@ bool ff_prefs_save(const char *key, const char *data, size_t len) {
     NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
     [d setObject:[NSData dataWithBytes:data length:len] forKey:@(key)];
     /* Not needed for the value to be kept eventually; asks for it now, so a power cut just
-       after a save loses less. The cache, written next and fsynced, covers the rest. */
-    return [d synchronize];
+       after a save loses less. Its result is only logged: the value is set either way, and
+       the cache, written next and fsynced, covers a flush that did not happen. */
+    if (![d synchronize]) NSLog(@"store: NSUserDefaults did not flush now; it will later");
+    return true;
   }
 }
 
