@@ -31,7 +31,7 @@ import { helpScreens, ui } from '../../src/app/screenState.js';
 import { atRest } from '../../src/app/roomGates.js';
 import { lengthOfRecord } from '../../src/core/record.js';
 import { busMultiplier, loadSettings } from '../../src/core/settings.js';
-import { advance, currentRoom, draw, enterRoom, initGame, isPaused, roomReady, saveExists, showMap } from './game.js';
+import { advance, currentRoom, draw, enterRoom, initGame, isPaused, roomReady, saveExists, showLegImage, showMap } from './game.js';
 import { ensureMapArt, mapFrame, mapPresented, mapSelectedCorner } from './mapScreen.js';
 import { OPTIONS_ROWS, PAUSE_ITEMS, menuOpen, openMenus, openOptions, pauseItemEnabled, topMenu } from './menus.js';
 import { ensureOptionsArt } from './optionsPaint.js';
@@ -106,11 +106,11 @@ async function untilReady(): Promise<void> {
 
 const moves = (): number => lengthOfRecord(engine?.srecord ?? '');
 
-/** The picture's box in a 1280×720 window: the room's composite, or the map, letterboxed. */
-function pictureBox(cw: number, ch: number): Box {
-  const k = Math.min(WIN_W / cw, WIN_H / ch);
+/** The picture's box in a `ww`×`wh` window: the room's composite, or the map, letterboxed. */
+function pictureBox(cw: number, ch: number, ww: number, wh: number): Box {
+  const k = Math.min(ww / cw, wh / ch);
   const w = Math.floor(cw * k), h = Math.floor(ch * k);
-  return [Math.floor((WIN_W - w) / 2), Math.floor((WIN_H - h) / 2), w, h];
+  return [Math.floor((ww - w) / 2), Math.floor((wh - h) / 2), w, h];
 }
 
 export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
@@ -148,11 +148,14 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     if (!ok) throw new MenuSmokeFailure(what);
   };
   const snaps: Record<string, readonly UiOp[]> = {};
-  const snap = (name: string): void => {
+  /** Draw the UI layer at a state, into a `ww`×`wh` window (by default the snapshot's 1280×720). */
+  const snap = (name: string, ww = WIN_W, wh = WIN_H): void => {
     // In a room, composite it first: the picture's box is the composite's size, as on screen.
     const inRoom = ui.screen === 'room' && draw(target, 0);
-    const box = inRoom ? pictureBox(target.width, target.height) : pictureBox(2560, 1920);
-    const r = paintUi(WIN_W, WIN_H, box);
+    const page = ui.screen === 'legimage' ? mapFrame(performance.now()) : null;
+    const box = inRoom ? pictureBox(target.width, target.height, ww, wh)
+      : page ? pictureBox(page.width, page.height, ww, wh) : pictureBox(2560, 1920, ww, wh);
+    const r = paintUi(ww, wh, box);
     if (!r) throw new MenuSmokeFailure(`the UI layer drew nothing for ${name}`);
     snaps[name] = r.ops;
     if (!outDir) return;
@@ -163,6 +166,8 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       if (shown) __native.saveTexture(shown.id, `${outDir}/pic-${name}.rgba`);
     }
   };
+  /** Did state `name` draw the hints' dark strip (they lie over the picture)? */
+  const strip = (name: string): boolean => snaps[name]!.some((op) => op[0] === 'rect' && op[5] === 0x10181e && op[6] === 78);
   const stored = (): ReturnType<typeof loadSettings> => loadSettings();
   const t0 = __native.now();
   try {
@@ -222,6 +227,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await tap('PadB');
     check(exits === 0 && ui.screen === 'map', 'the pad\'s Ⓑ on the plain map does nothing');
     snap('map-pad');
+    check(!strip('map-pad'), 'the pad\'s hints in the map\'s letterbox margin: muted, no strip');
+    snap('map-pad-fill', 960, 720);
+    check(strip('map-pad-fill'), 'with the map filling the window, the hints lie over it on a dark strip');
     await tap('Escape');
     check(exits === 1, 'the keyboard\'s Esc at the map\'s root leaves the game');
     await tap('RemoteBack');
@@ -263,6 +271,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     }
     check(movedBy !== '', `an edge click moves the active fish (${movedBy || 'no direction moved'})`);
     snap('room-remote');
+    check(!strip('room-remote'), 'the remote\'s hints in the room\'s letterbox margin: no strip');
+    snap('room-remote-fill', 800, 720);
+    check(strip('room-remote-fill'), 'with the room filling the window, the hints lie over it on a dark strip');
     const before = moves();
     for (const sw of ['RemoteSwipeLeft', 'RemoteSwipeRight', 'RemoteSwipeUp', 'RemoteSwipeDown']) await tap(sw);
     steps(10);
@@ -434,6 +445,15 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await tap('RemoteBack');
     await select('map');
     check(ui.screen === 'map' && !menuOpen(), 'the pause menu\'s World map leaves the room');
+
+    // A story page filling the window: its "Continue" on the strip, and any button dismisses it.
+    check(lastInput() === 'remote', 'the remote is still the last input');
+    await showLegImage(1);
+    check(ui.screen === 'legimage', 'a story page is up');
+    snap('legimage-remote-fill', 960, 720);
+    check(strip('legimage-remote-fill'), 'its hint lies over the page on a dark strip');
+    await tap('RemoteSelect');
+    check(ui.screen === 'map', 'a click dismisses it');
 
     // ── The layout snapshot ──────────────────────────────────────────────────────
     const json = `${JSON.stringify(snaps, null, 0).replace(/\],\[/g, '],\n[').replace(/":\[\[/g, '":[\n[')}\n`;

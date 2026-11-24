@@ -3,13 +3,17 @@
  * is up, as small "[glyph] Label" hints — an Xbox-style pad's chips (A5) or the Siri
  * Remote's (B3). The look is the first Xbox WebView prototype's `.pad-hints` (the
  * `xbox-port` branch's index.html, its 10-foot `body.tv` sizes at 1080 lines): a round
- * chip, the word to its right, no card behind either, muted at 75 %. Over the letterbox
- * margin it needs nothing more; where it lies over the picture the words carry the
- * subtitles' dark outline, and the chips their own dark fill and border.
+ * chip, the word to its right, no card behind either, muted at 75 %. That is enough over
+ * the black letterbox margin. Where the hints have to lie over the picture, muted light
+ * words vanish into it (the map's parchment, above all), so there they sit on one slim dark
+ * strip — the prototype's `.pad-box` dark, translucent — and are drawn at full strength.
  *
  * It goes in the letterbox margin beside the picture when it fits there — a short list
- * down the left margin, or one row in the top one — and otherwise as one thin row along
- * the top edge (the subtitles have the bottom).
+ * down the left margin, or one row in the top one — and otherwise as one row on its strip
+ * along the top edge. The top, not the bottom: in a room the subtitles have the bottom, and
+ * on the map the bottom holds the banner naming the selected level, which the player is
+ * reading while choosing; the map's top centre is scenery (its corners, Intro and Exit, are
+ * outside a centred row on any window wide enough to need a row).
  *
  * The keyboard gets no legend at all: a player at a keyboard knows its keys, and keycaps
  * on a TV picture only cover it. Items that cannot act now are dimmer (A6): Save while the
@@ -178,9 +182,15 @@ export function legendMetrics(h: number): HintMetrics {
   return { u, glyph: 26 * u, label: 18 * u, labelGap: 8 * u, gap: 30 * u, line: 38 * u, margin: 24 * u, outline: Math.max(1, 1.5 * u) };
 }
 
-/** Enabled hints are muted as the prototype's (`opacity: 0.75`); the greyed ones further. */
+/** Over the black margin the hints are muted as the prototype's (`opacity: 0.75`), the greyed ones further. */
 const ON_ALPHA = 0.75;
 const OFF_ALPHA = 0.3;
+/** On the strip over the picture: full strength, the greyed ones as dim as the margin's. */
+const STRIP_ON_ALPHA = 1;
+const STRIP_OFF_ALPHA = 0.4;
+/** The strip: the prototype's dark box colour, translucent. */
+const STRIP_RGB = 0x10181e;
+const STRIP_ALPHA = 0.78;
 
 const chipTextPx = (size: number): number => size * 0.58;
 
@@ -240,8 +250,8 @@ export function drawGlyph(ui: Ui, g: Glyph, x: number, y: number, size: number, 
  * An item's glyphs, right-aligned to `glyphsRight`, then its word (and the active fish's
  * picture after it, so the words of a list stay in one column). Returns where it ends.
  */
-function drawItem(ui: Ui, it: LegendItem, glyphsRight: number, y: number, m: HintMetrics): number {
-  const alpha = it.enabled ? ON_ALPHA : OFF_ALPHA;
+function drawItem(ui: Ui, it: LegendItem, glyphsRight: number, y: number, m: HintMetrics, strip: boolean): number {
+  const alpha = it.enabled ? (strip ? STRIP_ON_ALPHA : ON_ALPHA) : (strip ? STRIP_OFF_ALPHA : OFF_ALPHA);
   let gx = glyphsRight - glyphsWidth(ui, it, m.glyph);
   it.glyphs.forEach((g, i) => {
     gx += drawGlyph(ui, g, gx, y, m.glyph, alpha) + (i < it.glyphs.length - 1 ? m.glyph * 0.2 : 0);
@@ -265,36 +275,54 @@ export function hintRowWidth(ui: Ui, items: readonly LegendItem[], m: HintMetric
   return items.reduce((a, it) => a + itemWidth(ui, it, m), 0) + Math.max(0, items.length - 1) * m.gap;
 }
 
-/** `items` as one row, from `x`, the chips' tops at `y`. */
-export function drawHintRow(ui: Ui, items: readonly LegendItem[], x: number, y: number, m: HintMetrics): void {
-  for (const it of items) x = drawItem(ui, it, x + glyphsWidth(ui, it, m.glyph), y, m) + m.gap;
+/**
+ * `items` as one row, from `x`, the chips' tops at `y`; `strip` when it lies on its strip
+ * over the picture (full strength), not on a dark card or margin (muted).
+ */
+export function drawHintRow(ui: Ui, items: readonly LegendItem[], x: number, y: number, m: HintMetrics, strip = false): void {
+  for (const it of items) x = drawItem(ui, it, x + glyphsWidth(ui, it, m.glyph), y, m, strip) + m.gap;
+}
+
+/** The strip behind hints over the picture: the box `w`×`h` of hints at (x, y), padded. */
+function drawStrip(ui: Ui, x: number, y: number, w: number, h: number, m: HintMetrics): void {
+  const px = 14 * m.u, py = 6 * m.u;
+  ui.rect(x - px, y - py, w + 2 * px, h + 2 * py, STRIP_RGB, STRIP_ALPHA, (m.glyph + 2 * py) / 2);
 }
 
 /**
  * Draw `items` into the `w`×`h` window, beside `rect` (the picture's box: `[x, y, w, h]`):
  * down the left margin if the list fits there, else as a row in the top margin if that fits,
- * else as a row along the top edge over the picture.
+ * else as a row on its strip along the top edge over the picture.
  */
 export function drawLegend(ui: Ui, items: readonly LegendItem[], w: number, h: number, rect: readonly [number, number, number, number]): void {
   if (items.length === 0) return;
   const m = legendMetrics(h);
   const glyphsW = Math.max(...items.map((it) => glyphsWidth(ui, it, m.glyph)));
   const labelsW = Math.max(...items.map((it) => wordWidth(ui, it, m)));
-  const colW = m.margin + glyphsW + m.labelGap + labelsW + m.margin;
+  const listW = glyphsW + m.labelGap + labelsW;
   const rowW = hintRowWidth(ui, items, m);
   const [rx, ry] = rect;
-  if (colW <= rx || rowW > w - 2 * m.margin) {
-    // A list, the chips in one column and the words in the next.
-    let y = Math.max(m.margin, (h - items.length * m.line) / 2) + (m.line - m.glyph) / 2;
+  const listFits = m.margin + listW + m.margin <= rx;
+  if (listFits || rowW > w - 2 * m.margin) {
+    // A list, the chips in one column and the words in the next: in the margin, or (a window
+    // too narrow for the row) on a strip over the picture.
+    const listH = (items.length - 1) * m.line + m.glyph;
+    let y = Math.max(m.margin, (h - listH) / 2);
+    if (!listFits) drawStrip(ui, m.margin, y, listW, listH, m);
     for (const it of items) {
-      drawItem(ui, it, m.margin + glyphsW, y, m);
+      drawItem(ui, it, m.margin + glyphsW, y, m, !listFits);
       y += m.line;
     }
     return;
   }
-  // A row, centred: in the top margin, vertically in its middle, when it fits there.
-  const y = m.glyph + 2 * m.margin <= ry ? (ry - m.glyph) / 2 : m.margin;
-  drawHintRow(ui, items, (w - rowW) / 2, y, m);
+  // A row, centred: in the middle of the top margin when it fits there, else on its strip.
+  const x = (w - rowW) / 2;
+  if (m.glyph + 2 * m.margin <= ry) {
+    drawHintRow(ui, items, x, (ry - m.glyph) / 2, m);
+    return;
+  }
+  drawStrip(ui, x, m.margin, rowW, m.glyph, m);
+  drawHintRow(ui, items, x, m.margin, m, true);
 }
 
 /** Which legend the screen shows, or null for none (a launch, the confirm prompt). */

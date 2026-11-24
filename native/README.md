@@ -217,9 +217,11 @@ game the keys the browser's router reads — so every gate of that router still 
   the style of the first Xbox WebView prototype (`xbox-port`'s `.pad-hints`, its 10-foot
   sizes at 1080 lines: a 26 px round chip, 18 px words, no card behind them, muted to 75 %),
   scaled with the window and no smaller than at 720 lines. It goes down the left letterbox
-  margin as a short list when that fits, else as one row in the top margin, else as one thin
-  row along the top edge over the picture, where the words carry the subtitles' dark outline
-  (the subtitles have the bottom). Items that cannot act are dimmer. With the remote,
+  margin as a short list when that fits, else as one row in the top margin. Otherwise it lies
+  over the picture: one row along the top edge on a slim dark translucent strip (`#10181e` at
+  78 %, the prototype's dark box), drawn at full strength there, as muted light words vanish
+  into the map's parchment. The top, not the bottom: the subtitles have the room's bottom, and
+  the map's bottom carries the selected level's name. Items that cannot act are dimmer. With the remote,
   "Switch fish" carries the active fish's picture at the chip's height (B3: the touch badge's
   art and its visibility rule), the only cue to which fish an edge click moves. **The keyboard
   gets no legend, on any screen**, nor answer hints on the confirm prompt: its player knows
@@ -603,14 +605,15 @@ nothing, LB → Ⓐ saves, ☰ opens and closes the pause menu, Ⓑ goes to the 
 closes the pause menu, and its Save prompt (the question alone) is declined by Esc and
 answered by Enter; its World map leaves the room. A Play/Pause hold released inside the
 pause menu ends there. With the keyboard last, no hints are drawn on any screen (and, on the
-map and in a room, no UI layer at all). 66 checks, ~8 s.
+map and in a room, no UI layer at all). In windows the map, a room and a story page fill, the
+hints lie on their dark strip; in a letterbox margin, they do not. 74 checks, ~8 s.
 
-It also checks the **UI layout snapshot**: at 17 states the UI layer is drawn into a 1280×720
-window and the list of what it drew — every rectangle, shape, image and string, with its
-position and size in whole pixels — must equal `native/ui-layout.snap.json`. A layout change
-fails with the first op that moved and writes the new list to
-`native/build/ui-layout.snap.new.json`; if intended, rerun with `--update-snapshot` and review
-the file's diff. It is not a pixel comparison (the web has no such screens to compare with):
+It also checks the **UI layout snapshot**: at 20 states the UI layer is drawn into a 1280×720
+window (three of them into windows the picture fills) and the list of what it drew — every
+rectangle, shape, image and string, with its position and size in whole pixels — must equal
+`native/ui-layout.snap.json`. A layout change fails with the first op that moved and writes
+the new list to `native/build/ui-layout.snap.new.json`; if intended, rerun with
+`--update-snapshot` and review the file's diff. It is not a pixel comparison (the web has no such screens to compare with):
 it catches a moved, resized, missing or reworded element, not a wrong colour inside one.
 `--smoke-out DIR` keeps each state's pixels (`DIR/ui-<state>.rgba`) and the picture under
 it (`DIR/pic-<state>.rgba`: the room's composite or the map), to look at together.
