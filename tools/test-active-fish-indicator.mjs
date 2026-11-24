@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { appReady, exitProbe, launchBrowser, WAIT_BACKSTOP } from './ui-lib.mjs';
-import { checkFishSwitchButton, checkTabletFishIndicator } from './ui-tablet-fish-indicator.mjs';
+import { checkFishSwitchButton, checkTabletFishIndicator, waitFishBadge } from './ui-tablet-fish-indicator.mjs';
 import { tapPanel } from './ui-tablet-options.mjs';
 
 const browser = await launchBrowser();
@@ -50,15 +50,13 @@ try {
     true, 'phone browser uses the new skin without preview hooks');
   assert.equal(await p.locator('#phone-map svg').getAttribute('data-menu-icon'), 'map',
     'phone browser uses the new icons');
-  const waitFish = (which) => p.waitForFunction((which) => {
-    const badge = document.getElementById('active-fish-indicator');
-    return !badge.hidden && badge.dataset.fish === which;
-  }, which);
+  const waitFish = (which) => waitFishBadge(p, which);
   const save = async (name) => {
     if (evidence) await p.screenshot({ path: join(evidence, `${name}.png`) });
   };
   await p.evaluate(() => window.__ff.setGraphics('enhanced'));
-  await badge.waitFor({ state: 'visible' });
+  // The enhanced tier's art hold hides the badge on the next frame; wait it out.
+  await waitFish(await p.evaluate(() => window.__ff.state().active));
   for (const c of cases) {
     await p.setViewportSize({ width: c.width, height: c.height });
     await p.evaluate((insets) => {
