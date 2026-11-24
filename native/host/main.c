@@ -7,7 +7,10 @@
  *   ff4e-native <bundle.js> --root <public dir> [--room N] [--store F] [--headless ...]
  *
  * native/js/main.ts reads the rest of the arguments; the host only needs --root (the asset
- * root), --headless (no window, no gamepad, no audio output) and --store (the key-value file).
+ * root), --headless (no window, no gamepad, no audio output), --store (the key-value file)
+ * and --read-log (a file to list every asset read in: native/tvos/stage.mjs checks the app's
+ * asset subset against it). On tvOS the app is launched with no bundle argument: the bundle
+ * and the assets are in the app (`game.js`, `public/`), and any launch arguments are the game's.
  */
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -16,6 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef __APPLE__
+#include <TargetConditionals.h>
+#endif
 #ifdef _WIN32
 #include <io.h>
 #else
@@ -28,6 +34,9 @@
 
 void install_text(JSContext *ctx, JSValue native); /* text.c: the subtitle glyphs */
 void install_movie(JSContext *ctx, JSValue native); /* movie.c: the intro and logo movies */
+#ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
+void tvos_remote_absolute_dpad(void); /* platform_tvos.m */
+#endif
 
 /* ── state ─────────────────────────────────────────────────────────────────────── */
 static SDL_GPUDevice *dev;
@@ -58,6 +67,9 @@ static SDL_GPUGraphicsPipeline *bound;
 
 static SDL_Gamepad *pad;
 static char store_path[2048];
+static FILE *read_log; /* --read-log */
+/* Between SDL_EVENT_WILL_ENTER_BACKGROUND and SDL_EVENT_DID_ENTER_FOREGROUND (`lifecycle`). */
+static bool in_background;
 
 /* ── helpers ───────────────────────────────────────────────────────────────────── */
 static void die(const char *what) {
@@ -214,14 +226,22 @@ static JSValue n_now(JSContext *ctx, JSValueConst self, int argc, JSValueConst *
   return JS_NewFloat64(ctx, (double)SDL_GetTicksNS() / 1e6);
 }
 
+/* `--read-log`: an asset the game read (`rel`, as the game names it), when it was there. */
+void host_note_read(const char *rel) {
+  if (!read_log) return;
+  fprintf(read_log, "%s%s\n", rel[0] == '/' ? "" : "/", rel);
+  fflush(read_log);
+}
+
 static JSValue n_readFile(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   const char *rel = JS_ToCString(ctx, argv[0]);
   if (!rel) return JS_EXCEPTION;
   char path[2048];
   SDL_snprintf(path, sizeof path, "%s%s%s", root, rel[0] == '/' ? "" : "/", rel);
-  JS_FreeCString(ctx, rel);
   size_t size = 0;
   void *data = SDL_LoadFile(path, &size);
+  if (data) host_note_read(rel);
+  JS_FreeCString(ctx, rel);
   if (!data) return JS_NULL;
   JSValue buf = JS_NewArrayBufferCopy(ctx, data, size);
   SDL_free(data);
@@ -234,9 +254,11 @@ static JSValue n_fileExists(JSContext *ctx, JSValueConst self, int argc, JSValue
   if (!rel) return JS_EXCEPTION;
   char path[2048];
   SDL_snprintf(path, sizeof path, "%s%s%s", root, rel[0] == '/' ? "" : "/", rel);
-  JS_FreeCString(ctx, rel);
   SDL_PathInfo info;
-  return JS_NewBool(ctx, SDL_GetPathInfo(path, &info) && info.type == SDL_PATHTYPE_FILE);
+  bool there = SDL_GetPathInfo(path, &info) && info.type == SDL_PATHTYPE_FILE;
+  if (there) host_note_read(rel);
+  JS_FreeCString(ctx, rel);
+  return JS_NewBool(ctx, there);
 }
 
 /* writeFile(path, bytes): a file the parity harnesses read back (a path as given, not under root). */
@@ -669,6 +691,26 @@ static JSValue n_windowSize(JSContext *ctx, JSValueConst self, int argc, JSValue
   JS_SetPropertyUint32(ctx, a, 0, JS_NewInt32(ctx, sw));
   JS_SetPropertyUint32(ctx, a, 1, JS_NewInt32(ctx, sh));
   JS_SetPropertyUint32(ctx, a, 2, JS_NewFloat64(ctx, density > 0 ? density : 1));
+  return a;
+}
+
+/*
+ * [left, top, right, bottom]: how far in from each edge of the window, in its pixels, what
+ * must be seen has to stay — a TV's title-safe insets. On tvOS that is the view's
+ * `safeAreaInsets`, which include the screen's overscan margin: 60 points above and below
+ * and 80 at the sides on a 1080-line screen (×2 in pixels at 4K). Zeros on a desktop. Null
+ * headless.
+ */
+static JSValue n_safeArea(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  SDL_Rect r;
+  int ww = 0, wh = 0, pw = 0, ph = 0;
+  if (!win || !SDL_GetWindowSafeArea(win, &r) || !SDL_GetWindowSize(win, &ww, &wh) ||
+      !SDL_GetWindowSizeInPixels(win, &pw, &ph) || ww <= 0 || wh <= 0)
+    return JS_NULL;
+  const double sx = (double)pw / ww, sy = (double)ph / wh; /* the safe area is in points */
+  const double v[4] = {SDL_ceil(r.x * sx), SDL_ceil(r.y * sy), SDL_ceil((ww - r.x - r.w) * sx), SDL_ceil((wh - r.y - r.h) * sy)};
+  JSValue a = JS_NewArray(ctx);
+  for (uint32_t i = 0; i < 4; i++) JS_SetPropertyUint32(ctx, a, i, JS_NewFloat64(ctx, v[i] > 0 ? v[i] : 0));
   return a;
 }
 
@@ -1213,8 +1255,8 @@ static void poll_sticks(void) {
  *     axis it is that edge, else the centre. That needs ABSOLUTE d-pad values
  *     (`GCMicroGamepad.reportsAbsoluteDpadValues = YES`), which SDL does not set — by default
  *     the values are relative to where the thumb first touched, so a click with a resting
- *     thumb reads as the centre. A tvOS target has to set it (an Objective-C shim); until
- *     then only a slide-then-click is an edge on that remote.
+ *     thumb reads as the centre. The tvOS build sets it on every controller that connects
+ *     (`platform_tvos.m`) and says so here (`remote_absolute`).
  *
  * A remote with d-pad buttons in its mapping is the ring kind (`SDL_GamepadHasButton`). The
  * click pressed is the one released, whichever button sent it.
@@ -1222,9 +1264,9 @@ static void poll_sticks(void) {
  * A deflection with no click is a swipe — but only once it has lasted SWIPE_MS with no click,
  * because a slide toward an edge and a click there is one press, not a swipe and then a click
  * (which would step a menu twice). A click inside that window takes the slide's direction.
- * With absolute values a resting thumb would also read as a deflection; swipes should then
- * come from motion rather than position. Both are open for the tvOS step: nothing here has met
- * a real remote.
+ * With absolute values a resting thumb would also read as a deflection, so a swipe is then
+ * measured from where the thumb touched down (`remote_motion`), as the relative values are:
+ * a thumb landing on an edge is not a swipe. None of this has met a real remote yet.
  */
 static SDL_Gamepad *remote;
 static const char *remote_click; /* the code the click in progress sent */
@@ -1235,6 +1277,28 @@ static bool remote_playpause, remote_back; /* held, so a removed remote can let 
 #define SWIPE_MS 120
 static const char *const REMOTE_EDGE[4] = {"RemoteUp", "RemoteDown", "RemoteLeft", "RemoteRight"};
 static const char *const REMOTE_SWIPE[4] = {"RemoteSwipeUp", "RemoteSwipeDown", "RemoteSwipeLeft", "RemoteSwipeRight"};
+static bool remote_absolute;     /* the touch surface reports where the thumb is (tvOS) */
+static bool remote_touching;     /* absolute: a thumb is on the surface, since (remote_ox, remote_oy) */
+static int remote_ox, remote_oy;
+
+/*
+ * The remote's touch as a deflection from where the thumb touched down. Relative values (SDL's
+ * default) already are that; absolute ones are a position, (0, 0) once the thumb lifts.
+ */
+static void remote_motion(int *ax, int *ay) {
+  if (!remote_absolute) return;
+  if (*ax == 0 && *ay == 0) {
+    remote_touching = false;
+    return;
+  }
+  if (!remote_touching) {
+    remote_touching = true;
+    remote_ox = *ax;
+    remote_oy = *ay;
+  }
+  *ax -= remote_ox;
+  *ay -= remote_oy;
+}
 
 /* A click went down as `code` (an edge or the centre), or `code`'s click came up. */
 static void remote_click_edge(const char *code, bool down) {
@@ -1283,8 +1347,11 @@ static void remote_button(Uint8 b, bool down) {
 }
 
 static void poll_remote(void) {
-  if (!remote || remote_click) return; /* a thumb pressing to click is not a swipe */
-  int dir = stick_dir(SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY), remote_swipe);
+  if (!remote) return;
+  int ax = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY);
+  remote_motion(&ax, &ay); /* tracked through a click too: the touch-down is before it */
+  if (remote_click) return; /* a thumb pressing to click is not a swipe */
+  int dir = stick_dir(ax, ay, remote_swipe);
   if (dir && dir != remote_swipe) {
     remote_pending = dir;
     remote_pending_at = SDL_GetTicks();
@@ -1305,6 +1372,7 @@ static void remote_release_all(void) {
   remote_click = NULL;
   remote_playpause = remote_back = false;
   remote_swipe = remote_pending = 0;
+  remote_touching = false;
 }
 
 static bool is_remote(SDL_Gamepad *g) {
@@ -1410,6 +1478,9 @@ static void poll_events(void) {
   while (SDL_PollEvent(&e)) {
     switch (e.type) {
       case SDL_EVENT_QUIT: quit_requested = true; break;
+      /* The game pauses as the pause menu pauses it (uiInput.ts) — on the first frame after
+         it is back, as nothing runs in between (`lifecycle`). */
+      case SDL_EVENT_WILL_ENTER_BACKGROUND: push_event(false, "!background"); break;
       /* Unfocused, a held key's keyup never arrives: the game drops it (main.ts's blur). */
       case SDL_EVENT_WINDOW_FOCUS_LOST: push_event(false, "!blur"); break;
       case SDL_EVENT_GAMEPAD_ADDED: {
@@ -1551,7 +1622,7 @@ static void install(JSContext *ctx) {
       {"readText", n_readText, 1},     {"systemBack", n_systemBack, 1},     {"writeText", n_writeText, 2},
       {"events", n_events, 0},
       {"storeLoad", n_storeLoad, 1},   {"storeSave", n_storeSave, 2},
-      {"storePath", n_storePath, 0},
+      {"storePath", n_storePath, 0},   {"safeArea", n_safeArea, 0},
       {"args", n_args, 0},             {"quit", n_quit, 0},
   };
   JSValue g = JS_GetGlobalObject(ctx);
@@ -1570,73 +1641,157 @@ static void install(JSContext *ctx) {
   JS_FreeValue(ctx, g);
 }
 
+/*
+ * The app's lifecycle, from an event watch: SDL calls it from inside the system's callback
+ * (applicationWillResignActive, applicationDidBecomeActive), before the app is suspended —
+ * a queued event could be read only after. Leaving, the sound stops where it is and the
+ * loop stops drawing (no GPU work is allowed in the background) and stepping; the game
+ * pauses as the pause menu pauses it when it is back (`!background`, uiInput.ts). Nothing
+ * is left to save: every store write is already on disk (`n_storeSave`). Losing focus to an
+ * overlay (Control Center, Siri) is the same event, and pauses the same way.
+ */
+static bool SDLCALL lifecycle(void *user, SDL_Event *e) {
+  (void)user;
+  if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND && !in_background) {
+    in_background = true;
+    audio_suspend(true);
+  } else if (e->type == SDL_EVENT_DID_ENTER_FOREGROUND && in_background) {
+    in_background = false;
+    audio_suspend(false);
+  }
+  return true;
+}
+
+/* Why there is no GPU, said where a player will see it (`alert`: a message box), not only in a log. */
+static void no_gpu(bool alert) {
+  const char *why = SDL_GetError();
+  char msg[512];
+#if defined(SDL_PLATFORM_TVOS) && TARGET_OS_SIMULATOR
+  SDL_snprintf(msg, sizeof msg, "SDL GPU (Metal) does not start in the Apple TV Simulator (%s). "
+               "The game needs a real Apple TV; --startup-probe checks the rest here.", why);
+#else
+  SDL_snprintf(msg, sizeof msg, "SDL GPU (Metal) could not start: %s", why);
+#endif
+  SDL_Log("fatal: %s", msg);
+  if (alert) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Fish Fillets 4ever", msg, NULL);
+}
+
 int main(int argc, char **argv) {
+#ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
+  /* Launched with no bundle argument: the bundle and the assets are in the app. */
+  static char bundle_path[1024];
+  const char *base = SDL_GetBasePath();
+  SDL_snprintf(bundle_path, sizeof bundle_path, "%sgame.js", base ? base : "");
+  SDL_snprintf(root, sizeof root, "%spublic", base ? base : "");
+  const char *bundle = bundle_path;
+  const int first = 1;
+#else
   if (argc < 2) {
     fprintf(stderr, "usage: %s <bundle.js> --root <public dir> [--room N] [--store F] [--headless ...]\n", argv[0]);
     return 2;
   }
-  js_argc = argc - 2;
-  js_argv = argv + 2;
+  const char *bundle = argv[1];
+  const int first = 2;
   SDL_strlcpy(root, "public", sizeof root);
-  for (int i = 2; i < argc; i++) {
+#endif
+  js_argc = argc - first;
+  js_argv = argv + first;
+  bool startup_probe = false;
+  for (int i = first; i < argc; i++) {
     if (!strcmp(argv[i], "--root") && i + 1 < argc) SDL_strlcpy(root, argv[i + 1], sizeof root);
     if (!strcmp(argv[i], "--store") && i + 1 < argc) SDL_strlcpy(store_path, argv[i + 1], sizeof store_path);
+    if (!strcmp(argv[i], "--read-log") && i + 1 < argc && !(read_log = fopen(argv[i + 1], "w"))) {
+      fprintf(stderr, "cannot write %s\n", argv[i + 1]);
+      return 2;
+    }
     if (!strcmp(argv[i], "--headless")) headless = true;
     if (!strcmp(argv[i], "--remote-keys")) remote_keys = true;
+    if (!strcmp(argv[i], "--startup-probe")) startup_probe = true;
   }
 
-#ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
+#ifdef SDL_PLATFORM_TVOS
   /* The design reads the Siri Remote as a gamepad (the input section); stated, not left to
      SDL's default. Back at the top level goes to the system: `systemBack`. */
   SDL_SetHint(SDL_HINT_TV_REMOTE_AS_JOYSTICK, "1");
   SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, "0");
+  /* Solo ambient, not SDL's default (playback, mixing with others): the game's music and the
+     fish's voices are the game, so another app's music stops while it plays, as it does for
+     most games; and unlike playback it never asks to keep sounding in the background, which
+     the app does not declare. (A TV has no silent switch, so that difference is moot.) */
+  SDL_SetHint(SDL_HINT_AUDIO_CATEGORY, "AVAudioSessionCategorySoloAmbient");
 #endif
   /* The GPU device needs the video subsystem even when no window is ever opened. */
   if (!SDL_Init(headless ? SDL_INIT_VIDEO : (SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))) die("SDL_Init");
-  dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, false, NULL);
-  if (!dev) die("SDL_CreateGPUDevice");
-  SDL_Log("GPU driver: %s", SDL_GetGPUDeviceDriver(dev));
-  SDL_GPUTextureFormat swap_fmt = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+  SDL_AddEventWatch(lifecycle, NULL);
+#ifdef SDL_PLATFORM_TVOS
   if (!headless) {
-    win = SDL_CreateWindow("Fish Fillets 4ever", 1280, 800, SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+    tvos_remote_absolute_dpad();
+    remote_absolute = true;
+  }
+#endif
+  dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, false, NULL);
+  if (!dev) {
+    no_gpu(!headless && !startup_probe); /* the probe carries on without one */
+    if (!startup_probe) {
+      SDL_Quit();
+      return 1;
+    }
+  } else {
+    SDL_Log("GPU driver: %s", SDL_GetGPUDeviceDriver(dev));
+  }
+  SDL_GPUTextureFormat swap_fmt = SDL_GPU_TEXTUREFORMAT_B8G8R8A8_UNORM;
+  if (!headless && dev) {
+#ifdef SDL_PLATFORM_TVOS
+    /* The whole screen, at its pixels: 1920×1080, or 3840×2160 on a 4K Apple TV driving a 4K
+       TV (two pixels a point). The UI is laid out for whatever the window turns out to be. */
+    const SDL_WindowFlags flags = SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#else
+    const SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+#endif
+    win = SDL_CreateWindow("Fish Fillets 4ever", 1280, 800, flags);
     if (!win || !SDL_ClaimWindowForGPUDevice(dev, win)) die("window");
     swap_fmt = SDL_GetGPUSwapchainTextureFormat(dev, win);
+    int pw = 0, ph = 0;
+    SDL_GetWindowSizeInPixels(win, &pw, &ph);
+    SDL_Log("window: %d×%d pixels, %.0f per point", pw, ph, SDL_GetWindowPixelDensity(win));
   }
 
-  const SDL_GPUTextureFormat rgba = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
-  p_fill = pipeline("vs_rect", 1, "fs_fill", 0, rgba, false, true);
-  p_bg = pipeline("vs_full", 0, "fs_bg", 3, rgba, false, false);
-  p_sprite = pipeline("vs_rect", 1, "fs_sprite", 1, rgba, true, true);
-  p_disint = pipeline("vs_rect", 1, "fs_disint", 2, rgba, true, true);
-  p_mirror = pipeline("vs_full", 0, "fs_mirror", 2, rgba, false, false);
-  p_present = pipeline("vs_full", 0, "fs_present", 1, swap_fmt, false, false);
-  p_overlay = overlay_pipeline(swap_fmt);
-  SDL_GPUSamplerCreateInfo si = {0};
-  si.min_filter = si.mag_filter = SDL_GPU_FILTER_NEAREST;
-  si.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
-  si.address_mode_u = si.address_mode_v = si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
-  s_nearest = SDL_CreateGPUSampler(dev, &si);
-  si.min_filter = si.mag_filter = SDL_GPU_FILTER_LINEAR;
-  s_linear = SDL_CreateGPUSampler(dev, &si);
-  /* A real 1x1 texel, not nothing: the band texture is bound on every background pass
-     (GlAiScreen gives its uBands the same 1x1 black for the same reason). */
-  band_tex = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, 1, 1, SDL_GPU_TEXTUREUSAGE_SAMPLER);
-  band_w = 1;
-  upload(band_tex, (const uint8_t[4]){0, 0, 0, 255}, 1, 1, 4);
-  p_surf[0] = surf_pipeline(false);
-  p_surf[1] = surf_pipeline(true);
-  white_tex = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, 1, 1, SDL_GPU_TEXTUREUSAGE_SAMPLER);
-  upload(white_tex, (const uint8_t[4]){255, 255, 255, 255}, 1, 1, 4);
+  if (dev) {
+    const SDL_GPUTextureFormat rgba = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+    p_fill = pipeline("vs_rect", 1, "fs_fill", 0, rgba, false, true);
+    p_bg = pipeline("vs_full", 0, "fs_bg", 3, rgba, false, false);
+    p_sprite = pipeline("vs_rect", 1, "fs_sprite", 1, rgba, true, true);
+    p_disint = pipeline("vs_rect", 1, "fs_disint", 2, rgba, true, true);
+    p_mirror = pipeline("vs_full", 0, "fs_mirror", 2, rgba, false, false);
+    p_present = pipeline("vs_full", 0, "fs_present", 1, swap_fmt, false, false);
+    p_overlay = overlay_pipeline(swap_fmt);
+    SDL_GPUSamplerCreateInfo si = {0};
+    si.min_filter = si.mag_filter = SDL_GPU_FILTER_NEAREST;
+    si.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+    si.address_mode_u = si.address_mode_v = si.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+    s_nearest = SDL_CreateGPUSampler(dev, &si);
+    si.min_filter = si.mag_filter = SDL_GPU_FILTER_LINEAR;
+    s_linear = SDL_CreateGPUSampler(dev, &si);
+    /* A real 1x1 texel, not nothing: the band texture is bound on every background pass
+       (GlAiScreen gives its uBands the same 1x1 black for the same reason). */
+    band_tex = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, 1, 1, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    band_w = 1;
+    upload(band_tex, (const uint8_t[4]){0, 0, 0, 255}, 1, 1, 4);
+    p_surf[0] = surf_pipeline(false);
+    p_surf[1] = surf_pipeline(true);
+    white_tex = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, 1, 1, SDL_GPU_TEXTUREUSAGE_SAMPLER);
+    upload(white_tex, (const uint8_t[4]){255, 255, 255, 255}, 1, 1, 4);
+  }
 
   JSRuntime *rt = JS_NewRuntime();
   JS_SetMaxStackSize(rt, 8 * 1024 * 1024);
   JSContext *ctx = JS_NewContext(rt);
   install(ctx);
   size_t len = 0;
-  char *src = SDL_LoadFile(argv[1], &len);
-  if (!src) die(argv[1]);
+  char *src = SDL_LoadFile(bundle, &len);
+  if (!src) die(bundle);
   Uint64 t0 = SDL_GetTicksNS();
-  JSValue r = JS_Eval(ctx, src, len, argv[1], JS_EVAL_TYPE_GLOBAL);
+  JSValue r = JS_Eval(ctx, src, len, bundle, JS_EVAL_TYPE_GLOBAL);
   SDL_free(src);
   if (JS_IsException(r)) { report(ctx); return 1; }
   JS_FreeValue(ctx, r);
@@ -1644,6 +1799,10 @@ int main(int argc, char **argv) {
 
   while (!quit_requested) {
     if (!headless) poll_events();
+    if (in_background) { /* nothing runs, nothing is drawn: see `lifecycle` */
+      SDL_Delay(16);
+      continue;
+    }
     drain_jobs(rt);
     call_global(ctx, "__timers");
     drain_jobs(rt);
@@ -1654,7 +1813,8 @@ int main(int argc, char **argv) {
   audio_shutdown();
   JS_FreeContext(ctx);
   JS_FreeRuntime(rt);
-  SDL_DestroyGPUDevice(dev);
+  if (dev) SDL_DestroyGPUDevice(dev);
   SDL_Quit();
+  if (read_log) fclose(read_log);
   return exit_code;
 }

@@ -19,6 +19,7 @@ int host_texture_new(int w, int h, bool bgra);
 bool host_texture_upload(int id, const void *px, size_t stride);
 void host_texture_release(int id);
 const char *host_root(void);
+void host_note_read(const char *rel);
 
 typedef struct {
   MovieDecoder *dec;
@@ -50,6 +51,7 @@ static bool resolve(JSContext *ctx, JSValueConst v, char *out, size_t n) {
   const char *rel = JS_ToCString(ctx, v);
   if (!rel) return false;
   SDL_snprintf(out, n, "%s/%s", host_root(), rel[0] == '/' ? rel + 1 : rel);
+  if (SDL_GetPathInfo(out, NULL)) host_note_read(rel);
   JS_FreeCString(ctx, rel);
   return true;
 }

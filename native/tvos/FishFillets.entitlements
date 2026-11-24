@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The Apple TV app's entitlements (native/CMakeLists.txt, CODE_SIGN_ENTITLEMENTS). iCloud
+  key-value storage only, no CloudKit and no documents: tvOS keeps no app data reliably on the
+  device (native/README.md, "Apple TV"), so progress and saves are mirrored to the user's
+  iCloud key-value store, under the app's own identifier — the same one the iOS app would use.
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.ubiquity-kvstore-identifier</key>
+	<string>$(TeamIdentifierPrefix)$(CFBundleIdentifier)</string>
+</dict>
+</plist>

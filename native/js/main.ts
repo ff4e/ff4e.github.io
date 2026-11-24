@@ -8,6 +8,9 @@
  *     through the real loop instead of reading input, room after room. --remote-keys makes
  *     the keyboard a Siri Remote (native/host/main.c). Input: `uiInput.ts`; menus:
  *     `menus.ts`. Controls: native/README.md.
+ *   ff4e-native <bundle.js> --root <public dir> [--headless] --startup-probe [--store F]
+ *     what the game needs at start except the GPU (`startupProbe.ts`): the store, the assets,
+ *     the sound. The one thing that runs in the Apple TV Simulator, where SDL GPU does not.
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke ROOMS [--smoke-player ROOMS] --store F
  *     the smoke gate (`smoke.ts`): plays rooms through the real flow, headless, and exits
  *     non-zero unless each one is won.
@@ -72,6 +75,8 @@ import { introFrame, loadIntroArt, openSession } from './introScreen.js';
 import { soundPoll } from './sound.js';
 import { mixer } from './seams/audioEngine.js';
 import { MIX_RATE } from './sdlAudioBackend.js';
+import { runStartupProbe } from './startupProbe.js';
+import { simulateTvSafeArea } from './safeArea.js';
 
 const argv = __native.args();
 const arg = (name: string): string | undefined => {
@@ -83,6 +88,10 @@ const flag = (name: string): boolean => argv.includes(name);
 const g = globalThis as Record<string, unknown>;
 
 async function main(): Promise<void> {
+  if (flag('--startup-probe')) {
+    __native.quit(await runStartupProbe()); // before anything touches the GPU: there may be none
+    return;
+  }
   __native.setRandTable(RANDPOLE.slice().buffer);
   setScratchCanvasFactory(nativeScratchCanvas);
   setSurfaceFactory(nativeSurface);
@@ -152,6 +161,7 @@ async function main(): Promise<void> {
   // show no hints at all); on a Mac the keyboard, unless it is standing in for a remote.
   if (flag('--remote-keys') || __native.tv) setLastInput('remote');
   if (flag('--remote-keys')) setKeyboardIsRemote(true);
+  if (flag('--tv-safe-area')) simulateTvSafeArea();
   console.log(`sound: ${mixer.mode}, mixing at ${MIX_RATE} Hz`);
   if (arg('--room')) await enterRoom(Number(arg('--room')));
   else if (flag('--demo')) await enterRoom(firstRoom());

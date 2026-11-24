@@ -35,81 +35,26 @@
  *   npm run release:testflight -- --build 11 --upload      # archive AND upload
  *   FF4E_TEAM=ABCDE12345 npm run release:testflight -- --build 11 --upload
  */
-import { execFileSync, execSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { BUNDLE_ID, dieAs, findDistributionTeam, parseArgs, uploadArchive } from './testflight-lib.mjs';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const BUNDLE_ID = 'io.github.ff4e.fishfillets4ever';
 
-const die = (msg) => {
-  console.error(`\nrelease-testflight: ${msg}\n`);
-  process.exit(1);
-};
+const die = dieAs('release-testflight');
 
-const sh = (cmd, opts = {}) => execSync(cmd, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opts }).trim();
-
-const args = process.argv.slice(2);
-const upload = args.includes('--upload');
-const buildFlagIdx = args.indexOf('--build');
-const buildNumber = buildFlagIdx !== -1 ? args[buildFlagIdx + 1] : null;
-if (!buildNumber || !/^\d+$/.test(buildNumber)) {
-  die('usage: npm run release:testflight -- --build <N> [--upload]\n\nN is the new CFBundleVersion (integer); check App Store Connect for the last uploaded build number first.');
-}
-
-/**
- * Find a Distribution (not Development) codesigning identity's team.
- * Mirrors `device-build.mjs`'s `findTeam()`, but filters for "Apple Distribution"
- * — the free personal-team certificate `findTeam()` looks for cannot sign an
- * App Store archive at all.
- */
-function findDistributionTeam() {
-  if (process.env.FF4E_TEAM) return process.env.FF4E_TEAM;
-  let out = '';
-  try {
-    out = sh('security find-identity -v -p codesigning');
-  } catch {
-    /* handled below */
-  }
-  const names = [...out.matchAll(/"(Apple Distribution[^"]*)"/g)].map((m) => m[1]);
-  const teams = [];
-  for (const name of names) {
-    try {
-      const pem = execFileSync('security', ['find-certificate', '-c', name, '-p'], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-      const subject = execFileSync('openssl', ['x509', '-noout', '-subject'], {
-        input: pem,
-        encoding: 'utf8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      const ou = subject.match(/OU\s*=\s*([A-Z0-9]{10})/);
-      if (ou) teams.push(ou[1]);
-    } catch {
-      /* unreadable cert */
-    }
-  }
-  const unique = [...new Set(teams)];
-  if (unique.length === 0) {
-    die(
-      'No "Apple Distribution" certificate on this Mac.\n\n' +
-        'This requires the PAID Apple Developer account, unlike npm run build:device.\n' +
-        'Open Xcode with the enrolled Apple ID, select the App target → Signing &\n' +
-        'Capabilities, and let Xcode create a Distribution certificate for the real\n' +
-        `team, or set FF4E_TEAM=<id> if you already know it.`,
-    );
-  }
-  if (unique.length > 1) die(`Several distribution teams found: ${unique.join(', ')}. Pick one: FF4E_TEAM=<id> ...`);
-  return unique[0];
-}
+const { upload, buildNumber } = parseArgs(
+  die,
+  'usage: npm run release:testflight -- --build <N> [--upload]\n\nN is the new CFBundleVersion (integer); check App Store Connect for the last uploaded build number first.',
+);
 
 console.log('building web assets…');
 execSync('npm run build:ios', { cwd: REPO, stdio: 'inherit' });
 
-const team = findDistributionTeam();
+const team = findDistributionTeam(die);
 console.log(`signing as distribution team ${team}, build number ${buildNumber}`);
 
 const archiveDir = mkdtempSync(join(tmpdir(), 'ff4e-archive-'));
@@ -153,40 +98,13 @@ if (!upload) {
   process.exit(0);
 }
 
-console.log('\nexporting + uploading to App Store Connect…');
-const exportOptionsPath = join(archiveDir, 'ExportOptions.plist');
-writeFileSync(
-  exportOptionsPath,
-  `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>method</key><string>app-store-connect</string>
-  <key>teamID</key><string>${team}</string>
-  <key>signingStyle</key><string>automatic</string>
-  <key>destination</key><string>upload</string>
-</dict>
-</plist>
-`,
-);
-
-try {
-  execSync(
-    [
-      'xcodebuild',
-      '-exportArchive',
-      `-archivePath "${archivePath}"`,
-      `-exportOptionsPlist "${exportOptionsPath}"`,
-      '-allowProvisioningUpdates',
-    ].join(' '),
-    {
-      cwd: join(REPO, 'ios/App'),
-      stdio: 'inherit',
-      env: { ...process.env, GIT_CONFIG_VALUE_0: 'all' },
-    },
-  );
-} catch {
-  die('export/upload failed — xcodebuild output above says why. The archive is preserved; re-run --upload once the issue is fixed.');
-}
+uploadArchive({
+  archivePath,
+  archiveDir,
+  team,
+  cwd: join(REPO, 'ios/App'),
+  env: { ...process.env, GIT_CONFIG_VALUE_0: 'all' },
+  die,
+});
 
 console.log(`\n✅ build ${buildNumber} uploaded. Archive kept at: ${archivePath}\n`);

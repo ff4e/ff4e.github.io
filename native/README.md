@@ -1,4 +1,4 @@
-# Native host (macOS today; tvOS and Xbox are the point)
+# Native host (macOS and Apple TV; Xbox is next)
 
 > **Experimental. Not shipped, not part of the web or iOS build, and `src/` does not depend on
 > it.** Nothing under `native/` is imported by the game; it only imports *from* `src/`. Its
@@ -75,7 +75,8 @@ ignored): any change to the source fails `npm run test` until the copy has been 
 against it and the pin updated — the failure prints the new hash.
 `localStorage` is a JSON file the host owns (`--store FILE`, by default `store.json` in the
 user's app-support directory — `~/Library/Application Support/ff4e/Fish Fillets 4ever/` on
-macOS), so progress and save slots use the browser game's keys and format. Each write is
+macOS; on tvOS, which keeps no app data for sure, SDL's choice, `Library/Caches/ff4e/Fish
+Fillets 4ever/`: see "Apple TV"), so progress and save slots use the browser game's keys and format. Each write is
 flushed to disk before it replaces the store, and the previous store is kept as
 `store.json.bak`. A damaged store falls back to the backup; with both damaged the game
 refuses to start and says so, rather than run without saving or overwrite them.
@@ -259,7 +260,8 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   host turns `SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS` on there — the remote's Menu goes to the
   system, which goes Home — and off everywhere else (`systemBack`, `native/host/main.c`). The
   host also sets `SDL_HINT_TV_REMOTE_AS_JOYSTICK` to 1 on tvOS rather than rely on SDL's
-  default. Both are written from SDL 3.4's source and **unverified until there is a device**.
+  default. Both are written from SDL 3.4's source and **unverified until there is a device**
+  (the tvOS build compiles and links them: see "Apple TV").
   The pad's Ⓑ still does nothing on the plain map, on purpose.
 - **☰ in a room opens the pause menu**, on every native platform. The controller spec's A3
   has the pad's ☰ open Options directly; its B4 has it open the pause menu on tvOS. A deliberate
@@ -591,12 +593,12 @@ Remote. The host sends each as its own codes (`native/host/main.c`); `native/js/
 decides what they do. The remote is modelled from SDL's source — on tvOS SDL presents it as a
 gamepad (`SDL_HINT_TV_REMOTE_AS_JOYSTICK`): the click is A, Play/Pause X, Back B, the touch
 surface the left stick; on a 2nd/3rd-generation remote a click on the ring's edge is that
-d-pad button and a centre click is A — and has **not** been run on an Apple TV. One gap is
-known, on the 1st-generation remote (no ring): its edge click is read from where the thumb
-rests, which needs absolute d-pad values (`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL
-leaves them relative, so a tvOS target must set it (with absolute values, swipes should then
-come from motion rather than position). A slide followed by a click within 120 ms is one
-click, not a swipe and a click. On a Mac, `--remote-keys` makes the keyboard a remote, and
+d-pad button and a centre click is A — and has **not** been run on an Apple TV. On the
+1st-generation remote (no ring) an edge click is read from where the thumb rests, which needs
+absolute d-pad values (`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL leaves them relative,
+so the tvOS build sets them itself (`native/host/platform_tvos.m`) and measures swipes from
+where the thumb touched down rather than from its position (`remote_motion` in `main.c`). A
+slide followed by a click within 120 ms is one click, not a swipe and a click. On a Mac, `--remote-keys` makes the keyboard a remote, and
 the whole keyboard counts as the remote: any other key it sends (a letter, F2) leaves the
 remote the last input, so its hints stay up.
 
@@ -653,9 +655,118 @@ Other flags:
 - `--audio-log` prints every sound the game starts.
 - `--remote-keys` makes the keyboard a Siri Remote (above) and starts the legend in its glyphs,
   as a tvOS build always starts (`__native.tv`); a Mac starts with the keyboard's: none.
+- `--tv-safe-area` lays the menus and the legend out inside the title-safe insets tvOS gives a
+  TV (scaled to the window), to see on a Mac where they go on one.
+- `--startup-probe` checks what the game needs at start except the GPU — the store, the
+  assets, the sound — prints one line and quits (`native/js/startupProbe.ts`). It is what runs
+  in the Apple TV Simulator, and a `native:check` step.
+- `--read-log FILE` lists every asset the run read (see "Apple TV": the app's asset subset).
 
 From a Rosetta shell, prefix the commands with `arch -arm64`, or the universal tools
 build x86_64.
+
+## Apple TV
+
+The same host, the same bundle, built for tvOS. It is the iOS app's App Store record (a
+universal purchase): the bundle id `io.github.ff4e.fishfillets4ever`, under the existing app.
+
+    npm run native:tvos                       # device build, unsigned: compiles and links?
+    npm run native:tvos -- --simulator        # the Apple TV Simulator
+    npm run release:testflight:tvos -- --build N        # a signed archive (tools/, read its header)
+
+Every tvOS build, the device's included, needs Xcode's tvOS Simulator runtime: `actool` will
+not compile the asset catalog for tvOS without one (`xcodebuild -downloadPlatform tvOS`).
+
+`native/tvos/build.mjs` bundles the JS, stages the assets, has CMake generate an Xcode project
+for tvOS from `native/CMakeLists.txt` (`-G Xcode -DCMAKE_SYSTEM_NAME=tvOS`, into
+`native/build/tvos/`) and runs `xcodebuild`. **Why CMake's Xcode generator, not a checked-in
+Xcode project:** the host's sources and the four pinned, hashed dependencies are listed once,
+for every platform — QuickJS-ng, SDL3, libwebp and FreeType all build for tvOS from the same
+`FetchContent` pins with no change — and the generated project is what only Xcode can do:
+automatic signing, the asset catalog, `xcodebuild archive`. A second project would be a second
+list to keep in step. The dependencies' static libraries are marked `SKIP_INSTALL`, so an
+archive holds the app alone. tvOS 17 is the floor: every Apple TV Apple still supports, the HD included, runs it.
+
+**The app** (`native/tvos/`): `Info.plist` — the remote alone is enough
+(`GCSupportsControllerUserInteraction`; the micro and extended gamepad profiles supported,
+none required), the puzzle-games category, arm64, a black launch screen (`UILaunchScreen`, the
+splash's black), one scene (SDL supplies the scene delegate); `FishFillets.entitlements` —
+iCloud key-value storage only (its use is the saves' work, #222); `Assets.xcassets` — the
+layered App Icon and the Top Shelf images. **The artwork is a placeholder**, made by
+`make-placeholder-art.mjs` from `public/app-icon.png` and `public/cover.webp`; the real
+parallax icon and Top Shelf replace its PNGs one for one, same names and sizes.
+
+**What it ships** (`native/tvos/stage.mjs`): `game.js` and the part of `public/` the native
+host reads, by rule — the `ai` tier's art, the rooms, their subtitles and the staged speech,
+the AAC music, the AI movies, the fonts, the help figures. Not the faithful and `enhanced`
+tiers, the 1998 help bitmaps, the WAV originals, the faithful movies, nor the 1998 `.ffs`
+speech the `.ffs2` was staged from. **348 MB of 689** (the app, signed and with its asset
+catalog: 347 MB on disk; tvOS allows 4 GB). The rules are checked, not trusted:
+`native:check` runs every smoke with `--read-log` and then `stage.mjs --check`
+(`tvos-assets`), which fails on any file the game read that the app would not ship. (The
+smokes' read is a lower bound — ZAVER's art, a story page nobody reached — which is why the
+rules are by directory and kind, and the check only ever adds to them.)
+
+**tvOS in the host** (`main.c` and `platform_tvos.m`, under `SDL_PLATFORM_TVOS`):
+
+- *Started with no arguments*: the bundle and the assets are found in the app
+  (`SDL_GetBasePath`); launch arguments are the game's.
+- *The window* is the screen, at its pixels: 1920×1080, or 3840×2160 on a 4K Apple TV driving
+  a 4K set (two pixels a point, `SDL_WINDOW_HIGH_PIXEL_DENSITY`). Everything is laid out for the
+  window it gets, as on a Mac; the menus' icons are rasterised for its height at start.
+- *Title-safe area.* The menus, the legend and the intro's skip hint keep inside the view's
+  `safeAreaInsets` (60 points above and below, 80 at the sides; `__native.safeArea`,
+  `native/js/safeArea.ts`): the UI layer is drawn into the safe rectangle and laid out for
+  its size, a menu's scrim still dims the whole window. The pictures — the room, the map, a
+  movie — stay letterboxed to the whole screen, as a TV game's picture is, and so do the
+  subtitles, which are the room's. The menu smoke checks, at 1920×1080 with those insets,
+  that nothing of Options, the room's legend or the pause menu is drawn outside them.
+- *Sound*: the audio session is **solo ambient** (`SDL_HINT_AUDIO_CATEGORY`), not SDL's
+  default (playback, mixing with others): the music and the voices are the game, so another
+  app's music stops while it plays, as for most games, and nothing asks to keep sounding in
+  the background, which the app does not declare. A TV has no silent switch, so ambient's
+  difference there is moot.
+- *Leaving and coming back.* An SDL event watch — called inside the system's own callback,
+  before the app is suspended — holds the mixer and the movie clock where they are and
+  pauses the outputs (`audio_suspend`), and the loop stops stepping and drawing (no GPU work is
+  allowed in the background). The first frame back delivers `!background`, and a room is
+  paused as Back pauses it: the pause menu up, the room held (`uiInput.ts`). The map, an open
+  menu, the intro and the briefcase story carry on where they stopped. Losing the screen to
+  Control Center or Siri is the same event. Nothing needs saving on the way out: every store
+  write is already on disk (`n_storeSave`). The menu smoke drives `!background` on the map and
+  in a room.
+- *The store*: SDL's tvOS pref path is `Library/Caches/ff4e/Fish Fillets 4ever/store.json` —
+  tvOS keeps nothing on the device for sure, and Caches may be emptied when the app is not
+  running. Keeping progress across that (the 500 KB local limit, iCloud key-value storage) is
+  the saves' work, #222; until it lands a purge loses progress.
+- *The remote*: absolute d-pad values on every micro gamepad, swipes measured from the
+  touch-down (see Controls).
+- *No GPU*: SDL GPU (Metal) does not start in the Apple TV Simulator ("Device does not meet
+  the hardware requirements"). The host then says so in an alert and quits, rather than
+  crash; with `--startup-probe` it carries on without one.
+
+**What has run without a device.** In the Apple TV Simulator (tvOS 26.5, `Apple TV 4K (3rd
+generation)`): the app installs and launches, the alert above appears, and the startup probe
+passes — the bundle evaluated in ~40 ms, `__native.tv` true, the store written under
+`Library/Caches`, a device audio output opened, the menu music decoded by Audio Toolbox:
+
+    xcrun simctl launch --console-pty <udid> io.github.ff4e.fishfillets4ever --startup-probe
+
+The device build compiles, links (arm64, tvOS 17) and archives with signing off. Everything
+drawn, the remote, the lifecycle and the safe area wait for a device — and so does how the
+remote is told from a pad: by a name with "Remote" in it (`is_remote`); the Simulator's
+stand-in reports itself as "Gamepad".
+
+**Signing.** Automatic, for the paid team, as the iOS lane: the archive is signed with a tvOS
+development profile Xcode creates (`-allowProvisioningUpdates`) and re-signed for the App
+Store at export. On 2026-11-24 it stopped at the account: *"PLA Update available … agree to
+the latest Program License Agreement"* — Apple creates no new profile until the account
+holder accepts it at developer.apple.com — and so *"No profiles for
+'io.github.ff4e.fishfillets4ever' were found … tvOS App Development"*. After that, if Xcode
+says the team has no devices to make a development profile from, register the Apple TV (Xcode
+→ Devices and Simulators, pair it over the network). Before the first upload, add the tvOS
+platform to the app in App Store Connect. tvOS builds are numbered on their own, from 1: App
+Store Connect keeps each platform's versions and builds apart.
 
 ## Does it play? The smoke gate (`native/js/smoke.ts`)
 
@@ -857,10 +968,14 @@ with the self-test, after the map comparison.
 ## What it does not do yet
 
 - **The faithful side panel** is not drawn: a TV plays from the legend and the pause menu.
-- **A tvOS build.** The remote's scheme is built and gated on a Mac (`--remote-keys`), but
-  its SDL mapping, and Back at the map's root going to the system, have not met a real remote.
-- **Sound, beyond the rooms, the map, the movies and KUFRIK's story:** an audio session for
-  tvOS (interruptions, routing — `onGesture`/`onVisible` are no-ops here). The AAC is decoded
+- **Run on an Apple TV.** The tvOS app builds, archives (unsigned; signed once the account
+  allows: see "Apple TV") and starts in the Simulator up to the GPU, but nothing has run on a
+  device: the remote's SDL mapping, Back at the map's root going to the system, the absolute
+  d-pad, the audio session, the lifecycle, the safe area and the frame rate at 4K are all
+  written from documentation and source.
+- **Sound, beyond the rooms, the map, the movies and KUFRIK's story:** audio routing, and an
+  interruption (a call on a paired device) beyond SDL's own handling — `onGesture`/`onVisible`
+  are no-ops here. The AAC is decoded
   on the main thread as a room is entered (~1.2 s for all 100 minutes of speech, so a few
   tens of ms a room); decoded music stays cached for the session, as the browser's does (mono
   float32 at 22050 Hz: ~10 MB a track).

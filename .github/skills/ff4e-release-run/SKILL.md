@@ -1,6 +1,6 @@
 ---
 name: ff4e-release-run
-description: Release Fish Fillets 4ever to web or TestFlight, run it in the iOS Simulator/on a connected iPhone/iPad, check the latest released version, or launch the web build locally in a browser — using the repo's tools/*.mjs scripts instead of re-deriving the steps. Use for "release ff4e", "ship a new web/TestFlight build", "what version is live", "run ff4e locally/in the simulator", or "install ff4e on my phone".
+description: Release Fish Fillets 4ever to web or TestFlight (iOS or Apple TV), run it in the iOS Simulator/on a connected iPhone/iPad, check the latest released version, or launch the web build locally in a browser — using the repo's tools/*.mjs scripts instead of re-deriving the steps. Use for "release ff4e", "ship a new web/TestFlight build", "what version is live", "run ff4e locally/in the simulator", or "install ff4e on my phone".
 ---
 
 # Fish Fillets 4ever — release/run automation
@@ -77,6 +77,38 @@ same as web release. Without `--upload` the script only produces a local
 `.xcarchive` (safe, reversible, nothing leaves the Mac) — use that alone to validate
 a change before asking whether to actually ship it.
 
+## 3b. Release for Apple TV (TestFlight)
+
+```bash
+npm run release:testflight:tvos -- --build N                 # archive only — safe, local
+npm run release:testflight:tvos -- --build N --version 1.0.1  # tvOS has its own version
+npm run release:testflight:tvos -- --build N --upload         # archive AND ship to TestFlight
+```
+
+`tools/release-testflight-tvos.mjs` (read its header). The Apple TV app is the native host
+(`native/`), not the iOS web view: it builds `native/build/game.js`, stages the assets the
+host reads (`native/tvos/stage.mjs`, ~350 MB), generates an Xcode project with CMake and
+archives it (`native/tvos/build.mjs`). Same bundle id and App Store app as iOS (universal
+purchase), same team, same two stages, same `--upload` rule as §3.
+
+- **Build numbers are tvOS's own** — App Store Connect keeps each platform's versions and
+  builds apart, so `N` starts at 1 and follows the last *tvOS* build, whatever iOS is at.
+- **What the user must do in App Store Connect / the developer account first** (an agent
+  cannot): accept the current Program License Agreement at developer.apple.com (archives
+  fail with "PLA Update available" until then — seen 2026-11-24), and add the tvOS platform
+  to the app (app page → "+" beside the platforms → tvOS) before the first `--upload`. If
+  Xcode then says the team has no devices for a development profile, pair the Apple TV in
+  Xcode → Devices and Simulators.
+- The app uses iCloud key-value storage (`native/tvos/FishFillets.entitlements`); automatic
+  signing enables it on the App ID.
+
+Without signing, to check the build alone:
+
+```bash
+npm run native:tvos                     # device build, signing off: compiles and links?
+npm run native:tvos -- --simulator      # Apple TV Simulator build
+```
+
 ## 4. Run in the iOS Simulator
 
 ```bash
@@ -90,6 +122,22 @@ provisioning involved; the Simulator signs everything locally. Prefers an
 already-booted simulator so repeat runs in one session don't keep rebooting.
 Verified working end-to-end (2026-09-28): build, install, launch all succeeded and
 `simctl launch` returned a live PID.
+
+### The Apple TV Simulator
+
+SDL GPU (Metal) does not start there: the app shows an alert saying so. What can run is the
+startup probe — the bundle, the store, the assets and the sound, no GPU:
+
+```bash
+npm run native:tvos -- --simulator
+xcrun simctl boot "Apple TV 4K (3rd generation)"
+xcrun simctl install "Apple TV 4K (3rd generation)" native/build/tvos/xcode-sim/Release-appletvsimulator/FishFillets.app
+xcrun simctl launch --console-pty "Apple TV 4K (3rd generation)" io.github.ff4e.fishfillets4ever --startup-probe
+```
+
+It ends with `startup probe: ok — …`. Needs the tvOS Simulator runtime
+(`xcodebuild -downloadPlatform tvOS`, ~3.8 GB) — which every tvOS build needs anyway: actool
+will not compile the asset catalog for tvOS without it.
 
 ## 5. Run on a locally connected iPhone/iPad
 
@@ -122,7 +170,7 @@ touched to preserve its existing verified behavior.
 
 ## Never do without being explicitly asked
 
-- Actually tag/push/release the web build, or `--upload` a TestFlight build.
+- Actually tag/push/release the web build, or `--upload` a TestFlight build (iOS or tvOS).
 - Change `device-build.mjs`'s throwaway bundle id, or sign the real id with a free
   personal-team certificate.
 - Commit anything from these scripts' output (archives, derived data, logs) —

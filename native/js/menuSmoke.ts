@@ -111,6 +111,22 @@ async function untilReady(): Promise<void> {
 
 const moves = (): number => lengthOfRecord(engine?.srecord ?? '');
 
+/**
+ * Whether a recorded op lies inside a `w`×`h` area: its box (a text op's pen and the line of
+ * its size above its baseline — its right end is not recorded, only that it starts inside).
+ */
+function opInside(op: UiOp, w: number, h: number): boolean {
+  const n = (i: number): number => op[i] as number;
+  const box = (x: number, y: number, bw: number, bh: number): boolean => x >= 0 && y >= 0 && x + bw <= w && y + bh <= h;
+  switch (op[0]) {
+    case 'rect': case 'frame': case 'strip': return box(n(1), n(2), n(3), n(4));
+    case 'image': return box(n(2), n(3), n(4), n(5));
+    case 'shape': case 'icon': return box(n(2), n(3), n(4), n(4));
+    case 'text': return n(2) >= 0 && n(2) < w && n(3) - n(4) >= 0 && n(3) <= h;
+    default: return false;
+  }
+}
+
 /** The picture's box in a `ww`×`wh` window: the room's composite, or the map, letterboxed. */
 function pictureBox(cw: number, ch: number, ww: number, wh: number): Box {
   const k = Math.min(ww / cw, wh / ch);
@@ -185,6 +201,20 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     for (let i = 0; i < 10_000 && !draw(target, 0); i++) await new Promise((r) => setTimeout(r, 0));
     return roomHints();
   };
+  /**
+   * Draw the layer at 1920×1080 inside tvOS's title-safe insets (80 px at the sides, 60 above
+   * and below): every op it records — in the safe area's coordinates — must lie inside it.
+   */
+  const insideSafeArea = (what: string): void => {
+    const W = 1920, H = 1080, sw = W - 160, sh = H - 120;
+    const box = ui.screen === 'room' && draw(target, 0) ? pictureBox(target.width, target.height, W, H) : pictureBox(2560, 1920, W, H);
+    const ops = paintUi(W, H, box, [80, 60, 80, 60])?.ops ?? [];
+    // Only a scrim may reach past it: one rectangle exactly the whole window.
+    const scrim = (op: UiOp): boolean => op[0] === 'rect' && op[1] === -80 && op[2] === -60 && op[3] === W && op[4] === H;
+    const out = ops.filter((op) => !opInside(op, sw, sh) && !scrim(op));
+    check(ops.length > 0 && out.length === 0,
+      `${what} at 1920×1080 stays inside tvOS's title-safe area (${out.length} of ${ops.length} drawn outside${out.length ? `, first ${JSON.stringify(out[0])}` : ''})`);
+  };
   /** Did state `name` draw the hints' dark strip (they lie over the picture)? */
   const strip = (name: string): boolean => snaps[name]!.some((op) => op[0] === 'strip');
   const stored = (): ReturnType<typeof loadSettings> => loadSettings();
@@ -197,11 +227,15 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await mapTick();
     snap('map-key');
     check(snaps['map-key']!.length === 0, 'the keyboard on the map: no legend, and no UI layer drawn at all');
+    routeEvent('!background', clock);
+    await settle();
+    check(ui.screen === 'map' && !menuOpen(), 'leaving the app on the map opens nothing');
 
     // ── The map's Options, from the pad's ☰ ────────────────────────────────────────
     await tap('PadMenu');
     check(topMenu()?.kind === 'options' && lastInput() === 'pad', 'the pad\'s ☰ on the map opens Options');
     snap('options-pad');
+    insideSafeArea('Options, with the pad\'s legend,');
     const music0 = settings.volume.music;
     await tap('PadDown');
     await tap('PadDown');
@@ -371,6 +405,15 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     snap('pause-remote');
     await tap('RemoteBack');
     check(!menuOpen() && roomHints(), 'Back resumes, and the room\'s hints are up at once');
+    insideSafeArea('the room\'s remote legend');
+    routeEvent('!background', clock);
+    await settle();
+    const c1 = count;
+    advance(LOGIC_MS * 1.5);
+    advance(LOGIC_MS * 1.5);
+    check(topMenu()?.kind === 'pause' && isPaused() && count === c1, 'leaving the app in a room opens the pause menu, and the room holds');
+    insideSafeArea('the pause menu');
+    await tap('RemoteBack');
     await tap('RemoteBack');
     const order: string[] = [];
     for (let i = 0; i < PAUSE_ITEMS.filter(pauseItemEnabled).length; i++) {

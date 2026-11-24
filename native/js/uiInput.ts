@@ -290,10 +290,15 @@ const INTRO_START: Readonly<Record<string, string>> = { PadA: 'Space', RemoteSel
 
 // ── Entry points ────────────────────────────────────────────────────────────────────
 
-/** One event from `__native.events()`: `+Code`, `-Code` or `!blur`. */
+/** One event from `__native.events()`: `+Code`, `-Code`, `!blur` or `!background`. */
 export function routeEvent(ev: string, now: number = __native.now()): void {
   if (ev === '!blur') {
     inputBlur();
+    return;
+  }
+  if (ev === '!background') {
+    inputBlur();
+    pauseForBackground();
     return;
   }
   const down = ev[0] === '+';
@@ -318,6 +323,18 @@ export function inputFrame(now: number): void {
     menuRepeat.step(null, now);
   }
   undoHoldTick(now);
+}
+
+/**
+ * The app left the foreground (tvOS: Home, an app switch, Control Center over it): the host
+ * stopped the sound and the loop (native/host/main.c, `lifecycle`), and on the first frame
+ * back a room is paused as Back pauses it — the pause menu up, the room and its sound held —
+ * so play never resumes under a player who has not come back to it yet. Elsewhere nothing
+ * changes: the map, a menu already open, the intro and the briefcase story carry on from
+ * where they stopped (the story's Back would skip it, not pause it).
+ */
+function pauseForBackground(): void {
+  if (ui.screen === 'room' && !cutscene && !menuOpen()) openPause();
 }
 
 /** Focus lost: no held input's release will arrive. */

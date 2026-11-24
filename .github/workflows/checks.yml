@@ -133,36 +133,50 @@ jobs:
       - run: node native/build-js.mjs
       - run: cmake -S native -B native/build/cmake -G Ninja -DCMAKE_BUILD_TYPE=Release
       - run: ninja -C native/build/cmake
+      - run: mkdir -p native/build/check/reads
+      - name: Native startup probe, the store, the assets and the sound without the GPU
+        timeout-minutes: 1
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless
+          --startup-probe --store native/build/startup-store.json
       - name: Native smoke, every recorded solution through the real game flow
         timeout-minutes: 5
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke all --smoke-player 13,70 --store native/build/smoke-store.json
+          --read-log native/build/check/reads/smoke.log
       - name: Native map smoke, the world map driven by keys through the real flow
         timeout-minutes: 2
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-map --store native/build/smoke-map-store.json
+          --read-log native/build/check/reads/map-smoke.log
       - name: Native menus, the pause menu, Options, Help and the remote, and the UI layout snapshot
         timeout-minutes: 2
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-menus --store native/build/smoke-menus-store.json
+          --read-log native/build/check/reads/menu-smoke.log
       - name: Native sound, the mixer, every decode and PRVNI's dialogue timing
         timeout-minutes: 2
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-audio --store native/build/smoke-audio-store.json
+          --read-log native/build/check/reads/audio-smoke.log
       - name: Native movies, the intro, its splash and the credits through the real flow
         timeout-minutes: 2
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-movie --store native/build/smoke-movie-store.json
+          --read-log native/build/check/reads/movie-smoke.log
       - name: Native KUFRIK, the briefcase story, its skips, the tutorial demonstration and a Replay
         timeout-minutes: 3
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-kufrik --store native/build/smoke-kufrik-store.json
+          --read-log native/build/check/reads/kufrik-smoke.log
+      - name: The Apple TV app ships every asset the smokes read
+        run: node native/tvos/stage.mjs --check native/build/check/reads
       - run: npx playwright install chromium
       - name: Native vs WebGL parity, all 72 rooms
         run: node --import tsx native/compare.mjs --all

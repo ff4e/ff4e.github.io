@@ -57,7 +57,7 @@ others are small enough to read.
   [`TESTING.md`](TESTING.md).
 - **`native/`** — **experimental, not shipped**: a browser-free host spike (QuickJS-ng + SDL3 GPU)
   that runs the AI tier from `src/` natively — rooms, their subtitles, the world map, the intro
-  movies, the credits and KUFRIK's story — aimed at Apple TV and consoles. Nothing in `src/` imports it. See
+  movies, the credits and KUFRIK's story — on macOS and Apple TV, aimed at consoles too. Nothing in `src/` imports it. See
   [`native/README.md`](native/README.md): the subtitles are `native/js/subtitleLayout.ts` (where
   the glyphs go, restating `subtitleDom.ts`'s desktop layout), `subtitleDraw.ts` (FreeType
   glyphs, `native/host/text.c`, through `Surface2D.fillMask`) and `roomSubtitles.ts` (the game's
@@ -75,7 +75,14 @@ others are small enough to read.
   `uiDraw.ts` (which also has the intro splash's shape and text helpers), in the web touch UI's
   room-toned paint (`uiPalette.ts`, `uiGlass.ts`, `rusticIcons.ts`) and the UI's language
   (`uiStrings.ts`), and `menuSmoke.ts` gates them with `native/ui-layout.snap.json` (and
-  `uiAssetSmoke.ts` checks the icons and the strings' glyphs).
+  `uiAssetSmoke.ts` checks the icons and the strings' glyphs). The UI keeps inside a TV's
+  title-safe area (`safeArea.ts`). The Apple TV app is the same host built for tvOS
+  (native/README.md, "Apple TV"): `native/tvos/` holds its Info.plist, entitlements, asset
+  catalog (placeholder art, `make-placeholder-art.mjs`), the asset subset it ships
+  (`stage.mjs`, checked against what the smokes read) and its build (`build.mjs`, CMake's Xcode
+  generator); `native/host/platform_tvos.m` is the remote's absolute d-pad; the release lane is
+  `tools/release-testflight-tvos.mjs` (sharing `tools/testflight-lib.mjs` with the iOS one).
+  `startupProbe.ts` checks the store, the assets and the sound without a GPU (the Simulator).
 
 ### Map of `src/app/`
 
