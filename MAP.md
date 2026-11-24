@@ -75,7 +75,12 @@ others are small enough to read.
   `uiDraw.ts` (which also has the intro splash's shape and text helpers), in the web touch UI's
   room-toned paint (`uiPalette.ts`, `uiGlass.ts`, `rusticIcons.ts`) and the UI's language
   (`uiStrings.ts`), and `menuSmoke.ts` gates them with `native/ui-layout.snap.json` (and
-  `uiAssetSmoke.ts` checks the icons and the strings' glyphs). The UI keeps inside a TV's
+  `uiAssetSmoke.ts` checks the icons and the strings' glyphs). The store: `shims.ts` is
+  `localStorage` over the host's file; on tvOS it is `tvStore.ts` instead — NSUserDefaults
+  within `storeBudget.ts`'s budget (save slots' undo histories yield), the whole store in a
+  purgeable cache file, progress merged across devices in iCloud by `progressSync.ts` — over
+  `native/host/store.c` (`store_apple.m`; files with `--tv-store` on a Mac), gated by
+  `storeSmoke.ts`. The UI keeps inside a TV's
   title-safe area (`safeArea.ts`). The Apple TV app is the same host built for tvOS
   (native/README.md, "Apple TV"): `native/tvos/` holds its Info.plist, entitlements, asset
   catalog (placeholder art, `make-placeholder-art.mjs`), the asset subset it ships

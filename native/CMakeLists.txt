@@ -81,9 +81,11 @@ file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/shaders_msl.h "static const char SHADERS_
 # Movies: the player (host/movie.c) over the platform's decoder (host/movie.h) — AVFoundation
 # on Apple platforms (host/movie_apple.m, Objective-C with ARC); Media Foundation on Windows.
 enable_language(OBJC)
+# The store: tvOS keeps it in NSUserDefaults and iCloud (host/store.c over host/store_apple.m,
+# Foundation, ARC); a Mac stands in with files under --tv-store DIR.
 add_executable(ff4e-native host/main.c host/text.c host/audio.c host/audio_decode_apple.c
-  host/movie.c host/movie_apple.m)
-set_source_files_properties(host/movie_apple.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
+  host/movie.c host/movie_apple.m host/store.c host/store_apple.m)
+set_source_files_properties(host/movie_apple.m host/store_apple.m PROPERTIES COMPILE_OPTIONS "-fobjc-arc")
 target_include_directories(ff4e-native PRIVATE ${CMAKE_CURRENT_BINARY_DIR} ${libwebp_SOURCE_DIR}/src)
 target_link_libraries(ff4e-native PRIVATE qjs SDL3::SDL3-static webpdecoder freetype)
 if(APPLE)

@@ -175,6 +175,12 @@ jobs:
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-kufrik --store native/build/smoke-kufrik-store.json
           --read-log native/build/check/reads/kufrik-smoke.log
+      - name: Native tvOS store, saves within NSUserDefaults' budget, a purged cache and iCloud
+        timeout-minutes: 2
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless
+          --smoke-store --tv-store native/build/smoke-tv --store native/build/smoke-tv/store.json
+          --read-log native/build/check/reads/store-smoke.log
       - name: The Apple TV app ships every asset the smokes read
         run: node native/tvos/stage.mjs --check native/build/check/reads
       - run: npx playwright install chromium

@@ -151,8 +151,9 @@ export interface NativeApi {
   // ── Input. ──
   /**
    * Input transitions since the last call, oldest first: `+Code` down, `-Code` up,
-   * `!blur` when the window loses focus, and `!background` when the app left the foreground
-   * (delivered on its first frame back: nothing runs in between). A keyboard's Code is the DOM `KeyboardEvent.code`
+   * `!blur` when the window loses focus, `!background` when the app left the foreground
+   * (delivered on its first frame back: nothing runs in between), and `!kvs` when iCloud
+   * brings another device's progress. A keyboard's Code is the DOM `KeyboardEvent.code`
    * the browser game's router reads (`KeyI`, `ArrowUp`, `Space`, `Minus`, `F2`…); a
    * gamepad's is `Pad…` and a TV remote's `Remote…` (the list is in native/host/main.c's
    * input section). `uiInput.ts` routes them.
@@ -223,6 +224,19 @@ export interface NativeApi {
   storeSave(json: string, damaged?: boolean): void;
   /** Where the store is kept, for messages. */
   storePath(): string | null;
+  /**
+   * The store is `TvStore` (`tvStore.ts`): built for tvOS, or `--tv-store DIR` on a Mac,
+   * where the four calls below are files in DIR (`native/host/store.c`).
+   */
+  readonly tvStore: boolean;
+  /** The NSUserDefaults copy (`damaged`: the unreadable one set aside), or null. */
+  prefsLoad(damaged: boolean): string | null;
+  /** Replace it; throws when it cannot (the Mac stand-in: over 500 000 bytes, as tvOS's limit). */
+  prefsSave(json: string, damaged: boolean): void;
+  /** Every `ff4e.` key in iCloud's key-value store, as a JSON object of strings. */
+  kvsLoad(): string;
+  /** Set (or with null remove) one key; throws over its limits (1024 keys, 1 MB, 128-char keys). */
+  kvsSave(key: string, value: string | null): void;
   args(): string[];
   /** Leave the frame loop; the process exits with `code` (default 0). */
   quit(code?: number): void;

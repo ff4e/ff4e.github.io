@@ -50,6 +50,7 @@ const STEPS = [
   { name: 'audio-smoke', run: [host, [...game, '--smoke-audio', '--store', 'native/build/smoke-audio-store.json', ...reads('audio-smoke')]] },
   { name: 'movie-smoke', run: [host, [...game, '--smoke-movie', '--store', 'native/build/smoke-movie-store.json', ...reads('movie-smoke')]] },
   { name: 'kufrik-smoke', run: [host, [...game, '--smoke-kufrik', '--store', 'native/build/smoke-kufrik-store.json', ...reads('kufrik-smoke')]] },
+  { name: 'store-smoke', run: [host, [...game, '--smoke-store', '--tv-store', 'native/build/smoke-tv', '--store', 'native/build/smoke-tv/store.json', ...reads('store-smoke')]] },
   // The Apple TV app ships a subset of public/ (native/tvos/stage.mjs): everything the smokes
   // above read must be in it.
   { name: 'tvos-assets', run: ['node', ['native/tvos/stage.mjs', '--check', readDir]] },

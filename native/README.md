@@ -585,7 +585,7 @@ takes under a minute. Nothing from Homebrew but the build tools is used, so a pa
 upgrade cannot change the pixels `compare.mjs` checks.
 
 **The whole gate in one command:** `npm run native:check` (`native/check.mjs`) runs the
-typecheck, the bundle, the build, the room, map, menu, sound and movie smokes and the four
+typecheck, the bundle, the build, the room, map, menu, sound, movie, KUFRIK and store smokes and the four
 comparisons, in the CI job's order, one summary line per step (logs in `native/build/check/`).
 `-- --only smoke,subs` reruns just those steps after a build. Quote its summary in the PR.
 Controls: keyboard, gamepad (SDL maps any supported controller to an Xbox layout) and Siri
@@ -652,6 +652,8 @@ Other flags:
   from where the store says the player left off.
 - `--seconds N` quits after N seconds.
 - `--store FILE` keeps progress and save slots in FILE instead of the user's.
+- `--tv-store DIR` keeps them as tvOS does (see "Saves on tvOS"), over files in DIR standing in
+  for NSUserDefaults and iCloud; `--store` is then the cache file.
 - `--audio-log` prints every sound the game starts.
 - `--remote-keys` makes the keyboard a Siri Remote (above) and starts the legend in its glyphs,
   as a tvOS build always starts (`__native.tv`); a Mac starts with the keyboard's: none.
@@ -733,12 +735,10 @@ rules are by directory and kind, and the check only ever adds to them.)
   paused as Back pauses it: the pause menu up, the room held (`uiInput.ts`). The map, an open
   menu, the intro and the briefcase story carry on where they stopped. Losing the screen to
   Control Center or Siri is the same event. Nothing needs saving on the way out: every store
-  write is already on disk (`n_storeSave`). The menu smoke drives `!background` on the map and
+  write is made durable when it happens (`n_storeSave`; on tvOS `store.c`). The menu smoke drives `!background` on the map and
   in a room.
-- *The store*: SDL's tvOS pref path is `Library/Caches/ff4e/Fish Fillets 4ever/store.json` —
-  tvOS keeps nothing on the device for sure, and Caches may be emptied when the app is not
-  running. Keeping progress across that (the 500 KB local limit, iCloud key-value storage) is
-  the saves' work, #222; until it lands a purge loses progress.
+- *The store*: NSUserDefaults within its budget, the whole store in a purgeable cache file,
+  progress in iCloud key-value storage — see "Saves on tvOS".
 - *The remote*: absolute d-pad values on every micro gamepad, swipes measured from the
   touch-down (see Controls).
 - *No GPU*: SDL GPU (Metal) does not start in the Apple TV Simulator ("Device does not meet
@@ -965,13 +965,148 @@ The wrong frames measure at least local Δ 47.1 (one letter, `o`→`e`), colour 
 the two rasterisers would both draw (it is not a check of the fonts themselves). CI runs it,
 with the self-test, after the map comparison.
 
+## Saves on tvOS (`native/js/tvStore.ts`, `storeBudget.ts`, `progressSync.ts`, `native/host/store.c`)
+
+On a Mac the store is one JSON file (`--store`, or `store.json` in the user's Application
+Support), written whole and durably on every change (`shims.ts`). tvOS has no such place:
+
+- "your app can only access 500 KB of persistent storage that is local to the device (using
+  the `NSUserDefaults` class). Outside of this limited local storage, all other data must be
+  purgeable by the operating system when space is low" — and the cache directory "may be
+  deleted" "when space is low and your app is not running" (Apple, *App Programming Guide for
+  tvOS*, "Local Storage for Your App Is Limited").
+- SDL knows it: on tvOS `SDL_GetPrefPath` returns a directory in **Caches**
+  (`src/filesystem/cocoa/SDL_sysfilesystem.m`, "tvOS does not have persistent local
+  storage!"). So the file store as it is would lose a player's progress whenever tvOS needed
+  the space.
+- iCloud's key-value store (`NSUbiquitousKeyValueStore`): "no more than 1024 keys", "1
+  megabyte" for all values, "128 characters" a key; a write over a limit fails whole
+  (Apple, `NSUbiquitousKeyValueStore`).
+
+**What there is to keep** — measured with the real undo sampler on every recorded solution
+(`test/undoRoomHarness.ts`; a slot as `saveGame` writes it, one move before the win):
+
+| | bytes |
+| --- | --- |
+| a fresh game (`ff.schema`, `ff.options`) | ~0.2 K |
+| every room solved: `ff.best` | 50.5 K |
+| ... `ff.scores` / `ff.playtime` / `ff.solved` / `ff.options` / `ff.subfont` / `ff.schema` | 0.6 K / 1.0 K / 0.2 K / 0.1 K / 16 / 10 |
+| a save slot, median of 70 rooms (without its undo history: 0.7 K) | 15.8 K |
+| ... ZAVAL, 156 moves (its script state changes on every move) | 120.9 K |
+| ... MAPA 5 983 moves / DISKETA 5 323 / BANKA 1 603 / TRUHLA 2 046 | 82 K / 73 K / 55 K / 41 K |
+| ... the largest without its undo history (MAPA: the record is a byte a move) | 6.2 K |
+| a save in all 70 rooms (without undo histories: 64 K) | 1.42 M |
+| a long session: 2 000 more moves back and forth in ZAVAL / BANKA / UTES | 144 K / 79 K / 32 K |
+
+Progress is small and bounded (~52 K); the save slots are not — the undo history a slot
+carries grows with every move made in the room.
+
+**So there are three copies** (`TvStore`), and the game is not told about any of them — it
+speaks `localStorage` as on the web, and its save logic (`persist.ts`, `saveGame`) is untouched:
+
+1. **NSUserDefaults** (`ff4e.store`, the store as UTF-8 JSON in an `NSData`): the copy that
+   lasts. Written first, on every change, within a **400 000-byte budget** (`TV_BUDGET`; the
+   host refuses over 500 000). Progress — every key that is not `ff.save.N` — is always kept
+   whole. A save slot keeps its move record and script state whole; its undo history is what
+   yields (as `saveGame` already makes it yield to a browser's quota): the *oldest* points go
+   until the slot fits **32 KiB** (`TV_SLOT_CAP`), so a load still steps back through the
+   newest moves (ZAVAL's 157 points → its newest 30). If the copy is still over budget, the
+   other slots lose their history, largest first. Only then: a slot that does not fit even
+   bare is refused (the `QuotaExceededError` `saveGame` handles: no "saved"), and a progress
+   write — never refused — pushes whole slots out of this copy, largest first. With every
+   room solved and a heavy save in 24 rooms the copy is ~398 KB.
+2. **The cache file**: the host's ordinary store file, which on tvOS lives in Caches. It holds
+   everything, whole undo histories included. Every write goes to NSUserDefaults first (then
+   `synchronize`) and to the cache next, with the same write number. At launch the cache is
+   used whenever its number is not older: the same write (it is the fuller copy), or a newer
+   one — NSUserDefaults lost writes the cache kept (it is fsynced; a power cut just after a
+   save), and the NSUserDefaults copy is put right at once. A cache *older* than
+   NSUserDefaults missed a write and is not used. A write NSUserDefaults refuses still goes to
+   the cache and iCloud (and the write is reported failed, as on a Mac); a launch is never
+   stopped by one. While tvOS leaves the cache alone a load
+   resumes exactly what was saved; when it has been purged, the NSUserDefaults copy is the
+   save.
+3. **iCloud's key-value store**: the progress only (`ff.solved`, `ff.cheated`, `ff.scores`,
+   `ff.best`, `ff.playtime`, `ff.options`, `ff.subfont`; ~55 KB), so it survives a reinstall
+   and is shared with the player's other Apple TVs. iCloud resolves a conflict on a key by
+   keeping the newest write, so **no device writes another's key**: each writes its copy under
+   `ff4e.progress.<device id>` (the id lives in the NSUserDefaults copy; a reinstall makes a
+   new one), and every copy is merged (`progressSync.ts`; the web has one copy and no merge
+   rules to mirror — these follow `persist.ts`'s keep-the-best guards):
+
+   | key | merge |
+   | --- | --- |
+   | `ff.solved`, `ff.cheated` | union |
+   | `ff.scores` | the lowest move count per room |
+   | `ff.best` | per room, the record of the copy with the lower score (a tie keeps this device's) |
+   | `ff.playtime` | per room, the sum of every device's *own* time: each copy also carries every device's own time it knows of (largest wins, as it only grows), so two Apple TVs playing offline add up and what one merged from another is not counted twice; never below what the store holds, so an iCloud that reads empty (signed out, another account) takes nothing away |
+   | `ff.options` | per field (`volume.music`, `subtitles`…), the newest *change*: a field carries the time the player last changed it; a first write — a new device's first-run intro writing the defaults — carries none, so it never outweighs settings made elsewhere, and nor does a field the value before lacked (added by a newer version, written as its default); a change is stamped after the field's current stamp, so a device whose clock runs ahead cannot hold a field |
+   | `ff.subfont` | the newest write (only the player choosing a font writes it) |
+
+   A value that is not what its key should hold loses to one that is. Each device's copy is
+   the merge of all, so near 1 MB the copies it already holds everything of are removed.
+   At launch every copy is merged in before the game reads a key. While the game runs,
+   iCloud's change notification (another device, or the first download after a reinstall)
+   becomes the host's `!kvs` event: the progress keys are merged into the store *and* into
+   the running game's own sets (`adoptRemoteProgress`), so the map shows another Apple TV's
+   rooms at once; options apply at the next launch. (So on a new Apple TV whose first iCloud
+   download comes after launch, the intro still plays once, and the options set elsewhere
+   arrive at the next launch — without being overwritten by that intro's defaults.)
+
+An unreadable NSUserDefaults copy is set aside (`ff4e.store.damaged`), never overwritten, and
+the game starts from the cache — or, with no cache, from iCloud's progress. On a Mac,
+`--tv-store DIR` runs all of this over files that stand in for NSUserDefaults
+(`DIR/defaults.json`) and iCloud (`DIR/kvs.json`), with their limits enforced; the cache is
+the `--store` file. Saving ZAVAL's 121 KB slot (cutting it to 32 KiB) takes ~45 ms in
+QuickJS on an M-series Mac.
+
+**What is checked where.** `test/native-tv-store.test.ts` (V8, ~0.6 s): real ZAVAL slots
+(and one 2 000 moves longer) cut to their newest points with record and script state whole;
+every room solved with 24 heavy saves under the budget, progress byte for byte; a purged and
+a stale cache, and a cache newer than NSUserDefaults (which wins); a refused slot and a
+progress write that never is; a damaged defaults copy; the merge table; two Apple TVs writing
+only their own keys and taking in each other's; a new Apple TV's first-run defaults not
+resetting another's options, and per-field option changes from two devices both kept, a
+clock running ahead, a field a newer version adds; play time on two Apple TVs offline adding
+up, and never lowered by an empty iCloud; a failed NSUserDefaults write still writing the
+cache and not stopping a launch; a reinstall getting every room back. The store smoke (below) runs the real game in QuickJS
+over the host's stand-ins. **Needs a device:** that NSUserDefaults really keeps 500 KB on
+tvOS, the iCloud round trip and its notification timing (including the first download after
+a reinstall), and what tvOS actually purges.
+
+**What the app shell needs.** The iCloud capability with **Key-value storage** (no
+CloudKit container): the entitlement `com.apple.developer.ubiquity-kvstore-identifier` =
+`$(TeamIdentifierPrefix)$(CFBundleIdentifier)`, i.e. `<TEAM>.io.github.ff4e.fishfillets4ever`
+under universal purchase's shared bundle id (an iOS build using the same identifier would
+share the store). Apple: to use the store "you must distribute your app through the App
+Store or Mac App Store, and you must request the iCloud key-value store entitlement". Nothing
+else: NSUserDefaults needs no entitlement, and `store.c` starts the store
+(`synchronize`, the change observer) itself.
+
+### Does the store keep? `--smoke-store`
+
+    native/build/cmake/ff4e-native native/build/game.js --root public --headless \
+      --smoke-store --tv-store native/build/smoke-tv --store native/build/smoke-tv/store.json
+
+ZAVAL typed to its last move and saved with F2 through the real `saveGame`: the whole
+attempt in memory and in the cache, NSUserDefaults holding it within the cap with its record
+whole and its newest points; a relaunch with the cache purged finds that save; F3 loads it,
+undo steps back through every kept point and stops at the oldest; the room is finished and
+the win is in NSUserDefaults and in this device's iCloud copy; another device's copy
+arriving (`!kvs`) reaches the running game's sets, its play time adding to this device's;
+every room's best record and 24 heavy
+saves stay under the budget with progress whole; and the stand-ins refuse what tvOS and
+iCloud refuse. 16 checks, ~7 s; the DIR is wiped first. In `native:check` and the
+`native-macos` job after the KUFRIK smoke.
+
 ## What it does not do yet
 
 - **The faithful side panel** is not drawn: a TV plays from the legend and the pause menu.
 - **Run on an Apple TV.** The tvOS app builds, archives (unsigned; signed once the account
   allows: see "Apple TV") and starts in the Simulator up to the GPU, but nothing has run on a
   device: the remote's SDL mapping, Back at the map's root going to the system, the absolute
-  d-pad, the audio session, the lifecycle, the safe area and the frame rate at 4K are all
+  d-pad, the audio session, the lifecycle, the safe area, the store's tvOS side
+  (NSUserDefaults, iCloud: `store.c`, `store_apple.m`) and the frame rate at 4K are all
   written from documentation and source.
 - **Sound, beyond the rooms, the map, the movies and KUFRIK's story:** audio routing, and an
   interruption (a call on a paired device) beyond SDL's own handling — `onGesture`/`onVisible`
