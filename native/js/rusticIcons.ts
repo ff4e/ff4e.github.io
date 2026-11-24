@@ -9,14 +9,16 @@
  *
  * The rasteriser covers what the file uses: M/L/H/V/C/S/A/Z (absolute and relative), nonzero
  * fill, and strokes as their distance to the path (round joins, as the file asks), at 4×4
- * samples a pixel.
+ * samples a pixel. The menus' sizes follow the window's height, so a 4K TV's are big: the
+ * pause menu warms its icons before it is first opened (`warmMenuIcons` in `menuPaint.ts`).
  *
  * Two symbols the web's set has no need for — Resume and Help, in the pause menu — are drawn
  * here in the same hand (uneven outline, one highlight facet, one shade facet).
  */
 import iconSource from '../../src/styles/nativeMenuIcons.svg?raw';
 import type { Image2D } from '../../src/render/surface2d.js';
-import { coverageMask, type Ui } from './uiDraw.js';
+import { countMask, type Ui } from './uiDraw.js';
+import type { NativeImage } from './nativeSurface.js';
 import type { UiPalette } from './uiPalette.js';
 
 const NATIVE_ONLY = `
@@ -186,82 +188,276 @@ function iconSet(): Map<string, readonly Part[]> {
 
 export type IconName = 'map' | 'undo' | 'more' | 'save' | 'load' | 'options' | 'restart' | 'close' | 'resume' | 'help';
 
-/** Every icon the set has (the smoke gate checks each one rasterises). */
+/** Every icon the set has (the menu smoke checks each one rasterises, ink in every part). */
 export const iconNames = (): string[] => [...iconSet().keys()];
 
 // ── Rasterising ─────────────────────────────────────────────────────────────────────
+//
+// Each pixel takes 4×4 samples at (x + (i + .5)/4, y + (j + .5)/4), and a part covers a
+// sample by nonzero winding (a fill) or by lying within half the width of one of its
+// segments (a stroke). This runs in the host's interpreter, so it must not test every
+// segment at every sample (at a 4K TV's 80 px icons that took seconds): a fill walks each
+// sample row once, through the edges that cross it, and a stroke tests each segment only at
+// the samples near it. The samples and their tests are the ones testing everything would
+// make, so the masks are the same.
 
-/** Nonzero winding of the point against closed subpaths. */
-function inside(subpaths: readonly (readonly number[])[], px: number, py: number): boolean {
-  let wn = 0;
-  for (const s of subpaths) {
-    const n = s.length / 2;
-    for (let k = 0; k < n; k++) {
-      const ax = s[2 * k]!, ay = s[2 * k + 1]!;
-      const b = (k + 1) % n;
-      const bx = s[2 * b]!, by = s[2 * b + 1]!;
-      if (ay <= py) {
-        if (by > py && (bx - ax) * (py - ay) - (px - ax) * (by - ay) > 0) wn++;
-      } else if (by <= py && (bx - ax) * (py - ay) - (px - ax) * (by - ay) < 0) wn--;
-    }
-  }
-  return wn !== 0;
+/** Sample `J` (of 4 a pixel) along an axis, in the 24-unit box at `k` units a pixel. */
+const at = (J: number, k: number): number => ((J >> 2) + ((J & 3) + 0.5) / 4) * k;
+
+/** The first sample past `v`: the least `I` in 0..`side` with `at(I, k) > v`. */
+function firstAbove(v: number, k: number, side: number): number {
+  let I = Math.max(0, Math.min(side, Math.floor((v / k) * 4 - 0.5)));
+  while (I > 0 && at(I - 1, k) > v) I--;
+  while (I < side && at(I, k) <= v) I++;
+  return I;
 }
 
-function nearLine(subpaths: readonly (readonly number[])[], px: number, py: number, half: number): boolean {
-  const h2 = half * half;
+/** Add samples `a`..`b`-1 of a row to the counts of the pixels they fall in, from `base`. */
+function addRun(n: Uint8Array, base: number, a: number, b: number): void {
+  while (a < b) {
+    const e = Math.min(b, ((a >> 2) + 1) << 2);
+    n[base + (a >> 2)]! += e - a;
+    a = e;
+  }
+}
+
+/** Nonzero winding at (px, py) of the edges `e` (ax, ay, bx, by, …). */
+function winding(e: readonly number[], px: number, py: number): number {
+  let wn = 0;
+  for (let q = 0; q < e.length; q += 4) {
+    const ax = e[q]!, ay = e[q + 1]!, bx = e[q + 2]!, by = e[q + 3]!;
+    if (ay <= py) {
+      if (by > py && (bx - ax) * (py - ay) - (px - ax) * (by - ay) > 0) wn++;
+    } else if (by <= py && (bx - ax) * (py - ay) - (px - ax) * (by - ay) < 0) wn--;
+  }
+  return wn;
+}
+
+/** Count into `n` (per pixel) the samples a nonzero fill of the closed `subpaths` covers. */
+function fillSamples(subpaths: readonly (readonly number[])[], size: number, k: number, n: Uint8Array): void {
+  const side = 4 * size;
+  // Each edge with the sample rows it may cross (a row or so either side, for safety).
+  const edges: { e: readonly number[]; from: number; to: number }[] = [];
   for (const s of subpaths) {
-    for (let k = 0; k + 3 < s.length; k += 2) {
-      const ax = s[k]!, ay = s[k + 1]!, dx = s[k + 2]! - ax, dy = s[k + 3]! - ay;
+    const m = s.length / 2;
+    for (let q = 0; q < m; q++) {
+      const b = (q + 1) % m;
+      const ay = s[2 * q + 1]!, by = s[2 * b + 1]!;
+      if (ay === by) continue; // a level edge crosses no row
+      edges.push({
+        e: [s[2 * q]!, ay, s[2 * b]!, by],
+        from: Math.max(0, Math.floor((Math.min(ay, by) / k) * 4) - 1),
+        to: Math.min(side - 1, Math.ceil((Math.max(ay, by) / k) * 4) + 1),
+      });
+    }
+  }
+  edges.sort((a, b) => a.from - b.from);
+  const EPS = 1e-9;
+  let next = 0;
+  let live: (typeof edges)[number][] = [];
+  const row: number[] = [], xs: number[] = [], ds: number[] = [];
+  for (let J = edges.length ? edges[0]!.from : side; J < side; J++) {
+    while (next < edges.length && edges[next]!.from <= J) live.push(edges[next++]!);
+    live = live.filter((x) => x.to >= J);
+    if (!live.length) {
+      if (next === edges.length) break;
+      continue;
+    }
+    const py = at(J, k);
+    row.length = xs.length = ds.length = 0;
+    for (const { e } of live) {
+      const ax = e[0]!, ay = e[1]!, bx = e[2]!, by = e[3]!;
+      const d = ay <= py ? (by > py ? 1 : 0) : by <= py ? -1 : 0;
+      if (!d) continue;
+      row.push(ax, ay, bx, by);
+      const x = ax + ((bx - ax) * (py - ay)) / (by - ay);
+      let p = xs.length; // insertion sort: a row crosses a handful of edges
+      while (p > 0 && xs[p - 1]! > x) {
+        xs[p] = xs[p - 1]!;
+        ds[p] = ds[p - 1]!;
+        p--;
+      }
+      xs[p] = x;
+      ds[p] = d;
+    }
+    // Between crossings the winding is constant: left of all of them it is their sum (0,
+    // the edges closing), and past each it loses that edge's direction. A sample within a
+    // hair of a crossing, where rounding could put it on the wrong side, takes the exact test.
+    const base = (J >> 2) * size;
+    let w = ds.reduce((a, b) => a + b, 0);
+    let I = 0;
+    for (let c = 0; c < xs.length; c++) {
+      const lo = firstAbove(xs[c]! - EPS, k, side), hi = firstAbove(xs[c]! + EPS, k, side);
+      if (w !== 0 && I < lo) addRun(n, base, I, lo);
+      for (I = Math.max(I, lo); I < hi; I++) if (winding(row, at(I, k), py) !== 0) n[base + (I >> 2)]!++;
+      w -= ds[c]!;
+    }
+    if (w !== 0) addRun(n, base, I, side);
+  }
+}
+
+/** Count into `n` (per pixel) the samples within `half` of a segment of `subpaths`. */
+function strokeSamples(subpaths: readonly (readonly number[])[], half: number, size: number, k: number, n: Uint8Array): void {
+  const side = 4 * size;
+  const hit = new Uint8Array(side * side);
+  const h2 = half * half;
+  // The samples that may lie within `half` of [lo, hi] along an axis (a sample spare each side).
+  const from = (lo: number): number => Math.max(0, Math.floor(((lo - half) / k) * 4) - 1);
+  const to = (hi: number): number => Math.min(side - 1, Math.ceil(((hi + half) / k) * 4) + 1);
+  for (const s of subpaths) {
+    for (let q = 0; q + 3 < s.length; q += 2) {
+      const ax = s[q]!, ay = s[q + 1]!, dx = s[q + 2]! - ax, dy = s[q + 3]! - ay;
+      const l = dx * dx + dy * dy;
+      const j1 = to(Math.max(ay, ay + dy));
+      for (let J = from(Math.min(ay, ay + dy)); J <= j1; J++) {
+        const py = at(J, k);
+        // The part of the segment within `half` of this row, and so its samples' span.
+        let t0 = 0, t1 = 1;
+        if (dy !== 0) {
+          const ta = (py - half - ay) / dy, tb = (py + half - ay) / dy;
+          t0 = Math.max(0, Math.min(ta, tb));
+          t1 = Math.min(1, Math.max(ta, tb));
+          if (t0 > t1) continue;
+        }
+        const xa = ax + dx * t0, xb = ax + dx * t1;
+        const i1 = to(Math.max(xa, xb)), r = J * side, base = (J >> 2) * size;
+        // The interpreter pays for every call: `at` and the clamp are written out here.
+        for (let I = from(Math.min(xa, xb)); I <= i1; I++) {
+          if (hit[r + I]) continue;
+          const px = ((I >> 2) + ((I & 3) + 0.5) / 4) * k;
+          let t = 0;
+          if (l) {
+            t = ((px - ax) * dx + (py - ay) * dy) / l;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+          }
+          const ex = px - ax - dx * t, ey = py - ay - dy * t;
+          if (ex * ex + ey * ey <= h2) {
+            hit[r + I] = 1;
+            n[base + (I >> 2)]!++;
+          }
+        }
+      }
+    }
+  }
+}
+
+interface Raster {
+  readonly parts: readonly { readonly role: IconRole; readonly img: Image2D; readonly ink: number }[];
+  readonly shadow: Image2D;
+}
+
+/**
+ * The rasters, by size and then icon. A window shows the icons at two sizes (the pause
+ * menu's and the confirm prompt's); a size it no longer uses — the window was resized — is
+ * released when a newer one pushes it out.
+ */
+const rasters = new Map<number, Map<string, Raster>>();
+const KEEP_SIZES = 2;
+
+function release(r: Raster): void {
+  for (const img of [r.shadow, ...r.parts.map((p) => p.img)]) __native.releaseTexture((img as NativeImage).id);
+}
+
+/** Drop every raster (the next draw makes them again). */
+export function releaseIcons(): void {
+  for (const bySize of rasters.values()) for (const r of bySize.values()) release(r);
+  rasters.clear();
+}
+
+/** The cache for `size`, made the most recently used. */
+function sizeCache(size: number): Map<string, Raster> {
+  let bySize = rasters.get(size);
+  if (bySize) rasters.delete(size);
+  else bySize = new Map();
+  rasters.set(size, bySize); // a Map iterates in insertion order: oldest first
+  for (const [old, gone] of rasters) {
+    if (rasters.size <= KEEP_SIZES) break;
+    for (const r of gone.values()) release(r);
+    rasters.delete(old);
+  }
+  return bySize;
+}
+
+/**
+ * Each painted part of icon `name` at `size` px: per pixel, how many of its 16 samples the
+ * part covers. `exhaustive` tests every sample against every edge instead — the obvious way,
+ * far too slow for a frame, which the smoke gate holds the fast one to.
+ */
+export function partCounts(name: string, size: number, exhaustive = false): Uint8Array[] {
+  const parts = iconSet().get(name);
+  if (!parts) throw new Error(`no icon ${name}`);
+  const k = 24 / size;
+  return parts.map((part) => {
+    const n = new Uint8Array(size * size);
+    if (exhaustive) exhaustiveSamples(part, size, k, n);
+    else if (part.stroke === null) fillSamples(part.subpaths, size, k, n);
+    else strokeSamples(part.subpaths, part.stroke / 2, size, k, n);
+    return n;
+  });
+}
+
+function exhaustiveSamples(part: Part, size: number, k: number, n: Uint8Array): void {
+  const edges: number[] = [];
+  for (const s of part.subpaths) {
+    const m = s.length / 2;
+    for (let q = 0; q < m; q++) edges.push(s[2 * q]!, s[2 * q + 1]!, s[2 * ((q + 1) % m)]!, s[2 * ((q + 1) % m) + 1]!);
+  }
+  const h2 = part.stroke === null ? 0 : (part.stroke / 2) ** 2;
+  const near = (px: number, py: number): boolean => part.subpaths.some((s) => {
+    for (let q = 0; q + 3 < s.length; q += 2) {
+      const ax = s[q]!, ay = s[q + 1]!, dx = s[q + 2]! - ax, dy = s[q + 3]! - ay;
       const l = dx * dx + dy * dy;
       const t = l ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / l)) : 0;
       const ex = px - ax - dx * t, ey = py - ay - dy * t;
       if (ex * ex + ey * ey <= h2) return true;
     }
-  }
-  return false;
-}
-
-interface Raster {
-  readonly parts: readonly { readonly role: IconRole; readonly img: Image2D }[];
-  readonly shadow: Image2D;
-}
-
-const rasters = new Map<string, Raster>();
-
-function raster(name: IconName, size: number): Raster {
-  const key = `${name}|${size}`;
-  const hit = rasters.get(key);
-  if (hit) return hit;
-  const parts = iconSet().get(name);
-  if (!parts) throw new Error(`no icon ${name}`);
-  const k = 24 / size;
-  const union = new Float32Array(size * size);
-  const out = parts.map((part) => {
-    const cov = new Float32Array(size * size);
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        let n = 0;
-        for (let j = 0; j < 4; j++) {
-          for (let i = 0; i < 4; i++) {
-            const px = (x + (i + 0.5) / 4) * k, py = (y + (j + 0.5) / 4) * k;
-            if (part.stroke === null ? inside(part.subpaths, px, py) : nearLine(part.subpaths, px, py, part.stroke / 2)) n++;
-          }
-        }
-        cov[y * size + x] = n / 16;
-        union[y * size + x] = Math.max(union[y * size + x]!, n / 16);
-      }
-    }
-    return { role: part.role, img: coverageMask(size, size, cov) };
+    return false;
   });
-  const r = { parts: out, shadow: coverageMask(size, size, union) };
-  rasters.set(key, r);
+  for (let J = 0; J < 4 * size; J++) {
+    for (let I = 0; I < 4 * size; I++) {
+      const px = at(I, k), py = at(J, k);
+      if (part.stroke === null ? winding(edges, px, py) !== 0 : near(px, py)) n[(J >> 2) * size + (I >> 2)]!++;
+    }
+  }
+}
+
+function raster(name: string, size: number): Raster {
+  const bySize = sizeCache(size);
+  const hit = bySize.get(name);
+  if (hit) return hit;
+  const roles = iconSet().get(name)!;
+  const union = new Uint8Array(size * size);
+  const out = partCounts(name, size).map((n, i) => {
+    let ink = 0;
+    for (let p = 0; p < n.length; p++) {
+      ink += n[p]!;
+      if (n[p]! > union[p]!) union[p] = n[p]!;
+    }
+    return { role: roles[i]!.role, img: countMask(size, size, n, 16), ink: ink / 16 };
+  });
+  const r = { parts: out, shadow: countMask(size, size, union, 16) };
+  bySize.set(name, r);
   return r;
 }
 
+/** The box `drawIcon` draws a `size` icon in. */
+const iconPx = (size: number): number => Math.max(8, Math.round(size));
+
+/**
+ * Rasterise icon `name` for `size` now, as its first `drawIcon` would, and return each
+ * painted part's ink (its coverage summed, in pixels): to have it ready before a menu
+ * needs it, and for the smoke gate.
+ */
+export function warmIcon(name: string, size: number): number[] {
+  return raster(name, iconPx(size)).parts.map((p) => p.ink);
+}
+
+/** Whether icon `name` for `size` is rasterised already. */
+export const iconReady = (name: string, size: number): boolean => !!rasters.get(iconPx(size))?.has(name);
+
 /** Icon `name` in the `size`×`size` box at (x, y), in `pal`'s colours, at `alpha`. */
 export function drawIcon(ui: Ui, name: IconName, x: number, y: number, size: number, pal: UiPalette, alpha = 1): void {
-  const s = Math.max(8, Math.round(size));
+  const s = iconPx(size);
   const r = raster(name, s);
   ui.record(['icon', name, Math.round(x), Math.round(y), s]);
   // drop-shadow(0 1px 1px #000c), at the icon's scale.

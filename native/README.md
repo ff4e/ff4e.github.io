@@ -196,7 +196,10 @@ Surfaces are its translucent slate glass with the hairline edge and the inset be
 (`uiGlass.ts`); the pause menu and the confirm prompt carry its rustic carved icons
 (`src/styles/nativeMenuIcons.svg`, bundled as text and rasterised natively per colour role —
 `rusticIcons.ts`; Resume and Help, which the web has no button for, are drawn in the same
-hand); labels are its ink with its soft dark shadow. Focus is the touch UI's pressed state —
+hand). The icons' size follows the window's height, so the UI layer rasterises the menus'
+icons when it starts, and after a resize one a frame while no menu is up: at a 4K TV's
+2160 lines the first pause menu would otherwise wait for them (~50 ms on a Mac; ~6 s before
+the rasteriser stopped testing every segment at every sample). Labels are its ink with its soft dark shadow. Focus is the touch UI's pressed state —
 how a held button looks — and, on the Options face, its touch Options' `--menu-accent` outline.
 
 **Every string is in the UI's language** (`uiStrings.ts`): Czech or English, the language the
@@ -639,7 +642,11 @@ the legend is where it was with either fish active. With Czech subtitles the pau
 legend, the confirm prompt and Options are Czech. In windows the map, a room and a story page fill, the
 hints lie on their dark strip; in a letterbox margin, they do not. A room's first frame shows
 the remote's hints (room 1, and KUFRIK), and so does the room on leaving the pause menu; with
-`--remote-keys` a key the host leaves unmapped keeps them. 84 checks, ~10 s.
+`--remote-keys` a key the host leaves unmapped keeps them. First, though, what the UI draws
+with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted part, the
+fast rasteriser's masks equal the exhaustive one's, the whole set's time at 2160 lines is
+printed (under a bound far above it), and every UI string in both languages has a real glyph
+for each character in both of the UI font's weights. 88 checks, ~10 s.
 
 It also checks the **UI layout snapshot**: at 24 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills) and the list of what it drew — every
