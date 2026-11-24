@@ -25,6 +25,12 @@
  *   - the credits roll over the map: any button closes it (Back included — it never leaves
  *     the game from there).
  *
+ * The remote's swipes are made here, from the thumb's travel on its touch surface
+ * (`remoteSwipe.ts`, fed once a frame), and routed as `RemoteSwipe…` presses: in a menu and
+ * on the map they step, anywhere else they do nothing. There, a click toward the edge a swipe
+ * has just stepped to is that swipe's end and is dropped, so a swipe that finishes on the
+ * ring moves one step, not two.
+ *
  * Each event goes to the screen up when it arrives — one can change the screen. A release
  * off the room always reaches the map's router, the intro included: a direction held while
  * Ⓐ starts a movie and let go during it must not stay held on the map (`mapKeyUp` only
@@ -41,6 +47,7 @@ import { mapBlur, mapBusy, mapKeyDown, mapKeyUp, mapPanelOpen } from './mapScree
 import { menuAct, menuOpen, openConfirm, openOptions, openPause, type MenuAct } from './menus.js';
 import { roomLoading } from './seams/framePacing.js';
 import { introKeyDown } from './introScreen.js';
+import { SwipeTracker, type SwipeDir } from './remoteSwipe.js';
 
 export type InputSource = 'key' | 'pad' | 'remote';
 
@@ -283,6 +290,46 @@ function mapKey(down: boolean, code: string): void {
   else mapKeyUp(key);
 }
 
+// ── The remote's swipes ─────────────────────────────────────────────────────────────
+
+const swipes = new SwipeTracker();
+const SWIPE_CODE: Readonly<Record<SwipeDir, string>> = {
+  up: 'RemoteSwipeUp', down: 'RemoteSwipeDown', left: 'RemoteSwipeLeft', right: 'RemoteSwipeRight',
+};
+const SWIPE_OF: Readonly<Record<string, SwipeDir>> = {
+  RemoteSwipeUp: 'up', RemoteSwipeDown: 'down', RemoteSwipeLeft: 'left', RemoteSwipeRight: 'right',
+};
+/** The remote's clicks, and the edge each is toward (null: the centre). */
+const CLICK_EDGE: Readonly<Record<string, SwipeDir | null>> = {
+  RemoteUp: 'up', RemoteDown: 'down', RemoteLeft: 'left', RemoteRight: 'right', RemoteSelect: null,
+};
+/** Clicks dropped as a swipe's end: their releases are dropped too. */
+const swallowed = new Set<string>();
+
+/** Do swipes do anything here? In a menu and on the map (B2); never in a room. */
+const swipesAct = (): boolean => menuOpen() || (ui.screen === 'map' && ui.mapOverlay !== 'credits' && !ui.creditsLoading);
+
+/**
+ * A remote click or swipe, before it is routed: true when it is consumed here — a click that
+ * ends a swipe, or that click's release.
+ */
+function swipeFilter(down: boolean, code: string, now: number): boolean {
+  const swipe = SWIPE_OF[code];
+  if (swipe) {
+    if (down) swipes.swiped(swipe, now);
+    return false;
+  }
+  if (!(code in CLICK_EDGE)) return false;
+  if (!down) {
+    swipes.press(false);
+    return swallowed.delete(code);
+  }
+  swipes.press(true);
+  if (!swipesAct() || !swipes.endsSwipe(CLICK_EDGE[code] ?? null, now)) return false;
+  swallowed.add(code);
+  return true;
+}
+
 // ── The intro ───────────────────────────────────────────────────────────────────────
 
 /** The splash's start button, from the pad and the remote (the keyboard's Space/Enter pass as they are). */
@@ -308,6 +355,7 @@ export function routeEvent(ev: string, now: number = __native.now()): void {
   const down = ev[0] === '+';
   const code = ev.slice(1);
   if (down) last = keyboardIsRemote && sourceOf(code) === 'key' ? 'remote' : sourceOf(code);
+  if (swipeFilter(down, code, now)) return;
   if (!down && code === 'RemotePlayPause' && undoHold) {
     undoHoldUp(); // wherever the release lands — a menu, the map — the hold ends with it
     return;
@@ -318,9 +366,13 @@ export function routeEvent(ev: string, now: number = __native.now()): void {
   else mapKey(down, code);
 }
 
-/** Once a frame: who owns Back, menu repeat, the held undo. */
+/** Once a frame: who owns Back, the remote's swipes, menu repeat, the held undo. */
 export function inputFrame(now: number): void {
   systemOwnsBack = __native.systemBack(atMapRoot());
+  for (const dir of swipes.feed(__native.remoteTouch(), now)) {
+    routeEvent(`+${SWIPE_CODE[dir]}`, now);
+    routeEvent(`-${SWIPE_CODE[dir]}`, now);
+  }
   if (menuOpen()) menuSteer(now);
   else if (menuHeld.length) {
     menuHeld.length = 0; // the menu closed under a held direction
@@ -349,4 +401,6 @@ export function inputBlur(): void {
   menuRepeat.step(null, 0);
   if (undoHold) undoHold.stopped = true;
   undoHold = null;
+  swipes.reset();
+  swallowed.clear();
 }

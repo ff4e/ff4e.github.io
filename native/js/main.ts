@@ -163,13 +163,14 @@ async function main(): Promise<void> {
   }
   initGame({ verbose: true, demo: flag('--demo'), openCorner: () => openOptions() });
   await loadSubtitleAssets();
-  await initUiLayer();
-  void ensureOptionsArt();
   // The legend needs a source before the first press: on tvOS the remote (the keyboard would
   // show no hints at all); on a Mac the keyboard, unless it is standing in for a remote.
   if (flag('--remote-keys') || __native.tv) setLastInput('remote');
   if (flag('--remote-keys')) setKeyboardIsRemote(true);
   if (flag('--tv-safe-area')) simulateTvSafeArea();
+  void ensureOptionsArt();
+  // The menus get ready for the window now, beside the map's picture (the first screen).
+  await initUiLayer(windowLayout(AI_MAP_W, AI_MAP_H)?.picture);
   console.log(`sound: ${mixer.mode}, mixing at ${MIX_RATE} Hz`);
   if (arg('--room')) await enterRoom(Number(arg('--room')));
   else if (flag('--demo')) await enterRoom(firstRoom());

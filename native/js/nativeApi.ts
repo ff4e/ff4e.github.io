@@ -119,6 +119,12 @@ export interface NativeApi {
    * quit itself (native/host/main.c, `n_systemBack`).
    */
   systemBack(atRoot: boolean): boolean;
+  /**
+   * Where the thumb is on the Siri Remote's touch surface, `[x, y]` in -1..1 (right, down),
+   * or null when nothing touches it, no remote is connected, or headless
+   * (native/host/main.c, `n_remoteTouch`). Read by `remoteSwipe.ts` through `uiInput.ts`.
+   */
+  remoteTouch(): [number, number] | null;
   /** A text file by plain path (not under the asset root), or null when absent. */
   readText(path: string): string | null;
   /** Write a text file by plain path. Throws when it cannot. */

@@ -174,8 +174,8 @@ With none stored, the native host follows the **system language** — Czech on a
 (`locale`), else English. That is a deliberate difference from the browser, which gives a
 desktop English whatever its locale (#149): a TV or a console has no browser language picker,
 and its system language is the player's choice. The face is `ff.subfont`, the browser's pick,
-Mulish by default. Both can be changed in the native Options (below), which writes the same
-keys.
+Mulish by default. The language can be changed in the native Options (below), which writes the
+same key; the face cannot (Options has no font row), but a stored `ff.subfont` is still read.
 
 Approximate by nature, against the browser's own shaping and scaler — see
 `compare-subs.mjs` below for how close, and how a wrong one is caught. Also not reproduced:
@@ -198,11 +198,33 @@ Surfaces are its translucent slate glass with the hairline edge and the inset be
 (`uiGlass.ts`); the pause menu and the confirm prompt carry its rustic carved icons
 (`src/styles/nativeMenuIcons.svg`, bundled as text and rasterised natively per colour role —
 `rusticIcons.ts`; Resume and Help, which the web has no button for, are drawn in the same
-hand). The icons' size follows the window's height, so the UI layer rasterises the menus'
-icons when it starts, and after a resize one a frame while no menu is up: at a 4K TV's
-2160 lines the first pause menu would otherwise wait for them (~50 ms on a Mac; ~6 s before
-the rasteriser stopped testing every segment at every sample). Labels are its ink with its soft dark shadow. Focus is the touch UI's pressed state —
+hand). Labels are its ink with its soft dark shadow. Focus is the touch UI's pressed state —
 how a held button looks — and, on the Options face, its touch Options' `--menu-accent` outline.
+
+**A menu opens on the frame it is asked for.** Everything a menu draws is rasterised in the
+interpreter for the window's size — its icons, its words' glyphs, its glass — and on an Apple
+TV QuickJS is several times slower than on a Mac (an A12 core against an M-series one: about
+3.5× by single-core benchmarks; the gates take 5×). So:
+
+- A rounded box is drawn as nine pieces: its corners from the mask of a small box with the
+  same radius, its straight parts as plain rectangles (`uiDraw.ts`, `sliced`) — pixel for
+  pixel the whole mask, but costing its corners, not its area. **This was the 4K pause menu's
+  5-second open on the Apple TV:** at 2160 lines its glass was 2¼ million pixels of
+  distance tests, 581 ms of a 590 ms first frame on an M4 Mac (Options 136 ms, the confirm
+  prompt 146 ms) — seconds on an A12.
+- The menus are **rehearsed** before they are needed (`uiLayer.ts`): drawn onto a surface that
+  keeps nothing, which fills the caches the real drawing then finds full. All of them when the
+  UI starts (after the input source and the safe area are known, for the window it starts in),
+  and again whenever what they would draw changes — the window's size, the language, the
+  input's glyphs, the screen, a setting a menu shows — then within ~2 ms a frame while no menu
+  is up, so play does not hitch (`uiCost.ts`'s `rehearse`). At 2160 lines that takes ~30
+  frames on a Mac.
+- When a menu opens, its first frame's cost is logged by phase — `ui: pause opened at
+  3840×2160, its first frame 0.6 ms: …` — in the device console, and so is the start's.
+
+The menu smoke opens the pause menu, Options, Help and the restart prompt at 3840×2160 inside
+tvOS's insets after the room's frames got them ready, and holds each first frame under 10 ms
+on the Mac (50 ms at the Apple TV's 5×): 0.5–2 ms there now.
 
 **Every string is in the UI's language** (`uiStrings.ts`): Czech or English, the language the
 subtitles and the map's plaques are in (`subLang()`; subtitles off keep the last one chosen),
@@ -225,10 +247,10 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   outline on the row and a caption card of the touch UI's glass beside it naming the row and
   its value. Rows: effect, talk
   and music volume (left/right step the 0..12 slider), subtitles (Čeština / English / off),
-  the subtitle font (the one control the 1998 face has no place for, so it lives in the card,
-  shown in its own face), Help, and Exit options. Every change is persisted to the browser's
-  keys (`ff.options`, `ff.subfont`) and applied at once: the bus gain, the next line's language
-  and the map's plaques, the subtitle face (`optionsModel.ts`).
+  Help, and Exit options — the 1998 face's own, and nothing the face has no place for (a
+  subtitle-font row was tried and taken out). Every change is persisted to the browser's key
+  (`ff.options`) and applied at once: the bus gain, the next line's language and the map's
+  plaques (`optionsModel.ts`).
 - **Help** is the browser's ten pages (`src/data/helpText.ts`, ALTAR's text and the cropped
   diagrams), typeset natively into the original 640×480 page box by the stylesheet's rules
   (`helpPaint.ts`); left/right page (wrapping), anything else closes. Approximate by nature: the
@@ -241,7 +263,9 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   with the window and no smaller than at 720 lines. Each chip is the room's glass with its
   symbol in the room's carved-icon colour; the pad's A/B/X/Y keep their hues at that
   lightness, so they stay apart. It goes down the left letterbox margin as a short list when
-  that fits, else as one row in the top margin. Otherwise it lies over the picture: one row
+  that fits, else as one row in the top margin, against its edge: on a TV the title-safe
+  area's (tvOS's inset is the margin, as Apple's guidance has it, so the hints sit 4 px at
+  1080 lines inside it), on a desktop 12 px in from the window's. Otherwise it lies over the picture: one row
   along the top edge on a strip of the touch UI's popup glass, drawn at full strength there,
   as muted light words vanish into the map's parchment. The top, not the bottom: the
   subtitles have the room's bottom, and the map's bottom carries the selected level's name.
@@ -596,9 +620,20 @@ surface the left stick; on a 2nd/3rd-generation remote a click on the ring's edg
 d-pad button and a centre click is A — and has **not** been run on an Apple TV. On the
 1st-generation remote (no ring) an edge click is read from where the thumb rests, which needs
 absolute d-pad values (`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL leaves them relative,
-so the tvOS build sets them itself (`native/host/platform_tvos.m`) and measures swipes from
-where the thumb touched down rather than from its position (`remote_motion` in `main.c`). A
-slide followed by a click within 120 ms is one click, not a swipe and a click. On a Mac, `--remote-keys` makes the keyboard a remote, and
+so the tvOS build sets them itself (`native/host/platform_tvos.m`).
+
+**Swipes** (in menus and on the map; never in a room) are the thumb's TRAVEL, not where it
+is: SDL reports the touch surface only as the left stick's axes — the position, with absolute
+values, and (0, 0) once the thumb lifts, no touch-down or lift event — so the host hands the
+position over each frame (`__native.remoteTouch`) and `native/js/remoteSwipe.ts` measures it
+from where the thumb came down: every 0.5 of travel along the dominant axis (a quarter of the
+surface's width) is one step that way, so a long swipe keeps stepping as a list scrolls under
+it and a fast one takes the steps it covered; a thumb resting on an edge is no swipe. Nothing
+counts while a click is held. A click toward the edge a swipe stepped to in the last 300 ms
+is that swipe's end — a swipe finishing on the ring — and is dropped where swipes act, so it
+is one step, not two; a centre click is always a click, and in a room every click acts.
+`test/native-remote-swipe.test.ts` feeds it taps, slow, fast and long swipes and one that
+ends at an edge. On a Mac, `--remote-keys` makes the keyboard a remote, and
 the whole keyboard counts as the remote: any other key it sends (a letter, F2) leaves the
 remote the last input, so its hints stay up.
 
@@ -725,7 +760,7 @@ rules are by directory and kind, and the check only ever adds to them.)
   (`SDL_GetBasePath`); launch arguments are the game's.
 - *The window* is the screen, at its pixels: 1920×1080, or 3840×2160 on a 4K Apple TV driving
   a 4K set (two pixels a point, `SDL_WINDOW_HIGH_PIXEL_DENSITY`). Everything is laid out for the
-  window it gets, as on a Mac; the menus' icons are rasterised for its height at start.
+  window it gets, as on a Mac; the menus are rehearsed for its size at start (above).
 - *Title-safe area.* The menus, the legend and the intro's skip hint keep inside the view's
   `safeAreaInsets` (60 points above and below, 80 at the sides; `__native.safeArea`,
   `native/js/safeArea.ts`): the UI layer is drawn into the safe rectangle and laid out for
@@ -750,7 +785,7 @@ rules are by directory and kind, and the check only ever adds to them.)
 - *The store*: NSUserDefaults within its budget, the whole store in a purgeable cache file,
   progress in iCloud key-value storage — see "Saves on tvOS".
 - *The remote*: absolute d-pad values on every micro gamepad, swipes measured from the
-  touch-down (see Controls).
+  thumb's travel (see Controls).
 - *No GPU*: SDL GPU (Metal) does not start in the Apple TV Simulator ("Device does not meet
   the hardware requirements"), nor on an A8 Apple TV — which tvOS 27 keeps from installing
   the app. The host then says so in an alert and quits, rather than crash; with
@@ -786,6 +821,15 @@ fails, *"PLA Update available"*: Apple makes no new profile); add the tvOS platf
 in App Store Connect before the first upload. The archive itself is unsigned and never
 touches the account. tvOS builds are numbered on their own, from 1: App Store Connect keeps
 each platform's versions and builds apart.
+
+**Symbols.** The archive carries the app's dSYM, for App Store Connect to symbolicate a crash
+with — build 1 had none (*"Upload Symbols Failed"*): CMake writes "Generate Debug Symbols: NO"
+for a Release build whose flags have no `-g`, and pins the products to its own tree, where
+`xcodebuild archive` does not look for a dSYM. So the tvOS Release build compiles with `-g`
+(every target's, so SDL, QuickJS and libwebp are in the dSYM too, and an archive leaves the
+libraries unstripped for the app to link), and the app writes its dSYM where the archive
+collects it (`native/CMakeLists.txt`). The app itself ships stripped, as before. The lane
+stops unless the archive's dSYM has the app binary's UUID (`dwarfdump --uuid`).
 
 ## Does it play? The smoke gate (`native/js/smoke.ts`)
 
@@ -829,12 +873,13 @@ The menus have one too (`native/js/menuSmoke.ts`, `--smoke-menus --store F`): in
 through the router, checked against the game's own state and the store, never against what
 a menu says about itself. On the map: the pad's ☰ opens Options; a volume step is persisted to
 `ff.options` and reaches the mixer's bus at once; the subtitle language and its `tit_def` are
-persisted; the font is persisted to `ff.subfont` and loaded; Help opens over Options, pages
+persisted; there is no font row, and the subtitles still take their face from `ff.subfont`; Help opens over Options, pages
 and closes; the pad's Ⓑ at the root does nothing while Esc and the remote's Back leave; the
 Options corner is selectable and opens Options. In a room, with the remote: the centre click
-switches fish, an edge click moves the active one, a swipe moves nothing, Play/Pause undoes
+switches fish, an edge click moves the active one (also just after a swipe toward that edge), a swipe moves nothing, Play/Pause undoes
 one move and, held, repeats (350 ms, then every 80 ms) with nothing added on release; Back
-opens the pause menu and the room stops stepping; Load is greyed and skipped with no save;
+opens the pause menu and the room stops stepping; a swipe steps its highlight, and a swipe
+ending on the ring toward its edge steps it once; Load is greyed and skipped with no save;
 Save asks, Back declines, a click saves the move record; Load restores it; Options and Help
 open from the pause menu and close back to it; Restart starts over; a save mid-move is
 refused as F2 is. With the pad: Ⓧ asks to restart and Ⓑ declines, RB with no save opens
@@ -847,15 +892,19 @@ the legend is where it was with either fish active. With Czech subtitles the pau
 legend, the confirm prompt and Options are Czech. In windows the map, a room and a story page fill, the
 hints lie on their dark strip; in a letterbox margin, they do not. A room's first frame shows
 the remote's hints (room 1, and KUFRIK), and so does the room on leaving the pause menu; with
-`--remote-keys` a key the host leaves unmapped keeps them. First, though, what the UI draws
+`--remote-keys` a key the host leaves unmapped keeps them. At 3840×2160 inside tvOS's insets
+the room's frames get the menus ready, and the pause menu's, Options', Help's and the restart
+prompt's first frames are each under 10 ms (above). At 1080 and 2160 lines the TV legend hugs
+the title-safe edge: the map's and room 1's list at its left, UTES's row at its top. First, though, what the UI draws
 with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted part, the
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 88 checks, ~10 s.
+for each character in both of the UI font's weights. 106 checks, ~11 s.
 
-It also checks the **UI layout snapshot**: at 24 states (four of them Czech) the UI layer is drawn into a 1280×720
-window (three of them into windows the picture fills) and the list of what it drew — every
+It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
+window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a
+1080- and a 2160-line TV's title-safe area) and the list of what it drew — every
 rectangle, shape, image and string, with its position and size in whole pixels — must equal
 `native/ui-layout.snap.json`. A layout change fails with the first op that moved and writes
 the new list to `native/build/ui-layout.snap.new.json`; if intended, rerun with

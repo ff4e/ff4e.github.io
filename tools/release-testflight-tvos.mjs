@@ -4,9 +4,10 @@
  * signing and the same upload as the iOS lane (`release-testflight.mjs`, whose header explains
  * the method; the shared parts are `testflight-lib.mjs`):
  *
- *   1. archive (default) — an `.xcarchive` in a temp dir, then a LOCAL App Store export of it
- *      (`destination: export`) that proves the signing: the Apple Distribution certificate,
- *      an App Store profile and the iCloud key-value entitlement. Nothing leaves this Mac.
+ *   1. archive (default) — an `.xcarchive` in a temp dir, with the app's dSYM (checked: its
+ *      UUID is the app binary's), then a LOCAL App Store export of it (`destination: export`)
+ *      that proves the signing: the Apple Distribution certificate, an App Store profile and
+ *      the iCloud key-value entitlement. Nothing leaves this Mac.
  *   2. `--upload` — exports that archive straight to App Store Connect. A REAL, irreversible
  *      TestFlight release: run it only when explicitly asked to.
  *
@@ -82,6 +83,22 @@ try {
 
 if (!existsSync(archivePath)) die(`archive step reported success but ${archivePath} is missing.`);
 console.log(`\narchive created: ${archivePath}`);
+
+// The archive carries the app's dSYM, for App Store Connect to symbolicate crashes with (build
+// 1 had none: "Upload Symbols Failed"). It must be THIS binary's: the same UUID per slice.
+const uuids = (file) => {
+  try {
+    return execFileSync('dwarfdump', ['--uuid', file], { encoding: 'utf8' }).match(/UUID: [0-9A-F-]+ \(\w+\)/g)?.sort().join(', ') ?? '';
+  } catch {
+    return '';
+  }
+};
+const appBinary = join(archivePath, 'Products', 'Applications', 'FishFillets.app', 'FishFillets');
+const dwarf = join(archivePath, 'dSYMs', 'FishFillets.app.dSYM', 'Contents', 'Resources', 'DWARF', 'FishFillets');
+const appUuid = uuids(appBinary);
+if (!existsSync(dwarf)) die(`the archive has no dSYM of the app (${dwarf}): App Store Connect could not symbolicate its crashes.`);
+if (!appUuid || uuids(dwarf) !== appUuid) die(`the archive's dSYM is not the app's: app ${appUuid || 'unreadable'}, dSYM ${uuids(dwarf) || 'unreadable'}.`);
+console.log(`dSYM: ${appUuid}, the app binary's`);
 
 // Always: sign it for the App Store into a local folder and check what Apple would get — the
 // distribution certificate, an App Store profile, and the iCloud key-value entitlement.

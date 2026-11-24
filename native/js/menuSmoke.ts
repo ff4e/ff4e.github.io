@@ -10,7 +10,7 @@
  *
  * It walks: the map's Options (☰, and the Options corner) — a volume step persisted to
  * `ff.options` and on the bus, the subtitle language persisted and the plaques following it,
- * the font persisted to `ff.subfont` and loaded — Help paging and closing, Back at the map's
+ * no row for the subtitle font (whose `ff.subfont` the subtitles still read) — Help paging and closing, Back at the map's
  * root leaving the game; in a room, the remote's edge click moving the active fish, its
  * centre click switching fish, a swipe moving nothing, Play/Pause undoing (and repeating
  * while held), Back opening the pause menu and pausing the room, Load greyed with no save,
@@ -48,9 +48,11 @@ import { settings } from './seams/playerSettings.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
 import { soundTime } from './sound.js';
 import { SUB_FACES } from './subtitleFonts.js';
-import { inputFrame, lastInput, routeEvent, setExitHandler, setKeyboardIsRemote } from './uiInput.js';
+import { inputFrame, lastInput, routeEvent, setExitHandler, setKeyboardIsRemote, setLastInput } from './uiInput.js';
+import type { Insets } from './safeArea.js';
 import { t } from './uiStrings.js';
-import { initUiLayer, paintUi, type Box } from './uiLayer.js';
+import { initUiLayer, menusReady, paintUi, type Box } from './uiLayer.js';
+import { currentCost, describeCost, resetCost } from './uiCost.js';
 import { loadUiFonts, type UiOp } from './uiDraw.js';
 import { checkIcons, checkStrings } from './uiAssetSmoke.js';
 
@@ -173,13 +175,13 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   };
   const snaps: Record<string, readonly UiOp[]> = {};
   /** Draw the UI layer at a state, into a `ww`×`wh` window (by default the snapshot's 1280×720). */
-  const snap = (name: string, ww = WIN_W, wh = WIN_H): void => {
+  const snap = (name: string, ww = WIN_W, wh = WIN_H, insets?: Insets): void => {
     // In a room, composite it first: the picture's box is the composite's size, as on screen.
     const inRoom = ui.screen === 'room' && draw(target, 0);
     const page = ui.screen === 'legimage' ? mapFrame(performance.now()) : null;
     const box = inRoom ? pictureBox(target.width, target.height, ww, wh)
       : page ? pictureBox(page.width, page.height, ww, wh) : pictureBox(2560, 1920, ww, wh);
-    const r = paintUi(ww, wh, box);
+    const r = paintUi(ww, wh, box, insets);
     if (!r) throw new MenuSmokeFailure(`the UI layer drew nothing for ${name}`);
     snaps[name] = r.ops;
     if (!outDir) return;
@@ -214,6 +216,61 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     const out = ops.filter((op) => !opInside(op, sw, sh) && !scrim(op));
     check(ops.length > 0 && out.length === 0,
       `${what} at 1920×1080 stays inside tvOS's title-safe area (${out.length} of ${ops.length} drawn outside${out.length ? `, first ${JSON.stringify(out[0])}` : ''})`);
+  };
+  /**
+   * The first pause menu, confirm prompt, Options and Help at a 4K Apple TV's size (3840×2160,
+   * tvOS's title-safe insets), as the room's frames would have them: nothing at that size is
+   * cached yet, so the frames before a menu opens must get them ready — a little each (the
+   * largest frame's rasterising is printed) — and each menu's first frame then costs about what
+   * any later one does. On the Apple TV this interpreter is several times slower than on a Mac
+   * (QuickJS on an A12 against an M-series core: ~3.5× by single-core benchmarks, taken as 5×
+   * here), so a first frame is held under 50 ms there: 10 ms here. The first pause menu once
+   * took ~0.6 s here, ~3 s and more on an A12, all of it rasterising its glass at that size.
+   */
+  const firstMenusAt4k = async (): Promise<void> => {
+    const W = 3840, H = 2160, insets = [160, 120, 160, 120] as const;
+    const DEVICE_FACTOR = 5, DEVICE_MS = 50;
+    const box = pictureBox(target.width, target.height, W, H);
+    let frames = 0, worst = 0;
+    while (!menusReady() || frames === 0) {
+      resetCost();
+      const t = __native.now();
+      paintUi(W, H, box, insets);
+      worst = Math.max(worst, __native.now() - t);
+      if (++frames > 600) break;
+    }
+    check(menusReady(), `at 2160 lines the menus get ready in ${frames} frames while none is up, the dearest frame ${worst.toFixed(1)} ms`);
+    /** Open a menu with `code`'s press and release, timing that (the router and the menu's state), then its first frame. */
+    const first = async (what: string, code: string): Promise<void> => {
+      const t = __native.now();
+      routeEvent(`+${code}`, clock);
+      routeEvent(`-${code}`, clock);
+      const opening = __native.now() - t;
+      await settle();
+      resetCost();
+      const t1 = __native.now();
+      paintUi(W, H, box, insets);
+      const ms = __native.now() - t1;
+      check(ms * DEVICE_FACTOR < DEVICE_MS,
+        `${what}'s first frame at 2160 lines: ${describeCost(currentCost(), ms)} (×${DEVICE_FACTOR} for an Apple TV: under ${DEVICE_MS} ms); the press that opened it ${opening.toFixed(1)} ms`);
+    };
+    await first('the pause menu', 'RemoteBack');
+    check(topMenu()?.kind === 'pause', 'that was the pause menu');
+    const select = async (item: string): Promise<void> => {
+      for (let i = 0; i < PAUSE_ITEMS.length && PAUSE_ITEMS[(topMenu() as { sel: number }).sel] !== item; i++) await tap('RemoteDown');
+    };
+    await select('options');
+    await first('Options', 'RemoteSelect');
+    await tap('RemoteBack');
+    await select('help');
+    await first('Help', 'RemoteSelect');
+    await tap('RemoteBack');
+    await select('restart');
+    await first('the restart prompt', 'RemoteSelect');
+    check(topMenu()?.kind === 'confirm', 'that was the restart prompt');
+    await tap('RemoteBack');
+    await tap('RemoteBack');
+    check(!menuOpen(), 'and Back closes them all');
   };
   /** Did state `name` draw the hints' dark strip (they lie over the picture)? */
   const strip = (name: string): boolean => snaps[name]!.some((op) => op[0] === 'strip');
@@ -255,16 +312,16 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     while (settings.subtitles !== 'en') await tap('PadRight');
     check(stored().subtitles === 'en' && stored().titDef === 'en', 'English subtitles, and tit_def with them');
     await tap('PadDown');
-    snap('options-font');
-    const face0 = subtitleFace()?.name;
-    await tap('PadA');
-    await settle(40);
-    check(localStorage.getItem('ff.subfont') === SUB_FACES[1]!.name && subtitleFace()?.name === SUB_FACES[1]!.name,
-      `Ⓐ on Font steps the subtitle face, persisted to ff.subfont and loaded (${face0} → ${subtitleFace()?.name})`);
-    await tap('PadLeft');
-    await settle(40);
-    check(subtitleFace()?.name === SUB_FACES[0]!.name, 'left steps it back');
-    await tap('PadDown');
+    check(OPTIONS_ROWS[(topMenu() as { row: number }).row] === 'help' && !(OPTIONS_ROWS as readonly string[]).includes('font'),
+      'below Subtitles is Help: Options has no subtitle-font row');
+    // The face is still the player's pick, read from the store as the browser stores it.
+    localStorage.setItem('ff.subfont', SUB_FACES[1]!.name);
+    await loadSubtitleAssets();
+    const picked = subtitleFace()?.name;
+    localStorage.removeItem('ff.subfont');
+    await loadSubtitleAssets();
+    check(picked === SUB_FACES[1]!.name && subtitleFace()?.name === SUB_FACES[0]!.name,
+      `the subtitles still take their face from ff.subfont (${picked}), and the default without it (${subtitleFace()?.name})`);
     await tap('PadA');
     check(topMenu()?.kind === 'help' && helpScreens.page === 0 && openMenus().length === 2, 'Ⓐ on Help opens the help over Options, on page 1');
     snap('help-pad');
@@ -349,6 +406,14 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     const rows = at0.filter((p) => Number(p.split(',')[1]) < 120).length;
     check(fish0 !== fish1 && at0.join() === at1.join() && rows > 0 && rows < at0.length,
       `switching fish never moves the legend: ${at0.length} window widths, ${rows} with the row on top, the same with either fish`);
+    // In a room a swipe does nothing, so a click right after one toward its edge is a click.
+    const pre = moves();
+    await tap(`RemoteSwipe${movedBy.slice('Remote'.length)}`);
+    await press(movedBy);
+    steps(8);
+    await press(movedBy, false);
+    rest();
+    check(moves() === pre + 1, 'in a room, an edge click just after a swipe toward that edge still moves the fish');
     const before = moves();
     for (const sw of ['RemoteSwipeLeft', 'RemoteSwipeRight', 'RemoteSwipeUp', 'RemoteSwipeDown']) await tap(sw);
     steps(10);
@@ -394,6 +459,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     rest();
     check(moves() === held - 1, 'and the next Play/Pause undoes one move');
 
+    // ── A 4K Apple TV's first menus ─────────────────────────────────────────────
+    await firstMenusAt4k();
+
     // ── The pause menu ────────────────────────────────────────────────────────────
     check(!saveExists() && !pauseItemEnabled('load'), 'no save yet: Load is greyed');
     await tap('RemoteBack');
@@ -421,6 +489,17 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       order.push(PAUSE_ITEMS[(topMenu() as { sel: number }).sel]!);
     }
     check(!order.includes('load') && order[order.length - 1] === 'resume', `a swipe moves the highlight, skipping the greyed Load (${order.join(' → ')})`);
+    // A swipe that finishes pressing the ring toward its edge is one step, not two; a click
+    // on that edge a moment later is a click again.
+    const sel = (): number => (topMenu() as { sel: number }).sel;
+    const s0 = sel();
+    await tap('RemoteSwipeDown');
+    const s1 = sel();
+    await tap('RemoteDown');
+    check(s1 !== s0 && sel() === s1, 'a swipe that ends clicking the ring toward its edge steps the highlight once');
+    clock += 400;
+    await tap('RemoteDown');
+    check(sel() !== s1, 'and a click on that edge a moment later steps it again');
     const select = async (item: string): Promise<void> => {
       for (let i = 0; i < PAUSE_ITEMS.length && PAUSE_ITEMS[(topMenu() as { sel: number }).sel] !== item; i++) await tap('RemoteDown');
       await tap('RemoteSelect');
@@ -574,6 +653,35 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     settings.subtitles = 'en';
     settings.titDef = 'en';
     check(t('paused') === 'Paused', 'and English with English subtitles');
+
+    // ── A TV's legend, inside tvOS's title-safe area ─────────────────────────────
+    // The map and room 1 (the list down the left margin) and UTES, wider than the screen
+    // (a row along the top), at a 1080-line and a 2160-line Apple TV with the remote.
+    setLastInput('remote');
+    const tv = async (name: string): Promise<void> => {
+      snap(`tv-${name}-1080`, 1920, 1080, [80, 60, 80, 60]);
+      snap(`tv-${name}-2160`, 3840, 2160, [160, 120, 160, 120]);
+    };
+    showMap();
+    await mapTick();
+    await tv('map');
+    await enterRoom(1);
+    await untilReady();
+    await tv('room');
+    await enterRoom(7);
+    await untilReady();
+    await tv('wide');
+    // Against the safe area's edge, a hair in (4 px at 1080 lines, ×u): the list's chips at its
+    // left, the row's at its top — and nothing outside it.
+    for (const lines of [1080, 2160]) {
+      const sw = lines === 1080 ? 1760 : 3520, sh = lines === 1080 ? 960 : 1920, hair = Math.round((4 * sh) / 1080);
+      const chips = (name: string): UiOp[] => snaps[`tv-${name}-${lines}`]!.filter((op) => op[0] === 'rect');
+      const left = (name: string): number => Math.min(...chips(name).map((op) => op[1] as number));
+      const top = (name: string): number => Math.min(...chips(name).map((op) => op[2] as number));
+      check(left('map') === hair && left('room') === hair && top('wide') === hair &&
+        ['map', 'room', 'wide'].every((nm) => snaps[`tv-${nm}-${lines}`]!.every((op) => opInside(op, sw, sh))),
+      `at ${lines} lines the TV legend hugs the title-safe edge, ${hair} px in: the map's and room 1's list at its left (${left('map')}, ${left('room')}), UTES's row at its top (${top('wide')})`);
+    }
 
     // ── The layout snapshot ──────────────────────────────────────────────────────
     const json = `${JSON.stringify(snaps, null, 0).replace(/\],\[/g, '],\n[').replace(/":\[\[/g, '":[\n[')}\n`;

@@ -25,17 +25,17 @@ import { canSave, keyDown, saveExists, setPaused } from './game.js';
 import { audio } from './seams/audioEngine.js';
 import { mapBlur } from './mapScreen.js';
 import { settings, subLang } from './seams/playerSettings.js';
-import { cycleSubFont, setSubtitleMode, setVolume } from './optionsModel.js';
+import { setSubtitleMode, setVolume } from './optionsModel.js';
 import type { SubtitleMode, VolumeBus } from '../../src/core/settings.js';
 
 export type Verb = 'save' | 'load' | 'restart';
 export type PauseItem = 'resume' | 'map' | 'save' | 'load' | 'restart' | 'options' | 'help';
-export type OptionsRow = VolumeBus | 'subtitles' | 'font' | 'help' | 'done';
+export type OptionsRow = VolumeBus | 'subtitles' | 'help' | 'done';
 /** What a press means to a menu, whatever sent it. */
 export type MenuAct = 'up' | 'down' | 'left' | 'right' | 'ok' | 'back' | 'menu' | 'prev' | 'next' | 'other';
 
 export const PAUSE_ITEMS: readonly PauseItem[] = ['resume', 'map', 'save', 'load', 'restart', 'options', 'help'];
-export const OPTIONS_ROWS: readonly OptionsRow[] = ['effect', 'voice', 'music', 'subtitles', 'font', 'help', 'done'];
+export const OPTIONS_ROWS: readonly OptionsRow[] = ['effect', 'voice', 'music', 'subtitles', 'help', 'done'];
 const SUB_ORDER: readonly SubtitleMode[] = ['cz', 'en', 'off'];
 /** The 0..12 slider range of the Options face (hud.ts `sliderIndex`). */
 const SLIDER_MAX = 12;
@@ -174,8 +174,6 @@ function changeOption(row: OptionsRow, by: 1 | -1): void {
   } else if (row === 'subtitles') {
     const i = SUB_ORDER.indexOf(settings.subtitles);
     setSubtitleMode(SUB_ORDER[(i + by + SUB_ORDER.length) % SUB_ORDER.length]!);
-  } else if (row === 'font') {
-    void cycleSubFont(by);
   }
 }
 
@@ -202,7 +200,7 @@ export function menuAct(act: MenuAct): void {
       else if (act === 'ok') {
         if (row === 'help') openHelp();
         else if (row === 'done') pop();
-        else if (row === 'subtitles' || row === 'font') changeOption(row, 1); // step forward
+        else if (row === 'subtitles') changeOption(row, 1); // step forward
       } else if (act === 'back' || act === 'menu') pop();
       return;
     }

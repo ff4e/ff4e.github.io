@@ -18,6 +18,7 @@
 import type { Image2D, Surface2D } from '../../src/render/surface2d.js';
 import { STROKE_RGB, type SubtitleFrame } from './subtitleLayout.js';
 import type { NativeFace } from './subtitleFonts.js';
+import { costed } from './uiCost.js';
 
 /** One rasterised glyph: where its masks are in the atlas, and where they go from the pen. */
 interface AtlasGlyph {
@@ -55,6 +56,9 @@ export const nativePages: AtlasPages = {
   release: (page) => __native.releaseTexture((page as unknown as { id: number }).id),
 };
 
+/** A coverage byte as a premultiplied white pixel: the byte in all four channels. */
+const WORD = Uint32Array.from({ length: 256 }, (_, c) => c * 0x01010101);
+
 /**
  * The glyph cache: each (face, size, outline, quarter-pixel pen) rasterised once, the fill
  * mask and the outline mask side by side in a shelf-packed page.
@@ -73,20 +77,26 @@ export class GlyphAtlas {
     const key = `${face.id}|${ch}|${px.toFixed(3)}|${r.toFixed(3)}|${qx}|${qy}`;
     const hit = this.cache.get(key);
     if (hit) return hit;
+    return costed('glyphs', () => this.make(key, face, ch, px, r, qx, qy));
+  }
+
+  private make(key: string, face: NativeFace, ch: string, px: number, r: number, qx: number, qy: number): AtlasGlyph {
     const g = __native.fontGlyph(face.id, ch.codePointAt(0)!, px, r, qx / STEPS, qy / STEPS);
     let out: AtlasGlyph = { page: null, sx: 0, sy: 0, x: 0, y: 0, w: 0, h: 0 };
     if (g.w > 0) {
       const w = g.w, h = g.h!;
       const at = this.place(2 * w + 1, h);
-      const rgba = new Uint8Array((2 * w + 1) * h * 4);
+      // White × coverage, premultiplied: a pixel's four bytes are its coverage, one word each.
+      const row = 2 * w + 1;
+      const words = new Uint32Array(row * h);
       const fill = new Uint8Array(g.fill!), stroke = new Uint8Array(g.stroke!);
       for (let j = 0; j < h; j++) {
         for (let i = 0; i < w; i++) {
-          rgba.fill(fill[j * w + i]!, ((j * (2 * w + 1)) + i) * 4, ((j * (2 * w + 1)) + i) * 4 + 4);
-          rgba.fill(stroke[j * w + i]!, ((j * (2 * w + 1)) + w + 1 + i) * 4, ((j * (2 * w + 1)) + w + 1 + i) * 4 + 4);
+          words[j * row + i] = WORD[fill[j * w + i]!]!;
+          words[j * row + w + 1 + i] = WORD[stroke[j * w + i]!]!;
         }
       }
-      this.pages.upload(at.page, at.x, at.y, 2 * w + 1, h, rgba);
+      this.pages.upload(at.page, at.x, at.y, row, h, new Uint8Array(words.buffer));
       out = { page: at.page, sx: at.x, sy: at.y, x: g.x!, y: g.y!, w, h };
     }
     this.cache.set(key, out);
