@@ -9,8 +9,8 @@
  *
  * The rasteriser covers what the file uses: M/L/H/V/C/S/A/Z (absolute and relative), nonzero
  * fill, and strokes as their distance to the path (round joins, as the file asks), at 4×4
- * samples a pixel. The menus' sizes follow the window's height, so a 4K TV's are big: the
- * pause menu warms its icons before it is first opened (`warmMenuIcons` in `menuPaint.ts`).
+ * samples a pixel. The menus' sizes follow the window's height, so a 4K TV's are big: the UI
+ * layer rehearses the menus, icons and all, before one is first opened (`uiLayer.ts`).
  *
  * Two symbols the web's set has no need for — Resume and Help, in the pause menu — are drawn
  * here in the same hand (uneven outline, one highlight facet, one shade facet).
@@ -20,6 +20,7 @@ import type { Image2D } from '../../src/render/surface2d.js';
 import { countMask, type Ui } from './uiDraw.js';
 import type { NativeImage } from './nativeSurface.js';
 import type { UiPalette } from './uiPalette.js';
+import { costed } from './uiCost.js';
 
 const NATIVE_ONLY = `
   <g id="resume" stroke="var(--menu-outline, #243039)" stroke-width=".8" stroke-linejoin="round">
@@ -461,7 +462,7 @@ export const iconReady = (name: string, size: number): boolean => !!rasters.get(
 /** Icon `name` in the `size`×`size` box at (x, y), in `pal`'s colours, at `alpha`. */
 export function drawIcon(ui: Ui, name: IconName, x: number, y: number, size: number, pal: UiPalette, alpha = 1): void {
   const s = iconPx(size);
-  const r = raster(name, s);
+  const r = iconReady(name, s) ? raster(name, s) : costed('icons', () => raster(name, s));
   ui.record(['icon', name, Math.round(x), Math.round(y), s]);
   // drop-shadow(0 1px 1px #000c), at the icon's scale.
   ui.mask(r.shadow, x, y + Math.max(1, s / 24), 0x000000, 0.8 * alpha);

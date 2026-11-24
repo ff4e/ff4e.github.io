@@ -15,6 +15,7 @@ import { GlyphAtlas } from './subtitleDraw.js';
 import { NativeFace } from './subtitleFonts.js';
 import { readBytes } from './shims.js';
 import type { NativeImage } from './nativeSurface.js';
+import { costed, currentCost } from './uiCost.js';
 
 /** One recorded draw. Coordinates in surface pixels, rounded. */
 export type UiOp = readonly (string | number)[];
@@ -126,7 +127,8 @@ function shapeMask(shape: Shape, w: number, h: number, r: number, t: number): Ma
         sdRoundRect(x - cx, y - cy, t / 2, m * 0.34, t / 4)));
       break;
   }
-  const mask = uploadMask(w, h, cov);
+  const mask = costed('shapes', () => uploadMask(w, h, cov));
+  currentCost().shapePx += w * h;
   masks.set(key, mask);
   return mask;
 }
@@ -189,7 +191,7 @@ export class Ui {
     this.s.save();
     this.s.setAlpha(alpha);
     if (r <= 0) this.s.fillRect(x, y, w, h, rgb);
-    else {
+    else if (!this.sliced('rect', r1(x), r1(y), r1(w), r1(h), r1(r), 0, rgb)) {
       const m = shapeMask('rect', r1(w), r1(h), r1(r), 0);
       this.s.fillMask(m.img, 0, 0, m.w, m.h, r1(x), r1(y), m.w, m.h, rgb);
     }
@@ -200,11 +202,49 @@ export class Ui {
   frame(x: number, y: number, w: number, h: number, t: number, rgb: number, alpha = 1, r = 0): void {
     if (w <= 0 || h <= 0) return;
     this.ops.push(['frame', r1(x), r1(y), r1(w), r1(h), r1(t), rgb]);
-    const m = shapeMask('ring', r1(w), r1(h), r1(r), Math.max(1, r1(t)));
+    const th = Math.max(1, r1(t));
     this.s.save();
     this.s.setAlpha(alpha);
-    this.s.fillMask(m.img, 0, 0, m.w, m.h, r1(x), r1(y), m.w, m.h, rgb);
+    if (!this.sliced('ring', r1(x), r1(y), r1(w), r1(h), r1(r), th, rgb)) {
+      const m = shapeMask('ring', r1(w), r1(h), r1(r), th);
+      this.s.fillMask(m.img, 0, 0, m.w, m.h, r1(x), r1(y), m.w, m.h, rgb);
+    }
     this.s.restore();
+  }
+
+  /**
+   * A large `rect` or `ring` mask as nine pieces: its four corners from the mask of a
+   * 2c×2c box with the same radius and line (c = the larger of the two), and the straight
+   * parts between them as plain rectangles. Pixel for pixel what the whole mask draws: away
+   * from the corners a straight edge's coverage is exactly 0 or 1 (whole-pixel boxes, whole
+   * radii and lines, one pixel of anti-aliasing), and inside a corner every sample's
+   * distance is measured from that corner alone, so the small box's corner is the big one's.
+   * What it saves is the rasterising: a box costs its corners, not its area — at a 4K TV's
+   * size the pause menu's glass was 2¼ million pixels of distance tests in the interpreter,
+   * over half a second on a Mac and seconds on an Apple TV, on the frame the menu opened.
+   * Returns false (draw the whole mask) for a box too small to be worth it.
+   */
+  private sliced(kind: 'rect' | 'ring', x: number, y: number, w: number, h: number, r: number, t: number, rgb: number): boolean {
+    const c = Math.max(r, t);
+    if (c <= 0 || 2 * c > w || 2 * c > h || w * h <= 16 * c * c) return false;
+    const m = shapeMask(kind, 2 * c, 2 * c, r, t);
+    for (const [i, j] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+      this.s.fillMask(m.img, i * c, j * c, c, c, x + i * (w - c), y + j * (h - c), c, c, rgb);
+    }
+    const fill = (fx: number, fy: number, fw: number, fh: number): void => {
+      if (fw > 0 && fh > 0) this.s.fillRect(fx, fy, fw, fh, rgb);
+    };
+    if (kind === 'rect') {
+      fill(x + c, y, w - 2 * c, c);
+      fill(x, y + c, w, h - 2 * c);
+      fill(x + c, y + h - c, w - 2 * c, c);
+    } else {
+      fill(x + c, y, w - 2 * c, t);
+      fill(x + c, y + h - t, w - 2 * c, t);
+      fill(x, y + c, t, h - 2 * c);
+      fill(x + w - t, y + c, t, h - 2 * c);
+    }
+    return true;
   }
 
   /** A glyph shape in the `size`×`size` box at (x, y); `t` its line width. */

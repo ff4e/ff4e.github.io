@@ -50,7 +50,6 @@ const STRINGS = {
   talkVolume: ['Talk volume', 'Hlasitost řeči'],
   musicVolume: ['Music volume', 'Hlasitost hudby'],
   subtitles: ['Subtitles', 'Titulky'],
-  subtitleFont: ['Subtitle font', 'Písmo titulků'],
   exitOptions: ['Exit options', 'Zavřít nastavení'],
   subsOff: ['Off', 'Vypnuto'],
   helpValue: ['The rules and the controls', 'Pravidla a ovládání'],

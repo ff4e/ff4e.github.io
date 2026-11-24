@@ -7,9 +7,10 @@
  * which SDL never sets. The 1st-generation remote has no click ring: whether a click is an
  * edge or the centre is where the thumb rests when it clicks (main.c, `remote_button`), so
  * it needs the absolute position. Set on every controller with a micro gamepad profile (the
- * remotes), those connected now and those that connect later; main.c then measures swipes
- * from the touch-down itself (`remote_motion`). Written from Apple's documentation and SDL
- * 3.4's source; unverified until it runs on an Apple TV.
+ * remotes), those connected now and those that connect later; a swipe is then the thumb's
+ * travel, which native/js/remoteSwipe.ts measures from the position main.c hands over
+ * (`n_remoteTouch`). Written from Apple's documentation and SDL 3.4's source; unverified until
+ * it runs on an Apple TV.
  */
 #import <GameController/GameController.h>
 

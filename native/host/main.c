@@ -1101,8 +1101,9 @@ static SDL_GPUGraphicsPipeline *surf_pipeline(bool dest_in) {
  *              PadRUp PadRDown PadRLeft PadRRight (right stick), PadA PadB PadX PadY,
  *              PadLB PadRB, PadMenu (☰ start), PadView (⧉ back)
  *   TV remote  Remote*: RemoteUp RemoteDown RemoteLeft RemoteRight (a click on an edge),
- *              RemoteSelect (a click in the centre), RemotePlayPause, RemoteBack, and
- *              RemoteSwipeUp… (a swipe: down and up together, no hold)
+ *              RemoteSelect (a click in the centre), RemotePlayPause, RemoteBack; its
+ *              swipes are made by the JS side from where the thumb is (`n_remoteTouch`),
+ *              and `--remote-keys` sends RemoteSwipeUp… (down and up together, no hold)
  *
  * The Siri Remote reaches SDL on tvOS as a gamepad (SDL_HINT_TV_REMOTE_AS_JOYSTICK, on by
  * default): its click is A, Play/Pause is X, Menu/Back is B, and the touch surface (or the
@@ -1259,55 +1260,50 @@ static void poll_sticks(void) {
  *     (`GCMicroGamepad.reportsAbsoluteDpadValues = YES`), which SDL does not set — by default
  *     the values are relative to where the thumb first touched, so a click with a resting
  *     thumb reads as the centre. The tvOS build sets it on every controller that connects
- *     (`platform_tvos.m`) and says so here (`remote_absolute`).
+ *     (`platform_tvos.m`).
  *
  * A remote with d-pad buttons in its mapping is the ring kind (`SDL_GamepadHasButton`). The
  * click pressed is the one released, whichever button sent it.
  *
- * A deflection with no click is a swipe — but only once it has lasted SWIPE_MS with no click,
- * because a slide toward an edge and a click there is one press, not a swipe and then a click
- * (which would step a menu twice). A click inside that window takes the slide's direction.
- * With absolute values a resting thumb would also read as a deflection, so a swipe is then
- * measured from where the thumb touched down (`remote_motion`), as the relative values are:
- * a thumb landing on an edge is not a swipe. None of this has met a real remote yet.
+ * Swipes are not made here. SDL reports the touch surface only as those two axes — no
+ * touch-down, no lift; a lifted thumb reads (0, 0) — and with absolute values they are where
+ * the thumb is, not how it moved, so a swipe is the thumb's TRAVEL, which the JS side
+ * measures from the position handed over each frame (`n_remoteTouch`; native/js/remoteSwipe.ts,
+ * unit-tested), and it also decides when a click is the end of a swipe. None of this has met
+ * a real remote yet.
  */
 static SDL_Gamepad *remote;
 static const char *remote_click; /* the code the click in progress sent */
-static int remote_swipe;          /* the deflection held, as `Stick.held` */
-static int remote_pending;        /* a deflection not yet sent as a swipe (0 none) */
-static Uint64 remote_pending_at;
 static bool remote_playpause, remote_back; /* held, so a removed remote can let go */
-#define SWIPE_MS 120
 static const char *const REMOTE_EDGE[4] = {"RemoteUp", "RemoteDown", "RemoteLeft", "RemoteRight"};
-static const char *const REMOTE_SWIPE[4] = {"RemoteSwipeUp", "RemoteSwipeDown", "RemoteSwipeLeft", "RemoteSwipeRight"};
-static bool remote_absolute;     /* the touch surface reports where the thumb is (tvOS) */
-static bool remote_touching;     /* absolute: a thumb is on the surface, since (remote_ox, remote_oy) */
-static int remote_ox, remote_oy;
 
 /*
- * The remote's touch as a deflection from where the thumb touched down. Relative values (SDL's
- * default) already are that; absolute ones are a position, (0, 0) once the thumb lifts.
+ * Where the thumb is along gamepad axis `a` (LEFTX right, LEFTY down), read RAW from the
+ * joystick axis the remote's mapping binds to it: exactly 0 when no thumb is on the surface.
+ * Not SDL_GetGamepadAxis: SDL maps the remote's "Direction Pad Y Axis" inverted (`lefty: a1~`,
+ * IOS_JoystickGetGamepadMapping) and rescales an inverted axis in float, so a raw 0 comes out
+ * as -1 there (SDL_gamepad.c) — a lifted thumb would never read (0, 0), and a swipe's origin
+ * would never reset. The inversion is applied here instead, exactly.
  */
-static void remote_motion(int *ax, int *ay) {
-  if (!remote_absolute) return;
-  if (*ax == 0 && *ay == 0) {
-    remote_touching = false;
-    return;
+static int remote_axis(SDL_GamepadAxis a) {
+  int n = 0, v = SDL_GetGamepadAxis(remote, a);
+  SDL_GamepadBinding **b = SDL_GetGamepadBindings(remote, &n);
+  for (int i = 0; b && i < n; i++) {
+    if (b[i]->output_type != SDL_GAMEPAD_BINDTYPE_AXIS || b[i]->output.axis.axis != a ||
+        b[i]->input_type != SDL_GAMEPAD_BINDTYPE_AXIS)
+      continue;
+    const int raw = SDL_GetJoystickAxis(SDL_GetGamepadJoystick(remote), b[i]->input.axis.axis);
+    v = b[i]->input.axis.axis_min > b[i]->input.axis.axis_max ? -raw : raw;
+    break;
   }
-  if (!remote_touching) {
-    remote_touching = true;
-    remote_ox = *ax;
-    remote_oy = *ay;
-  }
-  *ax -= remote_ox;
-  *ay -= remote_oy;
+  SDL_free(b);
+  return v > 32767 ? 32767 : v;
 }
 
 /* A click went down as `code` (an edge or the centre), or `code`'s click came up. */
 static void remote_click_edge(const char *code, bool down) {
   if (down) {
     if (remote_click) return; /* one click at a time: the ring cannot be pressed twice */
-    remote_pending = 0;       /* a slide just before was this click's, not a swipe */
     remote_click = code;
     push_event(true, code);
   } else if (remote_click == code) {
@@ -1327,9 +1323,7 @@ static void remote_button(Uint8 b, bool down) {
         if (remote_click) return;
         int dir = 0;
         if (!SDL_GamepadHasButton(remote, SDL_GAMEPAD_BUTTON_DPAD_UP)) { /* 1st gen: where the thumb is */
-          int ax = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY);
-          dir = stick_dir(ax, ay, 0);
-          if (!dir) dir = remote_pending;
+          dir = stick_dir(remote_axis(SDL_GAMEPAD_AXIS_LEFTX), remote_axis(SDL_GAMEPAD_AXIS_LEFTY), 0);
         }
         remote_click_edge(dir ? REMOTE_EDGE[dir - 1] : "RemoteSelect", true);
       } else if (remote_click) {
@@ -1349,22 +1343,52 @@ static void remote_button(Uint8 b, bool down) {
   }
 }
 
-static void poll_remote(void) {
-  if (!remote) return;
-  int ax = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY);
-  remote_motion(&ax, &ay); /* tracked through a click too: the touch-down is before it */
-  if (remote_click) return; /* a thumb pressing to click is not a swipe */
-  int dir = stick_dir(ax, ay, remote_swipe);
-  if (dir && dir != remote_swipe) {
-    remote_pending = dir;
-    remote_pending_at = SDL_GetTicks();
+/*
+ * [x, y]: where the thumb is on the remote's touch surface, -1..1 across and down (the left
+ * stick's raw axes, `remote_axis`), or null when nothing touches it — a lifted thumb reads
+ * exactly (0, 0) raw — or there is no remote. With tvOS's absolute values (above) it is a
+ * position; native/js/remoteSwipe.ts makes swipes of its travel.
+ */
+static JSValue n_remoteTouch(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  if (!remote) return JS_NULL;
+  const int ax = remote_axis(SDL_GAMEPAD_AXIS_LEFTX), ay = remote_axis(SDL_GAMEPAD_AXIS_LEFTY);
+  if (ax == 0 && ay == 0) return JS_NULL;
+  JSValue a = JS_NewArray(ctx);
+  JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, ax / 32767.0));
+  JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, ay / 32767.0));
+  return a;
+}
+
+/*
+ * The menu smoke's check of the path above with SDL's own mapping code (headless, no remote):
+ * a virtual "Siri Remote" mapped as SDL maps one on tvOS 14+ (y inverted: `lefty:a1~`), its
+ * raw axes set to (argv[0], argv[1]), then what `remoteTouch` reports for it. Detached after.
+ */
+static JSValue n_remoteProbe(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  if (remote || !SDL_InitSubSystem(SDL_INIT_GAMEPAD)) return JS_ThrowTypeError(ctx, "remoteProbe: %s", remote ? "a remote is connected" : SDL_GetError());
+  SDL_VirtualJoystickDesc d;
+  SDL_INIT_INTERFACE(&d);
+  d.naxes = 2;
+  d.nbuttons = 3;
+  d.name = "Siri Remote (probe)";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&d);
+  char guid[64], mapping[256];
+  SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+  SDL_snprintf(mapping, sizeof mapping, "%s,Siri Remote (probe),a:b0,x:b1,b:b2,leftx:a0,lefty:a1~", guid);
+  JSValue out = JS_NULL;
+  if (id && SDL_AddGamepadMapping(mapping) >= 0 && (remote = SDL_OpenGamepad(id))) {
+    SDL_Joystick *j = SDL_GetGamepadJoystick(remote);
+    SDL_SetJoystickVirtualAxis(j, 0, (Sint16)ARGI(0));
+    SDL_SetJoystickVirtualAxis(j, 1, (Sint16)ARGI(1));
+    SDL_UpdateJoysticks();
+    out = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, out, 0, n_remoteTouch(ctx, self, 0, NULL));
+    JS_SetPropertyUint32(ctx, out, 1, JS_NewInt32(ctx, SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY)));
+    SDL_CloseGamepad(remote);
+    remote = NULL;
   }
-  remote_swipe = dir;
-  if (remote_pending && SDL_GetTicks() - remote_pending_at >= SWIPE_MS) {
-    push_event(true, REMOTE_SWIPE[remote_pending - 1]);
-    push_event(false, REMOTE_SWIPE[remote_pending - 1]);
-    remote_pending = 0;
-  }
+  if (id) SDL_DetachVirtualJoystick(id);
+  return JS_IsNull(out) ? JS_ThrowTypeError(ctx, "remoteProbe: %s", SDL_GetError()) : out;
 }
 
 /* A removed remote sends no button-up: let go of whatever it held. */
@@ -1374,8 +1398,6 @@ static void remote_release_all(void) {
   if (remote_back) push_event(false, "RemoteBack");
   remote_click = NULL;
   remote_playpause = remote_back = false;
-  remote_swipe = remote_pending = 0;
-  remote_touching = false;
 }
 
 static bool is_remote(SDL_Gamepad *g) {
@@ -1539,7 +1561,6 @@ static void poll_events(void) {
     }
   }
   poll_sticks();
-  poll_remote();
   if (store_remote_changed()) push_event(false, "!kvs");
 }
 
@@ -1627,6 +1648,7 @@ static void install(JSContext *ctx) {
       {"events", n_events, 0},
       {"storeLoad", n_storeLoad, 1},   {"storeSave", n_storeSave, 2},
       {"storePath", n_storePath, 0},   {"safeArea", n_safeArea, 0},
+      {"remoteTouch", n_remoteTouch, 0}, {"remoteProbe", n_remoteProbe, 2},
       {"args", n_args, 0},             {"quit", n_quit, 0},
   };
   JSValue g = JS_GetGlobalObject(ctx);
@@ -1729,10 +1751,7 @@ int main(int argc, char **argv) {
   if (!SDL_Init(headless ? SDL_INIT_VIDEO : (SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))) die("SDL_Init");
   SDL_AddEventWatch(lifecycle, NULL);
 #ifdef SDL_PLATFORM_TVOS
-  if (!headless) {
-    tvos_remote_absolute_dpad();
-    remote_absolute = true;
-  }
+  if (!headless) tvos_remote_absolute_dpad();
 #endif
   dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, false, NULL);
   if (!dev) {

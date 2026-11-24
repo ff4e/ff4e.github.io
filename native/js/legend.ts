@@ -13,7 +13,9 @@
  * down the left margin, or one row in the top one, muted (75 %, as the prototype's) — and
  * otherwise as one row along the top edge on a strip of the touch UI's popup glass, at full
  * strength. The top, not the bottom: in a room the subtitles have the bottom, and on the
- * map the bottom holds the banner naming the selected level.
+ * map the bottom holds the banner naming the selected level. Either way it hugs its edge:
+ * on a TV the title-safe area's (tvOS's own inset is the margin there, as Apple's guidance
+ * has it, so only a hair is added), on a desktop the window's, a small margin in.
  *
  * Where it goes depends on the window, the picture's box and the screen's words, never on
  * the game's state: an item's width is fixed whatever it shows — the "switch fish" item
@@ -188,8 +190,10 @@ export interface HintMetrics {
   readonly gap: number;
   /** One item's line in a list. */
   readonly line: number;
-  /** Off the window's edges. */
-  readonly margin: number;
+  /** Off the edge the hints hug: the title-safe area's on a TV, else the window's. */
+  readonly edge: number;
+  /** At least this far from the picture, beside or above it in its margin. */
+  readonly clear: number;
   /** The web's 1 CSS px. */
   readonly hair: number;
 }
@@ -197,11 +201,24 @@ export interface HintMetrics {
 /**
  * The prototype's 10-foot sizes — a 26 px chip, 18 px words, 30 px between items — at 1080
  * lines, scaled with the window, and no smaller than at 720 (a 17 px chip, 12 px words).
+ * `safe`: the window has title-safe insets (a TV), already as far in as the hints need to
+ * be, so they sit a hair inside them; a desktop window's edge gets a small margin instead.
  */
-export function legendMetrics(h: number): HintMetrics {
+export function legendMetrics(h: number, safe = false): HintMetrics {
   const u = Math.max(2 / 3, h / 1080);
-  return { u, glyph: 26 * u, label: 18 * u, labelGap: 8 * u, gap: 30 * u, line: 38 * u, margin: 24 * u, hair: hairline(h) };
+  return {
+    u, glyph: 26 * u, label: 18 * u, labelGap: 8 * u, gap: 30 * u, line: 38 * u,
+    edge: (safe ? TV_EDGE : DESKTOP_EDGE) * u, clear: 24 * u, hair: hairline(h),
+  };
 }
+
+/** Off a TV's title-safe edge, px at 1080 lines: the inset itself is the margin. */
+const TV_EDGE = 4;
+/** Off a desktop window's edge, px at 1080 lines. */
+const DESKTOP_EDGE = 12;
+
+/** Whether `ui` is laid out inside title-safe insets (a TV, or `--tv-safe-area`). */
+const insetUi = (ui: Ui): boolean => ui.bleed.some((v) => v > 0);
 
 /** Over the black margin the hints are muted as the prototype's (`opacity: 0.75`). */
 const ON_ALPHA = 0.75;
@@ -317,9 +334,12 @@ export function drawHintRow(ui: Ui, items: readonly LegendItem[], x: number, y: 
   for (const it of items) x = drawItem(ui, it, x + glyphsWidth(ui, it, m.glyph), y, m, pal, strip) + m.gap;
 }
 
+/** How far the strip behind hints reaches past them, across and down. */
+const stripPad = (m: HintMetrics): [number, number] => [14 * m.u, 6 * m.u];
+
 /** The strip behind hints over the picture: the touch UI's popup glass round the `w`×`h` box at (x, y). */
 function drawStrip(ui: Ui, x: number, y: number, w: number, h: number, m: HintMetrics, pal: UiPalette): void {
-  const px = 14 * m.u, py = 6 * m.u;
+  const [px, py] = stripPad(m);
   ui.record(['strip', Math.round(x - px), Math.round(y - py), Math.round(w + 2 * px), Math.round(h + 2 * py)]);
   drawGlass(ui, x - px, y - py, w + 2 * px, h + 2 * py, 10 * m.u, m.hair, pal, 'popup');
 }
@@ -329,32 +349,35 @@ export type LegendPlacement = 'list' | 'row' | 'row-strip' | 'list-strip';
 
 /** Where `items` go in the `w`×`h` window beside the picture's box `rect`. Pure: words, window and box only. */
 export function legendPlacement(ui: Ui, items: readonly LegendItem[], w: number, h: number, rect: readonly [number, number, number, number]): LegendPlacement {
-  const m = legendMetrics(h);
+  const m = legendMetrics(h, insetUi(ui));
   const listW = Math.max(...items.map((it) => glyphsWidth(ui, it, m.glyph))) + m.labelGap + Math.max(...items.map((it) => wordWidth(ui, it, m)));
-  if (m.margin + listW + m.margin <= rect[0]) return 'list';
-  if (hintRowWidth(ui, items, m) > w - 2 * m.margin) return 'list-strip';
-  return m.glyph + 2 * m.margin <= rect[1] ? 'row' : 'row-strip';
+  if (m.edge + listW + m.clear <= rect[0]) return 'list';
+  if (hintRowWidth(ui, items, m) + 2 * stripPad(m)[0] > w - 2 * m.edge) return 'list-strip';
+  return m.edge + m.glyph + m.clear <= rect[1] ? 'row' : 'row-strip';
 }
 
 /**
  * Draw `items` into the `w`×`h` window, beside `rect` (the picture's box: `[x, y, w, h]`):
  * down the left margin if the list fits there, else as a row in the top margin if that fits,
- * else as a row on its strip along the top edge over the picture.
+ * else as a row on its strip along the top edge over the picture — each against its edge
+ * (`HintMetrics.edge`), a strip's glass too.
  */
 export function drawLegend(ui: Ui, items: readonly LegendItem[], w: number, h: number, rect: readonly [number, number, number, number]): void {
   if (items.length === 0) return;
-  const m = legendMetrics(h);
+  const m = legendMetrics(h, insetUi(ui));
   const pal = currentPalette();
   const where = legendPlacement(ui, items, w, h, rect);
+  const [px, py] = stripPad(m);
   if (where === 'list' || where === 'list-strip') {
     const glyphsW = Math.max(...items.map((it) => glyphsWidth(ui, it, m.glyph)));
     const listW = glyphsW + m.labelGap + Math.max(...items.map((it) => wordWidth(ui, it, m)));
     const listH = (items.length - 1) * m.line + m.glyph;
-    let y = Math.max(m.margin, (h - listH) / 2);
     const strip = where === 'list-strip';
-    if (strip) drawStrip(ui, m.margin, y, listW, listH, m, pal);
+    const x = m.edge + (strip ? px : 0);
+    let y = Math.max(m.edge + (strip ? py : 0), (h - listH) / 2);
+    if (strip) drawStrip(ui, x, y, listW, listH, m, pal);
     for (const it of items) {
-      drawItem(ui, it, m.margin + glyphsW, y, m, pal, strip);
+      drawItem(ui, it, x + glyphsW, y, m, pal, strip);
       y += m.line;
     }
     return;
@@ -362,11 +385,11 @@ export function drawLegend(ui: Ui, items: readonly LegendItem[], w: number, h: n
   const rowW = hintRowWidth(ui, items, m);
   const x = (w - rowW) / 2;
   if (where === 'row') {
-    drawHintRow(ui, items, x, (rect[1] - m.glyph) / 2, m, pal);
+    drawHintRow(ui, items, x, m.edge, m, pal);
     return;
   }
-  drawStrip(ui, x, m.margin, rowW, m.glyph, m, pal);
-  drawHintRow(ui, items, x, m.margin, m, pal, true);
+  drawStrip(ui, x, m.edge + py, rowW, m.glyph, m, pal);
+  drawHintRow(ui, items, x, m.edge + py, m, pal, true);
 }
 
 /** Which legend the screen shows, or null for none (a launch, the confirm prompt). */

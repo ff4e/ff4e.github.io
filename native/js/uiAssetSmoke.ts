@@ -2,7 +2,6 @@
  * The menu smoke's checks of what the UI draws with, apart from any one screen: the carved
  * icons (`rusticIcons.ts`) and the UI's strings (`uiStrings.ts`) in its font.
  */
-import { warmMenuIcons } from './menuPaint.js';
 import { iconNames, partCounts, releaseIcons, warmIcon } from './rusticIcons.js';
 import type { UiFonts } from './uiDraw.js';
 import { allUiStrings } from './uiStrings.js';
@@ -13,11 +12,11 @@ const ms = (t0: number): number => Math.round(__native.now() - t0);
 
 /**
  * Every icon rasterises with ink in each painted part, and the fast rasteriser makes the
- * masks the exhaustive one does in this interpreter too. Then the cost a 4K TV (2160 lines) pays: the whole set at
- * the pause menu's and the confirm prompt's sizes there, and what the UI layer warms when it
- * starts — printed, and held under a bound far above it (a wall-clock gate is only a
- * tripwire under load; this one is for a return to testing every segment at every sample,
- * which took ~6 s for the pause menu's icons alone).
+ * masks the exhaustive one does in this interpreter too. Then the cost a 4K TV (2160 lines)
+ * pays: the whole set at the pause menu's and the confirm prompt's sizes there — printed, and
+ * held under a bound far above it (a wall-clock gate is only a tripwire under load; this one
+ * is for a return to testing every segment at every sample, which took ~6 s for the pause
+ * menu's icons alone).
  */
 export function checkIcons(check: Check): void {
   const names = iconNames();
@@ -42,11 +41,7 @@ export function checkIcons(check: Check): void {
     at4k.push(`${ms(t0)} ms at ${size} px`);
   }
   releaseIcons();
-  const t0 = __native.now();
-  warmMenuIcons(2160);
-  const warm = ms(t0);
-  releaseIcons();
-  check(total < 2000 && warm < 1000, `at 2160 lines the whole set rasterises in ${at4k.join(', ')}; the menus' icons warm in ${warm} ms when the UI starts`);
+  check(total < 2000, `at 2160 lines the whole set rasterises in ${at4k.join(', ')}`);
 }
 
 /** A glyph's pixels, to tell it from the face's missing-glyph box. */

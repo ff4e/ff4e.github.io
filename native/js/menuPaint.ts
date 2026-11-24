@@ -12,7 +12,7 @@ import { PAUSE_ITEMS, pauseItemEnabled, type PauseItem, type Verb } from './menu
 import { confirmItems, drawHintRow, hintRowWidth, legendMetrics } from './legend.js';
 import type { InputSource } from './uiInput.js';
 import type { Ui } from './uiDraw.js';
-import { drawIcon, iconReady, warmIcon, type IconName } from './rusticIcons.js';
+import { drawIcon, type IconName } from './rusticIcons.js';
 import { drawGlass, hairline } from './uiGlass.js';
 import { currentPalette, INK, type UiPalette } from './uiPalette.js';
 import { t, type UiString } from './uiStrings.js';
@@ -31,26 +31,6 @@ const PAUSE_ICON = 40, CONFIRM_ICON = 48;
 
 /** The window's scale: 1 at 1080 lines. */
 const scale = (h: number): number => Math.max(0.5, h / 1080);
-
-/**
- * Rasterise the icons the pause menu and the confirm prompt draw at a window `h` high, at
- * most `budget` of them now; returns whether all are ready. Their first drawing makes them
- * otherwise, and at a 4K TV's size the first menu would wait for that: the layer calls this
- * when the UI starts, and a frame at a time while no menu is up (after a resize).
- */
-export function warmMenuIcons(h: number, budget = Infinity): boolean {
-  const u = scale(h);
-  const want: [IconName, number][] = [
-    ...PAUSE_ITEMS.map((i): [IconName, number] => [PAUSE_ICON_NAME[i], PAUSE_ICON * u]),
-    ...Object.values(VERB_ICON).map((n): [IconName, number] => [n, CONFIRM_ICON * u]),
-  ];
-  for (const [name, size] of want) {
-    if (iconReady(name, size)) continue;
-    if (budget-- <= 0) return false;
-    warmIcon(name, size);
-  }
-  return true;
-}
 
 /** The touch UI's label shadow (`text-shadow: 0 1px 2px #000`), at the window's scale. */
 export const labelShadow = (u: number, h: number): { r: number; rgb: number; dy: number; alpha: number } =>

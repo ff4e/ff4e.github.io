@@ -8,35 +8,137 @@
  * layer is still the whole window, but its drawing is moved into the safe rectangle and laid
  * out for that rectangle's size, as if it were the window — so on a desktop (no insets)
  * nothing changes, and on a TV the menus and the legend are sized for the safe height.
+ *
+ * A menu must open on the frame it is asked for, and its first drawing at a window's size
+ * would rasterise its icons, its words' glyphs and its shapes for that size — in the
+ * interpreter, which on an Apple TV is several times slower than on a Mac. So the menus are
+ * REHEARSED before they are needed: drawn onto a surface that keeps nothing, which fills the
+ * caches the real drawing then finds full (`prepareMenus`). That happens when the UI starts,
+ * for the window it starts in, and again whenever what they would draw changes — the window's
+ * size, the language, the input's glyphs, the screen, a setting a menu shows — a few
+ * milliseconds a frame while no menu is up (`uiCost.ts`'s `rehearse`), so play does not
+ * hitch. When a menu opens, what its first frame cost is logged, by phase.
  */
-import { helpScreens } from '../../src/app/screenState.js';
-import { drawLegend, legendItems, legendScreen } from './legend.js';
+import { helpScreens, ui as screenUi } from '../../src/app/screenState.js';
+import type { Image2D, Surface2D } from '../../src/render/surface2d.js';
+import { drawLegend, legendItems, legendScreen, type LegendItem } from './legend.js';
 import { mapBusy, mapPanelOpen } from './mapScreen.js';
-import { paintConfirm, paintPause, warmMenuIcons } from './menuPaint.js';
-import { topMenu } from './menus.js';
+import { paintConfirm, paintPause } from './menuPaint.js';
+import { OPTIONS_ROWS, topMenu, type Layer } from './menus.js';
 import { NativeSurface } from './nativeSurface.js';
 import { paintOptions } from './optionsPaint.js';
 import { paintHelp } from './helpPaint.js';
-import { subLang } from './seams/playerSettings.js';
+import { settings, subLang } from './seams/playerSettings.js';
 import { Ui, loadUiFonts, type UiFonts, type UiOp } from './uiDraw.js';
+import { costed, currentCost, describeCost, rehearse, resetCost } from './uiCost.js';
 import { lastInput } from './uiInput.js';
 import { safeInsets, type Insets } from './safeArea.js';
 
 let fonts: UiFonts | null = null;
 let surface: NativeSurface | null = null;
-/** The safe area's height the menus' icons are ready for. */
-let warmFor = 0;
 
 export type Box = readonly [number, number, number, number];
 
-/** Load what the layer draws with, and rasterise the menus' icons for the window. Before the first frame. */
-export async function initUiLayer(): Promise<void> {
+/** What a rehearsal may spend on rasterising in one frame, ms. */
+const SLICE_MS = 2;
+
+/**
+ * Load what the layer draws with, and get the menus ready for the window as it is, all at
+ * once (before the first frame: nothing is on screen to hitch). `picture` is where the first
+ * screen's picture will be (the legend under a menu goes beside it). Set the input source and
+ * the safe area first: the rehearsal draws in their glyphs and inside their insets.
+ */
+export async function initUiLayer(picture?: Box): Promise<void> {
   fonts = await loadUiFonts();
   const size = __native.windowSize();
-  if (!size) return;
-  const [, t, , b] = safeInsets(size[0], size[1]);
-  if (warmMenuIcons(size[1] - t - b)) warmFor = size[1] - t - b;
+  if (!size || !picture) return;
+  const [w, h] = size;
+  const [l, t, r, b] = safeInsets(w, h);
+  const t0 = __native.now();
+  resetCost();
+  prepareMenus(w - l - r, h - t - b, [l, t, r, b], [picture[0] - l, picture[1] - t, picture[2], picture[3]], Infinity);
+  console.log(`ui: menus ready for ${w}×${h} at start, ${describeCost(currentCost(), __native.now() - t0)}`);
 }
+
+/** What a menu's paint takes, apart from the menu: its legend, the picture's box, the help's page. */
+function drawTop(ui: Ui, top: Layer | null, legend: readonly LegendItem[], w: number, h: number, picture: Box, helpPage: number): void {
+  let box = picture;
+  if (top?.kind === 'pause') paintPause(ui, w, h, top.sel);
+  else if (top?.kind === 'confirm') paintConfirm(ui, w, h, top.verb, lastInput());
+  else if (top?.kind === 'options') box = paintOptions(ui, w, h, top.row);
+  else if (top?.kind === 'help') box = paintHelp(ui, w, h, subLang(), helpPage);
+  drawLegend(ui, legend, w, h, box);
+}
+
+/** Every menu as it first opens: what a rehearsal draws, one a frame. */
+const REHEARSALS: readonly Layer[] = [
+  { kind: 'pause', sel: 0 },
+  ...(['save', 'load', 'restart'] as const).map((verb): Layer => ({ kind: 'confirm', verb })),
+  ...OPTIONS_ROWS.map((_, row): Layer => ({ kind: 'options', row })),
+  { kind: 'help' },
+];
+
+/** The state the menus were last rehearsed in, and the next rehearsal to run. */
+let ready = { key: '', next: 0, frames: 0, ms: 0, t0: 0 };
+
+/** A surface that draws nothing: a rehearsal's (it is drawn for the caches alone). */
+class NullSurface implements Surface2D {
+  constructor(readonly width: number, readonly height: number) {}
+  setSmoothing(): void {}
+  setAlpha(): void {}
+  setBlend(): void {}
+  translate(): void {}
+  scale(): void {}
+  save(): void {}
+  restore(): void {}
+  drawImage(_img: Image2D): void {}
+  drawImageRect(_img: Image2D): void {}
+  fillRect(): void {}
+  fillMask(_mask: Image2D): void {}
+  clear(): void {}
+  putPixels(): void {}
+}
+
+/**
+ * Rehearse the menus for a `w`×`h` safe area (inside `insets`; `picture` in its coordinates),
+ * spending at most about `budgetMs` on rasterising: the next rehearsal, and the ones after it
+ * while the budget lasts. Starts over when anything they would draw differently has changed.
+ */
+function prepareMenus(w: number, h: number, insets: Insets, picture: Box, budgetMs: number): void {
+  if (!fonts) return;
+  const key = [w, h, ...insets, ...picture, subLang(), lastInput(), screenUi.screen,
+    settings.subtitles, settings.volume.effect, settings.volume.voice, settings.volume.music].join('|');
+  if (key !== ready.key) ready = { key, next: 0, frames: 0, ms: 0, t0: __native.now() };
+  if (ready.next >= REHEARSALS.length) return;
+  ready.frames++;
+  const ui = new Ui(new NullSurface(w, h), fonts);
+  ui.bleed = insets;
+  const before = totalCost(), t0 = __native.now();
+  // The budget is the frame's time, the drawing included: a rehearsal that rasterises nothing
+  // still walks a whole menu, and all of them at once would be a hitch of its own.
+  while (ready.next < REHEARSALS.length) {
+    const top = REHEARSALS[ready.next]!;
+    const screen = legendScreen(top, false, false);
+    const legend = screen ? legendItems(screen, lastInput()) : [];
+    const spent = __native.now() - t0;
+    if (spent >= budgetMs || !rehearse(() => drawTop(ui, top, legend, w, h, picture, 0), budgetMs - spent)) break;
+    ready.next++;
+  }
+  ready.ms += totalCost() - before;
+  if (ready.next === REHEARSALS.length && budgetMs !== Infinity && ready.ms >= 5) {
+    console.log(`ui: menus ready for ${w}×${h} (safe area) in ${ready.frames} frames, ${ready.ms.toFixed(1)} ms of rasterising`);
+  }
+}
+
+const totalCost = (): number => Object.values(currentCost().ms).reduce((a, b) => a + b, 0);
+
+/** Whether the menus are rehearsed for the state they were last asked about (the smoke's). */
+export function menusReady(): boolean {
+  return ready.key !== '' && ready.next >= REHEARSALS.length;
+}
+
+/** The menu drawn on the last frame: a newly opened one has its first frame's cost logged. */
+let shownTop: Layer | null = null;
 
 /**
  * Draw the layer for a `w`×`h` window whose picture (the room, the map, a story page) is
@@ -52,25 +154,25 @@ export function paintUi(
   const [l, t, r, b] = insets;
   const sw = w - l - r, sh = h - t - b;
   if (sw <= 0 || sh <= 0) return null;
+  const t0 = __native.now();
+  resetCost();
   const top = topMenu();
-  // The window changed size: the menus' icons for the new one, one a frame, before a menu needs them.
-  if (!top && warmFor !== sh && warmMenuIcons(sh, 1)) warmFor = sh;
+  const box: Box = [picture[0] - l, picture[1] - t, picture[2], picture[3]];
+  if (!top) prepareMenus(sw, sh, insets, box, SLICE_MS);
+  const opened = top !== null && top !== shownTop;
+  shownTop = top;
   const screen = legendScreen(top, mapPanelOpen(), mapBusy());
   const legend = screen ? legendItems(screen, lastInput()) : [];
   if (!top && legend.length === 0) return { surface: null, ops: [] };
-  if (!surface || surface.width !== w || surface.height !== h) surface = new NativeSurface(w, h);
+  if (!surface || surface.width !== w || surface.height !== h) surface = costed('surface', () => new NativeSurface(w, h));
   surface.clear();
   surface.save();
   surface.translate(l, t);
   const ui = new Ui(surface, fonts);
   ui.bleed = insets;
-  let box: Box = [picture[0] - l, picture[1] - t, picture[2], picture[3]];
-  if (top?.kind === 'pause') paintPause(ui, sw, sh, top.sel);
-  else if (top?.kind === 'confirm') paintConfirm(ui, sw, sh, top.verb, lastInput());
-  else if (top?.kind === 'options') box = paintOptions(ui, sw, sh, top.row);
-  else if (top?.kind === 'help') box = paintHelp(ui, sw, sh, subLang(), helpScreens.page);
-  drawLegend(ui, legend, sw, sh, box);
+  drawTop(ui, top, legend, sw, sh, box, helpScreens.page);
   surface.restore();
+  if (opened) console.log(`ui: ${top.kind} opened at ${w}×${h}, its first frame ${describeCost(currentCost(), __native.now() - t0)}`);
   return { surface, ops: ui.ops };
 }
 

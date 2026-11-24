@@ -42,13 +42,6 @@ export async function loadSubtitleAssets(): Promise<void> {
   cutLayout = new SubtitleLayout(face);
 }
 
-/** Switch the subtitle face (the native Options' Font row); lines from now on use it. */
-export async function setSubtitleFace(name: string): Promise<void> {
-  face = await loadFace(name, readBytes);
-  layout = new SubtitleLayout(face);
-  cutLayout = new SubtitleLayout(face);
-}
-
 /** The face the subtitles are drawn in, once loaded (the UI text borrows it). */
 export function subtitleFace(): NativeFace | null {
   return face;

@@ -68,9 +68,11 @@ others are small enough to read.
   flipped quad); KUFRIK's briefcase story is `src/app/cutscenePlay.ts`, imported as it is, drawn
   by `native/js/cutsceneScreen.ts` (`drawCutscene`'s `ai` path), with the tutorial's Save/Load
   cue as a legend pulse (`tutorialHint.ts`) and its gate `kufrikSmoke.ts`. The TV menus:
-  `uiInput.ts` routes the keyboard, pad and remote for every screen, `menus.ts` is the pause
+  `uiInput.ts` routes the keyboard, pad and remote for every screen (the remote's swipes made
+  by `remoteSwipe.ts` from the thumb's travel), `menus.ts` is the pause
   menu / confirm / Options / Help state, `optionsModel.ts` persists and applies the options,
-  `uiLayer.ts` draws the window-sized UI layer — `menuPaint.ts`, `optionsPaint.ts` (the original
+  `uiLayer.ts` draws the window-sized UI layer, and rehearses the menus before they open
+  (`uiCost.ts` times and budgets that) — `menuPaint.ts`, `optionsPaint.ts` (the original
   Options face), `helpPaint.ts` (the help typeset from `helpText.ts`), `legend.ts` — through
   `uiDraw.ts` (which also has the intro splash's shape and text helpers), in the web touch UI's
   room-toned paint (`uiPalette.ts`, `uiGlass.ts`, `rusticIcons.ts`) and the UI's language

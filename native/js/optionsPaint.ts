@@ -3,8 +3,7 @@
  * (#183, #191), the AI-upscaled panel art `src/render/panelAi.ts` composites — drawn through
  * `Surface2D`, scaled to most of the window's height, with a TV focus ring on the row the
  * remote or the pad is on. Beside it, a caption card names the focused row and its value
- * (the face's sliders are small from a sofa), and holds the one control the 1998 face has no
- * place for: the subtitle font (`ff.subfont`), shown in its own face.
+ * (the face's sliders are small from a sofa).
  *
  * The chrome around the face is the web touch UI's, in the room's palette: the caption card
  * is its popup glass (`uiGlass.ts`), and the focus is its touch Options' focus outline
@@ -27,8 +26,6 @@ import { labelShadow, popup, scrim } from './menuPaint.js';
 import { currentPalette, ACCENT, INK } from './uiPalette.js';
 import { t, type UiString } from './uiStrings.js';
 import { hairline } from './uiGlass.js';
-import { subFontName } from './optionsModel.js';
-import { subtitleFace } from './roomSubtitles.js';
 import type { Ui } from './uiDraw.js';
 
 interface PanelArt {
@@ -67,7 +64,7 @@ const SUBTITLE_HIGHLIGHT_X: Record<'cz' | 'en' | 'off', number> = { cz: 5, en: 5
 const HANDLE_Y = { effect: 85, voice: 134, music: 183 } as const;
 
 /** Each row's box on the face, in panel pixels [x1, y1, x2, y2]: its hit region (hud.ts OBLMYSI). */
-const ROW_BOX: Readonly<Record<Exclude<OptionsRow, 'font'>, readonly [number, number, number, number]>> = {
+const ROW_BOX: Readonly<Record<OptionsRow, readonly [number, number, number, number]>> = {
   effect: OBLMYSI[17]!.slice(1) as unknown as [number, number, number, number],
   voice: OBLMYSI[18]!.slice(1) as unknown as [number, number, number, number],
   music: OBLMYSI[19]!.slice(1) as unknown as [number, number, number, number],
@@ -78,7 +75,7 @@ const ROW_BOX: Readonly<Record<Exclude<OptionsRow, 'font'>, readonly [number, nu
 
 const ROW_NAME: Readonly<Record<OptionsRow, UiString>> = {
   effect: 'effectVolume', voice: 'talkVolume', music: 'musicVolume', subtitles: 'subtitles',
-  font: 'subtitleFont', help: 'help', done: 'exitOptions',
+  help: 'help', done: 'exitOptions',
 };
 /** Each language in its own name; "off" in the UI's. */
 const subName = (mode: 'cz' | 'en' | 'off'): string => (mode === 'cz' ? 'Čeština' : mode === 'en' ? 'English' : t('subsOff'));
@@ -96,8 +93,6 @@ function rowValue(row: OptionsRow): string {
       return `${settings.volume[row]} / 12`;
     case 'subtitles':
       return subName(settings.subtitles);
-    case 'font':
-      return `‹  ${subFontName()}  ›`;
     case 'help':
       return t('helpValue');
     case 'done':
@@ -138,16 +133,15 @@ export function paintOptions(ui: Ui, w: number, h: number, row: number): [number
       ui.image(a.cudl, x0 + P(cx - 8), y0 + P(HANDLE_Y[bus] - 8), P(CUDL_SIZE), P(CUDL_SIZE), true, 1, `handle-${bus}`);
     }
   }
-  // The caption card follows the focus; for the font row it IS the control.
-  const [bx1, by1, bx2, by2] = focused === 'font' ? ROW_BOX.subtitles : ROW_BOX[focused];
+  // The caption card follows the focus.
+  const [bx1, by1, bx2, by2] = ROW_BOX[focused];
   const cardH = 150 * u;
   const cx = x0 + faceW + gap;
-  const cy = Math.max(y0, Math.min(y0 + faceH - cardH, y0 + ((by1 + by2) / 2) * f - cardH / 2 + (focused === 'font' ? 160 * u : 0)));
+  const cy = Math.max(y0, Math.min(y0 + faceH - cardH, y0 + ((by1 + by2) / 2) * f - cardH / 2));
   const pal = currentPalette();
   popup(ui, cx, cy, cardW, cardH, u, h, pal);
   ui.text(t(ROW_NAME[focused]), cx + 28 * u, cy + 52 * u, 26 * u, pal.symbol, { bold: true, outline: labelShadow(u, h) });
-  const face = focused === 'font' ? subtitleFace() ?? undefined : undefined;
-  ui.text(rowValue(focused), cx + 28 * u, cy + 112 * u, 36 * u, INK, { bold: !face, outline: labelShadow(u, h), ...(face ? { face } : {}) });
+  ui.text(rowValue(focused), cx + 28 * u, cy + 112 * u, 36 * u, INK, { bold: true, outline: labelShadow(u, h) });
   // The touch Options' `outline: … var(--menu-accent); outline-offset: 2px`, thickened to be
   // seen from a sofa, with the pressed button's ink border (`border-color: var(--menu-ink)`)
   // inside it, so it reads on the bright stone and on the dark card alike.
@@ -156,7 +150,6 @@ export function paintOptions(ui: Ui, w: number, h: number, row: number): [number
     focusOutline(ui, x, y, rw, rh, th, off, ACCENT, r);
     focusOutline(ui, x, y, rw, rh, hair, off, INK, r);
   };
-  if (focused === 'font') ring(cx, cy, cardW, cardH, 14 * u);
-  else ring(x0 + bx1 * f, y0 + by1 * f, (bx2 - bx1 + 1) * f, (by2 - by1 + 1) * f, 6 * u);
+  ring(x0 + bx1 * f, y0 + by1 * f, (bx2 - bx1 + 1) * f, (by2 - by1 + 1) * f, 6 * u);
   return [x0, y0, faceW + gap + cardW, faceH];
 }

@@ -41,6 +41,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
   set(CMAKE_XCODE_ATTRIBUTE_SKIP_INSTALL YES)
   set(CMAKE_XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY 3)
   set(CMAKE_XCODE_ATTRIBUTE_ENABLE_BITCODE NO)
+  # Debug information in the Release build, every target's (SDL and QuickJS too), so the
+  # archive carries a dSYM of the app (`dwarf-with-dsym`, on the app below) and App Store
+  # Connect can symbolicate a crash. Without -g in the flags CMake writes "Generate Debug
+  # Symbols: NO" and Xcode makes no dSYM ("Upload Symbols Failed", TestFlight build 1). The
+  # app itself ships stripped, as before: the symbols go to the dSYM only. The libraries are
+  # not: an archive strips each one's debug symbols before the app links it, and the dSYM
+  # would then have no SDL, QuickJS, FreeType or libwebp in it — where a crash most likely is.
+  string(APPEND CMAKE_C_FLAGS_RELEASE " -g")
+  set(CMAKE_XCODE_ATTRIBUTE_STRIP_INSTALLED_PRODUCT NO)
 endif()
 
 include(FetchContent)
@@ -147,7 +156,16 @@ if(CMAKE_SYSTEM_NAME STREQUAL "tvOS")
     XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS "${CMAKE_CURRENT_SOURCE_DIR}/tvos/FishFillets.entitlements"
     XCODE_ATTRIBUTE_SKIP_INSTALL NO
     XCODE_ATTRIBUTE_INSTALL_PATH "$(LOCAL_APPS_DIR)"
-    XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf-with-dsym")
+    XCODE_ATTRIBUTE_DEBUG_INFORMATION_FORMAT "dwarf-with-dsym"
+    # The app's own -g (above), stated: CMake reads it from the flags of the app's link
+    # language, Objective-C here, whose Release flags have none.
+    XCODE_ATTRIBUTE_GCC_GENERATE_DEBUGGING_SYMBOLS YES
+    XCODE_ATTRIBUTE_STRIP_INSTALLED_PRODUCT YES
+    # And the dSYM where an archive collects it: CMake pins the products to its own build
+    # tree (CONFIGURATION_BUILD_DIR), which `xcodebuild archive` does not look in, so the dSYM
+    # went beside the app there and the archive's dSYMs folder stayed empty. SYMROOT is the
+    # archive's products folder during an archive, CMake's elsewhere.
+    XCODE_ATTRIBUTE_DWARF_DSYM_FOLDER_PATH "$(SYMROOT)/$(CONFIGURATION)$(EFFECTIVE_PLATFORM_NAME)")
   add_custom_command(TARGET ff4e-native POST_BUILD
     COMMAND /bin/sh ${CMAKE_CURRENT_SOURCE_DIR}/tvos/copy-bundle.sh ${FF4E_TVOS_STAGE}
     VERBATIM)
