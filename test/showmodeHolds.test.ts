@@ -6,7 +6,7 @@
  * must key an entry in `help.cap` that **does nothing**. `showmodeHolds.ts` says so; this
  * checks it against the real recording, so the rule is enforced rather than remembered.
  *
- * The trap is `akce_restart`. `applyCapAction` (cutscene.ts) tests `akce === restart`
+ * The trap is `akce_restart`. `applyCapAction` (cutscenePlay.ts) tests `akce === restart`
  * before it tests `kdo` at all, so a `kdo=0` restart still calls `buildRoom(true)` — and
  * all three restart runs in the recording are `kdo=0`. "kdo=0 means no-op" is therefore
  * true of everything except restart and load, which is exactly the case a reader of a

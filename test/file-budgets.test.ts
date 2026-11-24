@@ -167,7 +167,11 @@ const BUDGETS: ReadonlyArray<readonly [path: string, maxLines: number]> = [
   // KUFRIK demo and showmode next door ARE `DalsiPrikaz` and share the keyboard's tick
   // cadence, and a replay is the original's `loadmode` and does not. Sitting in this file
   // is how it inherited the wrong one and broke WIN #68 and GRAL #64.
-  ['src/app/cutscene.ts', 570],
+  //
+  // 570 -> 260: the two drivers (the story's and showmode's) left for `cutscenePlay.ts`,
+  // which touches no page, so the native host can run them as they are. What stays is the
+  // page's: the frame, the DOM captions and the AI frame cache.
+  ['src/app/cutscene.ts', 260],
   // 1 549. The `window.__ff` surface. Grows naturally as probes need new hooks, which is
   // fine — but it is worth noticing when it does. 1 620 -> 1 644 for three of them that
   // review asked for: `blockedMoves` (so the probe can see a key that REACHED the engine

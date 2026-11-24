@@ -162,7 +162,8 @@ Sizes are characters / 4, the same rough token meter the `src/render/` map below
 | `portraitHint.ts` | | One-time, five-second animated portrait suggestion in VRAK on landscape phones; waits for native unlock and remembers only after 2.4 seconds of landscape display. Icon-only with reduced-motion support, no orientation lock. Styled by `src/styles/portraitHint.css`. |
 | `touchOptions.ts` | 2.0 k | The touch Options overlay: lends it the original panel canvas on phones and tablets alike, so presses go through the panel's own `panelAction` regions. |
 | `optionsLayout.ts` | | The phone's touch Options face: whole in portrait, cut at row 197 and laid side by side in landscape, with taps mapped back to the original panel and the face scaled to fill the dialog. |
-| `cutscene.ts` | 6.7 k | The KUFRIK demo and the intro/ending movies. |
+| `cutscene.ts` | 2.9 k | The KUFRIK briefcase story on the page: its frame on `#screen` or the GL canvas, its DOM captions, and the `ai` tier's frame cache. |
+| `cutscenePlay.ts` | | What plays the KUFRIK demo: the briefcase story's driver and the help.cap showmode's — start, one step per tick, skip, end. DOM-free (the native host runs it as it is; the frame cache is handed in). |
 | `cutsceneClose.ts` | | The briefcase demo's Skip button: the pointer way to skip it (a click on the room no longer does), shown only while the demo plays. |
 | `solveMode.ts` | 2.2 k | Dev-only `solvemode`: the room plays itself from its own recorded solution through the real loop, speaking and recording normally, and aborts loudly on death / a blocked move / moves exhausted / a stall. |
 | `replayMode.ts` | 2.4 k | The map's "Replay" of a stored best solution: one move per settled tick (run undrawn, with the held-key speed-up carried, so it moves as smoothly as the KUFRIK demo), a `busy`-dropped move retried, and KUFRIK's story and tutorial demonstration never started (their moves are already in the record). |

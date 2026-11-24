@@ -17,7 +17,7 @@ const button = vi.hoisted(() => ({
 }));
 const skipCutscene = vi.hoisted(() => vi.fn());
 vi.mock('../src/app/dom.js', () => ({ cutsceneClose: button }));
-vi.mock('../src/app/cutscene.js', () => ({ skipCutscene }));
+vi.mock('../src/app/cutscenePlay.js', () => ({ skipCutscene }));
 vi.mock('../src/app/frameClock.js', () => ({ wake: vi.fn() }));
 vi.mock('../src/app/gameState.js', () => ({ room: null, get cutscene() { return state.cutscene; } }));
 vi.mock('../src/app/touchButtons.js', () => ({ phoneUi: () => true }));

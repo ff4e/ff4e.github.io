@@ -119,7 +119,7 @@ export function beginHeldMove(code: string, sys: boolean, which: 'little' | 'big
  *
  *  No `hracNespi()` here, deliberately. DalsiPrikaz's `hrac_nespi` (URoom.pas:26985) sits
  *  in its SHOWMODE branch — it is how a REPLAYED command counts as activity, which is why
- *  the port's replay paths call it (`cutscene.ts`, `test/solutionsHarness.ts`) and this
+ *  the port's replay paths call it (`cutscenePlay.ts`, `test/solutionsHarness.ts`) and this
  *  one does not. A live command was already counted when the key went down
  *  (FormKeyDown, :26787). Resetting again on every engine-driven repeat tick would be a
  *  stronger reset than the original's, which only refreshes on the OS's own key repeat.

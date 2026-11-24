@@ -120,7 +120,7 @@ export function sampleUndoPoint(): void {
   //
   // Clearing on the transition rather than trusting the driver to put the record back is
   // deliberate: nothing does. `startShowmode` never captures the pre-demo record
-  // (`cutscene.ts`), `endShowmode` only clears flags, and the demo's own scripted restart
+  // (`cutscenePlay.ts`), `endShowmode` only clears flags, and the demo's own scripted restart
   // rebuilds the room — resetting `srecord` to empty — through the `carryPole` path that
   // keeps the history. Left alone, the first press after a demo would replay the player's
   // whole pre-demo record instead of taking one move back.

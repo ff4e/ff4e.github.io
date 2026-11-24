@@ -42,10 +42,10 @@ import { initRoomLoad, loadRoom, roomEntryHeld, roomVoicesSettled } from '../../
 import { atRest, fishBusy } from '../../src/app/roomGates.js';
 import { ui } from '../../src/app/screenState.js';
 import { armSolve, inAutoPlay, setSolvemode, cancelSolve } from '../../src/app/solveMode.js';
+import { endShowmode, inShowmode } from '../../src/app/cutscenePlay.js';
 import { loadUndoHistory, undoAvailable, undoHistoryForSave, undoMove } from '../../src/app/undo.js';
 import { aiRoom, aiRoomReady } from './seams/art.js';
 import { audio } from './seams/audioEngine.js';
-import { endShowmode, inShowmode } from './seams/cutscene.js';
 import { roomLoading } from './seams/framePacing.js';
 import { onLeaveRoom, returnFromRoom } from './seams/mapNav.js';
 import { DEFAULT_LINE_TICKS, EFFECT_VOL, LOGIC_MS, LOGIC_SEC } from './seams/stageGeometry.js';

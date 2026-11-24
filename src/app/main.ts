@@ -55,16 +55,8 @@ import {
   tryStep,
   wallShove,
 } from './movement.js';
-import {
-  aiKufr,
-  aiKufrFrames,
-  endShowmode,
-  inShowmode,
-  initCutscene,
-  skipCutscene,
-  startCutscene,
-  startShowmode,
-} from './cutscene.js';
+import { aiKufr, aiKufrFrames, disposeAiKufr } from './cutscene.js';
+import { endShowmode, inShowmode, initCutscene, skipCutscene, startCutscene, startShowmode } from './cutscenePlay.js';
 import { inReplay, replayAtShowmodeSpot } from './replayMode.js';
 import { cancelSolve, inAutoPlay, inSolvemode } from './solveMode.js';
 import { loadUndoHistory, undoAvailable, undoHistoryForSave, undoMove } from './undo.js';
@@ -819,7 +811,7 @@ function scriptTalk(name: string, prior: number): number {
 }
 
 /** Launch the briefcase story cutscene (InitKufrDemo), loading its assets once. */
-//#region Cutscene wiring | anchors: initCutscene | Hands `cutscene.ts` the four names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo and the movies are in that module.
+//#region Cutscene wiring | anchors: initCutscene | Hands `cutscenePlay.ts` the five names it needs — the things a cutscene does to the game when it starts, ends or is skipped. The KUFRIK demo and the movies are in that module.
 initCutscene({
   get buildRoom() {
     return buildRoom;
@@ -832,6 +824,9 @@ initCutscene({
   },
   get swapActive() {
     return swapActive;
+  },
+  get disposeAiKufr() {
+    return disposeAiKufr;
   },
 });
 initCutsceneClose();

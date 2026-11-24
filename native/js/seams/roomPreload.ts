@@ -11,3 +11,5 @@ export const setRoomPreloadPending: typeof Real.setRoomPreloadPending = () => {}
 export const clearRoomPreloadPending: typeof Real.clearRoomPreloadPending = () => {};
 export const preloadRoomPlayAssets: typeof Real.preloadRoomPlayAssets = async () => {};
 export const warmFinaleRoom: typeof Real.warmFinaleRoom = () => {};
+export const preloadCutscene: typeof Real.preloadCutscene = async () => {};
+export const showmodeRecording: typeof Real.showmodeRecording = () => null;
