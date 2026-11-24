@@ -41,9 +41,17 @@ function uploadMask(w: number, h: number, cov: (x: number, y: number) => number)
   return { img: { id, width: w, height: h, premultiplied: true } as unknown as Image2D, w, h };
 }
 
-/** A `w`×`h` coverage array (0..1, row by row) as a mask texture, for `Ui.mask`. */
-export function coverageMask(w: number, h: number, cov: Float32Array): Image2D {
-  return uploadMask(w, h, (x, y) => cov[Math.floor(y) * w + Math.floor(x)]!).img;
+/**
+ * A `w`×`h` mask texture, for `Ui.mask`, from each pixel's count of covered samples out of
+ * `samples` (row by row).
+ */
+export function countMask(w: number, h: number, counts: Uint8Array, samples: number): Image2D {
+  // White × coverage, premultiplied: all four bytes of a pixel the same, so one word each.
+  const level = Uint32Array.from({ length: samples + 1 }, (_, c) => Math.round(255 * (c / samples)) * 0x01010101);
+  const rgba = new Uint32Array(w * h);
+  for (let p = 0; p < w * h; p++) rgba[p] = level[counts[p]!]!;
+  const id = __native.createTexture(rgba.buffer, w, h, false);
+  return { id, width: w, height: h, premultiplied: true } as unknown as Image2D;
 }
 
 /** Coverage from a signed distance (negative inside), one pixel of anti-aliasing. */

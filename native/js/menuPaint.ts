@@ -12,7 +12,7 @@ import { PAUSE_ITEMS, pauseItemEnabled, type PauseItem, type Verb } from './menu
 import { confirmItems, drawHintRow, hintRowWidth, legendMetrics } from './legend.js';
 import type { InputSource } from './uiInput.js';
 import type { Ui } from './uiDraw.js';
-import { drawIcon, type IconName } from './rusticIcons.js';
+import { drawIcon, iconReady, warmIcon, type IconName } from './rusticIcons.js';
 import { drawGlass, hairline } from './uiGlass.js';
 import { currentPalette, INK, type UiPalette } from './uiPalette.js';
 import { t, type UiString } from './uiStrings.js';
@@ -20,10 +20,37 @@ import { t, type UiString } from './uiStrings.js';
 const PAUSE_LABEL: Readonly<Record<PauseItem, UiString>> = {
   resume: 'resume', map: 'worldMap', save: 'save', load: 'load', restart: 'restart', options: 'options', help: 'help',
 };
-const PAUSE_ICON: Readonly<Record<PauseItem, IconName>> = {
+const PAUSE_ICON_NAME: Readonly<Record<PauseItem, IconName>> = {
   resume: 'resume', map: 'map', save: 'save', load: 'load', restart: 'restart', options: 'options', help: 'help',
 };
 const PROMPT: Readonly<Record<Verb, UiString>> = { save: 'askSave', load: 'askLoad', restart: 'askRestart' };
+const VERB_ICON: Readonly<Record<Verb, IconName>> = { save: 'save', load: 'load', restart: 'restart' };
+
+/** The icons' sizes at 1080 lines: the pause menu's items', and the confirm prompt's. */
+const PAUSE_ICON = 40, CONFIRM_ICON = 48;
+
+/** The window's scale: 1 at 1080 lines. */
+const scale = (h: number): number => Math.max(0.5, h / 1080);
+
+/**
+ * Rasterise the icons the pause menu and the confirm prompt draw at a window `h` high, at
+ * most `budget` of them now; returns whether all are ready. Their first drawing makes them
+ * otherwise, and at a 4K TV's size the first menu would wait for that: the layer calls this
+ * when the UI starts, and a frame at a time while no menu is up (after a resize).
+ */
+export function warmMenuIcons(h: number, budget = Infinity): boolean {
+  const u = scale(h);
+  const want: [IconName, number][] = [
+    ...PAUSE_ITEMS.map((i): [IconName, number] => [PAUSE_ICON_NAME[i], PAUSE_ICON * u]),
+    ...Object.values(VERB_ICON).map((n): [IconName, number] => [n, CONFIRM_ICON * u]),
+  ];
+  for (const [name, size] of want) {
+    if (iconReady(name, size)) continue;
+    if (budget-- <= 0) return false;
+    warmIcon(name, size);
+  }
+  return true;
+}
 
 /** The touch UI's label shadow (`text-shadow: 0 1px 2px #000`), at the window's scale. */
 export const labelShadow = (u: number, h: number): { r: number; rgb: number; dy: number; alpha: number } =>
@@ -41,11 +68,11 @@ export function popup(ui: Ui, x: number, y: number, w: number, h: number, u: num
 
 /** The pause menu, centred in the window. Returns its box. */
 export function paintPause(ui: Ui, w: number, h: number, sel: number): [number, number, number, number] {
-  const u = Math.max(0.5, h / 1080);
+  const u = scale(h);
   const pal = currentPalette();
   const hair = hairline(h);
   scrim(ui, w, h, 0.6);
-  const itemH = 64 * u, step = 74 * u, padX = 28 * u, titleH = 92 * u, icon = 40 * u;
+  const itemH = 64 * u, step = 74 * u, padX = 28 * u, titleH = 92 * u, icon = PAUSE_ICON * u;
   const cw = 520 * u, ch = titleH + PAUSE_ITEMS.length * step + 18 * u;
   const x = (w - cw) / 2, y = (h - ch) / 2;
   popup(ui, x, y, cw, ch, u, h, pal);
@@ -55,22 +82,20 @@ export function paintPause(ui: Ui, w: number, h: number, sel: number): [number, 
     const on = pauseItemEnabled(item);
     const alpha = on ? 1 : 0.38;
     drawGlass(ui, bx, by, bw, itemH, 8 * u, hair, pal, i === sel ? 'pressed' : 'rest', alpha);
-    drawIcon(ui, PAUSE_ICON[item], bx + 18 * u, by + (itemH - icon) / 2, icon, pal, alpha);
+    drawIcon(ui, PAUSE_ICON_NAME[item], bx + 18 * u, by + (itemH - icon) / 2, icon, pal, alpha);
     ui.text(t(PAUSE_LABEL[item]), bx + 18 * u + icon + 20 * u, by + itemH / 2 + 34 * u * 0.36, 34 * u, INK,
       { bold: true, alpha, outline: labelShadow(u, h) });
   });
   return [x, y, cw, ch];
 }
 
-const VERB_ICON: Readonly<Record<Verb, IconName>> = { save: 'save', load: 'load', restart: 'restart' };
-
 /** The confirm prompt (A3): the verb's icon and the question, then "Ⓐ Yes  Ⓑ No" in the last input's glyphs. Returns its box. */
 export function paintConfirm(ui: Ui, w: number, h: number, verb: Verb, source: InputSource): [number, number, number, number] {
-  const u = Math.max(0.5, h / 1080);
+  const u = scale(h);
   const pal = currentPalette();
   scrim(ui, w, h, 0.67);
   const q = t(PROMPT[verb]);
-  const qpx = 36 * u, icon = 48 * u, iconGap = 18 * u;
+  const qpx = 36 * u, icon = CONFIRM_ICON * u, iconGap = 18 * u;
   const answers = confirmItems(source);
   const m = legendMetrics(h);
   const hintW = hintRowWidth(ui, answers, m);

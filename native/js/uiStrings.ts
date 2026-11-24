@@ -72,5 +72,5 @@ export function t(key: UiString): string {
   return STRINGS[key][uiLang() === 'cz' ? 1 : 0];
 }
 
-/** Every key, for the smoke gate's "every string renders" check. */
-export const UI_STRING_KEYS = Object.keys(STRINGS) as UiString[];
+/** Every string, in both languages: the menu smoke checks the UI font has a glyph for each character. */
+export const allUiStrings = (): string[] => Object.values(STRINGS).flat();

@@ -7,7 +7,7 @@
 import { helpScreens } from '../../src/app/screenState.js';
 import { drawLegend, legendItems, legendScreen } from './legend.js';
 import { mapBusy, mapPanelOpen } from './mapScreen.js';
-import { paintConfirm, paintPause } from './menuPaint.js';
+import { paintConfirm, paintPause, warmMenuIcons } from './menuPaint.js';
 import { topMenu } from './menus.js';
 import { NativeSurface } from './nativeSurface.js';
 import { paintOptions } from './optionsPaint.js';
@@ -18,10 +18,14 @@ import { lastInput } from './uiInput.js';
 
 let fonts: UiFonts | null = null;
 let surface: NativeSurface | null = null;
+/** The window height the menus' icons are ready for. */
+let warmFor = 0;
 
-/** Load what the layer draws with. Before the first frame. */
+/** Load what the layer draws with, and rasterise the menus' icons for the window. Before the first frame. */
 export async function initUiLayer(): Promise<void> {
   fonts = await loadUiFonts();
+  const size = __native.windowSize();
+  if (size && warmMenuIcons(size[1])) warmFor = size[1];
 }
 
 export type Box = readonly [number, number, number, number];
@@ -35,6 +39,8 @@ export type Box = readonly [number, number, number, number];
 export function paintUi(w: number, h: number, picture: Box): { surface: NativeSurface | null; ops: readonly UiOp[] } | null {
   if (!fonts || w <= 0 || h <= 0) return null;
   const top = topMenu();
+  // The window changed size: the menus' icons for the new one, one a frame, before a menu needs them.
+  if (!top && warmFor !== h && warmMenuIcons(h, 1)) warmFor = h;
   const screen = legendScreen(top, mapPanelOpen(), mapBusy());
   const legend = screen ? legendItems(screen, lastInput()) : [];
   if (!top && legend.length === 0) return { surface: null, ops: [] };

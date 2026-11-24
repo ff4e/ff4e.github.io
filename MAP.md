@@ -74,7 +74,8 @@ others are small enough to read.
   Options face), `helpPaint.ts` (the help typeset from `helpText.ts`), `legend.ts` — through
   `uiDraw.ts` (which also has the intro splash's shape and text helpers), in the web touch UI's
   room-toned paint (`uiPalette.ts`, `uiGlass.ts`, `rusticIcons.ts`) and the UI's language
-  (`uiStrings.ts`), and `menuSmoke.ts` gates them with `native/ui-layout.snap.json`.
+  (`uiStrings.ts`), and `menuSmoke.ts` gates them with `native/ui-layout.snap.json` (and
+  `uiAssetSmoke.ts` checks the icons and the strings' glyphs).
 
 ### Map of `src/app/`
 
