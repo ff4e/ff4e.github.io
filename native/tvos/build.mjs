@@ -4,7 +4,7 @@
 //   node native/tvos/build.mjs                          # device build, unsigned: does it compile and link?
 //   node native/tvos/build.mjs --simulator              # the Apple TV Simulator (signed locally, runnable)
 //   node native/tvos/build.mjs --archive DIR --team ID --build N [--version V]
-//                                                       # a signed .xcarchive for App Store Connect
+//                                                       # an .xcarchive for App Store Connect (signed at export)
 //
 // The archive is what tools/release-testflight-tvos.mjs makes (and, with --upload, exports);
 // read that file's header before releasing. Nothing here uploads anything.
@@ -12,7 +12,8 @@
 // The Xcode project is generated (native/build/tvos/xcode or xcode-sim), never checked in:
 // CMake is the one list of the host's sources and the pinned dependencies for every platform.
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stage } from './stage.mjs';
@@ -59,10 +60,36 @@ export const APP = 'FishFillets.app';
 
 const run = (cmd, args, env = {}) => execFileSync(cmd, args, { cwd: repo, stdio: 'inherit', env: { ...process.env, ...env } });
 
+export const BUNDLE_ID = 'io.github.ff4e.fishfillets4ever';
+export const ENTITLEMENTS = join(here, 'FishFillets.entitlements');
+
+/** FishFillets.entitlements with Xcode's `$(…)` variables filled in for `team`. */
+export function resolvedEntitlements(team) {
+  return readFileSync(ENTITLEMENTS, 'utf8')
+    .replaceAll('$(TeamIdentifierPrefix)', `${team}.`)
+    .replaceAll('$(CFBundleIdentifier)', BUNDLE_ID);
+}
+
 /**
- * Bundle, stage, generate and build. `archive`: the .xcarchive path (a signed device build);
- * else a device build without signing, or with `simulator` a Simulator build. Returns the
- * Xcode project's directory.
+ * Sign the archived (unsigned) app locally with its entitlements, so that the App Store export,
+ * which re-signs it, carries them: an unsigned app exports without the iCloud key-value store.
+ */
+function stampEntitlements(app, team) {
+  if (!existsSync(app)) throw new Error(`the archive has no ${app}`);
+  const dir = mkdtempSync(join(tmpdir(), 'ff4e-tvos-ent-'));
+  const file = join(dir, 'FishFillets.entitlements');
+  writeFileSync(file, resolvedEntitlements(team));
+  try {
+    run('codesign', ['--force', '--sign', '-', '--entitlements', file, app]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Bundle, stage, generate and build. `archive`: the .xcarchive path (an unsigned device build
+ * with its entitlements stamped on, signed for the App Store at export); else a device build
+ * without signing, or with `simulator` a Simulator build. Returns the Xcode project's directory.
  */
 export function buildTvos({ simulator = false, archive = null, team = null, build = '1', version = '1.0' } = {}) {
   if (archive && (simulator || !team)) throw new Error('an archive is a signed device build: it needs --team and no --simulator');
@@ -91,8 +118,14 @@ export function buildTvos({ simulator = false, archive = null, team = null, buil
   // No Swift packages here, so the iOS lane's safe.bareRepository override is not needed.
   const env = {};
   if (archive) {
+    // Unsigned, then the entitlements stamped on with a local signature: the export signs it for
+    // the App Store and keeps them. An automatically signed archive would first need a tvOS
+    // development profile, which Apple makes only for a team with a registered Apple TV
+    // ("Your team has no devices from which to generate a provisioning profile", 2026-11-24);
+    // the App Store profile the export makes needs no device.
     run('xcodebuild', [...common, '-destination', 'generic/platform=tvOS', '-archivePath', archive,
-      '-allowProvisioningUpdates', 'archive'], env);
+      'CODE_SIGNING_ALLOWED=NO', 'archive'], env);
+    stampEntitlements(join(archive, 'Products', 'Applications', APP), team);
   } else if (simulator) {
     run('xcodebuild', [...common, '-destination', 'generic/platform=tvOS Simulator', 'build'], env);
   } else {
