@@ -644,7 +644,8 @@ hints lie on their dark strip; in a letterbox margin, they do not. A room's firs
 the remote's hints (room 1, and KUFRIK), and so does the room on leaving the pause menu; with
 `--remote-keys` a key the host leaves unmapped keeps them. First, though, what the UI draws
 with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted part, the
-fast rasteriser's masks equal the exhaustive one's, the whole set's time at 2160 lines is
+fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
+sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
 for each character in both of the UI font's weights. 88 checks, ~10 s.
 

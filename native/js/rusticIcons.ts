@@ -311,10 +311,13 @@ function strokeSamples(subpaths: readonly (readonly number[])[], half: number, s
       const j1 = to(Math.max(ay, ay + dy));
       for (let J = from(Math.min(ay, ay + dy)); J <= j1; J++) {
         const py = at(J, k);
-        // The part of the segment within `half` of this row, and so its samples' span.
+        // The part of the segment within `half` of this row, and so its samples' span — a
+        // sample's width wider, as the ranges are, so rounding cannot drop a sample lying at
+        // exactly `half` (the exact test below still decides each one).
         let t0 = 0, t1 = 1;
         if (dy !== 0) {
-          const ta = (py - half - ay) / dy, tb = (py + half - ay) / dy;
+          const reach = half + k / 4;
+          const ta = (py - reach - ay) / dy, tb = (py + reach - ay) / dy;
           t0 = Math.max(0, Math.min(ta, tb));
           t1 = Math.min(1, Math.max(ta, tb));
           if (t0 > t1) continue;
