@@ -77,11 +77,7 @@ const archivePath = join(archiveDir, `FishFillets-tvOS-${buildNumber}.xcarchive`
 try {
   buildTvos({ archive: archivePath, team, build: buildNumber, version });
 } catch (e) {
-  die(
-    `archive failed (${e.message.split('\n')[0]}) — the output above says why. "PLA Update available": accept the new Program\n` +
-      'License Agreement at developer.apple.com. "No profiles … were found" / "no devices": see\n' +
-      'native/README.md, "Apple TV" → Signing.',
-  );
+  die(`archive failed (${e.message.split('\n')[0]}) — the output above says why. (The archive is unsigned: it does not touch the developer account.)`);
 }
 
 if (!existsSync(archivePath)) die(`archive step reported success but ${archivePath} is missing.`);
@@ -91,7 +87,12 @@ console.log(`\narchive created: ${archivePath}`);
 // distribution certificate, an App Store profile, and the iCloud key-value entitlement.
 console.log('\nexporting locally to check the App Store signing (nothing is uploaded)…');
 const exportPath = exportArchiveLocally({ archivePath, archiveDir, team, cwd: REPO, env: process.env, die });
-const summary = execFileSync('plutil', ['-convert', 'json', '-o', '-', join(exportPath, 'DistributionSummary.plist')], { encoding: 'utf8' });
+let summary = '';
+try {
+  summary = execFileSync('plutil', ['-convert', 'json', '-o', '-', join(exportPath, 'DistributionSummary.plist')], { encoding: 'utf8' });
+} catch {
+  die(`the export wrote no readable ${join(exportPath, 'DistributionSummary.plist')}. Nothing was uploaded.`);
+}
 const app = Object.values(JSON.parse(summary)).flat()[0] ?? {};
 const kvs = app.entitlements?.['com.apple.developer.ubiquity-kvstore-identifier'];
 if (app.certificate?.type !== 'Apple Distribution') die(`the export is not signed with Apple Distribution (${app.certificate?.type ?? 'none'}).`);

@@ -98,9 +98,10 @@ purchase), same team, same two stages, same `--upload` rule as §3.
   naming what to install, when the selected Xcode's tvOS SDK is older.
 - **What the user must do in App Store Connect / the developer account first** (an agent
   cannot): install that Xcode; sign it in to the developer account (Xcode → Settings →
-  Accounts; archives fail with "No Accounts" otherwise); accept the current Program License
-  Agreement at developer.apple.com (archives fail with "PLA Update available" until then —
-  seen 2026-11-24), and add the tvOS platform to the app (app page → "+" beside the platforms
+  Accounts; the archive-only run's local export fails with "No Accounts" otherwise); accept
+  the current Program License Agreement at developer.apple.com (the export fails with "PLA
+  Update available" until then — seen 2026-11-24), and add the tvOS platform to the app (app
+  page → "+" beside the platforms
   → tvOS) before the first `--upload`. No Apple TV needs to be registered: the archive is
   unsigned with its entitlements stamped on, and the export signs it with an App Store
   profile, which needs no device.

@@ -79,7 +79,11 @@ function stampEntitlements(app, team) {
   const dir = mkdtempSync(join(tmpdir(), 'ff4e-tvos-ent-'));
   const file = join(dir, 'FishFillets.entitlements');
   writeFileSync(file, resolvedEntitlements(team));
-  run('codesign', ['--force', '--sign', '-', '--entitlements', file, app]);
+  try {
+    run('codesign', ['--force', '--sign', '-', '--entitlements', file, app]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 /**

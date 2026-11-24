@@ -780,11 +780,12 @@ provisioning profile"*, 2026-11-24 — while the App Store profile the export ma
 device. Every archive-only run also exports locally and checks the result: Apple
 Distribution, an App Store profile, and the iCloud entitlement (an unsigned app would export
 without it). **What the account holder must do first:** install an Xcode with the tvOS 27
-SDK; sign Xcode in to the developer account (Settings → Accounts: without it, *"No Accounts"*);
-accept the current Program License Agreement (without it, *"PLA Update available"*: Apple
-makes no new profile); add the tvOS platform to the app in App Store Connect before the first
-upload. tvOS builds are numbered on their own, from 1: App Store Connect keeps each
-platform's versions and builds apart.
+SDK; sign Xcode in to the developer account (Settings → Accounts: without it the local export
+fails, *"No Accounts"*); accept the current Program License Agreement (without it the export
+fails, *"PLA Update available"*: Apple makes no new profile); add the tvOS platform to the app
+in App Store Connect before the first upload. The archive itself is unsigned and never
+touches the account. tvOS builds are numbered on their own, from 1: App Store Connect keeps
+each platform's versions and builds apart.
 
 ## Does it play? The smoke gate (`native/js/smoke.ts`)
 

@@ -104,7 +104,11 @@ export function exportArchiveLocally({ archivePath, archiveDir, team, cwd, env, 
       { cwd, stdio: 'inherit', env },
     );
   } catch {
-    die('the local App Store export failed — xcodebuild output above says why. Nothing was uploaded.');
+    die(
+      'the local App Store export failed — xcodebuild output above says why. Nothing was uploaded.\n' +
+        '"No Accounts": sign Xcode in to the developer account (Settings → Accounts). "PLA Update available":\n' +
+        'accept the new Program License Agreement at developer.apple.com. See native/README.md, "Apple TV" → Signing.',
+    );
   }
   return exportPath;
 }
