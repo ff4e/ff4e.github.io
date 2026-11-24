@@ -18,6 +18,9 @@
  * prompt changing nothing, the web's gate refusing a save mid-move, the pad's direct
  * LB/RB/Ⓧ prompts and Ⓑ to the map, and the pause menu's Map.
  *
+ * First, what the UI draws with (`uiAssetSmoke.ts`): every carved icon, timed at a 4K TV's
+ * size, and every UI string's glyphs in both languages.
+ *
  * The UI layout snapshot: at a dozen states the UI layer is drawn into a 1280×720 window
  * and what it drew — every rectangle, glyph, image and string, with its position — is
  * compared with native/ui-layout.snap.json. A layout change fails here with the first op
@@ -48,7 +51,8 @@ import { SUB_FACES } from './subtitleFonts.js';
 import { inputFrame, lastInput, routeEvent, setExitHandler, setKeyboardIsRemote } from './uiInput.js';
 import { t } from './uiStrings.js';
 import { initUiLayer, paintUi, type Box } from './uiLayer.js';
-import type { UiOp } from './uiDraw.js';
+import { loadUiFonts, type UiOp } from './uiDraw.js';
+import { checkIcons, checkStrings } from './uiAssetSmoke.js';
 
 class MenuSmokeFailure extends Error {}
 
@@ -186,6 +190,8 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   const stored = (): ReturnType<typeof loadSettings> => loadSettings();
   const t0 = __native.now();
   try {
+    checkIcons(check);
+    checkStrings(check, await loadUiFonts());
     await ensureMapArt();
     showMap();
     await mapTick();

@@ -92,7 +92,10 @@ export function roomPalette(num: number): UiPalette {
   return p;
 }
 
-/** The palette for what is on screen now. */
+/**
+ * The palette for what is on screen now: its room guard is `syncNativeMenu`'s.
+ * restates src/app/nativeMenu.ts `export function syncNativeMenu(` @ 02bec2533ee4
+ */
 export function currentPalette(): UiPalette {
   if (ui.screen === 'room' && curNum > 0 && !roomLoading && aiRoomReady()) lastRoom = curNum;
   return roomPalette(lastRoom);
