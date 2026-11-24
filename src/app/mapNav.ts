@@ -10,7 +10,7 @@
 import { aiCredits, ensureAiCredits } from './art.js';
 import { audio } from './audioEngine.js';
 import { endSilentFilm } from './cheats.js';
-import { endShowmode } from './cutscene.js';
+import { endShowmode } from './cutscenePlay.js';
 import { canvas, ctx, select, wrap } from './dom.js';
 import { wake } from './frameClock.js';
 import { perfPaint, setPerfPaint } from './framePacing.js';

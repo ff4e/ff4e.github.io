@@ -103,7 +103,7 @@ export function musicUrl(name: string): string {
  * `musicSnd` resolves a packaged name first and only falls through to a file for these
  * (audio.ts) — and all three rooms have `cHud: -1`, so nothing else ever asks for them:
  *
- *   KUFRIK  `kufrik`   1.11 MB — started with the briefcase cutscene (cutscene.ts).
+ *   KUFRIK  `kufrik`   1.11 MB — started with the briefcase cutscene (cutscenePlay.ts).
  *   DRAKAR1 `rybky04`  5.75 MB — cued by the room script's own `init` (drakar1.ts:52).
  *   KORALY  `rybky08`  0.74 MB — cued at score-step 19 (koraly.ts:373), well into the room.
  *

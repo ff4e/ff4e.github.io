@@ -12,7 +12,7 @@
  * phone's top-left corner, where its Map button sits in a room.
  */
 import { cutsceneClose } from './dom.js';
-import { skipCutscene } from './cutscene.js';
+import { skipCutscene } from './cutscenePlay.js';
 import { wake } from './frameClock.js';
 import { cutscene } from './gameState.js';
 import { ui } from './screenState.js';

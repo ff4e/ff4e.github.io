@@ -32,7 +32,7 @@ import { step } from '../../src/app/logicTick.js';
 import { heldKeyState } from '../../src/app/movement.js';
 import { armSolve, setSolvemode, solveStatus } from '../../src/app/solveMode.js';
 import { loadSubtitleAssets, subtitleOverlay } from './roomSubtitles.js';
-import { advance, draw, enterRoom, initGame, keyDown, keyUp, nextRoom, roomReady, saveExists, type LeaveReason } from './game.js';
+import { PLAYED_AS_REPLAY, advance, draw, enterRoom, initGame, keyDown, keyUp, nextRoom, roomReady, saveExists, solutionRecord, type LeaveReason } from './game.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { pinRandom } from './scene.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
@@ -92,6 +92,7 @@ function checkWon(num: number): void {
 async function solveRun(num: number, target: NativeAiScreen): Promise<number> {
   const jmeno = ROOMS[num - 1]?.jmeno ?? '';
   left = null;
+  if (PLAYED_AS_REPLAY.has(jmeno)) return replayRun(num, jmeno, target);
   await enterRoom(num);
   await untilReady(num);
   const armed = armSolve(jmeno, 1);
@@ -106,6 +107,19 @@ async function solveRun(num: number, target: NativeAiScreen): Promise<number> {
   const st = solveStatus();
   if (st.abort) throw new SmokeFailure(`${name(num)} ${st.abort.detail}`);
   if (!st.won) throw new SmokeFailure(`${name(num)} not won after ${ticks} ticks (move ${st.idx}/${st.total})`);
+  checkWon(num);
+  return ticks;
+}
+
+async function replayRun(num: number, jmeno: string, target: NativeAiScreen): Promise<number> {
+  await enterRoom(num, solutionRecord(jmeno));
+  await untilReady(num);
+  let ticks = 0;
+  for (; ticks < MAX_TICKS && !left; ticks++) {
+    advance(LOGIC_MS); // the interactive loop's frame: a replay's settled tick is run in it
+    if ((ticks === 1 || ticks === 240) && !left) drawOnce(target, num, `tick${ticks}`);
+  }
+  if (!left) throw new SmokeFailure(`${name(num)} replay not over after ${ticks} ticks`);
   checkWon(num);
   return ticks;
 }

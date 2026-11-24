@@ -20,14 +20,15 @@ import type { ScriptSnapshot } from '../../src/core/script.js';
 import { StepEngine } from '../../src/core/stepEngine.js';
 import { HookSystem } from '../../src/core/hooks.js';
 import { newDeathState } from '../../src/core/deathlines.js';
-import { lengthOfRecord, movesOf } from '../../src/core/record.js';
-import { roomScript } from '../../src/rooms/index.js';
+import { lengthOfRecord, moveChar, movesOf } from '../../src/core/record.js';
+import { decodeMoves } from '../../src/core/solutionMoves.js';
+import { roomScript, solutionFor } from '../../src/rooms/index.js';
 import { ROOMS } from '../../src/data/roomTable.js';
 import {
   BRANCHES, RES_REACHABLE, REGISTERED_ROOMS, ZAVER_LEG, ZAVER_ROOM, branchOfRoom, computeResena, depthOfRoom,
 } from '../../src/data/world.js';
 import {
-  activeScript, count, engine, ffr, fftEntries, font, hracNespi, linesSpoken, loadmode, pokus, poslMluv, prevKostra, room,
+  activeScript, count, cutscene, engine, showmode, ffr, fftEntries, font, hracNespi, linesSpoken, loadmode, pokus, poslMluv, prevKostra, room,
   subs, clearUndoHistory, setActiveScript, setCount, setDeathState, setEngine, setLastLine, setLinesSpoken, setLoadmode,
   setReplaymode, setRoom, setRoomDepth, setScreenShoveX, setSubs, talkIdx,
 } from '../../src/app/gameState.js';
@@ -37,20 +38,22 @@ import { MLUVI_PRIOR, KEYS, ARROWS, NOOP_SCRIPT } from '../../src/app/keyTables.
 import { armChatter, initLogicTick, step } from '../../src/app/logicTick.js';
 import { beginHeldMove, clearHeldKey, initMovement, releaseHeldKey, restartRoom, restore, wallShove } from '../../src/app/movement.js';
 import { openSaveStore } from '../../src/app/persist.js';
-import { inReplay, replaySettleDue } from '../../src/app/replayMode.js';
+import { inReplay, replayAtShowmodeSpot, replaySettleDue } from '../../src/app/replayMode.js';
 import { initRoomLoad, loadRoom, roomEntryHeld, roomVoicesSettled } from '../../src/app/roomLoad.js';
 import { atRest, fishBusy } from '../../src/app/roomGates.js';
 import { ui } from '../../src/app/screenState.js';
 import { armSolve, inAutoPlay, setSolvemode, cancelSolve } from '../../src/app/solveMode.js';
+import { endShowmode, initCutscene, inShowmode, skipCutscene, startCutscene, startShowmode } from '../../src/app/cutscenePlay.js';
 import { loadUndoHistory, undoAvailable, undoHistoryForSave, undoMove } from '../../src/app/undo.js';
 import { aiRoom, aiRoomReady } from './seams/art.js';
 import { audio } from './seams/audioEngine.js';
-import { endShowmode, inShowmode } from './seams/cutscene.js';
 import { roomLoading } from './seams/framePacing.js';
 import { onLeaveRoom, returnFromRoom } from './seams/mapNav.js';
 import { DEFAULT_LINE_TICKS, EFFECT_VOL, LOGIC_MS, LOGIC_SEC } from './seams/stageGeometry.js';
 import { initNativeSettings, subLang, subsOn } from './seams/playerSettings.js';
 import { aiFrame } from './frame.js';
+import { disposeKufrArt } from './cutsceneScreen.js';
+import { showTutorialHint } from './tutorialHint.js';
 import { closeLegPage, initMapScreen, mapArrived, openLegPage } from './mapScreen.js';
 import { initIntroScreen } from './introScreen.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
@@ -116,8 +119,8 @@ function setInfo(): void {
  * return the line's length in game ticks — the FFT record's `delka`, less Talking()'s lead
  * (RSound mez), never anything the mixer reports. The subtitle's own timing is the subtitle
  * system's (its length in characters), as in the browser. A best-solution replay neither
- * shows nor plays it, as the original's loadmode replay does. Minus the browser's dialogue
- * hint.
+ * shows nor plays it, as the original's loadmode replay does. The browser's dialogue hint is
+ * the legend's pulse here (`tutorialHint.ts`).
  * restates src/app/main.ts `function scriptTalk(` @ db999691d54e
  */
 function talk(name: string, prior: number): number {
@@ -139,14 +142,15 @@ function talk(name: string, prior: number): number {
   setLastLine({ name, count });
   setLinesSpoken(linesSpoken + 1);
   const dur = audio.duration(name);
+  showTutorialHint(name, dur > 0 ? dur * 1000 : DEFAULT_LINE_TICKS * LOGIC_MS);
   return dur > 0 ? Math.max(1, Math.round((dur - TALKING_MEZ_SEC) / LOGIC_SEC)) : DEFAULT_LINE_TICKS;
 }
 
 /**
  * `main.ts`'s `buildRoom`, minus what the native host does not have: the cheats (sprite,
- * water, silent film, hooks), the store review and KUFRIK's demonstration and briefcase
- * cutscene (their script callbacks stay unset). Everything that decides how the room PLAYS
- * — and how it sounds, and what it subtitles — is here, in the same order.
+ * water, silent film, hooks) and the store review. Everything that decides how the room
+ * PLAYS — and how it sounds, and what it subtitles, and KUFRIK's briefcase story and
+ * tutorial demonstration, held back during a map Replay — is here, in the same order.
  * restates src/app/main.ts `function buildRoom(` @ 95a7c5e6b334
  */
 function buildRoom(carryPole = false, carried: readonly number[] = []): void {
@@ -199,6 +203,8 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
   s.musicVolume = musicLevel();
   if (savedPole) for (let i = 0; i < s.roompole.length; i++) s.roompole[i] = savedPole[i] ?? 0;
   s.musName = roomMusic?.name ?? '';
+  s.onKufrDemo = () => void (inReplay() ? null : startCutscene()); // see replayAtShowmodeSpot
+  s.onShowmode = () => (inReplay() ? replayAtShowmodeSpot() : startShowmode());
   const eng = new StepEngine(built, s, def ?? NOOP_SCRIPT, {
     random: (n) => Math.floor(Math.random() * n),
     onLanding: (kind) =>
@@ -216,6 +222,9 @@ function buildRoom(carryPole = false, carried: readonly number[] = []): void {
     const it = built.items[j];
     if (it) it.initSpec = it.spec;
   }
+  // Keep an in-flight KUFRIK demonstration alive across a death-restart (the new
+  // Script reset s.showmode to false; the persistent replay state survived).
+  if (showmode) s.showmode = true;
   setActiveScript({ def: def ?? NOOP_SCRIPT, s });
   if (built.padani()) eng.phase = 'fall';
   else {
@@ -515,8 +524,32 @@ export async function enterRoom(num: number, replay?: string): Promise<void> {
   if (opts.demo && !replay) armDemo();
 }
 
+/**
+ * Rooms whose recorded solution cannot be played as a live run, and is played as the map's
+ * Replay of it instead (`--demo` and the smoke gate): the same moves through the same
+ * `tryStep`, with what a Replay holds back held back.
+ *
+ * KUFRIK: its solution walks both fish through the tutorial spot, and a live run that does
+ * starts the demonstration — which restarts the room and replays help.cap, so the rest of the
+ * solution no longer fits it. The browser's dev solve ends there too (`startShowmode` ends any
+ * solution playback). A Replay plays neither the demonstration nor the briefcase story.
+ */
+export const PLAYED_AS_REPLAY: ReadonlySet<string> = new Set(['KUFRIK']);
+
+/** A room's recorded solution as a move record: what a win stores and the map's Replay plays. */
+export function solutionRecord(jmeno: string): string {
+  const sol = solutionFor(jmeno);
+  if (sol.known !== 'ok') throw new Error(`${jmeno} has no recorded solution`);
+  return decodeMoves(sol.moves).map((m) => moveChar(m.which, m.dir) ?? '').join('');
+}
+
 function armDemo(): void {
   const jmeno = ROOMS[roomNum - 1]?.jmeno ?? '';
+  if (PLAYED_AS_REPLAY.has(jmeno)) {
+    const moves = movesOf(solutionRecord(jmeno));
+    if (moves.length) setReplaymode({ moves, idx: 0 });
+    return;
+  }
   const armed = armSolve(jmeno);
   if ('error' in armed) console.log(`#${roomNum} ${jmeno}: ${armed.detail} — play it yourself`);
   else setSolvemode(armed);
@@ -545,6 +578,7 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
   initMovement({ buildRoom, endShowmode, hracNespi, setInfo });
   initRoomLoad({ buildRoom, endShowmode, ffrUrl, solved: store.solved });
   initLogicTick({ buildRoom, casHry: store.casHry, hooks, updateLipSync });
+  initCutscene({ buildRoom, hracNespi, selectFish, swapActive, disposeAiKufr: disposeKufrArt });
   onLeaveRoom(leaveRoom);
   initIntroScreen({ showMap });
   initMapScreen({
@@ -581,10 +615,16 @@ export function roomReady(): boolean {
 
 /**
  * A key down while a room is up (the map's are `mapScreen.ts`'s). Escape — the gamepad's Ⓑ —
- * goes back to the map, as the browser's does.
+ * goes back to the map, as the browser's does; while KUFRIK's briefcase story plays it skips
+ * the story instead, and every other key is swallowed.
  * restates src/app/main.ts `window.addEventListener('keydown',` @ 6ff168e62d28
  */
 export function keyDown(code: string): void {
+  // While the briefcase story plays, input is swallowed; Escape skips it (zrus_kufr).
+  if (cutscene) {
+    if (code === 'Escape') skipCutscene();
+    return;
+  }
   if (code === 'Escape') {
     cancelSolve(); // always an escape hatch: an auto-play the player cannot stop is a trap
     if (ui.screen === 'room') showMap();

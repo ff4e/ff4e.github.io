@@ -9,7 +9,8 @@
 
 The game **without a browser**. It plays a whole game now — from the world map, room after
 room, with undo, saves, the record panel's Replay and the leg story pages, and with its
-sound and subtitles, the intro movies and the credits, and with the TV menus a console needs —
+sound and subtitles, the intro movies and the credits, KUFRIK's briefcase story and its
+tutorial demonstration, and with the TV menus a console needs —
 a pause menu, Options, Help, a button legend — playable from a keyboard, a gamepad or a Siri
 Remote, on the AI-upscaled tier:
 
@@ -216,7 +217,7 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   F2, F3 or Backspace down the room's router, so a save mid-move or during a replay is refused
   exactly as F2 is on the web. Save and Load are greyed (and skipped by the highlight) when they
   cannot act, by the touch buttons' rule (`buttonAvailability.ts`, pinned): never during
-  the KUFRIK demonstration, which teaches them (not played natively yet). On Resume the room
+  the KUFRIK demonstration, which teaches them. On Resume the room
   continues from the frame it stopped on.
 - **Options** is the original game's Options face — the AI-upscaled panel art the tablets show,
   composited as `AiPanel.drawOptions` composites it — scaled to most of the window, with a focus
@@ -435,6 +436,73 @@ released when it closes (the strip is ~135 MB decoded), as the browser detaches 
 A load failure leaves the map as it was and says so on the console: the browser's load note
 has no native counterpart yet.
 
+### KUFRIK's briefcase story and tutorial (`native/js/cutsceneScreen.ts`)
+
+Not a movie: the browser paints the story per game tick from the 1998 demo's own frames. What
+plays it is imported, not restated — `src/app/cutscenePlay.ts`, split out of `cutscene.ts` for
+this (the browser keeps the page half there): the room's script starts the story at the
+briefcase's phase 8 (`InitKufrDemo`); `logicTick.step` runs one step of its script per tick,
+with the KD-* narration voiced through the `AudioEngine` and captioned, each line holding the
+script until its voice has sounded its FFT `delka`; the looping `kufrik` music starts with it
+and outlives it; it ends by itself or is skipped. The tutorial demonstration — help.cap replayed
+one action a tick once both fish stand at its spot, through its scripted death and restart, the
+help lines in the dialogue queue — is the same module's, as is a map Replay holding both back
+(`replayAtShowmodeSpot`). Entering KUFRIK holds until the story and the recording are read, as
+the browser's entry does (`seams/roomPreload.ts`, its KUFRIK half restated). So it plays exactly
+when the browser's does: on every entry, once the player's moves knock the briefcase down.
+
+The picture is the `ai` tier's (`drawCutscene`'s upscaled path): the upscaled suitcase-and-TV
+base (×4), with the upscale of the frame on screen over the animation's region — or the 1998
+pixels, nearest-neighbour at the same scale, for the one frame shipped without an upscale — on
+one 2880×2220 surface, repainted when the frame changes and presented as the map is. Frames are
+read from the draw path four ahead, at most eight held, and released when the story ends or is
+skipped; until the base is in (a frame or two) the faithful frame shows, upscaled bilinearly.
+The captions are a layer of their own (`roomSubtitles.ts`, `cutsceneCaptionOverlay`), sized from
+the story's own box as `updateCutsceneCaptions` sizes them, and drawn into a surface that box's
+size, so rows still scrolling in from below are clipped to the picture as the browser's
+`overflow: hidden` layer clips them.
+
+Skipping is the controller spec's (A3, B2): the pad's Ⓑ, Ⓐ or ☰, the remote's click or Back,
+and the keyboard's Esc (the browser's `zrus_kufr`). Every other button is swallowed, as the
+browser's router swallows it, so nothing opens a menu over the story. The legend says "Ⓑ Skip"
+(the remote's "‹ Skip"; the keyboard, nothing). While the demonstration says how to save and
+load (help2, help7, help11), the legend's Save or Load pulses as the touch button does
+(`tutorialHint.ts`, with `dialogueHints.ts`'s rules); with the remote, whose Save and Load are in
+the pause menu, its Menu pulses.
+
+`--demo` and the smoke gate play KUFRIK's recorded solution as the map's Replay of it, not as a
+live run (`PLAYED_AS_REPLAY`, `game.ts`): the solution walks through the tutorial spot, and a
+live run that does starts the demonstration, which restarts the room.
+
+### Does KUFRIK play? `--smoke-kufrik`
+
+    native/build/cmake/ff4e-native native/build/game.js --root public --headless \
+      --smoke-kufrik --store native/build/smoke-kufrik-store.json [--smoke-out DIR]
+
+`native/js/kufrikSmoke.ts`, 56 checks in ~20 s, through the real flow and input routing.
+Entering KUFRIK holds until the story and the recording are read. The solution's first moves,
+typed, knock the briefcase down, and the story starts by itself with the `kufrik` music; its
+narration is voiced on the voice bus and captioned, each line starting as the one before has
+sounded its `delka` as the room's .fft gives it (±1 tick), and the long KD-ufo caption, scrolling
+in, leaves no ink outside the story's box in a window taller than the picture (read back from the
+GPU); over 200 distinct pictures are shown, the upscaled frame decoded
+on at least 90 % of ticks; it plays to its end, its art is released, the music plays on and the
+briefcase closes. Other buttons during it open nothing and move nothing; each of the six skips
+ends it, stops the narration and keeps the music. Fish at the tutorial spot (put there, as the
+browser's probe puts them: the spot is past the steel block's puzzle) start the demonstration
+unprompted: the big fish turned left, Save and Load available, all 1605 actions played through
+its death and restart, the fish moved by it, 22 help lines voiced in the queue's timing, the
+legend's Save and Load (and the remote's Menu) pulsing through help2, help7 and help11 and at no
+other time, and the room handed back. The map's Replay of the solution drops the briefcase and
+walks both fish through the spot without the story or the demonstration, and wins.
+
+Not proven by a gate: the captions' pixels and positions against the browser's (they are the room
+subtitles' renderer in a different box, which `compare-subs.mjs` covers, not compared over the
+story), and
+help6, which the demonstration queues just before its scripted death and the restart drops
+(the restart builds a new script, as `main.ts`'s does; the browser's probe does not ask for it
+either).
+
 ### Does it play? `--smoke-movie`
 
     native/build/cmake/ff4e-native native/build/game.js --root public --headless \
@@ -459,10 +527,9 @@ settled; a movie that cannot be read counts as ended.
 
 ### Is it the same movie? `native/compare-media.mjs`
 
-    node --import tsx native/compare-media.mjs --self-test      # or --only frames,audio,credits
+    node --import tsx native/compare-media.mjs --self-test      # or --only frames,audio,credits,story
 
-Three comparisons with the browser's own (`native/media-reference.html`), all tolerance gates,
-each with a self-test that draws or plays the native side wrong and fails unless every wrong
+Four comparisons with the browser's own (`native/media-reference.html`), each with a self-test that draws or plays the native side wrong and fails unless every wrong
 one is rejected:
 
 - **Frames**: at 11 fixed times across both AI movies (mid-frame, where the picture moves), the
@@ -484,9 +551,16 @@ one is rejected:
   the start, max Δ 6 and block 0.38 elsewhere (bilinear rounding). The self-test draws it a
   native pixel (25 ms) late, the strip unflipped, the static frame missing and the wrong
   backdrop: 23 of 23 rejected.
+- **KUFRIK's story**: at six ticks of its script run silent on both sides (before the first
+  frame, early, the frame shipped without an upscale, mid, the last), the native picture
+  (`--story-scene`, `storyScene.ts`) against the browser's `ai` composition of the same tick
+  (the upscaled base and frame, or the original pixels through the game's own
+  `drawIndexedRegion`). Every draw is a 1:1 or nearest blit of opaque art, so this one is exact:
+  the same frame chosen, and max Δ 0. Measured: identical at all six. The self-test shows the
+  previous point's picture and red and blue swapped: 10 of 10 rejected.
 
-~30 s. `npm run native:check` runs both gates (`movie-smoke`, `media`), as does the manual CI
-job.
+~40 s. `npm run native:check` runs both gates (`movie-smoke`, `media`), as does the manual CI
+job; KUFRIK's story and tutorial have their own smoke (`kufrik-smoke`, above).
 
 Not proven by a gate: lip sync through a real output (the clock's device-buffer estimate, and
 any TV's own latency), how the movie sounds after SDL's resampler, the letterboxed scaling of
@@ -591,7 +665,8 @@ build x86_64.
 Every room with a recorded solution (70 of 72: ZAVER and SCORE are the ending and the
 results screen) is entered through `roomLoad` and played through `solvemode` — every tick of
 the real `logicTick.step`, the moves through the real `tryStep`, the win through the real
-auto-return — and must be left by a win, with `ff.solved` on disk saying so. Rooms 13
+auto-return — and must be left by a win, with `ff.solved` on disk saying so. KUFRIK is played
+as the map's Replay of its solution instead (see "KUFRIK's briefcase story and tutorial"). Rooms 13
 DRAKAR1 and 70 DISKETA, two that carry script state through undo, are also TYPED key by
 key through the router the keyboard and the gamepad use, with a save (F2), two undos, a load
 (F3) and an undo into the loaded history on the way, each landing checked against the
@@ -784,14 +859,11 @@ with the self-test, after the map comparison.
 - **The faithful side panel** is not drawn: a TV plays from the legend and the pause menu.
 - **A tvOS build.** The remote's scheme is built and gated on a Mac (`--remote-keys`), but
   its SDL mapping, and Back at the map's root going to the system, have not met a real remote.
-- **Sound, beyond the rooms, the map and the movies:** the cutscene's (it is not played); an
-  audio session for tvOS (interruptions, routing — `onGesture`/`onVisible` are
-  no-ops here). The AAC is decoded on the main thread as a room is entered (~1.2 s for all
-  100 minutes of speech, so a few tens of ms a room); decoded music stays cached for the
-  session, as the browser's does (mono float32 at 22050 Hz: ~10 MB a track).
-- **KUFRIK's briefcase cutscene and its tutorial demonstration.** The room plays; the
-  demonstration is not shown. (It is not an MP4: the browser paints it per game tick from the demo's
-  own frames, `src/app/cutscene.ts`, so the movie player does not bring it.)
+- **Sound, beyond the rooms, the map, the movies and KUFRIK's story:** an audio session for
+  tvOS (interruptions, routing — `onGesture`/`onVisible` are no-ops here). The AAC is decoded
+  on the main thread as a room is entered (~1.2 s for all 100 minutes of speech, so a few
+  tens of ms a room); decoded music stays cached for the session, as the browser's does (mono
+  float32 at 22050 Hz: ~10 MB a track).
 - **The faithful credits** (`src/render/credits.ts`): the native host is the AI tier, so it
   rolls the AI credits only (and plays the faithful movies only where the AI encodes are
   missing, as the web's `ai` tier does).

@@ -36,6 +36,7 @@ const STRINGS = {
   close: ['Close', 'Zavřít'],
   yes: ['Yes', 'Ano'],
   no: ['No', 'Ne'],
+  skip: ['Skip', 'Přeskočit'],
   // The pause menu.
   paused: ['Paused', 'Pauza'],
   worldMap: ['World map', 'Mapa'],

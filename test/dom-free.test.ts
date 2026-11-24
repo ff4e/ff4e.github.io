@@ -20,8 +20,8 @@
  */
 import { describe, it, expect } from 'vitest';
 import ts from 'typescript';
-import { readFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -108,6 +108,40 @@ describe('DOM-free drawing modules', () => {
 
   it.each(Object.entries(INJECTED))('%s can still be redirected (%s)', (file, setter) => {
     expect(readFileSync(join(root, file), 'utf8')).toMatch(new RegExp(`export function ${setter}\\(`));
+  });
+});
+
+/**
+ * Flow modules split out of a DOM-bound one so that the native host can run them as they
+ * are (native/build-js.mjs's REAL list). Unlike the drawing modules above they import the
+ * game's flow — the audio engine, the player's settings — which reaches the page through
+ * modules the native bundle swaps for seams, so their whole closure is not DOM-free and is
+ * not walked. What is checked is what the bundle's fence checks, without a native build
+ * (the Linux CI job has none): their own source names no browser API, and every `src/app/`
+ * module they import is one the native bundle runs for real or has a seam for.
+ */
+const NATIVE_FLOW = ['src/app/cutscenePlay.ts'];
+
+describe('flow modules the native host runs as they are', () => {
+  const buildJs = readFileSync(join(root, 'native/build-js.mjs'), 'utf8');
+  const realList = /const REAL = new Set\(\[([\s\S]*?)\]\)/.exec(buildJs)?.[1] ?? '';
+  const real = new Set([...realList.matchAll(/'(\w+)'/g)].map((m) => m[1]!));
+  const seamed = new Set(readdirSync(join(root, 'native/js/seams')).map((f) => f.replace(/\.ts$/, '')));
+
+  it.each(NATIVE_FLOW)('%s is on the native REAL list', (entry) => {
+    expect(real.has(basename(entry, '.ts'))).toBe(true);
+  });
+
+  it.each(NATIVE_FLOW)('%s names no browser API and imports no page module', (entry) => {
+    expect(browserIdentifiers(resolve(root, entry))).toEqual([]);
+    const sf = ts.createSourceFile(entry, readFileSync(join(root, entry), 'utf8'), ts.ScriptTarget.Latest, true);
+    const app = sf.statements
+      .filter((st): st is ts.ImportDeclaration => ts.isImportDeclaration(st) && !st.importClause?.isTypeOnly)
+      .map((st) => (st.moduleSpecifier as ts.StringLiteral).text)
+      .filter((s) => s.startsWith('./'))
+      .map((s) => basename(s, '.js'));
+    expect(app.length).toBeGreaterThan(0);
+    expect(app.filter((m) => !real.has(m) && !seamed.has(m))).toEqual([]);
   });
 });
 

@@ -66,9 +66,9 @@ describe('music a room cues but does not enter with', () => {
     });
   }
 
-  it('KUFRIK enters with the cutscene theme, which is cued from cutscene.ts, not a script', () => {
+  it('KUFRIK enters with the cutscene theme, which is cued from cutscenePlay.ts, not a script', () => {
     // The one cue the scan above cannot see: `startCutscene` plays 'kufrik' directly.
-    expect(readFileSync(join('src', 'app', 'cutscene.ts'), 'utf8')).toContain("playMusic('kufrik'");
+    expect(readFileSync(join('src', 'app', 'cutscenePlay.ts'), 'utf8')).toContain("playMusic('kufrik'");
     expect(extraMusicOfRoom(2)).toBe('kufrik');
   });
 

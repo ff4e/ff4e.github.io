@@ -19,6 +19,9 @@
  *     UI layout snapshot (native/ui-layout.snap.json).
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-audio --store F
  *     the sound gate (`audioSmoke.ts`): the mixer, the decoder, and PRVNI's dialogue timing.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-kufrik --store F [--smoke-out DIR]
+ *     the KUFRIK gate (`kufrikSmoke.ts`): the briefcase story, its skips, the tutorial
+ *     demonstration, and a Replay through the tutorial spot, through the real flow.
  *   ff4e-native <bundle.js> --root <public dir> --room N --headless --out f.rgba
  *     [--replay TICKS] [--still] [--alpha A] [--probe]
  *     renders ONE composite of the parity scene (`scene.ts`) for native/compare.mjs.
@@ -31,6 +34,8 @@
  *   ff4e-native <bundle.js> --root <public dir> --headless (--movie-frames URL --at T,… |
  *     --movie-audio URL | --credits-scene P,…) --out PREFIX
  *     movie frames, movie sound, or credits frames (`mediaScene.ts`) for native/compare-media.mjs.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --story-scene T,… --out PREFIX
+ *     KUFRIK's briefcase story at fixed ticks (`storyScene.ts`), for native/compare-media.mjs.
  */
 import { runTimers, readBytes } from './shims.js';
 import { RANDPOLE } from '../../src/render/framebuffer.js';
@@ -56,9 +61,12 @@ import { SUB_CASES, buildSubScene } from './subtitleScene.js';
 import { SubtitleLayout } from './subtitleLayout.js';
 import { loadFace } from './subtitleFonts.js';
 import { GlyphAtlas, drawSubtitles } from './subtitleDraw.js';
-import { loadSubtitleAssets, subtitleOverlay } from './roomSubtitles.js';
+import { cutsceneCaptionOverlay, loadSubtitleAssets, subtitleOverlay } from './roomSubtitles.js';
+import { cutsceneFrame } from './cutsceneScreen.js';
 import { runAudioSmoke } from './audioSmoke.js';
 import { runMovieSmoke } from './movieSmoke.js';
+import { runKufrikSmoke } from './kufrikSmoke.js';
+import { renderStoryScene } from './storyScene.js';
 import { renderCreditsScene, renderMovieAudio, renderMovieFrames } from './mediaScene.js';
 import { introFrame, loadIntroArt, openSession } from './introScreen.js';
 import { soundPoll } from './sound.js';
@@ -87,6 +95,10 @@ async function main(): Promise<void> {
     __native.quit(await runMenuSmoke(target));
     return;
   }
+  if (flag('--smoke-kufrik')) {
+    __native.quit(await runKufrikSmoke());
+    return;
+  }
   if (flag('--smoke-movie')) {
     __native.quit(await runMovieSmoke());
     return;
@@ -99,6 +111,11 @@ async function main(): Promise<void> {
   }
   if (flag('--movie-audio')) {
     await renderMovieAudio(arg('--movie-audio')!, arg('--out')!);
+    __native.quit();
+    return;
+  }
+  if (flag('--story-scene')) {
+    await renderStoryScene(nums(arg('--story-scene')), arg('--out')!);
     __native.quit();
     return;
   }
@@ -210,6 +227,16 @@ function mutateRow<T extends { obsah: string; rgb: [number, number, number] }>(t
   return t;
 }
 
+/** What goes over the story's picture in the window: its KD-* captions, and the UI layer over them. */
+function storyLayers(story: NativeSurface, alpha: number): { captions?: number | undefined; ui?: number | undefined } {
+  const size = __native.windowSize();
+  const rect = __native.presentRect(story.width, story.height);
+  const caps = size && rect ? cutsceneCaptionOverlay(size[0], size[1], alpha, rect) : null;
+  const win = windowLayout(story.width, story.height);
+  const layer = win ? paintUi(win.w, win.h, win.picture) : null;
+  return { captions: caps?.id, ui: layer?.surface?.id };
+}
+
 function runInteractive(target: NativeAiScreen): void {
   const stopAt = arg('--seconds') ? __native.now() + Number(arg('--seconds')) * 1000 : Infinity;
   let last = __native.now();
@@ -229,7 +256,13 @@ function runInteractive(target: NativeAiScreen): void {
     soundPoll();
     const alpha = advance(now - last);
     last = now;
-    if (ui.screen === 'room') {
+    const story = ui.screen === 'room' ? cutsceneFrame() : null;
+    if (story) {
+      // KUFRIK's briefcase story, over the room it plays in: its picture, its captions, the legend.
+      const over = storyLayers(story, alpha);
+      jsMs += __native.now() - now;
+      __native.presentTexture(story.id, over.captions, over.ui);
+    } else if (ui.screen === 'room') {
       // Nothing is presented while a room loads, so the map's parchment frame stays up.
       const drawn = draw(target, alpha);
       const subs = drawn ? subtitleOverlay(target.width, target.height, alpha) : null;

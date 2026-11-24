@@ -1,7 +1,8 @@
-// Native-vs-browser parity for the movies and the credits: what the native player shows and
-// plays, against what the browser's own <video> and AiCredits show and play.
+// Native-vs-browser parity for the movies, the credits and KUFRIK's briefcase story: what the
+// native player shows and plays, against what the browser's own <video>, AiCredits and `ai`
+// story composition show and play.
 //
-//   node --import tsx native/compare-media.mjs [--only frames,audio,credits] [--self-test] [--keep]
+//   node --import tsx native/compare-media.mjs [--only frames,audio,credits,story] [--self-test] [--keep]
 //
 // Needs native/build/game.js and the host binary (see native/README.md).
 //
@@ -32,10 +33,20 @@
 // agree to within rounding: measured max Δ 6, worst block 0.38. LIMIT.credits is set above
 // that and well below what one native pixel of offset makes.
 //
+// STORY. KUFRIK's briefcase story at fixed ticks of its script, run silent from the first on
+// both sides (no voice holds a tick): the native picture (`--story-scene`, cutsceneScreen.ts)
+// against the browser's `ai` composition of the same tick (`__refStory`: the upscaled base,
+// the frame's upscale over the region, or the original pixels through the game's own
+// `drawIndexedRegion` for a frame shipped without one). Every draw is a 1:1 or nearest blit of
+// an opaque image both sides decode with libwebp, so the gate is exact: the same frame chosen,
+// and not one channel of difference. Measured: identical at every tick below — before the first
+// frame, early, the one "original" frame, mid-story, and the last.
+//
 // `--self-test` also checks that the gate fails on wrong native output: the frame before and
 // the frame after, red and blue swapped; the sound shifted by the AAC priming either way and
 // by a millisecond; the roll a native pixel (25 ms) late, the strip unflipped, the
-// static frame missing, the wrong backdrop. CI runs it.
+// static frame missing, the wrong backdrop; the story's picture from the point before, and
+// red and blue swapped. CI runs it.
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
@@ -49,7 +60,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, '..');
 const args = process.argv.slice(2);
 const opt = (f, d) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : d; };
-const PARTS = ['frames', 'audio', 'credits'];
+const PARTS = ['frames', 'audio', 'credits', 'story'];
 const only = opt('--only', '').split(',').filter(Boolean);
 if (only.some((p) => !PARTS.includes(p)) || (args.includes('--only') && !only.length)) {
   console.error(`--only takes ${PARTS.join(', ')}`);
@@ -77,6 +88,9 @@ const MOVIES = [
   { url: '/data/Movie/logo_ai.mp4', fps: 4000000 / 66667, frames: [200, 450, 700, 1100, 1300], windows: [3, 11, 18, 26] },
   { url: '/data/Movie/intro_ai.mp4', fps: 2000000 / 33333, frames: [1200, 1800, 2400, 3000, 3600, 4300], windows: [2, 15, 30, 45, 60, 70] },
 ];
+/** Story: ticks of its silent script — none shown yet, early, f0056 (shipped without an upscale), mid, the last frame. */
+const STORY_TICKS = [5, 40, 100, 300, 700, 1100];
+
 /** Credits: ms after the roll opened — the start, mid-strip at fractional offsets, its end, and settled. */
 const CREDIT_TIMES = [0, 3085, 25006.25, 42515, 82137.5, 87500, 95000];
 
@@ -285,6 +299,40 @@ if (want('credits')) {
       });
     }
   }
+}
+
+if (want('story')) {
+  const ref = await page.evaluate((t) => window.__refStory(t), STORY_TICKS);
+  const out = execFileSync(HOST, [BUNDLE, '--root', join(repo, 'public'), '--headless', '--story-scene', STORY_TICKS.join(','), '--out', join(OUT, 's')],
+    { encoding: 'utf8', timeout: RUN_TIMEOUT_MS, killSignal: 'SIGKILL' });
+  const natFrames = [...out.matchAll(/story tick (\d+): frame \d+ (\S+)/g)].map((m) => m[2]);
+  const nat = STORY_TICKS.map((_, i) => readRgba(join(OUT, `s-${i}.rgba`)));
+  STORY_TICKS.forEach((tick, i) => {
+    const r = ref[i], n = nat[i];
+    const rpx = Buffer.from(r.b64, 'base64');
+    const name = `story at tick ${tick} (${r.frame})`;
+    checks++;
+    if (n.w !== r.w || n.h !== r.h || natFrames[i] !== r.frame) {
+      console.log(`${name}: native ${n.w}x${n.h} showing ${natFrames[i]} vs browser ${r.w}x${r.h} showing ${r.frame}  FAIL`);
+      bad.push(name);
+      return;
+    }
+    const d = measure(n.px, rpx, r.w, r.h);
+    const ok = d.max === 0;
+    if (!ok) bad.push(name);
+    console.log(`${name.padEnd(36)} block ${d.block.toFixed(2).padStart(6)}  mean ${d.mad.toFixed(3)}  max ${String(d.max).padStart(3)}  ${ok ? 'ok' : 'FAIL'}`);
+    if (!ok || args.includes('--keep')) {
+      writeFileSync(join(OUT, `story-${tick}-native.png`), encodePng(new Uint8Array(n.px), r.w, r.h));
+      writeFileSync(join(OUT, `story-${tick}-browser.png`), encodePng(new Uint8Array(rpx), r.w, r.h));
+    }
+    if (selfTest && i > 0) {
+      // The picture of the tick before this point's (a frame early or late), and red and blue swapped.
+      for (const [what, px] of [['the previous point', nat[i - 1].px], ['red and blue swapped', swapRB(n.px)]]) {
+        const e = measure(px, rpx, r.w, r.h);
+        mutation(`${name}: ${what} (max ${e.max})`, e.max !== 0);
+      }
+    }
+  });
 }
 
 await browser.close();

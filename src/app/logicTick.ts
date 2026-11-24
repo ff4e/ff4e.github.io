@@ -8,7 +8,8 @@
  */
 import { audio } from './audioEngine.js';
 import { tickFrameEffects } from './cheats.js';
-import { advanceShowmode, cutsceneCaption, disposeAiKufr } from './cutscene.js';
+import { disposeAiKufr } from './cutscene.js';
+import { advanceShowmode, cutsceneCaption } from './cutscenePlay.js';
 import { advanceReplay, inReplay } from './replayMode.js';
 import { activeScript, blink, chatter, count, cutscene, cutsceneSubs, darkFlicker, deathState, engine, hracNespi, loadmode, pokus, prevKostra, replaymode, retireUndoHistory, room, roomDepth, setChatter, setCount, setCutscene, setCutsceneSubs, setPokus, showmode, subs } from './gameState.js';
 import { MLUVI_PRIOR } from './keyTables.js';

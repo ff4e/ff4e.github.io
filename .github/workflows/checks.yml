@@ -158,6 +158,11 @@ jobs:
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-movie --store native/build/smoke-movie-store.json
+      - name: Native KUFRIK, the briefcase story, its skips, the tutorial demonstration and a Replay
+        timeout-minutes: 3
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless
+          --smoke-kufrik --store native/build/smoke-kufrik-store.json
       - run: npx playwright install chromium
       - name: Native vs WebGL parity, all 72 rooms
         run: node --import tsx native/compare.mjs --all

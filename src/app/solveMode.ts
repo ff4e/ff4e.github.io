@@ -154,7 +154,7 @@ export function inSolvemode(): boolean {
  * like an inconsistency and is not one; leave it that way.
  *
  * It reads `replaymode` straight off `gameState` rather than calling `inReplay()` so this
- * module does not import `cutscene.ts`, which imports this one.
+ * module does not import `cutscenePlay.ts`, which imports this one.
  *
  * Escape, Backspace (restart) and leaving the room are all handled ABOVE the lockout, so
  * they always work: an auto-play the player cannot stop is a trap.

@@ -43,7 +43,7 @@ const ticks = (name: string): number => {
   return d > 0 ? Math.max(1, Math.round((d - TALKING_MEZ_SEC) / LOGIC_SEC)) : 0;
 };
 const text = (name: string): string => (entry(name)?.cz.text ?? '').trim();
-/** showHelpText's addv set (cutscene.ts): the rest are the little fish. */
+/** showHelpText's addv set (cutscenePlay.ts): the rest are the little fish. */
 const BIG_VOICED = new Set([2, 4, 7, 8, 11, 14, 20, 22]);
 const who = (k: number): string =>
   k === KDO.little ? 'little' : k === KDO.big ? 'big' : k === KDO.sys ? 'sys' : '—';
@@ -80,7 +80,7 @@ for (let i = 0; i < cap.length; i++) {
   }
   let what = '';
   let detail = '';
-  // The order here mirrors `applyCapAction` (cutscene.ts), and it has to. A recorded
+  // The order here mirrors `applyCapAction` (cutscenePlay.ts), and it has to. A recorded
   // RESTART is `kdo=0` — all three restart runs in help.cap are — yet `applyCapAction`
   // tests `akce === restart` BEFORE any `kdo` test, so those entries really do rebuild
   // the room. Test `kdo === none` first, as an earlier version of this tool did, and the

@@ -35,7 +35,7 @@
  * Module scope is side-effect-free; `initGpuLossRecovery()` is called by boot.
  */
 import { curNum } from './art.js';
-import { inShowmode } from './cutscene.js';
+import { inShowmode } from './cutscenePlay.js';
 import { glCanvas } from './dom.js';
 import { activeScript, engine, loadmode, replaymode, room } from './gameState.js';
 import {

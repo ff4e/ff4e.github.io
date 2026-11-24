@@ -9,9 +9,19 @@
  *     (an OfflineAudioContext at 22050 Hz does not resample a 22050 Hz track);
  *   - `__refCredits(posun)`: the game's REAL `AiCredits` (src/render/creditsAi.ts) — its two
  *     DOM layers and CSS transform — laid out at the art's own size, at scroll offset `posun`,
- *     for the harness to screenshot what the compositor makes of it.
+ *     for the harness to screenshot what the compositor makes of it;
+ *   - `__refStory(ticks)`: KUFRIK's briefcase story at each tick, run silent from its first as
+ *     `native/js/storyScene.ts` runs it, painted as the browser's `ai` tier paints it
+ *     (`drawCutscene`): the upscaled base, then the shown frame's upscale over the region —
+ *     or, for a frame shipped without one, the original pixels through the game's own
+ *     `drawIndexedRegion` — on a 2D canvas at the art's scale. Restated, not called:
+ *     `drawCutscene` paints the page's own `#screen` (dom.ts) and reads the booted page's
+ *     tier, renderer, font and stage state, none of which this reference page has.
+ *     restates src/app/cutscene.ts `export function drawCutscene(` @ b7f86f365c2e
  */
 import { AiCredits, loadAiCredits } from '../../src/render/creditsAi.js';
+import { KufrDemo } from '../../src/intro/kufrDemo.js';
+import { drawIndexedRegion } from '../../src/render/indexedRegion.js';
 
 const b64 = (u8: Uint8Array | Uint8ClampedArray): string => {
   let out = '';
@@ -70,6 +80,37 @@ w.__refCredits = async (posun: number) => {
   credits.setScroll(posun);
   await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
   return { w: credits.nativeW * credits.scale, h: credits.nativeH * credits.scale, delka: credits.delka };
+};
+
+w.__refStory = async (ticks: number[]) => {
+  const bytes = async (u: string): Promise<Uint8Array> => new Uint8Array(await (await fetch(u)).arrayBuffer());
+  const demo = new KufrDemo(await bytes('/data/Intro/kufr256.BMP'), await bytes('/data/Intro/demo.pck'),
+    await (await fetch('/data/Intro/script.txt')).text());
+  const man = await (await fetch('/enhanced-ai/_kufr/ai.json')).json() as {
+    scale: number; region: { x: number; y: number; w: number; h: number }; order: string[]; original?: string[];
+  };
+  const img = async (u: string): Promise<ImageBitmap> => createImageBitmap(await (await fetch(u)).blob());
+  const base = await img('/enhanced-ai/_kufr/base.webp');
+  const S = man.scale, R = man.region;
+  const cv = document.createElement('canvas');
+  cv.width = demo.width * S;
+  cv.height = demo.height * S;
+  const ctx = cv.getContext('2d', { willReadFrequently: true })!;
+  const out: Array<{ tick: number; frame: string; w: number; h: number; b64: string }> = [];
+  let t = 0;
+  for (const at of ticks) {
+    while (t < at) {
+      demo.tick(() => 1, () => false);
+      t++;
+    }
+    const name = man.order[Math.max(0, demo.framesShown - 1)] ?? '';
+    const shipped = name !== '' && !(man.original ?? []).includes(name);
+    ctx.drawImage(base, 0, 0);
+    if (shipped) ctx.drawImage(await img(`/enhanced-ai/_kufr/frames/${name}`), R.x * S, R.y * S);
+    else drawIndexedRegion(ctx, demo.pixels, demo.palette, demo.width, R, S);
+    out.push({ tick: at, frame: shipped ? name : 'pixels', w: cv.width, h: cv.height, b64: b64(ctx.getImageData(0, 0, cv.width, cv.height).data) });
+  }
+  return out;
 };
 
 w.__decodePng = async (data: string) => {
