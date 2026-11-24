@@ -45,6 +45,7 @@ const STEPS = [
   { name: 'audio-smoke', run: [host, [...game, '--smoke-audio', '--store', 'native/build/smoke-audio-store.json']] },
   { name: 'movie-smoke', run: [host, [...game, '--smoke-movie', '--store', 'native/build/smoke-movie-store.json']] },
   { name: 'kufrik-smoke', run: [host, [...game, '--smoke-kufrik', '--store', 'native/build/smoke-kufrik-store.json']] },
+  { name: 'store-smoke', run: [host, [...game, '--smoke-store', '--tv-store', 'native/build/smoke-tv', '--store', 'native/build/smoke-tv/store.json']] },
   { name: 'chromium', run: ['npx', ['playwright', 'install', 'chromium']] },
   { name: 'rooms', run: ['node', ['--import', 'tsx', 'native/compare.mjs', '--all']] },
   { name: 'map', run: ['node', ['--import', 'tsx', 'native/compare-map.mjs']] },

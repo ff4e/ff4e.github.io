@@ -7,7 +7,8 @@
  *   ff4e-native <bundle.js> --root <public dir> [--room N] [--store F] [--headless ...]
  *
  * native/js/main.ts reads the rest of the arguments; the host only needs --root (the asset
- * root), --headless (no window, no gamepad, no audio output) and --store (the key-value file).
+ * root), --headless (no window, no gamepad, no audio output), --store (the key-value file) and
+ * --tv-store DIR (store.c: the tvOS store's NSUserDefaults and iCloud, as files in DIR).
  */
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -28,6 +29,8 @@
 
 void install_text(JSContext *ctx, JSValue native); /* text.c: the subtitle glyphs */
 void install_movie(JSContext *ctx, JSValue native); /* movie.c: the intro and logo movies */
+void install_store(JSContext *ctx, JSValue native, int argc, char **argv); /* store.c: tvOS's store */
+bool store_remote_changed(void); /* store.c: iCloud brought another device's progress */
 
 /* ── state ─────────────────────────────────────────────────────────────────────── */
 static SDL_GPUDevice *dev;
@@ -1073,7 +1076,7 @@ static bool remote_keys; /* --remote-keys */
 
 static void push_event(bool down, const char *code) {
   if (evq_n >= EVQ) return;
-  if (code[0] == '!') SDL_strlcpy(evq[evq_n++], code, sizeof evq[0]); /* not a key: "!blur" */
+  if (code[0] == '!') SDL_strlcpy(evq[evq_n++], code, sizeof evq[0]); /* not a key: "!blur", "!kvs" */
   else SDL_snprintf(evq[evq_n++], sizeof evq[0], "%c%s", down ? '+' : '-', code);
 }
 
@@ -1466,6 +1469,7 @@ static void poll_events(void) {
   }
   poll_sticks();
   poll_remote();
+  if (store_remote_changed()) push_event(false, "!kvs");
 }
 
 /* The subtitle overlay over the presented composite: premultiplied source-over. */
@@ -1565,6 +1569,7 @@ static void install(JSContext *ctx) {
 #endif
   install_text(ctx, n);
   install_movie(ctx, n);
+  install_store(ctx, n, js_argc, js_argv);
   audio_install(ctx, n, !headless); /* headless: no output, the game advances the mixer */
   JS_SetPropertyStr(ctx, g, "__native", n);
   JS_FreeValue(ctx, g);

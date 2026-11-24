@@ -8,6 +8,7 @@
  * is a general browser.
  */
 import { rememberBitmapSource, type NativeBitmap } from './nativeCanvas.js';
+import { TvStore, type TvBackend } from './tvStore.js';
 
 declare const __CP1250_HIGH__: string;
 
@@ -127,6 +128,9 @@ g.createImageBitmap = async (blob: BlobShim): Promise<NativeBitmap> => {
 // called explicitly before the game opens its save store: it falls back to the backup
 // when the store is damaged, and refuses to start when both are; and a refused store is
 // never written.
+//
+// On tvOS (and on a Mac given `--tv-store DIR`) the store is `TvStore` instead: NSUserDefaults,
+// iCloud and a cache file, because tvOS keeps no file for certain (`tvStore.ts`).
 
 /** The parsed store, or why it is not usable. */
 function parseStore(raw: string | null): Map<string, string> | string {
@@ -140,7 +144,20 @@ function parseStore(raw: string | null): Map<string, string> | string {
   }
 }
 
+/** The host's side of `TvStore`: NSUserDefaults and iCloud on tvOS, files on a Mac. */
+export const tvHost: TvBackend = {
+  prefsLoad: (damaged) => __native.prefsLoad(!!damaged),
+  prefsSave: (json, damaged) => __native.prefsSave(json, !!damaged),
+  cacheLoad: (backup) => __native.storeLoad(!!backup),
+  cacheSave: (json) => __native.storeSave(json, false),
+  kvsLoad: () => JSON.parse(__native.kvsLoad()) as Record<string, string>,
+  kvsSave: (key, value) => __native.kvsSave(key, value),
+  now: () => Date.now(),
+  log: (m) => console.warn(m),
+};
+
 class StorageShim {
+  private readonly tv = __native.tvStore ? new TvStore(tvHost) : null;
   private items: Map<string, string> | null = null;
   private refused: string | null = null;
   /** Running from the backup: the store on disk is the damaged one, not a backup to keep. */
@@ -149,6 +166,10 @@ class StorageShim {
   load(): void {
     if (this.items) return;
     if (this.refused) throw new Error(this.refused);
+    if (this.tv) {
+      this.items = this.tv.load();
+      return;
+    }
     const main = __native.storeLoad();
     const store = parseStore(main);
     if (typeof store !== 'string') {
@@ -172,7 +193,7 @@ class StorageShim {
   }
   private map(): Map<string, string> {
     this.load();
-    return this.items!;
+    return this.tv ? this.tv.items : this.items!;
   }
   private flush(): void {
     __native.storeSave(JSON.stringify(Object.fromEntries(this.map())), this.damaged);
@@ -181,11 +202,43 @@ class StorageShim {
   get length(): number { return this.map().size; }
   key(i: number): string | null { return [...this.map().keys()][i] ?? null; }
   getItem(k: string): string | null { return this.map().get(k) ?? null; }
-  setItem(k: string, v: string): void { this.map().set(k, String(v)); this.flush(); }
-  removeItem(k: string): void { if (this.map().delete(k)) this.flush(); }
-  clear(): void { this.map().clear(); this.flush(); }
+  setItem(k: string, v: string): void {
+    if (this.tv) {
+      this.load();
+      this.tv.set(k, String(v)); // may refuse a save slot, as a browser's quota does
+      return;
+    }
+    this.map().set(k, String(v));
+    this.flush();
+  }
+  removeItem(k: string): void {
+    if (this.tv) {
+      this.load();
+      this.tv.remove(k);
+    } else if (this.map().delete(k)) this.flush();
+  }
+  clear(): void {
+    if (this.tv) {
+      this.load();
+      this.tv.clear();
+    } else {
+      this.map().clear();
+      this.flush();
+    }
+  }
+  /** Another device's progress, taken in while running (`TvStore.pullRemote`). */
+  pullRemote(): string[] {
+    if (!this.tv) return [];
+    this.load();
+    return this.tv.pullRemote();
+  }
 }
 const storage = new StorageShim();
+
+/** iCloud says another device's progress changed: merge it in; the keys that changed. */
+export function pullRemoteProgress(): string[] {
+  return storage.pullRemote();
+}
 
 /** Open the store before anything reads it; throws (with the reason) when it is unusable. */
 export function loadStore(): void {
