@@ -36,7 +36,7 @@
 import { cutscene, loadmode, replaymode, room, showmode } from '../../src/app/gameState.js';
 import { ui } from '../../src/app/screenState.js';
 import { DirRepeat } from './dirRepeat.js';
-import { blur as roomBlur, keyDown as roomKeyDown, keyUp as roomKeyUp } from './game.js';
+import { adoptRemoteProgress, blur as roomBlur, keyDown as roomKeyDown, keyUp as roomKeyUp } from './game.js';
 import { mapBlur, mapBusy, mapKeyDown, mapKeyUp, mapPanelOpen } from './mapScreen.js';
 import { menuAct, menuOpen, openConfirm, openOptions, openPause, type MenuAct } from './menus.js';
 import { roomLoading } from './seams/framePacing.js';
@@ -290,10 +290,14 @@ const INTRO_START: Readonly<Record<string, string>> = { PadA: 'Space', RemoteSel
 
 // ── Entry points ────────────────────────────────────────────────────────────────────
 
-/** One event from `__native.events()`: `+Code`, `-Code` or `!blur`. */
+/** One event from `__native.events()`: `+Code`, `-Code`, `!blur`, or `!kvs` (iCloud). */
 export function routeEvent(ev: string, now: number = __native.now()): void {
   if (ev === '!blur') {
     inputBlur();
+    return;
+  }
+  if (ev === '!kvs') {
+    adoptRemoteProgress();
     return;
   }
   const down = ev[0] === '+';

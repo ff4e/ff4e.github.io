@@ -163,6 +163,11 @@ jobs:
         run: >-
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-kufrik --store native/build/smoke-kufrik-store.json
+      - name: Native tvOS store, saves within NSUserDefaults' budget, a purged cache and iCloud
+        timeout-minutes: 2
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless
+          --smoke-store --tv-store native/build/smoke-tv --store native/build/smoke-tv/store.json
       - run: npx playwright install chromium
       - name: Native vs WebGL parity, all 72 rooms
         run: node --import tsx native/compare.mjs --all

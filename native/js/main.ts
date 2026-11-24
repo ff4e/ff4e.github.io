@@ -29,6 +29,9 @@
  *     paints ONE case of the world-map parity scene (`mapScene.ts`) for native/compare-map.mjs.
  *   ff4e-native <bundle.js> --root <public dir> --headless --subs-scene CASE --out f.rgba
  *     draws ONE case of the subtitle parity scene (`subtitleScene.ts`) for native/compare-subs.mjs.
+ *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-store --tv-store DIR --store DIR/store.json
+ *     the tvOS store's gate (`storeSmoke.ts`): saves, a purged cache, iCloud and the budget,
+ *     over the host's stand-ins for NSUserDefaults and iCloud.
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-movie --store F
  *     the movie gate (`movieSmoke.ts`): the intro, its splash and the credits through the real flow.
  *   ff4e-native <bundle.js> --root <public dir> --headless (--movie-frames URL --at T,… |
@@ -66,6 +69,7 @@ import { cutsceneFrame } from './cutsceneScreen.js';
 import { runAudioSmoke } from './audioSmoke.js';
 import { runMovieSmoke } from './movieSmoke.js';
 import { runKufrikSmoke } from './kufrikSmoke.js';
+import { runStoreSmoke } from './storeSmoke.js';
 import { renderStoryScene } from './storyScene.js';
 import { renderCreditsScene, renderMovieAudio, renderMovieFrames } from './mediaScene.js';
 import { introFrame, loadIntroArt, openSession } from './introScreen.js';
@@ -101,6 +105,10 @@ async function main(): Promise<void> {
   }
   if (flag('--smoke-movie')) {
     __native.quit(await runMovieSmoke());
+    return;
+  }
+  if (flag('--smoke-store')) {
+    __native.quit(await runStoreSmoke());
     return;
   }
   const nums = (s: string | undefined): number[] => (s ?? '').split(',').filter(Boolean).map(Number);

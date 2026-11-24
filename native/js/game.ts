@@ -58,7 +58,7 @@ import { closeLegPage, initMapScreen, mapArrived, openLegPage } from './mapScree
 import { initIntroScreen } from './introScreen.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import type { MapAction } from '../../src/render/worldMap.js';
-import { loadStore } from './shims.js';
+import { loadStore, pullRemoteProgress } from './shims.js';
 import { initSound, loadGlobalSounds, musicLevel, soundTime, startMenuMusic, updateLipSync } from './sound.js';
 import { MUSIC_PRIOR, TALKING_MEZ_SEC } from '../../src/audio/audio.js';
 import { musicForCHud, musicUrl } from '../../src/audio/music.js';
@@ -599,6 +599,27 @@ export function initGame(o: GameOptions): ReturnType<typeof openSaveStore> {
 let globalSounds: Promise<void> = Promise.resolve();
 
 /** The room a `--demo` session starts in: where the player left off. */
+/**
+ * Another device's progress arrived (iCloud's change notification, the host's `!kvs`): merge
+ * it into the store (`TvStore.pullRemote`) and into the running game's own sets and maps, in
+ * place — the map reads these very objects, so a room solved on another Apple TV shows at the
+ * next frame. Only ever adds: the merge keeps the best of both. Returns the keys that changed.
+ */
+export function adoptRemoteProgress(): string[] {
+  const changed = pullRemoteProgress();
+  const read = (key: string): unknown => JSON.parse(localStorage.getItem(key) ?? 'null');
+  for (const key of changed) {
+    const v = read(key);
+    if (key === 'ff.solved' || key === 'ff.cheated') {
+      for (const n of v as number[]) (key === 'ff.solved' ? store.solved : store.cheated).add(n);
+    } else {
+      const into = key === 'ff.scores' ? store.scores : key === 'ff.best' ? store.bestRecords : store.playTime;
+      for (const [k, x] of Object.entries(v as Record<string, number | string>)) (into as Map<number, typeof x>).set(Number(k), x);
+    }
+  }
+  return changed;
+}
+
 export function firstRoom(): number {
   return nextRoom(0, store.solved, store.cheated) ?? 1;
 }
