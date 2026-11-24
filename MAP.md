@@ -57,7 +57,7 @@ others are small enough to read.
   [`TESTING.md`](TESTING.md).
 - **`native/`** — **experimental, not shipped**: a browser-free host spike (QuickJS-ng + SDL3 GPU)
   that runs the AI tier from `src/` natively — rooms, their subtitles, the world map, the intro
-  movies and the credits — aimed at Apple TV and consoles. Nothing in `src/` imports it. See
+  movies, the credits and KUFRIK's story — aimed at Apple TV and consoles. Nothing in `src/` imports it. See
   [`native/README.md`](native/README.md): the subtitles are `native/js/subtitleLayout.ts` (where
   the glyphs go, restating `subtitleDom.ts`'s desktop layout), `subtitleDraw.ts` (FreeType
   glyphs, `native/host/text.c`, through `Surface2D.fillMask`) and `roomSubtitles.ts` (the game's
@@ -65,7 +65,9 @@ others are small enough to read.
   `mapNav.ts`'s intro flow, restated, with the start splash) over `movie.ts` and
   `native/host/movie.c` (the player; the platform decoder behind `movie.h`, AVFoundation in
   `movie_apple.m`); the credits are `native/js/creditsScreen.ts` (`creditsAi.ts`'s roll as one
-  flipped quad). The TV menus:
+  flipped quad); KUFRIK's briefcase story is `src/app/cutscenePlay.ts`, imported as it is, drawn
+  by `native/js/cutsceneScreen.ts` (`drawCutscene`'s `ai` path), with the tutorial's Save/Load
+  cue as a legend pulse (`tutorialHint.ts`) and its gate `kufrikSmoke.ts`. The TV menus:
   `uiInput.ts` routes the keyboard, pad and remote for every screen, `menus.ts` is the pause
   menu / confirm / Options / Help state, `optionsModel.ts` persists and applies the options,
   `uiLayer.ts` draws the window-sized UI layer — `menuPaint.ts`, `optionsPaint.ts` (the original

@@ -12,7 +12,7 @@
 import { FontData } from '../../src/render/font.js';
 import { subtitleScale } from '../../src/render/subtitleGeom.js';
 import { computeStageScale } from '../../src/app/layout.js';
-import { count, setFont, subs } from '../../src/app/gameState.js';
+import { count, cutsceneSubs, setFont, subs } from '../../src/app/gameState.js';
 import { AI_SUB_SCALE, SubtitleLayout } from './subtitleLayout.js';
 import { GlyphAtlas, drawSubtitles } from './subtitleDraw.js';
 import { loadFace, type NativeFace } from './subtitleFonts.js';
@@ -21,8 +21,11 @@ import { readBytes } from './shims.js';
 
 let face: NativeFace | null = null;
 let layout: SubtitleLayout | null = null;
+/** The briefcase story's captions: a layer of their own, as in the browser (`'cut'`). */
+let cutLayout: SubtitleLayout | null = null;
 const atlas = new GlyphAtlas();
 let overlay: NativeSurface | null = null;
+let cutOverlay: NativeSurface | null = null;
 
 /**
  * The game's bitmap font (the subtitle wrap and the speaker colours are measured from it, as
@@ -34,12 +37,14 @@ export async function loadSubtitleAssets(): Promise<void> {
   setFont(await FontData.load('/data/Intro'));
   face = await loadFace(localStorage.getItem('ff.subfont'), readBytes);
   layout = new SubtitleLayout(face);
+  cutLayout = new SubtitleLayout(face);
 }
 
 /** Switch the subtitle face (the native Options' Font row); lines from now on use it. */
 export async function setSubtitleFace(name: string): Promise<void> {
   face = await loadFace(name, readBytes);
   layout = new SubtitleLayout(face);
+  cutLayout = new SubtitleLayout(face);
 }
 
 /** The face the subtitles are drawn in, once loaded (the UI text borrows it). */
@@ -78,4 +83,39 @@ export function subtitleOverlay(
   overlay.clear();
   drawSubtitles(overlay, frame, face, atlas, density);
   return overlay;
+}
+
+/**
+ * The briefcase story's KD-* captions (`cutsceneSubs`) for a story picture shown at `rect`
+ * in a `winW`×`winH` window, drawn into a window-sized layer (`presentTexture` draws its
+ * overlay over the whole window) — or null when nothing is said.
+ *
+ * The browser's `updateCutsceneCaptions`: the story's own box, and the text sized from the
+ * story's own content scale rather than from the stage, because a cutscene has exactly one
+ * size (720×555), so there is no room-to-room variation to normalise. The readable band and
+ * the `ai` tier's shrink apply as they do to a room's lines (`SubtitleLayout`).
+ * restates src/app/cutscene.ts `export function updateCutsceneCaptions(` @ a88a4b7e1243
+ */
+export function cutsceneCaptionOverlay(
+  winW: number, winH: number, alpha: number,
+  rect: readonly [number, number, number, number, number],
+): NativeSurface | null {
+  if (!face || !cutLayout) return null;
+  if (!cutsceneSubs?.active) {
+    cutLayout.reset();
+    return null;
+  }
+  const [ox, oy, dw, dh, density] = rect;
+  const cssW = dw / density, cssH = dh / density;
+  const cs = cssW / cutsceneSubs.vectorScreen.w;
+  const frame = cutLayout.layout(cutsceneSubs, count + alpha, {
+    cssW, cssH, boxScale: cs, textScale: cs, tier: AI_SUB_SCALE,
+  }, face.name);
+  if (!cutOverlay || cutOverlay.width !== winW || cutOverlay.height !== winH) cutOverlay = new NativeSurface(winW, winH);
+  cutOverlay.clear();
+  cutOverlay.save();
+  cutOverlay.translate(ox, oy);
+  drawSubtitles(cutOverlay, frame, face, atlas, density);
+  cutOverlay.restore();
+  return cutOverlay;
 }

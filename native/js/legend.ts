@@ -42,6 +42,7 @@ import { verbAvailable } from './menus.js';
 import { drawGlass, hairline } from './uiGlass.js';
 import { currentPalette, INK, type UiPalette } from './uiPalette.js';
 import { t, type UiString } from './uiStrings.js';
+import { pulsePhase, tutorialHintVerb } from './tutorialHint.js';
 
 /**
  * One glyph of an item: a round chip (a pill when its text is wider) with a letter on it —
@@ -62,10 +63,12 @@ export interface LegendItem {
   readonly fishSlot?: boolean;
   /** The picture in that slot now, or null while the badge would be hidden. */
   readonly picture?: Image2D | null;
+  /** The tutorial is talking about this item's verb: its glyphs pulse (`tutorialHint.ts`). */
+  readonly pulse?: boolean;
 }
 
 /** Where the legend is: the screen it describes. */
-export type LegendScreen = 'room' | 'map' | 'panel' | 'legimage' | 'pause' | 'options' | 'help';
+export type LegendScreen = 'room' | 'cutscene' | 'map' | 'panel' | 'legimage' | 'pause' | 'options' | 'help';
 
 const chip = (text: string, hue?: number): Glyph => (hue === undefined ? { kind: 'chip', text } : { kind: 'chip', text, hue });
 // The pad's face-button hues (A green, B red, X blue, Y yellow), at the room symbol's lightness.
@@ -129,14 +132,20 @@ export function legendItems(screen: LegendScreen, source: InputSource): LegendIt
   if (source === 'key') return [];
   const remote = source === 'remote';
   switch (screen) {
-    case 'room':
+    case 'room': {
+      const cue = tutorialHintVerb();
+      const pulsing = (it: LegendItem, on: boolean): LegendItem => (on ? { ...it, pulse: true } : it);
       if (remote) {
         return [item([EDGE], 'move'), fishItem([CLICK], 'switchFish'),
-          item([PLAY], 'undo', verbAvailable('undo')), item([BACK], 'menu')];
+          item([PLAY], 'undo', verbAvailable('undo')), pulsing(item([BACK], 'menu'), cue !== null)];
       }
       return [item([L], 'little'), item([R], 'big'), item([B], 'map'),
-        item([LB], 'save', verbAvailable('save')), item([RB], 'load', verbAvailable('load')),
+        pulsing(item([LB], 'save', verbAvailable('save')), cue === 'save'),
+        pulsing(item([RB], 'load', verbAvailable('load')), cue === 'load'),
         item([X], 'restart'), item([MENU], 'menu'), item([Y], 'undo', verbAvailable('undo'))];
+    }
+    case 'cutscene':
+      return [item([remote ? BACK : B], 'skip')]; // A4: "B: Skip"; B2: Back (or a click) skips
     case 'map':
       if (remote) return [item([EDGE], 'choose'), item([CLICK], 'open'), item([PLAY], 'options'), item([BACK], 'exit')];
       return [item([L], 'choose'), item([A], 'open'), item([MENU], 'options')];
@@ -271,6 +280,11 @@ export function drawGlyph(ui: Ui, g: Glyph, x: number, y: number, size: number, 
 function drawItem(ui: Ui, it: LegendItem, glyphsRight: number, y: number, m: HintMetrics, pal: UiPalette, strip: boolean): number {
   const alpha = it.enabled ? (strip ? STRIP_ON_ALPHA : ON_ALPHA) : OFF_ALPHA;
   let gx = glyphsRight - glyphsWidth(ui, it, m.glyph);
+  if (it.pulse) {
+    // The touch button's `dialogue-hint-pulse`: a ring of #aee at 0.6 growing to 3 px and back.
+    const k = pulsePhase(), r = 3 * m.u * k;
+    if (r > 0.25) ui.frame(gx - r, y - r, glyphsWidth(ui, it, m.glyph) + 2 * r, m.glyph + 2 * r, r, 0xaaeeee, 0.6, m.glyph / 2 + r);
+  }
   it.glyphs.forEach((g, i) => {
     gx += drawGlyph(ui, g, gx, y, m.glyph, pal, alpha, m.hair) + (i < it.glyphs.length - 1 ? m.glyph * 0.2 : 0);
   });
@@ -358,7 +372,7 @@ export function drawLegend(ui: Ui, items: readonly LegendItem[], w: number, h: n
 /** Which legend the screen shows, or null for none (a launch, the confirm prompt). */
 export function legendScreen(top: { kind: string } | null, mapPanel: boolean, launching: boolean): LegendScreen | null {
   if (top) return top.kind === 'confirm' ? null : (top.kind as LegendScreen);
-  if (ui.screen === 'room') return 'room';
+  if (ui.screen === 'room') return cutscene ? 'cutscene' : 'room';
   if (ui.screen === 'legimage' || ui.mapOverlay === 'credits') return 'legimage'; // A4: "A: Continue"
   if (ui.screen === 'intro') return null; // A4: no legend during the intro (it has its skip hint)
   if (launching) return null;

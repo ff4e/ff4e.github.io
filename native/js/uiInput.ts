@@ -6,6 +6,9 @@
  * reads, so every guard of that router still applies (no move mid-move, none in a replay):
  *
  *   - a menu is open (`menus.ts`): directions, OK and Back drive it, with menu repeat;
+ *   - KUFRIK's briefcase story (A3, B2): the pad's Ⓑ, Ⓐ or ☰, the remote's click or Back, and
+ *     the keyboard's Esc skip it (the browser's Escape, `zrus_kufr`); anything else is
+ *     swallowed, as the browser's router swallows it;
  *   - in a room: the keyboard is the browser's, except that Esc opens the pause menu; the
  *     pad's left stick and d-pad move the little fish and its right stick the big one, Ⓨ
  *     undoes, Ⓑ (or ⧉) goes to the map, LB / RB / Ⓧ ask to save / load / restart, ☰ opens
@@ -199,7 +202,14 @@ const REMOTE_ROOM: Readonly<Record<string, string>> = {
   RemoteSelect: 'Space',
 };
 
+/** What skips the briefcase story: A3's Ⓑ, Ⓐ and ☰, B2's click and Back, and Esc. */
+const STORY_SKIP: ReadonlySet<string> = new Set(['PadB', 'PadA', 'PadMenu', 'RemoteSelect', 'RemoteBack', 'Escape']);
+
 function roomKey(down: boolean, code: string, now: number): void {
+  if (cutscene) {
+    if (down && STORY_SKIP.has(code)) roomKeyDown('Escape'); // the room's router skips it
+    return;
+  }
   const key = PAD_ROOM[code] ?? REMOTE_ROOM[code];
   if (key) {
     if (down) roomKeyDown(key);

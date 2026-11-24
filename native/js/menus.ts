@@ -66,8 +66,7 @@ export function menuOpen(): boolean {
  * May the pause menu's (and the legend's) `verb` act now? Greyed when not, by the touch
  * buttons' rule: Save while CanSave, Load while this room has a save, neither during a map
  * Replay or solution playback — and nothing greyed during the KUFRIK demonstration, which is
- * teaching these very buttons (the native host does not play it yet, so that branch is the
- * web's, kept for when it does). Restart is never refused.
+ * teaching these very buttons. Restart is never refused.
  * restates src/app/buttonAvailability.ts `export function syncButtonAvailability(` @ b69d32fe95c0
  */
 export function verbAvailable(verb: Verb | 'undo'): boolean {
