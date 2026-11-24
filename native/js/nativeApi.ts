@@ -125,6 +125,12 @@ export interface NativeApi {
    * (native/host/main.c, `n_remoteTouch`). Read by `remoteSwipe.ts` through `uiInput.ts`.
    */
   remoteTouch(): [number, number] | null;
+  /**
+   * The menu smoke's check of `remoteTouch` through SDL's own mapping code: a virtual Siri
+   * Remote, mapped as SDL maps one on tvOS (y inverted), its raw axes set to (`rawX`, `rawY`):
+   * what `remoteTouch` reports, and what `SDL_GetGamepadAxis` reads for its y. Headless only.
+   */
+  remoteProbe(rawX: number, rawY: number): [[number, number] | null, number];
   /** A text file by plain path (not under the asset root), or null when absent. */
   readText(path: string): string | null;
   /** Write a text file by plain path. Throws when it cannot. */

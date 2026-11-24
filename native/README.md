@@ -633,7 +633,12 @@ counts while a click is held. A click toward the edge a swipe stepped to in the 
 is that swipe's end — a swipe finishing on the ring — and is dropped where swipes act, so it
 is one step, not two; a centre click is always a click, and in a room every click acts.
 `test/native-remote-swipe.test.ts` feeds it taps, slow, fast and long swipes and one that
-ends at an edge. On a Mac, `--remote-keys` makes the keyboard a remote, and
+ends at an edge. The host reads those axes RAW (`remote_axis`): SDL maps the remote's y
+inverted and `SDL_GetGamepadAxis` rescales an inverted axis in float, so a lifted thumb reads
+(0, −1) there, never (0, 0) — the lift was never seen, and every swipe started from the
+centre and partly undid itself on the lift (TestFlight build 1). The menu smoke checks the
+raw reading through a virtual remote mapped as SDL maps one (`__native.remoteProbe`), and the
+tracker also takes anything within 3/32767 of the centre as a lift. On a Mac, `--remote-keys` makes the keyboard a remote, and
 the whole keyboard counts as the remote: any other key it sends (a letter, F2) leaves the
 remote the last input, so its hints stay up.
 
@@ -900,7 +905,7 @@ with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 106 checks, ~11 s.
+for each character in both of the UI font's weights. 107 checks, ~11 s.
 
 It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a

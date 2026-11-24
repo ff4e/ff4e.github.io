@@ -6,7 +6,10 @@
  * the surface's ABSOLUTE position (`reportsAbsoluteDpadValues`, which the 1st-generation
  * remote's clicks need — native/host/platform_tvos.m), -1..1 across and down, and SDL passes
  * it on as the left stick's two axes (SDL_mfijoystick.m) — with no touch-down or lift of its
- * own: a lifted thumb reads (0, 0), and the host says null then. A position is not a
+ * own: a lifted thumb reads (0, 0), and the host says null then. It reads them raw, because
+ * SDL's own reading of the inverted y gives -1 for a lifted thumb; a position within `LIFTED`
+ * of the centre is taken as lifted here too, so that reading can never pass for a thumb. A
+ * position is not a
  * deflection: a thumb resting on an edge is not a swipe, so a swipe is measured from where
  * the thumb came down, and from where the last step was taken.
  *
@@ -25,6 +28,11 @@ export type SwipeDir = 'up' | 'down' | 'left' | 'right';
 export const STEP = 0.5;
 /** How soon after a swipe's step a click toward the same edge is that swipe's end, ms. */
 export const SWIPE_CLICK_MS = 300;
+/**
+ * Closer to the centre than this on both axes is no thumb (3 of SDL's 32767 steps): what
+ * `SDL_GetGamepadAxis` returns for a lifted thumb on the inverted y is (0, -1/32767).
+ */
+export const LIFTED = 3 / 32767;
 
 export class SwipeTracker {
   /** Where travel is measured from; null while nothing touches (or a click is held). */
@@ -37,7 +45,7 @@ export class SwipeTracker {
    * travel since the last call makes, in order.
    */
   feed(pos: readonly [number, number] | null, now: number): SwipeDir[] {
-    if (!pos) {
+    if (!pos || (Math.abs(pos[0]) <= LIFTED && Math.abs(pos[1]) <= LIFTED)) {
       this.anchor = null;
       return [];
     }

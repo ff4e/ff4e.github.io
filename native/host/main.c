@@ -1277,6 +1277,29 @@ static const char *remote_click; /* the code the click in progress sent */
 static bool remote_playpause, remote_back; /* held, so a removed remote can let go */
 static const char *const REMOTE_EDGE[4] = {"RemoteUp", "RemoteDown", "RemoteLeft", "RemoteRight"};
 
+/*
+ * Where the thumb is along gamepad axis `a` (LEFTX right, LEFTY down), read RAW from the
+ * joystick axis the remote's mapping binds to it: exactly 0 when no thumb is on the surface.
+ * Not SDL_GetGamepadAxis: SDL maps the remote's "Direction Pad Y Axis" inverted (`lefty: a1~`,
+ * IOS_JoystickGetGamepadMapping) and rescales an inverted axis in float, so a raw 0 comes out
+ * as -1 there (SDL_gamepad.c) — a lifted thumb would never read (0, 0), and a swipe's origin
+ * would never reset. The inversion is applied here instead, exactly.
+ */
+static int remote_axis(SDL_GamepadAxis a) {
+  int n = 0, v = SDL_GetGamepadAxis(remote, a);
+  SDL_GamepadBinding **b = SDL_GetGamepadBindings(remote, &n);
+  for (int i = 0; b && i < n; i++) {
+    if (b[i]->output_type != SDL_GAMEPAD_BINDTYPE_AXIS || b[i]->output.axis.axis != a ||
+        b[i]->input_type != SDL_GAMEPAD_BINDTYPE_AXIS)
+      continue;
+    const int raw = SDL_GetJoystickAxis(SDL_GetGamepadJoystick(remote), b[i]->input.axis.axis);
+    v = b[i]->input.axis.axis_min > b[i]->input.axis.axis_max ? -raw : raw;
+    break;
+  }
+  SDL_free(b);
+  return v > 32767 ? 32767 : v;
+}
+
 /* A click went down as `code` (an edge or the centre), or `code`'s click came up. */
 static void remote_click_edge(const char *code, bool down) {
   if (down) {
@@ -1300,8 +1323,7 @@ static void remote_button(Uint8 b, bool down) {
         if (remote_click) return;
         int dir = 0;
         if (!SDL_GamepadHasButton(remote, SDL_GAMEPAD_BUTTON_DPAD_UP)) { /* 1st gen: where the thumb is */
-          int ax = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY);
-          dir = stick_dir(ax, ay, 0);
+          dir = stick_dir(remote_axis(SDL_GAMEPAD_AXIS_LEFTX), remote_axis(SDL_GAMEPAD_AXIS_LEFTY), 0);
         }
         remote_click_edge(dir ? REMOTE_EDGE[dir - 1] : "RemoteSelect", true);
       } else if (remote_click) {
@@ -1322,19 +1344,51 @@ static void remote_button(Uint8 b, bool down) {
 }
 
 /*
- * [x, y]: where the thumb is on the remote's touch surface, -1..1 across and down (SDL's
- * left stick, its y already flipped to point down), or null when nothing touches it — SDL
- * reads a lifted thumb as (0, 0) — or there is no remote. With tvOS's absolute values (above)
- * it is a position; native/js/remoteSwipe.ts makes swipes of its travel.
+ * [x, y]: where the thumb is on the remote's touch surface, -1..1 across and down (the left
+ * stick's raw axes, `remote_axis`), or null when nothing touches it — a lifted thumb reads
+ * exactly (0, 0) raw — or there is no remote. With tvOS's absolute values (above) it is a
+ * position; native/js/remoteSwipe.ts makes swipes of its travel.
  */
 static JSValue n_remoteTouch(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   if (!remote) return JS_NULL;
-  int ax = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY);
+  const int ax = remote_axis(SDL_GAMEPAD_AXIS_LEFTX), ay = remote_axis(SDL_GAMEPAD_AXIS_LEFTY);
   if (ax == 0 && ay == 0) return JS_NULL;
   JSValue a = JS_NewArray(ctx);
   JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, ax / 32767.0));
   JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, ay / 32767.0));
   return a;
+}
+
+/*
+ * The menu smoke's check of the path above with SDL's own mapping code (headless, no remote):
+ * a virtual "Siri Remote" mapped as SDL maps one on tvOS 14+ (y inverted: `lefty:a1~`), its
+ * raw axes set to (argv[0], argv[1]), then what `remoteTouch` reports for it. Detached after.
+ */
+static JSValue n_remoteProbe(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  if (remote || !SDL_InitSubSystem(SDL_INIT_GAMEPAD)) return JS_ThrowTypeError(ctx, "remoteProbe: %s", remote ? "a remote is connected" : SDL_GetError());
+  SDL_VirtualJoystickDesc d;
+  SDL_INIT_INTERFACE(&d);
+  d.naxes = 2;
+  d.nbuttons = 3;
+  d.name = "Siri Remote (probe)";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&d);
+  char guid[64], mapping[256];
+  SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+  SDL_snprintf(mapping, sizeof mapping, "%s,Siri Remote (probe),a:b0,x:b1,b:b2,leftx:a0,lefty:a1~", guid);
+  JSValue out = JS_NULL;
+  if (id && SDL_AddGamepadMapping(mapping) >= 0 && (remote = SDL_OpenGamepad(id))) {
+    SDL_Joystick *j = SDL_GetGamepadJoystick(remote);
+    SDL_SetJoystickVirtualAxis(j, 0, (Sint16)ARGI(0));
+    SDL_SetJoystickVirtualAxis(j, 1, (Sint16)ARGI(1));
+    SDL_UpdateJoysticks();
+    out = JS_NewArray(ctx);
+    JS_SetPropertyUint32(ctx, out, 0, n_remoteTouch(ctx, self, 0, NULL));
+    JS_SetPropertyUint32(ctx, out, 1, JS_NewInt32(ctx, SDL_GetGamepadAxis(remote, SDL_GAMEPAD_AXIS_LEFTY)));
+    SDL_CloseGamepad(remote);
+    remote = NULL;
+  }
+  if (id) SDL_DetachVirtualJoystick(id);
+  return JS_IsNull(out) ? JS_ThrowTypeError(ctx, "remoteProbe: %s", SDL_GetError()) : out;
 }
 
 /* A removed remote sends no button-up: let go of whatever it held. */
@@ -1594,7 +1648,7 @@ static void install(JSContext *ctx) {
       {"events", n_events, 0},
       {"storeLoad", n_storeLoad, 1},   {"storeSave", n_storeSave, 2},
       {"storePath", n_storePath, 0},   {"safeArea", n_safeArea, 0},
-      {"remoteTouch", n_remoteTouch, 0},
+      {"remoteTouch", n_remoteTouch, 0}, {"remoteProbe", n_remoteProbe, 2},
       {"args", n_args, 0},             {"quit", n_quit, 0},
   };
   JSValue g = JS_GetGlobalObject(ctx);

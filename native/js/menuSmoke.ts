@@ -406,6 +406,14 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     const rows = at0.filter((p) => Number(p.split(',')[1]) < 120).length;
     check(fish0 !== fish1 && at0.join() === at1.join() && rows > 0 && rows < at0.length,
       `switching fish never moves the legend: ${at0.length} window widths, ${rows} with the row on top, the same with either fish`);
+    // The remote's touch surface as the host reads it, through SDL's own mapping of a Siri
+    // Remote (y inverted): a lifted thumb must read as lifted, though SDL_GetGamepadAxis says
+    // -1 for it, and a thumb as where it is, y pointing down.
+    const [lifted, sdlY] = __native.remoteProbe(0, 0);
+    const [thumb] = __native.remoteProbe(16384, 16384);
+    const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-4;
+    check(lifted === null && sdlY !== 0 && !!thumb && near(thumb[0], 0.5) && near(thumb[1], -0.5),
+      `the remote's touch surface reads raw: a lifted thumb is none (SDL_GetGamepadAxis: ${sdlY}), raw (16384, 16384) is ${JSON.stringify(thumb?.map((v) => +v.toFixed(3)))}`);
     // In a room a swipe does nothing, so a click right after one toward its edge is a click.
     const pre = moves();
     await tap(`RemoteSwipe${movedBy.slice('Remote'.length)}`);

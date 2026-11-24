@@ -5,7 +5,7 @@
  * swipe's end. Synthetic sequences, one sample a frame (~16 ms), x right and y down in -1..1.
  */
 import { describe, expect, it } from 'vitest';
-import { STEP, SWIPE_CLICK_MS, SwipeTracker, type SwipeDir } from '../native/js/remoteSwipe.js';
+import { LIFTED, STEP, SWIPE_CLICK_MS, SwipeTracker, type SwipeDir } from '../native/js/remoteSwipe.js';
 
 type Sample = readonly [number, number] | null;
 
@@ -98,6 +98,36 @@ describe('remote swipes', () => {
   it('a lift starts the next swipe afresh', () => {
     const tr = new SwipeTracker();
     expect(play(tr, [...line([-0.4, 0], [0.05, 0], 5), null, ...line([-0.3, 0], [0.15, 0], 5)]).steps).toEqual([]);
+  });
+
+  describe('with a lift read through SDL_GetGamepadAxis: (0, -1/32767), not (0, 0)', () => {
+    // SDL maps the remote's y inverted and rescales it in float: a raw 0 reads -1. The host
+    // reads the raw axes (menuSmoke checks that through a virtual remote); this is the
+    // tracker's own guard, should such a reading ever reach it.
+    const LIFT: Sample = [0, -1 / 32767];
+
+    it('a lift starts the next touch afresh: a touch-down off the centre is no step', () => {
+      const tr = new SwipeTracker();
+      expect(play(tr, [LIFT, LIFT, ...rest([0.8, 0.05], 6), LIFT, ...rest([-0.75, 0.6], 6), LIFT]).steps).toEqual([]);
+    });
+
+    it('a swipe does not undo itself on the lift', () => {
+      const tr = new SwipeTracker();
+      expect(play(tr, [LIFT, ...line([0.1, 0], [0.7, 0], 8), LIFT, LIFT]).steps).toEqual(['right']);
+      expect(play(new SwipeTracker(), [LIFT, ...line([0, -0.1], [0, -0.7], 8), LIFT, LIFT]).steps).toEqual(['up']);
+    });
+
+    it('a resting thumb then an edge click is one step, not two', () => {
+      const tr = new SwipeTracker();
+      const { steps, t } = play(tr, [LIFT, ...rest([0, 0.85], 30)]);
+      expect(steps).toEqual([]);
+      expect(tr.endsSwipe('down', t)).toBe(false);
+    });
+
+    it('only readings that close to the centre count as lifted', () => {
+      const tr = new SwipeTracker();
+      expect(play(tr, [[LIFTED * 2, 0], [0.6, 0]]).steps).toEqual(['right']);
+    });
   });
 
   it('relative values (zero at the touch-down) swipe the same', () => {
