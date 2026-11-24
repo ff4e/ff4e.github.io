@@ -12,9 +12,15 @@
  *   ff.scores              the lowest move count per room
  *   ff.best                per room, the record of the copy with the lowest score (it is the
  *                          record OF that score: `recordBest` keeps the two in step)
- *   ff.playtime            the highest per room — never the sum: each copy already holds
- *                          the time it merged from the others, so a sum would count it twice
- *   ff.options, ff.subfont the newest write
+ *   ff.playtime            the sum over devices of each one's OWN time per room (`PlayTimes`,
+ *                          carried beside the copy): two devices playing offline add up, and
+ *                          what one merged from another is never counted twice. Here, on the
+ *                          stamped value alone, the highest per room — `TvStore` replaces it.
+ *   ff.options             per field, the newest CHANGE: a field carries the time the player
+ *                          last changed it on some device, and a first write (a new device's
+ *                          first-run defaults) carries none — so it never outweighs settings
+ *                          made elsewhere
+ *   ff.subfont             the newest write (only ever written by the player choosing a font)
  * A value that is not what its key should hold loses to one that is.
  *
  * The web has no merge rules to mirror: a browser's store is one copy. These follow
@@ -27,9 +33,16 @@ export const MIRRORED = ['ff.solved', 'ff.cheated', 'ff.scores', 'ff.best', 'ff.
 export const LIVE = ['ff.solved', 'ff.cheated', 'ff.scores', 'ff.best', 'ff.playtime'] as const;
 export const isMirrored = (key: string): boolean => (MIRRORED as readonly string[]).includes(key);
 
-/** A value and when it was last written (ms since the epoch; 0 when unknown). */
-export interface Stamped { v: string; t: number }
+/**
+ * A value and when it was last written (ms since the epoch; 0 when unknown). `ff.options`
+ * also carries `f`: per field (`volume.music`), when the player last changed it.
+ */
+export interface Stamped { v: string; t: number; f?: Record<string, number> }
 export type Progress = Record<string, Stamped>;
+/** Play time per device, per room: each device's OWN time, which only ever grows. */
+export type PlayTimes = Record<string, Record<string, number>>;
+/** One device's copy: its merged progress, and every device's own play time it knows of. */
+export interface Copy { p: Progress; pt: PlayTimes }
 
 /** One device's key in the key-value store. */
 export const KVS_PREFIX = 'ff4e.progress.';
@@ -51,6 +64,38 @@ const roomMap = <T>(v: unknown, ok: (x: unknown) => x is T): Record<string, T> |
   return out;
 };
 const isCount = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x) && x >= 0;
+const isPlain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+const stampsOf = (v: unknown): Record<string, number> => {
+  const out: Record<string, number> = {};
+  if (isPlain(v)) for (const [k, t] of Object.entries(v)) if (typeof t === 'number' && Number.isFinite(t)) out[k] = t;
+  return out;
+};
+
+/** An options object's leaves by dotted path (`volume.music`), in its own key order. */
+export function flatten(v: unknown, prefix = '', out: Record<string, unknown> = {}): Record<string, unknown> {
+  if (!isPlain(v)) return out;
+  for (const [k, x] of Object.entries(v)) {
+    if (isPlain(x)) flatten(x, `${prefix}${k}.`, out);
+    else out[`${prefix}${k}`] = x;
+  }
+  return out;
+}
+function unflatten(leaves: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [path, x] of Object.entries(leaves)) {
+    const parts = path.split('.');
+    let at = out;
+    for (const part of parts.slice(0, -1)) at = (isPlain(at[part]) ? at[part] : (at[part] = {})) as Record<string, unknown>;
+    at[parts[parts.length - 1]!] = x;
+  }
+  return out;
+}
+/** Per field, the later of two stamps. */
+const laterStamps = (a: Record<string, number> = {}, b: Record<string, number> = {}): Record<string, number> => {
+  const out = { ...a };
+  for (const [k, t] of Object.entries(b)) out[k] = Math.max(out[k] ?? 0, t);
+  return out;
+};
 const isRecord = (x: unknown): x is string => typeof x === 'string';
 
 /** The newer of two stamped values; a tie keeps `a` (the local one, by convention). */
@@ -79,7 +124,7 @@ export function mergeProgress(a: Progress, b: Progress): Progress {
       continue;
     }
     if (x.v === y.v) {
-      out[key] = { v: x.v, t: Math.max(x.t, y.t) };
+      out[key] = { v: x.v, t: Math.max(x.t, y.t), ...(x.f || y.f ? { f: laterStamps(x.f, y.f) } : {}) };
       continue;
     }
     switch (key) {
@@ -120,6 +165,25 @@ export function mergeProgress(a: Progress, b: Progress): Progress {
         out[key] = stamp(m, x, y);
         break;
       }
+      case 'ff.options': {
+        const [p, q] = both(x, y, (v) => (isPlain(v) ? flatten(v) : null));
+        if (!p || !q) {
+          out[key] = p ? x : y;
+          break;
+        }
+        const fx = x.f ?? {};
+        const fy = y.f ?? {};
+        const leaves: Record<string, unknown> = {};
+        const f: Record<string, number> = {};
+        for (const path of new Set([...Object.keys(p), ...Object.keys(q)])) {
+          const theirs = path in q && (!(path in p) || (fy[path] ?? 0) > (fx[path] ?? 0));
+          leaves[path] = theirs ? q[path] : p[path];
+          const t = theirs ? fy[path] : fx[path];
+          if (t) f[path] = t;
+        }
+        out[key] = { v: JSON.stringify(unflatten(leaves)), t: Math.max(x.t, y.t), f };
+        break;
+      }
       default:
         out[key] = newer(x, y)!;
     }
@@ -128,27 +192,51 @@ export function mergeProgress(a: Progress, b: Progress): Progress {
 }
 
 /** One device's copy as it is kept in the key-value store. */
-export function encodeCopy(p: Progress): string {
-  return JSON.stringify({ v: 1, p });
+export function encodeCopy(c: Copy): string {
+  return JSON.stringify({ v: 2, p: c.p, pt: c.pt });
 }
 
 /** A device's copy back from the key-value store; anything unrecognised is no copy. */
-export function decodeCopy(raw: string | undefined): Progress {
-  const d = json(raw) as { v?: unknown; p?: unknown } | undefined;
-  if (!d || typeof d !== 'object' || d.v !== 1 || !d.p || typeof d.p !== 'object') return {};
-  const out: Progress = {};
+export function decodeCopy(raw: string | undefined): Copy {
+  const d = json(raw) as { v?: unknown; p?: unknown; pt?: unknown } | undefined;
+  const out: Copy = { p: {}, pt: {} };
+  if (!d || typeof d !== 'object' || d.v !== 2 || !isPlain(d.p)) return out;
   for (const key of MIRRORED) {
-    const s = (d.p as Record<string, unknown>)[key] as Partial<Stamped> | undefined;
-    if (s && typeof s.v === 'string' && typeof s.t === 'number' && Number.isFinite(s.t)) out[key] = { v: s.v, t: s.t };
+    const s = d.p[key] as Partial<Stamped> | undefined;
+    if (s && typeof s.v === 'string' && typeof s.t === 'number' && Number.isFinite(s.t)) {
+      out.p[key] = { v: s.v, t: s.t, ...(isPlain(s.f) ? { f: stampsOf(s.f) } : {}) };
+    }
+  }
+  if (isPlain(d.pt)) {
+    for (const [dev, rooms] of Object.entries(d.pt)) {
+      const r = roomMap(rooms, isCount);
+      if (r) out.pt[dev] = r;
+    }
+  }
+  return out;
+}
+
+/** Per device and room, the larger: a device's own play time only ever grows. */
+export function mergePlayTimes(a: PlayTimes, b: PlayTimes): PlayTimes {
+  const out: PlayTimes = {};
+  for (const src of [a, b]) {
+    for (const [dev, rooms] of Object.entries(src)) {
+      const m = (out[dev] ??= {});
+      for (const [r, n] of Object.entries(rooms)) m[r] = Math.max(m[r] ?? 0, n);
+    }
   }
   return out;
 }
 
 /** Every device's copy merged, `local` first so it wins every tie. */
-export function mergeAll(local: Progress, kvs: Record<string, string>): Progress {
-  let merged = local;
+export function mergeAll(local: Progress, kvs: Record<string, string>): Copy {
+  let p = local;
+  let pt: PlayTimes = {};
   for (const k of Object.keys(kvs).sort()) {
-    if (k.startsWith(KVS_PREFIX)) merged = mergeProgress(merged, decodeCopy(kvs[k]));
+    if (!k.startsWith(KVS_PREFIX)) continue;
+    const c = decodeCopy(kvs[k]);
+    p = mergeProgress(p, c.p);
+    pt = mergePlayTimes(pt, c.pt);
   }
-  return merged;
+  return { p, pt };
 }

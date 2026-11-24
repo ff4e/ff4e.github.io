@@ -10,9 +10,9 @@
  * holds it all. Then the cache is "purged" (a relaunch that finds none), the game loads what
  * NSUserDefaults kept with F3, undoes back through every point it kept and no further, and
  * finishes the room: the win must be in NSUserDefaults and in this device's iCloud copy.
- * Another device's copy arriving (`!kvs`) must reach the running game's own sets; the worst
- * case measured — every room solved, a heavy save in 24 rooms — must stay under the budget
- * with progress byte for byte; and the stand-ins must refuse what tvOS and iCloud refuse.
+ * Another device's copy arriving (`!kvs`) must reach the running game's own sets, its play
+ * time adding to this device's; the worst case measured — every room solved, a heavy save
+ * in 24 rooms — must stay under the budget with progress byte for byte; and the stand-ins must refuse what tvOS and iCloud refuse.
  * The store DIR is wiped first.
  */
 import { decodeMoves } from '../../src/core/solutionMoves.js';
@@ -140,16 +140,20 @@ export async function runStoreSmoke(): Promise<number> {
     check(left!.why === 'won' && solved.includes(num) && defaults()['ff.best'] !== undefined, 'the win is in NSUserDefaults');
     const kvs = JSON.parse(__native.kvsLoad()) as Record<string, string>;
     const own = Object.keys(kvs).filter((k) => k.startsWith(KVS_PREFIX));
-    check(own.length === 1 && (JSON.parse(decodeCopy(kvs[own[0]!])['ff.solved']?.v ?? '[]') as number[]).includes(num),
+    check(own.length === 1 && (JSON.parse(decodeCopy(kvs[own[0]!]).p['ff.solved']?.v ?? '[]') as number[]).includes(num),
       `...and in this device's iCloud copy (${own[0]})`);
 
     // ── Another Apple TV's progress arrives while the game runs.
     __native.kvsSave(`${KVS_PREFIX}smoke-other`, encodeCopy({
-      'ff.solved': { v: '[1,2]', t: 1 }, 'ff.scores': { v: '{"1":3}', t: 1 }, 'ff.best': { v: '{"1":"abc"}', t: 1 },
+      p: { 'ff.solved': { v: '[1,2]', t: 1 }, 'ff.scores': { v: '{"1":3}', t: 1 }, 'ff.best': { v: '{"1":"abc"}', t: 1 } },
+      pt: { 'smoke-other': { 1: 60_000 } },
     }));
     routeEvent('!kvs');
+    const ownZaval = store.playTime.get(num) ?? 0;
     check(store.solved.has(1) && store.solved.has(2) && store.solved.has(num) && store.scores.get(1) === 3 && store.bestRecords.get(1) === 'abc',
       'another device\'s rooms reach the running game (`!kvs`), and its own stay');
+    check(store.playTime.get(1) === 60_000 && store.playTime.get(num) === ownZaval && ownZaval > 0,
+      '...and its play time adds to this device\'s');
     check((JSON.parse(defaults()['ff.solved']!) as number[]).includes(2), '...and NSUserDefaults');
 
     // ── The worst case measured: every room solved, a heavy save in 24 rooms.

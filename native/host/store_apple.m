@@ -24,8 +24,11 @@ char *ff_prefs_load(const char *key, size_t *len) {
 
 bool ff_prefs_save(const char *key, const char *data, size_t len) {
   @autoreleasepool {
-    [[NSUserDefaults standardUserDefaults] setObject:[NSData dataWithBytes:data length:len] forKey:@(key)];
-    return true;
+    NSUserDefaults *d = [NSUserDefaults standardUserDefaults];
+    [d setObject:[NSData dataWithBytes:data length:len] forKey:@(key)];
+    /* Not needed for the value to be kept eventually; asks for it now, so a power cut just
+       after a save loses less. The cache, written next and fsynced, covers the rest. */
+    return [d synchronize];
   }
 }
 

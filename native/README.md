@@ -907,11 +907,14 @@ speaks `localStorage` as on the web, and its save logic (`persist.ts`, `saveGame
    write — never refused — pushes whole slots out of this copy, largest first. With every
    room solved and a heavy save in 24 rooms the copy is ~398 KB.
 2. **The cache file**: the host's ordinary store file, which on tvOS lives in Caches. It holds
-   everything, whole undo histories included. Both local copies carry a write number; at
-   launch the cache is used only when it is the *same* write as the NSUserDefaults copy (the
-   defaults are written first, so a cache that is older, or newer after a crash, is never
-   trusted over them). While tvOS leaves it alone a load resumes exactly what was saved;
-   when it has been purged, the NSUserDefaults copy is the save.
+   everything, whole undo histories included. Every write goes to NSUserDefaults first (then
+   `synchronize`) and to the cache next, with the same write number. At launch the cache is
+   used whenever its number is not older: the same write (it is the fuller copy), or a newer
+   one — NSUserDefaults lost writes the cache kept (it is fsynced; a power cut just after a
+   save), and the NSUserDefaults copy is put right at once. A cache *older* than
+   NSUserDefaults missed a write and is not used. While tvOS leaves the cache alone a load
+   resumes exactly what was saved; when it has been purged, the NSUserDefaults copy is the
+   save.
 3. **iCloud's key-value store**: the progress only (`ff.solved`, `ff.cheated`, `ff.scores`,
    `ff.best`, `ff.playtime`, `ff.options`, `ff.subfont`; ~55 KB), so it survives a reinstall
    and is shared with the player's other Apple TVs. iCloud resolves a conflict on a key by
@@ -925,8 +928,9 @@ speaks `localStorage` as on the web, and its save logic (`persist.ts`, `saveGame
    | `ff.solved`, `ff.cheated` | union |
    | `ff.scores` | the lowest move count per room |
    | `ff.best` | per room, the record of the copy with the lower score (a tie keeps this device's) |
-   | `ff.playtime` | the highest per room — not the sum: a copy already holds what it merged from the others |
-   | `ff.options`, `ff.subfont` | the newest write |
+   | `ff.playtime` | per room, the sum of every device's *own* time: each copy also carries every device's own time it knows of (largest wins, as it only grows), so two Apple TVs playing offline add up and what one merged from another is not counted twice |
+   | `ff.options` | per field (`volume.music`, `subtitles`…), the newest *change*: a field carries the time the player last changed it; a first write — a new device's first-run intro writing the defaults — carries none, so it never outweighs settings made elsewhere |
+   | `ff.subfont` | the newest write (only the player choosing a font writes it) |
 
    A value that is not what its key should hold loses to one that is. Each device's copy is
    the merge of all, so near 1 MB the copies it already holds everything of are removed.
@@ -934,7 +938,9 @@ speaks `localStorage` as on the web, and its save logic (`persist.ts`, `saveGame
    iCloud's change notification (another device, or the first download after a reinstall)
    becomes the host's `!kvs` event: the progress keys are merged into the store *and* into
    the running game's own sets (`adoptRemoteProgress`), so the map shows another Apple TV's
-   rooms at once; options apply at the next launch.
+   rooms at once; options apply at the next launch. (So on a new Apple TV whose first iCloud
+   download comes after launch, the intro still plays once, and the options set elsewhere
+   arrive at the next launch — without being overwritten by that intro's defaults.)
 
 An unreadable NSUserDefaults copy is set aside (`ff4e.store.damaged`), never overwritten, and
 the game starts from the cache — or, with no cache, from iCloud's progress. On a Mac,
@@ -946,9 +952,11 @@ QuickJS on an M-series Mac.
 **What is checked where.** `test/native-tv-store.test.ts` (V8, ~0.6 s): real ZAVAL slots
 (and one 2 000 moves longer) cut to their newest points with record and script state whole;
 every room solved with 24 heavy saves under the budget, progress byte for byte; a purged and
-a stale cache; a refused slot and a progress write that never is; a damaged defaults copy;
-the merge table; two Apple TVs writing only their own keys and taking in each other's; a
-reinstall getting every room back. The store smoke (below) runs the real game in QuickJS
+a stale cache, and a cache newer than NSUserDefaults (which wins); a refused slot and a
+progress write that never is; a damaged defaults copy; the merge table; two Apple TVs writing
+only their own keys and taking in each other's; a new Apple TV's first-run defaults not
+resetting another's options, and per-field option changes from two devices both kept; play
+time on two Apple TVs offline adding up; a reinstall getting every room back. The store smoke (below) runs the real game in QuickJS
 over the host's stand-ins. **Needs a device:** that NSUserDefaults really keeps 500 KB on
 tvOS, the iCloud round trip and its notification timing (including the first download after
 a reinstall), and what tvOS actually purges.
@@ -972,9 +980,10 @@ attempt in memory and in the cache, NSUserDefaults holding it within the cap wit
 whole and its newest points; a relaunch with the cache purged finds that save; F3 loads it,
 undo steps back through every kept point and stops at the oldest; the room is finished and
 the win is in NSUserDefaults and in this device's iCloud copy; another device's copy
-arriving (`!kvs`) reaches the running game's sets; every room's best record and 24 heavy
+arriving (`!kvs`) reaches the running game's sets, its play time adding to this device's;
+every room's best record and 24 heavy
 saves stay under the budget with progress whole; and the stand-ins refuse what tvOS and
-iCloud refuse. 15 checks, ~7 s; the DIR is wiped first. In `native:check` and the
+iCloud refuse. 16 checks, ~7 s; the DIR is wiped first. In `native:check` and the
 `native-macos` job after the KUFRIK smoke.
 
 ## What it does not do yet

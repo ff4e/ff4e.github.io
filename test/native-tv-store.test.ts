@@ -184,6 +184,7 @@ describe('the tvOS store budget', () => {
     a.set('ff.solved', '[1,2]');
     a.set('ff.save.5', long);
     expect(new TvStore(tv).load().get('ff.save.5')).toBe(long);
+    expect(tv.logs).toEqual([]); // an ordinary launch says nothing about the cache
     tv.purge();
     const after = new TvStore(tv).load();
     expect(after.get('ff.solved')).toBe('[1,2]');
@@ -198,6 +199,24 @@ describe('the tvOS store budget', () => {
     b.set('ff.save.5', small);
     tv.cache = stale;
     expect(new TvStore(tv).load().get('ff.save.5')).toBe(small);
+    expect(tv.logs.at(-1)).toMatch(/older than NSUserDefaults/);
+  });
+
+  it('trusts a cache newer than the defaults copy: NSUserDefaults lost its last writes, the cache did not', () => {
+    const tv = new FakeTv();
+    const a = new TvStore(tv);
+    a.load();
+    a.set('ff.solved', '[1]');
+    const older = tv.prefs;
+    a.set('ff.solved', '[1,2]');
+    tv.prefs = older; // a power cut before NSUserDefaults reached the disk
+    tv.kvs = {};
+    const b = new TvStore(tv);
+    expect(b.load().get('ff.solved')).toBe('[1,2]');
+    expect(persisted(tv)['ff.solved']).toBe('[1,2]'); // and the defaults copy is put right at once
+    b.set('ff.scores', '{"2":7}');
+    expect((JSON.parse(tv.cache!) as { items: Record<string, string> }).items['ff.solved']).toBe('[1,2]');
+    expect(tv.logs.some((m) => m.includes('newer'))).toBe(true);
   });
 
   it('refuses a slot that cannot fit even bare, as a browser quota does, and never refuses progress', () => {
@@ -276,7 +295,7 @@ describe('progress in iCloud', () => {
     a.set('ff.solved', '[1,2,3]'); // a still runs on what it loaded
     expect(Object.keys(one.kvs).filter((k) => k.startsWith(KVS_PREFIX)).length).toBe(2);
     // a's push merged b's copy in, so a's own key carries everything.
-    const aCopy = decodeCopy(one.kvs[KVS_PREFIX + (JSON.parse(one.prefs!) as { device: string }).device]);
+    const aCopy = decodeCopy(one.kvs[KVS_PREFIX + (JSON.parse(one.prefs!) as { device: string }).device]).p;
     expect(JSON.parse(aCopy['ff.solved']!.v)).toEqual([1, 2, 3, 7]);
     // While running, a takes in b's progress (the `!kvs` path) — but not its options.
     b.set('ff.options', '{"subtitles":"cz"}');
@@ -286,6 +305,74 @@ describe('progress in iCloud', () => {
     expect(a.items.has('ff.options')).toBe(false);
     // Next launch, the options too.
     expect(new TvStore(one).load().get('ff.options')).toBe('{"subtitles":"cz"}');
+  });
+
+  it('a new Apple TV\'s first-run defaults do not reset the options another device set', () => {
+    const OPT = (o: object): string => JSON.stringify({ volume: { effect: 7, voice: 7, music: 7 }, subtitles: 'en', titDef: 'en', introSeen: true, fitMode: 'medium', ...o });
+    const one = new FakeTv();
+    const a = new TvStore(one);
+    a.load();
+    a.set('ff.options', OPT({})); // A's first-run intro
+    a.set('ff.options', OPT({ subtitles: 'cz', titDef: 'cz', volume: { effect: 7, voice: 3, music: 0 } })); // the player
+    const configured = a.items.get('ff.options');
+    const two = new FakeTv(); // B: iCloud has not arrived yet
+    two.clock = 99_999;
+    const b = new TvStore(two);
+    b.load();
+    b.set('ff.options', OPT({})); // B's first-run intro, later than A's settings
+    const sync = { ...one.kvs, ...two.kvs };
+    one.kvs = { ...sync };
+    two.kvs = { ...sync };
+    expect(new TvStore(one).load().get('ff.options')).toBe(configured);
+    expect(new TvStore(two).load().get('ff.options')).toBe(configured);
+  });
+
+  it('per field, the newest change wins: one device\'s volume and another\'s subtitles both stay', () => {
+    const OPT = (o: object): string => JSON.stringify({ volume: { effect: 7, voice: 7, music: 7 }, subtitles: 'en', introSeen: true, ...o });
+    const one = new FakeTv();
+    const a = new TvStore(one);
+    a.load();
+    a.set('ff.options', OPT({}));
+    const b = new TvStore(one.sibling());
+    b.load();
+    a.set('ff.options', OPT({ volume: { effect: 7, voice: 7, music: 2 } }));
+    b.set('ff.options', OPT({ subtitles: 'cz' }));
+    expect(JSON.parse(new TvStore(one).load().get('ff.options')!)).toEqual(JSON.parse(OPT({ subtitles: 'cz', volume: { effect: 7, voice: 7, music: 2 } })));
+  });
+
+  it('play time on two Apple TVs offline adds up, and never counts the shared part twice', () => {
+    const one = new FakeTv();
+    const a = new TvStore(one);
+    a.load();
+    a.set('ff.playtime', '{"1":10}');
+    const two = new FakeTv();
+    two.kvs = { ...one.kvs };
+    const b = new TvStore(two);
+    expect(b.load().get('ff.playtime')).toBe('{"1":10}');
+    a.set('ff.playtime', '{"1":15}'); // each plays 5 more, offline
+    b.set('ff.playtime', '{"1":15,"2":4}');
+    const sync = { ...two.kvs, ...one.kvs }; // iCloud keeps A's newest write of A's key
+    one.kvs = { ...sync };
+    two.kvs = { ...sync };
+    const a2 = new TvStore(one);
+    expect(a2.load().get('ff.playtime')).toBe('{"1":20,"2":4}');
+    expect(new TvStore(two).load().get('ff.playtime')).toBe('{"1":20,"2":4}');
+    // A plays on from the total: the next merge adds only what A played.
+    a2.set('ff.playtime', '{"1":21,"2":4}');
+    two.kvs = { ...two.kvs, ...one.kvs };
+    expect(new TvStore(two).load().get('ff.playtime')).toBe('{"1":21,"2":4}');
+    expect(new TvStore(one).load().get('ff.playtime')).toBe('{"1":21,"2":4}');
+  });
+
+  it('play time another device added is not taken as this one\'s until it is taken in', () => {
+    const one = new FakeTv();
+    const a = new TvStore(one);
+    a.load();
+    a.set('ff.playtime', '{"1":10}');
+    one.kvs[`${KVS_PREFIX}other`] = encodeCopy({ p: {}, pt: { other: { 1: 7 } } }); // arrives; not pulled
+    a.set('ff.solved', '[1]'); // a write, and its push, merge it but must not adopt it
+    a.set('ff.playtime', '{"1":12}'); // the game's own clock: 2 more here
+    expect(new TvStore(one).load().get('ff.playtime')).toBe('{"1":19}');
   });
 
   it('a reinstall gets every room back from iCloud', () => {
