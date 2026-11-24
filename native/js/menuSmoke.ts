@@ -22,7 +22,8 @@
  * and what it drew — every rectangle, glyph, image and string, with its position — is
  * compared with native/ui-layout.snap.json. A layout change fails here with the first op
  * that moved; `--update-snapshot` rewrites the file (review its diff), and `--smoke-out`
- * keeps each state's pixels (`DIR/ui-<state>.rgba`, as compare.mjs reads them).
+ * keeps each state's pixels (`DIR/ui-<state>.rgba`, as compare.mjs reads them) and the
+ * picture under it (`DIR/pic-<state>.rgba`: the room's composite or the map), to look at.
  */
 import { count, engine, loadmode } from '../../src/app/gameState.js';
 import { step } from '../../src/app/logicTick.js';
@@ -30,12 +31,12 @@ import { helpScreens, ui } from '../../src/app/screenState.js';
 import { atRest } from '../../src/app/roomGates.js';
 import { lengthOfRecord } from '../../src/core/record.js';
 import { busMultiplier, loadSettings } from '../../src/core/settings.js';
-import { advance, currentRoom, enterRoom, initGame, isPaused, roomReady, saveExists, showMap } from './game.js';
+import { advance, currentRoom, draw, enterRoom, initGame, isPaused, roomReady, saveExists, showMap } from './game.js';
 import { ensureMapArt, mapFrame, mapPresented, mapSelectedCorner } from './mapScreen.js';
 import { OPTIONS_ROWS, PAUSE_ITEMS, menuOpen, openMenus, openOptions, pauseItemEnabled, topMenu } from './menus.js';
 import { ensureOptionsArt } from './optionsPaint.js';
 import { preloadHelpFigures } from './helpPaint.js';
-import { preloadLegendArt } from './legend.js';
+import { confirmItems, legendItems, preloadLegendArt, type LegendScreen } from './legend.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { loadSubtitleAssets, subtitleFace } from './roomSubtitles.js';
 import { pinRandom } from './scene.js';
@@ -148,11 +149,19 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   };
   const snaps: Record<string, readonly UiOp[]> = {};
   const snap = (name: string): void => {
-    const box = ui.screen === 'room' ? pictureBox(target.width, target.height) : pictureBox(2560, 1920);
+    // In a room, composite it first: the picture's box is the composite's size, as on screen.
+    const inRoom = ui.screen === 'room' && draw(target, 0);
+    const box = inRoom ? pictureBox(target.width, target.height) : pictureBox(2560, 1920);
     const r = paintUi(WIN_W, WIN_H, box);
     if (!r) throw new MenuSmokeFailure(`the UI layer drew nothing for ${name}`);
     snaps[name] = r.ops;
-    if (outDir) __native.saveTexture(r.surface.id, `${outDir}/ui-${name}.rgba`);
+    if (!outDir) return;
+    if (r.surface) __native.saveTexture(r.surface.id, `${outDir}/ui-${name}.rgba`);
+    if (inRoom) __native.saveComposite(`${outDir}/pic-${name}.rgba`);
+    else {
+      const shown = mapFrame(performance.now());
+      if (shown) __native.saveTexture(shown.id, `${outDir}/pic-${name}.rgba`);
+    }
   };
   const stored = (): ReturnType<typeof loadSettings> => loadSettings();
   const t0 = __native.now();
@@ -161,6 +170,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     showMap();
     await mapTick();
     snap('map-key');
+    check(snaps['map-key']!.length === 0, 'the keyboard on the map: no legend, and no UI layer drawn at all');
 
     // ── The map's Options, from the pad's ☰ ────────────────────────────────────────
     await tap('PadMenu');
@@ -211,6 +221,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     // ── Back at the root, and the Options corner ──────────────────────────────────
     await tap('PadB');
     check(exits === 0 && ui.screen === 'map', 'the pad\'s Ⓑ on the plain map does nothing');
+    snap('map-pad');
     await tap('Escape');
     check(exits === 1, 'the keyboard\'s Esc at the map\'s root leaves the game');
     await tap('RemoteBack');
@@ -388,13 +399,21 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     snap('room-pad');
     await tap('PadMenu');
     check(topMenu()?.kind === 'pause', 'the pad\'s ☰ opens the pause menu');
+    snap('pause-pad');
     await tap('PadMenu');
     check(!menuOpen(), 'and closes it');
     await tap('Escape');
     check(topMenu()?.kind === 'pause' && lastInput() === 'key', 'the keyboard\'s Esc opens the pause menu');
     snap('pause-key');
+    const screens: LegendScreen[] = ['room', 'map', 'panel', 'legimage', 'pause', 'options', 'help'];
+    check(screens.every((sc) => legendItems(sc, 'key').length === 0) && confirmItems('key').length === 0,
+      'the keyboard gets no button hints on any screen, nor on the confirm prompt');
+    check(screens.every((sc) => legendItems(sc, 'pad').length > 0 && legendItems(sc, 'remote').length > 0),
+      'the pad and the remote get them on every screen');
     await tap('Escape');
     check(!menuOpen(), 'and Esc resumes');
+    snap('room-key');
+    check(snaps['room-key']!.length === 0, 'the keyboard in a room: no legend, and no UI layer drawn at all');
     await tap('PadB');
     check(ui.screen === 'map', 'the pad\'s Ⓑ goes straight to the map');
     await enterRoom(1);

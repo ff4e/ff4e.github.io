@@ -234,7 +234,7 @@ function runInteractive(target: NativeAiScreen): void {
       const layer = win ? paintUi(win.w, win.h, win.picture) : null;
       // Measured BEFORE present: present waits for vsync, which is idle time, not work.
       jsMs += __native.now() - now;
-      if (drawn) __native.present(subs?.id, layer?.surface.id);
+      if (drawn) __native.present(subs?.id, layer?.surface?.id);
     } else if (ui.screen === 'intro') {
       // The splash, or a movie frame with the skip hint over it. No legend (A4).
       const shown = introFrame(now);
@@ -245,7 +245,7 @@ function runInteractive(target: NativeAiScreen): void {
       const win = shown ? windowLayout(shown.width, shown.height) : null;
       const layer = win ? paintUi(win.w, win.h, win.picture) : null;
       jsMs += __native.now() - now;
-      if (shown) __native.presentTexture(shown.id, undefined, layer?.surface.id);
+      if (shown) __native.presentTexture(shown.id, undefined, layer?.surface?.id);
       mapPresented();
     }
     frames++;

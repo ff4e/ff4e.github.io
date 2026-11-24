@@ -226,8 +226,11 @@ export class Ui {
     return face.advances(chars, px).reduce((a, b) => a + b, 0) + spacing * chars.length;
   }
 
-  /** `text` with its baseline at `y`, aligned on `x`. Returns its width. */
-  text(text: string, x: number, y: number, px: number, rgb: number, opts: { align?: Align; bold?: boolean; alpha?: number; spacing?: number; face?: NativeFace } = {}): number {
+  /**
+   * `text` with its baseline at `y`, aligned on `x`. Returns its width. With `outline`, each
+   * glyph first gets a dark rim `r` pixels wide, as a subtitle's does.
+   */
+  text(text: string, x: number, y: number, px: number, rgb: number, opts: { align?: Align; bold?: boolean; alpha?: number; spacing?: number; face?: NativeFace; outline?: { r: number; rgb: number } } = {}): number {
     const face = opts.face ?? (opts.bold ? this.fonts.bold : this.fonts.regular);
     const chars = [...text];
     const adv = face.advances(chars, px);
@@ -240,7 +243,8 @@ export class Ui {
     const [y0, qy] = quarter(y);
     chars.forEach((ch, i) => {
       const [x0, qx] = quarter(pen);
-      const g = atlas.get(face, ch, px, 0, qx, qy);
+      const g = atlas.get(face, ch, px, opts.outline?.r ?? 0, qx, qy);
+      if (g.page && opts.outline) this.s.fillMask(g.page, g.sx + g.w + 1, g.sy, g.w, g.h, x0 + g.x, y0 + g.y, g.w, g.h, opts.outline.rgb);
       if (g.page) this.s.fillMask(g.page, g.sx, g.sy, g.w, g.h, x0 + g.x, y0 + g.y, g.w, g.h, rgb);
       pen += adv[i]! + spacing;
     });

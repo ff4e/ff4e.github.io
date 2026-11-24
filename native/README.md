@@ -192,7 +192,8 @@ game the keys the browser's router reads — so every gate of that router still 
   Back in a room (Esc, the pad's ☰, the remote's Back): tvOS requires Back during play to pause
   and show a menu. While any menu is over a room the room is **paused**: no logic step runs and
   the sound holds its place (`setModalPause`, as the browser's Help does). Save, Load and
-  Restart ask first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no), then send
+  Restart ask first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no; the card
+  shows the pad's or the remote's answers as the legend's small hints, the keyboard's none), then send
   F2, F3 or Backspace down the room's router, so a save mid-move or during a replay is refused
   exactly as F2 is on the web. Save and Load are greyed (and skipped by the highlight) when they
   cannot act, by the touch buttons' rule (`buttonAvailability.ts`, pinned): never during
@@ -212,11 +213,18 @@ game the keys the browser's router reads — so every gate of that router still 
   line breaks are a greedy wrap's, and there is no italic face natively, so the emphasised
   phrases and the notes are upright.
 - **The legend** (A4) shows what each button does on the screen that is up, in the glyphs of
-  the last input used — keycaps, an Xbox pad's coloured chips, or the remote's outlines — in
-  the letterbox margin beside the picture when it fits there (left edge or top, whichever covers
-  less otherwise), about a tenth of the window tall. Items that cannot act are greyed. With the
-  remote, "Switch fish" carries the active fish's picture (B3: the touch badge's art and its
-  visibility rule), the only cue to which fish an edge click moves.
+  the last input used — an Xbox pad's chips or the remote's — as small "[chip] Word" hints in
+  the style of the first Xbox WebView prototype (`xbox-port`'s `.pad-hints`, its 10-foot
+  sizes at 1080 lines: a 26 px round chip, 18 px words, no card behind them, muted to 75 %),
+  scaled with the window and no smaller than at 720 lines. It goes down the left letterbox
+  margin as a short list when that fits, else as one row in the top margin, else as one thin
+  row along the top edge over the picture, where the words carry the subtitles' dark outline
+  (the subtitles have the bottom). Items that cannot act are dimmer. With the remote,
+  "Switch fish" carries the active fish's picture at the chip's height (B3: the touch badge's
+  art and its visibility rule), the only cue to which fish an edge click moves. **The keyboard
+  gets no legend, on any screen**, nor answer hints on the confirm prompt: its player knows
+  the keys, and keycaps would only cover the picture. With nothing to draw the UI layer is
+  not drawn at all.
 - **At the map's root, Back leaves the game** (the keyboard's Esc, the remote's Back): tvOS
   requires Back at the top level to go Home, and App Review rejects a game that quits itself.
   So on macOS it quits, and on tvOS the game does nothing with it: each frame the router tells
@@ -592,16 +600,18 @@ open from the pause menu and close back to it; Restart starts over; a save mid-m
 refused as F2 is. With the pad: Ⓧ asks to restart and Ⓑ declines, RB with no save opens
 nothing, LB → Ⓐ saves, ☰ opens and closes the pause menu, Ⓑ goes to the map; Esc opens and
 closes the pause menu; its World map leaves the room. A Play/Pause hold released inside the
-pause menu ends there. 58 checks, ~6 s.
+pause menu ends there. With the keyboard last, no hints are drawn on any screen (and, on the
+map and in a room, no UI layer at all). 62 checks, ~8 s.
 
-It also checks the **UI layout snapshot**: at 13 states the UI layer is drawn into a 1280×720
+It also checks the **UI layout snapshot**: at 16 states the UI layer is drawn into a 1280×720
 window and the list of what it drew — every rectangle, shape, image and string, with its
 position and size in whole pixels — must equal `native/ui-layout.snap.json`. A layout change
 fails with the first op that moved and writes the new list to
 `native/build/ui-layout.snap.new.json`; if intended, rerun with `--update-snapshot` and review
 the file's diff. It is not a pixel comparison (the web has no such screens to compare with):
 it catches a moved, resized, missing or reworded element, not a wrong colour inside one.
-`--smoke-out DIR` keeps each state's pixels (`DIR/ui-<state>.rgba`).
+`--smoke-out DIR` keeps each state's pixels (`DIR/ui-<state>.rgba`) and the picture under
+it (`DIR/pic-<state>.rgba`: the room's composite or the map), to look at together.
 
 ## Is it the same picture? `native/compare.mjs`
 

@@ -3,10 +3,11 @@
  * list over the dimmed room, and a centred card asking before a save, a load or a restart
  * (the controller spec's A5 look: a `#18262e` card with a `#6cc` border over a black scrim
  * at ~67%, the focus a 3 px `#7ee6ff` outline offset 4 px) — sized for a TV: the prompt's
- * text is 36 px at 1080 lines, where the tablet's was 24.
+ * text is 36 px at 1080 lines, where the tablet's was 24. Its answers are the legend's small
+ * hints ("Ⓐ Yes  Ⓑ No"); the keyboard gets none (Enter and Esc still answer).
  */
 import { PAUSE_ITEMS, pauseItemEnabled, type PauseItem, type Verb } from './menus.js';
-import { drawGlyph, type Glyph } from './legend.js';
+import { confirmItems, drawHintRow, hintRowWidth, legendMetrics } from './legend.js';
 import type { InputSource } from './uiInput.js';
 import type { Ui } from './uiDraw.js';
 
@@ -55,35 +56,21 @@ export function paintPause(ui: Ui, w: number, h: number, sel: number): [number, 
   return [x, y, cw, ch];
 }
 
-/** The answer glyphs for the prompt, in the last input's: Ⓐ/Ⓑ, the remote's click/Back, Enter/Esc. */
-function answerGlyphs(source: InputSource): [Glyph, Glyph] {
-  if (source === 'pad') return [{ kind: 'chip', text: 'A', rgb: 0x3d9a1f, ink: 0xffffff }, { kind: 'chip', text: 'B', rgb: 0xc62a2a, ink: 0xffffff }];
-  if (source === 'remote') return [{ kind: 'clickpad', edge: false }, { kind: 'shape', shape: 'chevron' }];
-  return [{ kind: 'key', text: 'Enter' }, { kind: 'key', text: 'Esc' }];
-}
-
-/** The confirm prompt (A3): the question, then "Ⓐ Yes · Ⓑ No". Returns its box. */
+/** The confirm prompt (A3): the question, then "Ⓐ Yes  Ⓑ No" in the last input's glyphs. Returns its box. */
 export function paintConfirm(ui: Ui, w: number, h: number, verb: Verb, source: InputSource): [number, number, number, number] {
   const u = Math.max(0.5, h / 1080);
   scrim(ui, w, h, 0.67);
   const q = PROMPT[verb];
-  const qpx = 36 * u, hpx = 27 * u, g = 40 * u;
-  const [yes, no] = answerGlyphs(source);
-  // The hint row — glyph, "Yes", a gap, glyph, "No" — measured from its parts.
-  const glyphW = (gl: Glyph): number => gl.kind === 'key' ? Math.max(g, ui.measure(gl.text, g * 0.5, true) + g * 0.5) : g;
-  const yesW = ui.measure('Yes', hpx, true), noW = ui.measure('No', hpx, true), sp = 12 * u, mid = 48 * u;
-  const hintW = glyphW(yes) + sp + yesW + mid + glyphW(no) + sp + noW;
+  const qpx = 36 * u;
+  const answers = confirmItems(source);
+  const m = legendMetrics(h);
+  const hintW = hintRowWidth(ui, answers, m);
   const cw = Math.max(ui.measure(q, qpx, true), hintW) + 2 * 56 * u;
-  const ch = 190 * u;
+  const ch = answers.length ? 176 * u : 124 * u;
   const x = (w - cw) / 2, y = (h - ch) / 2;
   ui.rect(x, y, cw, ch, CARD_RGB, 1, 18 * u);
   ui.frame(x, y, cw, ch, Math.max(1, 2 * u), CARD_BORDER, 1, 18 * u);
-  ui.text(q, x + cw / 2, y + 76 * u, qpx, TEXT_RGB, { align: 'center', bold: true });
-  let hx = x + (cw - hintW) / 2;
-  const gy = y + 112 * u;
-  hx += drawGlyph(ui, yes, hx, gy, g) + sp;
-  hx += ui.text('Yes', hx, gy + g * 0.7, hpx, TEXT_RGB, { bold: true }) + mid;
-  hx += drawGlyph(ui, no, hx, gy, g) + sp;
-  ui.text('No', hx, gy + g * 0.7, hpx, TEXT_RGB, { bold: true });
+  ui.text(q, x + cw / 2, y + 75 * u, qpx, TEXT_RGB, { align: 'center', bold: true });
+  if (answers.length) drawHintRow(ui, answers, x + (cw - hintW) / 2, y + 112 * u, m);
   return [x, y, cw, ch];
 }
