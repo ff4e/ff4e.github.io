@@ -131,6 +131,20 @@ export interface NativeApi {
    * what `remoteTouch` reports, and what `SDL_GetGamepadAxis` reads for its y. Headless only.
    */
   remoteProbe(rawX: number, rawY: number): [[number, number] | null, number];
+  /**
+   * The menu smoke's check of the remote's Menu/Back (native/host/main.c,
+   * `n_remoteBackProbe`): `[fast, slow, codes]` — the button events SDL's poll makes of a
+   * virtual remote's Back pressed and released between two polls (as tvOS delivers it: 0) and
+   * held across one (2), and the input events `presses` presses make through GameController's
+   * handler path, all between two polls. Headless only.
+   */
+  remoteBackProbe(presses: number): [number, number, string[]];
+  /**
+   * The input log (native/host/main.c, `input_log`): with a line, adds it (on tvOS it goes to
+   * the device console too); without, the last lines, oldest first — the overlay's text.
+   */
+  inputLog(): string[];
+  inputLog(line: string): void;
   /** A text file by plain path (not under the asset root), or null when absent. */
   readText(path: string): string | null;
   /** Write a text file by plain path. Throws when it cannot. */

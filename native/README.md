@@ -263,9 +263,13 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   with the window and no smaller than at 720 lines. Each chip is the room's glass with its
   symbol in the room's carved-icon colour; the pad's A/B/X/Y keep their hues at that
   lightness, so they stay apart. It goes down the left letterbox margin as a short list when
-  that fits, else as one row in the top margin, against its edge: on a TV the title-safe
-  area's (tvOS's inset is the margin, as Apple's guidance has it, so the hints sit 4 px at
-  1080 lines inside it), on a desktop 12 px in from the window's. Otherwise it lies over the picture: one row
+  that fits, else as one row in the top margin, against the SCREEN's edge, a small fixed
+  margin in: 12 px at 1080 lines on a desktop, 20 px (1.9 %) on a TV. Not the title-safe
+  area's edge, as the menus keep to: tvOS's insets are the same 80 points at the sides and 60
+  above and below on every set, which put the hints far from the edge on the sets that do not
+  overscan, as nearly none does now (TestFlight feedback, twice); the 20 px leave a little for
+  one that still overscans. On a TV it is laid out against the whole window and sized for its
+  height (`legend.ts`, `TV_EDGE`). Otherwise it lies over the picture: one row
   along the top edge on a strip of the touch UI's popup glass, drawn at full strength there,
   as muted light words vanish into the map's parchment. The top, not the bottom: the
   subtitles have the room's bottom, and the map's bottom carries the selected level's name.
@@ -282,11 +286,29 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   So on macOS it quits, and on tvOS the game does nothing with it: each frame the router tells
   the host whether the plain map is up (no record panel, menu, launch or story page), and the
   host turns `SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS` on there — the remote's Menu goes to the
-  system, which goes Home — and off everywhere else (`systemBack`, `native/host/main.c`). The
-  host also sets `SDL_HINT_TV_REMOTE_AS_JOYSTICK` to 1 on tvOS rather than rely on SDL's
-  default. Both are written from SDL 3.4's source and **unverified until there is a device**
-  (the tvOS build compiles and links them: see "Apple TV").
+  system, which goes Home — and off everywhere else (`systemBack`, `native/host/main.c`). SDL
+  sets the view controller's `controllerUserInteractionEnabled` from that hint on every change
+  (`SDL_uikitviewcontroller.m`, `SDL_AppleTVControllerUIHintChanged`); the host reads it back
+  every frame, sets it itself if it ever disagrees, and logs each change (below). The host
+  also sets `SDL_HINT_TV_REMOTE_AS_JOYSTICK` to 1 on tvOS rather than rely on SDL's default.
   The pad's Ⓑ still does nothing on the plain map, on purpose.
+- **The remote's Back comes from GameController, not SDL.** On TestFlight build 2 Back opened
+  the pause menu once in many presses. SDL 3.4 reads the remote's Menu/Back by polling
+  `isPressed` once per `SDL_UpdateJoysticks` (`SDL_mfijoystick.m`, the `physicalInputProfile`
+  loop of `IOS_MFIJoystickUpdate`), but tvOS runs a gesture recognizer over that button and
+  hands the app its press and release together, after the release — GameController's header
+  says as much (`GCMicroGamepad.h`, `GCInputMicroGamepadButtonMenu`: "You should avoid polling
+  this button every frame … register a pressedChangedHandler"). Both land between two polls,
+  and SDL sees nothing; it latches the deprecated `controllerPausedHandler` for exactly this
+  (`pause_button_pressed`), but only its pre-tvOS-14 profiles read the latch. So
+  `platform_tvos.m` registers the Menu button's `pressedChangedHandler` on every remote, the
+  host counts each press and sends it as a whole tap, Back down and up
+  (`native_remote_menu`, `remote_menu_drain`), and ignores SDL's polled copy (B). The menu
+  smoke shows the loss with SDL's own code — a virtual remote's B pressed and released
+  between two polls makes no event, held across one makes two (`__native.remoteBackProbe`) —
+  then drives room → Back → pause → Back → room five times through the handler's path, two
+  presses in one poll as two taps, and at the map's root, with the system owning Back as on a
+  TV, Back left to it.
 - **☰ in a room opens the pause menu**, on every native platform. The controller spec's A3
   has the pad's ☰ open Options directly; its B4 has it open the pause menu on tvOS. A deliberate
   deviation from A3: one native TV UI everywhere, and Options is one row away.
@@ -697,8 +719,9 @@ Other flags:
 - `--audio-log` prints every sound the game starts.
 - `--remote-keys` makes the keyboard a Siri Remote (above) and starts the legend in its glyphs,
   as a tvOS build always starts (`__native.tv`); a Mac starts with the keyboard's: none.
-- `--tv-safe-area` lays the menus and the legend out inside the title-safe insets tvOS gives a
-  TV (scaled to the window), to see on a Mac where they go on one.
+- `--tv-safe-area` lays the menus out inside the title-safe insets tvOS gives a TV (scaled to
+  the window), and the legend with a TV's edge margin, to see on a Mac where they go on one.
+- `--input-log` prints the input log (below, "Reading the remote's input log") to stderr.
 - `--startup-probe` checks what the game needs at start except the GPU — the store, the
   assets, the sound — prints one line and quits (`native/js/startupProbe.ts`). It is what runs
   in the Apple TV Simulator, and a `native:check` step.
@@ -766,13 +789,16 @@ rules are by directory and kind, and the check only ever adds to them.)
 - *The window* is the screen, at its pixels: 1920×1080, or 3840×2160 on a 4K Apple TV driving
   a 4K set (two pixels a point, `SDL_WINDOW_HIGH_PIXEL_DENSITY`). Everything is laid out for the
   window it gets, as on a Mac; the menus are rehearsed for its size at start (above).
-- *Title-safe area.* The menus, the legend and the intro's skip hint keep inside the view's
-  `safeAreaInsets` (60 points above and below, 80 at the sides; `__native.safeArea`,
-  `native/js/safeArea.ts`): the UI layer is drawn into the safe rectangle and laid out for
-  its size, a menu's scrim still dims the whole window. The pictures — the room, the map, a
-  movie — stay letterboxed to the whole screen, as a TV game's picture is, and so do the
-  subtitles, which are the room's. The menu smoke checks, at 1920×1080 with those insets,
-  that nothing of Options, the room's legend or the pause menu is drawn outside them.
+- *Title-safe area.* The menus keep inside the view's `safeAreaInsets` (60 points above and
+  below, 80 at the sides; `__native.safeArea`, `native/js/safeArea.ts`): the UI layer is drawn
+  into the safe rectangle and laid out for its size, a menu's scrim still dims the whole
+  window. The hints do not: the legend and the intro's skip hint hug the screen's edge (the
+  legend 20 px in at 1080 lines, the skip hint 18 px off the bottom, as on the web), since
+  tvOS's insets are the same large ones whether the set overscans or not. The pictures — the
+  room, the map, a movie — stay letterboxed to the whole screen, as a TV game's picture is,
+  and so do the subtitles, which are the room's. The menu smoke checks, at 1920×1080 and
+  3840×2160 with those insets, that nothing of Options or the pause menu is drawn outside
+  them, and that the legend is drawn 20 px (×u) in from the screen's edge.
 - *Sound*: the audio session is **solo ambient** (`SDL_HINT_AUDIO_CATEGORY`), not SDL's
   default (playback, mixing with others): the music and the voices are the game, so another
   app's music stops while it plays, as for most games, and nothing asks to keep sounding in
@@ -789,8 +815,25 @@ rules are by directory and kind, and the check only ever adds to them.)
   in a room.
 - *The store*: NSUserDefaults within its budget, the whole store in a purgeable cache file,
   progress in iCloud key-value storage — see "Saves on tvOS".
-- *The remote*: absolute d-pad values on every micro gamepad, swipes measured from the
-  thumb's travel (see Controls).
+- *The remote*: absolute d-pad values on every remote, swipes measured from the thumb's
+  travel, Back from GameController's handler (see Controls and "The TV menus").
+
+**Reading the remote's input log.** Every remote button as SDL reports it, Menu/Back as
+GameController's handler reports it, each touch on and off the surface, every input event
+the host sends (`-> +RemoteBack`), what the router made of each remote press (`route
+RemoteBack on room -> menu pause`), the remote's SDL mapping as it connects, and who owns Back
+(`ui-events 1 (map root, Back goes Home): controllerUserInteractionEnabled=1`) go to the
+device's unified log, subsystem `io.github.ff4e.fishfillets4ever`, category `input`
+(`input_log` in `main.c`, `tvos_log` in `platform_tvos.m`). Only presses and changes are
+logged, never a line a frame. To read it: on a Mac paired with the Apple TV (Xcode → Window →
+Devices and Simulators), open Console.app, pick the Apple TV under Devices, press Start, and
+filter on `subsystem:io.github.ff4e.fishfillets4ever category:input` (or search `input`); with
+Xcode attached to a run the lines are in its console as well. Without a Mac at hand, the same
+log is on the TV: **hold Play/Pause for 5 s on the world map** (its press opens Options, which
+the hold closes again) to show its last 14 lines over the top right of the screen
+(`native/js/inputOverlay.ts`, newest at the bottom, highlighted); the same hold hides it.
+It is off at every launch. On a Mac, `--input-log` prints the log to stderr, and with
+`--remote-keys` the hold is a held `P`.
 - *No GPU*: SDL GPU (Metal) does not start in the Apple TV Simulator ("Device does not meet
   the hardware requirements"), nor on an A8 Apple TV — which tvOS 27 keeps from installing
   the app. The host then says so in an alert and quits, rather than crash; with
@@ -900,16 +943,18 @@ the remote's hints (room 1, and KUFRIK), and so does the room on leaving the pau
 `--remote-keys` a key the host leaves unmapped keeps them. At 3840×2160 inside tvOS's insets
 the room's frames get the menus ready, and the pause menu's, Options', Help's and the restart
 prompt's first frames are each under 10 ms (above). At 1080 and 2160 lines the TV legend hugs
-the title-safe edge: the map's and room 1's list at its left, UTES's row at its top. First, though, what the UI draws
+the screen's edge, 20 px in at 1080 lines (not the title-safe area's): the map's and room 1's
+list at its left, UTES's row at its top. Back as an Apple TV delivers it (above, "The remote's
+Back comes from GameController"). First, though, what the UI draws
 with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted part, the
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 107 checks, ~11 s.
+for each character in both of the UI font's weights. 121 checks, ~12 s.
 
 It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a
-1080- and a 2160-line TV's title-safe area) and the list of what it drew — every
+1080- and a 2160-line TV, with its title-safe insets) and the list of what it drew — every
 rectangle, shape, image and string, with its position and size in whole pixels — must equal
 `native/ui-layout.snap.json`. A layout change fails with the first op that moved and writes
 the new list to `native/build/ui-layout.snap.new.json`; if intended, rerun with

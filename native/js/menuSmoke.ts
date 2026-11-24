@@ -16,7 +16,9 @@
  * while held), Back opening the pause menu and pausing the room, Load greyed with no save,
  * Save → confirm → saved, Load → confirm → the saved record restored, Restart, a declined
  * prompt changing nothing, the web's gate refusing a save mid-move, the pad's direct
- * LB/RB/Ⓧ prompts and Ⓑ to the map, and the pause menu's Map.
+ * LB/RB/Ⓧ prompts and Ⓑ to the map, and the pause menu's Map. Back as an Apple TV delivers it
+ * (press and release together, through GameController's handler): room → pause → room five
+ * times over, and at the map's root left to the system.
  *
  * First, what the UI draws with (`uiAssetSmoke.ts`): every carved icon, timed at a 4K TV's
  * size, and every UI string's glyphs in both languages.
@@ -39,7 +41,7 @@ import { ensureMapArt, mapFrame, mapPresented, mapSelectedCorner } from './mapSc
 import { OPTIONS_ROWS, PAUSE_ITEMS, menuOpen, openMenus, openOptions, pauseItemEnabled, topMenu } from './menus.js';
 import { ensureOptionsArt } from './optionsPaint.js';
 import { preloadHelpFigures } from './helpPaint.js';
-import { confirmItems, legendItems, preloadLegendArt, type LegendScreen } from './legend.js';
+import { TV_EDGE, confirmItems, legendItems, preloadLegendArt, type LegendScreen } from './legend.js';
 import type { NativeAiScreen } from './nativeAiScreen.js';
 import { loadSubtitleAssets, subtitleFace } from './roomSubtitles.js';
 import { pinRandom } from './scene.js';
@@ -55,6 +57,7 @@ import { initUiLayer, menusReady, paintUi, type Box } from './uiLayer.js';
 import { currentCost, describeCost, resetCost } from './uiCost.js';
 import { loadUiFonts, type UiOp } from './uiDraw.js';
 import { checkIcons, checkStrings } from './uiAssetSmoke.js';
+import { OVERLAY_HOLD_MS, inputOverlayOn } from './inputOverlay.js';
 
 class MenuSmokeFailure extends Error {}
 
@@ -77,6 +80,41 @@ async function press(code: string, down = true): Promise<void> {
 async function tap(code: string): Promise<void> {
   await press(code, true);
   await press(code, false);
+}
+
+/**
+ * `presses` presses of the remote's Back as an Apple TV delivers them — each press and its
+ * release together, between two of SDL's polls — through the host's path for them
+ * (GameController's handler, `__native.remoteBackProbe`), routed as the loop routes the
+ * host's events, then a frame. Returns what the host sent.
+ */
+async function tvBack(presses = 1): Promise<string[]> {
+  const [, , codes] = __native.remoteBackProbe(presses);
+  for (const ev of codes) routeEvent(ev, clock);
+  await settle();
+  inputFrame(clock);
+  return codes;
+}
+
+/**
+ * Run `fn` with the system owning Back where tvOS's would — at the map's root, as
+ * `__native.systemBack` says on an Apple TV (it never does on a Mac) — handing `fn` what the
+ * router told the host, frame by frame.
+ */
+async function asTv(fn: (owns: boolean[]) => Promise<void>): Promise<void> {
+  const real = __native.systemBack;
+  const owns: boolean[] = [];
+  __native.systemBack = (atRoot: boolean): boolean => {
+    owns.push(atRoot);
+    return atRoot;
+  };
+  try {
+    inputFrame(clock);
+    await fn(owns);
+  } finally {
+    __native.systemBack = real;
+    inputFrame(clock);
+  }
 }
 
 /** One map frame, as the interactive loop takes it. */
@@ -127,6 +165,24 @@ function opInside(op: UiOp, w: number, h: number): boolean {
     case 'text': return n(2) >= 0 && n(2) < w && n(3) - n(4) >= 0 && n(3) <= h;
     default: return false;
   }
+}
+
+/** Where a recorded op's position is held: [x, y]'s indices. */
+const posAt = (op: UiOp): number => (op[0] === 'rect' || op[0] === 'frame' || op[0] === 'strip' ? 1 : 2);
+
+/** `op` moved by (dx, dy). */
+function shifted(op: UiOp, dx: number, dy: number): UiOp {
+  const o = [...op];
+  const i = posAt(op);
+  o[i] = (o[i] as number) + dx;
+  o[i + 1] = (o[i + 1] as number) + dy;
+  return o;
+}
+
+/** An op's left and top (a text op's top is its baseline less its size). */
+function opCorner(op: UiOp): [number, number] {
+  const i = posAt(op), x = op[i] as number, y = op[i + 1] as number;
+  return [x, op[0] === 'text' ? y - (op[4] as number) : y];
 }
 
 /** The picture's box in a `ww`×`wh` window: the room's composite, or the map, letterboxed. */
@@ -204,18 +260,31 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     return roomHints();
   };
   /**
-   * Draw the layer at 1920×1080 inside tvOS's title-safe insets (80 px at the sides, 60 above
-   * and below): every op it records — in the safe area's coordinates — must lie inside it.
+   * Draw the layer at 1920×1080 and 3840×2160 inside tvOS's title-safe insets (80 points at
+   * the sides, 60 above and below): every op a menu records — in the safe area's coordinates —
+   * must lie inside it, and the legend's must hug the SCREEN's edge instead: inside the
+   * window, TV_EDGE (at 1080 lines) in from it, and on that line exactly (legend.ts). At 4K
+   * (`k` 2) only after `firstMenusAt4k`, which needs nothing at that size drawn before it.
    */
-  const insideSafeArea = (what: string): void => {
-    const W = 1920, H = 1080, sw = W - 160, sh = H - 120;
-    const box = ui.screen === 'room' && draw(target, 0) ? pictureBox(target.width, target.height, W, H) : pictureBox(2560, 1920, W, H);
-    const ops = paintUi(W, H, box, [80, 60, 80, 60])?.ops ?? [];
-    // Only a scrim may reach past it: one rectangle exactly the whole window.
-    const scrim = (op: UiOp): boolean => op[0] === 'rect' && op[1] === -80 && op[2] === -60 && op[3] === W && op[4] === H;
-    const out = ops.filter((op) => !opInside(op, sw, sh) && !scrim(op));
-    check(ops.length > 0 && out.length === 0,
-      `${what} at 1920×1080 stays inside tvOS's title-safe area (${out.length} of ${ops.length} drawn outside${out.length ? `, first ${JSON.stringify(out[0])}` : ''})`);
+  const insideSafeArea = (what: string, sizes: readonly number[] = [1, 2]): void => {
+    for (const k of sizes) {
+      const W = 1920 * k, H = 1080 * k, l = 80 * k, t = 60 * k, sw = W - 2 * l, sh = H - 2 * t, edge = TV_EDGE * k;
+      const box = ui.screen === 'room' && draw(target, 0) ? pictureBox(target.width, target.height, W, H) : pictureBox(2560, 1920, W, H);
+      const r = paintUi(W, H, box, [l, t, l, t]);
+      const ops = r?.ops ?? [];
+      const menu = ops.slice(0, r?.legendAt ?? 0), legend = ops.slice(r?.legendAt ?? 0);
+      // Only a scrim may reach past it: one rectangle exactly the whole window.
+      const scrim = (op: UiOp): boolean => op[0] === 'rect' && op[1] === -l && op[2] === -t && op[3] === W && op[4] === H;
+      const out = menu.filter((op) => !opInside(op, sw, sh) && !scrim(op));
+      check(out.length === 0,
+        `${what} at ${W}×${H}: its menu stays inside tvOS's title-safe area (${out.length} of ${menu.length} drawn outside${out.length ? `, first ${JSON.stringify(out[0])}` : ''})`);
+      // The legend in the window's coordinates, and in from its edge by `edge`.
+      const moved = legend.map((op) => shifted(op, l - edge, t - edge));
+      const off = moved.filter((op) => !opInside(op, W - 2 * edge, H - 2 * edge));
+      const near = Math.min(...moved.map((op) => Math.min(...opCorner(op))));
+      check(legend.length > 0 && off.length === 0 && Math.abs(near) <= 1,
+        `${what} at ${W}×${H}: the legend hugs the screen's edge, ${edge} px in, not the title-safe area's (${off.length} of ${legend.length} past that${off.length ? `, first ${JSON.stringify(off[0])}` : ''}; its nearest ${near.toFixed(1)} px from the line)`);
+    }
   };
   /**
    * The first pause menu, confirm prompt, Options and Help at a 4K Apple TV's size (3840×2160,
@@ -292,7 +361,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await tap('PadMenu');
     check(topMenu()?.kind === 'options' && lastInput() === 'pad', 'the pad\'s ☰ on the map opens Options');
     snap('options-pad');
-    insideSafeArea('Options, with the pad\'s legend,');
+    insideSafeArea('Options, with the pad\'s legend,', [1]);
     const music0 = settings.volume.music;
     await tap('PadDown');
     await tap('PadDown');
@@ -346,6 +415,11 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(exits === 1, 'the keyboard\'s Esc at the map\'s root leaves the game');
     await tap('RemoteBack');
     check(exits === 2, 'and so does the remote\'s Back (tvOS: Back at the top level goes Home)');
+    await asTv(async (owns) => {
+      const sent = await tvBack();
+      check(sent.join() === '+RemoteBack,-RemoteBack' && owns[owns.length - 1] === true && exits === 2 && ui.screen === 'map' && !menuOpen(),
+        `on an Apple TV, the remote's Back at the map's root is the system's (systemBack(true): Home), and the game does nothing with it (${sent.join()})`);
+    });
     for (let i = 0; i < 40 && mapSelectedCorner() !== 'options'; i++) {
       await tap(['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'][Math.floor(i / 10)]!);
       await mapTick();
@@ -358,6 +432,28 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(topMenu()?.kind === 'options', '...which opens Options');
     await tap('Escape');
     check(!menuOpen(), 'Esc closes it');
+
+    // ── The hidden input overlay: Play/Pause held 5 s on the map ──────────────────
+    const hold = async (): Promise<boolean> => {
+      await press('RemotePlayPause');
+      const opened = topMenu()?.kind === 'options';
+      for (let ms = 0; ms <= OVERLAY_HOLD_MS; ms += 100) {
+        clock += 100;
+        inputFrame(clock);
+      }
+      await press('RemotePlayPause', false);
+      return opened && !menuOpen() && ui.screen === 'map';
+    };
+    const off = paintUi(WIN_W, WIN_H, pictureBox(2560, 1920, WIN_W, WIN_H));
+    check(!inputOverlayOn() && !off?.ops.some((op) => op[0] === 'text' && String(op[1]).includes('->')), 'the input overlay is off at start');
+    const toggled = await hold();
+    const log = __native.inputLog();
+    const on = paintUi(WIN_W, WIN_H, pictureBox(2560, 1920, WIN_W, WIN_H));
+    if (outDir && on?.surface) __native.saveTexture(on.surface.id, `${outDir}/ui-input-overlay.rgba`);
+    check(toggled && inputOverlayOn() && log.some((l) => l.includes('route RemotePlayPause on map root -> menu options')) &&
+      !!on?.surface && on.ops.some((op) => op[0] === 'text' && op[1] === log[log.length - 1]),
+      `holding Play/Pause 5 s on the map shows the input log over the screen, and closes the Options its press opened (last line: ${log[log.length - 1]})`);
+    check(await hold() && !inputOverlayOn(), 'and the same hold hides it');
 
     // ── A room, with the remote ───────────────────────────────────────────────────
     await tap('RemoteUp'); // on the map: the remote is the last input
@@ -481,6 +577,26 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     snap('pause-remote');
     await tap('RemoteBack');
     check(!menuOpen() && roomHints(), 'Back resumes, and the room\'s hints are up at once');
+    // ── Back, as an Apple TV's remote delivers it (TestFlight build 2: it opened the pause
+    // menu once in many presses). tvOS gives the app Menu/Back's press and release together;
+    // SDL polls the button and loses such a press, so the host takes it from GameController's
+    // handler instead (platform_tvos.m), every press a whole tap.
+    const [fast, slow] = __native.remoteBackProbe(1);
+    check(fast === 0 && slow === 2,
+      `SDL's poll loses a Back pressed and released between two polls (${fast} events) and sees one held across a poll (${slow}): Back comes from GameController's handler`);
+    await asTv(async (owns) => {
+      let rounds = 0;
+      for (let i = 0; i < 5; i++) {
+        const open = await tvBack();
+        const paused = topMenu()?.kind === 'pause' && isPaused() && owns[owns.length - 1] === false && open.length === 2;
+        await tvBack();
+        if (paused && !menuOpen() && ui.screen === 'room' && !isPaused()) rounds++;
+      }
+      check(rounds === 5, `room → Back → pause → Back → room, 5 times over, the game owning Back throughout (${rounds} of 5)`);
+      const two = await tvBack(2);
+      check(two.join() === '+RemoteBack,-RemoteBack,+RemoteBack,-RemoteBack' && !menuOpen() && ui.screen === 'room',
+        'two presses between two polls are two taps: the pause menu opens and closes again');
+    });
     insideSafeArea('the room\'s remote legend');
     routeEvent('!background', clock);
     await settle();
@@ -662,7 +778,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     settings.titDef = 'en';
     check(t('paused') === 'Paused', 'and English with English subtitles');
 
-    // ── A TV's legend, inside tvOS's title-safe area ─────────────────────────────
+    // ── A TV's legend, at the screen's edge ───────────────────────────────────────
     // The map and room 1 (the list down the left margin) and UTES, wider than the screen
     // (a row along the top), at a 1080-line and a 2160-line Apple TV with the remote.
     setLastInput('remote');
@@ -679,16 +795,17 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await enterRoom(7);
     await untilReady();
     await tv('wide');
-    // Against the safe area's edge, a hair in (4 px at 1080 lines, ×u): the list's chips at its
-    // left, the row's at its top — and nothing outside it.
+    // Against the SCREEN's edge, not the title-safe area's (TestFlight feedback: too far in),
+    // TV_EDGE in (20 px at 1080 lines, ×u): the list's chips at its left, the row's at its top —
+    // and nothing outside the window. The ops are in the safe area's coordinates: (l, t) off.
     for (const lines of [1080, 2160]) {
-      const sw = lines === 1080 ? 1760 : 3520, sh = lines === 1080 ? 960 : 1920, hair = Math.round((4 * sh) / 1080);
+      const k = lines / 1080, l = 80 * k, t = 60 * k, W = 1920 * k, H = lines, edge = TV_EDGE * k;
       const chips = (name: string): UiOp[] => snaps[`tv-${name}-${lines}`]!.filter((op) => op[0] === 'rect');
-      const left = (name: string): number => Math.min(...chips(name).map((op) => op[1] as number));
-      const top = (name: string): number => Math.min(...chips(name).map((op) => op[2] as number));
-      check(left('map') === hair && left('room') === hair && top('wide') === hair &&
-        ['map', 'room', 'wide'].every((nm) => snaps[`tv-${nm}-${lines}`]!.every((op) => opInside(op, sw, sh))),
-      `at ${lines} lines the TV legend hugs the title-safe edge, ${hair} px in: the map's and room 1's list at its left (${left('map')}, ${left('room')}), UTES's row at its top (${top('wide')})`);
+      const left = (name: string): number => l + Math.min(...chips(name).map((op) => op[1] as number));
+      const top = (name: string): number => t + Math.min(...chips(name).map((op) => op[2] as number));
+      check(left('map') === edge && left('room') === edge && top('wide') === edge &&
+        ['map', 'room', 'wide'].every((nm) => snaps[`tv-${nm}-${lines}`]!.every((op) => opInside(shifted(op, l, t), W, H))),
+      `at ${lines} lines the TV legend hugs the screen's edge, ${edge} px in: the map's and room 1's list at its left (${left('map')}, ${left('room')}), UTES's row at its top (${top('wide')})`);
     }
 
     // ── The layout snapshot ──────────────────────────────────────────────────────

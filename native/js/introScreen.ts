@@ -29,7 +29,6 @@ import { NativeSurface, decodeImage, type NativeImage } from './nativeSurface.js
 import { GlyphAtlas } from './subtitleDraw.js';
 import type { NativeFace } from './subtitleFonts.js';
 import { readBytes } from './shims.js';
-import { safeInsets } from './safeArea.js';
 import { fillDisc, fillPlay, fillRoundRect, fillText, loadUiFace, textWidth } from './uiDraw.js';
 
 // ── Which file (src/app/introOverlay.ts) ─────────────────────────────────────────────
@@ -285,9 +284,10 @@ export function paintSplash(s: NativeSurface, dpr: number): void {
 
 /**
  * The skip hint (#intro-hint on a TV): 12px #cdd at half opacity, centred, 18px off the bottom
- * — or, on a TV, on the bottom edge of the title-safe area (`bottom`, its inset), if that is higher.
+ * — on a TV too, not on the title-safe area's edge: like the button legend (`legend.ts`), a
+ * hint hugs the screen's edge.
  */
-export function paintHint(s: NativeSurface, dpr: number, bottom = 0): void {
+export function paintHint(s: NativeSurface, dpr: number): void {
   s.clear();
   if (!faces) return;
   s.setSmoothing(false);
@@ -295,7 +295,7 @@ export function paintHint(s: NativeSurface, dpr: number, bottom = 0): void {
   const w = textWidth(faces.hint, skipHint(), px);
   const [, desc] = faces.hint.metrics(px);
   s.setAlpha(0.5);
-  fillText(s, atlas, faces.hint, skipHint(), (s.width - w) / 2, s.height - Math.max(18 * dpr, bottom) + desc, px, 0xccdddd);
+  fillText(s, atlas, faces.hint, skipHint(), (s.width - w) / 2, s.height - 18 * dpr + desc, px, 0xccdddd);
   s.setAlpha(1);
 }
 
@@ -319,7 +319,7 @@ export function introFrame(now: number): { tex: number; overlay?: number } | nul
   }
   if (!hintSurface || hintSurface.width !== w || hintSurface.height !== h || drawnFor !== key) {
     hintSurface = new NativeSurface(w, h);
-    paintHint(hintSurface, dpr, safeInsets(w, h)[3]);
+    paintHint(hintSurface, dpr);
     drawnFor = key;
     splashSurface = null;
   }
