@@ -771,18 +771,20 @@ drawn, the remote, the lifecycle and the safe area wait for a device — and so 
 remote is told from a pad: by a name with "Remote" in it (`is_remote`); the Simulator's
 stand-in reports itself as "Gamepad".
 
-**Signing.** Automatic, for the paid team, as the iOS lane: the archive is signed with a tvOS
-development profile Xcode creates (`-allowProvisioningUpdates`) and re-signed for the App
-Store at export. **What the account holder must do first:** install an Xcode with the tvOS 27
-SDK; accept the current Program License Agreement; add the tvOS platform to the app in App
-Store Connect. On 2026-11-24 the archive stopped at the account: *"PLA Update available … agree to
-the latest Program License Agreement"* — Apple creates no new profile until the account
-holder accepts it at developer.apple.com — and so *"No profiles for
-'io.github.ff4e.fishfillets4ever' were found … tvOS App Development"*. After that, if Xcode
-says the team has no devices to make a development profile from, register the Apple TV (Xcode
-→ Devices and Simulators, pair it over the network). Before the first upload, add the tvOS
-platform to the app in App Store Connect. tvOS builds are numbered on their own, from 1: App
-Store Connect keeps each platform's versions and builds apart.
+**Signing.** The archive is built unsigned, its entitlements (iCloud key-value storage) are
+stamped on with a local signature, and the export signs it for the App Store with automatic
+signing (`native/tvos/build.mjs`, `tools/release-testflight-tvos.mjs`). Not the iOS lane's
+automatically signed archive: that needs a tvOS *development* profile, which Apple makes only
+for a team with a registered Apple TV — *"Your team has no devices from which to generate a
+provisioning profile"*, 2026-11-24 — while the App Store profile the export makes needs no
+device. Every archive-only run also exports locally and checks the result: Apple
+Distribution, an App Store profile, and the iCloud entitlement (an unsigned app would export
+without it). **What the account holder must do first:** install an Xcode with the tvOS 27
+SDK; sign Xcode in to the developer account (Settings → Accounts: without it, *"No Accounts"*);
+accept the current Program License Agreement (without it, *"PLA Update available"*: Apple
+makes no new profile); add the tvOS platform to the app in App Store Connect before the first
+upload. tvOS builds are numbered on their own, from 1: App Store Connect keeps each
+platform's versions and builds apart.
 
 ## Does it play? The smoke gate (`native/js/smoke.ts`)
 

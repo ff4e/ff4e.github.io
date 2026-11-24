@@ -75,6 +75,41 @@ export function findDistributionTeam(die) {
 }
 
 /**
+ * Export `archivePath` for App Store Connect into a local folder (`destination: export`) and
+ * return the folder. Nothing leaves this Mac: this is how an archive-only run proves the App
+ * Store signing (certificate, profile, entitlements) works before anything is uploaded.
+ */
+export function exportArchiveLocally({ archivePath, archiveDir, team, cwd, env, die }) {
+  const exportOptionsPath = join(archiveDir, 'ExportOptions-local.plist');
+  const exportPath = join(archiveDir, 'export');
+  writeFileSync(
+    exportOptionsPath,
+    `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>teamID</key><string>${team}</string>
+  <key>signingStyle</key><string>automatic</string>
+  <key>destination</key><string>export</string>
+</dict>
+</plist>
+`,
+  );
+  try {
+    execFileSync(
+      'xcodebuild',
+      ['-exportArchive', '-archivePath', archivePath, '-exportOptionsPlist', exportOptionsPath, '-exportPath', exportPath,
+        '-allowProvisioningUpdates'],
+      { cwd, stdio: 'inherit', env },
+    );
+  } catch {
+    die('the local App Store export failed — xcodebuild output above says why. Nothing was uploaded.');
+  }
+  return exportPath;
+}
+
+/**
  * Export `archivePath` straight to App Store Connect (`destination: upload`). A REAL,
  * irreversible TestFlight release: call it only behind an explicit `--upload`.
  */

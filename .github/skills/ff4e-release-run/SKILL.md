@@ -97,13 +97,16 @@ purchase), same team, same two stages, same `--upload` rule as §3.
   why), so it needs an **Xcode with the tvOS 27 SDK**. Every tvOS command stops at once,
   naming what to install, when the selected Xcode's tvOS SDK is older.
 - **What the user must do in App Store Connect / the developer account first** (an agent
-  cannot): install that Xcode; accept the current Program License Agreement at developer.apple.com (archives
-  fail with "PLA Update available" until then — seen 2026-11-24), and add the tvOS platform
-  to the app (app page → "+" beside the platforms → tvOS) before the first `--upload`. If
-  Xcode then says the team has no devices for a development profile, pair the Apple TV in
-  Xcode → Devices and Simulators.
-- The app uses iCloud key-value storage (`native/tvos/FishFillets.entitlements`); automatic
-  signing enables it on the App ID.
+  cannot): install that Xcode; sign it in to the developer account (Xcode → Settings →
+  Accounts; archives fail with "No Accounts" otherwise); accept the current Program License
+  Agreement at developer.apple.com (archives fail with "PLA Update available" until then —
+  seen 2026-11-24), and add the tvOS platform to the app (app page → "+" beside the platforms
+  → tvOS) before the first `--upload`. No Apple TV needs to be registered: the archive is
+  unsigned with its entitlements stamped on, and the export signs it with an App Store
+  profile, which needs no device.
+- Archive-only runs also export LOCALLY and check the signing (Apple Distribution, App Store
+  profile, the iCloud key-value entitlement), so a clean archive-only run means `--upload`
+  will be signed right.
 
 Without signing, to check the build alone:
 
