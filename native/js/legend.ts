@@ -13,9 +13,14 @@
  * down the left margin, or one row in the top one, muted (75 %, as the prototype's) — and
  * otherwise as one row along the top edge on a strip of the touch UI's popup glass, at full
  * strength. The top, not the bottom: in a room the subtitles have the bottom, and on the
- * map the bottom holds the banner naming the selected level. Either way it hugs its edge:
- * on a TV the title-safe area's (tvOS's own inset is the margin there, as Apple's guidance
- * has it, so only a hair is added), on a desktop the window's, a small margin in.
+ * map the bottom holds the banner naming the selected level. Either way it hugs the SCREEN's
+ * edge, a small fixed margin in — on a TV too: unlike the menus, the hints do not keep to
+ * tvOS's title-safe area (`safeArea.ts`), whose insets are fixed and large (80 pt at the
+ * sides, 60 above and below, whatever the set), which put them far from the edge on the
+ * TVs that do not overscan, as nearly none does now (TestFlight feedback, twice). So on a TV
+ * the legend is laid out against the whole window, sized for its height, 20 px in at 1080
+ * lines (1.9 %): a little more than a desktop window's 12, for a set that still overscans a
+ * little.
  *
  * Where it goes depends on the window, the picture's box and the screen's words, never on
  * the game's state: an item's width is fixed whatever it shows — the "switch fish" item
@@ -190,7 +195,7 @@ export interface HintMetrics {
   readonly gap: number;
   /** One item's line in a list. */
   readonly line: number;
-  /** Off the edge the hints hug: the title-safe area's on a TV, else the window's. */
+  /** Off the window's edge, which the hints hug. */
   readonly edge: number;
   /** At least this far from the picture, beside or above it in its margin. */
   readonly clear: number;
@@ -201,24 +206,31 @@ export interface HintMetrics {
 /**
  * The prototype's 10-foot sizes — a 26 px chip, 18 px words, 30 px between items — at 1080
  * lines, scaled with the window, and no smaller than at 720 (a 17 px chip, 12 px words).
- * `safe`: the window has title-safe insets (a TV), already as far in as the hints need to
- * be, so they sit a hair inside them; a desktop window's edge gets a small margin instead.
+ * `tv`: the window is a TV's (it has title-safe insets), whose edge gets a little more margin.
  */
-export function legendMetrics(h: number, safe = false): HintMetrics {
+export function legendMetrics(h: number, tv = false): HintMetrics {
   const u = Math.max(2 / 3, h / 1080);
   return {
     u, glyph: 26 * u, label: 18 * u, labelGap: 8 * u, gap: 30 * u, line: 38 * u,
-    edge: (safe ? TV_EDGE : DESKTOP_EDGE) * u, clear: 24 * u, hair: hairline(h),
+    edge: (tv ? TV_EDGE : DESKTOP_EDGE) * u, clear: 24 * u, hair: hairline(h),
   };
 }
 
-/** Off a TV's title-safe edge, px at 1080 lines: the inset itself is the margin. */
-const TV_EDGE = 4;
+/** Off a TV screen's edge, px at 1080 lines (not off its title-safe area: see the header). */
+export const TV_EDGE = 20;
 /** Off a desktop window's edge, px at 1080 lines. */
 const DESKTOP_EDGE = 12;
 
-/** Whether `ui` is laid out inside title-safe insets (a TV, or `--tv-safe-area`). */
-const insetUi = (ui: Ui): boolean => ui.bleed.some((v) => v > 0);
+/**
+ * The legend's frame: the whole window, though `ui` may be laid out inside title-safe insets
+ * (a TV, or `--tv-safe-area`) — `w`×`h` and the picture's box `rect` are in the safe area's
+ * coordinates, the result in the window's, and (dx, dy) takes a window point back to `ui`'s.
+ */
+function windowFrame(ui: Ui, w: number, h: number, rect: readonly [number, number, number, number]):
+  { w: number; h: number; rect: readonly [number, number, number, number]; dx: number; dy: number; tv: boolean } {
+  const [l, t, r, b] = ui.bleed;
+  return { w: w + l + r, h: h + t + b, rect: [rect[0] + l, rect[1] + t, rect[2], rect[3]], dx: -l, dy: -t, tv: ui.bleed.some((v) => v > 0) };
+}
 
 /** Over the black margin the hints are muted as the prototype's (`opacity: 0.75`). */
 const ON_ALPHA = 0.75;
@@ -348,8 +360,9 @@ function drawStrip(ui: Ui, x: number, y: number, w: number, h: number, m: HintMe
 export type LegendPlacement = 'list' | 'row' | 'row-strip' | 'list-strip';
 
 /** Where `items` go in the `w`×`h` window beside the picture's box `rect`. Pure: words, window and box only. */
-export function legendPlacement(ui: Ui, items: readonly LegendItem[], w: number, h: number, rect: readonly [number, number, number, number]): LegendPlacement {
-  const m = legendMetrics(h, insetUi(ui));
+export function legendPlacement(ui: Ui, items: readonly LegendItem[], sw: number, sh: number, srect: readonly [number, number, number, number]): LegendPlacement {
+  const { w, h, rect, tv } = windowFrame(ui, sw, sh, srect);
+  const m = legendMetrics(h, tv);
   const listW = Math.max(...items.map((it) => glyphsWidth(ui, it, m.glyph))) + m.labelGap + Math.max(...items.map((it) => wordWidth(ui, it, m)));
   if (m.edge + listW + m.clear <= rect[0]) return 'list';
   if (hintRowWidth(ui, items, m) + 2 * stripPad(m)[0] > w - 2 * m.edge) return 'list-strip';
@@ -357,24 +370,26 @@ export function legendPlacement(ui: Ui, items: readonly LegendItem[], w: number,
 }
 
 /**
- * Draw `items` into the `w`×`h` window, beside `rect` (the picture's box: `[x, y, w, h]`):
- * down the left margin if the list fits there, else as a row in the top margin if that fits,
- * else as a row on its strip along the top edge over the picture — each against its edge
- * (`HintMetrics.edge`), a strip's glass too.
+ * Draw `items` into the window, beside the picture's box (`[x, y, w, h]`): down the left
+ * margin if the list fits there, else as a row in the top margin if that fits, else as a row
+ * on its strip along the top edge over the picture — each against the window's edge
+ * (`HintMetrics.edge`), a strip's glass too. `sw`×`sh` and `srect` are in `ui`'s coordinates:
+ * the title-safe area's on a TV, which the legend alone of the UI does not keep to.
  */
-export function drawLegend(ui: Ui, items: readonly LegendItem[], w: number, h: number, rect: readonly [number, number, number, number]): void {
+export function drawLegend(ui: Ui, items: readonly LegendItem[], sw: number, sh: number, srect: readonly [number, number, number, number]): void {
   if (items.length === 0) return;
-  const m = legendMetrics(h, insetUi(ui));
+  const { w, h, dx, dy, tv } = windowFrame(ui, sw, sh, srect);
+  const m = legendMetrics(h, tv);
   const pal = currentPalette();
-  const where = legendPlacement(ui, items, w, h, rect);
+  const where = legendPlacement(ui, items, sw, sh, srect);
   const [px, py] = stripPad(m);
   if (where === 'list' || where === 'list-strip') {
     const glyphsW = Math.max(...items.map((it) => glyphsWidth(ui, it, m.glyph)));
     const listW = glyphsW + m.labelGap + Math.max(...items.map((it) => wordWidth(ui, it, m)));
     const listH = (items.length - 1) * m.line + m.glyph;
     const strip = where === 'list-strip';
-    const x = m.edge + (strip ? px : 0);
-    let y = Math.max(m.edge + (strip ? py : 0), (h - listH) / 2);
+    const x = m.edge + (strip ? px : 0) + dx;
+    let y = Math.max(m.edge + (strip ? py : 0), (h - listH) / 2) + dy;
     if (strip) drawStrip(ui, x, y, listW, listH, m, pal);
     for (const it of items) {
       drawItem(ui, it, x + glyphsW, y, m, pal, strip);
@@ -383,13 +398,13 @@ export function drawLegend(ui: Ui, items: readonly LegendItem[], w: number, h: n
     return;
   }
   const rowW = hintRowWidth(ui, items, m);
-  const x = (w - rowW) / 2;
+  const x = (w - rowW) / 2 + dx;
   if (where === 'row') {
-    drawHintRow(ui, items, x, m.edge, m, pal);
+    drawHintRow(ui, items, x, m.edge + dy, m, pal);
     return;
   }
-  drawStrip(ui, x, m.edge + py, rowW, m.glyph, m, pal);
-  drawHintRow(ui, items, x, m.edge + py, m, pal, true);
+  drawStrip(ui, x, m.edge + py + dy, rowW, m.glyph, m, pal);
+  drawHintRow(ui, items, x, m.edge + py + dy, m, pal, true);
 }
 
 /** Which legend the screen shows, or null for none (a launch, the confirm prompt). */

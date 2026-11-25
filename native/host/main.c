@@ -17,6 +17,7 @@
 #include <SDL3/SDL_main.h>
 #include <quickjs.h>
 #include <webp/decode.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -38,7 +39,9 @@ void install_movie(JSContext *ctx, JSValue native); /* movie.c: the intro and lo
 void install_store(JSContext *ctx, JSValue native, int argc, char **argv); /* store.c: tvOS's store */
 bool store_remote_changed(void); /* store.c: iCloud brought another device's progress */
 #ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
-void tvos_remote_absolute_dpad(void); /* platform_tvos.m */
+void tvos_remote_init(void);                  /* platform_tvos.m: the remote's absolute touch and Menu */
+void tvos_log(const char *line);              /* platform_tvos.m: the unified log */
+int tvos_ui_events(void *uiwindow, int set);  /* platform_tvos.m: controllerUserInteractionEnabled */
 #endif
 
 /* ── state ─────────────────────────────────────────────────────────────────────── */
@@ -73,6 +76,33 @@ static char store_path[2048];
 static FILE *read_log; /* --read-log */
 /* Between SDL_EVENT_WILL_ENTER_BACKGROUND and SDL_EVENT_DID_ENTER_FOREGROUND (`lifecycle`). */
 static bool in_background;
+
+/*
+ * The input log: what the remote, its Menu/Back and the system's ownership of Back did, for
+ * an Apple TV no debugger is attached to. On tvOS every line goes to the unified log
+ * (`tvos_log`: Console.app and Xcode's device console, native/README.md); on a Mac to stderr
+ * with --input-log. The last INLOG lines are also kept for the hidden on-screen overlay
+ * (`n_inputLog`, native/js/inputOverlay.ts). Only presses and state changes are logged, never
+ * a line a frame.
+ */
+#define INLOG 14
+static char inlog[INLOG][160];
+static unsigned inlog_n; /* lines written, ever */
+static bool input_log_stderr; /* --input-log */
+
+static void input_log(const char *fmt, ...) {
+  char line[150];
+  va_list ap;
+  va_start(ap, fmt);
+  SDL_vsnprintf(line, sizeof line, fmt, ap);
+  va_end(ap);
+  SDL_snprintf(inlog[inlog_n++ % INLOG], sizeof inlog[0], "%7.2f %s", SDL_GetTicks() / 1000.0, line);
+#ifdef SDL_PLATFORM_TVOS
+  tvos_log(line);
+#else
+  if (input_log_stderr) fprintf(stderr, "input: %s\n", line);
+#endif
+}
 
 /* ── helpers ───────────────────────────────────────────────────────────────────── */
 static void die(const char *what) {
@@ -729,9 +759,20 @@ static JSValue n_systemBack(JSContext *ctx, JSValueConst self, int argc, JSValue
 #ifdef SDL_PLATFORM_TVOS /* SDL's name for TARGET_OS_TV */
   static int owned = -1;
   int want = argc > 0 && JS_ToBool(ctx, argv[0]) ? 1 : 0;
+  void *uiw = win ? SDL_GetPointerProperty(SDL_GetWindowProperties(win), SDL_PROP_WINDOW_UIKIT_WINDOW_POINTER, NULL) : NULL;
   if (want != owned) {
+    /* SDL's hint callback sets the view controller's controllerUserInteractionEnabled on
+       every change (SDL_uikitviewcontroller.m, SDL_AppleTVControllerUIHintChanged). */
     SDL_SetHint(SDL_HINT_APPLE_TV_CONTROLLER_UI_EVENTS, want ? "1" : "0");
+    input_log("ui-events %d (%s): controllerUserInteractionEnabled=%d", want,
+              want ? "map root, Back goes Home" : "the game owns Back", uiw ? tvos_ui_events(uiw, -1) : -1);
     owned = want;
+  }
+  /* And checked every frame: the property itself is what decides where Menu goes, so a
+     view controller that disagrees with the hint is set straight, and that is logged. */
+  if (uiw && tvos_ui_events(uiw, -1) == !want) {
+    tvos_ui_events(uiw, want);
+    input_log("ui-events: the view controller disagreed with the hint; set to %d", want);
   }
   return JS_NewBool(ctx, want);
 #else
@@ -1108,8 +1149,8 @@ static SDL_GPUGraphicsPipeline *surf_pipeline(bool dest_in) {
  * The Siri Remote reaches SDL on tvOS as a gamepad (SDL_HINT_TV_REMOTE_AS_JOYSTICK, on by
  * default): its click is A, Play/Pause is X, Menu/Back is B, and the touch surface (or the
  * click ring's touch) is the left stick's two axes (SDL_mfijoystick.m). A gamepad whose name says
- * "Remote" is read as one. That mapping is read from SDL's source and has NOT been run on an
- * Apple TV. On a Mac, `--remote-keys` makes the keyboard a remote instead — see
+ * "Remote" is read as one. Menu/Back alone does not come from SDL on tvOS: SDL polls it and
+ * misses it, so GameController's handler reports it (`native_remote_menu`, platform_tvos.m). On a Mac, `--remote-keys` makes the keyboard a remote instead — see
  * `remote_key` — so the remote's scheme can be played and tested without one.
  */
 #define EVQ 128
@@ -1118,6 +1159,7 @@ static int evq_n;
 static bool remote_keys; /* --remote-keys */
 
 static void push_event(bool down, const char *code) {
+  if (!strncmp(code, "Remote", 6)) input_log("-> %c%s", down ? '+' : '-', code);
   if (evq_n >= EVQ) return;
   if (code[0] == '!') SDL_strlcpy(evq[evq_n++], code, sizeof evq[0]); /* not a key: "!blur", "!kvs" */
   else SDL_snprintf(evq[evq_n++], sizeof evq[0], "%c%s", down ? '+' : '-', code);
@@ -1335,11 +1377,37 @@ static void remote_button(Uint8 b, bool down) {
       push_event(down, "RemotePlayPause");
       return;
     case SDL_GAMEPAD_BUTTON_EAST:
+#ifdef SDL_PLATFORM_TVOS
+      return; /* SDL's polled Menu/Back: `native_remote_menu` sends every press instead */
+#else
       remote_back = down;
       push_event(down, "RemoteBack");
       return;
+#endif
     default:
       return;
+  }
+}
+
+/*
+ * The remote's Menu/Back as GameController reports it (platform_tvos.m: its button's
+ * pressedChangedHandler, called on the main thread while SDL pumps events). tvOS holds the
+ * press back until its gesture recognizer has seen the release, so press and release arrive
+ * together — too fast for SDL's poll, which is why they come this way. Each press is counted
+ * and sent as a whole tap, Back down and up, on the next `poll_events` (`remote_menu_drain`):
+ * the router acts on the press, and a press is never lost however short it was.
+ */
+static SDL_AtomicInt remote_menu_presses;
+
+void native_remote_menu(bool pressed) {
+  input_log("remote Menu/Back %s (GameController handler)", pressed ? "down" : "up");
+  if (pressed) SDL_AddAtomicInt(&remote_menu_presses, 1);
+}
+
+static void remote_menu_drain(void) {
+  for (int n = SDL_SetAtomicInt(&remote_menu_presses, 0); n > 0; n--) {
+    push_event(true, "RemoteBack");
+    push_event(false, "RemoteBack");
   }
 }
 
@@ -1350,8 +1418,14 @@ static void remote_button(Uint8 b, bool down) {
  * position; native/js/remoteSwipe.ts makes swipes of its travel.
  */
 static JSValue n_remoteTouch(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  static bool touching;
   if (!remote) return JS_NULL;
   const int ax = remote_axis(SDL_GAMEPAD_AXIS_LEFTX), ay = remote_axis(SDL_GAMEPAD_AXIS_LEFTY);
+  if ((ax != 0 || ay != 0) != touching) {
+    touching = !touching;
+    if (touching) input_log("touch on at %.2f, %.2f", ax / 32767.0, ay / 32767.0);
+    else input_log("touch off");
+  }
   if (ax == 0 && ay == 0) return JS_NULL;
   JSValue a = JS_NewArray(ctx);
   JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, ax / 32767.0));
@@ -1389,6 +1463,80 @@ static JSValue n_remoteProbe(JSContext *ctx, JSValueConst self, int argc, JSValu
   }
   if (id) SDL_DetachVirtualJoystick(id);
   return JS_IsNull(out) ? JS_ThrowTypeError(ctx, "remoteProbe: %s", SDL_GetError()) : out;
+}
+
+/*
+ * The menu smoke's check of Menu/Back (headless): [fast, slow, codes]. `fast` and `slow` are
+ * how many gamepad button events SDL makes of a virtual Siri Remote's B (SDL's mapping of
+ * Menu) pressed and released between two polls — as tvOS delivers Menu — and of one held
+ * across a poll: SDL's poll loses the first (0) and sees the second (2), which is why Back
+ * comes from GameController's handler. `codes`: what the router receives for argv[0] such
+ * presses through that handler's path (`native_remote_menu`, `remote_menu_drain`), all of
+ * them between two polls — a "+RemoteBack", "-RemoteBack" pair for every one.
+ */
+static JSValue n_remoteBackProbe(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  if (remote || !SDL_InitSubSystem(SDL_INIT_GAMEPAD)) return JS_ThrowTypeError(ctx, "remoteBackProbe: %s", remote ? "a remote is connected" : SDL_GetError());
+  SDL_VirtualJoystickDesc d;
+  SDL_INIT_INTERFACE(&d);
+  d.naxes = 2;
+  d.nbuttons = 3;
+  d.name = "Siri Remote (probe)";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&d);
+  char guid[64], mapping[256];
+  SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+  SDL_snprintf(mapping, sizeof mapping, "%s,Siri Remote (probe),a:b0,x:b1,b:b2,leftx:a0,lefty:a1~", guid);
+  SDL_Gamepad *g = id && SDL_AddGamepadMapping(mapping) >= 0 ? SDL_OpenGamepad(id) : NULL;
+  if (!g) {
+    if (id) SDL_DetachVirtualJoystick(id);
+    return JS_ThrowTypeError(ctx, "remoteBackProbe: %s", SDL_GetError());
+  }
+  SDL_Joystick *j = SDL_GetGamepadJoystick(g);
+  SDL_Event e;
+  SDL_UpdateJoysticks();
+  SDL_FlushEvents(SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP);
+  int counts[2] = {0, 0};
+  for (int held = 0; held < 2; held++) {
+    SDL_SetJoystickVirtualButton(j, 2, true);
+    if (held) SDL_UpdateJoysticks();
+    SDL_SetJoystickVirtualButton(j, 2, false);
+    SDL_UpdateJoysticks();
+    while (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP) == 1)
+      if (e.gbutton.button == SDL_GAMEPAD_BUTTON_EAST) counts[held]++;
+  }
+  SDL_CloseGamepad(g);
+  SDL_DetachVirtualJoystick(id);
+  const int from = evq_n, presses = argc > 0 ? ARGI(0) : 1;
+  for (int i = 0; i < presses; i++) {
+    native_remote_menu(true);
+    native_remote_menu(false);
+  }
+  remote_menu_drain();
+  JSValue codes = JS_NewArray(ctx);
+  for (int i = from; i < evq_n; i++) JS_SetPropertyUint32(ctx, codes, (uint32_t)(i - from), JS_NewString(ctx, evq[i]));
+  evq_n = from;
+  JSValue out = JS_NewArray(ctx);
+  JS_SetPropertyUint32(ctx, out, 0, JS_NewInt32(ctx, counts[0]));
+  JS_SetPropertyUint32(ctx, out, 1, JS_NewInt32(ctx, counts[1]));
+  JS_SetPropertyUint32(ctx, out, 2, codes);
+  return out;
+}
+
+/*
+ * The input log's last lines, oldest first (the overlay's text); with argv[0], a line the
+ * JS side adds first (the router's decision for a remote press, `uiInput.ts`).
+ */
+static JSValue n_inputLog(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  if (argc > 0 && JS_IsString(argv[0])) {
+    const char *line = JS_ToCString(ctx, argv[0]);
+    if (!line) return JS_EXCEPTION;
+    input_log("%s", line);
+    JS_FreeCString(ctx, line);
+    return JS_UNDEFINED;
+  }
+  JSValue a = JS_NewArray(ctx);
+  const unsigned first = inlog_n > INLOG ? inlog_n - INLOG : 0;
+  for (unsigned i = first; i < inlog_n; i++) JS_SetPropertyUint32(ctx, a, i - first, JS_NewString(ctx, inlog[i % INLOG]));
+  return a;
 }
 
 /* A removed remote sends no button-up: let go of whatever it held. */
@@ -1515,6 +1663,11 @@ static void poll_events(void) {
         else if (!is_remote(g) && !pad) pad = g;
         else { SDL_CloseGamepad(g); break; }
         SDL_Log("%s: %s", g == remote ? "remote" : "gamepad", SDL_GetGamepadName(g));
+        if (g == remote) {
+          char *m = SDL_GetGamepadMapping(g);
+          input_log("remote connected: %s", m ? m : SDL_GetGamepadName(g));
+          SDL_free(m);
+        }
         break;
       }
       case SDL_EVENT_GAMEPAD_REMOVED:
@@ -1529,12 +1682,14 @@ static void poll_events(void) {
           SDL_CloseGamepad(remote);
           remote = NULL;
           remote_release_all();
+          input_log("remote removed");
         }
         break;
       case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
       case SDL_EVENT_GAMEPAD_BUTTON_UP: {
         bool down = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
         if (remote && SDL_GetGamepadID(remote) == e.gbutton.which) {
+          input_log("remote %s %s (SDL)", SDL_GetGamepadStringForButton((SDL_GamepadButton)e.gbutton.button), down ? "down" : "up");
           remote_button(e.gbutton.button, down);
           break;
         }
@@ -1560,6 +1715,7 @@ static void poll_events(void) {
       default: break;
     }
   }
+  remote_menu_drain();
   poll_sticks();
   if (store_remote_changed()) push_event(false, "!kvs");
 }
@@ -1649,6 +1805,7 @@ static void install(JSContext *ctx) {
       {"storeLoad", n_storeLoad, 1},   {"storeSave", n_storeSave, 2},
       {"storePath", n_storePath, 0},   {"safeArea", n_safeArea, 0},
       {"remoteTouch", n_remoteTouch, 0}, {"remoteProbe", n_remoteProbe, 2},
+      {"remoteBackProbe", n_remoteBackProbe, 1}, {"inputLog", n_inputLog, 1},
       {"args", n_args, 0},             {"quit", n_quit, 0},
   };
   JSValue g = JS_GetGlobalObject(ctx);
@@ -1733,6 +1890,7 @@ int main(int argc, char **argv) {
     }
     if (!strcmp(argv[i], "--headless")) headless = true;
     if (!strcmp(argv[i], "--remote-keys")) remote_keys = true;
+    if (!strcmp(argv[i], "--input-log")) input_log_stderr = true;
     if (!strcmp(argv[i], "--startup-probe")) startup_probe = true;
   }
 
@@ -1751,7 +1909,7 @@ int main(int argc, char **argv) {
   if (!SDL_Init(headless ? SDL_INIT_VIDEO : (SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))) die("SDL_Init");
   SDL_AddEventWatch(lifecycle, NULL);
 #ifdef SDL_PLATFORM_TVOS
-  if (!headless) tvos_remote_absolute_dpad();
+  if (!headless) tvos_remote_init();
 #endif
   dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, false, NULL);
   if (!dev) {

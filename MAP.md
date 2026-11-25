@@ -82,12 +82,14 @@ others are small enough to read.
   within `storeBudget.ts`'s budget (save slots' undo histories yield), the whole store in a
   purgeable cache file, progress merged across devices in iCloud by `progressSync.ts` — over
   `native/host/store.c` (`store_apple.m`; files with `--tv-store` on a Mac), gated by
-  `storeSmoke.ts`. The UI keeps inside a TV's
-  title-safe area (`safeArea.ts`). The Apple TV app is the same host built for tvOS
+  `storeSmoke.ts`. The menus keep inside a TV's
+  title-safe area (`safeArea.ts`); the legend hugs the screen's edge. `inputOverlay.ts` is the
+  hidden on-screen input log. The Apple TV app is the same host built for tvOS
   (native/README.md, "Apple TV"): `native/tvos/` holds its Info.plist, entitlements, asset
   catalog (placeholder art, `make-placeholder-art.mjs`), the asset subset it ships
   (`stage.mjs`, checked against what the smokes read) and its build (`build.mjs`, CMake's Xcode
-  generator); `native/host/platform_tvos.m` is the remote's absolute d-pad; the release lane is
+  generator); `native/host/platform_tvos.m` is the remote's absolute d-pad, its Menu/Back handler and the
+  device log; the release lane is
   `tools/release-testflight-tvos.mjs` (sharing `tools/testflight-lib.mjs` with the iOS one).
   `startupProbe.ts` checks the store, the assets and the sound without a GPU (the Simulator).
 

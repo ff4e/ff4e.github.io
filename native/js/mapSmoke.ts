@@ -21,7 +21,7 @@ import { armSolve, setSolvemode } from '../../src/app/solveMode.js';
 import { loadSubtitleAssets } from './roomSubtitles.js';
 import { currentRoom, enterRoom, initGame, roomReady, showMap } from './game.js';
 import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
-import { routeEvent } from './uiInput.js';
+import { inputFrame, routeEvent, setExitHandler } from './uiInput.js';
 import { pinRandom } from './scene.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
 import { soundTime } from './sound.js';
@@ -133,6 +133,32 @@ export async function runMapSmoke(): Promise<number> {
     check(ui.mapInfoHover === 'cancel' && ui.mapInfoRoom === 1, 'up and down do not move off the panel');
     await tap('PadB');
     check(ui.mapInfoRoom === null && ui.screen === 'map', 'Ⓑ closes the panel');
+
+    // On an Apple TV (the system owning Back at the root, as `systemBack` says there), two
+    // remote Backs drained in one poll: the first closes the panel, the second lands at the
+    // root it uncovered before any frame — the system's then, never the game's to quit on.
+    await tap('PadA');
+    await frame();
+    const realBack = __native.systemBack;
+    const owns: boolean[] = [];
+    __native.systemBack = (atRoot: boolean): boolean => {
+      owns.push(atRoot);
+      return atRoot;
+    };
+    let exits = 0, codes: string[] = [];
+    setExitHandler(() => exits++);
+    try {
+      inputFrame(performance.now());
+      const opened = ui.mapInfoRoom === 1 && owns[owns.length - 1] === false;
+      [, , codes] = __native.remoteBackProbe(2);
+      for (const ev of codes) routeEvent(ev, performance.now());
+      await settle();
+      check(opened && codes.length === 4 && ui.mapInfoRoom === null && ui.screen === 'map' && exits === 0 && owns[owns.length - 1] === true,
+        `on an Apple TV, two Backs in one poll from the record panel: it closes, and the second Back is the system's at the root (${exits} quits)`);
+    } finally {
+      __native.systemBack = realBack;
+      inputFrame(performance.now());
+    }
 
     await tap('PadA');
     await tap('KeyL');

@@ -2,9 +2,11 @@
  * The window's title-safe area: on a TV the set's overscan may cut the picture's edges off,
  * and tvOS asks for menus and hints to stay 60 points in from the top and bottom and 80 from
  * the sides (the view's `safeAreaInsets`, which the host reports: `__native.safeArea`). The
- * UI layer (`uiLayer.ts`) and the intro's skip hint (`introScreen.ts`) keep inside it; the
- * pictures themselves (the room, the map, a movie) stay where they are, letterboxed to the
- * whole window, as a TV game's picture is.
+ * UI layer's menus and popups (`uiLayer.ts`) keep inside it. The hints do not: the button
+ * legend (`legend.ts`) and the intro's skip hint (`introScreen.ts`) hug the screen's edge a
+ * small fixed margin in, as tvOS's insets are the same large ones on every set, overscanning
+ * or not. The pictures themselves (the room, the map, a movie) stay where they are,
+ * letterboxed to the whole window, as a TV game's picture is.
  */
 
 /** `[left, top, right, bottom]` insets from the window's edges, in its pixels. */

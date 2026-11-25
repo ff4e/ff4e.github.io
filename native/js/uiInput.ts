@@ -38,16 +38,21 @@
  * gate route through here, so a gate sees the routing a player does.
  *
  * The last source pressed picks the legend's glyphs (`legend.ts`).
+ *
+ * Every remote press is written to the input log with where it landed and what it led to
+ * (`__native.inputLog`: the device console, and the hidden overlay that holding Play/Pause
+ * for 5 s on the map turns on, `inputOverlay.ts`).
  */
 import { cutscene, loadmode, replaymode, room, showmode } from '../../src/app/gameState.js';
 import { ui } from '../../src/app/screenState.js';
 import { DirRepeat } from './dirRepeat.js';
 import { adoptRemoteProgress, blur as roomBlur, keyDown as roomKeyDown, keyUp as roomKeyUp } from './game.js';
 import { mapBlur, mapBusy, mapKeyDown, mapKeyUp, mapPanelOpen } from './mapScreen.js';
-import { menuAct, menuOpen, openConfirm, openOptions, openPause, type MenuAct } from './menus.js';
+import { menuAct, menuOpen, openConfirm, openOptions, openPause, topMenu, type MenuAct } from './menus.js';
 import { roomLoading } from './seams/framePacing.js';
 import { introKeyDown } from './introScreen.js';
 import { SwipeTracker, type SwipeDir } from './remoteSwipe.js';
+import { OVERLAY_HOLD_MS, toggleInputOverlay } from './inputOverlay.js';
 
 export type InputSource = 'key' | 'pad' | 'remote';
 
@@ -76,12 +81,17 @@ export function setKeyboardIsRemote(on: boolean): void {
 const sourceOf = (code: string): InputSource =>
   code.startsWith('Pad') ? 'pad' : code.startsWith('Remote') ? 'remote' : 'key';
 
-/** What leaves the game at the map's root. The smoke gate swaps it to watch for it. */
+/**
+ * What leaves the game at the map's root. The smoke gate swaps it to watch for it. Never
+ * called on tvOS (`mapKey`), where a game must not quit itself (App Review).
+ */
 let exitApp: () => void = () => __native.quit();
 /**
  * Does the system own Back right now? On tvOS at the map's root it does — the remote's
  * Menu/Back goes Home, and a game must not quit itself (App Review) — so the game does
- * nothing with it there. Refreshed every frame (`inputFrame`).
+ * nothing with it there. Refreshed every frame (`inputFrame`), and again when Back reaches
+ * the root: one batch of events can close a panel or a menu and then press Back at the
+ * root it uncovered, before the next frame (two quick presses the host drains together).
  */
 let systemOwnsBack = false;
 
@@ -281,7 +291,12 @@ function mapKey(down: boolean, code: string): void {
     if (!down || mapBusy() || ui.creditsLoading) return;
     if (!back) openOptions();
     else if (mapPanelOpen()) mapKeyDown('Escape'); // daCancel
-    else if (!systemOwnsBack) exitApp(); // Back at the root; on tvOS the system takes it Home
+    else {
+      systemOwnsBack = __native.systemBack(atMapRoot()); // decided now, not at the last frame
+      // Back at the root. On tvOS the system takes it Home, and should it ever reach the game
+      // instead (UI events somehow off) the game still does nothing: it never quits itself.
+      if (!systemOwnsBack && !__native.tv) exitApp();
+    }
     return;
   }
   const key = MAP_KEYS[code] ?? (sourceOf(code) === 'key' ? code : null);
@@ -337,8 +352,31 @@ const INTRO_START: Readonly<Record<string, string>> = { PadA: 'Space', RemoteSel
 
 // ── Entry points ────────────────────────────────────────────────────────────────────
 
+/** Where a press lands, for the input log. */
+function where(): string {
+  const top = topMenu();
+  if (top) return `menu ${top.kind}`;
+  if (ui.screen !== 'map') return ui.screen;
+  return atMapRoot() ? (systemOwnsBack ? 'map root (system owns Back)' : 'map root') : 'map';
+}
+
+/** When a Play/Pause hold that began on the map started: at OVERLAY_HOLD_MS it toggles the overlay. */
+let overlayHold: number | null = null;
+
 /** One event from `__native.events()`: `+Code`, `-Code`, `!blur`, `!background`, or `!kvs` (iCloud). */
 export function routeEvent(ev: string, now: number = __native.now()): void {
+  const code = ev.slice(1);
+  if (code === 'RemotePlayPause') overlayHold = ev[0] === '+' && ui.screen === 'map' && !menuOpen() ? now : null;
+  if (ev[0] !== '+' || !code.startsWith('Remote')) {
+    route(ev, now);
+    return;
+  }
+  const from = where();
+  route(ev, now);
+  __native.inputLog(`route ${code} on ${from} -> ${where()}`);
+}
+
+function route(ev: string, now: number): void {
   if (ev === '!blur') {
     inputBlur();
     return;
@@ -369,6 +407,11 @@ export function routeEvent(ev: string, now: number = __native.now()): void {
 /** Once a frame: who owns Back, the remote's swipes, menu repeat, the held undo. */
 export function inputFrame(now: number): void {
   systemOwnsBack = __native.systemBack(atMapRoot());
+  if (overlayHold !== null && now - overlayHold >= OVERLAY_HOLD_MS) {
+    overlayHold = null;
+    if (topMenu()?.kind === 'options') menuAct('back'); // the Options the hold's press opened
+    toggleInputOverlay();
+  }
   for (const dir of swipes.feed(__native.remoteTouch(), now)) {
     routeEvent(`+${SWIPE_CODE[dir]}`, now);
     routeEvent(`-${SWIPE_CODE[dir]}`, now);
@@ -403,4 +446,5 @@ export function inputBlur(): void {
   undoHold = null;
   swipes.reset();
   swallowed.clear();
+  overlayHold = null;
 }

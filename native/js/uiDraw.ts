@@ -173,7 +173,8 @@ export class Ui {
   readonly ops: UiOp[] = [];
   /**
    * How far the window reaches past the area being laid out, `[left, top, right, bottom]`:
-   * the title-safe insets (`uiLayer.ts`). Only a scrim reaches into them (`scrim`).
+   * the title-safe insets (`uiLayer.ts`). Only a scrim (`scrim`), the button legend, which
+   * hugs the window's edge (`legend.ts`), and the input overlay reach into them.
    */
   bleed: readonly [number, number, number, number] = [0, 0, 0, 0];
 
