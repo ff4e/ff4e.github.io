@@ -671,7 +671,7 @@ either).
     native/build/cmake/ff4e-native native/build/game.js --root public --headless \
       --smoke-movie --store native/build/smoke-movie-store.json
 
-`native/js/movieSmoke.ts`, 28 checks in ~11 s, through the real input routing (`uiInput.ts`, shared
+`native/js/movieSmoke.ts`, 27 checks in ~11 s, through the real input routing (`uiInput.ts`, shared
 with the interactive loop) and frames: a first
 run opens on the splash, which Ⓑ, a stick, a d-pad, Ⓧ, Esc and the remote's Back and edge click do not leave and Ⓐ does, into the
 AI logo with the game's sound killed; four seconds of the logo at 60 refreshes a second on
@@ -1104,7 +1104,7 @@ with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 150 checks, ~15 s.
+for each character in both of the UI font's weights. 151 checks, ~15 s.
 
 It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a
