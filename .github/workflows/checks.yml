@@ -163,6 +163,12 @@ jobs:
           native/build/cmake/ff4e-native native/build/game.js --root public --headless
           --smoke-audio --store native/build/smoke-audio-store.json
           --read-log native/build/check/reads/audio-smoke.log
+      - name: Native sound across leaving and coming back, a dead output and the audio session's notices
+        timeout-minutes: 2
+        run: >-
+          native/build/cmake/ff4e-native native/build/game.js --root public --headless --audio-output
+          --smoke-audio-lifecycle --store native/build/smoke-audio-life-store.json
+          --read-log native/build/check/reads/audio-lifecycle.log
       - name: Native movies, the intro, its splash and the credits through the real flow
         timeout-minutes: 2
         run: >-

@@ -8,6 +8,7 @@
 #ifndef FF4E_AUDIO_H
 #define FF4E_AUDIO_H
 
+#include <SDL3/SDL_events.h>
 #include <quickjs.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -29,6 +30,38 @@ void audio_shutdown(void);
  * too. Safe from an SDL event watch (any thread holding no audio lock).
  */
 void audio_suspend(bool on);
+
+/*
+ * Keeping the output alive (native/README.md, "When the sound does not come back"). The
+ * mixer's voices and clock do not live in the SDL stream, so an output that stops asking for
+ * sound — an audio session the system took away and SDL did not restore, a device gone —
+ * is replaced by reopening the streams, with nothing the game hears lost. Every step goes to
+ * the audio log (tvOS: the unified log, category `audio`; elsewhere SDL_Log).
+ */
+typedef enum {
+  AUDIO_INFO,    /* only logged */
+  AUDIO_LOST,    /* the session was interrupted or deactivated: reopen when it is back */
+  AUDIO_BACK,    /* the interruption ended, resumption recommended: reactivate, check */
+  AUDIO_ROUTE,   /* the route changed (HDMI, AirPlay, Bluetooth): reactivate, check */
+  AUDIO_RESET,   /* media services were reset: every audio object is gone, reopen */
+  AUDIO_REMOVED, /* SDL says a playback device was removed: reopen */
+} AudioNotice;
+/** Log `detail` and note what it asks for; acted on by audio_poll. Safe from any thread. */
+void audio_notice(AudioNotice what, const char *detail);
+/** SDL's audio device events (removed, format changed), from the event loop. */
+void audio_sdl_event(const SDL_Event *e);
+/**
+ * Once per main-loop pass in the foreground: act on notices (reactivate the session, or
+ * reopen), and the watchdog — an output that has not asked for sound for 750 ms is reopened
+ * (then after 1, 2, 4, 8 s while it stays dead), and the clock meanwhile runs in real time
+ * without it, as SDL's dummy driver would, so nothing waiting on a sound waits for ever.
+ */
+void audio_poll(void);
+void audio_log(const char *fmt, ...) SDL_PRINTF_VARARG_FUNC(1);
+/** Checks only (`audioLifecycle`): the streams open now stop asking for sound, as a dead output does. */
+void audio_test_kill(void);
+/** Checks only: `n` reopens have failed, the last 7.5 s ago (the retry schedule's far end). */
+void audio_test_failed(int n);
 
 /**
  * Decode an encoded file (AAC in MP4) to mono float PCM at AUDIO_RATE. On success `*out`
