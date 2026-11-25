@@ -913,9 +913,13 @@ SDK is older. The no-GPU alert (below) stays, as a defence.
 none required), the puzzle-games category, arm64, a black launch screen (`UILaunchScreen`, the
 splash's black), one scene (SDL supplies the scene delegate); `FishFillets.entitlements` —
 iCloud key-value storage only (its use is the saves' work, #222); `Assets.xcassets` — the
-layered App Icon and the Top Shelf images. **The artwork is a placeholder**, made by
-`make-placeholder-art.mjs` from `public/app-icon.png` and `public/cover.webp`; the real
-parallax icon and Top Shelf replace its PNGs one for one, same names and sizes.
+layered App Icon and the Top Shelf images: the game's gold emblem on black (TestFlight build
+4 found the first icon, the iOS icon's sea-blue tile, read as a blue rounded rectangle on the
+home row). `make-art.mjs` draws them with Playwright from the iOS icon's vector emblem
+(`tools/build-app-icon.mjs`, imported): the icon's Back layer pure black, its Front layer the
+emblem alone over transparency, so the focus parallax lifts the mark off the black, its ring
+62 % of the height across (tvOS crops a focused icon's edges); the Top Shelf the same mark on
+black.
 
 **What it ships** (`native/tvos/stage.mjs`): `game.js` and the part of `public/` the native
 host reads, by rule — the `ai` tier's art, the rooms, their subtitles and the staged speech,

@@ -86,7 +86,7 @@ others are small enough to read.
   title-safe area (`safeArea.ts`); the legend hugs the screen's edge. `inputOverlay.ts` is the
   hidden on-screen input log. The Apple TV app is the same host built for tvOS
   (native/README.md, "Apple TV"): `native/tvos/` holds its Info.plist, entitlements, asset
-  catalog (placeholder art, `make-placeholder-art.mjs`), the asset subset it ships
+  catalog (the gold emblem on black, `make-art.mjs`), the asset subset it ships
   (`stage.mjs`, checked against what the smokes read) and its build (`build.mjs`, CMake's Xcode
   generator); `native/host/platform_tvos.m` is the remote's absolute d-pad, its Menu/Back handler and the
   device log; the release lane is

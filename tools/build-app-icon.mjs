@@ -42,6 +42,9 @@
 //
 // Requires the repo's Playwright (a dev dependency already, for the UI suite).
 // Usage: `node tools/build-app-icon.mjs`
+//
+// The Apple TV's icon and Top Shelf are the same emblem (`native/tvos/make-art.mjs` imports
+// `emblem` and `MARK_DEF` from here; importing this module builds nothing).
 import { chromium } from 'playwright';
 import { writeFileSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
@@ -76,7 +79,7 @@ const LINE_W = 4.5; // body and tail
 // lines stay exactly as heavy while the ring and the fish inside it get bigger. In the
 // capture's own units that means the strokes get proportionally thinner, which is what
 // `ringW` / `lineW` below express and what everything derived from them has to follow.
-const GROW = 1.05;
+export const GROW = 1.05;
 const ringW = RING_W / GROW;
 const lineW = LINE_W / GROW;
 
@@ -121,7 +124,7 @@ function tailClearance() {
  * The emblem as SVG markup, centred on (cx, cy). `size` is the pixel weight the strokes are
  * drawn at -- the ring is `size * GROW` across, not `size`.
  */
-function emblem(size, cx, cy) {
+export function emblem(size, cx, cy) {
   const k = (size * GROW) / D; // geometry
   const kw = size / D; // stroke widths, deliberately not grown
   const at = (v) => (v * k).toFixed(2);
@@ -151,7 +154,7 @@ function emblem(size, cx, cy) {
 
 // The ramp is applied across the mark on a diagonal, so the top-left of every stroke catches
 // the light and the underside falls away -- the same read the metallic letterforms have.
-const MARK_DEF = `
+export const MARK_DEF = `
   <linearGradient id="mark" x1="0.28" y1="0" x2="0.62" y2="1">
     <stop offset="0%" stop-color="${MARK[0]}"/>
     <stop offset="42%" stop-color="${MARK[1]}"/>
@@ -226,17 +229,19 @@ const OUTPUTS = [
   },
 ];
 
-const browser = await chromium.launch();
-const page = await browser.newPage({ deviceScaleFactor: 1 });
-console.log(`emblem ${GROW}x, tail clears the ring by ${tailClearance().toFixed(2)}`);
-for (const { path, side, svg } of OUTPUTS) {
-  await page.setViewportSize({ width: side, height: side });
-  await page.setContent(
-    `<style>html,body{margin:0;padding:0;background:#000}svg{display:block;width:${side}px;height:${side}px}</style>` +
-      svg(side),
-  );
-  // No alpha anywhere: App Store Connect rejects an icon with a transparent channel.
-  writeFileSync(path, await page.screenshot({ omitBackground: false, type: 'png' }));
-  console.log(`wrote ${relative(ROOT, path)} (${side}x${side})`);
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ deviceScaleFactor: 1 });
+  console.log(`emblem ${GROW}x, tail clears the ring by ${tailClearance().toFixed(2)}`);
+  for (const { path, side, svg } of OUTPUTS) {
+    await page.setViewportSize({ width: side, height: side });
+    await page.setContent(
+      `<style>html,body{margin:0;padding:0;background:#000}svg{display:block;width:${side}px;height:${side}px}</style>` +
+        svg(side),
+    );
+    // No alpha anywhere: App Store Connect rejects an icon with a transparent channel.
+    writeFileSync(path, await page.screenshot({ omitBackground: false, type: 'png' }));
+    console.log(`wrote ${relative(ROOT, path)} (${side}x${side})`);
+  }
+  await browser.close();
 }
-await browser.close();
