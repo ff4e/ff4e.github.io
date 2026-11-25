@@ -12,8 +12,8 @@
  * It goes in the letterbox margin beside the picture when it fits there — a short list
  * down the left margin, or one row in the top one, muted (75 %, as the prototype's) — and
  * otherwise as one row along the top edge on a strip of the touch UI's popup glass, at full
- * strength. The top, not the bottom: in a room the subtitles have the bottom, and on the
- * map the bottom holds the banner naming the selected level. Either way it hugs the SCREEN's
+ * strength. The top, not the bottom: in a room the subtitles have the bottom. Nothing on
+ * the map's side has hints (`legendScreen`). Either way it hugs the SCREEN's
  * edge, a small fixed margin in — on a TV too: unlike the menus, the hints do not keep to
  * tvOS's title-safe area (`safeArea.ts`), whose insets are fixed and large (80 pt at the
  * sides, 60 above and below, whatever the set), which put them far from the edge on the
@@ -75,7 +75,7 @@ export interface LegendItem {
 }
 
 /** Where the legend is: the screen it describes. */
-export type LegendScreen = 'room' | 'cutscene' | 'panel' | 'legimage' | 'options' | 'help';
+export type LegendScreen = 'room' | 'cutscene' | 'options' | 'help';
 
 const chip = (text: string, hue?: number): Glyph => (hue === undefined ? { kind: 'chip', text } : { kind: 'chip', text, hue });
 // The pad's face-button hues (A green, B red, X blue, Y yellow), at the room symbol's lightness.
@@ -153,11 +153,6 @@ export function legendItems(screen: LegendScreen, source: InputSource): LegendIt
     }
     case 'cutscene':
       return [item([remote ? BACK : B], 'skip')]; // A4: "B: Skip"; B2: Back (or a click) skips
-    case 'panel':
-      if (remote) return [item([EDGE], 'choose'), item([CLICK], 'select'), item([BACK], 'cancel')];
-      return [item([L], 'choose'), item([A], 'select'), item([B], 'cancel')];
-    case 'legimage':
-      return [item([remote ? CLICK : A], 'continue')];
     case 'options':
       if (remote) return [item([EDGE], 'change'), item([CLICK], 'select'), item([BACK], 'done')];
       return [item([DPAD], 'change'), item([A], 'select'), item([B], 'done')];
@@ -402,15 +397,15 @@ export function drawLegend(ui: Ui, items: readonly LegendItem[], sw: number, sh:
 }
 
 /**
- * Which legend the screen shows, or null for none: the plain world map (B6: it needs none —
- * its selection and its plaques say it all), a launch, the confirm prompt, and the top bar
- * (B6: the room's hints step aside for it; it is tvOS's own idiom).
+ * Which legend the screen shows, or null for none. None anywhere on the map's side (B6,
+ * after TestFlight build 3): the plain map, its record panel, a launch, a story page and the
+ * credits — the selection ring, the panel's lit button and a page's own picture say what a
+ * click does. None during the intro (A4: it has its skip hint), on the confirm prompt (its
+ * answers are on its card), or under the top bar (B6: the room's hints step aside for it).
+ * Options and Help, which can open over the map too, keep theirs: they are menus, not the map.
  */
-export function legendScreen(top: { kind: string } | null, mapPanel: boolean, launching: boolean): LegendScreen | null {
+export function legendScreen(top: { kind: string } | null): LegendScreen | null {
   if (top) return top.kind === 'confirm' || top.kind === 'bar' ? null : (top.kind as LegendScreen);
   if (ui.screen === 'room') return cutscene ? 'cutscene' : 'room';
-  if (ui.screen === 'legimage' || ui.mapOverlay === 'credits') return 'legimage'; // A4: "A: Continue"
-  if (ui.screen === 'intro') return null; // A4: no legend during the intro (it has its skip hint)
-  if (launching) return null;
-  return mapPanel ? 'panel' : null;
+  return null;
 }

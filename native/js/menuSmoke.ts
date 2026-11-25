@@ -903,7 +903,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await tap('Escape');
     check(topMenu()?.kind === 'bar' && lastInput() === 'key', 'the keyboard\'s Esc opens the top bar');
     snap('bar-key');
-    const screens: LegendScreen[] = ['room', 'panel', 'legimage', 'options', 'help'];
+    const screens: LegendScreen[] = ['room', 'options', 'help'];
     check(screens.every((sc) => legendItems(sc, 'key').length === 0) && confirmItems('key').length === 0,
       'the keyboard gets no button hints on any screen, nor on the confirm prompt');
     check(screens.every((sc) => legendItems(sc, 'pad').length > 0 && legendItems(sc, 'remote').length > 0),
@@ -942,12 +942,15 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await select('map');
     check(ui.screen === 'map' && !menuOpen(), 'the top bar\'s World map leaves the room');
 
-    // A story page filling the window: its "Continue" on the strip, and any button dismisses it.
+    // A story page: no hints (B6: none on the map's side), and any button dismisses it.
     check(lastInput() === 'remote', 'the remote is still the last input');
     await showLegImage(1);
     check(ui.screen === 'legimage', 'a story page is up');
     snap('legimage-remote-fill', 960, 720);
-    check(strip('legimage-remote-fill'), 'its hint lies over the page on a dark strip');
+    check(snaps['legimage-remote-fill']!.length === 0, 'with the remote, a story page has no hints, and no UI layer is drawn');
+    setLastInput('pad');
+    check(paintUi(960, 720, pictureBox(2560, 1920, 960, 720))?.ops.length === 0, 'nor with the pad');
+    setLastInput('remote');
     await tap('RemoteSelect');
     check(ui.screen === 'map', 'a click dismisses it');
 

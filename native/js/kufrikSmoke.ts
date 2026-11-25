@@ -189,7 +189,7 @@ async function storyToItsEnd(): Promise<void> {
   const typed = await untilStory();
   const start = count;
   check(typed > 0, `the briefcase story started by itself once the briefcase fell, ${typed} moves in (its phase 8)`);
-  const legend = legendItems(legendScreen(null, false, false)!, 'pad');
+  const legend = legendItems(legendScreen(null)!, 'pad');
   check(legend.length === 1 && legend[0]!.key === 'skip', `the pad's legend over the story is "B Skip" (${legend.map((l) => l.key).join(',')})`);
   check(legendItems('cutscene', 'key').length === 0, 'the keyboard gets no legend over the story');
   await frames(30);

@@ -332,9 +332,10 @@ map still work.
 - **☰ in a room opens the top bar**, on every native platform. The controller spec's A3
   has the pad's ☰ open Options directly; its B4 has it open the in-room menu on tvOS. A
   deliberate deviation from A3: one native TV UI everywhere, and Options is one tab away.
-- **The plain world map has no hints**, whatever the input (B6): its selection ring and its
-  plaques say what a click does. The record panel over it, the credits and the story pages
-  keep theirs.
+- **Nothing on the map's side has hints**, whatever the input (B6): the plain map, its record
+  panel, a launch, a story page and the credits roll — the selection ring, the plaques and the
+  panel's lit button say what a click does. Options and Help keep theirs over the map too:
+  they are menus, shared with the rooms.
 
 Everything is drawn through `uiDraw.ts`: rectangles, procedurally rasterised glyph shapes
 and the carved icons (coverage masks, tinted by `fillMask`), FreeType text in Mulish and images. It also records
@@ -959,10 +960,10 @@ the parity sweep.
 The map has a smoke gate of its own (`native/js/mapSmoke.ts`, `--smoke-map --store F`): the
 map driven key by key through the real flow — a fresh session opens on the map with room 1
 selected, Ⓑ does nothing, Ⓐ launches it, its win comes back with it still selected, a
-direction moves the selection, the record panel opens on Run and cycles Run → Replay →
+direction moves the selection, the record panel opens on Run with no hints and cycles Run → Replay →
 Cancel, Ⓑ closes it, two remote Backs in one poll on an Apple TV close it and leave the second
 to the system (never a quit), Replay plays the best record and comes back, a leg-final room's win
-and its Run both show the story page, and Ⓑ in a room goes back to the map. 22 checks, a
+and its Run both show the story page, and Ⓑ in a room goes back to the map. 23 checks, a
 few seconds; CI runs it after the room smoke. Its input goes through the same router as the
 window's (`uiInput.ts`).
 
@@ -995,8 +996,9 @@ by Esc and answered by Enter; its World map leaves the room. A Play/Pause hold r
 the top bar ends there. With the keyboard last, no hints are drawn on any screen (and, on the
 map and in a room, no UI layer at all). At 81 window widths across the margin/top switch
 the legend is where it was with either fish active. With Czech subtitles the top bar, the
-legend, the confirm prompt and Options are Czech. In windows a room and a story page fill, the
-hints lie on their dark strip; in a letterbox margin, they do not. A room's first frame shows
+legend, the confirm prompt and Options are Czech. In a window a room fills, the hints lie on
+their dark strip; in a letterbox margin, they do not. A story page has no hints, for the
+remote or the pad. A room's first frame shows
 the remote's hints (room 1, and KUFRIK), and so does the room on hiding the top bar; with
 `--remote-keys` a key the host leaves unmapped keeps them. At 3840×2160 inside tvOS's insets
 the room's frames get the menus ready, and the top bar's, Options', Help's and the restart

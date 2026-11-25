@@ -23,7 +23,6 @@
 import { helpScreens, ui as screenUi } from '../../src/app/screenState.js';
 import type { Image2D, Surface2D } from '../../src/render/surface2d.js';
 import { drawLegend, legendItems, legendScreen, type LegendItem } from './legend.js';
-import { mapBusy, mapPanelOpen } from './mapScreen.js';
 import { paintBar, paintConfirm } from './menuPaint.js';
 import { BAR_ITEMS, OPTIONS_ROWS, topMenu, type Layer } from './menus.js';
 import { NativeSurface } from './nativeSurface.js';
@@ -125,7 +124,7 @@ function prepareMenus(w: number, h: number, insets: Insets, picture: Box, budget
   // still walks a whole menu, and all of them at once would be a hitch of its own.
   while (ready.next < REHEARSALS.length) {
     const top = REHEARSALS[ready.next]!;
-    const screen = legendScreen(top, false, false);
+    const screen = legendScreen(top);
     const legend = screen ? legendItems(screen, lastInput()) : [];
     const spent = __native.now() - t0;
     if (spent >= budgetMs || !rehearse(() => drawTop(ui, top, legend, w, h, picture, 0), budgetMs - spent)) break;
@@ -169,7 +168,7 @@ export function paintUi(
   if (!top) prepareMenus(sw, sh, insets, box, SLICE_MS);
   const opened = top !== null && top !== shownTop;
   shownTop = top;
-  const screen = legendScreen(top, mapPanelOpen(), mapBusy());
+  const screen = legendScreen(top);
   const legend = screen ? legendItems(screen, lastInput()) : [];
   if (!top && legend.length === 0 && !inputOverlayOn()) return { surface: null, ops: [], legendAt: 0 };
   if (!surface || surface.width !== w || surface.height !== h) surface = costed('surface', () => new NativeSurface(w, h));

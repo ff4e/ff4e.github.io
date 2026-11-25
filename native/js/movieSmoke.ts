@@ -16,7 +16,7 @@ import { initGame } from './game.js';
 import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
 import { intro, introFrame, loadIntroArt, openSession, playIntroMovies } from './introScreen.js';
 import { routeEvent, setExitHandler } from './uiInput.js';
-import { legendItems, legendScreen } from './legend.js';
+import { legendScreen } from './legend.js';
 import { pinRandom } from './scene.js';
 import { soundPoll } from './sound.js';
 
@@ -78,7 +78,7 @@ export async function runMovieSmoke(): Promise<number> {
     check((await frame()) !== 0, '...which is drawn');
     for (const k of ['PadB', 'PadUp', 'PadDown', 'PadX', 'Escape', 'RemoteBack', 'RemoteLeft']) await tap(k);
     await frame();
-    check(legendScreen(null, false, false) === null, 'no button legend over the intro (A4: it has its own hint)');
+    check(legendScreen(null) === null, 'no button legend over the intro (A4: it has its own hint)');
     check(intro.gated && !intro.movie, 'nothing but Ⓐ leaves the splash (Ⓑ, a stick, a d-pad, Ⓧ, Esc, the remote\'s Back and an edge click are ignored)');
     await tap('PadA');
     check(!intro.gated && intro.movie?.url === '/data/Movie/logo_ai.mp4', 'Ⓐ starts the AI logo movie');
@@ -185,9 +185,7 @@ export async function runMovieSmoke(): Promise<number> {
     await settle(50);
     const roll = await frame();
     check(ui.mapOverlay === 'credits' && roll !== 0, 'Ⓐ on it opens the credits roll over the map');
-    check(legendItems(legendScreen(null, false, false)!, 'pad').map((i) => i.key).join() === 'continue',
-      'the legend over the roll is A4\'s "Ⓐ Continue"');
-    check(legendItems(legendScreen(null, false, false)!, 'key').length === 0, 'and the keyboard (the last input here) gets none');
+    check(legendScreen(null) === null, 'no hints over the roll, for any input (B6: none on the map\'s side)');
     let exits = 0;
     setExitHandler(() => exits++);
     await tap('RemoteBack');
