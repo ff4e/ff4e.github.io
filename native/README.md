@@ -11,7 +11,7 @@ The game **without a browser**. It plays a whole game now — from the world map
 room, with undo, saves, the record panel's Replay and the leg story pages, and with its
 sound and subtitles, the intro movies and the credits, KUFRIK's briefcase story and its
 tutorial demonstration, and with the TV menus a console needs —
-a pause menu, Options, Help, a button legend — playable from a keyboard, a gamepad or a Siri
+a top bar, Options, Help, a button legend — playable from a keyboard, a gamepad or a Siri
 Remote, on the AI-upscaled tier:
 
 - **QuickJS-ng** runs the game's own TypeScript. Nothing is ported: the room, its script and
@@ -195,10 +195,9 @@ room's colours: the same reviewed static hue per room (`src/data/nativeMenuHues.
 the same `menuPalette` (`src/platform/nativeMenuPalette.ts`), imported and parsed into numbers
 (`uiPalette.ts`) — the room on screen, or the last one while a room loads and on the map.
 Surfaces are its translucent slate glass with the hairline edge and the inset bevel
-(`uiGlass.ts`); the pause menu and the confirm prompt carry its rustic carved icons
+(`uiGlass.ts`); the top bar and the confirm prompt carry its rustic carved icons
 (`src/styles/nativeMenuIcons.svg`, bundled as text and rasterised natively per colour role —
-`rusticIcons.ts`; Resume and Help, which the web has no button for, are drawn in the same
-hand). Labels are its ink with its soft dark shadow. Focus is the touch UI's pressed state —
+`rusticIcons.ts`; Help, which the web has no button for, is drawn in the same hand). Labels are its ink with its soft dark shadow. Focus is the touch UI's pressed state —
 how a held button looks — and, on the Options face, its touch Options' `--menu-accent` outline.
 
 **A menu opens on the frame it is asked for.** Everything a menu draws is rasterised in the
@@ -208,8 +207,8 @@ TV QuickJS is several times slower than on a Mac (an A12 core against an M-serie
 
 - A rounded box is drawn as nine pieces: its corners from the mask of a small box with the
   same radius, its straight parts as plain rectangles (`uiDraw.ts`, `sliced`) — pixel for
-  pixel the whole mask, but costing its corners, not its area. **This was the 4K pause menu's
-  5-second open on the Apple TV:** at 2160 lines its glass was 2¼ million pixels of
+  pixel the whole mask, but costing its corners, not its area. **This was the 4K pause
+  menu's 5-second open on the Apple TV** (the top bar's predecessor): at 2160 lines its glass was 2¼ million pixels of
   distance tests, 581 ms of a 590 ms first frame on an M4 Mac (Options 136 ms, the confirm
   prompt 146 ms) — seconds on an A12.
 - The menus are **rehearsed** before they are needed (`uiLayer.ts`): drawn onto a surface that
@@ -218,11 +217,13 @@ TV QuickJS is several times slower than on a Mac (an A12 core against an M-serie
   and again whenever what they would draw changes — the window's size, the language, the
   input's glyphs, the screen, a setting a menu shows — then within ~2 ms a frame while no menu
   is up, so play does not hitch (`uiCost.ts`'s `rehearse`). At 2160 lines that takes ~30
-  frames on a Mac.
-- When a menu opens, its first frame's cost is logged by phase — `ui: pause opened at
+  frames on a Mac. The top bar's focused tab has rounded corners rather than a capsule's for
+  this reason: a capsule that narrow cannot be sliced, and its six focus states doubled the
+  rehearsal's rasterising at 2160 lines (215 ms against 105).
+- When a menu opens, its first frame's cost is logged by phase — `ui: bar opened at
   3840×2160, its first frame 0.6 ms: …` — in the device console, and so is the start's.
 
-The menu smoke opens the pause menu, Options, Help and the restart prompt at 3840×2160 inside
+The menu smoke opens the top bar, Options, Help and the restart prompt at 3840×2160 inside
 tvOS's insets after the room's frames got them ready, and holds each first frame under 10 ms
 on the Mac (50 ms at the Apple TV's 5×): 0.5–2 ms there now.
 
@@ -231,17 +232,29 @@ subtitles and the map's plaques are in (`subLang()`; subtitles off keep the last
 which on a first run follows the system's. The web has no Czech UI chrome to reuse, so the
 Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech diacritics.
 
-- **The pause menu** — Resume · World map · Save · Load · Restart · Options · Help — opens on
-  Back in a room (Esc, the pad's ☰, the remote's Back): tvOS requires Back during play to pause
-  and show a menu. While any menu is over a room the room is **paused**: no logic step runs and
-  the sound holds its place (`setModalPause`, as the browser's Help does). Save, Load and
-  Restart ask first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no; the card
-  shows the pad's or the remote's answers as the legend's small hints, the keyboard's none), then send
-  F2, F3 or Backspace down the room's router, so a save mid-move or during a replay is refused
-  exactly as F2 is on the web. Save and Load are greyed (and skipped by the highlight) when they
-  cannot act, by the touch buttons' rule (`buttonAvailability.ts`, pinned): never during
-  the KUFRIK demonstration, which teaches them. On Resume the room
-  continues from the frame it stopped on.
+- **The top bar** — World map · Save · Load · Restart · Options · Help — is an Apple TV app's
+  tab bar (controller spec B6, after TestFlight build 3 asked for something less invasive
+  than a pause menu): a slim capsule of the touch UI's glass across the top of the title-safe
+  area, over the room and without dimming it, each tab a carved icon and its word, the focused
+  one in the touch UI's pressed state. Back in a room shows it (Esc, the pad's ☰, the remote's
+  Back), and Back again hides it (so do down, a swipe down, and the pad's Ⓑ). **It does not
+  pause the game**: the logic steps on and the sound plays; only the input is the bar's, so
+  no fish moves while it has focus (a held move is let go as it opens), and the room's hints
+  step aside for it. It opens on Save — or the next tab that can act — never on World map,
+  which leaves the room without asking. Left and right (a click on the edge, a swipe, the
+  pad's d-pad or LB / RB, the arrows) move the focus, skipping a tab that cannot act and
+  stopping at the ends, as tvOS's tab bars do; a click presses. Save, Load and Restart ask
+  first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no, back to the bar; the
+  card shows the pad's or the remote's answers as the legend's small hints, the keyboard's
+  none), then send F2, F3 or Backspace down the room's router, so a save mid-move or during a
+  replay is refused exactly as F2 is on the web. Save and Load are greyed (and skipped by the
+  focus) when they cannot act, by the touch buttons' rule (`buttonAvailability.ts`, pinned):
+  never during the KUFRIK demonstration, which teaches them. The prompt does not pause the
+  room either; **Options and Help do** — they are whole panels over it — so while either is
+  over a room no logic step runs and the sound holds its place (`setModalPause`, as the
+  browser's Help does), and closing it back to the bar lets the room run on from the frame it
+  stopped on. Should the room go from under the bar (won, or KUFRIK's story beginning), the bar
+  goes with it. The pad's direct LB / RB / Ⓧ prompts and Ⓑ to the map still work.
 - **Options** is the original game's Options face — the AI-upscaled panel art the tablets show,
   composited as `AiPanel.drawOptions` composites it — scaled to most of the window, with a focus
   outline on the row and a caption card of the touch UI's glass beside it naming the row and
@@ -297,7 +310,7 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   also sets `SDL_HINT_TV_REMOTE_AS_JOYSTICK` to 1 on tvOS rather than rely on SDL's default.
   The pad's Ⓑ still does nothing on the plain map, on purpose.
 - **The remote's Back comes from GameController, not SDL.** On TestFlight build 2 Back opened
-  the pause menu once in many presses. SDL 3.4 reads the remote's Menu/Back by polling
+  the pause menu (the top bar's predecessor) once in many presses. SDL 3.4 reads the remote's Menu/Back by polling
   `isPressed` once per `SDL_UpdateJoysticks` (`SDL_mfijoystick.m`, the `physicalInputProfile`
   loop of `IOS_MFIJoystickUpdate`), but tvOS runs a gesture recognizer over that button and
   hands the app its press and release together, after the release — GameController's header
@@ -310,13 +323,16 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   (`native_remote_menu`, `remote_menu_drain`), and ignores SDL's polled copy (B). The menu
   smoke shows the loss with SDL's own code — a virtual remote's B pressed and released
   between two polls makes no event, held across one makes two (`__native.remoteBackProbe`) —
-  then drives room → Back → pause → Back → room five times through the handler's path, two
+  then drives room → Back → top bar → Back → room five times through the handler's path, two
   presses in one poll as two taps, and at the map's root, with the system owning Back as on a
   TV, Back left to it — also as the second of two Backs in one poll that first close Options
   (and, in the map smoke, the record panel) — and Back at the root on tvOS never quitting.
-- **☰ in a room opens the pause menu**, on every native platform. The controller spec's A3
-  has the pad's ☰ open Options directly; its B4 has it open the pause menu on tvOS. A deliberate
-  deviation from A3: one native TV UI everywhere, and Options is one row away.
+- **☰ in a room opens the top bar**, on every native platform. The controller spec's A3
+  has the pad's ☰ open Options directly; its B4 has it open the in-room menu on tvOS. A
+  deliberate deviation from A3: one native TV UI everywhere, and Options is one tab away.
+- **The plain world map has no hints**, whatever the input (B6): its selection ring and its
+  plaques say what a click does. The record panel over it, the credits and the story pages
+  keep theirs.
 
 Everything is drawn through `uiDraw.ts`: rectangles, procedurally rasterised glyph shapes
 and the carved icons (coverage masks, tinted by `fillMask`), FreeType text in Mulish and images. It also records
@@ -521,7 +537,7 @@ browser's router swallows it, so nothing opens a menu over the story. The legend
 (the remote's "‹ Skip"; the keyboard, nothing). While the demonstration says how to save and
 load (help2, help7, help11), the legend's Save or Load pulses as the touch button does
 (`tutorialHint.ts`, with `dialogueHints.ts`'s rules); with the remote, whose Save and Load are in
-the pause menu, its Menu pulses.
+the top bar, its Menu pulses.
 
 `--demo` and the smoke gate play KUFRIK's recorded solution as the map's Replay of it, not as a
 live run (`PLAYED_AS_REPLAY`, `game.ts`): the solution walks through the tutorial spot, and a
@@ -649,25 +665,42 @@ d-pad button and a centre click is A — and has **not** been run on an Apple TV
 absolute d-pad values (`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL leaves them relative,
 so the tvOS build sets them itself (`native/host/platform_tvos.m`).
 
-**Swipes** (in menus and on the map; never in a room) are the thumb's TRAVEL, not where it
+**Swipes** (in menus, on the map, and — since TestFlight build 3 — in a room) are the thumb's TRAVEL, not where it
 is: SDL reports the touch surface only as the left stick's axes — the position, with absolute
 values, and (0, 0) once the thumb lifts, no touch-down or lift event — so the host hands the
 position over each frame (`__native.remoteTouch`) and `native/js/remoteSwipe.ts` measures it
 from where the thumb came down: every 0.5 of travel along the dominant axis (a quarter of the
 surface's width) is one step that way, so a long swipe keeps stepping as a list scrolls under
-it and a fast one takes the steps it covered; a thumb resting on an edge is no swipe. Nothing
-counts while a click is held. A click toward the edge a swipe stepped to in the last 300 ms
-is that swipe's end — a swipe finishing on the ring — and is dropped where swipes act, so it
-is one step, not two; a centre click is always a click, and in a room every click acts.
-`test/native-remote-swipe.test.ts` feeds it taps, slow, fast and long swipes and one that
-ends at an edge. The host reads those axes RAW (`remote_axis`): SDL maps the remote's y
+it and a fast one takes the steps it covered; a thumb resting on an edge is no swipe; turning
+back takes a step back from the furthest the thumb went. Nothing counts while a click is held.
+A click toward the edge a swipe stepped to in the last 300 ms is that swipe's end — a swipe
+finishing on the ring — and is dropped, so it is one step, not two; a centre click is always a
+click.
+
+**In a room a swipe moves the active fish, and the thumb kept on the surface keeps it going**
+(B6, reversing B5's "rooms are click only"; `SwipeHold`, `uiInput.ts`). The swipe's first step
+holds that direction down the room's router as a held arrow — the game's own held-key machine
+(`movement.ts`, KeyRoom), so the fish keeps moving at the game's cadence, as a held edge click
+or a held key does — for as long as the thumb stays on the surface, moving or resting; lifting
+it lets go (a flick is one step: KeyRoom's tap). Only travel starts a hold: a thumb landing and
+resting anywhere moves nothing. With the thumb still down, a step another way — a whole 0.5
+back from the furthest it went, or 0.5 across — turns the hold that way, so turning takes as
+deliberate a motion as starting, and a thumb settling back a little does not reverse the fish;
+more travel the same way changes nothing. A click toward the held direction is the swipe
+pressing on and is dropped (the hold goes on); any other click lets go of the hold and is
+itself — an edge click moves, a centre click switches fish. A thumb that swiped in a menu or on
+the map moves no fish until it lifts, so the swipe down that hides the top bar does not carry
+on into the room. Each hold, turn and release is in the input log (`swipe holds right`,
+`swipe lets go of right: lifted`). `test/native-remote-swipe.test.ts` feeds the tracker taps,
+slow, fast and long swipes, one that ends at an edge, and the hold with real lifted readings. The host reads those axes RAW (`remote_axis`): SDL maps the remote's y
 inverted and `SDL_GetGamepadAxis` rescales an inverted axis in float, so a lifted thumb reads
 (0, −1) there, never (0, 0) — the lift was never seen, and every swipe started from the
 centre and partly undid itself on the lift (TestFlight build 1). The menu smoke checks the
 raw reading through a virtual remote mapped as SDL maps one (`__native.remoteProbe`), and the
 tracker also takes anything within 3/32767 of the centre as a lift. On a Mac, `--remote-keys` makes the keyboard a remote, and
 the whole keyboard counts as the remote: any other key it sends (a letter, F2) leaves the
-remote the last input, so its hints stay up.
+remote the last input, so its hints stay up. Each key's release sends what its press sent,
+so the arrow of a Shift+arrow swipe never sends a stray edge release.
 
 | Siri Remote | with `--remote-keys` |
 | --- | --- |
@@ -676,19 +709,19 @@ remote the last input, so its hints stay up.
 | Play/Pause | `P` |
 | Back | Esc, Backspace |
 | swipe | Shift+arrow |
+| thumb resting on the surface (keeps a swipe's move going in a room) | Shift held |
 
 | in a room | keyboard | gamepad | Siri Remote |
 | --- | --- | --- | --- |
 | little fish | `I` `J` `K` `L` | d-pad, left stick | |
 | big fish | `W` `A` `S` `D` | right stick | |
-| active fish | arrows | | click an edge (held: keeps moving) |
+| active fish | arrows | | click an edge (held: keeps moving), or swipe (thumb kept down: keeps moving) |
 | switch fish | Space, Tab (`1`/`2` select) | Ⓐ | click the centre |
 | undo one move | `-` (the character, wherever the layout puts it) | Ⓨ | Play/Pause (held: repeats) |
-| restart the room | Backspace | Ⓧ, then Ⓐ to confirm | pause menu |
-| save / load | F2 / F3 | LB / RB, then Ⓐ to confirm | pause menu |
-| back to the map | | Ⓑ, ⧉ | pause menu |
-| pause menu | Esc | ☰ | Back |
-| — | | | a swipe does nothing (decided: a stray swipe must not cost a move) |
+| restart the room | Backspace | Ⓧ, then Ⓐ to confirm | top bar |
+| save / load | F2 / F3 | LB / RB, then Ⓐ to confirm | top bar |
+| back to the map | | Ⓑ, ⧉ | top bar |
+| top bar (show / hide; the room keeps running) | Esc | ☰ (Ⓑ hides) | Back |
 
 | on the map | keyboard | gamepad | Siri Remote |
 | --- | --- | --- | --- |
@@ -708,7 +741,8 @@ remote the last input, so its hints stay up.
 | --- | --- | --- | --- |
 | move / change a value / turn a help page | arrows, `IJKL`, `WASD` | d-pad, sticks; LB / RB page | swipe, or click an edge |
 | press | Enter, Space | Ⓐ | click the centre |
-| back (resume, decline, close) | Esc (in Help: any other key) | Ⓑ, ☰ | Back (in Help: a click too) |
+| back (hide the bar, decline, close) | Esc (in Help: any other key) | Ⓑ, ☰ | Back (in Help: a click too) |
+| the top bar: move the focus / hide it | left, right / down | left, right / down | the same, by click or swipe |
 
 Other flags:
 
@@ -802,8 +836,9 @@ rules are by directory and kind, and the check only ever adds to them.)
   tvOS's insets are the same large ones whether the set overscans or not. The pictures — the
   room, the map, a movie — stay letterboxed to the whole screen, as a TV game's picture is,
   and so do the subtitles, which are the room's. The menu smoke checks, at 1920×1080 and
-  3840×2160 with those insets, that nothing of Options or the pause menu is drawn outside
-  them, and that the legend is drawn 20 px (×u) in from the screen's edge.
+  3840×2160 with those insets, that nothing of Options or the top bar is drawn outside
+  them (the bar along their top, in English and Czech), and that the legend is drawn 20 px
+  (×u) in from the screen's edge.
 - *Sound*: the audio session is **solo ambient** (`SDL_HINT_AUDIO_CATEGORY`), not SDL's
   default (playback, mixing with others): the music and the voices are the game, so another
   app's music stops while it plays, as for most games, and nothing asks to keep sounding in
@@ -812,8 +847,9 @@ rules are by directory and kind, and the check only ever adds to them.)
 - *Leaving and coming back.* An SDL event watch — called inside the system's own callback,
   before the app is suspended — holds the mixer and the movie clock where they are and
   pauses the outputs (`audio_suspend`), and the loop stops stepping and drawing (no GPU work is
-  allowed in the background). The first frame back delivers `!background`, and a room is
-  paused as Back pauses it: the pause menu up, the room held (`uiInput.ts`). The map, an open
+  allowed in the background). The first frame back delivers `!background`, and a room shows
+  its top bar as Back does (`uiInput.ts`): the room runs on under it, as it always does under
+  the bar, but the player comes back to the bar's focus rather than to a fish. The map, an open
   menu, the intro and the briefcase story carry on where they stopped. Losing the screen to
   Control Center or Siri is the same event. Nothing needs saving on the way out: every store
   write is made durable when it happens (`n_storeSave`; on tvOS `store.c`). The menu smoke drives `!background` on the map and
@@ -826,7 +862,7 @@ rules are by directory and kind, and the check only ever adds to them.)
 **Reading the remote's input log.** Every remote button as SDL reports it, Menu/Back as
 GameController's handler reports it, each touch on and off the surface, every input event
 the host sends (`-> +RemoteBack`), what the router made of each remote press (`route
-RemoteBack on room -> menu pause`), the remote's SDL mapping as it connects, and who owns Back
+RemoteBack on room -> menu bar`), each swipe hold and its release, the remote's SDL mapping as it connects, and who owns Back
 (`ui-events 1 (map root, Back goes Home): controllerUserInteractionEnabled=1`) go to the
 device's unified log, subsystem `io.github.ff4e.fishfillets4ever`, category `input`
 (`input_log` in `main.c`, `tvos_log` in `platform_tvos.m`). Only presses and changes are
@@ -929,34 +965,42 @@ a menu says about itself. On the map: the pad's ☰ opens Options; a volume step
 `ff.options` and reaches the mixer's bus at once; the subtitle language and its `tit_def` are
 persisted; there is no font row, and the subtitles still take their face from `ff.subfont`; Help opens over Options, pages
 and closes; the pad's Ⓑ at the root does nothing while Esc and the remote's Back leave; the
-Options corner is selectable and opens Options. In a room, with the remote: the centre click
-switches fish, an edge click moves the active one (also just after a swipe toward that edge), a swipe moves nothing, Play/Pause undoes
-one move and, held, repeats (350 ms, then every 80 ms) with nothing added on release; Back
-opens the pause menu and the room stops stepping; a swipe steps its highlight, and a swipe
-ending on the ring toward its edge steps it once; Load is greyed and skipped with no save;
-Save asks, Back declines, a click saves the move record; Load restores it; Options and Help
-open from the pause menu and close back to it; Restart starts over; a save mid-move is
-refused as F2 is. With the pad: Ⓧ asks to restart and Ⓑ declines, RB with no save opens
-nothing, LB → Ⓐ saves, ☰ opens and closes the pause menu, Ⓑ goes to the map; Esc opens and
-closes the pause menu, and its Save prompt (the question alone) is declined by Esc and
-answered by Enter; its World map leaves the room. A Play/Pause hold released inside the
-pause menu ends there. With the keyboard last, no hints are drawn on any screen (and, on the
+Options corner is selectable and opens Options; the plain map draws no hints, for the pad or
+the remote. In a room, with the remote: the centre click switches fish, an edge click moves the
+active one; a swipe moves it one step, and an edge click just after it toward its edge is that
+swipe's end (a moment later, a click again); a thumb resting on the surface moves nothing,
+kept on it after a swipe it holds the move (KeyRoom held) — an edge click its way holds on, a
+swipe back turns it, lifting stops the fish, a centre click lets go and switches fish — and
+the thumb that swiped the top bar away moves no fish; Play/Pause undoes one move and, held,
+repeats (350 ms, then every 80 ms) with nothing added on release. Back opens the top bar on
+Save, and the room is not paused: it steps, the mixer's clock runs, and no click, swipe, held
+thumb or Play/Pause moves a fish; the hints step aside. A swipe moves the focus, skipping the
+greyed Load and stopping at the ends, and a swipe ending on the ring toward its edge steps it
+once; a click down hides the bar; Save asks (the prompt does not pause either), Back declines,
+a click saves the move record; Load restores it; Options and Help pause the room and close
+back to the bar, which runs on again; Restart starts over; a save mid-move is refused as F2
+is; coming back to the app shows the bar. With the pad: Ⓧ asks to restart and Ⓑ declines, RB
+with no save opens nothing, LB → Ⓐ saves, ☰ opens and closes the bar and Ⓑ closes it, Ⓑ goes
+to the map; Esc opens and hides the bar, and its Save prompt (the question alone) is declined
+by Esc and answered by Enter; its World map leaves the room. A Play/Pause hold released inside
+the top bar ends there. With the keyboard last, no hints are drawn on any screen (and, on the
 map and in a room, no UI layer at all). At 81 window widths across the margin/top switch
-the legend is where it was with either fish active. With Czech subtitles the pause menu, the
-legend, the confirm prompt and Options are Czech. In windows the map, a room and a story page fill, the
+the legend is where it was with either fish active. With Czech subtitles the top bar, the
+legend, the confirm prompt and Options are Czech. In windows a room and a story page fill, the
 hints lie on their dark strip; in a letterbox margin, they do not. A room's first frame shows
-the remote's hints (room 1, and KUFRIK), and so does the room on leaving the pause menu; with
+the remote's hints (room 1, and KUFRIK), and so does the room on hiding the top bar; with
 `--remote-keys` a key the host leaves unmapped keeps them. At 3840×2160 inside tvOS's insets
-the room's frames get the menus ready, and the pause menu's, Options', Help's and the restart
+the room's frames get the menus ready, and the top bar's, Options', Help's and the restart
 prompt's first frames are each under 10 ms (above). At 1080 and 2160 lines the TV legend hugs
-the screen's edge, 20 px in at 1080 lines (not the title-safe area's): the map's and room 1's
-list at its left, UTES's row at its top. Back as an Apple TV delivers it (above, "The remote's
+the screen's edge, 20 px in at 1080 lines (not the title-safe area's): room 1's list at its
+left, UTES's row at its top; the map has none; the top bar keeps to the title-safe area's top
+in English and Czech. Back as an Apple TV delivers it (above, "The remote's
 Back comes from GameController"). First, though, what the UI draws
 with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted part, the
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 123 checks, ~12 s.
+for each character in both of the UI font's weights. 143 checks, ~15 s.
 
 It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a
@@ -1225,7 +1269,7 @@ iCloud refuse. 16 checks, ~7 s; the DIR is wiped first. In `native:check` and th
 
 ## What it does not do yet
 
-- **The faithful side panel** is not drawn: a TV plays from the legend and the pause menu.
+- **The faithful side panel** is not drawn: a TV plays from the legend and the top bar.
 - **Run on an Apple TV.** The tvOS app builds, archives (unsigned; signed once the account
   allows: see "Apple TV") and starts in the Simulator up to the GPU, but nothing has run on a
   device: the remote's SDL mapping, Back at the map's root going to the system, the absolute

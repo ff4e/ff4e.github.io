@@ -1145,6 +1145,7 @@ static SDL_GPUGraphicsPipeline *surf_pipeline(bool dest_in) {
  *              RemoteSelect (a click in the centre), RemotePlayPause, RemoteBack; its
  *              swipes are made by the JS side from where the thumb is (`n_remoteTouch`),
  *              and `--remote-keys` sends RemoteSwipeUp… (down and up together, no hold)
+ *              and RemoteTouch (Shift held: a thumb resting on the surface)
  *
  * The Siri Remote reaches SDL on tvOS as a gamepad (SDL_HINT_TV_REMOTE_AS_JOYSTICK, on by
  * default): its click is A, Play/Pause is X, Menu/Back is B, and the touch surface (or the
@@ -1199,12 +1200,16 @@ static const char *code_of(SDL_Scancode sc, SDL_Keycode key) {
  * `--remote-keys`: the keyboard as a Siri Remote, for a Mac with no Apple TV. Arrows click
  * an edge (held = held), Return, Space or Tab clicks the centre (Space and Tab are where a
  * keyboard player switches fish), P is Play/Pause, Esc or Backspace is Back, and
- * Shift+arrow swipes. `*swipe` says the code is a swipe (no hold).
+ * Shift+arrow swipes. Shift itself is a thumb on the touch surface (RemoteTouch, held while
+ * Shift is): in a room a swipe holds the fish's move for as long as the thumb stays, so
+ * Shift+arrow, Shift still held, keeps the fish going, and letting go of Shift lifts the thumb.
+ * `*swipe` says the code is a swipe (no hold).
  */
 static const char *remote_key(SDL_Scancode sc, SDL_Keymod mod, bool *swipe) {
   bool shift = (mod & SDL_KMOD_SHIFT) != 0;
   *swipe = false;
   switch (sc) {
+    case SDL_SCANCODE_LSHIFT: case SDL_SCANCODE_RSHIFT: return "RemoteTouch";
     case SDL_SCANCODE_UP: *swipe = shift; return shift ? "RemoteSwipeUp" : "RemoteUp";
     case SDL_SCANCODE_DOWN: *swipe = shift; return shift ? "RemoteSwipeDown" : "RemoteDown";
     case SDL_SCANCODE_LEFT: *swipe = shift; return shift ? "RemoteSwipeLeft" : "RemoteLeft";
@@ -1651,8 +1656,8 @@ static void poll_events(void) {
   while (SDL_PollEvent(&e)) {
     switch (e.type) {
       case SDL_EVENT_QUIT: quit_requested = true; break;
-      /* The game pauses as the pause menu pauses it (uiInput.ts) — on the first frame after
-         it is back, as nothing runs in between (`lifecycle`). */
+      /* A room shows its top bar, as Back does (uiInput.ts) — on the first frame after it is
+         back, as nothing runs in between (`lifecycle`). */
       case SDL_EVENT_WILL_ENTER_BACKGROUND: push_event(false, "!background"); break;
       /* Unfocused, a held key's keyup never arrives: the game drops it (main.ts's blur). */
       case SDL_EVENT_WINDOW_FOCUS_LOST: push_event(false, "!blur"); break;
@@ -1701,13 +1706,27 @@ static void poll_events(void) {
       case SDL_EVENT_KEY_UP: {
         if (e.key.repeat) break; /* the game repeats a held key itself (KeyRoom) */
         bool down = e.type == SDL_EVENT_KEY_DOWN, swipe = false;
-        /* A release is never a swipe, so an edge held while Shift went down still lets go. */
-        const char *rc = remote_keys ? remote_key(e.key.scancode, down ? e.key.mod : 0, &swipe) : NULL;
-        if (rc && swipe) {
-          if (down) { push_event(true, rc); push_event(false, rc); }
-          break;
+        if (remote_keys) {
+          /* A key's release sends what its press sent: an edge held while Shift went down
+             still lets go, and the arrow of a Shift+arrow swipe (down and up at once) sends
+             nothing more — never a stray edge release, which would let go of the swipe's hold. */
+          static const char *sent[SDL_SCANCODE_COUNT];
+          const SDL_Scancode sc = e.key.scancode;
+          const char *rc = remote_key(sc, e.key.mod, &swipe);
+          if (rc && down && swipe) {
+            push_event(true, rc);
+            push_event(false, rc);
+            sent[sc] = "";
+            break;
+          }
+          if (rc && down) { push_event(true, rc); sent[sc] = rc; break; }
+          if (!down && sc < SDL_SCANCODE_COUNT && sent[sc]) {
+            if (*sent[sc]) push_event(false, sent[sc]);
+            sent[sc] = NULL;
+            break;
+          }
+          if (rc) break;
         }
-        if (rc) { push_event(down, rc); break; }
         const char *code = code_of(e.key.scancode, e.key.key);
         if (code) push_event(down, code);
         break;
@@ -1829,10 +1848,10 @@ static void install(JSContext *ctx) {
  * The app's lifecycle, from an event watch: SDL calls it from inside the system's callback
  * (applicationWillResignActive, applicationDidBecomeActive), before the app is suspended —
  * a queued event could be read only after. Leaving, the sound stops where it is and the
- * loop stops drawing (no GPU work is allowed in the background) and stepping; the game
- * pauses as the pause menu pauses it when it is back (`!background`, uiInput.ts). Nothing
+ * loop stops drawing (no GPU work is allowed in the background) and stepping; a room shows
+ * its top bar, as Back does, when it is back (`!background`, uiInput.ts). Nothing
  * is left to save: every store write is made durable when it happens (`n_storeSave`, store.c). Losing focus to an
- * overlay (Control Center, Siri) is the same event, and pauses the same way.
+ * overlay (Control Center, Siri) is the same event, and comes back the same way.
  */
 static bool SDLCALL lifecycle(void *user, SDL_Event *e) {
   (void)user;

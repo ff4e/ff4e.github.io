@@ -11,14 +11,19 @@
  * It walks: the map's Options (☰, and the Options corner) — a volume step persisted to
  * `ff.options` and on the bus, the subtitle language persisted and the plaques following it,
  * no row for the subtitle font (whose `ff.subfont` the subtitles still read) — Help paging and closing, Back at the map's
- * root leaving the game; in a room, the remote's edge click moving the active fish, its
- * centre click switching fish, a swipe moving nothing, Play/Pause undoing (and repeating
- * while held), Back opening the pause menu and pausing the room, Load greyed with no save,
- * Save → confirm → saved, Load → confirm → the saved record restored, Restart, a declined
- * prompt changing nothing, the web's gate refusing a save mid-move, the pad's direct
- * LB/RB/Ⓧ prompts and Ⓑ to the map, and the pause menu's Map. Back as an Apple TV delivers it
- * (press and release together, through GameController's handler): room → pause → room five
- * times over, and at the map's root left to the system.
+ * root leaving the game, and no hints on the plain map; in a room, the remote's edge click
+ * moving the active fish, its centre click switching fish, a swipe moving it one step, and
+ * with the thumb kept on the surface (`--remote-keys`' Shift, `RemoteTouch`) holding the move
+ * until it lifts — turning on a swipe the other way, letting go on another click, never
+ * started by a resting thumb nor carried over from a swipe that closed the top bar, and an
+ * edge click ending a swipe not counted twice — Play/Pause undoing (and repeating while held),
+ * Back opening the top bar WITHOUT pausing the room (it steps, its sound plays, no remote
+ * input moves a fish, the hints step aside), Load greyed with no save, Save → confirm →
+ * saved, Load → confirm → the saved record restored, Options and Help pausing the room,
+ * Restart, a declined prompt changing nothing, the web's gate refusing a save mid-move, the
+ * pad's direct LB/RB/Ⓧ prompts and Ⓑ to the map, and the bar's World map. Back as an Apple TV
+ * delivers it (press and release together, through GameController's handler): room → bar →
+ * room five times over, and at the map's root left to the system.
  *
  * First, what the UI draws with (`uiAssetSmoke.ts`): every carved icon, timed at a 4K TV's
  * size, and every UI string's glyphs in both languages.
@@ -37,8 +42,9 @@ import { atRest } from '../../src/app/roomGates.js';
 import { lengthOfRecord } from '../../src/core/record.js';
 import { busMultiplier, loadSettings } from '../../src/core/settings.js';
 import { advance, currentRoom, draw, enterRoom, initGame, isPaused, roomReady, saveExists, showLegImage, showMap } from './game.js';
+import { heldKeyState } from '../../src/app/movement.js';
 import { ensureMapArt, mapFrame, mapPresented, mapSelectedCorner } from './mapScreen.js';
-import { OPTIONS_ROWS, PAUSE_ITEMS, menuOpen, openMenus, openOptions, pauseItemEnabled, topMenu } from './menus.js';
+import { BAR_ITEMS, OPTIONS_ROWS, barItemEnabled, menuOpen, openMenus, openOptions, topMenu, type BarItem } from './menus.js';
 import { ensureOptionsArt } from './optionsPaint.js';
 import { preloadHelpFigures } from './helpPaint.js';
 import { TV_EDGE, confirmItems, legendItems, preloadLegendArt, type LegendScreen } from './legend.js';
@@ -266,7 +272,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
    * window, TV_EDGE (at 1080 lines) in from it, and on that line exactly (legend.ts). At 4K
    * (`k` 2) only after `firstMenusAt4k`, which needs nothing at that size drawn before it.
    */
-  const insideSafeArea = (what: string, sizes: readonly number[] = [1, 2]): void => {
+  const insideSafeArea = (what: string, sizes: readonly number[] = [1, 2], hints = true): void => {
     for (const k of sizes) {
       const W = 1920 * k, H = 1080 * k, l = 80 * k, t = 60 * k, sw = W - 2 * l, sh = H - 2 * t, edge = TV_EDGE * k;
       const box = ui.screen === 'room' && draw(target, 0) ? pictureBox(target.width, target.height, W, H) : pictureBox(2560, 1920, W, H);
@@ -282,19 +288,33 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       const moved = legend.map((op) => shifted(op, l - edge, t - edge));
       const off = moved.filter((op) => !opInside(op, W - 2 * edge, H - 2 * edge));
       const near = Math.min(...moved.map((op) => Math.min(...opCorner(op))));
+      if (!hints) {
+        check(legend.length === 0, `${what} at ${W}×${H}: no hints`);
+        continue;
+      }
       check(legend.length > 0 && off.length === 0 && Math.abs(near) <= 1,
         `${what} at ${W}×${H}: the legend hugs the screen's edge, ${edge} px in, not the title-safe area's (${off.length} of ${legend.length} past that${off.length ? `, first ${JSON.stringify(off[0])}` : ''}; its nearest ${near.toFixed(1)} px from the line)`);
     }
   };
+  /** The top bar's focused tab. */
+  const barSel = (): BarItem => BAR_ITEMS[(topMenu() as { sel: number }).sel]!;
+  /** Focus the top bar's `item`, stepping toward it with `left` / `right` (the bar does not wrap). */
+  const focusBar = async (item: BarItem, left = 'RemoteLeft', right = 'RemoteRight'): Promise<void> => {
+    const want = BAR_ITEMS.indexOf(item);
+    for (let i = 0; i < BAR_ITEMS.length && barSel() !== item; i++) {
+      await tap(BAR_ITEMS.indexOf(barSel()) < want ? right : left);
+    }
+  };
   /**
-   * The first pause menu, confirm prompt, Options and Help at a 4K Apple TV's size (3840×2160,
+   * The first top bar, confirm prompt, Options and Help at a 4K Apple TV's size (3840×2160,
    * tvOS's title-safe insets), as the room's frames would have them: nothing at that size is
    * cached yet, so the frames before a menu opens must get them ready — a little each (the
    * largest frame's rasterising is printed) — and each menu's first frame then costs about what
    * any later one does. On the Apple TV this interpreter is several times slower than on a Mac
    * (QuickJS on an A12 against an M-series core: ~3.5× by single-core benchmarks, taken as 5×
    * here), so a first frame is held under 50 ms there: 10 ms here. The first pause menu once
-   * took ~0.6 s here, ~3 s and more on an A12, all of it rasterising its glass at that size.
+   * took ~0.6 s here, ~3 s and more on an A12, all of it rasterising its glass at that size
+   * (then the pause menu, which the top bar replaced).
    */
   const firstMenusAt4k = async (): Promise<void> => {
     const W = 3840, H = 2160, insets = [160, 120, 160, 120] as const;
@@ -323,18 +343,15 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       check(ms * DEVICE_FACTOR < DEVICE_MS,
         `${what}'s first frame at 2160 lines: ${describeCost(currentCost(), ms)} (×${DEVICE_FACTOR} for an Apple TV: under ${DEVICE_MS} ms); the press that opened it ${opening.toFixed(1)} ms`);
     };
-    await first('the pause menu', 'RemoteBack');
-    check(topMenu()?.kind === 'pause', 'that was the pause menu');
-    const select = async (item: string): Promise<void> => {
-      for (let i = 0; i < PAUSE_ITEMS.length && PAUSE_ITEMS[(topMenu() as { sel: number }).sel] !== item; i++) await tap('RemoteDown');
-    };
-    await select('options');
+    await first('the top bar', 'RemoteBack');
+    check(topMenu()?.kind === 'bar', 'that was the top bar');
+    await focusBar('options');
     await first('Options', 'RemoteSelect');
     await tap('RemoteBack');
-    await select('help');
+    await focusBar('help');
     await first('Help', 'RemoteSelect');
     await tap('RemoteBack');
-    await select('restart');
+    await focusBar('restart');
     await first('the restart prompt', 'RemoteSelect');
     check(topMenu()?.kind === 'confirm', 'that was the restart prompt');
     await tap('RemoteBack');
@@ -408,9 +425,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await tap('PadB');
     check(exits === 0 && ui.screen === 'map', 'the pad\'s Ⓑ on the plain map does nothing');
     snap('map-pad');
-    check(!strip('map-pad'), 'the pad\'s hints in the map\'s letterbox margin: muted, no strip');
-    snap('map-pad-fill', 960, 720);
-    check(strip('map-pad-fill'), 'with the map filling the window, the hints lie over it on a dark strip');
+    check(snaps['map-pad']!.length === 0, 'the pad on the plain map: no hints (B6), and no UI layer drawn at all');
     await tap('Escape');
     check(exits === 1, 'the keyboard\'s Esc at the map\'s root leaves the game');
     await tap('RemoteBack');
@@ -479,6 +494,8 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
 
     // ── A room, with the remote ───────────────────────────────────────────────────
     await tap('RemoteUp'); // on the map: the remote is the last input
+    check(lastInput() === 'remote' && (paintUi(WIN_W, WIN_H, pictureBox(2560, 1920, WIN_W, WIN_H))?.ops.length ?? 1) === 0,
+      'the remote on the plain map: no hints either (B6)');
     check(lastInput() === 'remote' && await enterShowsHints(1), 'entering a room, its first frame shows the remote\'s hints');
     await untilReady();
     await tap('RemoteSelect'); // a press makes the remote the last input
@@ -532,18 +549,110 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-4;
     check(lifted === null && sdlY !== 0 && !!thumb && near(thumb[0], 0.5) && near(thumb[1], -0.5),
       `the remote's touch surface reads raw: a lifted thumb is none (SDL_GetGamepadAxis: ${sdlY}), raw (16384, 16384) is ${JSON.stringify(thumb?.map((v) => +v.toFixed(3)))}`);
-    // In a room a swipe does nothing, so a click right after one toward its edge is a click.
-    const pre = moves();
-    await tap(`RemoteSwipe${movedBy.slice('Remote'.length)}`);
-    await press(movedBy);
-    steps(8);
-    await press(movedBy, false);
-    rest();
-    check(moves() === pre + 1, 'in a room, an edge click just after a swipe toward that edge still moves the fish');
-    const before = moves();
-    for (const sw of ['RemoteSwipeLeft', 'RemoteSwipeRight', 'RemoteSwipeUp', 'RemoteSwipeDown']) await tap(sw);
+    // ── Swipes move the fish (B6) ─────────────────────────────────────────────────
+    const logged = (needle: string): boolean => __native.inputLog().slice(-30).some((l) => l.includes(needle));
+    const start0 = moves();
+    /** Undo back to `start0`: each check below starts from the same place. */
+    const back0 = async (): Promise<void> => {
+      for (let i = 0; i < 100 && moves() > start0; i++) {
+        await tap('RemotePlayPause');
+        rest();
+      }
+    };
+    /** A quick click: down and up before a step, so it is one move (KeyRoom's tap, 1 → 3). */
+    const click = async (code: string): Promise<void> => {
+      await tap(code);
+      rest();
+    };
+    // A way the active fish can go two steps from here, so a second move would show.
+    let way = '';
+    for (const dir of ['RemoteRight', 'RemoteLeft', 'RemoteUp', 'RemoteDown']) {
+      await click(dir);
+      clock += 400;
+      await click(dir);
+      clock += 400;
+      const two = moves() === start0 + 2;
+      await back0();
+      if (two) {
+        way = dir;
+        break;
+      }
+    }
+    check(way !== '' && moves() === start0, `the active fish can go two steps one way (${way || 'none'}), and undo brings it back`);
+    const name = way.slice('Remote'.length).toLowerCase();
+    const swipeTo = `RemoteSwipe${way.slice('Remote'.length)}`;
+    const back = { RemoteRight: 'RemoteSwipeLeft', RemoteLeft: 'RemoteSwipeRight', RemoteUp: 'RemoteSwipeDown', RemoteDown: 'RemoteSwipeUp' }[way]!;
+    let pre = moves();
+    await tap(swipeTo);
     steps(10);
-    check(moves() === before, 'a swipe moves nothing');
+    rest();
+    check(moves() === pre + 1, `a swipe moves the active fish one step, the thumb lifting at once (${pre} → ${moves()})`);
+    await back0();
+    // A click on the edge a swipe has just stepped to is that swipe's end (it finished on the
+    // ring): one step, not two. A moment later, a click on that edge is a click again.
+    pre = moves();
+    await tap(swipeTo);
+    inputFrame(clock);
+    await click(way);
+    check(moves() === pre + 1, `in a room, an edge click just after a swipe toward that edge is the swipe's end, not a second move (${pre} → ${moves()})`);
+    clock += 400;
+    await click(way);
+    check(moves() === pre + 2, 'and a click on that edge a moment later moves it again');
+    await back0();
+    // A thumb resting on the surface moves nothing; only travel does.
+    pre = moves();
+    await press('RemoteTouch');
+    steps(20);
+    check(moves() === pre && heldKeyState() === 0, 'a thumb resting on the surface moves no fish');
+    // The thumb kept on the surface after a swipe holds the move, at the held key's cadence.
+    await tap(swipeTo);
+    steps(20);
+    check(heldKeyState() === 2 && moves() > pre && logged(`swipe holds ${name}`),
+      `the thumb kept on the surface after a swipe keeps the move held (KeyRoom ${heldKeyState()}, ${pre} → ${moves()} moves)`);
+    // An edge click toward the held direction is that swipe pressing on: it holds on.
+    await press(way);
+    await press(way, false);
+    steps(4);
+    check(heldKeyState() === 2, 'an edge click toward the held swipe\'s way: the hold goes on');
+    // A swipe the other way turns it.
+    await tap(back);
+    steps(2);
+    check(heldKeyState() === 2 && logged(`(was ${name})`), 'a swipe the other way, the thumb still down, turns the held move');
+    await press('RemoteTouch', false);
+    steps(2);
+    rest();
+    const stopped = moves();
+    steps(20);
+    check(heldKeyState() === 0 && moves() === stopped && logged('lets go of') && logged('lifted'), 'lifting the thumb lets go: the fish stops');
+    // Another click lets go of a held swipe and is itself: the centre click switches fish.
+    await press('RemoteTouch');
+    await tap(swipeTo);
+    steps(2);
+    const fishA = engine!.active;
+    await tap('RemoteSelect');
+    steps(2);
+    check(heldKeyState() === 0 && engine!.active !== fishA && logged('a click (RemoteSelect)'),
+      'a centre click during a held swipe lets go of it, and switches fish');
+    await press('RemoteTouch', false);
+    await tap('RemoteSelect');
+    rest();
+    // A swipe that closes the top bar does not carry on into the room: that thumb moves no
+    // fish until it lifts.
+    pre = moves();
+    await press('RemoteTouch');
+    await tap('RemoteBack');
+    await tap('RemoteSwipeDown');
+    check(!menuOpen(), 'a swipe down closes the top bar');
+    await tap('RemoteSwipeDown');
+    await tap(swipeTo);
+    steps(10);
+    check(moves() === pre && heldKeyState() === 0, 'and the same thumb swiping on moves no fish');
+    await press('RemoteTouch', false);
+    inputFrame(clock);
+    clock += 400;
+    await back0();
+    const before = moves();
+    check(before === start0, `undone back to before the swipes (${before} moves)`);
     await tap('RemotePlayPause');
     rest();
     check(moves() === before - 1, `Play/Pause undoes one move (${before} → ${moves()})`);
@@ -580,7 +689,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       clock += 10;
       inputFrame(clock);
     }
-    check(!menuOpen() && moves() === held, `Play/Pause released inside the pause menu undoes nothing, then or later (${held} → ${moves()})`);
+    check(!menuOpen() && moves() === held, `Play/Pause released inside the top bar undoes nothing, then or later (${held} → ${moves()})`);
     await tap('RemotePlayPause');
     rest();
     check(moves() === held - 1, 'and the next Play/Pause undoes one move');
@@ -588,17 +697,34 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     // ── A 4K Apple TV's first menus ─────────────────────────────────────────────
     await firstMenusAt4k();
 
-    // ── The pause menu ────────────────────────────────────────────────────────────
-    check(!saveExists() && !pauseItemEnabled('load'), 'no save yet: Load is greyed');
+    // ── The top bar (B6): Back in a room, and the room runs on under it ──────────
+    check(!saveExists() && !barItemEnabled('load'), 'no save yet: Load is greyed');
     await tap('RemoteBack');
-    check(topMenu()?.kind === 'pause' && isPaused(), 'Back in a room opens the pause menu and pauses the room');
-    const c0 = count;
+    check(topMenu()?.kind === 'bar' && !isPaused() && barSel() === 'save',
+      'Back in a room opens the top bar, focused on Save, and does not pause the room');
+    const c0 = count, sound0 = mixer.now();
     advance(LOGIC_MS * 1.5);
     advance(LOGIC_MS * 1.5);
-    check(count === c0, 'a paused room does not step');
-    snap('pause-remote');
+    check(count > c0 && !mixer.paused && mixer.now() > sound0,
+      `under the top bar the room steps on (${c0} → ${count}) and its sound plays (the mixer's clock ${sound0.toFixed(0)} → ${mixer.now().toFixed(0)} ms)`);
+    // No remote input moves a fish while the bar has focus.
+    const m0 = moves(), fish0b = engine!.active;
+    await press('RemoteUp');
+    steps(8);
+    await press('RemoteUp', false);
+    await tap('RemoteSwipeUp');
+    await press('RemoteTouch');
+    await tap('RemoteSwipeUp');
+    steps(8);
+    await press('RemoteTouch', false);
+    await tap('RemotePlayPause');
+    steps(8);
+    check(topMenu()?.kind === 'bar' && moves() === m0 && engine!.active === fish0b && heldKeyState() === 0,
+      'with the bar up, no click, swipe, held thumb or Play/Pause moves, switches or undoes a fish');
+    check(!roomHints(), 'the room\'s hints step aside while the bar is up');
+    snap('bar-remote');
     await tap('RemoteBack');
-    check(!menuOpen() && roomHints(), 'Back resumes, and the room\'s hints are up at once');
+    check(!menuOpen() && roomHints(), 'Back hides it, and the room\'s hints are up at once');
     // ── Back, as an Apple TV's remote delivers it (TestFlight build 2: it opened the pause
     // menu once in many presses). tvOS gives the app Menu/Back's press and release together;
     // SDL polls the button and loses such a press, so the host takes it from GameController's
@@ -610,14 +736,14 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       let rounds = 0;
       for (let i = 0; i < 5; i++) {
         const open = await tvBack();
-        const paused = topMenu()?.kind === 'pause' && isPaused() && owns[owns.length - 1] === false && open.length === 2;
+        const up = topMenu()?.kind === 'bar' && !isPaused() && owns[owns.length - 1] === false && open.length === 2;
         await tvBack();
-        if (paused && !menuOpen() && ui.screen === 'room' && !isPaused()) rounds++;
+        if (up && !menuOpen() && ui.screen === 'room' && !isPaused()) rounds++;
       }
-      check(rounds === 5, `room → Back → pause → Back → room, 5 times over, the game owning Back throughout (${rounds} of 5)`);
+      check(rounds === 5, `room → Back → top bar → Back → room, 5 times over, the game owning Back throughout, never paused (${rounds} of 5)`);
       const two = await tvBack(2);
       check(two.join() === '+RemoteBack,-RemoteBack,+RemoteBack,-RemoteBack' && !menuOpen() && ui.screen === 'room',
-        'two presses between two polls are two taps: the pause menu opens and closes again');
+        'two presses between two polls are two taps: the top bar opens and closes again');
     });
     insideSafeArea('the room\'s remote legend');
     routeEvent('!background', clock);
@@ -625,40 +751,49 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     const c1 = count;
     advance(LOGIC_MS * 1.5);
     advance(LOGIC_MS * 1.5);
-    check(topMenu()?.kind === 'pause' && isPaused() && count === c1, 'leaving the app in a room opens the pause menu, and the room holds');
-    insideSafeArea('the pause menu');
+    check(topMenu()?.kind === 'bar' && !isPaused() && count > c1, 'coming back to the app in a room shows the top bar, the room running on');
+    insideSafeArea('the top bar', [1, 2], false);
     await tap('RemoteBack');
+    // Left and right move the focus, skipping the greyed Load, and stop at the ends (tvOS's
+    // tab bars do not wrap); down, or Back, hides the bar.
     await tap('RemoteBack');
     const order: string[] = [];
-    for (let i = 0; i < PAUSE_ITEMS.filter(pauseItemEnabled).length; i++) {
-      await tap('RemoteSwipeDown');
-      order.push(PAUSE_ITEMS[(topMenu() as { sel: number }).sel]!);
+    for (let i = 0; i < 4; i++) {
+      await tap('RemoteSwipeRight');
+      order.push(barSel());
     }
-    check(!order.includes('load') && order[order.length - 1] === 'resume', `a swipe moves the highlight, skipping the greyed Load (${order.join(' → ')})`);
+    for (let i = 0; i < 6; i++) {
+      await tap('RemoteSwipeLeft');
+      order.push(barSel());
+    }
+    check(order.join() === 'restart,options,help,help,options,restart,save,map,map,map',
+      `a swipe moves the focus, skipping the greyed Load, stopping at the ends (${order.join(' → ')})`);
     // A swipe that finishes pressing the ring toward its edge is one step, not two; a click
     // on that edge a moment later is a click again.
-    const sel = (): number => (topMenu() as { sel: number }).sel;
-    const s0 = sel();
-    await tap('RemoteSwipeDown');
-    const s1 = sel();
-    await tap('RemoteDown');
-    check(s1 !== s0 && sel() === s1, 'a swipe that ends clicking the ring toward its edge steps the highlight once');
+    await focusBar('options', 'ArrowLeft', 'ArrowRight');
+    await tap('RemoteSwipeLeft');
+    const s1 = barSel();
+    await tap('RemoteLeft');
+    check(s1 === 'restart' && barSel() === s1, 'a swipe that ends clicking the ring toward its edge steps the focus once');
     clock += 400;
+    await tap('RemoteLeft');
+    check(barSel() === 'save', 'and a click on that edge a moment later steps it again');
     await tap('RemoteDown');
-    check(sel() !== s1, 'and a click on that edge a moment later steps it again');
-    const select = async (item: string): Promise<void> => {
-      for (let i = 0; i < PAUSE_ITEMS.length && PAUSE_ITEMS[(topMenu() as { sel: number }).sel] !== item; i++) await tap('RemoteDown');
+    check(!menuOpen(), 'a click down hides the bar');
+    const select = async (item: BarItem): Promise<void> => {
+      await focusBar(item);
       await tap('RemoteSelect');
     };
     const rec = engine!.srecord;
+    await tap('RemoteBack');
     await select('save');
-    check(topMenu()?.kind === 'confirm', 'Save asks first');
+    check(topMenu()?.kind === 'confirm' && !isPaused(), 'Save asks first, and the prompt does not pause the room either');
     snap('confirm-save-remote');
     await tap('RemoteBack');
-    check(topMenu()?.kind === 'pause' && !saveExists(), 'Back declines: back on the pause menu, nothing saved');
+    check(topMenu()?.kind === 'bar' && !saveExists(), 'Back declines: back on the top bar, nothing saved');
     await tap('RemoteSelect');
     await tap('RemoteSelect');
-    check(!menuOpen() && !isPaused() && saveExists(), 'a click says yes: saved, and the room resumes');
+    check(!menuOpen() && saveExists(), 'a click says yes: saved, and the bar is gone');
     check(JSON.parse(localStorage.getItem(`ff.save.${currentRoom()}`) ?? '{}').rec === rec, 'the slot holds the move record');
     // Move on, then load the save back.
     await press(movedBy);
@@ -674,22 +809,24 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     rest();
     check(engine!.srecord === rec, 'yes: the saved record is restored');
 
-    // Options and Help from the pause menu, and back to it.
+    // Options and Help from the top bar pause the room — whole panels over it — and close
+    // back to the bar, which does not.
     await tap('RemoteBack');
     await select('options');
-    check(topMenu()?.kind === 'options' && isPaused(), 'Options from the pause menu, the room still paused');
+    check(topMenu()?.kind === 'options' && isPaused() && mixer.paused, 'Options from the top bar pauses the room and holds its sound');
     const fx0 = settings.volume.effect;
     await tap('RemoteRight');
     check(stored().volume.effect === Math.min(12, fx0 + 1), 'an edge click right raises the effect volume, persisted');
     await tap('RemoteLeft');
     snap('options-remote');
     await tap('RemoteBack');
-    check(topMenu()?.kind === 'pause', 'Back closes Options, back to the pause menu');
+    check(topMenu()?.kind === 'bar' && !isPaused() && !mixer.paused, 'Back closes Options, back to the top bar, the room running again');
     await select('help');
+    check(topMenu()?.kind === 'help' && isPaused(), 'Help from the top bar pauses the room');
     await tap('RemoteRight');
-    check(topMenu()?.kind === 'help' && helpScreens.page === 1, 'Help from the pause menu pages right');
+    check(topMenu()?.kind === 'help' && helpScreens.page === 1, 'Help pages right');
     await tap('RemoteSelect');
-    check(topMenu()?.kind === 'pause', 'a click closes the help');
+    check(topMenu()?.kind === 'bar' && !isPaused(), 'a click closes the help, back to the bar');
     await select('restart');
     await tap('RemoteSelect');
     rest();
@@ -700,11 +837,13 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await press(movedBy);
     steps(1);
     check(!atRest(), 'a fish is mid-move');
+    await press(movedBy, false);
     await tap('RemoteBack');
-    await select('save');
+    await focusBar('save');
+    await tap('RemoteSelect');
+    check(topMenu()?.kind === 'confirm' && !atRest(), 'Save asks, the fish still mid-move');
     await tap('RemoteSelect');
     check(!saveExists(), 'Save → yes mid-move is refused, as F2 is on the web');
-    await press(movedBy, false);
     rest();
 
     // ── The pad's direct shortcuts, and the keyboard ──────────────────────────────
@@ -721,33 +860,36 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(saveExists(), 'Ⓐ says yes: saved');
     snap('room-pad');
     await tap('PadMenu');
-    check(topMenu()?.kind === 'pause', 'the pad\'s ☰ opens the pause menu');
-    snap('pause-pad');
+    check(topMenu()?.kind === 'bar' && !isPaused(), 'the pad\'s ☰ opens the top bar');
+    snap('bar-pad');
     await tap('PadMenu');
     check(!menuOpen(), 'and closes it');
+    await tap('PadMenu');
+    await tap('PadB');
+    check(!menuOpen() && ui.screen === 'room', 'Ⓑ closes it too, staying in the room');
     await tap('Escape');
-    check(topMenu()?.kind === 'pause' && lastInput() === 'key', 'the keyboard\'s Esc opens the pause menu');
-    snap('pause-key');
-    const screens: LegendScreen[] = ['room', 'map', 'panel', 'legimage', 'pause', 'options', 'help'];
+    check(topMenu()?.kind === 'bar' && lastInput() === 'key', 'the keyboard\'s Esc opens the top bar');
+    snap('bar-key');
+    const screens: LegendScreen[] = ['room', 'panel', 'legimage', 'options', 'help'];
     check(screens.every((sc) => legendItems(sc, 'key').length === 0) && confirmItems('key').length === 0,
       'the keyboard gets no button hints on any screen, nor on the confirm prompt');
     check(screens.every((sc) => legendItems(sc, 'pad').length > 0 && legendItems(sc, 'remote').length > 0),
       'the pad and the remote get them on every screen');
     // The keyboard's confirm prompt: the question alone, answered by Esc and Enter.
     localStorage.removeItem(`ff.save.${currentRoom()}`);
-    for (let i = 0; i < PAUSE_ITEMS.length && PAUSE_ITEMS[(topMenu() as { sel: number }).sel] !== 'save'; i++) await tap('ArrowDown');
+    await focusBar('save', 'ArrowLeft', 'ArrowRight');
     await tap('Enter');
     check(topMenu()?.kind === 'confirm' && lastInput() === 'key', 'Enter on Save asks first');
     snap('confirm-save-key');
     await tap('Escape');
-    check(topMenu()?.kind === 'pause' && !saveExists(), 'Esc declines: back on the pause menu, nothing saved');
+    check(topMenu()?.kind === 'bar' && !saveExists(), 'Esc declines: back on the top bar, nothing saved');
     await tap('Enter');
     await tap('Enter');
-    check(!menuOpen() && !isPaused() && saveExists(), 'Enter says yes: saved, and the room resumes');
+    check(!menuOpen() && saveExists(), 'Enter says yes: saved, and the bar is gone');
     await tap('Escape');
-    check(topMenu()?.kind === 'pause', 'Esc opens the pause menu again');
+    check(topMenu()?.kind === 'bar', 'Esc opens the top bar again');
     await tap('Escape');
-    check(!menuOpen(), 'and Esc resumes');
+    check(!menuOpen(), 'and Esc hides it');
     snap('room-key');
     check(snaps['room-key']!.length === 0, 'the keyboard in a room: no legend, and no UI layer drawn at all');
     await tap('PadB');
@@ -756,7 +898,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await untilReady();
     await tap('RemoteBack');
     await select('map');
-    check(ui.screen === 'map' && !menuOpen(), 'the pause menu\'s World map leaves the room');
+    check(ui.screen === 'map' && !menuOpen(), 'the top bar\'s World map leaves the room');
 
     // A story page filling the window: its "Continue" on the strip, and any button dismisses it.
     check(lastInput() === 'remote', 'the remote is still the last input');
@@ -783,8 +925,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     settings.subtitles = 'cz';
     settings.titDef = 'cz';
     await tap('PadMenu');
-    snap('pause-pad-cz');
-    check(snaps['pause-pad-cz']!.some((op) => op[0] === 'text' && op[1] === 'Pauza'), 'with Czech subtitles the pause menu is Czech');
+    snap('bar-pad-cz');
+    check(['Mapa', 'Uložit', 'Nápověda'].every((w) => snaps['bar-pad-cz']!.some((op) => op[0] === 'text' && op[1] === w)),
+      'with Czech subtitles the top bar is Czech');
     await tap('PadB');
     snap('room-pad-cz');
     check(snaps['room-pad-cz']!.some((op) => op[0] === 'text' && op[1] === 'Malá'), 'and so is the room\'s legend');
@@ -795,14 +938,15 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     snap('options-pad-cz');
     await tap('PadB');
     settings.subtitles = 'off';
-    check(t('paused') === 'Pauza', 'subtitles off: the UI keeps the last language chosen');
+    check(t('help') === 'Nápověda', 'subtitles off: the UI keeps the last language chosen');
     settings.subtitles = 'en';
     settings.titDef = 'en';
-    check(t('paused') === 'Paused', 'and English with English subtitles');
+    check(t('help') === 'Help', 'and English with English subtitles');
 
-    // ── A TV's legend, at the screen's edge ───────────────────────────────────────
-    // The map and room 1 (the list down the left margin) and UTES, wider than the screen
-    // (a row along the top), at a 1080-line and a 2160-line Apple TV with the remote.
+    // ── A TV's legend, at the screen's edge, and its top bar ──────────────────────
+    // Room 1 (the list down the left margin) and UTES, wider than the screen (a row along
+    // the top), at a 1080-line and a 2160-line Apple TV with the remote; the map, which has
+    // none; and room 1's top bar, in English and Czech.
     setLastInput('remote');
     const tv = async (name: string): Promise<void> => {
       snap(`tv-${name}-1080`, 1920, 1080, [80, 60, 80, 60]);
@@ -811,9 +955,25 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     showMap();
     await mapTick();
     await tv('map');
+    check(snaps['tv-map-1080']!.length === 0 && snaps['tv-map-2160']!.length === 0, 'a TV\'s map: no hints (B6)');
     await enterRoom(1);
     await untilReady();
     await tv('room');
+    for (const lang of ['en', 'cz'] as const) {
+      settings.subtitles = lang;
+      settings.titDef = lang;
+      await tap('RemoteBack');
+      await tv(`bar-${lang}`);
+      await tap('RemoteBack');
+    }
+    settings.subtitles = 'en';
+    settings.titDef = 'en';
+    for (const lines of [1080, 2160]) {
+      const bar = (lang: string): readonly UiOp[] => snaps[`tv-bar-${lang}-${lines}`]!;
+      check(['en', 'cz'].every((lang) => bar(lang).length > 0 && bar(lang).every((op) => opInside(op, 1760 * lines / 1080, 960 * lines / 1080)) &&
+        Math.min(...bar(lang).map((op) => opCorner(op)[1])) === 0) && bar('en').some((op) => op[1] === 'World map') && bar('cz').some((op) => op[1] === 'Mapa'),
+      `at ${lines} lines the top bar keeps to the title-safe area, along its top, in English and Czech`);
+    }
     await enterRoom(7);
     await untilReady();
     await tv('wide');
@@ -825,9 +985,9 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       const chips = (name: string): UiOp[] => snaps[`tv-${name}-${lines}`]!.filter((op) => op[0] === 'rect');
       const left = (name: string): number => l + Math.min(...chips(name).map((op) => op[1] as number));
       const top = (name: string): number => t + Math.min(...chips(name).map((op) => op[2] as number));
-      check(left('map') === edge && left('room') === edge && top('wide') === edge &&
-        ['map', 'room', 'wide'].every((nm) => snaps[`tv-${nm}-${lines}`]!.every((op) => opInside(shifted(op, l, t), W, H))),
-      `at ${lines} lines the TV legend hugs the screen's edge, ${edge} px in: the map's and room 1's list at its left (${left('map')}, ${left('room')}), UTES's row at its top (${top('wide')})`);
+      check(left('room') === edge && top('wide') === edge &&
+        ['room', 'wide'].every((nm) => snaps[`tv-${nm}-${lines}`]!.every((op) => opInside(shifted(op, l, t), W, H))),
+      `at ${lines} lines the TV legend hugs the screen's edge, ${edge} px in: room 1's list at its left (${left('room')}), UTES's row at its top (${top('wide')})`);
     }
 
     // ── The layout snapshot ──────────────────────────────────────────────────────

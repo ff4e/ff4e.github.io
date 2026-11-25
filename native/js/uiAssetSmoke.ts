@@ -13,10 +13,10 @@ const ms = (t0: number): number => Math.round(__native.now() - t0);
 /**
  * Every icon rasterises with ink in each painted part, and the fast rasteriser makes the
  * masks the exhaustive one does in this interpreter too. Then the cost a 4K TV (2160 lines)
- * pays: the whole set at the pause menu's and the confirm prompt's sizes there — printed, and
+ * pays: the whole set at the top bar's and the confirm prompt's sizes there — printed, and
  * held under a bound far above it (a wall-clock gate is only a tripwire under load; this one
- * is for a return to testing every segment at every sample, which took ~6 s for the pause
- * menu's icons alone).
+ * is for a return to testing every segment at every sample, which took ~6 s for the then
+ * pause menu's icons alone).
  */
 export function checkIcons(check: Check): void {
   const names = iconNames();
@@ -33,7 +33,7 @@ export function checkIcons(check: Check): void {
   check(differ.length === 0, `the fast rasteriser's masks are the exhaustive one's at 25 px (${ms(t1)} ms)${differ.length ? `; not ${differ.join(', ')}` : ''}`);
   const at4k: string[] = [];
   let total = 0;
-  for (const size of [80, 96]) {
+  for (const size of [68, 96]) {
     releaseIcons();
     const t0 = __native.now();
     for (const n of names) warmIcon(n, size);

@@ -5,7 +5,7 @@
  * swipe's end. Synthetic sequences, one sample a frame (~16 ms), x right and y down in -1..1.
  */
 import { describe, expect, it } from 'vitest';
-import { LIFTED, STEP, SWIPE_CLICK_MS, SwipeTracker, type SwipeDir } from '../native/js/remoteSwipe.js';
+import { LIFTED, STEP, SWIPE_CLICK_MS, SwipeHold, SwipeTracker, type SwipeDir } from '../native/js/remoteSwipe.js';
 
 type Sample = readonly [number, number] | null;
 
@@ -95,6 +95,15 @@ describe('remote swipes', () => {
     expect(play(tr, line([0.9, 0.1], [0.2, 0.1], 6), 400).steps).toEqual(['left']);
   });
 
+  it('turning back counts from the furthest the thumb went, not from its last step', () => {
+    const tr = new SwipeTracker();
+    // A step right at -0.1, the thumb on to 0.35 (no second step), then back to -0.2: a
+    // STEP back from 0.35, though only 0.1 back from the step.
+    expect(play(tr, [...line([-0.6, 0], [0.35, 0], 10), ...line([0.35, 0], [-0.2, 0], 8)]).steps).toEqual(['right', 'left']);
+    // Back less than a STEP from the furthest is nothing.
+    expect(play(new SwipeTracker(), [...line([-0.6, 0], [0.35, 0], 10), ...line([0.35, 0], [-0.1, 0], 8)]).steps).toEqual(['right']);
+  });
+
   it('a lift starts the next swipe afresh', () => {
     const tr = new SwipeTracker();
     expect(play(tr, [...line([-0.4, 0], [0.05, 0], 5), null, ...line([-0.3, 0], [0.15, 0], 5)]).steps).toEqual([]);
@@ -135,5 +144,58 @@ describe('remote swipes', () => {
     // travel counts from the next one.
     const tr = new SwipeTracker();
     expect(play(tr, [null, ...line([0.05, 0], [-0.7, 0.04], 8), null]).steps).toEqual(['left']);
+  });
+
+  describe('in a room, a swipe held while the thumb stays (B6)', () => {
+    const LIFT: Sample = [0, -1 / 32767];
+
+    /** Feed `samples` as uiInput does: steps to the hold, a lift letting go. What was held, frame by frame. */
+    function hold(samples: readonly Sample[]): (SwipeDir | null)[] {
+      const tr = new SwipeTracker();
+      const h = new SwipeHold();
+      return samples.map((s, i) => {
+        h.steps(tr.feed(s, i * 16));
+        if (!tr.touching) h.release();
+        return h.held;
+      });
+    }
+
+    it('a thumb landing and resting, anywhere, holds nothing', () => {
+      for (const p of [[0.9, 0], [-0.85, 0.1], [0, 0.9], [0.03, -0.02]] as const) {
+        expect(hold([LIFT, ...rest(p, 40), LIFT]).every((d) => d === null)).toBe(true);
+      }
+    });
+
+    it('a swipe holds its way while the thumb rests where it stopped, and the lift lets go', () => {
+      const held = hold([LIFT, ...line([-0.3, 0], [0.4, 0.05], 8), ...rest([0.4, 0.05], 60), LIFT, LIFT]);
+      const first = held.indexOf('right');
+      expect(first).toBeGreaterThan(0);
+      expect(held.slice(first, -2).every((d) => d === 'right')).toBe(true);
+      expect(held.slice(-2)).toEqual([null, null]);
+    });
+
+    it('the lifted reading (0, -1/32767) and a missing remote (null) both let go', () => {
+      expect(hold([...line([0, -0.1], [0, -0.8], 8), LIFT]).slice(-1)).toEqual([null]);
+      expect(hold([...line([0, -0.1], [0, -0.8], 8), null]).slice(-1)).toEqual([null]);
+    });
+
+    it('settling back less than a step keeps the way; a whole step back turns it', () => {
+      const go = line([-0.6, 0], [0.2, 0], 8);
+      const settle = line([0.2, 0], [-0.1, 0], 5); // 0.3 back from the furthest: less than a STEP
+      expect(hold([...go, ...settle]).slice(-1)).toEqual(['right']);
+      const turn = line([0.2, 0], [-0.4, 0], 8); // 0.6 back from the furthest (the last step was at -0.1)
+      expect(hold([...go, ...turn]).slice(-1)).toEqual(['left']);
+      const across = line([0.2, 0], [0.2, 0.7], 8); // a step down, the thumb still on
+      expect(hold([...go, ...across]).slice(-1)).toEqual(['down']);
+    });
+
+    it('more steps the same way change nothing: one press, held', () => {
+      const h = new SwipeHold();
+      expect(h.steps(['up'])).toEqual({ up: null, down: 'up' });
+      expect(h.steps(['up', 'up'])).toBeNull();
+      expect(h.steps(['left', 'down'])).toEqual({ up: 'up', down: 'down' });
+      expect(h.release()).toBe('down');
+      expect(h.release()).toBeNull();
+    });
   });
 });

@@ -23,13 +23,10 @@ const STRINGS = {
   load: ['Load', 'Nahrát'],
   restart: ['Restart', 'Restart'],
   choose: ['Choose', 'Vybrat'],
-  open: ['Open', 'Otevřít'],
   options: ['Options', 'Nastavení'],
-  exit: ['Exit', 'Konec'],
   select: ['Select', 'Potvrdit'],
   cancel: ['Cancel', 'Zrušit'],
   continue: ['Continue', 'Pokračovat'],
-  resume: ['Resume', 'Pokračovat'],
   change: ['Change', 'Změnit'],
   done: ['Done', 'Hotovo'],
   page: ['Page', 'Stránka'],
@@ -37,8 +34,7 @@ const STRINGS = {
   yes: ['Yes', 'Ano'],
   no: ['No', 'Ne'],
   skip: ['Skip', 'Přeskočit'],
-  // The pause menu.
-  paused: ['Paused', 'Pauza'],
+  // The top bar.
   worldMap: ['World map', 'Mapa'],
   help: ['Help', 'Nápověda'],
   // The confirm prompt.

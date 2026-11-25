@@ -75,7 +75,7 @@ export interface LegendItem {
 }
 
 /** Where the legend is: the screen it describes. */
-export type LegendScreen = 'room' | 'cutscene' | 'map' | 'panel' | 'legimage' | 'pause' | 'options' | 'help';
+export type LegendScreen = 'room' | 'cutscene' | 'panel' | 'legimage' | 'options' | 'help';
 
 const chip = (text: string, hue?: number): Glyph => (hue === undefined ? { kind: 'chip', text } : { kind: 'chip', text, hue });
 // The pad's face-button hues (A green, B red, X blue, Y yellow), at the room symbol's lightness.
@@ -153,17 +153,11 @@ export function legendItems(screen: LegendScreen, source: InputSource): LegendIt
     }
     case 'cutscene':
       return [item([remote ? BACK : B], 'skip')]; // A4: "B: Skip"; B2: Back (or a click) skips
-    case 'map':
-      if (remote) return [item([EDGE], 'choose'), item([CLICK], 'open'), item([PLAY], 'options'), item([BACK], 'exit')];
-      return [item([L], 'choose'), item([A], 'open'), item([MENU], 'options')];
     case 'panel':
       if (remote) return [item([EDGE], 'choose'), item([CLICK], 'select'), item([BACK], 'cancel')];
       return [item([L], 'choose'), item([A], 'select'), item([B], 'cancel')];
     case 'legimage':
       return [item([remote ? CLICK : A], 'continue')];
-    case 'pause':
-      if (remote) return [item([EDGE], 'choose'), item([CLICK], 'select'), item([BACK], 'resume')];
-      return [item([L], 'choose'), item([A], 'select'), item([B], 'resume')];
     case 'options':
       if (remote) return [item([EDGE], 'change'), item([CLICK], 'select'), item([BACK], 'done')];
       return [item([DPAD], 'change'), item([A], 'select'), item([B], 'done')];
@@ -407,12 +401,16 @@ export function drawLegend(ui: Ui, items: readonly LegendItem[], sw: number, sh:
   drawHintRow(ui, items, x, m.edge + py + dy, m, pal, true);
 }
 
-/** Which legend the screen shows, or null for none (a launch, the confirm prompt). */
+/**
+ * Which legend the screen shows, or null for none: the plain world map (B6: it needs none —
+ * its selection and its plaques say it all), a launch, the confirm prompt, and the top bar
+ * (B6: the room's hints step aside for it; it is tvOS's own idiom).
+ */
 export function legendScreen(top: { kind: string } | null, mapPanel: boolean, launching: boolean): LegendScreen | null {
-  if (top) return top.kind === 'confirm' ? null : (top.kind as LegendScreen);
+  if (top) return top.kind === 'confirm' || top.kind === 'bar' ? null : (top.kind as LegendScreen);
   if (ui.screen === 'room') return cutscene ? 'cutscene' : 'room';
   if (ui.screen === 'legimage' || ui.mapOverlay === 'credits') return 'legimage'; // A4: "A: Continue"
   if (ui.screen === 'intro') return null; // A4: no legend during the intro (it has its skip hint)
   if (launching) return null;
-  return mapPanel ? 'panel' : 'map';
+  return mapPanel ? 'panel' : null;
 }

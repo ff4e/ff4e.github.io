@@ -12,7 +12,7 @@
  * samples a pixel. The menus' sizes follow the window's height, so a 4K TV's are big: the UI
  * layer rehearses the menus, icons and all, before one is first opened (`uiLayer.ts`).
  *
- * Two symbols the web's set has no need for — Resume and Help, in the pause menu — are drawn
+ * One symbol the web's set has no need for — Help, in the top bar — is drawn
  * here in the same hand (uneven outline, one highlight facet, one shade facet).
  */
 import iconSource from '../../src/styles/nativeMenuIcons.svg?raw';
@@ -23,11 +23,6 @@ import type { UiPalette } from './uiPalette.js';
 import { costed } from './uiCost.js';
 
 const NATIVE_ONLY = `
-  <g id="resume" stroke="var(--menu-outline, #243039)" stroke-width=".8" stroke-linejoin="round">
-    <path fill="currentColor" d="M6.2 3.1 8.9 3.6 20.4 10.9 20.9 12.9 9.3 20.5 6.1 21 5.3 19.1 5.7 4.8Z"/>
-    <path fill="none" stroke="var(--menu-highlight, #fff8dc)" stroke-width=".85" d="m7 5.3-.2 13.4M9 4.9l10.4 6.6"/>
-    <path fill="none" stroke="var(--menu-shade, #aba48e)" stroke-width="1" d="m9.4 18.8 10-6.3"/>
-  </g>
   <g id="help" stroke="var(--menu-outline, #243039)" stroke-width=".8" stroke-linejoin="round">
     <path fill="currentColor" d="M6.9 7C7.6 3.8 10 2.2 12.6 2.3c3.2.1 5.4 2.1 5.3 4.8-.1 2.4-1.6 3.5-3.2 4.6-1.1.8-1.5 1.4-1.4 2.9l-3.5.1c-.3-2.5.4-3.7 2.1-5 1.2-.9 2.2-1.5 2.2-2.8.1-1.3-.9-2.1-2.2-2.1-1.4 0-2.3.8-2.7 2.4ZM10.1 16.4l3.7-.3.4 3.6-3.7.4Z"/>
     <path fill="none" stroke="var(--menu-highlight, #fff8dc)" stroke-width=".85" d="M8.4 6.2c.9-2 3.6-2.8 5.7-1.8M10.9 17.2l2.1-.1"/>
@@ -187,7 +182,7 @@ function iconSet(): Map<string, readonly Part[]> {
   return icons;
 }
 
-export type IconName = 'map' | 'undo' | 'more' | 'save' | 'load' | 'options' | 'restart' | 'close' | 'resume' | 'help';
+export type IconName = 'map' | 'undo' | 'more' | 'save' | 'load' | 'options' | 'restart' | 'close' | 'help';
 
 /** Every icon the set has (the menu smoke checks each one rasterises, ink in every part). */
 export const iconNames = (): string[] => [...iconSet().keys()];

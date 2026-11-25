@@ -3,7 +3,7 @@
  * Save or Load button while KUFRIK's demonstration says how to use it (help2: save, help7 and
  * help11: load). A TV has no such buttons; the legend's item for the verb pulses instead (the
  * controller spec's A4) — the pad's Save (LB) or Load (RB), or, with the remote, whose Save
- * and Load are in the pause menu, its Menu item, as a phone's cue opens its "..." menu.
+ * and Load are in the top bar, its Menu item, as a phone's cue opens its "..." menu.
  *
  * The lifecycle is the browser's: the cue starts with the line (whether or not it is voiced
  * or captioned) and lasts as long as it does; it goes with the room, with the demonstration
