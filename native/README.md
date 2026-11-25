@@ -289,7 +289,11 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   system, which goes Home — and off everywhere else (`systemBack`, `native/host/main.c`). SDL
   sets the view controller's `controllerUserInteractionEnabled` from that hint on every change
   (`SDL_uikitviewcontroller.m`, `SDL_AppleTVControllerUIHintChanged`); the host reads it back
-  every frame, sets it itself if it ever disagrees, and logs each change (below). The host
+  every frame, sets it itself if it ever disagrees, and logs each change (below). Ownership
+  is decided again when Back reaches the root, not only at the last frame: two quick Backs
+  drained in one poll can close Options or the record panel and then press Back at the root
+  they uncovered, and that second one is the system's too. And on tvOS the game never quits
+  itself, whatever the system does with Back (`mapKey`, `uiInput.ts`). The host
   also sets `SDL_HINT_TV_REMOTE_AS_JOYSTICK` to 1 on tvOS rather than rely on SDL's default.
   The pad's Ⓑ still does nothing on the plain map, on purpose.
 - **The remote's Back comes from GameController, not SDL.** On TestFlight build 2 Back opened
@@ -308,7 +312,8 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   between two polls makes no event, held across one makes two (`__native.remoteBackProbe`) —
   then drives room → Back → pause → Back → room five times through the handler's path, two
   presses in one poll as two taps, and at the map's root, with the system owning Back as on a
-  TV, Back left to it.
+  TV, Back left to it — also as the second of two Backs in one poll that first close Options
+  (and, in the map smoke, the record panel) — and Back at the root on tvOS never quitting.
 - **☰ in a room opens the pause menu**, on every native platform. The controller spec's A3
   has the pad's ☰ open Options directly; its B4 has it open the pause menu on tvOS. A deliberate
   deviation from A3: one native TV UI everywhere, and Options is one row away.
@@ -912,8 +917,9 @@ The map has a smoke gate of its own (`native/js/mapSmoke.ts`, `--smoke-map --sto
 map driven key by key through the real flow — a fresh session opens on the map with room 1
 selected, Ⓑ does nothing, Ⓐ launches it, its win comes back with it still selected, a
 direction moves the selection, the record panel opens on Run and cycles Run → Replay →
-Cancel, Ⓑ closes it, Replay plays the best record and comes back, a leg-final room's win
-and its Run both show the story page, and Ⓑ in a room goes back to the map. 21 checks, a
+Cancel, Ⓑ closes it, two remote Backs in one poll on an Apple TV close it and leave the second
+to the system (never a quit), Replay plays the best record and comes back, a leg-final room's win
+and its Run both show the story page, and Ⓑ in a room goes back to the map. 22 checks, a
 few seconds; CI runs it after the room smoke. Its input goes through the same router as the
 window's (`uiInput.ts`).
 
@@ -950,7 +956,7 @@ with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 121 checks, ~12 s.
+for each character in both of the UI font's weights. 123 checks, ~12 s.
 
 It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a

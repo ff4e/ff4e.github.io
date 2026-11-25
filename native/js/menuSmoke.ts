@@ -419,7 +419,29 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       const sent = await tvBack();
       check(sent.join() === '+RemoteBack,-RemoteBack' && owns[owns.length - 1] === true && exits === 2 && ui.screen === 'map' && !menuOpen(),
         `on an Apple TV, the remote's Back at the map's root is the system's (systemBack(true): Home), and the game does nothing with it (${sent.join()})`);
+      // Two Backs drained in one poll (a stalled main thread queues them): the first closes
+      // Options, the second lands at the root it uncovered before any frame — and is the
+      // system's then, not the game's to quit on.
+      await tap('RemotePlayPause');
+      inputFrame(clock);
+      const before = owns[owns.length - 1];
+      const two = await tvBack(2);
+      check(before === false && two.length === 4 && !menuOpen() && ui.screen === 'map' && exits === 2 && owns[owns.length - 1] === true,
+        `on an Apple TV, Options (Play/Pause) then two Backs in one poll: Options closes, and the second Back is the system's at the root, decided at that press (${exits - 2} quits)`);
     });
+    // And should the system ever not take Back at the root on tvOS (UI events somehow off),
+    // the game still does nothing: it never quits itself there.
+    const realTv = __native.tv, realBack = __native.systemBack;
+    (__native as { tv: boolean }).tv = true;
+    __native.systemBack = (): boolean => false;
+    try {
+      await tvBack();
+    } finally {
+      (__native as { tv: boolean }).tv = realTv;
+      __native.systemBack = realBack;
+      inputFrame(clock);
+    }
+    check(exits === 2 && ui.screen === 'map' && !menuOpen(), 'on tvOS, Back at the map\'s root never quits the game, even with the system not taking it');
     for (let i = 0; i < 40 && mapSelectedCorner() !== 'options'; i++) {
       await tap(['ArrowUp', 'ArrowRight', 'ArrowDown', 'ArrowLeft'][Math.floor(i / 10)]!);
       await mapTick();

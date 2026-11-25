@@ -81,12 +81,17 @@ export function setKeyboardIsRemote(on: boolean): void {
 const sourceOf = (code: string): InputSource =>
   code.startsWith('Pad') ? 'pad' : code.startsWith('Remote') ? 'remote' : 'key';
 
-/** What leaves the game at the map's root. The smoke gate swaps it to watch for it. */
+/**
+ * What leaves the game at the map's root. The smoke gate swaps it to watch for it. Never
+ * called on tvOS (`mapKey`), where a game must not quit itself (App Review).
+ */
 let exitApp: () => void = () => __native.quit();
 /**
  * Does the system own Back right now? On tvOS at the map's root it does — the remote's
  * Menu/Back goes Home, and a game must not quit itself (App Review) — so the game does
- * nothing with it there. Refreshed every frame (`inputFrame`).
+ * nothing with it there. Refreshed every frame (`inputFrame`), and again when Back reaches
+ * the root: one batch of events can close a panel or a menu and then press Back at the
+ * root it uncovered, before the next frame (two quick presses the host drains together).
  */
 let systemOwnsBack = false;
 
@@ -286,7 +291,12 @@ function mapKey(down: boolean, code: string): void {
     if (!down || mapBusy() || ui.creditsLoading) return;
     if (!back) openOptions();
     else if (mapPanelOpen()) mapKeyDown('Escape'); // daCancel
-    else if (!systemOwnsBack) exitApp(); // Back at the root; on tvOS the system takes it Home
+    else {
+      systemOwnsBack = __native.systemBack(atMapRoot()); // decided now, not at the last frame
+      // Back at the root. On tvOS the system takes it Home, and should it ever reach the game
+      // instead (UI events somehow off) the game still does nothing: it never quits itself.
+      if (!systemOwnsBack && !__native.tv) exitApp();
+    }
     return;
   }
   const key = MAP_KEYS[code] ?? (sourceOf(code) === 'key' ? code : null);
