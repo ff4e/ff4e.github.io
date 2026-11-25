@@ -17,6 +17,26 @@ export interface MovieInfo {
   readonly frameRate: number;
 }
 
+/** `audioStatus()`: what audio.c knows about its output. */
+export interface AudioStatus {
+  /** Times the mixer's output has been opened: 1, plus one per reopen. */
+  readonly opens: number;
+  /** Times the app went to the background (a repeated event is not counted). */
+  readonly suspends: number;
+  readonly suspended: boolean;
+  /** The game's own pause (`audioPause`). */
+  readonly paused: boolean;
+  /** No output has asked for sound for 750 ms: the clock runs on the wall's time until one does. */
+  readonly stalled: boolean;
+  /** A mixer stream is open (false after a failed reopen). */
+  readonly output: boolean;
+  readonly movieOutput: boolean;
+  /** Frames the output has asked for, ever. */
+  readonly fed: number;
+  /** The mixer's clock, in frames. */
+  readonly clock: number;
+}
+
 export interface GlyphRaster {
   readonly w: number;
   readonly h?: number;
@@ -215,6 +235,14 @@ export interface NativeApi {
   audioVoices(): number;
   /** `manual` only: mix `frames` more; with `capture`, return them (float32). */
   audioAdvance(frames: number, capture?: boolean): ArrayBuffer | undefined;
+  /** The output's health (audio.c's watchdog): for the checks and the stat line. */
+  audioStatus(): AudioStatus;
+  /**
+   * `--smoke-audio-lifecycle` only: play the system's part — app events, the audio session's
+   * notices, a dead output, time away — through the host's real paths (main.c,
+   * `n_audioLifecycle`). Space-separated steps; it must end in the foreground.
+   */
+  audioLifecycle?(steps: string): void;
 
   // ── Movies (native/host/movie.c over the platform decoder; native/js/movie.ts). ──
   /** Open a movie under the asset root to read its frames from `start` s. Throws when it cannot. */

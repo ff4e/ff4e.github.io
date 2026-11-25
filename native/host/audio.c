@@ -26,10 +26,26 @@
  * would, tick for tick, at any speed, with no device and no wall clock in it.
  *
  * All mixer state is behind one mutex, held by the audio thread for one block at a time.
+ *
+ * Keeping the output alive (audio_poll, below): on tvOS the system can take the output away
+ * — another app's sound interrupts the audio session, the route changes, media services
+ * reset — and SDL 3.4's iOS/tvOS path does not always give it back (native/README.md,
+ * "When the sound does not come back"). The mixer does not depend on the SDL stream: its
+ * voices and its clock live here. So a dead output is noticed (nothing has asked for sound
+ * for STALL_NS) and the streams are simply reopened, with nothing the game hears lost, and
+ * while there is no output the clock is driven in real time, silently, as SDL's dummy
+ * driver would.
  */
 #include "audio.h"
 
 #include <SDL3/SDL.h>
+#include <stdarg.h>
+
+#ifdef SDL_PLATFORM_TVOS
+void tvos_log_audio(const char *line);                /* platform_tvos.m */
+bool tvos_audio_activate(char *err, size_t errlen);
+void tvos_audio_describe(char *out, size_t outlen);
+#endif
 
 #define MAX_VOICES 256
 #define CHUNK 1024
@@ -66,6 +82,25 @@ static int nbufs, capbufs;
 static uint32_t *ended;
 static int nended, capended;
 static float chunk[CHUNK];
+
+/* The output's health (audio_poll). `gen` is each opened stream's userdata: a reopen moves it
+   on, and `dead_gen` (audio_test_kill) makes the streams of one generation stop answering. */
+static uint32_t gen = 1, dead_gen;
+static Uint64 last_feed_ns; /* the device last asked for sound (under `lock`) */
+static Uint64 watch_ns;     /* the watchdog counts from here: an open, a reopen, a resume (under `lock`) */
+static int64_t fed_frames;  /* frames the device has asked for, ever (under `lock`) */
+enum { REQ_NONE, REQ_CHECK, REQ_REOPEN };
+static SDL_AtomicInt request_level, session_lost;
+static void *request_why; /* SDL_SetAtomicPointer: a static string */
+/* The rest is the main thread's (audio_poll). */
+#define STALL_NS (750 * SDL_NS_PER_MS)
+#define SETTLED_NS (2 * SDL_NS_PER_SECOND)
+static bool stalled;
+static int attempts, opens = 1, suspends;
+static Uint64 last_attempt_ns, stalled_ns, drive_ns;
+static double drive_owed;
+static float drive_buf[CHUNK];
+static void request(int level, const char *why);
 
 static void unref(Buf *b) {
   if (--b->refs > 0) return;
@@ -123,28 +158,54 @@ static void mix(float *out, int n) {
 }
 
 static void SDLCALL feed(void *user, SDL_AudioStream *s, int additional, int total) {
-  (void)user;
   (void)total;
+  SDL_LockMutex(lock);
+  bool dead = (uint32_t)(uintptr_t)user == dead_gen;
+  if (!dead) last_feed_ns = SDL_GetTicksNS();
+  SDL_UnlockMutex(lock);
+  if (dead) return;
   int frames = additional / (int)sizeof(float);
   while (frames > 0) {
     int k = frames < CHUNK ? frames : CHUNK;
     SDL_LockMutex(lock);
     mix(chunk, k);
+    fed_frames += k;
     SDL_UnlockMutex(lock);
     SDL_PutAudioStreamData(s, chunk, k * (int)sizeof(float));
     frames -= k;
   }
 }
 
+/* A stream on the default output, of this generation, running. */
+static SDL_AudioStream *open_stream(const SDL_AudioSpec *spec, SDL_AudioStreamCallback cb) {
+  SDL_AudioStream *s = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, spec, cb, (void *)(uintptr_t)gen);
+  if (s) SDL_ResumeAudioStreamDevice(s);
+  return s;
+}
+
+static const SDL_AudioSpec mix_spec = {SDL_AUDIO_F32, 1, AUDIO_RATE};
+
+/* What the output is, for the log. */
+static void log_output(const char *what) {
+  SDL_AudioSpec spec = {0};
+  int frames = 0;
+  SDL_AudioDeviceID id = stream ? SDL_GetAudioStreamDevice(stream) : 0;
+  const char *name = id ? SDL_GetAudioDeviceName(id) : NULL;
+  if (id) SDL_GetAudioDeviceFormat(id, &spec, &frames);
+  audio_log("%s: driver %s, device '%s', %d Hz, %d ch, %d-frame buffer", what, SDL_GetCurrentAudioDriver(),
+            name ? name : "?", spec.freq, spec.channels, frames);
+}
+
 static bool open_device(void) {
   if (!SDL_InitSubSystem(SDL_INIT_AUDIO)) return false;
-  const SDL_AudioSpec spec = {SDL_AUDIO_F32, 1, AUDIO_RATE};
-  stream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, feed, NULL);
+  stream = open_stream(&mix_spec, feed);
   if (!stream) {
     SDL_QuitSubSystem(SDL_INIT_AUDIO);
     return false;
   }
-  SDL_ResumeAudioStreamDevice(stream);
+  SDL_LockMutex(lock);
+  watch_ns = SDL_GetTicksNS();
+  SDL_UnlockMutex(lock);
   return true;
 }
 
@@ -174,10 +235,9 @@ static void movie_pull(float *out, int64_t n) {
 }
 
 static void SDLCALL feed_movie(void *user, SDL_AudioStream *s, int additional, int total) {
-  (void)user;
   (void)total;
   SDL_LockMutex(lock);
-  if (!mv.on) {
+  if (!mv.on || (uint32_t)(uintptr_t)user == dead_gen) {
     SDL_UnlockMutex(lock);
     return;
   }
@@ -226,7 +286,7 @@ bool audio_movie_play(float *pcm, int64_t frames, int channels, int rate, char *
   /* A logical device of its own on the same output (SDL mixes logical devices): the mixer's
      was opened with SDL_OpenAudioDeviceStream, whose bindings SDL does not let change. */
   const SDL_AudioSpec spec = {SDL_AUDIO_F32, channels, rate};
-  mstream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, feed_movie, NULL);
+  mstream = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, feed_movie, (void *)(uintptr_t)gen);
   if (!mstream || !SDL_ResumeAudioStreamDevice(mstream)) {
     SDL_snprintf(err, errlen, "cannot open the movie's audio stream: %s", SDL_GetError());
     audio_movie_stop();
@@ -321,6 +381,7 @@ static JSValue n_audioOpen(JSContext *ctx, JSValueConst self, int argc, JSValueC
     mode = "manual";
   } else if (open_device()) {
     mode = "device";
+    log_output("output open");
   } else {
     /* No output to be had: SDL's dummy driver consumes at the device's pace without one, so
        the clock still runs in real time and nothing that waits on a sound waits for ever. */
@@ -328,6 +389,7 @@ static JSValue n_audioOpen(JSContext *ctx, JSValueConst self, int argc, JSValueC
     SDL_SetHint(SDL_HINT_AUDIO_DRIVER, "dummy");
     if (!open_device()) return JS_ThrowInternalError(ctx, "cannot open audio: %s", SDL_GetError());
     mode = "dummy";
+    log_output("output open (silent)");
   }
   return JS_NewString(ctx, mode);
 }
@@ -483,6 +545,25 @@ static JSValue n_audioVoices(JSContext *ctx, JSValueConst self, int argc, JSValu
   return JS_NewInt32(ctx, n);
 }
 
+/* audioStatus() -> the output's health, for the checks (audioLifecycleSmoke.ts). */
+static JSValue n_audioStatus(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  SDL_LockMutex(lock);
+  double fed = (double)fed_frames, clock = (double)clock_frames;
+  bool held = suspended, pause = paused;
+  SDL_UnlockMutex(lock);
+  JSValue r = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, r, "opens", JS_NewInt32(ctx, opens));
+  JS_SetPropertyStr(ctx, r, "suspends", JS_NewInt32(ctx, suspends));
+  JS_SetPropertyStr(ctx, r, "suspended", JS_NewBool(ctx, held));
+  JS_SetPropertyStr(ctx, r, "paused", JS_NewBool(ctx, pause));
+  JS_SetPropertyStr(ctx, r, "stalled", JS_NewBool(ctx, stalled));
+  JS_SetPropertyStr(ctx, r, "output", JS_NewBool(ctx, stream != NULL));
+  JS_SetPropertyStr(ctx, r, "movieOutput", JS_NewBool(ctx, mstream != NULL));
+  JS_SetPropertyStr(ctx, r, "fed", JS_NewFloat64(ctx, fed));
+  JS_SetPropertyStr(ctx, r, "clock", JS_NewFloat64(ctx, clock));
+  return r;
+}
+
 /*
  * audioAdvance(frames, capture) -> the mixed frames as float32 when `capture`: the manual
  * clock's whole drive (the headless runs). Refused when a device drives the mixer.
@@ -518,6 +599,7 @@ void audio_install(JSContext *ctx, JSValue native, bool device) {
       {"audioBusGain", n_audioBusGain, 2},   {"audioPause", n_audioPause, 1},
       {"audioClock", n_audioClock, 0},       {"audioEnded", n_audioEnded, 0},
       {"audioVoices", n_audioVoices, 0},     {"audioAdvance", n_audioAdvance, 2},
+      {"audioStatus", n_audioStatus, 0},
   };
   for (size_t i = 0; i < sizeof fns / sizeof fns[0]; i++)
     JS_SetPropertyStr(ctx, native, fns[i].name, JS_NewCFunction(ctx, fns[i].fn, fns[i].name, fns[i].len));
@@ -526,8 +608,13 @@ void audio_install(JSContext *ctx, JSValue native, bool device) {
 void audio_suspend(bool on) {
   if (!lock) return;
   SDL_LockMutex(lock);
+  bool was = suspended;
   suspended = on;
+  int64_t clock = clock_frames;
+  if (!on) watch_ns = SDL_GetTicksNS(); /* a stall is measured from here, not from before */
   SDL_UnlockMutex(lock);
+  if (was == on) return; /* a repeated event changes nothing, and is released once */
+  suspends += on;
   /* And stop the devices pulling at all (the mix would be silence): no work in the background. */
   SDL_AudioStream *outs[2] = {stream, mstream};
   for (int i = 0; i < 2; i++) {
@@ -535,6 +622,174 @@ void audio_suspend(bool on) {
     if (on) SDL_PauseAudioStreamDevice(outs[i]);
     else SDL_ResumeAudioStreamDevice(outs[i]);
   }
+  audio_log("%s, the mixer clock at %.3f s", on ? "suspended for the background" : "resumed in the foreground",
+            (double)clock / AUDIO_RATE);
+  if (!on) request(REQ_CHECK, "back in the foreground");
+}
+
+/* ── Keeping the output alive ────────────────────────────────────────────────────── */
+
+void audio_log(const char *fmt, ...) {
+  char line[256];
+  va_list ap;
+  va_start(ap, fmt);
+  SDL_vsnprintf(line, sizeof line, fmt, ap);
+  va_end(ap);
+#ifdef SDL_PLATFORM_TVOS
+  tvos_log_audio(line); /* the unified log, category `audio` (native/README.md) */
+#else
+  SDL_Log("audio: %s", line);
+#endif
+}
+
+/* What a notice asks of the main thread: a check (the session reactivated, the watchdog
+   decides), or a reopen. Set from any thread; taken by audio_poll. */
+static void request(int level, const char *why) {
+  SDL_SetAtomicPointer(&request_why, (void *)why);
+  for (;;) {
+    int cur = SDL_GetAtomicInt(&request_level);
+    if (cur >= level || SDL_CompareAndSwapAtomicInt(&request_level, cur, level)) return;
+  }
+}
+
+void audio_notice(AudioNotice what, const char *detail) {
+  static const char *const names[] = {"note", "session lost", "session back", "route change", "media services reset", "device removed"};
+  audio_log("%s: %s", names[what], detail);
+  switch (what) {
+    case AUDIO_LOST: SDL_SetAtomicInt(&session_lost, 1); break;
+    case AUDIO_BACK:
+    case AUDIO_ROUTE: request(REQ_CHECK, names[what]); break;
+    case AUDIO_RESET:
+    case AUDIO_REMOVED: request(REQ_REOPEN, names[what]); break;
+    case AUDIO_INFO: break;
+  }
+}
+
+void audio_sdl_event(const SDL_Event *e) {
+  if (e->adevice.recording) return;
+  char d[96];
+  SDL_snprintf(d, sizeof d, "SDL audio device %u", (unsigned)e->adevice.which);
+  if (e->type == SDL_EVENT_AUDIO_DEVICE_REMOVED) audio_notice(AUDIO_REMOVED, d);
+  else if (e->type == SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED) {
+    SDL_strlcat(d, " changed format", sizeof d);
+    audio_notice(AUDIO_INFO, d);
+  }
+}
+
+/* Ask the platform for the audio session (tvOS: setActive:YES, which SDL does only once). */
+static void activate_session(void) {
+#ifdef SDL_PLATFORM_TVOS
+  char err[160], route[256];
+  bool ok = tvos_audio_activate(err, sizeof err);
+  tvos_audio_describe(route, sizeof route);
+  if (ok) audio_log("session active: %s", route);
+  else audio_log("could not activate the session: %s; %s", err, route);
+#endif
+}
+
+/* Throw the streams away and open them again: a new SDL device, a new AudioQueue. Both go
+   first — they share one physical device, which SDL closes only with its last stream. */
+static void reopen(const char *why, Uint64 now) {
+  attempts++;
+  last_attempt_ns = now;
+  audio_log("reopening the output (%s), attempt %d", why, attempts);
+  activate_session();
+  if (mstream) SDL_DestroyAudioStream(mstream);
+  if (stream) SDL_DestroyAudioStream(stream);
+  mstream = stream = NULL;
+  SDL_LockMutex(lock);
+  gen++;
+  watch_ns = now;
+  bool movie = mv.on;
+  const SDL_AudioSpec mspec = {SDL_AUDIO_F32, mv.channels, mv.rate};
+  mv.fed_before = mv.pos; /* the movie's clock carries on from where its sound is */
+  mv.request_ns = now;
+  SDL_UnlockMutex(lock);
+  stream = open_stream(&mix_spec, feed);
+  opens++;
+  if (!stream) {
+    audio_log("reopen failed (%s): the mixer keeps time silently until the output is back", SDL_GetError());
+    return;
+  }
+  if (movie && !(mstream = open_stream(&mspec, feed_movie))) audio_log("the movie's stream did not reopen: %s", SDL_GetError());
+  log_output("output reopened");
+}
+
+/* Mix the wall's time away, silently, while there is no output to ask for it. */
+static void drive(Uint64 now) {
+  double owed = (double)(now - drive_ns) * AUDIO_RATE / 1e9 + drive_owed;
+  int64_t n = (int64_t)owed;
+  drive_owed = owed - (double)n;
+  drive_ns = now;
+  SDL_LockMutex(lock);
+  for (int64_t done = 0; done < n;) {
+    int k = n - done < CHUNK ? (int)(n - done) : CHUNK;
+    mix(drive_buf, k);
+    done += k;
+  }
+  if (mv.on && !paused && !suspended) {
+    mv.pos += n * mv.rate / AUDIO_RATE;
+    mv.fed_before = mv.pos;
+    mv.request_ns = now;
+  }
+  SDL_UnlockMutex(lock);
+}
+
+void audio_poll(void) {
+  if (!lock || !mode || SDL_strcmp(mode, "manual") == 0) return;
+  Uint64 now = SDL_GetTicksNS();
+  SDL_LockMutex(lock);
+  bool held = suspended;
+  Uint64 fed_at = last_feed_ns, from = SDL_max(last_feed_ns, watch_ns);
+  SDL_UnlockMutex(lock);
+  if (held) { /* nothing is asked of a backgrounded output; requests wait for the foreground */
+    drive_ns = now; /* and the time away is not driven either */
+    drive_owed = 0;
+    return;
+  }
+  int req = SDL_SetAtomicInt(&request_level, REQ_NONE);
+  if (req != REQ_NONE) {
+    const char *why = SDL_GetAtomicPointer(&request_why);
+    bool lost = SDL_SetAtomicInt(&session_lost, 0) != 0;
+    if (req == REQ_REOPEN || lost || !stream) {
+      /* A session the system took away is not trusted to come back by itself (SDL retries
+         AudioQueueStart only on three notifications, and never reactivates the session). */
+      reopen(lost ? "the session was taken away" : why, now);
+      return;
+    }
+    activate_session(); /* a check: the watchdog below says whether the output is pulling */
+  }
+  if (now - from < STALL_NS) {
+    if (stalled && fed_at > stalled_ns) {
+      audio_log("the output is pulling again after %.2f s", (double)(now - stalled_ns) / 1e9);
+      stalled = false;
+    }
+    /* Retries start from the shortest wait again only once a reopened output has kept pulling. */
+    if (!stalled && now - last_attempt_ns >= SETTLED_NS) attempts = 0;
+    if (stalled) {
+      drive(now); /* until the new output has pulled once */
+    } else {
+      drive_ns = now;
+      drive_owed = 0;
+    }
+    return;
+  }
+  if (!stalled) {
+    stalled = true;
+    stalled_ns = now;
+    audio_log("the output stopped pulling: nothing asked for sound for %.2f s", (double)(now - from) / 1e9);
+  }
+  Uint64 wait = attempts == 0 ? 0 : (Uint64)SDL_min(8, 1 << (attempts - 1)) * SDL_NS_PER_SECOND;
+  if (now - last_attempt_ns >= wait) reopen("the output stopped pulling", now);
+  drive(now);
+}
+
+void audio_test_kill(void) {
+  if (!lock) return;
+  SDL_LockMutex(lock);
+  dead_gen = gen;
+  SDL_UnlockMutex(lock);
+  audio_log("test: the output stops answering (generation %u)", (unsigned)gen);
 }
 
 void audio_shutdown(void) {

@@ -80,6 +80,7 @@ import { soundPoll } from './sound.js';
 import { mixer } from './seams/audioEngine.js';
 import { MIX_RATE } from './sdlAudioBackend.js';
 import { runStartupProbe } from './startupProbe.js';
+import { runAudioLifecycleSmoke } from './audioLifecycleSmoke.js';
 import { simulateTvSafeArea } from './safeArea.js';
 
 const argv = __native.args();
@@ -100,6 +101,10 @@ async function main(): Promise<void> {
   setScratchCanvasFactory(nativeScratchCanvas);
   setSurfaceFactory(nativeSurface);
   const target = new NativeAiScreen();
+  if (flag('--smoke-audio-lifecycle')) {
+    __native.quit(await runAudioLifecycleSmoke());
+    return;
+  }
   if (flag('--smoke-audio')) {
     __native.quit(await runAudioSmoke());
     return;

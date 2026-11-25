@@ -42,12 +42,15 @@ bool store_remote_changed(void); /* store.c: iCloud brought another device's pro
 void tvos_remote_init(void);                  /* platform_tvos.m: the remote's absolute touch and Menu */
 void tvos_log(const char *line);              /* platform_tvos.m: the unified log */
 int tvos_ui_events(void *uiwindow, int set);  /* platform_tvos.m: controllerUserInteractionEnabled */
+void tvos_audio_init(void);                   /* platform_tvos.m: the audio session's notices */
 #endif
 
 /* ── state ─────────────────────────────────────────────────────────────────────── */
 static SDL_GPUDevice *dev;
 static SDL_Window *win;
 static bool headless;
+static bool audio_output;      /* --audio-output: an output even headless (the lifecycle checks) */
+static bool audio_test_hooks;  /* --smoke-audio-lifecycle: `audioLifecycle` */
 static bool quit_requested;
 static int exit_code;
 static char root[1024];
@@ -1656,6 +1659,8 @@ static void poll_events(void) {
       case SDL_EVENT_WILL_ENTER_BACKGROUND: push_event(false, "!background"); break;
       /* Unfocused, a held key's keyup never arrives: the game drops it (main.ts's blur). */
       case SDL_EVENT_WINDOW_FOCUS_LOST: push_event(false, "!blur"); break;
+      case SDL_EVENT_AUDIO_DEVICE_REMOVED:
+      case SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED: audio_sdl_event(&e); break;
       case SDL_EVENT_GAMEPAD_ADDED: {
         SDL_Gamepad *g = SDL_OpenGamepad(e.gdevice.which);
         if (!g) break;
@@ -1781,6 +1786,8 @@ static bool call_global(JSContext *ctx, const char *name) {
   return called;
 }
 
+static JSValue n_audioLifecycle(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv);
+
 static void install(JSContext *ctx) {
   static const struct { const char *name; JSCFunction *fn; int len; } fns[] = {
       {"print", n_print, 1},           {"now", n_now, 0},
@@ -1820,7 +1827,8 @@ static void install(JSContext *ctx) {
   install_text(ctx, n);
   install_movie(ctx, n);
   install_store(ctx, n, js_argc, js_argv);
-  audio_install(ctx, n, !headless); /* headless: no output, the game advances the mixer */
+  audio_install(ctx, n, !headless || audio_output); /* headless: no output, the game advances the mixer */
+  if (audio_test_hooks) JS_SetPropertyStr(ctx, n, "audioLifecycle", JS_NewCFunction(ctx, n_audioLifecycle, "audioLifecycle", 1));
   JS_SetPropertyStr(ctx, g, "__native", n);
   JS_FreeValue(ctx, g);
 }
@@ -1836,6 +1844,14 @@ static void install(JSContext *ctx) {
  */
 static bool SDLCALL lifecycle(void *user, SDL_Event *e) {
   (void)user;
+  static const struct { Uint32 type; const char *name; } app[] = {
+      {SDL_EVENT_WILL_ENTER_BACKGROUND, "will enter the background"}, {SDL_EVENT_DID_ENTER_BACKGROUND, "in the background"},
+      {SDL_EVENT_WILL_ENTER_FOREGROUND, "will enter the foreground"}, {SDL_EVENT_DID_ENTER_FOREGROUND, "in the foreground"},
+  };
+  const bool repeat = (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND && in_background) ||
+                     (e->type == SDL_EVENT_DID_ENTER_FOREGROUND && !in_background);
+  for (size_t i = 0; i < SDL_arraysize(app); i++)
+    if (e->type == app[i].type) audio_log("app: %s%s", app[i].name, repeat ? " (already: ignored)" : "");
   if (e->type == SDL_EVENT_WILL_ENTER_BACKGROUND && !in_background) {
     in_background = true;
     audio_suspend(true);
@@ -1844,6 +1860,49 @@ static bool SDLCALL lifecycle(void *user, SDL_Event *e) {
     audio_suspend(false);
   }
   return true;
+}
+
+/*
+ * audioLifecycle("will-background sleep:2000 kill did-foreground ..."): the checks' stand-in
+ * for the system (native/js/audioLifecycleSmoke.ts), only with --smoke-audio-lifecycle. Each
+ * step goes through the code the real event or notice reaches: the app events through
+ * `lifecycle` (the event watch), the session's notices through audio_notice as
+ * platform_tvos.m sends them, a device removal through audio_sdl_event. `kill` is what SDL's
+ * InterruptionBegin leaves behind (its AudioQueue paused for good): the streams stop asking
+ * for sound. `sleep:N` is time away, during which nothing of the loop runs, as when suspended.
+ * The sequence must end in the foreground: the loop does not run the game in the background.
+ */
+static JSValue n_audioLifecycle(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  const char *ops = JS_ToCString(ctx, argv[0]);
+  if (!ops) return JS_EXCEPTION;
+  char buf[512];
+  SDL_strlcpy(buf, ops, sizeof buf);
+  JS_FreeCString(ctx, ops);
+  char *save = NULL;
+  for (char *op = SDL_strtok_r(buf, " ", &save); op; op = SDL_strtok_r(NULL, " ", &save)) {
+    SDL_Event e;
+    SDL_zero(e);
+    if (!SDL_strcmp(op, "will-background")) e.type = SDL_EVENT_WILL_ENTER_BACKGROUND;
+    else if (!SDL_strcmp(op, "did-background")) e.type = SDL_EVENT_DID_ENTER_BACKGROUND;
+    else if (!SDL_strcmp(op, "will-foreground")) e.type = SDL_EVENT_WILL_ENTER_FOREGROUND;
+    else if (!SDL_strcmp(op, "did-foreground")) e.type = SDL_EVENT_DID_ENTER_FOREGROUND;
+    else if (!SDL_strncmp(op, "sleep:", 6)) SDL_Delay((Uint32)SDL_atoi(op + 6));
+    else if (!SDL_strcmp(op, "kill")) audio_test_kill();
+    else if (!SDL_strcmp(op, "interrupt-begin")) { audio_test_kill(); audio_notice(AUDIO_LOST, "test: interruption began"); }
+    else if (!SDL_strcmp(op, "interrupt-end")) audio_notice(AUDIO_BACK, "test: interruption ended");
+    else if (!SDL_strcmp(op, "route")) audio_notice(AUDIO_ROUTE, "test: route changed");
+    else if (!SDL_strcmp(op, "reset")) { audio_test_kill(); audio_notice(AUDIO_RESET, "test: media services were reset"); }
+    else if (!SDL_strcmp(op, "removed")) {
+      audio_test_kill();
+      e.type = SDL_EVENT_AUDIO_DEVICE_REMOVED;
+      e.adevice.which = 1;
+      audio_sdl_event(&e);
+      continue;
+    } else return JS_ThrowRangeError(ctx, "audioLifecycle: unknown step '%s'", op);
+    if (e.type) lifecycle(NULL, &e);
+  }
+  if (in_background) return JS_ThrowRangeError(ctx, "audioLifecycle: the sequence must end in the foreground");
+  return JS_UNDEFINED;
 }
 
 /* Why there is no GPU, said where a player will see it (`alert`: a message box), not only in a log. */
@@ -1889,6 +1948,8 @@ int main(int argc, char **argv) {
       return 2;
     }
     if (!strcmp(argv[i], "--headless")) headless = true;
+    if (!strcmp(argv[i], "--audio-output")) audio_output = true;
+    if (!strcmp(argv[i], "--smoke-audio-lifecycle")) audio_test_hooks = true;
     if (!strcmp(argv[i], "--remote-keys")) remote_keys = true;
     if (!strcmp(argv[i], "--input-log")) input_log_stderr = true;
     if (!strcmp(argv[i], "--startup-probe")) startup_probe = true;
@@ -1909,7 +1970,10 @@ int main(int argc, char **argv) {
   if (!SDL_Init(headless ? SDL_INIT_VIDEO : (SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))) die("SDL_Init");
   SDL_AddEventWatch(lifecycle, NULL);
 #ifdef SDL_PLATFORM_TVOS
-  if (!headless) tvos_remote_init();
+  if (!headless) {
+    tvos_remote_init();
+    tvos_audio_init();
+  }
 #endif
   dev = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL, false, NULL);
   if (!dev) {
@@ -1985,6 +2049,7 @@ int main(int argc, char **argv) {
       SDL_Delay(16);
       continue;
     }
+    audio_poll(); /* the session's notices, and an output that stopped asking for sound */
     drain_jobs(rt);
     call_global(ctx, "__timers");
     drain_jobs(rt);
