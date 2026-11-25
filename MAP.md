@@ -72,12 +72,12 @@ others are small enough to read.
   by `remoteSwipe.ts` from the thumb's travel, and held in a room as the fish's move), `menus.ts`
   is the top bar / confirm / Options / Help state, `optionsModel.ts` persists and applies the options,
   `uiLayer.ts` draws the window-sized UI layer, and rehearses the menus before they open
-  (`uiCost.ts` times and budgets that) — `menuPaint.ts`, `optionsPaint.ts` (the original
+  (`uiCost.ts` times and budgets that) and slides the top bar in and out (`barSlide.ts`) — `menuPaint.ts`, `optionsPaint.ts` (the original
   Options face), `helpPaint.ts` (the help typeset from `helpText.ts`), `legend.ts` — through
   `uiDraw.ts` (which also has the intro splash's shape and text helpers), in the web touch UI's
   room-toned paint (`uiPalette.ts`, `uiGlass.ts`, `rusticIcons.ts`) and the UI's language
   (`uiStrings.ts`), and `menuSmoke.ts` gates them with `native/ui-layout.snap.json` (and
-  `uiAssetSmoke.ts` checks the icons and the strings' glyphs). The store: `shims.ts` is
+  `uiAssetSmoke.ts` checks the icons and the strings' glyphs, `barSlideSmoke.ts` the slide). The store: `shims.ts` is
   `localStorage` over the host's file; on tvOS it is `tvStore.ts` instead — NSUserDefaults
   within `storeBudget.ts`'s budget (save slots' undo histories yield), the whole store in a
   purgeable cache file, progress merged across devices in iCloud by `progressSync.ts` — over

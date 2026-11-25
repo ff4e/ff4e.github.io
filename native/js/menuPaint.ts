@@ -55,8 +55,19 @@ export function popup(ui: Ui, x: number, y: number, w: number, h: number, u: num
   drawGlass(ui, x, y, w, h, 12 * u, hairline(wh), pal, 'popup');
 }
 
-/** The top bar across the top of a `w`×`h` window (its safe area), tab `sel` focused. Returns its box. */
-export function paintBar(ui: Ui, w: number, h: number, sel: number): [number, number, number, number] {
+/**
+ * The top bar across the top of a `w`×`h` window (its safe area), tab `sel` focused. Returns
+ * its box, where it rests. `lift` is how much of it is slid up out of sight (`barSlide.ts`):
+ * 1 puts its bottom edge on the screen's top, past the safe area's inset. The slide moves
+ * the surface by whole pixels, not the bar's layout, so a sliding bar draws the masks and
+ * glyphs a resting one does — nothing is rasterised for it — and records the same ops,
+ * after a `slide` op saying how far they are moved. `enabled` is each tab's state, by
+ * default as it is now; a bar sliding out after its room has gone keeps the one it showed.
+ */
+export function paintBar(
+  ui: Ui, w: number, h: number, sel: number,
+  opts: { lift?: number; enabled?: readonly boolean[] } = {},
+): [number, number, number, number] {
   const pal = currentPalette();
   const hair = hairline(h);
   // The 1080-line sizes, shrunk as a whole should the tabs not fit across the window.
@@ -69,17 +80,24 @@ export function paintBar(ui: Ui, w: number, h: number, sel: number): [number, nu
   const tabH = 60 * u, pad = 10 * u, icon = BAR_ICON * u, px = 30 * u;
   const bh = tabH + 2 * pad;
   const x = (w - bw) / 2, y = 0;
+  const dy = -Math.round((opts.lift ?? 0) * (Math.ceil(bh) + ui.bleed[1]));
+  if (dy !== 0) {
+    ui.record(['slide', 0, dy]);
+    ui.s.save();
+    ui.s.translate(0, dy);
+  }
   drawGlass(ui, x, y, bw, bh, bh / 2, hair, pal, 'popup');
   let tx = x + pad;
   BAR_ITEMS.forEach((item, i) => {
     const tw = widths[i]!, ty = y + pad;
-    const alpha = barItemEnabled(item) ? 1 : 0.38;
+    const alpha = (opts.enabled?.[i] ?? barItemEnabled(item)) ? 1 : 0.38;
     if (i === sel) drawGlass(ui, tx, ty, tw, tabH, 14 * u, hair, pal, 'pressed', alpha);
     drawIcon(ui, BAR_ICON_NAME[item], tx + 24 * u, ty + (tabH - icon) / 2, icon, pal, alpha);
     ui.text(t(BAR_LABEL[item]), tx + (24 + BAR_ICON + 12) * u, ty + tabH / 2 + px * 0.36, px, INK,
       { bold: true, alpha, outline: labelShadow(u, h) });
     tx += tw + 6 * u;
   });
+  if (dy !== 0) ui.s.restore();
   return [x, y, bw, bh];
 }
 

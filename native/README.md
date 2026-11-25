@@ -240,7 +240,15 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   Back), and Back again hides it (so do down, a swipe down, and the pad's Ⓑ). **It does not
   pause the game**: the logic steps on and the sound plays; only the input is the bar's, so
   no fish moves while it has focus (a held move is let go as it opens), and the room's hints
-  step aside for it. It opens on Save — or the next tab that can act — never on World map,
+  step aside for it. **It slides** down from above the screen's top edge as it opens and back
+  up as it closes, 180 ms each way, eased out both ways (`barSlide.ts`; TestFlight build 4 asked
+  for it). Only the picture slides: the input is the bar's from the press that opens it and the
+  room's from the press that closes it — a click mid-slide presses a tab, a move made while it
+  slides out moves the fish — and Back again halfway turns it round from where it is. Nothing
+  is rasterised for the slide: the bar's cached masks and glyphs are drawn at a whole-pixel
+  offset the GPU applies to their quads. Into or out of a prompt, Options or Help it does not
+  slide (they replace it on the frame), and when its World map takes the room away it finishes
+  sliding out over the map. It opens on Save — or the next tab that can act — never on World map,
   which leaves the room without asking. Left and right (a click on the edge, a swipe, the
   pad's d-pad or LB / RB, the arrows) move the focus, skipping a tab that cannot act and
   stopping at the ends, as tvOS's tab bars do; a click presses. Save, Load and Restart ask
@@ -1091,7 +1099,13 @@ map and in a room, no UI layer at all). At 81 window widths across the margin/to
 the legend is where it was with either fish active. With Czech subtitles the top bar, the
 legend, the confirm prompt and Options are Czech. In a window a room fills, the hints lie on
 their dark strip; in a letterbox margin, they do not. A story page has no hints, for the
-remote or the pad. A room's first frame shows
+remote or the pad. The top bar's slide, on a clock of its own (`barSlideSmoke.ts`; every other
+state is drawn at rest): Back opens it at once and its first frame draws it just above the
+screen's edge, a third of the way in it is most of the way down, a click mid-slide moves its
+focus, it rests where it is drawn without a slide; Back closes it at once and it slides out
+over the room while a move goes to the fish; Back again halfway turns it round from where it
+is; and its World map leaves the room with the bar sliding out over the map, then nothing
+drawn — no frame of a slide rasterising anything. A room's first frame shows
 the remote's hints (room 1, and KUFRIK), and so does the room on hiding the top bar; with
 `--remote-keys` a key the host leaves unmapped keeps them. At 3840×2160 inside tvOS's insets
 the room's frames get the menus ready, and the top bar's, Options', Help's and the restart
@@ -1104,7 +1118,7 @@ with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 151 checks, ~15 s.
+for each character in both of the UI font's weights. 163 checks, ~15 s.
 
 It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a
