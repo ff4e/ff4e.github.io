@@ -1869,7 +1869,7 @@ static bool SDLCALL lifecycle(void *user, SDL_Event *e) {
  * `lifecycle` (the event watch), the session's notices through audio_notice as
  * platform_tvos.m sends them, a device removal through audio_sdl_event. `kill` is what SDL's
  * InterruptionBegin leaves behind (its AudioQueue paused for good): the streams stop asking
- * for sound. `sleep:N` is time away, during which nothing of the loop runs, as when suspended.
+ * for sound. `failed:N` puts the watchdog N failed reopens in, the last 7.5 s ago. `sleep:N` is time away, during which nothing of the loop runs, as when suspended.
  * The sequence must end in the foreground: the loop does not run the game in the background.
  */
 static JSValue n_audioLifecycle(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
@@ -1888,6 +1888,7 @@ static JSValue n_audioLifecycle(JSContext *ctx, JSValueConst self, int argc, JSV
     else if (!SDL_strcmp(op, "did-foreground")) e.type = SDL_EVENT_DID_ENTER_FOREGROUND;
     else if (!SDL_strncmp(op, "sleep:", 6)) SDL_Delay((Uint32)SDL_atoi(op + 6));
     else if (!SDL_strcmp(op, "kill")) audio_test_kill();
+    else if (!SDL_strncmp(op, "failed:", 7)) audio_test_failed(SDL_atoi(op + 7));
     else if (!SDL_strcmp(op, "interrupt-begin")) { audio_test_kill(); audio_notice(AUDIO_LOST, "test: interruption began"); }
     else if (!SDL_strcmp(op, "interrupt-end")) audio_notice(AUDIO_BACK, "test: interruption ended");
     else if (!SDL_strcmp(op, "route")) audio_notice(AUDIO_ROUTE, "test: route changed");

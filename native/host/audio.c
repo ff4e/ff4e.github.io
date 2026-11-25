@@ -90,7 +90,7 @@ static Uint64 last_feed_ns; /* the device last asked for sound (under `lock`) */
 static Uint64 watch_ns;     /* the watchdog counts from here: an open, a reopen, a resume (under `lock`) */
 static int64_t fed_frames;  /* frames the device has asked for, ever (under `lock`) */
 enum { REQ_NONE, REQ_CHECK, REQ_REOPEN };
-static SDL_AtomicInt request_level, session_lost;
+static SDL_AtomicInt request_level, session_lost, drive_restart;
 static void *request_why; /* SDL_SetAtomicPointer: a static string */
 /* The rest is the main thread's (audio_poll). */
 #define STALL_NS (750 * SDL_NS_PER_MS)
@@ -612,6 +612,7 @@ void audio_suspend(bool on) {
   suspended = on;
   int64_t clock = clock_frames;
   if (!on) watch_ns = SDL_GetTicksNS(); /* a stall is measured from here, not from before */
+  if (!on) SDL_SetAtomicInt(&drive_restart, 1); /* and the silent drive, if any, restarts from here too */
   SDL_UnlockMutex(lock);
   if (was == on) return; /* a repeated event changes nothing, and is released once */
   suspends += on;
@@ -742,10 +743,10 @@ void audio_poll(void) {
   bool held = suspended;
   Uint64 fed_at = last_feed_ns, from = SDL_max(last_feed_ns, watch_ns);
   SDL_UnlockMutex(lock);
-  if (held) { /* nothing is asked of a backgrounded output; requests wait for the foreground */
-    drive_ns = now; /* and the time away is not driven either */
+  if (held) return; /* nothing is asked of a backgrounded output; requests wait for the foreground */
+  if (SDL_SetAtomicInt(&drive_restart, 0)) { /* back from a trip: the time away is not driven */
+    drive_ns = now;
     drive_owed = 0;
-    return;
   }
   int req = SDL_SetAtomicInt(&request_level, REQ_NONE);
   if (req != REQ_NONE) {
@@ -779,9 +780,16 @@ void audio_poll(void) {
     stalled_ns = now;
     audio_log("the output stopped pulling: nothing asked for sound for %.2f s", (double)(now - from) / 1e9);
   }
-  Uint64 wait = attempts == 0 ? 0 : (Uint64)SDL_min(8, 1 << (attempts - 1)) * SDL_NS_PER_SECOND;
+  /* 0, then 1, 2, 4, 8 s, and 8 s for ever after (the shift capped: it must not overflow). */
+  Uint64 wait = attempts == 0 ? 0 : ((Uint64)1 << (SDL_min(attempts, 4) - 1)) * SDL_NS_PER_SECOND;
   if (now - last_attempt_ns >= wait) reopen("the output stopped pulling", now);
   drive(now);
+}
+
+void audio_test_failed(int n) {
+  attempts = n;
+  last_attempt_ns = SDL_GetTicksNS() - (Uint64)7500 * SDL_NS_PER_MS;
+  audio_log("test: %d reopens have failed, the last 7.5 s ago", n);
 }
 
 void audio_test_kill(void) {

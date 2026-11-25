@@ -430,7 +430,10 @@ session on tvOS (`src/audio/coreaudio/SDL_coreaudio.m`, its iOS section):
   stays paused for good: SDL asks the mixer for nothing more, and the game is silent until it
   is killed;
 - route changes and media-services resets are not handled at all on iOS/tvOS (only macOS
-  listens for default-device changes).
+  listens for default-device changes);
+- closing a device does not deactivate the session either (`COREAUDIO_CloseDevice` →
+  `UpdateAudioSession(…, false)` counts the closing device itself), so a reopen alone would
+  never call `setActive:YES` again: the host does it itself before every reopen.
 
 The game makes the interruption likely: its session is **solo ambient** (above), not mixable,
 so any other app that plays sound while it is in the background — the TV app, Music, a Top
@@ -449,14 +452,21 @@ side in `platform_tvos.m`):
   (`setActive:YES`); if the session was taken away meanwhile, the output is **reopened** at once;
 - a **watchdog**: an output that has not asked for sound for 750 ms (in the foreground, not
   deliberately paused) is reopened — a new SDL device, so a new AudioQueue — and again after 1,
-  2, 4, 8 s while it stays dead; meanwhile the mixer's clock runs on the wall's time, silently,
+  2, 4, 8 s, then every 8 s for as long as it stays dead; meanwhile the mixer's clock runs on the wall's time, silently,
   as SDL's dummy driver would, so nothing waiting on a sound waits for ever. A removed SDL
   device and a media-services reset are reopened at once. Both streams (the mixer's and a
   movie's) are reopened together: they share one SDL device, which closes only with its last;
 - nothing the game hears is lost: the voices, the music's place and the clock live in the mixer,
   not in the SDL stream. The trip away itself is not counted (`suspended`, released once — a
-  repeated lifecycle event changes nothing), and a room's pause menu taken for the background
-  stays the game's to release.
+  repeated lifecycle event changes nothing) — not even when the output was already dead when
+  the player left — and a room's pause menu taken for the background stays the game's to
+  release.
+
+**The price of taking the session back.** The session is solo ambient, so reactivating it — on
+every return, and within ~1 s of an interruption the game outlives on screen — stops whatever
+the player had playing (Music, AirPlay) as the game's sound comes back, as launching the game
+does. That is deliberate for now: the game's sound is the game. A player who wants their own
+music under the game would need the category to change (ambient, mixable), not this rescue.
 
 **Reading the audio log.** Every step above goes to the device's unified log, subsystem
 `io.github.ff4e.fishfillets4ever`, category **`audio`**: in Console.app (the Apple TV under
@@ -469,7 +479,7 @@ output (…)`, `output reopened: driver coreaudio, device '…', … Hz` and `th
 again…`. The line `session active: …` names the route (HDMI, AirPlay, Bluetooth) and whether
 other audio is playing. On a Mac the same lines are `SDL_Log`ged, prefixed `audio:`.
 
-**Checked on a Mac** (`--smoke-audio-lifecycle`, `native/js/audioLifecycleSmoke.ts`, ~25 s,
+**Checked on a Mac** (`--smoke-audio-lifecycle`, `native/js/audioLifecycleSmoke.ts`, ~40 s,
 with an output: the Mac's device, or SDL's dummy driver where there is none):
 
     native/build/cmake/ff4e-native native/build/game.js --root public --headless --audio-output \
@@ -483,7 +493,9 @@ trip home and back, Control Center, every event twice, a line spoken across 2 s 
 exactly `delka` of mixer clock after it started, the time away not counted), an output dead on
 return with no word (watchdog), an interruption while away with and without its end (reopened
 at once), the pause menu across a trip, an output dying in the foreground (and staying dead:
-the retry schedule, the clock on the wall's time), a route change with a live output (kept), a
+the retry schedule, the clock on the wall's time), an output still dead when the player leaves
+(the time away not driven through the mixer on return), the retry still due within 8 s after 32
+and 41 failed reopens (`failed:N`), a route change with a live output (kept), a
 media-services reset with a movie playing (both streams back, the movie's clock running on) and
 a removed device. `npm run native:check` runs it (`audio-life`), as does the manual CI job.
 **Waits for a device:** that tvOS really sends these notices in this order,

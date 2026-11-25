@@ -60,6 +60,8 @@ void audio_poll(void);
 void audio_log(const char *fmt, ...) SDL_PRINTF_VARARG_FUNC(1);
 /** Checks only (`audioLifecycle`): the streams open now stop asking for sound, as a dead output does. */
 void audio_test_kill(void);
+/** Checks only: `n` reopens have failed, the last 7.5 s ago (the retry schedule's far end). */
+void audio_test_failed(int n);
 
 /**
  * Decode an encoded file (AAC in MP4) to mono float PCM at AUDIO_RATE. On success `*out`

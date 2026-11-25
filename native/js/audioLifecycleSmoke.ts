@@ -15,7 +15,7 @@
  * across the trip ends on the mixer clock exactly `delka` after it started, as `playing()`
  * says, the time away not counted.
  *
- * It runs on the wall's time (an output consumes in real time), ~25 s.
+ * It runs on the wall's time (an output consumes in real time), ~40 s.
  */
 import { audio, mixer } from './seams/audioEngine.js';
 import { initGame } from './game.js';
@@ -176,6 +176,37 @@ async function checks(): Promise<void> {
   ok(drift > 0.5, `still dead: the clock keeps the wall's time without an output (×${drift.toFixed(2)})`);
   await runs('dead in the foreground');
   ok(musicOn(), 'dead in the foreground: the music voice survives');
+
+  // Still dead when the player leaves (the watchdog between retries), back 2 s later: the time
+  // away must not be driven through the mixer on return — that would skip every voice and the
+  // music forward by it, and end a line that was mid-way.
+  await sleep(2000); // the retry schedule starts over once an output has kept pulling for 2 s
+  o = st().opens;
+  life('kill');
+  await reopened(o, 2000, 'dead when leaving');
+  life('kill');
+  ok(await until(() => st().stalled, 1500), 'dead when leaving: the watchdog is between retries');
+  const cl = st().clock;
+  life('will-background did-background sleep:2000 will-foreground did-foreground');
+  await sleep(100);
+  const jumped = (st().clock - cl) / MIX_RATE;
+  ok(jumped < 0.5, `dead when leaving: the time away is not driven on return (${jumped.toFixed(2)} s of clock for 2 s away)`);
+  await reopened(o + 1, 3000, 'dead when leaving');
+  await runs('dead when leaving');
+
+  // The far end of the retry schedule: however many reopens have failed, the next is due within 8 s.
+  // (the output dead and the watchdog between retries, then N failures behind it, the last 7.5 s ago)
+  for (const n of [32, 41]) {
+    await sleep(2000); // the schedule starts over
+    o = st().opens;
+    life('kill');
+    await reopened(o, 2000, `${n} failed reopens`);
+    life('kill');
+    ok(await until(() => st().stalled, 1500), `${n} failed reopens: the watchdog is between retries`);
+    life(`failed:${n}`);
+    await reopened(o + 1, 2000, `${n} failed reopens`);
+    await runs(`${n} failed reopens`);
+  }
 
   o = st().opens;
   life('route');
