@@ -123,9 +123,26 @@ fragment float4 fs_mirror(VSOut in [[stage_in]], texture2d<float> uSrc [[texture
   return col;
 }
 
-// PRESENT_FS — box-downsample the ×S composite into the window. `origin` is the
-// letterboxed viewport's top-left in drawable pixels ([[position]] is target-relative).
-struct PresentU { float2 size; float2 origin; float2 footprint; int taps; int _p; };
+// The AI tier's colour grade, as the web applies it: `filter: contrast(c) saturate(s)
+// brightness(b)` over the game's canvases (src/app/aiFilter.ts, index.html). Each function
+// is its Filter Effects matrix — contrast and brightness the feComponentTransfer linear
+// functions (slope c, intercept 0.5 - 0.5c; slope b), saturate the feColorMatrix
+// `saturate` — applied in the shorthand's order to the sRGB-encoded values, clamped to
+// [0, 1] after each, as Chromium (Skia's matrix colour filters) applies them.
+float3 css_grade(float3 c, float3 g) {
+  c = clamp(c * g.x + (0.5 - 0.5 * g.x), 0.0, 1.0);
+  float s = g.y;
+  float3 r0 = float3(0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s);
+  float3 r1 = float3(0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s);
+  float3 r2 = float3(0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s);
+  c = clamp(float3(dot(r0, c), dot(r1, c), dot(r2, c)), 0.0, 1.0);
+  return clamp(c * g.z, 0.0, 1.0);
+}
+
+// PRESENT_FS — box-downsample the ×S composite into the window, then, `graded`, the colour
+// grade above. `origin` is the letterboxed viewport's top-left in drawable pixels
+// ([[position]] is target-relative).
+struct PresentU { float2 size; float2 origin; float2 footprint; int taps; int graded; float4 grade; };
 fragment float4 fs_present(VSOut in [[stage_in]], texture2d<float> uTex [[texture(0)]],
                            sampler smp [[sampler(0)]], constant PresentU& u [[buffer(0)]]) {
   float2 uv = (in.pos.xy - u.origin) / u.size;
@@ -137,7 +154,9 @@ fragment float4 fs_present(VSOut in [[stage_in]], texture2d<float> uTex [[textur
       acc += uTex.sample(smp, uv + o * u.footprint).rgb;
     }
   }
-  return float4(acc / (n * n), 1.0);
+  float3 c = acc / (n * n);
+  if (u.graded == 1) c = css_grade(c, u.grade.xyz);
+  return float4(c, 1.0);
 }
 
 // OVERLAY — a Surface2D drawn over the presented composite at one texel per window pixel

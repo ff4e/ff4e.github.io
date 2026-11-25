@@ -54,10 +54,11 @@ import { loadMapScene, paintMapCase } from './mapScene.js';
 import { AI_MAP_H, AI_MAP_W } from '../../src/render/worldMapAi.js';
 import { compositeSize, frameFor, loadScene, pinRandom, probeFrame, replaySolution } from './scene.js';
 import { advance, draw, enterRoom, firstRoom, initGame, showMap } from './game.js';
-import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
+import { creditsShown, ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
 import { inputFrame, routeEvent, setKeyboardIsRemote, setLastInput } from './uiInput.js';
 import { openOptions } from './menus.js';
 import { initUiLayer, paintUi, windowLayout } from './uiLayer.js';
+import { initGrade } from './grade.js';
 import { ensureOptionsArt } from './optionsPaint.js';
 import { runMenuSmoke } from './menuSmoke.js';
 import { ui } from '../../src/app/screenState.js';
@@ -167,6 +168,7 @@ async function main(): Promise<void> {
     return;
   }
   initGame({ verbose: true, demo: flag('--demo'), openCorner: () => openOptions() });
+  initGrade();
   await loadSubtitleAssets();
   // The legend needs a source before the first press: on tvOS the remote (the keyboard would
   // show no hints at all); on a Mac the keyboard, unless it is standing in for a remote.
@@ -285,7 +287,7 @@ function runInteractive(target: NativeAiScreen): void {
       // KUFRIK's briefcase story, over the room it plays in: its picture, its captions, the legend.
       const over = storyLayers(story, alpha);
       jsMs += __native.now() - now;
-      __native.presentTexture(story.id, over.captions, over.ui);
+      __native.presentTexture(story.id, over.captions, over.ui, true);
     } else if (ui.screen === 'room') {
       // Nothing is presented while a room loads, so the map's parchment frame stays up.
       const drawn = draw(target, alpha);
@@ -305,7 +307,7 @@ function runInteractive(target: NativeAiScreen): void {
       const win = shown ? windowLayout(shown.width, shown.height) : null;
       const layer = win ? paintUi(win.w, win.h, win.picture) : null;
       jsMs += __native.now() - now;
-      if (shown) __native.presentTexture(shown.id, undefined, layer?.surface?.id);
+      if (shown) __native.presentTexture(shown.id, undefined, layer?.surface?.id, !creditsShown());
       mapPresented();
     }
     frames++;

@@ -373,12 +373,17 @@ export function closeLegPage(): void {
   legPage = null;
 }
 
+/** Whether the last `mapFrame` was the credits roll: the one map-side screen the web shows outside a canvas, ungraded (`grade.ts`). */
+let rolling = false;
+export const creditsShown = (): boolean => rolling;
+
 /**
  * One frame of the map (or the story page over it): steer and paint. Returns the surface to
  * present, or null when there is nothing to show yet; the caller presents it, so that its
  * frame-time measurement leaves out the wait for vsync.
  */
 export function mapFrame(now: number): NativeSurface | null {
+  rolling = false;
   if (ui.screen === 'legimage') {
     if (!legPage) return null;
     if (!legPage.surface) {
@@ -390,6 +395,7 @@ export function mapFrame(now: number): NativeSurface | null {
   }
   if (ui.mapOverlay === 'credits') {
     const roll = creditsFrame(now);
+    rolling = roll !== null;
     if (roll) return roll;
   }
   if (!art) return null;

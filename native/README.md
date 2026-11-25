@@ -25,7 +25,8 @@ Remote, on the AI-upscaled tier:
   stream, with **Apple's decoder** for the AAC: see "Sound" below.
 - The AI tier's `AiTarget` seam (`src/render/aiTarget.ts`) is implemented on **SDL GPU**
   (`native/js/nativeAiScreen.ts`, `native/host/shaders.metal`). That is the one thing a
-  native host has to own.
+  native host has to own. The web's colour grade over that tier is applied as the picture is
+  presented: see "The colour grade" below.
 - The screens around the room — the world map with its record panel, name plaques,
   room-entry parchment and selection ring, and the story pages — draw through `Surface2D`
   (`src/render/surface2d.ts`), which is implemented on **SDL GPU** too
@@ -182,6 +183,33 @@ Approximate by nature, against the browser's own shaping and scaler — see
 the browser eases a row's 2 px scroll over a tick (a CSS transition); natively a row steps,
 and the wave runs on the game's clock plus the frame's fraction of a tick rather than on the
 compositor's.
+
+### The colour grade (`native/js/grade.ts`)
+
+The web grades the AI tier with a CSS `filter: contrast() saturate() brightness()` over the
+game's canvases (`src/app/aiFilter.ts`, `index.html`); the native host renders only that
+tier, so it grades always, with the same numbers read the same way: `AI_FILTER_DEFAULT`
+(1.05 / 1.10 / 1.03 today), or a deviation the web's dev bar left in `ff.aiFilter`
+(`initAiFilter`, imported as it is). It is applied on the GPU, in the pass that presents the
+picture to the window (`css_grade` in `shaders.metal`, after `fs_present`'s box filter):
+each function's Filter Effects matrix, in the shorthand's order, on the sRGB-encoded values,
+clamped after each — as Chromium applies them. Checked once against Chromium's own `filter:`
+on 32 768 colours (its software and GPU paths agree): the per-step clamp matches to
+rounding (0.5 of 255 at worst), and a single clamp at the end does not (0.98).
+
+**What it covers is what the web's covers**, which is its `canvas` elements: the room, the
+world map with its record panel and plaques, the story pages and KUFRIK's briefcase story.
+Not the subtitles or the cutscene's captions (DOM text on the web; overlays drawn over the
+graded picture here), not the menus and the legend (HTML there, the UI layer here), not the
+AI credits roll (two `<img>` layers there) and not the intro's splash and movies (a `<div>`
+and a `<video>`). Not into the composite either: `saveComposite`, and with it the 72-room
+sweep (`compare.mjs`), still compares the ungraded picture with the browser's ungraded WebGL
+canvas — CSS filters the canvas's display, not its pixels.
+
+The menu smoke holds it to that arithmetic (`gradeSmoke.ts`): the room presented into a
+texture (`presentProbe`, the present pass headless) graded and ungraded, at the composite's
+own size so the ungraded one is its texels exactly, and every fifth pixel of the graded one
+must be `cssGrade` of the ungraded within half a step.
 
 ### The TV menus (`native/js/uiInput.ts`, `menus.ts`, `uiLayer.ts`)
 
@@ -1103,7 +1131,7 @@ map and in a room, no UI layer at all). At 81 window widths across the margin/to
 the legend is where it was with either fish active. With Czech subtitles the top bar, the
 legend, the confirm prompt and Options are Czech. In a window a room fills, the hints lie on
 their dark strip; in a letterbox margin, they do not. A story page has no hints, for the
-remote or the pad. The top bar's slide, on a clock of its own (`barSlideSmoke.ts`; every other
+remote or the pad. The room is presented with the web's colour grade (above). The top bar's slide, on a clock of its own (`barSlideSmoke.ts`; every other
 state is drawn at rest): Back opens it at once and its first frame draws it just above the
 screen's edge, a third of the way in it is most of the way down, a click mid-slide moves its
 focus, it rests where it is drawn without a slide; Back closes it at once and it slides out
@@ -1122,7 +1150,7 @@ with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 163 checks, ~15 s.
+for each character in both of the UI font's weights. 166 checks, ~16 s.
 
 It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a
@@ -1166,6 +1194,8 @@ updated with the fix. Differing frames leave `-native`, `-webgl` and `-diff` PNG
 `native/build/compare/`.
 
 Current result: **72 of 72 rooms byte-identical** in all three states: all 216 frames.
+Both sides are compared before the colour grade: the browser's WebGL canvas holds the ungraded
+picture (CSS grades its display), and the native composite is graded only as it is presented.
 CI runs `--all` on a hosted macOS runner, whose Metal device gives the same bytes.
 
 The spike was written at 68/72. Room 56 CHODBA left the list when `scene.ts` stopped

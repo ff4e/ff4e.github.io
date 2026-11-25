@@ -61,6 +61,7 @@ import type { Insets } from './safeArea.js';
 import { t } from './uiStrings.js';
 import { initUiLayer, menusReady, paintUi, setBarSlide, type Box } from './uiLayer.js';
 import { checkBarSlide } from './barSlideSmoke.js';
+import { checkGrade } from './gradeSmoke.js';
 import type { NativeSurface } from './nativeSurface.js';
 import { currentCost, describeCost, resetCost } from './uiCost.js';
 import { loadUiFonts, type UiOp } from './uiDraw.js';
@@ -942,6 +943,8 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(ui.screen === 'map' && !menuOpen(), 'the room leaving under the pad\'s prompt closes it: nothing is left over the map');
     await enterRoom(1);
     await untilReady();
+    // The colour grade the room is presented with.
+    checkGrade({ check, drawRoom: () => draw(target, 0), compositeSize: () => [target.width, target.height], outDir });
     // The top bar's slide, ending with its World map leaving the room.
     await checkBarSlide({
       check,

@@ -71,7 +71,8 @@ others are small enough to read.
   `uiInput.ts` routes the keyboard, pad and remote for every screen (the remote's swipes made
   by `remoteSwipe.ts` from the thumb's travel, and held in a room as the fish's move), `menus.ts`
   is the top bar / confirm / Options / Help state, `optionsModel.ts` persists and applies the options,
-  `uiLayer.ts` draws the window-sized UI layer, and rehearses the menus before they open
+  `grade.ts` is the web's AI-tier colour grade, applied as the picture is presented (gated by
+  `gradeSmoke.ts`); `uiLayer.ts` draws the window-sized UI layer, and rehearses the menus before they open
   (`uiCost.ts` times and budgets that) and slides the top bar in and out (`barSlide.ts`) — `menuPaint.ts`, `optionsPaint.ts` (the original
   Options face), `helpPaint.ts` (the help typeset from `helpText.ts`), `legend.ts` — through
   `uiDraw.ts` (which also has the intro splash's shape and text helpers), in the web touch UI's

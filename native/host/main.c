@@ -58,6 +58,9 @@ static int js_argc;
 static char **js_argv;
 
 static SDL_GPUGraphicsPipeline *p_fill, *p_bg, *p_sprite, *p_disint, *p_mirror, *p_present, *p_overlay;
+static SDL_GPUGraphicsPipeline *p_present_rgba; /* fs_present into an RGBA8 target: `presentProbe` */
+/* The AI tier's colour grade (`setGrade`): contrast, saturate, brightness; identity until set. */
+static float grade[4] = {1, 1, 1, 0};
 static SDL_GPUSampler *s_nearest, *s_linear;
 static SDL_GPUTexture *rand_tex;
 static SDL_GPUTexture *band_tex;  /* the ZX stripes: one RGBA texel per native row */
@@ -614,7 +617,7 @@ static JSValue n_mirror(JSContext *ctx, JSValueConst self, int argc, JSValueCons
   return JS_UNDEFINED;
 }
 
-typedef struct { float size[2], origin[2], footprint[2]; int32_t taps, pad; } PresentU;
+typedef struct { float size[2], origin[2], footprint[2]; int32_t taps, graded; float grade[4]; } PresentU;
 typedef struct { float origin[2]; int32_t size[2]; } OverlayU;
 
 /* Where content of w×h lands in a sw×sh window: as large as fits, centred, whole pixels. */
@@ -631,7 +634,24 @@ static void letterbox(int w, int h, Uint32 sw, Uint32 sh, float *ox, float *oy, 
  * the same rect at one texel per window pixel, premultiplied — the subtitles, laid out
  * for exactly that rect (`presentRect`) — and submit the frame.
  */
-static void present_tex(SDL_GPUTexture *src, int w, int h, int overlay, bool overlay_window, int ui) {
+/*
+ * The present pass's draw, on `rp` with its viewport set to the dw×dh rect at (ox, oy): `src`
+ * (w×h) box-filtered into it, then, `graded`, the AI tier's colour grade (`fs_present`).
+ */
+static void draw_present(SDL_GPURenderPass *rp, SDL_GPUGraphicsPipeline *p, SDL_GPUTexture *src, int w, int h,
+                         float ox, float oy, float dw, float dh, bool graded) {
+  SDL_BindGPUGraphicsPipeline(rp, p);
+  float rx = (float)w / dw, ry = (float)h / dh;
+  int taps = (int)SDL_ceilf(SDL_max(rx, ry));
+  taps = taps < 1 ? 1 : taps > 4 ? 4 : taps;
+  PresentU u = {{dw, dh}, {ox, oy}, {rx / (float)w, ry / (float)h}, taps, graded ? 1 : 0, {grade[0], grade[1], grade[2], 0}};
+  SDL_PushGPUFragmentUniformData(cmd, 0, &u, sizeof u);
+  SDL_GPUTextureSamplerBinding b = {src, s_linear};
+  SDL_BindGPUFragmentSamplers(rp, 0, &b, 1);
+  SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
+}
+
+static void present_tex(SDL_GPUTexture *src, int w, int h, int overlay, bool overlay_window, int ui, bool graded) {
   flush_surf();
   end_composite();
   /* Nothing recorded this frame (a surface painted once and shown again, a movie frame
@@ -650,15 +670,7 @@ static void present_tex(SDL_GPUTexture *src, int w, int h, int overlay, bool ove
     SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
     SDL_GPUViewport vp = {ox, oy, dw, dh, 0, 1};
     SDL_SetGPUViewport(rp, &vp);
-    SDL_BindGPUGraphicsPipeline(rp, p_present);
-    float rx = (float)w / dw, ry = (float)h / dh;
-    int taps = (int)SDL_ceilf(SDL_max(rx, ry));
-    taps = taps < 1 ? 1 : taps > 4 ? 4 : taps;
-    PresentU u = {{dw, dh}, {ox, oy}, {rx / (float)w, ry / (float)h}, taps, 0};
-    SDL_PushGPUFragmentUniformData(cmd, 0, &u, sizeof u);
-    SDL_GPUTextureSamplerBinding b = {src, s_linear};
-    SDL_BindGPUFragmentSamplers(rp, 0, &b, 1);
-    SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
+    draw_present(rp, p_present, src, w, h, ox, oy, dw, dh, graded);
     SDL_GPUTexture *ov = tex_by_id(overlay);
     if (ov) {
       if (overlay_window) { /* the overlay is the whole window's, not the content's rect */
@@ -698,23 +710,35 @@ static int opt_id(JSContext *ctx, int argc, JSValueConst *argv, int i) {
   return v;
 }
 
-/* GlAiScreen.present: the composite into the window, with an optional overlay surface
+/* GlAiScreen.present: the composite into the window, graded, with an optional overlay surface
    over the room's rect and an optional UI surface over the whole window. */
 static JSValue n_present(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-  present_tex(comp, comp_w, comp_h, opt_id(ctx, argc, argv, 0), false, opt_id(ctx, argc, argv, 1));
+  present_tex(comp, comp_w, comp_h, opt_id(ctx, argc, argv, 0), false, opt_id(ctx, argc, argv, 1), true);
   return JS_UNDEFINED;
 }
 
 /*
  * A Surface2D (the map, a story page) or a movie frame into the window, the same way, with
  * an optional overlay surface the size of the whole WINDOW over it (a movie's hint) and an
- * optional UI surface over that (the menus and the legend, `uiLayer.ts`).
+ * optional UI surface over that (the menus and the legend, `uiLayer.ts`). Graded when
+ * argv[3] is true (what the web's filter covers: `native/js/grade.ts`).
  */
 static JSValue n_presentTexture(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int id = ARGI(0);
   SDL_GPUTexture *t = tex_by_id(id);
   if (!t) return JS_ThrowTypeError(ctx, "presentTexture: unknown texture");
-  present_tex(t, tex_w[id], tex_h[id], opt_id(ctx, argc, argv, 1), true, opt_id(ctx, argc, argv, 2));
+  bool graded = argc > 3 && JS_ToBool(ctx, argv[3]);
+  present_tex(t, tex_w[id], tex_h[id], opt_id(ctx, argc, argv, 1), true, opt_id(ctx, argc, argv, 2), graded);
+  return JS_UNDEFINED;
+}
+
+/* The colour grade the presented picture gets: contrast, saturate, brightness (`grade.ts`). */
+static JSValue n_setGrade(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  for (int i = 0; i < 3; i++) {
+    double v = 1;
+    if (argc > i) JS_ToFloat64(ctx, &v, argv[i]);
+    grade[i] = (float)v;
+  }
   return JS_UNDEFINED;
 }
 
@@ -840,10 +864,20 @@ static JSValue n_locale(JSContext *ctx, JSValueConst self, int argc, JSValueCons
   return r;
 }
 
+static JSValue save_tex_on(JSContext *ctx, SDL_GPUTexture *t, int w, int h, const char *path, JSValue *out);
+
 /* Read `t` (w×h) back, top-down RGBA, and write it as u32 w, u32 h, pixels. */
 static JSValue save_tex(JSContext *ctx, SDL_GPUTexture *t, int w, int h, const char *path) {
   flush_surf();
   end_composite();
+  return save_tex_on(ctx, t, w, h, path, NULL);
+}
+
+/*
+ * The readback itself, on the current command buffer (recorded so far): to `path` as above,
+ * or, with `path` NULL and `out` set, into a new ArrayBuffer at *out.
+ */
+static JSValue save_tex_on(JSContext *ctx, SDL_GPUTexture *t, int w, int h, const char *path, JSValue *out) {
   Uint32 size = (Uint32)(w * h * 4);
   SDL_GPUTransferBufferCreateInfo ti = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, .size = size};
   SDL_GPUTransferBuffer *tb = SDL_CreateGPUTransferBuffer(dev, &ti);
@@ -858,6 +892,12 @@ static JSValue save_tex(JSContext *ctx, SDL_GPUTexture *t, int w, int h, const c
   SDL_WaitForGPUFences(dev, true, &fence, 1);
   SDL_ReleaseGPUFence(dev, fence);
   const void *px = tb ? SDL_MapGPUTransferBuffer(dev, tb, false) : NULL;
+  if (out) {
+    *out = px ? JS_NewArrayBufferCopy(ctx, px, size) : JS_NULL;
+    if (px) SDL_UnmapGPUTransferBuffer(dev, tb);
+    if (tb) SDL_ReleaseGPUTransferBuffer(dev, tb);
+    return px ? JS_UNDEFINED : JS_ThrowTypeError(ctx, "readback failed");
+  }
   /* Every step is checked: a short file must not reach compare.mjs as a finished frame. */
   bool ok = false;
   FILE *f = px ? fopen(path, "wb") : NULL;
@@ -879,6 +919,39 @@ static JSValue n_saveComposite(JSContext *ctx, JSValueConst self, int argc, JSVa
   JSValue r = save_tex(ctx, comp, comp_w, comp_h, path);
   JS_FreeCString(ctx, path);
   return r;
+}
+
+/*
+ * The present pass into a w×h RGBA8 texture instead of the window, and its pixels back
+ * (top-down RGBA): argv[0] a texture id, or 0 for the composite; argv[3] whether graded. The
+ * menu smoke checks the grade with it (`gradeSmoke.ts`), headless as it is.
+ */
+static JSValue n_presentProbe(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  int id = ARGI(0), w = ARGI(1), h = ARGI(2);
+  bool graded = argc > 3 && JS_ToBool(ctx, argv[3]);
+  SDL_GPUTexture *src = id ? tex_by_id(id) : comp;
+  int sw = id ? tex_w[id] : comp_w, sh = id ? tex_h[id] : comp_h;
+  if (!src || w <= 0 || h <= 0) return JS_ThrowTypeError(ctx, "presentProbe: unknown texture or size");
+  flush_surf();
+  end_composite();
+  SDL_GPUTexture *dst = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
+  if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(dev);
+  float ox, oy, dw, dh;
+  letterbox(sw, sh, (Uint32)w, (Uint32)h, &ox, &oy, &dw, &dh);
+  SDL_GPUColorTargetInfo ct = {0};
+  ct.texture = dst;
+  ct.load_op = SDL_GPU_LOADOP_CLEAR;
+  ct.store_op = SDL_GPU_STOREOP_STORE;
+  SDL_GPURenderPass *rp = SDL_BeginGPURenderPass(cmd, &ct, 1, NULL);
+  SDL_GPUViewport vp = {ox, oy, dw, dh, 0, 1};
+  SDL_SetGPUViewport(rp, &vp);
+  draw_present(rp, p_present_rgba, src, sw, sh, ox, oy, dw, dh, graded);
+  SDL_EndGPURenderPass(rp);
+  JSValue buf = JS_NULL;
+  JSValue r = save_tex_on(ctx, dst, w, h, NULL, &buf);
+  SDL_ReleaseGPUTexture(dev, dst);
+  if (JS_IsException(r)) return r;
+  return buf;
 }
 
 /* The same readback of a Surface2D's texture. Stored premultiplied: exact for opaque pixels. */
@@ -1824,6 +1897,7 @@ static void install(JSContext *ctx) {
       {"decodeImage", n_decodeImage, 1}, {"surfCreate", n_surfCreate, 2},
       {"surfQuad", n_surfQuad, 16},     {"surfClear", n_surfClear, 1},
       {"surfPut", n_surfPut, 2},        {"presentTexture", n_presentTexture, 1},
+      {"setGrade", n_setGrade, 3},      {"presentProbe", n_presentProbe, 4},
       {"saveTexture", n_saveTexture, 2}, {"presentRect", n_presentRect, 2},
       {"locale", n_locale, 0},         {"windowSize", n_windowSize, 0},
       {"readText", n_readText, 1},     {"systemBack", n_systemBack, 1},     {"writeText", n_writeText, 2},
@@ -2030,6 +2104,7 @@ int main(int argc, char **argv) {
     p_disint = pipeline("vs_rect", 1, "fs_disint", 2, rgba, true, true);
     p_mirror = pipeline("vs_full", 0, "fs_mirror", 2, rgba, false, false);
     p_present = pipeline("vs_full", 0, "fs_present", 1, swap_fmt, false, false);
+    p_present_rgba = pipeline("vs_full", 0, "fs_present", 1, rgba, false, false);
     p_overlay = overlay_pipeline(swap_fmt);
     SDL_GPUSamplerCreateInfo si = {0};
     si.min_filter = si.mag_filter = SDL_GPU_FILTER_NEAREST;
