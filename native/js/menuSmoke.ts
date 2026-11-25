@@ -805,9 +805,42 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     await select('load');
     check(topMenu()?.kind === 'confirm', 'Load asks first');
     await tap('RemoteSelect');
+    // A swipe while the load replays is not taken (the room moves nothing in a replay), so it
+    // is no hold: afterwards, the same thumb's click toward that edge is a click.
+    check(loadmode !== null, 'the load replays its record');
+    await press('RemoteTouch');
+    await tap(swipeTo);
+    check(logged(`swipe ${name} not taken`), 'a swipe during the replay is not taken');
     for (let i = 0; i < 5000 && (loadmode || !atRest()); i++) steps(1);
     rest();
     check(engine!.srecord === rec, 'yes: the saved record is restored');
+    clock += 400;
+    await press(way);
+    check(heldKeyState() === 1, `after the replay, the same thumb's click toward the swiped edge is a click (KeyRoom ${heldKeyState()})`);
+    await press(way, false);
+    await press('RemoteTouch', false);
+    rest();
+    // A held swipe the room lets go of on its own (an undo rebuilds it) is no hold any more.
+    await press('RemoteTouch');
+    await tap(swipeTo);
+    steps(40); // on to the wall, where the fish rests and an undo can act
+    const run = moves();
+    await tap('RemotePlayPause');
+    steps(1);
+    clock += 400;
+    await press(way);
+    check(moves() < run && heldKeyState() === 1 && logged('the room let go of it first'),
+      `a held swipe an undo dropped is forgotten: a click toward its edge is a click (${run} → ${moves()} moves, KeyRoom ${heldKeyState()})`);
+    await press(way, false);
+    await press('RemoteTouch', false);
+    rest();
+    await tap('RemoteBack');
+    for (let i = 0; i < 3000 && !atRest(); i++) steps(1); // the bar does not pause: let the room settle
+    await select('load');
+    await tap('RemoteSelect');
+    for (let i = 0; i < 5000 && (loadmode || !atRest()); i++) steps(1);
+    rest();
+    check(engine!.srecord === rec, 'loaded back');
 
     // Options and Help from the top bar pause the room — whole panels over it — and close
     // back to the bar, which does not.
@@ -894,6 +927,15 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(snaps['room-key']!.length === 0, 'the keyboard in a room: no legend, and no UI layer drawn at all');
     await tap('PadB');
     check(ui.screen === 'map', 'the pad\'s Ⓑ goes straight to the map');
+    await enterRoom(1);
+    await untilReady();
+    // A prompt the pad opened on its own (no bar under it, and it does not pause) is dropped
+    // when the room goes from under it — as a win's countdown ends — not left over the map.
+    await tap('PadX');
+    check(topMenu()?.kind === 'confirm', 'Ⓧ asks to restart');
+    showMap();
+    inputFrame(clock);
+    check(ui.screen === 'map' && !menuOpen(), 'the room leaving under the pad\'s prompt closes it: nothing is left over the map');
     await enterRoom(1);
     await untilReady();
     await tap('RemoteBack');

@@ -132,11 +132,14 @@ export function openBar(): void {
 }
 
 /**
- * The room under the top bar went away — won, left for the map, or KUFRIK's story began over
- * it — while the bar was up (it does not pause the room): the bar, and anything over it, goes.
+ * The room under the top bar or a confirm prompt went away — won, left for the map, or
+ * KUFRIK's story began over it — while it was up (neither pauses the room): the bar, a prompt
+ * the pad's LB / RB / Ⓧ opened on its own, and anything over them, go — or the prompt would
+ * stand over the map taking its input, its Yes acting on no room.
  */
-export function dropStrandedBar(): void {
-  if (stack[0]?.kind === 'bar' && (ui.screen !== 'room' || cutscene)) closeMenus();
+export function dropStrandedMenus(): void {
+  const bottom = stack[0]?.kind;
+  if ((bottom === 'bar' || bottom === 'confirm') && (ui.screen !== 'room' || cutscene)) closeMenus();
 }
 
 /** A destructive verb asks first (Ⓐ yes, Ⓑ no). Nothing opens for a verb that cannot act. */

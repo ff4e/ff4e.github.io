@@ -52,10 +52,11 @@ import { ui } from '../../src/app/screenState.js';
 import { DirRepeat } from './dirRepeat.js';
 import { adoptRemoteProgress, blur as roomBlur, keyDown as roomKeyDown, keyUp as roomKeyUp } from './game.js';
 import { mapBlur, mapBusy, mapKeyDown, mapKeyUp, mapPanelOpen } from './mapScreen.js';
-import { dropStrandedBar, menuAct, menuOpen, openBar, openConfirm, openOptions, topMenu, type MenuAct } from './menus.js';
+import { dropStrandedMenus, menuAct, menuOpen, openBar, openConfirm, openOptions, topMenu, type MenuAct } from './menus.js';
 import { roomLoading } from './seams/framePacing.js';
 import { introKeyDown } from './introScreen.js';
 import { SwipeHold, SwipeTracker, type SwipeDir } from './remoteSwipe.js';
+import { heldMoveToken } from '../../src/app/movement.js';
 import { OVERLAY_HOLD_MS, toggleInputOverlay } from './inputOverlay.js';
 
 export type InputSource = 'key' | 'pad' | 'remote';
@@ -233,7 +234,10 @@ function roomKey(down: boolean, code: string, now: number): void {
   }
   const swipe = SWIPE_OF[code];
   if (swipe) {
-    if (down && !menuThumb) holdChange(hold.steps([swipe]));
+    if (down && !menuThumb) {
+      holdLive();
+      holdChange(hold.steps([swipe]));
+    }
     return;
   }
   const key = PAD_ROOM[code] ?? REMOTE_ROOM[code];
@@ -342,17 +346,51 @@ let menuThumb = false;
 
 const touching = (): boolean => swipes.touching || keyThumb;
 
-/** The held swipe changed: let go of the old direction, hold the new one. */
+/** The game's own hold (`movement.ts`'s press token) that a held swipe pressed, or null. */
+let holdToken: object | null = null;
+
+/**
+ * The held swipe changed: let go of the old direction, hold the new one — if the room takes
+ * it. A room ignores a move during a load's replay, the KUFRIK demonstration, an auto-play,
+ * ZELVA's possession and the ZAVER finale (`game.ts`'s `keyDown`), and a key already held
+ * keeps its place; a swipe the room did not take is no hold, so the next step or click acts.
+ */
 function holdChange(c: { up: SwipeDir | null; down: SwipeDir } | null): void {
   if (!c) return;
   if (c.up) roomKeyUp(SWIPE_ARROW[c.up]);
+  const before = heldMoveToken();
   roomKeyDown(SWIPE_ARROW[c.down]);
+  const token = heldMoveToken();
+  if (token === null || token === before) {
+    hold.release();
+    holdToken = null;
+    __native.inputLog(`swipe ${c.down} not taken: the room moves nothing now`);
+    return;
+  }
+  holdToken = token;
   __native.inputLog(`swipe holds ${c.down}${c.up ? ` (was ${c.up})` : ''}`);
+}
+
+/**
+ * Is the held swipe still the game's held move? Not once the game let go of it on its own —
+ * a room rebuilt under it (an undo, a load, a death's restart: `buildRoom`'s `clearHeldKey`)
+ * or anything else that dropped it: then the hold is forgotten, so the thumb's next step
+ * presses again and a click toward that edge is a click.
+ */
+function holdLive(): boolean {
+  if (hold.held !== null && heldMoveToken() !== holdToken) {
+    __native.inputLog(`swipe lets go of ${hold.held}: the room let go of it first`);
+    hold.release();
+    holdToken = null;
+  }
+  return hold.held !== null;
 }
 
 /** Let go of a held swipe, if any. */
 function letGo(why: string): void {
+  if (!holdLive()) return; // nothing of ours to let go of: never another press's key
   const up = hold.release();
+  holdToken = null;
   if (!up) return;
   roomKeyUp(SWIPE_ARROW[up]);
   __native.inputLog(`swipe lets go of ${up}: ${why}`);
@@ -385,7 +423,7 @@ function swipeFilter(down: boolean, code: string, now: number): boolean {
   }
   swipes.press(true);
   const edge = CLICK_EDGE[code] ?? null;
-  if (hold.held !== null && inRoom()) {
+  if (inRoom() && holdLive()) {
     if (edge !== hold.held) {
       letGo(`a click (${code})`);
       return false;
@@ -470,7 +508,7 @@ function lifted(): void {
 
 /** Once a frame: who owns Back, the remote's swipes (and a held one), menu repeat, the held undo. */
 export function inputFrame(now: number): void {
-  dropStrandedBar();
+  dropStrandedMenus();
   systemOwnsBack = __native.systemBack(atMapRoot());
   if (overlayHold !== null && now - overlayHold >= OVERLAY_HOLD_MS) {
     overlayHold = null;
@@ -483,6 +521,7 @@ export function inputFrame(now: number): void {
   }
   if (!touching()) lifted();
   else if (hold.held !== null && !inRoom()) letGo('the room is not taking input'); // a menu opened, or the room went
+  else holdLive();
   if (menuOpen()) menuSteer(now);
   else if (menuHeld.length) {
     menuHeld.length = 0; // the menu closed under a held direction
@@ -514,6 +553,7 @@ export function inputBlur(): void {
   swipes.reset();
   swallowed.clear();
   hold.release(); // the room's own blur let go of its key
+  holdToken = null;
   keyThumb = false;
   menuThumb = false;
   overlayHold = null;

@@ -254,7 +254,9 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   over a room no logic step runs and the sound holds its place (`setModalPause`, as the
   browser's Help does), and closing it back to the bar lets the room run on from the frame it
   stopped on. Should the room go from under the bar (won, or KUFRIK's story beginning), the bar
-  goes with it. The pad's direct LB / RB / Ⓧ prompts and Ⓑ to the map still work.
+  goes with it — and so does a prompt the pad's direct LB / RB / Ⓧ opened on its own, which
+would otherwise stand over the map taking its input. The pad's direct prompts and Ⓑ to the
+map still work.
 - **Options** is the original game's Options face — the AI-upscaled panel art the tablets show,
   composited as `AiPanel.drawOptions` composites it — scaled to most of the window, with a focus
   outline on the row and a caption card of the touch UI's glass beside it naming the row and
@@ -688,7 +690,12 @@ back from the furthest it went, or 0.5 across — turns the hold that way, so tu
 deliberate a motion as starting, and a thumb settling back a little does not reverse the fish;
 more travel the same way changes nothing. A click toward the held direction is the swipe
 pressing on and is dropped (the hold goes on); any other click lets go of the hold and is
-itself — an edge click moves, a centre click switches fish. A thumb that swiped in a menu or on
+itself — an edge click moves, a centre click switches fish. A swipe the room does not take (a
+load's replay, the KUFRIK demonstration, an auto-play, ZELVA's possession, the ZAVER finale)
+is no hold, and a hold the room lets go of on its own (an undo, a load or a death's restart
+rebuilding it) is forgotten: the hold is live only while the game still holds the press it
+made (`movement.ts`'s press token), so the next step presses again and a click toward that
+edge is a click. A thumb that swiped in a menu or on
 the map moves no fish until it lifts, so the swipe down that hides the top bar does not carry
 on into the room. Each hold, turn and release is in the input log (`swipe holds right`,
 `swipe lets go of right: lifted`). `test/native-remote-swipe.test.ts` feeds the tracker taps,
@@ -971,7 +978,9 @@ active one; a swipe moves it one step, and an edge click just after it toward it
 swipe's end (a moment later, a click again); a thumb resting on the surface moves nothing,
 kept on it after a swipe it holds the move (KeyRoom held) — an edge click its way holds on, a
 swipe back turns it, lifting stops the fish, a centre click lets go and switches fish — and
-the thumb that swiped the top bar away moves no fish; Play/Pause undoes one move and, held,
+the thumb that swiped the top bar away moves no fish; a swipe during a load's replay is not
+taken and a held swipe an undo dropped is forgotten (a click toward that edge is a click
+after either); Play/Pause undoes one move and, held,
 repeats (350 ms, then every 80 ms) with nothing added on release. Back opens the top bar on
 Save, and the room is not paused: it steps, the mixer's clock runs, and no click, swipe, held
 thumb or Play/Pause moves a fish; the hints step aside. A swipe moves the focus, skipping the
@@ -981,7 +990,7 @@ a click saves the move record; Load restores it; Options and Help pause the room
 back to the bar, which runs on again; Restart starts over; a save mid-move is refused as F2
 is; coming back to the app shows the bar. With the pad: Ⓧ asks to restart and Ⓑ declines, RB
 with no save opens nothing, LB → Ⓐ saves, ☰ opens and closes the bar and Ⓑ closes it, Ⓑ goes
-to the map; Esc opens and hides the bar, and its Save prompt (the question alone) is declined
+to the map, and Ⓧ's prompt goes when the room does; Esc opens and hides the bar, and its Save prompt (the question alone) is declined
 by Esc and answered by Enter; its World map leaves the room. A Play/Pause hold released inside
 the top bar ends there. With the keyboard last, no hints are drawn on any screen (and, on the
 map and in a room, no UI layer at all). At 81 window widths across the margin/top switch
@@ -1000,7 +1009,7 @@ with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
 sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
-for each character in both of the UI font's weights. 143 checks, ~15 s.
+for each character in both of the UI font's weights. 150 checks, ~15 s.
 
 It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
 window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a
