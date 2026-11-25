@@ -17,7 +17,7 @@
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-map --store F
  *     the map smoke gate (`mapSmoke.ts`): the world map driven by keys through the real flow.
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-menus --store F [--smoke-out DIR] [--update-snapshot]
- *     the menu smoke gate (`menuSmoke.ts`): the pause menu, the confirm prompt, Options, Help,
+ *     the menu smoke gate (`menuSmoke.ts`): the top bar, the confirm prompt, Options, Help,
  *     the map's Options corner and the remote's room mapping, through the real flow, and the
  *     UI layout snapshot (native/ui-layout.snap.json).
  *   ff4e-native <bundle.js> --root <public dir> --headless --smoke-audio --store F

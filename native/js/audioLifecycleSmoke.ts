@@ -147,8 +147,8 @@ async function checks(): Promise<void> {
   await reopened(o, 300, 'an interruption with no end');
   await runs('an interruption with no end');
 
-  // The pause menu a room takes for the background: the output stays alive under it, the
-  // clock stands still, and it is released once, by the game.
+  // A modal pause (Options or Help over a room, Help anywhere) across a trip: the output stays
+  // alive under it, the clock stands still, and it is released once, by the game.
   audio.setModalPause(true);
   o = st().opens;
   away('will-background sleep:500 did-foreground', 'paused across a trip');

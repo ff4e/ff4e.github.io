@@ -23,9 +23,8 @@
 import { helpScreens, ui as screenUi } from '../../src/app/screenState.js';
 import type { Image2D, Surface2D } from '../../src/render/surface2d.js';
 import { drawLegend, legendItems, legendScreen, type LegendItem } from './legend.js';
-import { mapBusy, mapPanelOpen } from './mapScreen.js';
-import { paintConfirm, paintPause } from './menuPaint.js';
-import { OPTIONS_ROWS, topMenu, type Layer } from './menus.js';
+import { paintBar, paintConfirm } from './menuPaint.js';
+import { BAR_ITEMS, OPTIONS_ROWS, topMenu, type Layer } from './menus.js';
 import { NativeSurface } from './nativeSurface.js';
 import { paintOptions } from './optionsPaint.js';
 import { paintHelp } from './helpPaint.js';
@@ -68,7 +67,7 @@ export async function initUiLayer(picture?: Box): Promise<void> {
  */
 function drawTop(ui: Ui, top: Layer | null, legend: readonly LegendItem[], w: number, h: number, picture: Box, helpPage: number): number {
   let box = picture;
-  if (top?.kind === 'pause') paintPause(ui, w, h, top.sel);
+  if (top?.kind === 'bar') paintBar(ui, w, h, top.sel);
   else if (top?.kind === 'confirm') paintConfirm(ui, w, h, top.verb, lastInput());
   else if (top?.kind === 'options') box = paintOptions(ui, w, h, top.row);
   else if (top?.kind === 'help') box = paintHelp(ui, w, h, subLang(), helpPage);
@@ -79,7 +78,7 @@ function drawTop(ui: Ui, top: Layer | null, legend: readonly LegendItem[], w: nu
 
 /** Every menu as it first opens: what a rehearsal draws, one a frame. */
 const REHEARSALS: readonly Layer[] = [
-  { kind: 'pause', sel: 0 },
+  ...BAR_ITEMS.map((_, sel): Layer => ({ kind: 'bar', sel })),
   ...(['save', 'load', 'restart'] as const).map((verb): Layer => ({ kind: 'confirm', verb })),
   ...OPTIONS_ROWS.map((_, row): Layer => ({ kind: 'options', row })),
   { kind: 'help' },
@@ -125,7 +124,7 @@ function prepareMenus(w: number, h: number, insets: Insets, picture: Box, budget
   // still walks a whole menu, and all of them at once would be a hitch of its own.
   while (ready.next < REHEARSALS.length) {
     const top = REHEARSALS[ready.next]!;
-    const screen = legendScreen(top, false, false);
+    const screen = legendScreen(top);
     const legend = screen ? legendItems(screen, lastInput()) : [];
     const spent = __native.now() - t0;
     if (spent >= budgetMs || !rehearse(() => drawTop(ui, top, legend, w, h, picture, 0), budgetMs - spent)) break;
@@ -169,7 +168,7 @@ export function paintUi(
   if (!top) prepareMenus(sw, sh, insets, box, SLICE_MS);
   const opened = top !== null && top !== shownTop;
   shownTop = top;
-  const screen = legendScreen(top, mapPanelOpen(), mapBusy());
+  const screen = legendScreen(top);
   const legend = screen ? legendItems(screen, lastInput()) : [];
   if (!top && legend.length === 0 && !inputOverlayOn()) return { surface: null, ops: [], legendAt: 0 };
   if (!surface || surface.width !== w || surface.height !== h) surface = costed('surface', () => new NativeSurface(w, h));

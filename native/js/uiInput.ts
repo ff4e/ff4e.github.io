@@ -9,12 +9,12 @@
  *   - KUFRIK's briefcase story (A3, B2): the pad's Ⓑ, Ⓐ or ☰, the remote's click or Back, and
  *     the keyboard's Esc skip it (the browser's Escape, `zrus_kufr`); anything else is
  *     swallowed, as the browser's router swallows it;
- *   - in a room: the keyboard is the browser's, except that Esc opens the pause menu; the
+ *   - in a room: the keyboard is the browser's, except that Esc opens the top bar; the
  *     pad's left stick and d-pad move the little fish and its right stick the big one, Ⓨ
  *     undoes, Ⓑ (or ⧉) goes to the map, LB / RB / Ⓧ ask to save / load / restart, ☰ opens
- *     the pause menu; the remote's edge clicks move the active fish, its centre click
- *     switches fish, Play/Pause undoes (held: repeats, as the touch Undo does), Back opens
- *     the pause menu, and a swipe does nothing (decided: a stray swipe must not cost a move);
+ *     the top bar; the remote's edge clicks move the active fish, its centre click switches
+ *     fish, Play/Pause undoes (held: repeats, as the touch Undo does), Back opens the top
+ *     bar, and a swipe moves the active fish, held while the thumb stays on the surface (B6);
  *   - on the map: directions move the selection, OK opens, the pad's ☰ and the remote's
  *     Play/Pause open Options, and Back — the keyboard's Esc, the remote's Back — closes the
  *     record panel, or, at the root, leaves the game (tvOS requires Back at the top level to
@@ -27,9 +27,13 @@
  *
  * The remote's swipes are made here, from the thumb's travel on its touch surface
  * (`remoteSwipe.ts`, fed once a frame), and routed as `RemoteSwipe…` presses: in a menu and
- * on the map they step, anywhere else they do nothing. There, a click toward the edge a swipe
- * has just stepped to is that swipe's end and is dropped, so a swipe that finishes on the
- * ring moves one step, not two.
+ * on the map they step; in a room the first step holds the active fish's move that way, as a
+ * held arrow, until the thumb lifts (a whole step the other way turns it; `SwipeHold`). A
+ * thumb that swiped a menu or the map moves no fish until it lifts, so a swipe down that
+ * closes the top bar does not carry on into the room. A click toward the edge a swipe has just
+ * stepped to — or, in a room, toward the edge it holds — is that swipe's end and is dropped,
+ * so a swipe that finishes on the ring moves one step, not two; any other click lets go of a
+ * held swipe and is a click.
  *
  * Each event goes to the screen up when it arrives — one can change the screen. A release
  * off the room always reaches the map's router, the intro included: a direction held while
@@ -48,10 +52,11 @@ import { ui } from '../../src/app/screenState.js';
 import { DirRepeat } from './dirRepeat.js';
 import { adoptRemoteProgress, blur as roomBlur, keyDown as roomKeyDown, keyUp as roomKeyUp } from './game.js';
 import { mapBlur, mapBusy, mapKeyDown, mapKeyUp, mapPanelOpen } from './mapScreen.js';
-import { menuAct, menuOpen, openConfirm, openOptions, openPause, topMenu, type MenuAct } from './menus.js';
+import { dropStrandedMenus, menuAct, menuOpen, openBar, openConfirm, openOptions, topMenu, type MenuAct } from './menus.js';
 import { roomLoading } from './seams/framePacing.js';
 import { introKeyDown } from './introScreen.js';
-import { SwipeTracker, type SwipeDir } from './remoteSwipe.js';
+import { SwipeHold, SwipeTracker, type SwipeDir } from './remoteSwipe.js';
+import { heldMoveToken } from '../../src/app/movement.js';
 import { OVERLAY_HOLD_MS, toggleInputOverlay } from './inputOverlay.js';
 
 export type InputSource = 'key' | 'pad' | 'remote';
@@ -227,6 +232,14 @@ function roomKey(down: boolean, code: string, now: number): void {
     if (down && STORY_SKIP.has(code)) roomKeyDown('Escape'); // the room's router skips it
     return;
   }
+  const swipe = SWIPE_OF[code];
+  if (swipe) {
+    if (down && !menuThumb) {
+      holdLive();
+      holdChange(hold.steps([swipe]));
+    }
+    return;
+  }
   const key = PAD_ROOM[code] ?? REMOTE_ROOM[code];
   if (key) {
     if (down) roomKeyDown(key);
@@ -248,7 +261,7 @@ function roomKey(down: boolean, code: string, now: number): void {
     case 'Escape':
     case 'PadMenu':
     case 'RemoteBack':
-      openPause();
+      openBar();
       return;
     case 'PadB':
     case 'PadView':
@@ -264,7 +277,7 @@ function roomKey(down: boolean, code: string, now: number): void {
       openConfirm('restart');
       return;
     default:
-      return; // swipes, and the pad's unused buttons
+      return; // the pad's unused buttons
   }
 }
 
@@ -320,9 +333,75 @@ const CLICK_EDGE: Readonly<Record<string, SwipeDir | null>> = {
 };
 /** Clicks dropped as a swipe's end: their releases are dropped too. */
 const swallowed = new Set<string>();
+/** A swipe held in a room (B6): the active fish's held move. */
+const hold = new SwipeHold();
+/** The arrow a held swipe holds down the room's router (the active fish's, as the keyboard's). */
+const SWIPE_ARROW: Readonly<Record<SwipeDir, string>> = {
+  up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight',
+};
+/** `--remote-keys`' stand-in for a thumb resting on the surface: Shift held (`RemoteTouch`). */
+let keyThumb = false;
+/** The thumb on the surface swiped a menu or the map: it moves no fish until it lifts. */
+let menuThumb = false;
 
-/** Do swipes do anything here? In a menu and on the map (B2); never in a room. */
-const swipesAct = (): boolean => menuOpen() || (ui.screen === 'map' && ui.mapOverlay !== 'credits' && !ui.creditsLoading);
+const touching = (): boolean => swipes.touching || keyThumb;
+
+/** The game's own hold (`movement.ts`'s press token) that a held swipe pressed, or null. */
+let holdToken: object | null = null;
+
+/**
+ * The held swipe changed: let go of the old direction, hold the new one — if the room takes
+ * it. A room ignores a move during a load's replay, the KUFRIK demonstration, an auto-play,
+ * ZELVA's possession and the ZAVER finale (`game.ts`'s `keyDown`), and a key already held
+ * keeps its place; a swipe the room did not take is no hold, so the next step or click acts.
+ */
+function holdChange(c: { up: SwipeDir | null; down: SwipeDir } | null): void {
+  if (!c) return;
+  if (c.up) roomKeyUp(SWIPE_ARROW[c.up]);
+  const before = heldMoveToken();
+  roomKeyDown(SWIPE_ARROW[c.down]);
+  const token = heldMoveToken();
+  if (token === null || token === before) {
+    hold.release();
+    holdToken = null;
+    __native.inputLog(`swipe ${c.down} not taken: the room moves nothing now`);
+    return;
+  }
+  holdToken = token;
+  __native.inputLog(`swipe holds ${c.down}${c.up ? ` (was ${c.up})` : ''}`);
+}
+
+/**
+ * Is the held swipe still the game's held move? Not once the game let go of it on its own —
+ * a room rebuilt under it (an undo, a load, a death's restart: `buildRoom`'s `clearHeldKey`)
+ * or anything else that dropped it: then the hold is forgotten, so the thumb's next step
+ * presses again and a click toward that edge is a click.
+ */
+function holdLive(): boolean {
+  if (hold.held !== null && heldMoveToken() !== holdToken) {
+    __native.inputLog(`swipe lets go of ${hold.held}: the room let go of it first`);
+    hold.release();
+    holdToken = null;
+  }
+  return hold.held !== null;
+}
+
+/** Let go of a held swipe, if any. */
+function letGo(why: string): void {
+  if (!holdLive()) return; // nothing of ours to let go of: never another press's key
+  const up = hold.release();
+  holdToken = null;
+  if (!up) return;
+  roomKeyUp(SWIPE_ARROW[up]);
+  __native.inputLog(`swipe lets go of ${up}: ${why}`);
+}
+
+/** A room taking input (no menu over it, no story playing). */
+const inRoom = (): boolean => ui.screen === 'room' && !cutscene && !menuOpen();
+
+/** Do swipes do anything here? In a menu, on the map (B2) and in a room (B6). */
+const swipesAct = (): boolean =>
+  menuOpen() || (ui.screen === 'room' && !cutscene) || (ui.screen === 'map' && ui.mapOverlay !== 'credits' && !ui.creditsLoading);
 
 /**
  * A remote click or swipe, before it is routed: true when it is consumed here — a click that
@@ -331,7 +410,10 @@ const swipesAct = (): boolean => menuOpen() || (ui.screen === 'map' && ui.mapOve
 function swipeFilter(down: boolean, code: string, now: number): boolean {
   const swipe = SWIPE_OF[code];
   if (swipe) {
-    if (down) swipes.swiped(swipe, now);
+    if (down) {
+      swipes.swiped(swipe, now);
+      if (!inRoom()) menuThumb = true;
+    }
     return false;
   }
   if (!(code in CLICK_EDGE)) return false;
@@ -340,7 +422,16 @@ function swipeFilter(down: boolean, code: string, now: number): boolean {
     return swallowed.delete(code);
   }
   swipes.press(true);
-  if (!swipesAct() || !swipes.endsSwipe(CLICK_EDGE[code] ?? null, now)) return false;
+  const edge = CLICK_EDGE[code] ?? null;
+  if (inRoom() && holdLive()) {
+    if (edge !== hold.held) {
+      letGo(`a click (${code})`);
+      return false;
+    }
+    swallowed.add(code); // the held swipe pressing on: it holds on, and the click is its end
+    return true;
+  }
+  if (!swipesAct() || !swipes.endsSwipe(edge, now)) return false;
   swallowed.add(code);
   return true;
 }
@@ -383,7 +474,7 @@ function route(ev: string, now: number): void {
   }
   if (ev === '!background') {
     inputBlur();
-    pauseForBackground();
+    barForBackground();
     return;
   }
   if (ev === '!kvs') {
@@ -393,6 +484,11 @@ function route(ev: string, now: number): void {
   const down = ev[0] === '+';
   const code = ev.slice(1);
   if (down) last = keyboardIsRemote && sourceOf(code) === 'key' ? 'remote' : sourceOf(code);
+  if (code === 'RemoteTouch') {
+    keyThumb = down;
+    if (!touching()) lifted();
+    return;
+  }
   if (swipeFilter(down, code, now)) return;
   if (!down && code === 'RemotePlayPause' && undoHold) {
     undoHoldUp(); // wherever the release lands — a menu, the map — the hold ends with it
@@ -404,8 +500,15 @@ function route(ev: string, now: number): void {
   else mapKey(down, code);
 }
 
-/** Once a frame: who owns Back, the remote's swipes, menu repeat, the held undo. */
+/** The thumb left the surface: a held swipe lets go, and the next thumb may move a fish. */
+function lifted(): void {
+  menuThumb = false;
+  letGo('lifted');
+}
+
+/** Once a frame: who owns Back, the remote's swipes (and a held one), menu repeat, the held undo. */
 export function inputFrame(now: number): void {
+  dropStrandedMenus();
   systemOwnsBack = __native.systemBack(atMapRoot());
   if (overlayHold !== null && now - overlayHold >= OVERLAY_HOLD_MS) {
     overlayHold = null;
@@ -416,6 +519,9 @@ export function inputFrame(now: number): void {
     routeEvent(`+${SWIPE_CODE[dir]}`, now);
     routeEvent(`-${SWIPE_CODE[dir]}`, now);
   }
+  if (!touching()) lifted();
+  else if (hold.held !== null && !inRoom()) letGo('the room is not taking input'); // a menu opened, or the room went
+  else holdLive();
   if (menuOpen()) menuSteer(now);
   else if (menuHeld.length) {
     menuHeld.length = 0; // the menu closed under a held direction
@@ -427,13 +533,13 @@ export function inputFrame(now: number): void {
 /**
  * The app left the foreground (tvOS: Home, an app switch, Control Center over it): the host
  * stopped the sound and the loop (native/host/main.c, `lifecycle`), and on the first frame
- * back a room is paused as Back pauses it — the pause menu up, the room and its sound held —
- * so play never resumes under a player who has not come back to it yet. Elsewhere nothing
- * changes: the map, a menu already open, the intro and the briefcase story carry on from
- * where they stopped (the story's Back would skip it, not pause it).
+ * back a room shows the top bar, as Back does — the room runs on under it (B6: the bar never
+ * pauses), but the player comes back to the bar's focus, not to a fish a held input would
+ * move. Elsewhere nothing changes: the map, a menu already open, the intro and the briefcase
+ * story carry on from where they stopped (the story's Back would skip it).
  */
-function pauseForBackground(): void {
-  if (ui.screen === 'room' && !cutscene && !menuOpen()) openPause();
+function barForBackground(): void {
+  if (ui.screen === 'room' && !cutscene && !menuOpen()) openBar();
 }
 
 /** Focus lost: no held input's release will arrive. */
@@ -446,5 +552,9 @@ export function inputBlur(): void {
   undoHold = null;
   swipes.reset();
   swallowed.clear();
+  hold.release(); // the room's own blur let go of its key
+  holdToken = null;
+  keyThumb = false;
+  menuThumb = false;
   overlayHold = null;
 }

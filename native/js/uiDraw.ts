@@ -221,7 +221,7 @@ export class Ui {
    * radii and lines, one pixel of anti-aliasing), and inside a corner every sample's
    * distance is measured from that corner alone, so the small box's corner is the big one's.
    * What it saves is the rasterising: a box costs its corners, not its area — at a 4K TV's
-   * size the pause menu's glass was 2¼ million pixels of distance tests in the interpreter,
+   * size the (then) pause menu's glass was 2¼ million pixels of distance tests in the interpreter,
    * over half a second on a Mac and seconds on an Apple TV, on the frame the menu opened.
    * Returns false (draw the whole mask) for a box too small to be worth it.
    */

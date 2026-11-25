@@ -1,16 +1,21 @@
 /**
- * The native menus: the pause menu, the confirm prompt, Options and the help pages — a TV's
+ * The native menus: the top bar, the confirm prompt, Options and the help pages — a TV's
  * replacement for the browser's panel and pointer (the controller spec's A3 "Options",
- * "Help", "Confirm prompt" and B2 "Pause menu"). This module is their state and what each
- * press does; `uiInput.ts` turns keys, the gamepad and the remote into `MenuAct`s, and
+ * "Help", "Confirm prompt" and B6's top bar). This module is their state and what each press
+ * does; `uiInput.ts` turns keys, the gamepad and the remote into `MenuAct`s, and
  * `menuPaint.ts` / `optionsPaint.ts` / `helpPaint.ts` draw them.
  *
- * The menus are a stack: Options opens Help over itself, the pause menu opens the confirm
- * prompt, Options and Help, and Back closes the top one. While anything is open over a room
- * the room is PAUSED — the logic tick stops and the sound holds its place, as the browser's
- * help pauses (`openHelp`) — because tvOS requires Back during play to pause and show a menu.
- * Over the map only Help pauses the sound, as in the browser; Options leaves the menu music
- * playing so a volume change can be heard.
+ * The menus are a stack: Options opens Help over itself, the top bar opens the confirm
+ * prompt, Options and Help, and Back closes the top one. The top bar (B6: TestFlight build 3
+ * asked for something less invasive than a pause menu) is an Apple TV–style row of tabs
+ * across the top of a room — World map · Save · Load · Restart · Options · Help — and does
+ * NOT pause it: the logic steps on and the sound plays, only the input is the bar's while it
+ * is up, so no fish moves. The confirm prompt does not pause either (it is the bar's, and the
+ * pad's direct LB / RB / Ⓧ's, one question long). Options and Help do: they are whole panels
+ * over the room, and while either is over it the room is PAUSED — the logic tick stops and
+ * the sound holds its place, as the browser's help pauses (`openHelp`). Over the map only
+ * Help pauses the sound, as in the browser; Options leaves the menu music playing so a volume
+ * change can be heard.
  *
  * The verbs reach the game the way the keyboard's do — F2, F3, Backspace and Escape through
  * the room's router (`game.ts`'s `keyDown`) — so the browser's gates still decide: F2 is
@@ -19,9 +24,9 @@
 import { helpPages } from '../../src/data/helpText.js';
 import { helpScreens, ui } from '../../src/app/screenState.js';
 import { inAutoPlay } from '../../src/app/solveMode.js';
-import { showmode } from '../../src/app/gameState.js';
+import { cutscene, showmode } from '../../src/app/gameState.js';
 import { undoAvailable } from '../../src/app/undo.js';
-import { canSave, keyDown, saveExists, setPaused } from './game.js';
+import { blur as roomBlur, canSave, keyDown, saveExists, setPaused } from './game.js';
 import { audio } from './seams/audioEngine.js';
 import { mapBlur } from './mapScreen.js';
 import { settings, subLang } from './seams/playerSettings.js';
@@ -29,19 +34,19 @@ import { setSubtitleMode, setVolume } from './optionsModel.js';
 import type { SubtitleMode, VolumeBus } from '../../src/core/settings.js';
 
 export type Verb = 'save' | 'load' | 'restart';
-export type PauseItem = 'resume' | 'map' | 'save' | 'load' | 'restart' | 'options' | 'help';
+export type BarItem = 'map' | 'save' | 'load' | 'restart' | 'options' | 'help';
 export type OptionsRow = VolumeBus | 'subtitles' | 'help' | 'done';
 /** What a press means to a menu, whatever sent it. */
 export type MenuAct = 'up' | 'down' | 'left' | 'right' | 'ok' | 'back' | 'menu' | 'prev' | 'next' | 'other';
 
-export const PAUSE_ITEMS: readonly PauseItem[] = ['resume', 'map', 'save', 'load', 'restart', 'options', 'help'];
+export const BAR_ITEMS: readonly BarItem[] = ['map', 'save', 'load', 'restart', 'options', 'help'];
 export const OPTIONS_ROWS: readonly OptionsRow[] = ['effect', 'voice', 'music', 'subtitles', 'help', 'done'];
 const SUB_ORDER: readonly SubtitleMode[] = ['cz', 'en', 'off'];
 /** The 0..12 slider range of the Options face (hud.ts `sliderIndex`). */
 const SLIDER_MAX = 12;
 
 export type Layer =
-  | { readonly kind: 'pause'; sel: number }
+  | { readonly kind: 'bar'; sel: number }
   | { readonly kind: 'confirm'; readonly verb: Verb }
   | { readonly kind: 'options'; row: number }
   | { readonly kind: 'help' };
@@ -63,7 +68,7 @@ export function menuOpen(): boolean {
 }
 
 /**
- * May the pause menu's (and the legend's) `verb` act now? Greyed when not, by the touch
+ * May the top bar's (and the legend's) `verb` act now? Greyed when not, by the touch
  * buttons' rule: Save while CanSave, Load while this room has a save, neither during a map
  * Replay or solution playback — and nothing greyed during the KUFRIK demonstration, which is
  * teaching these very buttons. Restart is never refused.
@@ -77,22 +82,29 @@ export function verbAvailable(verb: Verb | 'undo'): boolean {
   return verb === 'save' ? canSave() : verb === 'load' ? saveExists() : undoAvailable();
 }
 
-export function pauseItemEnabled(item: PauseItem): boolean {
+export function barItemEnabled(item: BarItem): boolean {
   return item === 'save' || item === 'load' || item === 'restart' ? verbAvailable(item) : true;
 }
 
 /**
- * Pause a room for as long as a menu is over it; hold the sound under Help anywhere (the
- * browser's `openHelp` / `closeHelp`).
+ * Pause a room for as long as a whole panel — Options or Help — is over it (the top bar and
+ * the confirm prompt leave it running); hold the sound under Help anywhere (the browser's
+ * `openHelp` / `closeHelp`).
  */
 function syncPause(): void {
-  const overRoom = stack.length > 0 && ui.screen === 'room';
+  const panel = stack.some((l) => l.kind === 'options' || l.kind === 'help');
+  const overRoom = panel && ui.screen === 'room';
   setPaused(overRoom);
   audio.setModalPause(overRoom || stack.some((l) => l.kind === 'help'));
 }
 
 function push(l: Layer): void {
-  if (!stack.length) mapBlur(); // a direction held on the map must not steer it after the menu
+  if (!stack.length) {
+    // A direction held on the map, or a fish's held move in a room, must not go on under the
+    // menu: its release will be the menu's.
+    mapBlur();
+    roomBlur();
+  }
   stack.push(l);
   syncPause();
 }
@@ -108,10 +120,26 @@ export function closeMenus(): void {
   syncPause();
 }
 
-/** Back/Menu in a room: the pause menu, on Resume. */
-export function openPause(): void {
+/**
+ * Back/Menu in a room: the top bar, its focus on Save (or the next tab that can act) — never
+ * on World map, which leaves the room without asking, so a click straight after Back cannot.
+ */
+export function openBar(): void {
   if (stack.length) return;
-  push({ kind: 'pause', sel: 0 });
+  const l: Layer = { kind: 'bar', sel: BAR_ITEMS.indexOf('save') - 1 };
+  moveBar(l, 1);
+  push(l);
+}
+
+/**
+ * The room under the top bar or a confirm prompt went away — won, left for the map, or
+ * KUFRIK's story began over it — while it was up (neither pauses the room): the bar, a prompt
+ * the pad's LB / RB / Ⓧ opened on its own, and anything over them, go — or the prompt would
+ * stand over the map taking its input, its Yes acting on no room.
+ */
+export function dropStrandedMenus(): void {
+  const bottom = stack[0]?.kind;
+  if ((bottom === 'bar' || bottom === 'confirm') && (ui.screen !== 'room' || cutscene)) closeMenus();
 }
 
 /** A destructive verb asks first (Ⓐ yes, Ⓑ no). Nothing opens for a verb that cannot act. */
@@ -135,21 +163,18 @@ function perform(verb: Verb): void {
   keyDown(verb === 'save' ? 'F2' : verb === 'load' ? 'F3' : 'Backspace');
 }
 
-function movePause(l: Extract<Layer, { kind: 'pause' }>, by: number): void {
-  for (let i = 1; i <= PAUSE_ITEMS.length; i++) {
-    const at = (l.sel + by * i + PAUSE_ITEMS.length * i) % PAUSE_ITEMS.length;
-    if (pauseItemEnabled(PAUSE_ITEMS[at]!)) {
+/** Focus the next tab `by` that way that can act; at the bar's end it stays (no wrap, as tvOS's). */
+function moveBar(l: Extract<Layer, { kind: 'bar' }>, by: 1 | -1): void {
+  for (let at = l.sel + by; at >= 0 && at < BAR_ITEMS.length; at += by) {
+    if (barItemEnabled(BAR_ITEMS[at]!)) {
       l.sel = at;
       return;
     }
   }
 }
 
-function pressPause(item: PauseItem): void {
+function pressBar(item: BarItem): void {
   switch (item) {
-    case 'resume':
-      closeMenus();
-      return;
     case 'map':
       closeMenus();
       keyDown('Escape'); // the room router's way back to the map
@@ -182,11 +207,11 @@ export function menuAct(act: MenuAct): void {
   const l = topMenu();
   if (!l) return;
   switch (l.kind) {
-    case 'pause':
-      if (act === 'up') movePause(l, -1);
-      else if (act === 'down') movePause(l, 1);
-      else if (act === 'ok') pressPause(PAUSE_ITEMS[l.sel]!);
-      else if (act === 'back' || act === 'menu') closeMenus(); // Back = Resume
+    case 'bar':
+      if (act === 'left' || act === 'prev') moveBar(l, -1);
+      else if (act === 'right' || act === 'next') moveBar(l, 1);
+      else if (act === 'ok') pressBar(BAR_ITEMS[l.sel]!);
+      else if (act === 'down' || act === 'back' || act === 'menu') closeMenus(); // back to the room
       return;
     case 'confirm':
       if (act === 'ok') perform(l.verb);

@@ -22,6 +22,8 @@ import { loadSubtitleAssets } from './roomSubtitles.js';
 import { currentRoom, enterRoom, initGame, roomReady, showMap } from './game.js';
 import { ensureMapArt, mapFrame, mapPresented } from './mapScreen.js';
 import { inputFrame, routeEvent, setExitHandler } from './uiInput.js';
+import { legendScreen } from './legend.js';
+import { topMenu } from './menus.js';
 import { pinRandom } from './scene.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
 import { soundTime } from './sound.js';
@@ -121,6 +123,7 @@ export async function runMapSmoke(): Promise<number> {
     await tap('PadA');
     await frame();
     check(ui.mapInfoRoom === 1 && ui.mapInfoHover === 'run', 'Ⓐ on a solved room opens its record panel on Run');
+    check(legendScreen(topMenu()) === null, 'no hints over the record panel, for any input (B6: none on the map\'s side)');
     const order: (string | null)[] = [];
     for (let i = 0; i < 3; i++) {
       await tap('KeyL');
