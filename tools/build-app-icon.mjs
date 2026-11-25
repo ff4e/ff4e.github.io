@@ -46,7 +46,7 @@
 // The Apple TV's icon and Top Shelf are the same emblem (`native/tvos/make-art.mjs` imports
 // `emblem` and `MARK_DEF` from here; importing this module builds nothing).
 import { chromium } from 'playwright';
-import { writeFileSync } from 'node:fs';
+import { realpathSync, writeFileSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -229,7 +229,8 @@ const OUTPUTS = [
   },
 ];
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// Run directly (through a symlink too), not imported: compare the resolved paths.
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   const browser = await chromium.launch();
   const page = await browser.newPage({ deviceScaleFactor: 1 });
   console.log(`emblem ${GROW}x, tail clears the ring by ${tailClearance().toFixed(2)}`);

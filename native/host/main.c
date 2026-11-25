@@ -930,8 +930,8 @@ static JSValue n_presentProbe(JSContext *ctx, JSValueConst self, int argc, JSVal
   int id = ARGI(0), w = ARGI(1), h = ARGI(2);
   bool graded = argc > 3 && JS_ToBool(ctx, argv[3]);
   SDL_GPUTexture *src = id ? tex_by_id(id) : comp;
-  int sw = id ? tex_w[id] : comp_w, sh = id ? tex_h[id] : comp_h;
   if (!src || w <= 0 || h <= 0) return JS_ThrowTypeError(ctx, "presentProbe: unknown texture or size");
+  int sw = id ? tex_w[id] : comp_w, sh = id ? tex_h[id] : comp_h;
   flush_surf();
   end_composite();
   SDL_GPUTexture *dst = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
