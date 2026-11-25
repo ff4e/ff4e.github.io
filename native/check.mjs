@@ -48,6 +48,8 @@ const STEPS = [
   { name: 'map-smoke', run: [host, [...game, '--smoke-map', '--store', 'native/build/smoke-map-store.json', ...reads('map-smoke')]] },
   { name: 'menu-smoke', run: [host, [...game, '--smoke-menus', '--store', 'native/build/smoke-menus-store.json', ...reads('menu-smoke')]] },
   { name: 'audio-smoke', run: [host, [...game, '--smoke-audio', '--store', 'native/build/smoke-audio-store.json', ...reads('audio-smoke')]] },
+  // With an output (the Mac's, or SDL's dummy driver): the app's trips away, a dead output, the session's notices.
+  { name: 'audio-life', run: [host, [...game, '--audio-output', '--smoke-audio-lifecycle', '--store', 'native/build/smoke-audio-life-store.json', ...reads('audio-lifecycle')]] },
   { name: 'movie-smoke', run: [host, [...game, '--smoke-movie', '--store', 'native/build/smoke-movie-store.json', ...reads('movie-smoke')]] },
   { name: 'kufrik-smoke', run: [host, [...game, '--smoke-kufrik', '--store', 'native/build/smoke-kufrik-store.json', ...reads('kufrik-smoke')]] },
   { name: 'store-smoke', run: [host, [...game, '--smoke-store', '--tv-store', 'native/build/smoke-tv', '--store', 'native/build/smoke-tv/store.json', ...reads('store-smoke')]] },

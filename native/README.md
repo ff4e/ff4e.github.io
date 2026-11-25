@@ -383,7 +383,9 @@ supplies only the `AudioBackend` under it (`native/js/sdlAudioBackend.ts`, hande
   `native/js/sound.ts`), so the talking heads came with the sound.
 - **With an output** (the interactive game) the device's consumption drives the mixer; when
   none can be opened, SDL's `dummy` driver keeps the clock running in real time, silently.
-  The 5-second stat line prints the mixer clock against the wall's (×1.000 when healthy).
+  The 5-second stat line prints the mixer clock against the wall's (×1.000 when healthy). An
+  output that stops asking for sound is reopened, the clock meanwhile kept on the wall's time
+  (below, "When the sound does not come back").
   **Headless** (`--headless`: the smoke gates) no output is opened and the game drives the
   mixer itself, 1764 frames per 80 ms step (`soundTime` in `sound.ts`), so a headless run
   hears the timeline a player would, tick for tick, at any speed, with no device in it.
@@ -428,6 +430,95 @@ every voice, effect and music track of every room, on the headless clock.
 Not proven by a gate: how it sounds through a real device. It has been run with an output on
 a Mac (the mixer clock tracks the wall at ×1.001–1.002), not listened to critically, and the
 SDL resampler's output has not been compared with Chromium's.
+
+### When the sound does not come back (Apple TV)
+
+TestFlight tvOS build 3: *"sometimes when I close (minify) the app, on reopen the sound goes
+completely off. I have to kill the game and then reopen."* What SDL 3.4.20 does with the audio
+session on tvOS (`src/audio/coreaudio/SDL_coreaudio.m`, its iOS section):
+
+- it activates the AVAudioSession **once** (`session_active`, set when the first device opens)
+  and never again: nothing clears the flag when the system deactivates the session, so SDL
+  never calls `setActive:YES` after an interruption;
+- an interruption's *began* pauses the AudioQueue and marks it `interrupted`
+  (`InterruptionBegin`); the only way back is `InterruptionEnd`, which retries
+  `AudioQueueStart` — no reactivation — on three notifications only: the interruption's *ended*,
+  `UIApplicationWillEnterForeground` and `UIApplicationDidBecomeActive`. If the start fails at
+  each of those moments (the session still inactive, the app not yet active, another app's
+  session holding the output), or an *ended* never comes (Apple does not promise one), the queue
+  stays paused for good: SDL asks the mixer for nothing more, and the game is silent until it
+  is killed;
+- route changes and media-services resets are not handled at all on iOS/tvOS (only macOS
+  listens for default-device changes);
+- closing a device does not deactivate the session either (`COREAUDIO_CloseDevice` →
+  `UpdateAudioSession(…, false)` counts the closing device itself), so a reopen alone would
+  never call `setActive:YES` again: the host does it itself before every reopen.
+
+The game makes the interruption likely: its session is **solo ambient** (above), not mixable,
+so any other app that plays sound while it is in the background — the TV app, Music, a Top
+Shelf preview with sound — interrupts it. "Sometimes" is whether that happened while away.
+Nothing on our side noticed: `audio_suspend(false)` resumed the SDL streams, which were never
+the problem, and the mixer's clock stood still with the dead queue, so `playing()` stalled too.
+
+What the host does now (`audio_poll`, `audio_notice` in `native/host/audio.c`; the session's
+side in `platform_tvos.m`):
+
+- every notice the session gives — interruption began/ended, became inactive/active (tvOS 27's
+  `AVAudioSessionDidBecomeInactiveNotification` with its source), resumption recommended, route
+  changed, media services lost/reset — and every app lifecycle event is logged and handed to the
+  mixer;
+- back in the foreground, at an interruption's end or a route change, the session is reactivated
+  (`setActive:YES`); if the session was taken away meanwhile, the output is **reopened** at once;
+- a **watchdog**: an output that has not asked for sound for 750 ms (in the foreground, not
+  deliberately paused) is reopened — a new SDL device, so a new AudioQueue — and again after 1,
+  2, 4, 8 s, then every 8 s for as long as it stays dead; meanwhile the mixer's clock runs on the wall's time, silently,
+  as SDL's dummy driver would, so nothing waiting on a sound waits for ever. A removed SDL
+  device and a media-services reset are reopened at once. Both streams (the mixer's and a
+  movie's) are reopened together: they share one SDL device, which closes only with its last;
+- nothing the game hears is lost: the voices, the music's place and the clock live in the mixer,
+  not in the SDL stream. The trip away itself is not counted (`suspended`, released once — a
+  repeated lifecycle event changes nothing) — not even when the output was already dead when
+  the player left — and a modal pause held across the trip (Options or Help over a room, Help
+  anywhere) stays the game's to release.
+
+**The price of taking the session back.** The session is solo ambient, so reactivating it — on
+every return, and within ~1 s of an interruption the game outlives on screen — stops whatever
+the player had playing (Music, AirPlay) as the game's sound comes back, as launching the game
+does. That is deliberate for now: the game's sound is the game. A player who wants their own
+music under the game would need the category to change (ambient, mixable), not this rescue.
+
+**Reading the audio log.** Every step above goes to the device's unified log, subsystem
+`io.github.ff4e.fishfillets4ever`, category **`audio`**: in Console.app (the Apple TV under
+Devices, Start) filter on `subsystem:io.github.ff4e.fishfillets4ever category:audio`, or
+search `audio`; with Xcode attached the lines are in its console. A trip away that comes back
+healthy reads `app: will enter the background`, `suspended for the background, the mixer clock
+at …`, `app: in the foreground`, `resumed in the foreground…`, `session active: category …,
+route …`. A rescue reads `session lost: …` or `the output stopped pulling…`, then `reopening the
+output (…)`, `output reopened: driver coreaudio, device '…', … Hz` and `the output is pulling
+again…`. The line `session active: …` names the route (HDMI, AirPlay, Bluetooth) and whether
+other audio is playing. On a Mac the same lines are `SDL_Log`ged, prefixed `audio:`.
+
+**Checked on a Mac** (`--smoke-audio-lifecycle`, `native/js/audioLifecycleSmoke.ts`, ~40 s,
+with an output: the Mac's device, or SDL's dummy driver where there is none):
+
+    native/build/cmake/ff4e-native native/build/game.js --root public --headless --audio-output \
+      --smoke-audio-lifecycle --store native/build/smoke-audio-life-store.json
+
+`__native.audioLifecycle` (main.c, only with that flag) plays the system's part through the
+host's real paths: the app events through the event watch, the session's notices through
+`audio_notice` as `platform_tvos.m` sends them, a removed device through SDL's event path, and
+`kill` — the streams stop asking for sound, as SDL's paused AudioQueue leaves them. It checks a
+trip home and back, Control Center, every event twice, a line spoken across 2 s away (it ends
+exactly `delka` of mixer clock after it started, the time away not counted), an output dead on
+return with no word (watchdog), an interruption while away with and without its end (reopened
+at once), a modal pause across a trip, an output dying in the foreground (and staying dead:
+the retry schedule, the clock on the wall's time), an output still dead when the player leaves
+(the time away not driven through the mixer on return), the retry still due within 8 s after 32
+and 41 failed reopens (`failed:N`), a route change with a live output (kept), a
+media-services reset with a movie playing (both streams back, the movie's clock running on) and
+a removed device. `npm run native:check` runs it (`audio-life`), as does the manual CI job.
+**Waits for a device:** that tvOS really sends these notices in this order,
+that `setActive:YES` and a reopen succeed where SDL's restart failed, and the route names.
 
 ## Movies and credits
 
@@ -855,9 +946,11 @@ rules are by directory and kind, and the check only ever adds to them.)
 - *Leaving and coming back.* An SDL event watch — called inside the system's own callback,
   before the app is suspended — holds the mixer and the movie clock where they are and
   pauses the outputs (`audio_suspend`), and the loop stops stepping and drawing (no GPU work is
-  allowed in the background). The first frame back delivers `!background`, and a room shows
-  its top bar as Back does (`uiInput.ts`): the room runs on under it, as it always does under
-  the bar, but the player comes back to the bar's focus rather than to a fish. The map, an open
+  allowed in the background). Back, the audio session is reactivated and an output SDL did not
+  restore is reopened ("When the sound does not come back", above). The first frame back
+  delivers `!background`, and a room shows its top bar as Back does (`uiInput.ts`): the room
+  runs on under it, as it always does under the bar, but the player comes back to the bar's
+  focus rather than to a fish. The map, an open
   menu, the intro and the briefcase story carry on where they stopped. Losing the screen to
   Control Center or Siri is the same event. Nothing needs saving on the way out: every store
   write is made durable when it happens (`n_storeSave`; on tvOS `store.c`). The menu smoke drives `!background` on the map and
