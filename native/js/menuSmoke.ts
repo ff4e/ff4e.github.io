@@ -59,7 +59,10 @@ import { SUB_FACES } from './subtitleFonts.js';
 import { inputFrame, lastInput, routeEvent, setExitHandler, setKeyboardIsRemote, setLastInput } from './uiInput.js';
 import type { Insets } from './safeArea.js';
 import { t } from './uiStrings.js';
-import { initUiLayer, menusReady, paintUi, type Box } from './uiLayer.js';
+import { initUiLayer, menusReady, paintUi, setBarSlide, type Box } from './uiLayer.js';
+import { checkBarSlide } from './barSlideSmoke.js';
+import { checkGrade } from './gradeSmoke.js';
+import type { NativeSurface } from './nativeSurface.js';
 import { currentCost, describeCost, resetCost } from './uiCost.js';
 import { loadUiFonts, type UiOp } from './uiDraw.js';
 import { checkIcons, checkStrings } from './uiAssetSmoke.js';
@@ -215,6 +218,8 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   settings.titDef = 'en';
   await loadSubtitleAssets();
   await initUiLayer();
+  // Every state is drawn as it rests; the top bar's slide is checked on its own clock (below).
+  setBarSlide(0);
   await ensureOptionsArt();
   await preloadHelpFigures('en');
   await preloadHelpFigures('cz');
@@ -938,8 +943,34 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     check(ui.screen === 'map' && !menuOpen(), 'the room leaving under the pad\'s prompt closes it: nothing is left over the map');
     await enterRoom(1);
     await untilReady();
-    await tap('RemoteBack');
-    await select('map');
+    // The colour grade the room is presented with.
+    checkGrade({ check, drawRoom: () => draw(target, 0), compositeSize: () => [target.width, target.height], outDir });
+    // The top bar's slide, ending with its World map leaving the room.
+    await checkBarSlide({
+      check,
+      tap,
+      paint: () => {
+        const inRoom = ui.screen === 'room' && draw(target, 0);
+        return paintUi(WIN_W, WIN_H, inRoom ? pictureBox(target.width, target.height, WIN_W, WIN_H) : pictureBox(2560, 1920, WIN_W, WIN_H));
+      },
+      moveFish: async () => {
+        for (const dir of ['RemoteRight', 'RemoteLeft', 'RemoteUp', 'RemoteDown']) {
+          const before = moves();
+          await press(dir);
+          steps(8);
+          await press(dir, false);
+          rest();
+          if (moves() > before) return true;
+        }
+        return false;
+      },
+      pressWorldMap: () => select('map'),
+      save: (name, surface) => {
+        if (!outDir || !surface) return;
+        __native.saveTexture((surface as NativeSurface).id, `${outDir}/ui-${name}.rgba`);
+        if (ui.screen === 'room') __native.saveComposite(`${outDir}/pic-${name}.rgba`);
+      },
+    });
     check(ui.screen === 'map' && !menuOpen(), 'the top bar\'s World map leaves the room');
 
     // A story page: no hints (B6: none on the map's side), and any button dismisses it.

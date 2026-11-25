@@ -37,7 +37,7 @@ const AUDIO_SEAMS = new Set([...SEAMED].filter((n) => n.startsWith('audio-')).ma
  * — through the seams — at every import depth. Adding one here is a claim that it is.
  */
 const REAL = new Set([
-  'cutscenePlay', 'fishFrame', 'frameClock', 'gameState', 'initQuiet', 'keyTables', 'layout', 'logicTick',
+  'aiFilter', 'cutscenePlay', 'fishFrame', 'frameClock', 'gameState', 'initQuiet', 'keyTables', 'layout', 'logicTick',
   'movement', 'paintClock', 'panelLight', 'persist', 'phoneUndoFocus', 'replayMode', 'roomActionEvent',
   'roomGates', 'roomLoad', 'saveMigration', 'screenState', 'showmodeHolds', 'solveMode', 'undo',
 ]);

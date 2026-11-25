@@ -95,8 +95,19 @@ export interface NativeApi {
    * surface drawn over the same rect at one texel per window pixel, premultiplied — the
    * subtitles, laid out for the rect `presentRect` reports. `ui` is a surface drawn over the
    * whole window at one texel per window pixel (the menus and the button legend, `uiLayer.ts`).
+   * The composite is colour-graded (`setGrade`); the overlays are not.
    */
   present(overlay?: number, ui?: number): void;
+  /**
+   * The colour grade the presented picture gets, as the web's `filter: contrast() saturate()
+   * brightness()` (`grade.ts`); identity until set.
+   */
+  setGrade(contrast: number, saturate: number, brightness: number): void;
+  /**
+   * The present pass into a `w`×`h` texture rather than the window — texture `id`, or 0 for
+   * the composite, letterboxed and box-filtered, `graded` or not — and its RGBA, top-down.
+   */
+  presentProbe(id: number, w: number, h: number, graded: boolean): ArrayBuffer;
   /** Write the composite's RGBA (top-down) to `path`, prefixed by u32 w, u32 h. */
   saveComposite(path: string): void;
 
@@ -120,9 +131,10 @@ export interface NativeApi {
   /**
    * Show a surface (or a movie frame) in the window, as `present` shows the composite, with
    * `overlay` — a premultiplied surface the size of the whole WINDOW — drawn over it 1:1, and
-   * `ui` (the menus and the legend, `uiLayer.ts`) over that.
+   * `ui` (the menus and the legend, `uiLayer.ts`) over that. Colour-graded when `graded`
+   * (`grade.ts` says which screens are).
    */
-  presentTexture(id: number, overlay?: number, ui?: number): void;
+  presentTexture(id: number, overlay?: number, ui?: number, graded?: boolean): void;
   /** Built for tvOS: the remote is the input until something else is pressed. */
   readonly tv: boolean;
   /** `[w, h, density]`: the window's size in pixels, and pixels per point. Null headless. */

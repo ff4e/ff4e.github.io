@@ -19,12 +19,19 @@
  * size, the language, the input's glyphs, the screen, a setting a menu shows — a few
  * milliseconds a frame while no menu is up (`uiCost.ts`'s `rehearse`), so play does not
  * hitch. When a menu opens, what its first frame cost is logged, by phase.
+ *
+ * The top bar slides down into view as it opens and back up as it closes (`barSlide.ts`):
+ * the layer goes on drawing it for the slide's few frames after the menu stack has let it go
+ * — over the room, or over the map if the room went with it — at a whole-pixel offset, so
+ * nothing new is rasterised for it. Into or out of a prompt or a panel it simply appears and
+ * goes, as they do.
  */
 import { helpScreens, ui as screenUi } from '../../src/app/screenState.js';
 import type { Image2D, Surface2D } from '../../src/render/surface2d.js';
 import { drawLegend, legendItems, legendScreen, type LegendItem } from './legend.js';
 import { paintBar, paintConfirm } from './menuPaint.js';
-import { BAR_ITEMS, OPTIONS_ROWS, topMenu, type Layer } from './menus.js';
+import { BAR_ITEMS, OPTIONS_ROWS, barItemEnabled, openMenus, topMenu, type Layer } from './menus.js';
+import { Slide } from './barSlide.js';
 import { NativeSurface } from './nativeSurface.js';
 import { paintOptions } from './optionsPaint.js';
 import { paintHelp } from './helpPaint.js';
@@ -61,13 +68,25 @@ export async function initUiLayer(picture?: Box): Promise<void> {
   console.log(`ui: menus ready for ${w}×${h} at start, ${describeCost(currentCost(), __native.now() - t0)}`);
 }
 
+/** The top bar as it was last drawn: what a bar sliding out after the menu stack let it go shows. */
+interface BarLook {
+  readonly sel: number;
+  readonly enabled: readonly boolean[];
+}
+
 /**
  * What a menu's paint takes, apart from the menu: its legend, the picture's box, the help's
- * page. Returns where in `ui.ops` the legend's ops begin.
+ * page, and the top bar while it slides (`bar`: how it looks and how much of it is lifted
+ * out of sight — drawn with no menu up, too, as it slides out). Returns where in `ui.ops`
+ * the legend's ops begin.
  */
-function drawTop(ui: Ui, top: Layer | null, legend: readonly LegendItem[], w: number, h: number, picture: Box, helpPage: number): number {
+function drawTop(
+  ui: Ui, top: Layer | null, legend: readonly LegendItem[], w: number, h: number, picture: Box, helpPage: number,
+  bar: { look: BarLook; lift: number } | null = null,
+): number {
   let box = picture;
-  if (top?.kind === 'bar') paintBar(ui, w, h, top.sel);
+  if (top?.kind === 'bar') paintBar(ui, w, h, top.sel, { lift: bar?.lift ?? 0 });
+  else if (!top && bar) paintBar(ui, w, h, bar.look.sel, { lift: bar.lift, enabled: bar.look.enabled });
   else if (top?.kind === 'confirm') paintConfirm(ui, w, h, top.verb, lastInput());
   else if (top?.kind === 'options') box = paintOptions(ui, w, h, top.row);
   else if (top?.kind === 'help') box = paintHelp(ui, w, h, subLang(), helpPage);
@@ -146,6 +165,34 @@ export function menusReady(): boolean {
 /** The menu drawn on the last frame: a newly opened one has its first frame's cost logged. */
 let shownTop: Layer | null = null;
 
+/** The top bar's slide, the clock it runs on, and how the bar looked when it was last up. */
+const slide = new Slide();
+let slideClock = (): number => __native.now();
+let barLook: BarLook | null = null;
+
+/**
+ * Set the slide's length in ms, and its clock: the menu smoke runs the menus with no slide
+ * (0), so each state is drawn as it rests, and times the slide by hand on its own clock.
+ */
+export function setBarSlide(ms: number, clock: () => number = () => __native.now()): void {
+  slide.ms = ms;
+  slideClock = clock;
+}
+
+/**
+ * How much of the top bar shows this frame (0..1, eased) for `top`, the menu on top now.
+ * Under a prompt or a panel the bar is not drawn, and is held at rest — shown if it is still
+ * on the stack under them, so coming back to it does not slide it in again; a prompt or a
+ * panel closing everything takes the bar with it, unslid.
+ */
+function barShown(top: Layer | null): number {
+  if (top && top.kind !== 'bar') slide.snap(openMenus()[0]?.kind === 'bar');
+  else if (!top && shownTop && shownTop.kind !== 'bar') slide.snap(false);
+  const f = slide.step(top?.kind === 'bar', slideClock());
+  if (top?.kind === 'bar') barLook = { sel: top.sel, enabled: BAR_ITEMS.map(barItemEnabled) };
+  return f;
+}
+
 /**
  * Draw the layer for a `w`×`h` window whose picture (the room, the map, a story page) is
  * shown in `picture`, everything inside `insets` (by default the window's own). Returns the
@@ -166,18 +213,20 @@ export function paintUi(
   const top = topMenu();
   const box: Box = [picture[0] - l, picture[1] - t, picture[2], picture[3]];
   if (!top) prepareMenus(sw, sh, insets, box, SLICE_MS);
+  const shown = barShown(top);
+  const bar = barLook && (top?.kind === 'bar' || (!top && shown > 0)) ? { look: barLook, lift: 1 - shown } : null;
   const opened = top !== null && top !== shownTop;
   shownTop = top;
   const screen = legendScreen(top);
   const legend = screen ? legendItems(screen, lastInput()) : [];
-  if (!top && legend.length === 0 && !inputOverlayOn()) return { surface: null, ops: [], legendAt: 0 };
+  if (!top && !bar && legend.length === 0 && !inputOverlayOn()) return { surface: null, ops: [], legendAt: 0 };
   if (!surface || surface.width !== w || surface.height !== h) surface = costed('surface', () => new NativeSurface(w, h));
   surface.clear();
   surface.save();
   surface.translate(l, t);
   const ui = new Ui(surface, fonts);
   ui.bleed = insets;
-  const legendAt = drawTop(ui, top, legend, sw, sh, box, helpScreens.page);
+  const legendAt = drawTop(ui, top, legend, sw, sh, box, helpScreens.page, bar);
   drawInputOverlay(ui, w, h, l, t);
   surface.restore();
   if (opened) console.log(`ui: ${top.kind} opened at ${w}×${h}, its first frame ${describeCost(currentCost(), __native.now() - t0)}`);
