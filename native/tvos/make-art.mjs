@@ -7,9 +7,10 @@
 //
 // The icon is a layered stack, as tvOS requires: an opaque Back layer, pure black, and a Front
 // layer holding only the emblem over transparency, so the focus parallax lifts the mark off
-// the black. The mark keeps inside the middle of the layer (its ring 62 % of the height
-// across): tvOS enlarges a focused icon and crops its edges. The Top Shelf images (shown when
-// the app is in the top row) are the same mark on black, smaller against their height. The
+// the black. The mark fills most of the layer's height (its ring 86 % across; 62 % read as too
+// small on a TV, build 5) but keeps a margin: tvOS enlarges a focused icon and crops its
+// edges. The Top Shelf images (shown when the app is in the top row) are the same mark on
+// black, a little smaller against their height (70 %). The
 // files keep the names and pixel sizes the catalog's Contents.json files name.
 //
 // Requires the repo's Playwright (a dev dependency already, for the UI suite).
@@ -31,7 +32,7 @@ const doc = (w, h, back, ring) =>
      ${ring ? emblem((ring * h) / GROW, w / 2, h / 2) : ''}
    </svg>`;
 
-const ICON_RING = 0.62, SHELF_RING = 0.5;
+const ICON_RING = 0.86, SHELF_RING = 0.7;
 const OUT = [];
 for (const [stack, sizes] of [['App Icon', [[400, 240, '1x'], [800, 480, '2x']]], ['App Icon - App Store', [[1280, 768, '1x']]]]) {
   for (const [w, h, scale] of sizes) {

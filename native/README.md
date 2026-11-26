@@ -946,8 +946,8 @@ layered App Icon and the Top Shelf images: the game's gold emblem on black (Test
 home row). `make-art.mjs` draws them with Playwright from the iOS icon's vector emblem
 (`tools/build-app-icon.mjs`, imported): the icon's Back layer pure black, its Front layer the
 emblem alone over transparency, so the focus parallax lifts the mark off the black, its ring
-62 % of the height across (tvOS crops a focused icon's edges); the Top Shelf the same mark on
-black.
+86 % of the height across, leaving a margin because tvOS crops a focused icon's edges (62 % read
+as too small on a TV); the Top Shelf the same mark on black, its ring 70 % of the height.
 
 **What it ships** (`native/tvos/stage.mjs`): `game.js` and the part of `public/` the native
 host reads, by rule — the `ai` tier's art, the rooms, their subtitles and the staged speech,
