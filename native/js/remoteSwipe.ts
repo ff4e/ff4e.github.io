@@ -7,8 +7,10 @@
  * The host hands over where the thumb is, every frame (`__native.remoteTouch`): tvOS reports
  * the surface's ABSOLUTE position (`reportsAbsoluteDpadValues`, which the 1st-generation
  * remote's clicks need — native/host/platform_tvos.m), -1..1 across and down, and SDL passes
- * it on as the left stick's two axes (SDL_mfijoystick.m) — with no touch-down or lift of its
- * own: a lifted thumb reads (0, 0), and the host says null then. It reads them raw, because
+ * it on as the left stick's two axes (SDL_mfijoystick.m) — or, for the iPhone's Apple TV
+ * Remote, which SDL maps without them, the host reads GameController's d-pad (main.c, the
+ * touchpad kind) — with no touch-down or lift of its own: a lifted thumb reads (0, 0), and the
+ * host says null then. It reads them raw, because
  * SDL's own reading of the inverted y gives -1 for a lifted thumb; a position within `LIFTED`
  * of the centre is taken as lifted here too, so that reading can never pass for a thumb. A
  * position is not a deflection: a thumb resting on an edge is not a swipe, so a swipe is
@@ -22,8 +24,14 @@
  * counts while a click is held (a thumb pressing moves), and the thumb's place when the click
  * lets go is where travel starts again. A click on the edge a swipe just stepped toward —
  * a swipe that ends pressing the ring, or the 1st-generation remote's click with the thumb
- * still out there — is the end of that swipe, not one more step (`endsSwipe`); a click in the
- * centre is always a click.
+ * still out there — is the end of that swipe, not one more step (`endsSwipe`). Whether the
+ * thumb SWIPED is kept too (`stepped`): a step in this touch, or one `SWIPE_CLICK_MS` ago —
+ * and whether it merely TRAVELLED (`travelled`): `TAP_SLOP` from where it came down, in this
+ * touch or one that lifted `SWIPE_CLICK_MS` ago. A centre click is a click only when the thumb
+ * did not, where the router asks (uiInput.ts): in a room, so that a swipe never switches fish,
+ * by `stepped` on a Siri Remote (whose thumb rests, drifts and slides to the centre to click
+ * without swiping), and anywhere by `travelled` on the iPhone's Apple TV Remote, whose
+ * "click" is a tap that can end a swipe too short for a step.
  */
 
 export type SwipeDir = 'up' | 'down' | 'left' | 'right';
@@ -37,6 +45,11 @@ export const SWIPE_CLICK_MS = 300;
  * `SDL_GetGamepadAxis` returns for a lifted thumb on the inverted y is (0, -1/32767).
  */
 export const LIFTED = 3 / 32767;
+/**
+ * Travel from where the thumb came down past which a touch is no tap (half a `STEP`, an
+ * eighth of the width): a resting thumb's jitter and a click's wobble stay well inside it.
+ */
+export const TAP_SLOP = STEP / 2;
 
 export class SwipeTracker {
   /** Where travel is measured from; null while nothing touches (or a click is held). */
@@ -46,10 +59,38 @@ export class SwipeTracker {
   private last: { dir: SwipeDir; at: number } | null = null;
   /** This touch's last step, and how far along its way the thumb has gone since (its signed coordinate). */
   private reach: { dir: SwipeDir; far: number } | null = null;
+  /** Where this touch came down (or where the thumb was when a click let go). */
+  private landed: [number, number] | null = null;
+  /** Has this touch gone `TAP_SLOP` from `landed`? */
+  private moved = false;
+  /** The last time a thumb that had travelled was on the surface. */
+  private movedAt: number | null = null;
+  /** Has this touch made a step (or a stand-in swipe, `swiped`)? */
+  private steppedTouch = false;
 
   /** Is a thumb on the surface, as of the last `feed` (a click held included)? */
   get touching(): boolean {
     return this.thumb;
+  }
+
+  /**
+   * Did the thumb travel — this touch `TAP_SLOP` from where it came down, or a step or a
+   * travelled touch within `SWIPE_CLICK_MS` of `now` (a tap's click can come just after the
+   * lift)? A centre click going down then is the end of a swipe, not a click (uiInput.ts).
+   */
+  travelled(now: number): boolean {
+    if (this.moved) return true;
+    const recent = (at: number | null | undefined): boolean => at != null && now - at <= SWIPE_CLICK_MS;
+    return recent(this.movedAt) || recent(this.last?.at);
+  }
+
+  /**
+   * Did the thumb SWIPE — a step in this touch, or one within `SWIPE_CLICK_MS` of `now`? The
+   * Siri Remote's test for a centre click being a swipe's end (uiInput.ts): travel alone is
+   * not, since its thumb slides to where it clicks.
+   */
+  stepped(now: number): boolean {
+    return this.steppedTouch || (this.last !== null && now - this.last.at <= SWIPE_CLICK_MS);
   }
 
   /**
@@ -61,9 +102,18 @@ export class SwipeTracker {
     if (!pos || !this.thumb) {
       this.anchor = null;
       this.reach = null;
+      this.landed = null;
+      this.moved = false;
+      this.steppedTouch = false;
       return [];
     }
+    if (this.moved) this.movedAt = now;
     if (this.pressed) return [];
+    if (!this.landed) this.landed = [pos[0], pos[1]];
+    else if (!this.moved && Math.max(Math.abs(pos[0] - this.landed[0]), Math.abs(pos[1] - this.landed[1])) >= TAP_SLOP) {
+      this.moved = true;
+      this.movedAt = now;
+    }
     if (!this.anchor) {
       this.anchor = [pos[0], pos[1]];
       return [];
@@ -107,6 +157,7 @@ export class SwipeTracker {
   /** A swipe stepped `dir` at `now` (from here, or a stand-in: `--remote-keys`' Shift+arrow). */
   swiped(dir: SwipeDir, now: number): void {
     this.last = { dir, at: now };
+    if (this.thumb) this.steppedTouch = true;
   }
 
   /** A click went down (`true`) or came up: no travel counts while it is held. */
@@ -114,6 +165,11 @@ export class SwipeTracker {
     this.pressed = down;
     this.anchor = null; // the next position is where travel starts again
     this.reach = null;
+    if (!down) {
+      this.landed = null; // ...and where a tap is measured from
+      this.moved = false;
+      this.steppedTouch = false;
+    }
   }
 
   /** Is a click toward `dir` (null: the centre), going down at `now`, the end of a swipe? */
@@ -128,6 +184,10 @@ export class SwipeTracker {
     this.thumb = false;
     this.last = null;
     this.reach = null;
+    this.landed = null;
+    this.moved = false;
+    this.movedAt = null;
+    this.steppedTouch = false;
   }
 }
 

@@ -629,18 +629,127 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     const stopped = moves();
     steps(20);
     check(heldKeyState() === 0 && moves() === stopped && logged('lets go of') && logged('lifted'), 'lifting the thumb lets go: the fish stops');
-    // Another click lets go of a held swipe and is itself: the centre click switches fish.
+    // A centre click during a held swipe is that swipe's end (TestFlight tvOS builds 4-6: a
+    // swipe must never switch fish): the hold goes on, and the fish stays.
     await press('RemoteTouch');
     await tap(swipeTo);
     steps(2);
     const fishA = engine!.active;
     await tap('RemoteSelect');
     steps(2);
-    check(heldKeyState() === 0 && engine!.active !== fishA && logged('a click (RemoteSelect)'),
-      'a centre click during a held swipe lets go of it, and switches fish');
+    check(heldKeyState() === 2 && engine!.active === fishA && logged('RemoteSelect ends the swipe held'),
+      'a centre click during a held swipe is its end: the hold goes on, and no fish switches');
+    // Another click lets go of a held swipe and is itself: an edge click another way.
+    const otherEdge = { RemoteRight: 'RemoteLeft', RemoteLeft: 'RemoteRight', RemoteUp: 'RemoteDown', RemoteDown: 'RemoteUp' }[way]!;
+    await tap(otherEdge);
+    steps(2);
+    check(heldKeyState() === 0 && logged(`a click (${otherEdge})`), 'an edge click another way during a held swipe lets go of it');
     await press('RemoteTouch', false);
+    rest();
+    clock += 400;
     await tap('RemoteSelect');
     rest();
+    check(engine!.active !== fishA, 'once the thumb has lifted, a centre click switches fish');
+    await tap('RemoteSelect');
+    rest();
+    await back0();
+    // The iPhone's Apple TV Remote (TestFlight tvOS builds 4-6: its swipes moved the fish the
+    // wrong way or switched it). SDL maps it as a generic micro gamepad: d-pad buttons made of
+    // where the thumb is, no touch axes. The host takes its touch from GameController, a d-pad
+    // button only when the d-pad reads exactly that edge, and its tap as the centre.
+    const tp = __native.remoteTouchpadProbe([
+      [0.2, 0.8, ''], // a thumb high on the touchpad: x right, y down
+      [0.2, 0.8, 'dpup'], // its Up is where the thumb is, not a press
+      [-0.1, -0.7, 'dpdown'], // ...nor Down
+      [0, 1, 'dpup'], // exactly the edge, as a digital d-pad: an edge click
+      [0.3, 0.8, 'a'], // its tap, the thumb high: the centre
+      [1, 0, 'a'], // a click with the d-pad exactly at an edge: that edge
+      [0, 0, ''], // lifted
+      [0, -0.6, '', 1], // a controller whose y points down: its own Up says so
+    ]);
+    const [high, , , , tapHigh, edgeA, liftedTp, flipped] = tp.steps;
+    const codes = (i: number): string => tp.steps[i]!.codes.join(' ');
+    check(tp.remote && tp.kind === 'touchpad' && !!high!.touch && near(high!.touch[0], 0.2) && near(high!.touch[1], -0.8),
+      `the phone's remote is a remote of the touchpad kind (${tp.remote}, ${tp.kind}), its touch from GameController with y down (${JSON.stringify(high!.touch?.map((v) => +v.toFixed(3)))})`);
+    check(codes(1) === '' && codes(2) === '' && codes(3) === '+RemoteUp -RemoteUp',
+      `its d-pad buttons click only when the d-pad reads exactly that edge (${codes(1) || 'none'}; ${codes(2) || 'none'}; ${codes(3)})`);
+    check(tapHigh!.codes.join(' ') === '+RemoteSelect -RemoteSelect' && edgeA!.codes.join(' ') === '+RemoteRight -RemoteRight',
+      `its tap is the centre wherever the thumb is, exactly an edge is that edge (${tapHigh!.codes.join(' ')}; ${edgeA!.codes.join(' ')})`);
+    check(liftedTp!.touch === null && !!flipped!.touch && near(flipped!.touch[1], -0.6),
+      `lifted it reads none; a controller whose own Up is a negative y reads up (${JSON.stringify(flipped!.touch)})`);
+    // Off tvOS a pad with neither Y nor a right stick is a pad (SDL's Nintendo Switch Online
+    // NES and Famicom pads): its d-pad moves the fish, never a touchpad's ignored presses.
+    const nes = tp.nesPad;
+    check(!!nes && !nes.remote && nes.codes.join(' ') === '+PadUp -PadUp',
+      `on a Mac an NES-style pad (no Y, no right stick) is a pad, its Up an Up (${nes ? `${nes.remote}, ${nes.codes.join(' ') || 'none'}` : 'not run'})`);
+    // Its swipes through the router, as the host hands them over (GameController's absolute
+    // positions, y down) and its tap as the centre click it sends: a swipe that ends in a tap
+    // moves the fish and never switches it; a tap that did not travel switches.
+    const realTouch = __native.remoteTouch, realKind = __native.remoteKind;
+    let thumbAt: [number, number] | null = null;
+    __native.remoteTouch = () => thumbAt;
+    __native.remoteKind = () => 'touchpad';
+    try {
+      const v = { RemoteRight: [1, 0], RemoteLeft: [-1, 0], RemoteUp: [0, -1], RemoteDown: [0, 1] }[way]!;
+      const fishP = engine!.active;
+      pre = moves();
+      for (let i = 0; i <= 6; i++) {
+        const f = -0.6 + (1.2 * i) / 6;
+        thumbAt = [v[0]! * f + 0.05, v[1]! * f + 0.05];
+        steps(1);
+      }
+      thumbAt = null;
+      steps(1);
+      await tap('RemoteSelect'); // the tap, just after the lift
+      rest();
+      check(moves() > pre && engine!.active === fishP && logged('after the thumb swiped'),
+        `the phone: a swipe ending in its tap moves the active fish (${pre} → ${moves()}) and does not switch it`);
+      await back0();
+      clock += 400;
+      thumbAt = [0.3, -0.5];
+      steps(2);
+      await tap('RemoteSelect');
+      thumbAt = null;
+      steps(1);
+      rest();
+      check(engine!.active !== fishP, 'the phone: a tap that did not travel switches fish');
+      await tap('RemoteSelect');
+      rest();
+      // In a menu too its tap at a swipe's end is no click: the top bar stays, nothing opens.
+      await tap('RemoteBack');
+      const sel0 = barSel();
+      for (let i = 0; i <= 6; i++) {
+        thumbAt = [-0.6 + (1.2 * i) / 6, 0.1];
+        steps(1);
+      }
+      thumbAt = null;
+      steps(1);
+      await tap('RemoteSelect');
+      check(topMenu()?.kind === 'bar' && barSel() !== sel0, `the phone: in the top bar a swipe moves the focus (${sel0} → ${barSel()}) and its tap there opens nothing`);
+      await tap('RemoteBack');
+      rest();
+      // A Siri Remote's thumb slides to where it clicks (the 1st generation: landing off-centre,
+      // clicking in the centre): travel without a step is no swipe, and its centre click switches.
+      __native.remoteKind = () => 'surface';
+      clock += 400;
+      const fishS = engine!.active;
+      for (let i = 0; i <= 6; i++) {
+        thumbAt = [0.4 - (0.3 * i) / 6, 0.3 - (0.3 * i) / 6 + 0.01];
+        steps(1);
+      }
+      await tap('RemoteSelect');
+      thumbAt = null;
+      steps(1);
+      rest();
+      check(engine!.active !== fishS, 'a Siri Remote: a thumb sliding to the centre without a swipe, then a centre click, switches fish');
+      clock += 400;
+      await tap('RemoteSelect');
+      rest();
+    } finally {
+      __native.remoteTouch = realTouch;
+      __native.remoteKind = realKind;
+    }
+    clock += 400;
     // A swipe that closes the top bar does not carry on into the room: that thumb moves no
     // fish until it lifts.
     pre = moves();
