@@ -24,6 +24,8 @@ const reclaim = typeof FinalizationRegistry === 'function'
 export class NativeAiScreen implements AiTarget {
   width = 0;
   height = 0;
+  /** Composite pixels a native pixel (the `ai` tier's ×4): what a room's size cap is in (`roomCapH`). */
+  scale = 1;
   /**
    * Textures for the scratch canvases the room hands over (classic-sprite fallbacks,
    * LODE's wreck background), by identity plus `aiImageRevision` — the rule of
@@ -61,9 +63,10 @@ export class NativeAiScreen implements AiTarget {
     return { id: hit.id, width: img.width, height: img.height };
   }
 
-  begin(w: number, h: number): void {
+  begin(w: number, h: number, scale = 1): void {
     this.width = w;
     this.height = h;
+    this.scale = scale;
     __native.begin(w, h);
   }
 

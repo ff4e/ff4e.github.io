@@ -749,7 +749,7 @@ export function advance(dt: number): number {
 /** Composite the current room into `target`; false when there is nothing to draw yet. */
 export function draw(target: NativeAiScreen, alpha: number): boolean {
   if (!roomReady() || !aiRoom || !room) return false;
-  target.begin(aiRoom.nativeWidth * aiRoom.scale, aiRoom.nativeHeight * aiRoom.scale);
+  target.begin(aiRoom.nativeWidth * aiRoom.scale, aiRoom.nativeHeight * aiRoom.scale, aiRoom.scale);
   aiRoom.drawInto(target, room, aiFrame(alpha));
   return true;
 }

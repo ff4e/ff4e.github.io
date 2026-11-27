@@ -234,10 +234,13 @@ export function paintUi(
   return { surface, ops: ui.ops, legendAt };
 }
 
-/** The window's size, and where a `cw`×`ch` picture is shown in it; null with no window. */
-export function windowLayout(cw: number, ch: number): { w: number; h: number; picture: Box } | null {
+/**
+ * The window's size, and where a `cw`×`ch` picture is shown in it — a room capped by `capH`
+ * as `present` caps it (`roomCapH`) — or null with no window.
+ */
+export function windowLayout(cw: number, ch: number, capH = 0): { w: number; h: number; picture: Box } | null {
   const size = __native.windowSize();
-  const rect = __native.presentRect(cw, ch);
+  const rect = __native.presentRect(cw, ch, capH);
   if (!size || !rect) return null;
   return { w: size[0], h: size[1], picture: [rect[0], rect[1], rect[2], rect[3]] };
 }

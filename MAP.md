@@ -61,7 +61,8 @@ others are small enough to read.
   [`native/README.md`](native/README.md): the subtitles are `native/js/subtitleLayout.ts` (where
   the glyphs go, restating `subtitleDom.ts`'s desktop layout), `subtitleDraw.ts` (FreeType
   glyphs, `native/host/text.c`, through `Surface2D.fillMask`) and `roomSubtitles.ts` (the game's
-  per-frame layer); the movies are `native/js/introScreen.ts` (`intro.ts`'s player and
+  per-frame layer); how big a room is shown, at most 45 px a cell per 1080 lines, is
+  `native/js/roomFit.ts` (checked by `roomFitSmoke.ts`); the movies are `native/js/introScreen.ts` (`intro.ts`'s player and
   `mapNav.ts`'s intro flow, restated, with the start splash) over `movie.ts` and
   `native/host/movie.c` (the player; the platform decoder behind `movie.h`, AVFoundation in
   `movie_apple.m`); the credits are `native/js/creditsScreen.ts` (`creditsAi.ts`'s roll as one

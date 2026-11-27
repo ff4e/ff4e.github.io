@@ -53,6 +53,7 @@ import { showmodeRecording } from './seams/roomPreload.js';
 import { LOGIC_MS, LOGIC_SEC } from './seams/stageGeometry.js';
 import { soundPoll } from './sound.js';
 import { routeEvent } from './uiInput.js';
+import { letterboxRect } from './roomFit.js';
 
 
 class KufrikSmokeFailure extends Error {}
@@ -144,13 +145,12 @@ const talkTicks = (name: string): number => {
 };
 
 /**
- * Where a `winW`×`winH` window shows the story (`presentRect`'s letterbox, restated for the
- * window the smoke has not got) — a window taller than the picture, so there is room below it.
+ * Where a `winW`×`winH` window shows the story (`presentRect`'s letterbox, `letterboxRect`, for
+ * the window the smoke has not got; uncapped, as the story is) — a window taller than the
+ * picture, so there is room below it.
  */
 function storyRect(winW: number, winH: number, w: number, h: number): [number, number, number, number, number] {
-  const s = Math.min(winW / w, winH / h);
-  const dw = Math.floor(w * s), dh = Math.floor(h * s);
-  return [Math.floor((winW - dw) / 2), Math.floor((winH - dh) / 2), dw, dh, 1];
+  return [...letterboxRect(w, h, winW, winH), 1];
 }
 
 /**

@@ -37,6 +37,8 @@ import type { NativeAiScreen } from './nativeAiScreen.js';
 import { pinRandom } from './scene.js';
 import { LOGIC_MS } from './seams/stageGeometry.js';
 import { soundTime } from './sound.js';
+import { roomCapH } from './roomFit.js';
+import { checkRoomFit } from './roomFitSmoke.js';
 
 /** Ticks a room may take, solution and all: the longest recording is a few thousand moves. */
 const MAX_TICKS = 200_000;
@@ -62,19 +64,23 @@ async function untilReady(num: number): Promise<void> {
  * Exercise the draw path on the real flow's state; the pixels are compare.mjs's business.
  * With `--smoke-out DIR` the composite is kept (`DIR/<room>-<what>.rgba`, as compare.mjs
  * writes them) for a look, with the subtitles on screen at that moment as a 1280×720 window
- * would show them (`-subs.rgba`); otherwise it is submitted to no window and dropped.
+ * would show them (`-subs.rgba`); otherwise it is submitted to no window and dropped. On the
+ * first frame the room's size cap is checked too (`checkRoomFit`).
  */
 function drawOnce(target: NativeAiScreen, num: number, what: string): void {
   if (!draw(target, 0.5)) throw new SmokeFailure(`${name(num)} had nothing to draw in a ready room`);
-  // The subtitles too, as a 1280×720 window would show this room: there is no window.
-  const s = Math.min(1280 / target.width, 720 / target.height);
-  const w = Math.floor(target.width * s), h = Math.floor(target.height * s);
-  const subs = subtitleOverlay(target.width, target.height, 0.5, [Math.floor((1280 - w) / 2), Math.floor((720 - h) / 2), w, h, 1]);
   const args = __native.args();
   const dir = args.includes('--smoke-out') ? args[args.indexOf('--smoke-out') + 1] : undefined;
+  const capH = roomCapH(target.scale);
+  if (what === 'tick1') {
+    const err = checkRoomFit(target, num, dir);
+    if (err) throw new SmokeFailure(`${name(num)} ${err}`);
+  }
+  // The subtitles too, as a 1280×720 window would show this room: there is no window.
+  const subs = subtitleOverlay(target.width, target.height, 0.5, __native.presentRect(target.width, target.height, capH, 1280, 720));
   if (dir && subs) __native.saveTexture(subs.id, `${dir}/${num}-${what}-subs.rgba`);
   if (dir) __native.saveComposite(`${dir}/${num}-${what}.rgba`);
-  else __native.present();
+  else __native.present(undefined, undefined, capH);
 }
 
 function persisted(key: string): string | null {
