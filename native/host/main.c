@@ -1810,16 +1810,24 @@ static JSValue n_inputLog(JSContext *ctx, JSValueConst self, int argc, JSValueCo
   return a;
 }
 
+/* The touchpad probe's stand-in for tvOS, where `is_remote`'s micro-gamepad rule applies. */
+static bool probe_as_tv;
+
 /*
  * Is `g` a remote? Its name says "Remote" (the Siri Remote's does: SDL names a controller by
- * its vendorName, else its productCategory), or it is a micro gamepad — neither a Y button nor
- * a right stick, which every extended gamepad has. The second is for a remote whose name SDL
- * may not give as one: the iPhone's Apple TV Remote reached the pad's path before, where its
- * position-made d-pad and its tap moved and switched the fish just the same.
+ * its vendorName, else its productCategory), or — on tvOS — it is a micro gamepad: neither a Y
+ * button nor a right stick, which every extended gamepad has. The second is for a remote whose
+ * name SDL may not give as one: the iPhone's Apple TV Remote reached the pad's path before,
+ * where its position-made d-pad and its tap moved and switched the fish just the same. Only
+ * on tvOS, where every controller is MFi: on a Mac SDL's NES and Famicom pads (Nintendo
+ * Switch Online) have neither either, and must stay pads.
  */
 static bool is_remote(SDL_Gamepad *g) {
   const char *name = SDL_GetGamepadName(g);
   if (name && SDL_strcasestr(name, "remote") != NULL) return true;
+#ifndef SDL_PLATFORM_TVOS
+  if (!probe_as_tv) return false;
+#endif
   return !SDL_GamepadHasButton(g, SDL_GAMEPAD_BUTTON_NORTH) && !SDL_GamepadHasAxis(g, SDL_GAMEPAD_AXIS_RIGHTX);
 }
 
@@ -1896,6 +1904,46 @@ static void gamepad_button(SDL_JoystickID which, Uint8 button, bool down) {
   if (code) pad_key(code, down);
 }
 
+/* `n_remoteTouchpadProbe`'s NES pad, on a Mac: {remote, codes} for its d-pad's Up pressed and released. */
+static JSValue nes_pad_probe(JSContext *ctx) {
+  if (pad) return JS_NULL; /* a real pad in use: nothing to learn */
+  SDL_VirtualJoystickDesc d;
+  SDL_INIT_INTERFACE(&d);
+  d.nbuttons = 10;
+  d.name = "NES Controller (probe)";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&d);
+  char guid[64], mapping[256];
+  SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+  /* SDL_gamepad.c's mapping for the NSO NES pad: A B, Select Start, L R, the d-pad; no Y, no right stick. */
+  SDL_snprintf(mapping, sizeof mapping,
+               "%s,NES Controller (probe),a:b0,b:b1,back:b2,start:b3,leftshoulder:b4,rightshoulder:b5,dpup:b6,dpdown:b7,dpleft:b8,dpright:b9", guid);
+  if (!id || SDL_AddGamepadMapping(mapping) < 0) {
+    if (id) SDL_DetachVirtualJoystick(id);
+    return JS_NULL;
+  }
+  const int from = evq_n;
+  gamepad_added(id);
+  JSValue out = JS_NewObject(ctx), codes = JS_NewArray(ctx);
+  JS_SetPropertyStr(ctx, out, "remote", JS_NewBool(ctx, nremotes > 0));
+  SDL_Gamepad *g = nremotes ? remotes[0] : pad;
+  SDL_Joystick *j = g ? SDL_GetGamepadJoystick(g) : NULL;
+  SDL_Event e;
+  SDL_UpdateJoysticks();
+  SDL_FlushEvents(SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP);
+  for (int dn = 1; j && dn >= 0; dn--) {
+    SDL_SetJoystickVirtualButton(j, 6, dn == 1);
+    SDL_UpdateJoysticks();
+    while (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP) == 1)
+      gamepad_button(e.gbutton.which, e.gbutton.button, e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
+  }
+  for (int k = from; k < evq_n; k++) JS_SetPropertyUint32(ctx, codes, (uint32_t)(k - from), JS_NewString(ctx, evq[k]));
+  JS_SetPropertyStr(ctx, out, "codes", codes);
+  gamepad_removed(id);
+  evq_n = from;
+  SDL_DetachVirtualJoystick(id);
+  return out;
+}
+
 /*
  * The menu smoke's check of a touchpad remote (headless, no remote connected): a virtual
  * micro gamepad mapped as SDL maps one that is not a Siri Remote — buttons in GameController's
@@ -1904,7 +1952,9 @@ static void gamepad_button(SDL_JoystickID which, Uint8 button, bool down) {
  * [gcX, gcY, button, yDown]: GameController's d-pad (y up; its direction buttons' values
  * follow, the other way round when yDown), then an SDL button ("a", "dpup", "dpdown",
  * "dpleft", "dpright"; "" none) pressed and released through `gamepad_button`. Returns
- * {remote, kind, steps: [{touch, codes}]}: what `remoteTouch` read and what the host sent.
+ * {remote, kind, steps: [{touch, codes}], nesPad}: what `remoteTouch` read and what the host
+ * sent; `nesPad` is a virtual pad mapped as SDL maps a Nintendo Switch Online NES pad (no Y, no
+ * right stick), connected WITHOUT the tvOS stand-in: {remote, codes} for its d-pad's Up.
  */
 static JSValue n_remoteTouchpadProbe(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   if (remote || nremotes || !SDL_InitSubSystem(SDL_INIT_GAMEPAD))
@@ -1922,7 +1972,9 @@ static JSValue n_remoteTouchpadProbe(JSContext *ctx, JSValueConst self, int argc
     if (id) SDL_DetachVirtualJoystick(id);
     return JS_ThrowTypeError(ctx, "remoteTouchpadProbe: %s", SDL_GetError());
   }
+  probe_as_tv = true;
   gamepad_added(id);
+  probe_as_tv = false;
   JSValue out = JS_NewObject(ctx), steps = JS_NewArray(ctx);
   JS_SetPropertyStr(ctx, out, "remote", JS_NewBool(ctx, remote != NULL));
   JS_SetPropertyStr(ctx, out, "kind", remote ? JS_NewString(ctx, REMOTE_KIND[remote_k]) : JS_NULL);
@@ -1977,6 +2029,7 @@ static JSValue n_remoteTouchpadProbe(JSContext *ctx, JSValueConst self, int argc
   gamepad_removed(id);
   evq_n = from; /* nothing the probe held reaches the game */
   SDL_DetachVirtualJoystick(id);
+  JS_SetPropertyStr(ctx, out, "nesPad", nes_pad_probe(ctx));
   return out;
 }
 

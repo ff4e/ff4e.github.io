@@ -677,6 +677,11 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       `its tap is the centre wherever the thumb is, exactly an edge is that edge (${tapHigh!.codes.join(' ')}; ${edgeA!.codes.join(' ')})`);
     check(liftedTp!.touch === null && !!flipped!.touch && near(flipped!.touch[1], -0.6),
       `lifted it reads none; a controller whose own Up is a negative y reads up (${JSON.stringify(flipped!.touch)})`);
+    // Off tvOS a pad with neither Y nor a right stick is a pad (SDL's Nintendo Switch Online
+    // NES and Famicom pads): its d-pad moves the fish, never a touchpad's ignored presses.
+    const nes = tp.nesPad;
+    check(!!nes && !nes.remote && nes.codes.join(' ') === '+PadUp -PadUp',
+      `on a Mac an NES-style pad (no Y, no right stick) is a pad, its Up an Up (${nes ? `${nes.remote}, ${nes.codes.join(' ') || 'none'}` : 'not run'})`);
     // Its swipes through the router, as the host hands them over (GameController's absolute
     // positions, y down) and its tap as the centre click it sends: a swipe that ends in a tap
     // moves the fish and never switches it; a tap that did not travel switches.
@@ -697,7 +702,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       steps(1);
       await tap('RemoteSelect'); // the tap, just after the lift
       rest();
-      check(moves() > pre && engine!.active === fishP && logged('after the thumb travelled'),
+      check(moves() > pre && engine!.active === fishP && logged('after the thumb swiped'),
         `the phone: a swipe ending in its tap moves the active fish (${pre} → ${moves()}) and does not switch it`);
       await back0();
       clock += 400;
@@ -722,6 +727,23 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       await tap('RemoteSelect');
       check(topMenu()?.kind === 'bar' && barSel() !== sel0, `the phone: in the top bar a swipe moves the focus (${sel0} → ${barSel()}) and its tap there opens nothing`);
       await tap('RemoteBack');
+      rest();
+      // A Siri Remote's thumb slides to where it clicks (the 1st generation: landing off-centre,
+      // clicking in the centre): travel without a step is no swipe, and its centre click switches.
+      __native.remoteKind = () => 'surface';
+      clock += 400;
+      const fishS = engine!.active;
+      for (let i = 0; i <= 6; i++) {
+        thumbAt = [0.4 - (0.3 * i) / 6, 0.3 - (0.3 * i) / 6 + 0.01];
+        steps(1);
+      }
+      await tap('RemoteSelect');
+      thumbAt = null;
+      steps(1);
+      rest();
+      check(engine!.active !== fishS, 'a Siri Remote: a thumb sliding to the centre without a swipe, then a centre click, switches fish');
+      clock += 400;
+      await tap('RemoteSelect');
       rest();
     } finally {
       __native.remoteTouch = realTouch;

@@ -205,6 +205,48 @@ describe('remote swipes', () => {
     });
   });
 
+  describe("a Siri Remote's centre click ends a swipe only after a step (`stepped`)", () => {
+    // Its thumb rests, drifts and slides to where it clicks: travel alone is no swipe, so a
+    // centre click that switches fish must not be dropped for it (review of #232).
+
+    it('the 1st generation: a thumb landing off-centre and sliding to the centre to click', () => {
+      const tr = new SwipeTracker();
+      const { steps, t } = play(tr, line([0.4, 0.3], [0.1, 0], 8));
+      expect(steps).toEqual([]);
+      expect(tr.travelled(t)).toBe(true); // the touchpad's test would drop it...
+      expect(tr.stepped(t)).toBe(false); // ...the Siri Remote's does not
+    });
+
+    it('the 2nd generation: a resting thumb drifting 0.25-0.5, then the next centre click', () => {
+      const tr = new SwipeTracker();
+      const { steps, t } = play(tr, [...line([0, 0], [0.4, 0.1], 40), ...rest([0.4, 0.1], 20)]);
+      expect(steps).toEqual([]);
+      expect(tr.stepped(t)).toBe(false);
+    });
+
+    it('a step in this touch, or one a moment ago, is a swipe', () => {
+      const tr = new SwipeTracker();
+      const { steps, t } = play(tr, [...line([-0.6, 0], [0.2, 0], 6), ...rest([0.2, 0], 40)]);
+      expect(steps).toEqual(['right']);
+      expect(tr.stepped(t)).toBe(true); // the thumb still down, however long after
+      const lifted = play(tr, [null], t).t;
+      expect(tr.stepped(lifted + 20)).toBe(false); // the step was long ago, the touch is over
+      const tr2 = new SwipeTracker();
+      const a = play(tr2, [...line([-0.6, 0], [0.2, 0], 6), null]).t;
+      expect(tr2.stepped(a + 20)).toBe(true); // a click just after a swipe's lift
+      expect(tr2.stepped(a + SWIPE_CLICK_MS + 20)).toBe(false);
+    });
+
+    it("a click's release starts the touch over: the next centre click is a click", () => {
+      const tr = new SwipeTracker();
+      const { t } = play(tr, line([-0.6, 0], [0.2, 0], 6));
+      tr.press(true);
+      expect(tr.stepped(t)).toBe(true);
+      tr.press(false);
+      expect(tr.stepped(t + SWIPE_CLICK_MS + 20)).toBe(false);
+    });
+  });
+
   describe('in a room, a swipe held while the thumb stays (B6)', () => {
     const LIFT: Sample = [0, -1 / 32767];
 

@@ -33,10 +33,10 @@
  * closes the top bar does not carry on into the room. A click toward the edge a swipe has just
  * stepped to — or, in a room, toward the edge it holds — is that swipe's end and is dropped,
  * so a swipe that finishes on the ring moves one step, not two. A centre click after the
- * thumb travelled (`SwipeTracker.travelled`) is a swipe's end too in a room — a swipe never
- * switches fish — and anywhere on a touchpad remote (the iPhone's Apple TV Remote, whose
- * select is a tap: `__native.remoteKind`); any other click lets go of a held swipe and is a
- * click.
+ * thumb swiped (`SwipeTracker.stepped`) is a swipe's end too in a room — a swipe never
+ * switches fish — and so is one after it merely travelled (`travelled`) anywhere on a touchpad
+ * remote (the iPhone's Apple TV Remote, whose select is a tap: `__native.remoteKind`); any
+ * other click lets go of a held swipe and is a click.
  *
  * Each event goes to the screen up when it arrives — one can change the screen. A release
  * off the room always reaches the map's router, the intro included: a direction held while
@@ -409,13 +409,16 @@ const swipesAct = (): boolean =>
   menuOpen() || (ui.screen === 'room' && !cutscene) || (ui.screen === 'map' && ui.mapOverlay !== 'credits' && !ui.creditsLoading);
 
 /**
- * Is a centre click going down now the end of a swipe rather than a click? When the thumb
- * travelled — in a room, where the centre switches fish, and anywhere on a touchpad remote,
- * whose select is a tap that can come at a swipe's end.
+ * Is a centre click going down now the end of a swipe rather than a click? In a room, where
+ * the centre switches fish, when the thumb swiped (a step: `stepped`); anywhere on a touchpad
+ * remote, whose select is a tap that can come at a swipe's end, when it merely travelled.
  */
 function centreEndsSwipe(now: number): boolean {
-  if (!inRoom() && __native.remoteKind() !== 'touchpad') return false;
-  return swipes.travelled(now) || (keyThumb && keyThumbSwiped);
+  const touchpad = __native.remoteKind() === 'touchpad';
+  if (!inRoom() && !touchpad) return false;
+  if (keyThumb && keyThumbSwiped) return true;
+  // A Siri Remote's thumb slides and drifts on its way to a click: only a swipe's step ends one.
+  return touchpad ? swipes.travelled(now) : swipes.stepped(now);
 }
 
 /**
@@ -452,7 +455,7 @@ function swipeFilter(down: boolean, code: string, now: number): boolean {
   }
   if (centreEnd) {
     swallowed.add(code);
-    __native.inputLog(`${code} after the thumb travelled: the swipe's end, dropped`);
+    __native.inputLog(`${code} after the thumb swiped: the swipe's end, dropped`);
     return true;
   }
   if (!swipesAct() || !swipes.endsSwipe(edge, now)) return false;

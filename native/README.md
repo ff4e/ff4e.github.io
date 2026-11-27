@@ -804,8 +804,9 @@ gamepad: no touch axes, Menu as start, and d-pad buttons made of where the thumb
 absolute values, a thumb landing high on the phone presses Up whichever way it then swipes,
 which the host read as an edge click, and its tap (A) as a centre click. The host now tells
 remotes apart by their mapping (`remote_kind`: `ring`, `surface`, `touchpad`), takes any
-controller with neither a Y button nor a right stick as a remote whatever its name
-(`is_remote`), and for the touchpad kind reads the touch from GameController itself
+controller with neither a Y button nor a right stick as a remote whatever its name — on tvOS
+only: on a Mac SDL's Nintendo Switch Online NES and Famicom pads have neither, and stay pads
+(`is_remote`) — and for the touchpad kind reads the touch from GameController itself
 (`tvos_touchpad`), y turned down by GameController's convention unless the controller's own
 direction buttons say otherwise; its d-pad buttons click only when the d-pad reads exactly
 that edge (as a digital d-pad would — the phone's *Directional Buttons* accessibility option,
@@ -826,11 +827,13 @@ surface's width) is one step that way, so a long swipe keeps stepping as a list 
 it and a fast one takes the steps it covered; a thumb resting on an edge is no swipe; turning
 back takes a step back from the furthest the thumb went. Nothing counts while a click is held.
 A click toward the edge a swipe stepped to in the last 300 ms is that swipe's end — a swipe
-finishing on the ring — and is dropped, so it is one step, not two. A centre click after the
-thumb TRAVELLED — 0.25 from where it came down, in this touch or one that lifted in the last
-300 ms (`SwipeTracker.travelled`) — is a swipe's end too, in a room (a swipe never switches
-fish) and, on the touchpad kind, everywhere (the phone's select is a tap, which can come at a
-swipe's end); elsewhere a centre click is a click.
+finishing on the ring — and is dropped, so it is one step, not two. A centre click after a
+swipe is a swipe's end too. In a room (a swipe never switches fish) that is after a STEP — in
+this touch, or in the last 300 ms (`SwipeTracker.stepped`) — since a Siri Remote's thumb rests,
+drifts and slides to where it clicks without swiping. On the touchpad kind it is anywhere, and
+after mere TRAVEL — 0.25 from where the thumb came down, in this touch or one that lifted in
+the last 300 ms (`travelled`) — since the phone's select is a tap that can end a swipe too
+short for a step. Elsewhere a centre click is a click.
 
 **In a room a swipe moves the active fish, and the thumb kept on the surface keeps it going**
 (B6, reversing B5's "rooms are click only"; `SwipeHold`, `uiInput.ts`). The swipe's first step
@@ -842,7 +845,7 @@ resting anywhere moves nothing. With the thumb still down, a step another way �
 back from the furthest it went, or 0.5 across — turns the hold that way, so turning takes as
 deliberate a motion as starting, and a thumb settling back a little does not reverse the fish;
 more travel the same way changes nothing. A click toward the held direction, or a centre
-click — the thumb has travelled — is the swipe pressing on and is dropped (the hold goes on);
+click — the thumb has swiped — is the swipe pressing on and is dropped (the hold goes on);
 an edge click another way lets go of the hold and moves. A swipe the room does not take (a
 load's replay, the KUFRIK demonstration, an auto-play, ZELVA's possession, the ZAVER finale)
 is no hold, and a hold the room lets go of on its own (an undo, a load or a death's restart

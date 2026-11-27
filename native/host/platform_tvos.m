@@ -101,16 +101,18 @@ static void attach(GCController *c) {
  */
 bool tvos_touchpad(float v[6]) {
   bool any = false;
-  for (GCController *c in GCController.controllers) {
-    GCMicroGamepad *m = c.microGamepad;
-    if (!m || c.extendedGamepad || [c.productCategory hasPrefix:@"Siri Remote"]) continue;
-    GCControllerDirectionPad *d = m.dpad;
-    const float x = d.xAxis.value, y = d.yAxis.value;
-    if (!any || x != 0 || y != 0) {
-      v[0] = x, v[1] = y, v[2] = d.up.value, v[3] = d.down.value, v[4] = d.left.value, v[5] = d.right.value;
+  @autoreleasepool { /* every frame, and nothing else drains this thread's pool */
+    for (GCController *c in GCController.controllers) {
+      GCMicroGamepad *m = c.microGamepad;
+      if (!m || c.extendedGamepad || [c.productCategory hasPrefix:@"Siri Remote"]) continue;
+      GCControllerDirectionPad *d = m.dpad;
+      const float x = d.xAxis.value, y = d.yAxis.value;
+      if (!any || x != 0 || y != 0) {
+        v[0] = x, v[1] = y, v[2] = d.up.value, v[3] = d.down.value, v[4] = d.left.value, v[5] = d.right.value;
+      }
+      any = true;
+      if (x != 0 || y != 0) break;
     }
-    any = true;
-    if (x != 0 || y != 0) break;
   }
   if (!any) memset(v, 0, 6 * sizeof *v);
   return any;

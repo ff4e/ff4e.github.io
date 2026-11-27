@@ -25,10 +25,13 @@
  * lets go is where travel starts again. A click on the edge a swipe just stepped toward —
  * a swipe that ends pressing the ring, or the 1st-generation remote's click with the thumb
  * still out there — is the end of that swipe, not one more step (`endsSwipe`). Whether the
- * thumb TRAVELLED is kept too (`travelled`): `TAP_SLOP` from where it came down, in this touch
- * or one that lifted `SWIPE_CLICK_MS` ago. A centre click is a click only when it did not —
- * where the router asks (uiInput.ts): in a room, so that a swipe never switches fish, and
- * anywhere on the iPhone's Apple TV Remote, whose "click" is a tap that can end a swipe.
+ * thumb SWIPED is kept too (`stepped`): a step in this touch, or one `SWIPE_CLICK_MS` ago —
+ * and whether it merely TRAVELLED (`travelled`): `TAP_SLOP` from where it came down, in this
+ * touch or one that lifted `SWIPE_CLICK_MS` ago. A centre click is a click only when the thumb
+ * did not, where the router asks (uiInput.ts): in a room, so that a swipe never switches fish,
+ * by `stepped` on a Siri Remote (whose thumb rests, drifts and slides to the centre to click
+ * without swiping), and anywhere by `travelled` on the iPhone's Apple TV Remote, whose
+ * "click" is a tap that can end a swipe too short for a step.
  */
 
 export type SwipeDir = 'up' | 'down' | 'left' | 'right';
@@ -62,6 +65,8 @@ export class SwipeTracker {
   private moved = false;
   /** The last time a thumb that had travelled was on the surface. */
   private movedAt: number | null = null;
+  /** Has this touch made a step (or a stand-in swipe, `swiped`)? */
+  private steppedTouch = false;
 
   /** Is a thumb on the surface, as of the last `feed` (a click held included)? */
   get touching(): boolean {
@@ -80,6 +85,15 @@ export class SwipeTracker {
   }
 
   /**
+   * Did the thumb SWIPE — a step in this touch, or one within `SWIPE_CLICK_MS` of `now`? The
+   * Siri Remote's test for a centre click being a swipe's end (uiInput.ts): travel alone is
+   * not, since its thumb slides to where it clicks.
+   */
+  stepped(now: number): boolean {
+    return this.steppedTouch || (this.last !== null && now - this.last.at <= SWIPE_CLICK_MS);
+  }
+
+  /**
    * The thumb at `pos` (x right, y down; null when lifted) at time `now`: the steps its
    * travel since the last call makes, in order.
    */
@@ -90,6 +104,7 @@ export class SwipeTracker {
       this.reach = null;
       this.landed = null;
       this.moved = false;
+      this.steppedTouch = false;
       return [];
     }
     if (this.moved) this.movedAt = now;
@@ -142,6 +157,7 @@ export class SwipeTracker {
   /** A swipe stepped `dir` at `now` (from here, or a stand-in: `--remote-keys`' Shift+arrow). */
   swiped(dir: SwipeDir, now: number): void {
     this.last = { dir, at: now };
+    if (this.thumb) this.steppedTouch = true;
   }
 
   /** A click went down (`true`) or came up: no travel counts while it is held. */
@@ -152,6 +168,7 @@ export class SwipeTracker {
     if (!down) {
       this.landed = null; // ...and where a tap is measured from
       this.moved = false;
+      this.steppedTouch = false;
     }
   }
 
@@ -170,6 +187,7 @@ export class SwipeTracker {
     this.landed = null;
     this.moved = false;
     this.movedAt = null;
+    this.steppedTouch = false;
   }
 }
 

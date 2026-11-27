@@ -171,12 +171,15 @@ export interface NativeApi {
    * `steps` — `[gcX, gcY, button, yDown?]`: GameController's d-pad reading (y up) and then an SDL
    * button (a, dpup, dpdown, dpleft, dpright) pressed and released, or '' for none. Returns
    * whether it was taken as a remote, its kind, and per step what `remoteTouch` read and the
-   * input events the host sent; `yDown` makes the d-pad's direction buttons say its y points down. Headless only.
+   * input events the host sent; `yDown` makes the d-pad's direction buttons say its y points down;
+   * and `nesPad`, a pad without Y or a right stick connected as on a Mac. Headless only.
    */
   remoteTouchpadProbe(steps: [number, number, string, number?][]): {
     remote: boolean;
     kind: string | null;
     steps: { touch: [number, number] | null; codes: string[] }[];
+    /** A Nintendo Switch Online NES pad, as SDL maps one, on a Mac: a pad, its d-pad's Up `+PadUp -PadUp`. */
+    nesPad: { remote: boolean; codes: string[] } | null;
   };
   /**
    * The menu smoke's check of `remoteTouch` through SDL's own mapping code: a virtual Siri
