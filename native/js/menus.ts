@@ -148,11 +148,17 @@ let barGuardUntil = -Infinity;
  * a click straight after Back could not leave the room). World map leaves the room without
  * asking, so a click that arrives within BAR_CLICK_GUARD_MS of the bar opening — a double
  * press, a click already on its way — is ignored instead (`menuAct`).
+ *
+ * `focus` is another tab to open on: the app coming back from the background opens the bar
+ * on Options (`uiInput.ts`'s `barForBackground`), because a player who returns and clicks to
+ * resume a second later would be past the guard — on World map that click would leave the room
+ * and its unsaved progress unasked, and on Restart, Load or Save two would restart, load or
+ * overwrite the save. Options only opens a panel. (It is never greyed.)
  */
-export function openBar(now = -Infinity): void {
+export function openBar(now = -Infinity, focus: BarItem = 'map'): void {
   if (stack.length) return;
   barGuardUntil = now + BAR_CLICK_GUARD_MS;
-  push({ kind: 'bar', sel: barStep(-1, 1) });
+  push({ kind: 'bar', sel: focus === 'map' ? barStep(-1, 1) : BAR_ITEMS.indexOf(focus) });
 }
 
 /**

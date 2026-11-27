@@ -563,11 +563,12 @@ export function inputFrame(now: number): void {
  * stopped the sound and the loop (native/host/main.c, `lifecycle`), and on the first frame
  * back a room shows the top bar, as Back does — the room runs on under it (B6: the bar never
  * pauses), but the player comes back to the bar's focus, not to a fish a held input would
- * move. Elsewhere nothing changes: the map, a menu already open, the intro and the briefcase
+ * move — on Options, not World map: a click to resume a second later must not leave the room
+ * (`openBar`). Elsewhere nothing changes: the map, a menu already open, the intro and the briefcase
  * story carry on from where they stopped (the story's Back would skip it).
  */
 function barForBackground(now: number): void {
-  if (ui.screen === 'room' && !cutscene && !menuOpen()) openBar(now);
+  if (ui.screen === 'room' && !cutscene && !menuOpen()) openBar(now, 'options');
 }
 
 /** Focus lost: no held input's release will arrive. */

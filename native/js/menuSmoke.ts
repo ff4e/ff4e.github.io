@@ -930,6 +930,14 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     advance(LOGIC_MS * 1.5);
     check(topMenu()?.kind === 'bar' && !isPaused() && count > c1, 'coming back to the app in a room shows the top bar, the room running on');
     insideSafeArea('the top bar', [1, 2], false);
+    // ...focused on Options, not World map: a click to resume a second later, past the guard,
+    // must not leave the room (and its unsaved progress) unasked.
+    check(barSel() === 'options', `coming back, the bar is focused on Options (${barSel()})`);
+    clock += 1000;
+    await tap('RemoteSelect');
+    check(ui.screen === 'room' && topMenu()?.kind === 'options', 'a click a second later opens Options: the room stays');
+    await tap('RemoteBack');
+    check(topMenu()?.kind === 'bar', 'and Back closes it, back to the bar');
     await tap('RemoteBack');
     // Left and right move the focus, skipping the greyed Load, and stop at the ends (tvOS's
     // tab bars do not wrap); down, or Back, hides the bar.

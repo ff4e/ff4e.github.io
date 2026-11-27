@@ -106,6 +106,10 @@ describe('the top bar', () => {
     expect(tab()).toBe('restart');
     expect(ticks).toBe(3);
   });
+  it('can open on another tab (Options, on coming back to the app), without a tick', () => {
+    menus.openBar(0, 'options');
+    expect([tab(), ticks]).toEqual(['options', 0]);
+  });
   it('ignores a click within BAR_CLICK_GUARD_MS of opening, and takes one after', () => {
     menus.openBar(1000);
     menus.menuAct('ok', 1000);

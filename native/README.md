@@ -277,12 +277,13 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   offset the GPU applies to their quads. Into or out of a prompt, Options or Help it does not
   slide (they replace it on the frame), and when its World map takes the room away it finishes
   sliding out over the map. Its order puts Restart and Load, which both rewind the attempt, together after World map, and
-  Save after them. It opens on World map, its first tab, as a TV app's tab bar does
+  Save after them. Back opens it on World map, its first tab, as a TV app's tab bar does
   (#228 opened it on Save, so that a click straight after Back could not leave the room). World
   map leaves the room without asking, so **a click that comes within 250 ms of the bar
   opening** (`BAR_CLICK_GUARD_MS`: the 180 ms slide, and at least a quarter of a second) is
   dropped, and logged (`a click … ms after the top bar opened: dropped`): a double press, or a
-  click already on its way, cannot take the player out of the room. Left and right (a click on
+  click already on its way, cannot take the player out of the room. Coming back from the
+  background it opens on Options instead (see "Leaving and coming back"). Left and right (a click on
   the edge, a swipe, the pad's d-pad or LB / RB, the arrows) move the focus, skipping a tab
   that cannot act and stopping at the ends, as tvOS's tab bars do; a click presses. Save,
   Load and Restart ask first in a classic dialog: the question ("Save the game?") and two
@@ -1046,7 +1047,9 @@ rules are by directory and kind, and the check only ever adds to them.)
   restore is reopened ("When the sound does not come back", above). The first frame back
   delivers `!background`, and a room shows its top bar as Back does (`uiInput.ts`): the room
   runs on under it, as it always does under the bar, but the player comes back to the bar's
-  focus rather than to a fish. The map, an open
+  focus rather than to a fish — on Options, not World map, so a click to resume after the
+  250 ms guard opens a panel rather than leaving the room and its unsaved progress (Restart,
+  Load and Save would act on two clicks). The map, an open
   menu, the intro and the briefcase story carry on where they stopped. Losing the screen to
   Control Center or Siri is the same event. Nothing needs saving on the way out: every store
   write is made durable when it happens (`n_storeSave`; on tvOS `store.c`). The menu smoke drives `!background` on the map and
@@ -1193,7 +1196,8 @@ silent, a click on Cancel declining, the prompt reopening on OK — Back decline
 a click saves the move record; Load restores it; Options and Help pause the room and close
 back to the bar, which runs on again; in Options over the paused room each row ticks, heard
 while the room's clock holds, and two quick ticks peak as one does (no pile-up); Restart starts over; a save mid-move is refused as F2
-is; coming back to the app shows the bar. With the pad: Ⓧ asks to restart and Ⓑ declines, RB
+is; coming back to the app shows the bar, focused on Options, and a click a second later
+opens Options, the room staying. With the pad: Ⓧ asks to restart and Ⓑ declines, RB
 with no save opens nothing, LB → Ⓐ saves, ☰ opens and closes the bar and Ⓑ closes it, Ⓑ goes
 to the map, and Ⓧ's prompt goes when the room does; Esc opens and hides the bar, and its Save prompt (the question alone) is declined
 by Esc and answered by Enter; its World map leaves the room. A Play/Pause hold released inside
