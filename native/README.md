@@ -211,6 +211,42 @@ texture (`presentProbe`, the present pass headless) graded and ungraded, at the 
 own size so the ungraded one is its texels exactly, and every fifth pixel of the graded one
 must be `cssGrade` of the ungraded within half a step.
 
+### How big a room is shown (`native/js/roomFit.ts`)
+
+A room is shown as large as the window allows, but **a cell no larger than 45 px per 1080
+lines** of window height: 45 px on a 1080-line set, 90 at 4K. Filling the window with every
+room made a small one enormous on a TV — MIKRO (24×14 cells) came out at 77 px a cell at
+1080 lines, against 28 for the largest rooms. The web bounds the same enlargement for the same
+reason, at 42 CSS px a cell on a desktop and 34 on a tablet (`MAX_CELL_PX`,
+`MAX_CELL_PX_TOUCH` in `src/app/layout.ts`); a TV is further away, and 45 is Martin's. On a
+1920×1080 window it binds on 9 rooms — MIKRO (77 → 45), ZAVAL, NOGROUND, POTOPENA, ZRC,
+ODPADKY, WC, KAJUTA1 and TRUP (49 → 45) — and leaves the other 63 exactly as they were. The
+border is the letterbox's plain black, and there is no option for it.
+
+It is a share of the window's height rather than a number of points, so a 4K set shows what
+a 1080-line one does, and **the macOS window has it too**: the macOS build is the TV's
+development host, not a product, and a Mac that showed a room the TV never shows would be
+testing the wrong picture. In proportion it is also about the web desktop's 42: a cell is
+1/24 of the window's height, 37.5 points in a 900-point-tall window.
+
+Rooms only. The world map, the story pages, KUFRIK's briefcase story, the credits and the
+intro keep filling the window: they are pictures composed for the screen, not a grid of cells
+whose count varies.
+
+One number carries it everywhere: `roomCapH(scale)`, the height of a composite the cap would
+show exactly filling the window's height (24 rows × 15 × 4 = 1440 on the `ai` tier). The host's
+`letterbox` takes it (`present`, `presentRect`, `presentProbe`; 0 for no cap) and applies it
+to the window it is actually presenting into, so the picture, the colour grade's pass over
+it, the subtitles laid out for `presentRect`'s rect, the legend's margin placement and the
+UI layer all follow the same rect. `letterboxRect` restates `letterbox` for what has no
+window to ask — the smokes' picture boxes and the subtitle parity scene — float for float,
+and the smoke gate asks the host for every room it plays, at 1920×1080 and 3840×2160, capped
+and not, that the two agree (`roomFitSmoke.ts`). The subtitles keep their size in a capped
+room: the text follows the stage (the window), which is smaller than the room's box even at
+the cap, and the width a line may measure before it is shrunk to fit stays more than twice the
+room's own (`test/native-room-fit.test.ts`). The composite is untouched, so the 72-room parity
+sweep is too.
+
 ### The TV menus (`native/js/uiInput.ts`, `menus.ts`, `uiLayer.ts`)
 
 Native only: the web keeps its HTML UI. Built to the controller spec (#165's, extended for the
@@ -1030,7 +1066,8 @@ rules are by directory and kind, and the check only ever adds to them.)
   window. The hints do not: the legend and the intro's skip hint hug the screen's edge (the
   legend 20 px in at 1080 lines, the skip hint 18 px off the bottom, as on the web), since
   tvOS's insets are the same large ones whether the set overscans or not. The pictures — the
-  room, the map, a movie — stay letterboxed to the whole screen, as a TV game's picture is,
+  room (up to its size cap, "How big a room is shown"), the map, a movie — stay letterboxed
+  to the whole screen, as a TV game's picture is,
   and so do the subtitles, which are the room's. The menu smoke checks, at 1920×1080 and
   3840×2160 with those insets, that nothing of Options or the top bar is drawn outside
   them (the bar along their top, in English and Czech), and that the legend is drawn 20 px
@@ -1146,9 +1183,12 @@ real flow's state. The sound is on — each room's voices, effects and music, on
 mixer clock (see "Sound"), so a script that waits for a sound to end waits as it would in
 play — and so are the subtitles: every line the rooms say goes through the real
 `SubtitleSystem`, and each drawn frame lays them out and rasterises them. `--store` is
-required and wiped: a smoke run never touches the player's progress. `--smoke-out DIR` keeps
-those frames, and the subtitles on screen at that moment as a 1280×720 window would show them
-(`-subs.rgba`).
+required and wiped: a smoke run never touches the player's progress. On each room's first
+frame the room's size cap is checked (`roomFitSmoke.ts`, "How big a room is shown"): the host's
+`letterbox` against `letterboxRect`, and MIKRO at 45 px a cell, centred, through the present
+pass itself. `--smoke-out DIR` keeps those frames, the subtitles on screen at that moment as a
+1280×720 window would show them (`-subs.rgba`), and the room presented into 1920×1080 and
+3840×2160 windows, capped and as it would fill them (`-fit-<W>x<H>-<capped|full>.rgba`).
 
 Each run starts as it would alone — Math.random seeded per room, the chatter history, blink
 state and the room's solved flag put back to rest — so `--smoke N` (or `--smoke-player N`)

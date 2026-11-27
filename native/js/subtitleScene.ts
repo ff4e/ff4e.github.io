@@ -17,6 +17,7 @@ import { parseFft, type FftEntry } from '../../src/data/fft.js';
 import { Room } from '../../src/core/room.js';
 import { computeStageScale } from '../../src/app/layout.js';
 import { AI_SUB_SCALE, type SubtitleBox } from './subtitleLayout.js';
+import { letterboxRect, roomCapH } from './roomFit.js';
 
 export interface SubCase {
   readonly name: string;
@@ -81,13 +82,12 @@ export interface SubScene {
 }
 
 /**
- * Where the native host puts a `w`×`h` room in a `win` window of `density`: as large as
- * fits, whole device pixels (`letterbox` in native/host/main.c), and the CSS box that is.
+ * Where the native host puts a `w`×`h` room (native pixels) in a `win` window of `density`:
+ * as large as fits up to the room's cap, whole device pixels (`letterbox` in
+ * native/host/main.c, `letterboxRect`), and the CSS box that is.
  */
 export function roomBox(w: number, h: number, win: readonly [number, number], density: number, tier: number): { box: SubtitleBox; devW: number; devH: number } {
-  const sw = win[0] * density, sh = win[1] * density;
-  const s = Math.min(sw / w, sh / h);
-  const devW = Math.floor(w * s), devH = Math.floor(h * s);
+  const [, , devW, devH] = letterboxRect(w, h, win[0] * density, win[1] * density, roomCapH(1));
   const cssW = devW / density, cssH = devH / density;
   const boxScale = cssW / w;
   // The native host has no panel column and no margins: the stage is the window.

@@ -70,6 +70,7 @@ import { currentCost, describeCost, resetCost } from './uiCost.js';
 import { loadUiFonts, type UiOp } from './uiDraw.js';
 import { checkIcons, checkStrings } from './uiAssetSmoke.js';
 import { OVERLAY_HOLD_MS, inputOverlayOn } from './inputOverlay.js';
+import { letterboxRect, roomCapH } from './roomFit.js';
 
 class MenuSmokeFailure extends Error {}
 
@@ -203,11 +204,12 @@ function opCorner(op: UiOp): [number, number] {
   return [x, op[0] === 'text' ? y - (op[4] as number) : y];
 }
 
-/** The picture's box in a `ww`×`wh` window: the room's composite, or the map, letterboxed. */
-function pictureBox(cw: number, ch: number, ww: number, wh: number): Box {
-  const k = Math.min(ww / cw, wh / ch);
-  const w = Math.floor(cw * k), h = Math.floor(ch * k);
-  return [Math.floor((ww - w) / 2), Math.floor((wh - h) / 2), w, h];
+/**
+ * The picture's box in a `ww`×`wh` window: the room's composite (capped by `capH`, as
+ * `present` caps it), or the map, letterboxed.
+ */
+function pictureBox(cw: number, ch: number, ww: number, wh: number, capH = 0): Box {
+  return letterboxRect(cw, ch, ww, wh, capH);
 }
 
 export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
@@ -255,7 +257,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     // In a room, composite it first: the picture's box is the composite's size, as on screen.
     const inRoom = ui.screen === 'room' && draw(target, 0);
     const page = ui.screen === 'legimage' ? mapFrame(performance.now()) : null;
-    const box = inRoom ? pictureBox(target.width, target.height, ww, wh)
+    const box = inRoom ? pictureBox(target.width, target.height, ww, wh, roomCapH(target.scale))
       : page ? pictureBox(page.width, page.height, ww, wh) : pictureBox(2560, 1920, ww, wh);
     const r = paintUi(ww, wh, box, insets);
     if (!r) throw new MenuSmokeFailure(`the UI layer drew nothing for ${name}`);
@@ -270,7 +272,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   };
   /** Is the room's legend in `source`'s glyphs on screen now (its "Switch fish" / "Little")? */
   const roomHints = (): boolean => {
-    const r = paintUi(WIN_W, WIN_H, pictureBox(target.width, target.height, WIN_W, WIN_H));
+    const r = paintUi(WIN_W, WIN_H, pictureBox(target.width, target.height, WIN_W, WIN_H, roomCapH(target.scale)));
     return !!r?.ops.some((op) => op[0] === 'text' && (op[1] === 'Switch fish' || op[1] === 'Little'));
   };
   /** Enter room `num` and return whether its first drawable frame shows the room's hints. */
@@ -289,7 +291,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   const insideSafeArea = (what: string, sizes: readonly number[] = [1, 2], hints = true): void => {
     for (const k of sizes) {
       const W = 1920 * k, H = 1080 * k, l = 80 * k, t = 60 * k, sw = W - 2 * l, sh = H - 2 * t, edge = TV_EDGE * k;
-      const box = ui.screen === 'room' && draw(target, 0) ? pictureBox(target.width, target.height, W, H) : pictureBox(2560, 1920, W, H);
+      const box = ui.screen === 'room' && draw(target, 0) ? pictureBox(target.width, target.height, W, H, roomCapH(target.scale)) : pictureBox(2560, 1920, W, H);
       const r = paintUi(W, H, box, [l, t, l, t]);
       const ops = r?.ops ?? [];
       const menu = ops.slice(0, r?.legendAt ?? 0), legend = ops.slice(r?.legendAt ?? 0);
@@ -339,7 +341,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
   const firstMenusAt4k = async (): Promise<void> => {
     const W = 3840, H = 2160, insets = [160, 120, 160, 120] as const;
     const DEVICE_FACTOR = 5, DEVICE_MS = 50;
-    const box = pictureBox(target.width, target.height, W, H);
+    const box = pictureBox(target.width, target.height, W, H, roomCapH(target.scale));
     let frames = 0, worst = 0;
     while (!menusReady() || frames === 0) {
       resetCost();
@@ -578,7 +580,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
     const placements = (): string[] => {
       const out: string[] = [];
       for (let ww = 760; ww <= 1400; ww += 8) {
-        const r = paintUi(ww, WIN_H, pictureBox(target.width, target.height, ww, WIN_H));
+        const r = paintUi(ww, WIN_H, pictureBox(target.width, target.height, ww, WIN_H, roomCapH(target.scale)));
         const move = r?.ops.find((op) => op[0] === 'text' && op[1] === 'Move');
         out.push(`${move?.[2]},${move?.[3]}`);
       }
@@ -1159,7 +1161,7 @@ export async function runMenuSmoke(target: NativeAiScreen): Promise<number> {
       tap,
       paint: () => {
         const inRoom = ui.screen === 'room' && draw(target, 0);
-        return paintUi(WIN_W, WIN_H, inRoom ? pictureBox(target.width, target.height, WIN_W, WIN_H) : pictureBox(2560, 1920, WIN_W, WIN_H));
+        return paintUi(WIN_W, WIN_H, inRoom ? pictureBox(target.width, target.height, WIN_W, WIN_H, roomCapH(target.scale)) : pictureBox(2560, 1920, WIN_W, WIN_H));
       },
       moveFish: async () => {
         for (const dir of ['RemoteRight', 'RemoteLeft', 'RemoteUp', 'RemoteDown']) {

@@ -635,11 +635,26 @@ static JSValue n_mirror(JSContext *ctx, JSValueConst self, int argc, JSValueCons
 typedef struct { float size[2], origin[2], footprint[2]; int32_t taps, graded; float grade[4]; } PresentU;
 typedef struct { float origin[2]; int32_t size[2]; } OverlayU;
 
-/* Where content of w×h lands in a sw×sh window: as large as fits, centred, whole pixels. */
-static void letterbox(int w, int h, Uint32 sw, Uint32 sh, float *ox, float *oy, float *dw, float *dh) {
+/*
+ * Where content of w×h lands in a sw×sh window: as large as fits, centred, whole pixels.
+ *
+ * `cap_h` > 0 caps it: no larger than content `cap_h` tall filling the window's height, so at
+ * most sh/cap_h window pixels a content pixel. A room passes its cap (`roomCapH` in
+ * native/js/roomFit.ts, 45 px a cell per 1080 lines); everything else passes 0. The capped
+ * size is (w·sh)/cap_h in doubles, so a cap that lands on whole pixels lands on them exactly;
+ * a picture already under the cap takes the float path it always took, pixel for pixel.
+ * Restated, float for float, by `letterboxRect` in roomFit.ts; the smoke gate checks the two
+ * agree for every room (roomFitSmoke.ts).
+ */
+static void letterbox(int w, int h, Uint32 sw, Uint32 sh, double cap_h, float *ox, float *oy, float *dw, float *dh) {
   float scale = SDL_min((float)sw / (float)w, (float)sh / (float)h);
-  *dw = SDL_floorf((float)w * scale);
-  *dh = SDL_floorf((float)h * scale);
+  if (cap_h > 0 && (double)sh / cap_h < (double)scale) {
+    *dw = (float)SDL_floor((double)w * sh / cap_h);
+    *dh = (float)SDL_floor((double)h * sh / cap_h);
+  } else {
+    *dw = SDL_floorf((float)w * scale);
+    *dh = SDL_floorf((float)h * scale);
+  }
   *ox = SDL_floorf(((float)sw - *dw) / 2);
   *oy = SDL_floorf(((float)sh - *dh) / 2);
 }
@@ -666,7 +681,7 @@ static void draw_present(SDL_GPURenderPass *rp, SDL_GPUGraphicsPipeline *p, SDL_
   SDL_DrawGPUPrimitives(rp, 3, 1, 0, 0);
 }
 
-static void present_tex(SDL_GPUTexture *src, int w, int h, int overlay, bool overlay_window, int ui, bool graded) {
+static void present_tex(SDL_GPUTexture *src, int w, int h, double cap_h, int overlay, bool overlay_window, int ui, bool graded) {
   flush_surf();
   end_composite();
   /* Nothing recorded this frame (a surface painted once and shown again, a movie frame
@@ -677,7 +692,7 @@ static void present_tex(SDL_GPUTexture *src, int w, int h, int overlay, bool ove
   Uint32 sw = 0, sh = 0;
   if (src && win && SDL_WaitAndAcquireGPUSwapchainTexture(cmd, win, &swap, &sw, &sh) && swap) {
     float ox, oy, dw, dh;
-    letterbox(w, h, sw, sh, &ox, &oy, &dw, &dh);
+    letterbox(w, h, sw, sh, cap_h, &ox, &oy, &dw, &dh);
     SDL_GPUColorTargetInfo ct = {0};
     ct.texture = swap;
     ct.load_op = SDL_GPU_LOADOP_CLEAR;
@@ -725,10 +740,18 @@ static int opt_id(JSContext *ctx, int argc, JSValueConst *argv, int i) {
   return v;
 }
 
+/* The optional number argument `i`: 0 when absent or undefined (a letterbox's `cap_h`: none). */
+static double opt_num(JSContext *ctx, int argc, JSValueConst *argv, int i) {
+  double v = 0;
+  if (argc > i && !JS_IsUndefined(argv[i]) && !JS_IsNull(argv[i])) JS_ToFloat64(ctx, &v, argv[i]);
+  return v;
+}
+
 /* GlAiScreen.present: the composite into the window, graded, with an optional overlay surface
-   over the room's rect and an optional UI surface over the whole window. */
+   over the room's rect and an optional UI surface over the whole window; argv[2] the room's
+   size cap (`letterbox`'s cap_h, `roomCapH`). */
 static JSValue n_present(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
-  present_tex(comp, comp_w, comp_h, opt_id(ctx, argc, argv, 0), false, opt_id(ctx, argc, argv, 1), true);
+  present_tex(comp, comp_w, comp_h, opt_num(ctx, argc, argv, 2), opt_id(ctx, argc, argv, 0), false, opt_id(ctx, argc, argv, 1), true);
   return JS_UNDEFINED;
 }
 
@@ -743,7 +766,7 @@ static JSValue n_presentTexture(JSContext *ctx, JSValueConst self, int argc, JSV
   SDL_GPUTexture *t = tex_by_id(id);
   if (!t) return JS_ThrowTypeError(ctx, "presentTexture: unknown texture");
   bool graded = argc > 3 && JS_ToBool(ctx, argv[3]);
-  present_tex(t, tex_w[id], tex_h[id], opt_id(ctx, argc, argv, 1), true, opt_id(ctx, argc, argv, 2), graded);
+  present_tex(t, tex_w[id], tex_h[id], 0, opt_id(ctx, argc, argv, 1), true, opt_id(ctx, argc, argv, 2), graded);
   return JS_UNDEFINED;
 }
 
@@ -851,13 +874,26 @@ static JSValue n_writeText(JSContext *ctx, JSValueConst self, int argc, JSValueC
   return r;
 }
 
-/* [x, y, w, h, density]: where `present` puts content of w×h in the window, in its pixels. */
+/*
+ * [x, y, w, h, density]: where `present` puts content of w×h in the window, in its pixels,
+ * capped by argv[2] (`letterbox`'s cap_h; absent, none). With argv[3] and argv[4] it answers
+ * for a window of that many pixels instead, at density 1 — headless too, which is how the
+ * smoke gate holds `letterboxRect` to this.
+ */
 static JSValue n_presentRect(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int w = ARGI(0), h = ARGI(1), sw = 0, sh = 0;
-  if (!win || w <= 0 || h <= 0 || !SDL_GetWindowSizeInPixels(win, &sw, &sh) || sw <= 0 || sh <= 0) return JS_NULL;
+  double cap_h = opt_num(ctx, argc, argv, 2);
+  bool given = argc > 4 && !JS_IsUndefined(argv[3]) && !JS_IsUndefined(argv[4]);
+  if (given) {
+    sw = ARGI(3);
+    sh = ARGI(4);
+  } else if (!win || !SDL_GetWindowSizeInPixels(win, &sw, &sh)) {
+    return JS_NULL;
+  }
+  if (w <= 0 || h <= 0 || sw <= 0 || sh <= 0) return JS_NULL;
   float ox, oy, dw, dh;
-  letterbox(w, h, (Uint32)sw, (Uint32)sh, &ox, &oy, &dw, &dh);
-  float density = SDL_GetWindowPixelDensity(win);
+  letterbox(w, h, (Uint32)sw, (Uint32)sh, cap_h, &ox, &oy, &dw, &dh);
+  float density = given ? 1 : SDL_GetWindowPixelDensity(win);
   JSValue a = JS_NewArray(ctx);
   const double v[5] = {ox, oy, dw, dh, density > 0 ? density : 1};
   for (uint32_t i = 0; i < 5; i++) JS_SetPropertyUint32(ctx, a, i, JS_NewFloat64(ctx, v[i]));
@@ -938,8 +974,9 @@ static JSValue n_saveComposite(JSContext *ctx, JSValueConst self, int argc, JSVa
 
 /*
  * The present pass into a w×h RGBA8 texture instead of the window, and its pixels back
- * (top-down RGBA): argv[0] a texture id, or 0 for the composite; argv[3] whether graded. The
- * menu smoke checks the grade with it (`gradeSmoke.ts`), headless as it is.
+ * (top-down RGBA): argv[0] a texture id, or 0 for the composite; argv[3] whether graded;
+ * argv[4] the size cap (`letterbox`'s cap_h; absent, none). The menu smoke checks the grade
+ * with it (`gradeSmoke.ts`), and the smoke gate a capped room (`roomFitSmoke.ts`), headless.
  */
 static JSValue n_presentProbe(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int id = ARGI(0), w = ARGI(1), h = ARGI(2);
@@ -952,7 +989,7 @@ static JSValue n_presentProbe(JSContext *ctx, JSValueConst self, int argc, JSVal
   SDL_GPUTexture *dst = make_texture(SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM, w, h, SDL_GPU_TEXTUREUSAGE_COLOR_TARGET);
   if (!cmd) cmd = SDL_AcquireGPUCommandBuffer(dev);
   float ox, oy, dw, dh;
-  letterbox(sw, sh, (Uint32)w, (Uint32)h, &ox, &oy, &dw, &dh);
+  letterbox(sw, sh, (Uint32)w, (Uint32)h, opt_num(ctx, argc, argv, 4), &ox, &oy, &dw, &dh);
   SDL_GPUColorTargetInfo ct = {0};
   ct.texture = dst;
   ct.load_op = SDL_GPU_LOADOP_CLEAR;

@@ -58,6 +58,7 @@ import { creditsShown, ensureMapArt, mapFrame, mapPresented } from './mapScreen.
 import { inputFrame, routeEvent, setKeyboardIsRemote, setLastInput } from './uiInput.js';
 import { openOptions } from './menus.js';
 import { initUiLayer, paintUi, windowLayout } from './uiLayer.js';
+import { roomCapH } from './roomFit.js';
 import { initGrade } from './grade.js';
 import { ensureOptionsArt } from './optionsPaint.js';
 import { runMenuSmoke } from './menuSmoke.js';
@@ -291,12 +292,15 @@ function runInteractive(target: NativeAiScreen): void {
     } else if (ui.screen === 'room') {
       // Nothing is presented while a room loads, so the map's parchment frame stays up.
       const drawn = draw(target, alpha);
-      const subs = drawn ? subtitleOverlay(target.width, target.height, alpha) : null;
-      const win = drawn ? windowLayout(target.width, target.height) : null;
+      // The room no larger than its cap (roomFit.ts): the subtitles, the legend and the
+      // picture all take it from the one `capH`.
+      const capH = roomCapH(target.scale);
+      const subs = drawn ? subtitleOverlay(target.width, target.height, alpha, __native.presentRect(target.width, target.height, capH)) : null;
+      const win = drawn ? windowLayout(target.width, target.height, capH) : null;
       const layer = win ? paintUi(win.w, win.h, win.picture) : null;
       // Measured BEFORE present: present waits for vsync, which is idle time, not work.
       jsMs += __native.now() - now;
-      if (drawn) __native.present(subs?.id, layer?.surface?.id);
+      if (drawn) __native.present(subs?.id, layer?.surface?.id, capH);
     } else if (ui.screen === 'intro') {
       // The splash, or a movie frame with the skip hint over it. No legend (A4).
       const shown = introFrame(now);

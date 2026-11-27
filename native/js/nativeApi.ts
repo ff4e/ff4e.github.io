@@ -97,9 +97,10 @@ export interface NativeApi {
    * surface drawn over the same rect at one texel per window pixel, premultiplied — the
    * subtitles, laid out for the rect `presentRect` reports. `ui` is a surface drawn over the
    * whole window at one texel per window pixel (the menus and the button legend, `uiLayer.ts`).
-   * The composite is colour-graded (`setGrade`); the overlays are not.
+   * The composite is colour-graded (`setGrade`); the overlays are not. `capH` caps the room's
+   * size (`roomCapH`, roomFit.ts); absent, it fills the window.
    */
-  present(overlay?: number, ui?: number): void;
+  present(overlay?: number, ui?: number, capH?: number): void;
   /**
    * The colour grade the presented picture gets, as the web's `filter: contrast() saturate()
    * brightness()` (`grade.ts`); identity until set.
@@ -107,9 +108,10 @@ export interface NativeApi {
   setGrade(contrast: number, saturate: number, brightness: number): void;
   /**
    * The present pass into a `w`×`h` texture rather than the window — texture `id`, or 0 for
-   * the composite, letterboxed and box-filtered, `graded` or not — and its RGBA, top-down.
+   * the composite, letterboxed and box-filtered, `graded` or not, capped by `capH` as
+   * `present` caps a room — and its RGBA, top-down.
    */
-  presentProbe(id: number, w: number, h: number, graded: boolean): ArrayBuffer;
+  presentProbe(id: number, w: number, h: number, graded: boolean, capH?: number): ArrayBuffer;
   /** Write the composite's RGBA (top-down) to `path`, prefixed by u32 w, u32 h. */
   saveComposite(path: string): void;
 
@@ -211,9 +213,11 @@ export interface NativeApi {
   saveTexture(id: number, path: string): void;
   /**
    * Where `present` puts content of `w`×`h` in the window right now: `[x, y, w, h, density]`
-   * in window pixels, `density` being pixels per point. Null without a window (headless).
+   * in window pixels, `density` being pixels per point, capped by `capH` as `present` caps a
+   * room. Null without a window (headless) — unless `winW`×`winH` is given, when it answers
+   * for a window of that many pixels at density 1, window or none.
    */
-  presentRect(w: number, h: number): [number, number, number, number, number] | null;
+  presentRect(w: number, h: number, capH?: number, winW?: number, winH?: number): [number, number, number, number, number] | null;
 
   // ── Subtitle text (native/host/text.c, FreeType). Read by native/js/subtitleFonts.ts. ──
   /** Load a TrueType face; a variable one is set to `weight` on its `wght` axis. Returns its id. */

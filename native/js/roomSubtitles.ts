@@ -50,12 +50,12 @@ export function subtitleFace(): NativeFace | null {
 /**
  * The subtitle layer for a room composited at `compW`×`compH`, `alpha` of the way through
  * the tick — or null when nothing is said (or there is no window to lay it out for). `rect`
- * is where the room is shown (`presentRect`'s answer); the smoke gate, with no window, passes
- * one.
+ * is where the room is shown: `presentRect`'s answer with the room's cap (`roomCapH`), or
+ * for the smoke gate, with no window, the same for a window it names.
  */
 export function subtitleOverlay(
   compW: number, compH: number, alpha: number,
-  rect: readonly [number, number, number, number, number] | null = __native.presentRect(compW, compH),
+  rect: readonly [number, number, number, number, number] | null,
 ): NativeSurface | null {
   if (!face || !layout) return null;
   // Nothing said: forget the rows' fits, as the browser tears its layer down
