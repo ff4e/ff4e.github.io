@@ -6,10 +6,10 @@ where you move two talking fish around a room without dropping anything on eithe
 The goal: a modern implementation, ported function-by-function from the original Delphi/Pascal
 source for behavioral fidelity, with improved graphics, that runs on any modern hardware.
 
-### ▶ Play in a browser at **<https://ff4e.github.io/>**, or get the **[App Store app](https://apps.apple.com/us/app/fish-fillets-forever/id6812738745)** for iPhone/iPad.
+### ▶ Play in a browser at **<https://fishfillets.net/>**, or get the **[App Store app](https://apps.apple.com/us/app/fish-fillets-forever/id6812738745)** for iPhone/iPad.
 
 No install, no account, no plugin needed for the browser version. See
-**[about.html](https://ff4e.github.io/about.html)** for platform details.
+**[about.html](https://fishfillets.net/about.html)** for platform details.
 
 ![The world map](docs/screenshots/world-map.jpg)
 
