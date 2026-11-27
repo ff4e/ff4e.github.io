@@ -59,6 +59,12 @@
 		<key>UIColorName</key>
 		<string>LaunchBackground</string>
 	</dict>
+	<!-- Required by App Store Connect (ITMS-90683, build 6) because SDL's HIDAPI links
+	     CoreBluetooth to reach Steam Controllers over Bluetooth LE (src/hidapi/ios/hid.m).
+	     SDL only starts Bluetooth when SDL_HINT_JOYSTICK_HIDAPI_STEAM is on; it is off by
+	     default and the host never sets it, so no permission prompt is ever shown. -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Fish Fillets uses Bluetooth only to connect game controllers.</string>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
