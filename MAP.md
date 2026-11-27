@@ -70,7 +70,8 @@ others are small enough to read.
   cue as a legend pulse (`tutorialHint.ts`) and its gate `kufrikSmoke.ts`. The TV menus:
   `uiInput.ts` routes the keyboard, pad and remote for every screen (the remote's swipes made
   by `remoteSwipe.ts` from the thumb's travel, and held in a room as the fish's move), `menus.ts`
-  is the top bar / confirm / Options / Help state, `optionsModel.ts` persists and applies the options,
+  is the top bar / confirm / Options / Help state, `focusSound.ts` the tick a moving focus plays
+  (synthesised; the mixer's cue slot), `optionsModel.ts` persists and applies the options,
   `grade.ts` is the web's AI-tier colour grade, applied as the picture is presented (gated by
   `gradeSmoke.ts`); `uiLayer.ts` draws the window-sized UI layer, and rehearses the menus before they open
   (`uiCost.ts` times and budgets that) and slides the top bar in and out (`barSlide.ts`) — `menuPaint.ts`, `optionsPaint.ts` (the original

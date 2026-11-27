@@ -12,11 +12,13 @@
  * (`uiDraw.ts`, `sliced`), and six of them at 2160 lines doubled the rehearsal's rasterising. Sized for a TV: the words are
  * 30 px at 1080 lines, and the whole bar shrinks to fit a narrower window.
  *
- * The prompt asks before a save, a load or a restart, and its answers are the legend's small
- * hints ("Ⓐ Yes  Ⓑ No"); the keyboard gets none (Enter and Esc still answer). The words are
- * in the UI's language.
+ * The prompt asks before a save, a load or a restart: a classic dialog — the verb's icon and
+ * the question, then two buttons, OK and Cancel, in the touch UI's button glass, the focused
+ * one pressed as the bar's focused tab is — and under them the legend's small hints for its
+ * controls ("Ⓐ Select  Ⓑ Cancel"); the keyboard gets none (Enter and Esc still answer). The
+ * words are in the UI's language.
  */
-import { BAR_ITEMS, barItemEnabled, type BarItem, type Verb } from './menus.js';
+import { BAR_ITEMS, CONFIRM_BUTTONS, barItemEnabled, type BarItem, type ConfirmButton, type Verb } from './menus.js';
 import { confirmItems, drawHintRow, hintRowWidth, legendMetrics } from './legend.js';
 import type { InputSource } from './uiInput.js';
 import type { Ui } from './uiDraw.js';
@@ -33,6 +35,7 @@ const BAR_ICON_NAME: Readonly<Record<BarItem, IconName>> = {
 };
 const PROMPT: Readonly<Record<Verb, UiString>> = { save: 'askSave', load: 'askLoad', restart: 'askRestart' };
 const VERB_ICON: Readonly<Record<Verb, IconName>> = { save: 'save', load: 'load', restart: 'restart' };
+const BUTTON_LABEL: Readonly<Record<ConfirmButton, UiString>> = { ok: 'ok', cancel: 'cancel' };
 
 /** The icons' sizes at 1080 lines: the bar's tabs', and the confirm prompt's. */
 const BAR_ICON = 34, CONFIRM_ICON = 48;
@@ -101,24 +104,43 @@ export function paintBar(
   return [x, y, bw, bh];
 }
 
-/** The confirm prompt (A3): the verb's icon and the question, then "Ⓐ Yes  Ⓑ No" in the last input's glyphs. Returns its box. */
-export function paintConfirm(ui: Ui, w: number, h: number, verb: Verb, source: InputSource): [number, number, number, number] {
+/**
+ * The confirm prompt (A3): the verb's icon and the question, OK and Cancel with button `sel`
+ * focused, then "Ⓐ Select  Ⓑ Cancel" in the last input's glyphs. Returns its box.
+ */
+export function paintConfirm(
+  ui: Ui, w: number, h: number, verb: Verb, sel: number, source: InputSource,
+): [number, number, number, number] {
   const u = scale(h);
   const pal = currentPalette();
+  const hair = hairline(h);
   scrim(ui, w, h, 0.67);
   const q = t(PROMPT[verb]);
   const qpx = 36 * u, icon = CONFIRM_ICON * u, iconGap = 18 * u;
-  const answers = confirmItems(source);
+  // The buttons: one width for both, wide enough for the longer word, as an alert's are.
+  const bpx = 30 * u, bh = 64 * u, bGap = 28 * u;
+  const labels = CONFIRM_BUTTONS.map((b) => t(BUTTON_LABEL[b]));
+  const bw = Math.max(220 * u, Math.max(...labels.map((s) => ui.measure(s, bpx, true))) + 2 * 44 * u);
+  const rowW = CONFIRM_BUTTONS.length * bw + (CONFIRM_BUTTONS.length - 1) * bGap;
+  const hints = confirmItems(source);
   const m = legendMetrics(h);
-  const hintW = hintRowWidth(ui, answers, m);
+  const hintW = hintRowWidth(ui, hints, m);
   const lineW = icon + iconGap + ui.measure(q, qpx, true);
-  const cw = Math.max(lineW, hintW) + 2 * 56 * u;
-  const ch = answers.length ? 182 * u : 128 * u;
+  const cw = Math.max(lineW, rowW, hintW) + 2 * 56 * u;
+  const by = 124 * u;
+  const ch = hints.length ? by + bh + 28 * u + m.glyph + 34 * u : by + bh + 40 * u;
   const x = (w - cw) / 2, y = (h - ch) / 2;
   popup(ui, x, y, cw, ch, u, h, pal);
   const lx = x + (cw - lineW) / 2;
   drawIcon(ui, VERB_ICON[verb], lx, y + 40 * u, icon, pal);
   ui.text(q, lx + icon + iconGap, y + 77 * u, qpx, INK, { bold: true, outline: labelShadow(u, h) });
-  if (answers.length) drawHintRow(ui, answers, x + (cw - hintW) / 2, y + 120 * u, m, pal, true);
+  let bx = x + (cw - rowW) / 2;
+  labels.forEach((label, i) => {
+    drawGlass(ui, bx, y + by, bw, bh, 14 * u, hair, pal, i === sel ? 'pressed' : 'rest');
+    ui.text(label, bx + (bw - ui.measure(label, bpx, true)) / 2, y + by + bh / 2 + bpx * 0.36, bpx, INK,
+      { bold: true, outline: labelShadow(u, h) });
+    bx += bw + bGap;
+  });
+  if (hints.length) drawHintRow(ui, hints, x + (cw - hintW) / 2, y + by + bh + 28 * u, m, pal, true);
   return [x, y, cw, ch];
 }

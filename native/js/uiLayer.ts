@@ -30,7 +30,7 @@ import { helpScreens, ui as screenUi } from '../../src/app/screenState.js';
 import type { Image2D, Surface2D } from '../../src/render/surface2d.js';
 import { drawLegend, legendItems, legendScreen, type LegendItem } from './legend.js';
 import { paintBar, paintConfirm } from './menuPaint.js';
-import { BAR_ITEMS, OPTIONS_ROWS, barItemEnabled, openMenus, topMenu, type Layer } from './menus.js';
+import { BAR_ITEMS, CONFIRM_BUTTONS, OPTIONS_ROWS, barItemEnabled, openMenus, topMenu, type Layer } from './menus.js';
 import { Slide } from './barSlide.js';
 import { NativeSurface } from './nativeSurface.js';
 import { paintOptions } from './optionsPaint.js';
@@ -87,7 +87,7 @@ function drawTop(
   let box = picture;
   if (top?.kind === 'bar') paintBar(ui, w, h, top.sel, { lift: bar?.lift ?? 0 });
   else if (!top && bar) paintBar(ui, w, h, bar.look.sel, { lift: bar.lift, enabled: bar.look.enabled });
-  else if (top?.kind === 'confirm') paintConfirm(ui, w, h, top.verb, lastInput());
+  else if (top?.kind === 'confirm') paintConfirm(ui, w, h, top.verb, top.sel, lastInput());
   else if (top?.kind === 'options') box = paintOptions(ui, w, h, top.row);
   else if (top?.kind === 'help') box = paintHelp(ui, w, h, subLang(), helpPage);
   const at = ui.ops.length;
@@ -95,10 +95,11 @@ function drawTop(
   return at;
 }
 
-/** Every menu as it first opens: what a rehearsal draws, one a frame. */
+/** Every menu as it first opens (and the prompt with either button focused): what a rehearsal draws, one a frame. */
 const REHEARSALS: readonly Layer[] = [
   ...BAR_ITEMS.map((_, sel): Layer => ({ kind: 'bar', sel })),
-  ...(['save', 'load', 'restart'] as const).map((verb): Layer => ({ kind: 'confirm', verb })),
+  ...(['save', 'load', 'restart'] as const).flatMap((verb) =>
+    CONFIRM_BUTTONS.map((_, sel): Layer => ({ kind: 'confirm', verb, sel }))),
   ...OPTIONS_ROWS.map((_, row): Layer => ({ kind: 'options', row })),
   { kind: 'help' },
 ];

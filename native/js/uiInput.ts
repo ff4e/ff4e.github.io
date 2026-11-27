@@ -139,7 +139,7 @@ const menuRepeat = new DirRepeat<MenuAct>();
 function menuSteer(now: number): void {
   const code = menuHeld[menuHeld.length - 1];
   const act = menuRepeat.step(code ? MENU_DIR[code]! : null, now);
-  if (act) menuAct(act);
+  if (act) menuAct(act, now);
 }
 
 function menuKey(down: boolean, code: string, now: number): void {
@@ -152,7 +152,7 @@ function menuKey(down: boolean, code: string, now: number): void {
   }
   if (!down) return;
   const act = MENU_PRESS[code] ?? (sourceOf(code) === 'key' ? 'other' : null);
-  if (act) menuAct(act);
+  if (act) menuAct(act, now);
 }
 
 // ── The remote's held Play/Pause: undo, and repeat while held ───────────────────────
@@ -264,7 +264,7 @@ function roomKey(down: boolean, code: string, now: number): void {
     case 'Escape':
     case 'PadMenu':
     case 'RemoteBack':
-      openBar();
+      openBar(now);
       return;
     case 'PadB':
     case 'PadView':
@@ -501,7 +501,7 @@ function route(ev: string, now: number): void {
   }
   if (ev === '!background') {
     inputBlur();
-    barForBackground();
+    barForBackground(now);
     return;
   }
   if (ev === '!kvs') {
@@ -566,8 +566,8 @@ export function inputFrame(now: number): void {
  * move. Elsewhere nothing changes: the map, a menu already open, the intro and the briefcase
  * story carry on from where they stopped (the story's Back would skip it).
  */
-function barForBackground(): void {
-  if (ui.screen === 'room' && !cutscene && !menuOpen()) openBar();
+function barForBackground(now: number): void {
+  if (ui.screen === 'room' && !cutscene && !menuOpen()) openBar(now);
 }
 
 /** Focus lost: no held input's release will arrive. */

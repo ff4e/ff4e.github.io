@@ -28,13 +28,13 @@ const STRINGS = {
   done: ['Done', 'Hotovo'],
   page: ['Page', 'Stránka'],
   close: ['Close', 'Zavřít'],
-  yes: ['Yes', 'Ano'],
-  no: ['No', 'Ne'],
+  cancel: ['Cancel', 'Zrušit'],
   skip: ['Skip', 'Přeskočit'],
   // The top bar.
   worldMap: ['World map', 'Mapa'],
   help: ['Help', 'Nápověda'],
-  // The confirm prompt.
+  // The confirm prompt: the question, and its buttons.
+  ok: ['OK', 'OK'],
   askSave: ['Save the game?', 'Uložit pozici?'],
   askLoad: ['Load the saved game?', 'Nahrát uloženou pozici?'],
   askRestart: ['Restart the room?', 'Začít místnost znovu?'],

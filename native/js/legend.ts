@@ -162,10 +162,13 @@ export function legendItems(screen: LegendScreen, source: InputSource): LegendIt
   }
 }
 
-/** The confirm prompt's answers (A3): Ⓐ Yes · Ⓑ No, or the remote's click and Back; none for the keyboard. */
+/**
+ * The confirm prompt's hints, under its OK and Cancel: Ⓐ presses the focused button and Ⓑ
+ * cancels — the remote's click and Back; none for the keyboard (Enter and Esc).
+ */
 export function confirmItems(source: InputSource): LegendItem[] {
-  if (source === 'pad') return [item([A], 'yes'), item([B], 'no')];
-  if (source === 'remote') return [item([CLICK], 'yes'), item([BACK], 'no')];
+  if (source === 'pad') return [item([A], 'select'), item([B], 'cancel')];
+  if (source === 'remote') return [item([CLICK], 'select'), item([BACK], 'cancel')];
   return [];
 }
 
@@ -401,7 +404,7 @@ export function drawLegend(ui: Ui, items: readonly LegendItem[], sw: number, sh:
  * after TestFlight build 3): the plain map, its record panel, a launch, a story page and the
  * credits — the selection ring, the panel's lit button and a page's own picture say what a
  * click does. None during the intro (A4: it has its skip hint), on the confirm prompt (its
- * answers are on its card), or under the top bar (B6: the room's hints step aside for it).
+ * hints are on its card, under its buttons), or under the top bar (B6: the room's hints step aside for it).
  * Options and Help, which can open over the map too, keep theirs: they are menus, not the map.
  */
 export function legendScreen(top: { kind: string } | null): LegendScreen | null {

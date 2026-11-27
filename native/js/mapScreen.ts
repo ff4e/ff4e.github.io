@@ -16,7 +16,9 @@
  *   - in the record panel, left/right cycle Run → Replay → Cancel (Replay skipped with no
  *     record), Ⓐ presses, Ⓑ closes;
  *   - Ⓑ on the plain map does nothing, on purpose: it is the button that gets mashed to back
- *     out of things, and must not drop the player into a room.
+ *     out of things, and must not drop the player into a room;
+ *   - a step that moves the selection, or the panel's lit button, ticks as a TV's focus does
+ *     (`focusSound.ts`); one with nothing that way does not.
  *
  * The default selection is the room last played if it can still be selected, else the
  * first room not yet solved — so resuming is one press of Ⓐ.
@@ -47,6 +49,7 @@ import { readBytes } from './shims.js';
 import { DirRepeat } from './dirRepeat.js';
 import { creditsFrame, creditsKeyDown, openCredits } from './creditsScreen.js';
 import { replayIntro } from './introScreen.js';
+import { focusMoved } from './focusSound.js';
 
 /** What the map needs of the game: the player's record, and the way into a room. */
 export interface MapScreenHost {
@@ -232,18 +235,25 @@ function activateInfoButton(room: number, btn: InfoButton | null): void {
   closeMapInfo();
 }
 
+/** A selection's identity, for telling whether a step moved it (a focus tick). */
+const targetKey = (t: MapTarget): number | string => (t.kind === 'node' ? t.room : t.action);
+
 function move(step: MapStep): void {
   const room = ui.mapInfoRoom;
   if (room !== null) {
     if (step !== 'left' && step !== 'right') return;
     const usable = usableButtons(room);
-    const i = Math.max(0, usable.indexOf(ui.mapInfoHover ?? 'run'));
+    const from = ui.mapInfoHover;
+    const i = Math.max(0, usable.indexOf(from ?? 'run'));
     ui.mapInfoHover = usable[(i + (step === 'right' ? 1 : usable.length - 1)) % usable.length]!;
+    focusMoved(from, ui.mapInfoHover);
     return;
   }
   if (!sel) return;
   const next = nearestInDirection(sel.kind === 'node' ? nodeCenter(sel.room) : sel, targets(), step);
-  if (next) sel = next;
+  if (!next) return; // nothing that way: the selection stays, silently
+  focusMoved(targetKey(sel), targetKey(next));
+  sel = next;
 }
 
 function press(): void {
