@@ -19,6 +19,13 @@
  *   - the clock (audioClock) is the frames mixed so far. It stops while paused, which
  *     audioBackend.ts allows.
  *
+ * Beside the voices is one more slot, the UI's focus cue (audioCue, native/js/focusSound.ts):
+ * the tick a menu plays when its focus moves. It is not the game's: it has no id, reports no
+ * end, counts toward no voice limit and moves no clock, so nothing the policy decides can see
+ * it. It is on the effects bus (its slider, 0 silencing it), and it sounds while the game is
+ * paused — Options pauses a room, and its rows tick — though not while the app is suspended.
+ * A new cue restarts the slot rather than adding a voice, so quick moves never pile up.
+ *
  * Two clocks drive the mixing. With an output (the interactive game) SDL's audio thread
  * pulls blocks as the device consumes them. Without one (`--headless`: the smoke gates and
  * the audio checks) nothing is opened and the game advances the mixer itself, 1764 frames
@@ -76,6 +83,12 @@ static bool paused;
 static bool suspended; /* the app is in the background (audio_suspend): held, as paused is */
 static int64_t clock_frames;
 static Voice voices[MAX_VOICES];
+static struct {
+  Buf *buf; /* NULL: silent */
+  int64_t pos;
+  float gain;
+} cue;
+static int cues; /* cues started, ever: for the checks */
 static uint32_t next_voice = 1;
 static Buf **bufs; /* id - 1 -> buffer; NULL when released */
 static int nbufs, capbufs;
@@ -126,10 +139,28 @@ static void end_voice(Voice *v) {
   v->id = 0;
 }
 
+/* Add the focus cue's next `n` frames to `out`. Called with `lock` held. */
+static void mix_cue(float *out, int n) {
+  if (!cue.buf) return;
+  const float g = cue.gain * bus_gain[0] * master;
+  int64_t run = cue.buf->frames - cue.pos;
+  if (run > n) run = n;
+  for (int64_t j = 0; j < run; j++) out[j] += cue.buf->pcm[cue.pos++] * g;
+  if (cue.pos >= cue.buf->frames) {
+    unref(cue.buf);
+    cue.buf = NULL;
+  }
+}
+
 /* Mix `n` frames into `out`. Called with `lock` held. */
 static void mix(float *out, int n) {
   SDL_memset(out, 0, (size_t)n * sizeof *out);
-  if (paused || suspended) return;
+  if (suspended) return;
+  if (paused) { /* the game's sound holds its place; only the UI's cue sounds */
+    mix_cue(out, n);
+    for (int i = 0; i < n; i++) out[i] = out[i] > 1.0f ? 1.0f : out[i] < -1.0f ? -1.0f : out[i];
+    return;
+  }
   for (int k = 0; k < MAX_VOICES; k++) {
     Voice *v = &voices[k];
     if (!v->id) continue;
@@ -153,6 +184,7 @@ static void mix(float *out, int n) {
       if (pos >= v->buf->frames) end_voice(v);
     }
   }
+  mix_cue(out, n);
   for (int i = 0; i < n; i++) out[i] = out[i] > 1.0f ? 1.0f : out[i] < -1.0f ? -1.0f : out[i];
   clock_frames += n;
 }
@@ -499,6 +531,28 @@ static JSValue n_audioStop(JSContext *ctx, JSValueConst self, int argc, JSValueC
   return JS_UNDEFINED;
 }
 
+/*
+ * audioCue(buffer id, gain): play the UI's focus cue from its start, on the effects bus,
+ * replacing one still sounding (see the header). A missing buffer is ignored: a tick is not
+ * worth an exception in a menu.
+ */
+static JSValue n_audioCue(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  double gain = 1;
+  JS_ToFloat64(ctx, &gain, argv[1]);
+  SDL_LockMutex(lock);
+  Buf *b = buf_by_id(ctx, argv[0]);
+  if (b && b->frames > 0) {
+    if (cue.buf) unref(cue.buf);
+    b->refs++;
+    cue.buf = b;
+    cue.pos = 0;
+    cue.gain = (float)gain;
+    cues++;
+  }
+  SDL_UnlockMutex(lock);
+  return JS_UNDEFINED;
+}
+
 static JSValue n_audioBusGain(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   int32_t bus = 0;
   double g = 1;
@@ -550,6 +604,7 @@ static JSValue n_audioStatus(JSContext *ctx, JSValueConst self, int argc, JSValu
   SDL_LockMutex(lock);
   double fed = (double)fed_frames, clock = (double)clock_frames;
   bool held = suspended, pause = paused;
+  int cued = cues;
   SDL_UnlockMutex(lock);
   JSValue r = JS_NewObject(ctx);
   JS_SetPropertyStr(ctx, r, "opens", JS_NewInt32(ctx, opens));
@@ -561,6 +616,7 @@ static JSValue n_audioStatus(JSContext *ctx, JSValueConst self, int argc, JSValu
   JS_SetPropertyStr(ctx, r, "movieOutput", JS_NewBool(ctx, mstream != NULL));
   JS_SetPropertyStr(ctx, r, "fed", JS_NewFloat64(ctx, fed));
   JS_SetPropertyStr(ctx, r, "clock", JS_NewFloat64(ctx, clock));
+  JS_SetPropertyStr(ctx, r, "cues", JS_NewInt32(ctx, cued));
   return r;
 }
 
@@ -599,7 +655,7 @@ void audio_install(JSContext *ctx, JSValue native, bool device) {
       {"audioBusGain", n_audioBusGain, 2},   {"audioPause", n_audioPause, 1},
       {"audioClock", n_audioClock, 0},       {"audioEnded", n_audioEnded, 0},
       {"audioVoices", n_audioVoices, 0},     {"audioAdvance", n_audioAdvance, 2},
-      {"audioStatus", n_audioStatus, 0},
+      {"audioStatus", n_audioStatus, 0},     {"audioCue", n_audioCue, 2},
   };
   for (size_t i = 0; i < sizeof fns / sizeof fns[0]; i++)
     JS_SetPropertyStr(ctx, native, fns[i].name, JS_NewCFunction(ctx, fns[i].fn, fns[i].name, fns[i].len));

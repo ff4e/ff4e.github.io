@@ -260,7 +260,7 @@ subtitles and the map's plaques are in (`subLang()`; subtitles off keep the last
 which on a first run follows the system's. The web has no Czech UI chrome to reuse, so the
 Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech diacritics.
 
-- **The top bar** — World map · Save · Load · Restart · Options · Help — is an Apple TV app's
+- **The top bar** — World map · Restart · Load · Save · Options · Help — is an Apple TV app's
   tab bar (controller spec B6, after TestFlight build 3 asked for something less invasive
   than a pause menu): a slim capsule of the touch UI's glass across the top of the title-safe
   area, over the room and without dimming it, each tab a carved icon and its word, the focused
@@ -271,18 +271,28 @@ Czech words follow ALTAR's own Czech help (`helpText.ts`). Mulish has the Czech 
   step aside for it. **It slides** down from above the screen's top edge as it opens and back
   up as it closes, 180 ms each way, eased out both ways (`barSlide.ts`; TestFlight build 4 asked
   for it). Only the picture slides: the input is the bar's from the press that opens it and the
-  room's from the press that closes it — a click mid-slide presses a tab, a move made while it
-  slides out moves the fish — and Back again halfway turns it round from where it is. Nothing
+  room's from the press that closes it — a direction mid-slide moves the focus, a move made
+  while it slides out moves the fish — and Back again halfway turns it round from where it is. Nothing
   is rasterised for the slide: the bar's cached masks and glyphs are drawn at a whole-pixel
   offset the GPU applies to their quads. Into or out of a prompt, Options or Help it does not
   slide (they replace it on the frame), and when its World map takes the room away it finishes
-  sliding out over the map. It opens on Save — or the next tab that can act — never on World map,
-  which leaves the room without asking. Left and right (a click on the edge, a swipe, the
-  pad's d-pad or LB / RB, the arrows) move the focus, skipping a tab that cannot act and
-  stopping at the ends, as tvOS's tab bars do; a click presses. Save, Load and Restart ask
-  first ("Save the game?" — Ⓐ / a click / Enter yes, Ⓑ / Back / Esc no, back to the bar; the
-  card shows the pad's or the remote's answers as the legend's small hints, the keyboard's
-  none), then send F2, F3 or Backspace down the room's router, so a save mid-move or during a
+  sliding out over the map. Its order puts Restart and Load, which both rewind the attempt, together after World map, and
+  Save after them. Back opens it on World map, its first tab, as a TV app's tab bar does
+  (#228 opened it on Save, so that a click straight after Back could not leave the room). World
+  map leaves the room without asking, so **a click that comes within 250 ms of the bar
+  opening** (`BAR_CLICK_GUARD_MS`: the 180 ms slide, and at least a quarter of a second) is
+  dropped, and logged (`a click … ms after the top bar opened: dropped`): a double press, or a
+  click already on its way, cannot take the player out of the room. Coming back from the
+  background it opens on Options instead (see "Leaving and coming back"). Left and right (a click on
+  the edge, a swipe, the pad's d-pad or LB / RB, the arrows) move the focus, skipping a tab
+  that cannot act and stopping at the ends, as tvOS's tab bars do; a click presses. Save,
+  Load and Restart ask first in a classic dialog: the question ("Save the game?") and two
+  buttons, **OK and Cancel** (OK / Zrušit), the focused one in the pressed state. Left and
+  right move between them (no wrap); Ⓐ / a click / Enter presses the focused one; Ⓑ / Back /
+  Esc always cancels, back to the bar. It opens focused on OK, so opening it and clicking
+  still says yes in one click (`CONFIRM_FOCUS` in `menus.ts` flips that). Under the buttons
+  the card shows the pad's or the remote's hints ("Ⓐ Select · Ⓑ Cancel"), the keyboard's none.
+  OK sends F2, F3 or Backspace down the room's router, so a save mid-move or during a
   replay is refused exactly as F2 is on the web. Save and Load are greyed (and skipped by the
   focus) when they cannot act, by the touch buttons' rule (`buttonAvailability.ts`, pinned):
   never during the KUFRIK demonstration, which teaches them. The prompt does not pause the
@@ -329,7 +339,7 @@ map still work.
   switching fish cannot move it between the margin and the top. Items that cannot act are dimmer. With the remote,
   "Switch fish" carries the active fish's picture at the chip's height (B3: the touch badge's
   art and its visibility rule), the only cue to which fish an edge click moves. **The keyboard
-  gets no legend, on any screen**, nor answer hints on the confirm prompt: its player knows
+  gets no legend, on any screen**, nor hints on the confirm prompt: its player knows
   the keys, and keycaps would only cover the picture. With nothing to draw the UI layer is
   not drawn at all.
 - **At the map's root, Back leaves the game** (the keyboard's Esc, the remote's Back): tvOS
@@ -431,6 +441,25 @@ browser (`seams/stageState.ts` reports the boot as done, so every entry takes th
 a room is not ticked until its sound is in, as the browser does not present one. The global
 packages (x00 effects, x03 chatter, x02 death lines, the restored lines) are loaded before
 the first room (`loadGlobalSounds`). The map plays the menu music; the story pages `rybky11`.
+
+**The focus tick** (`native/js/focusSound.ts`) is the native menus' own sound, not the
+game's: a short, soft click whenever a focus actually moves — between the map's bubbles (and
+its corner buttons and the record panel's buttons), the top bar's tabs, the Options rows and
+the confirm prompt's buttons — and never for a press that moves nothing (an end that does not
+wrap, a step whose every tab that way is greyed), for a menu opening, or in the room. It is
+**synthesised, not tvOS's**: tvOS plays its focus sound only through the UIKit focus engine,
+as part of a focus update between UIKit views (`UIFocusSoundIdentifierDefault` from
+`soundIdentifierForFocusUpdateInContext:`, UIFocus.h) — there is no public call that plays it
+on demand and no system sound id for it, the game's menus are drawn into one SDL window that
+takes the remote through GameController, and Apple's sound file is not ours to ship. So three
+damped partials (~1.4 kHz, ~3.1 kHz, ~620 Hz) make a 32 ms click, built once at its first use
+(`focusClickPcm`), and the mixer plays it in a slot of its own beside the voices (`audioCue`,
+audio.c): on the effects bus, so it follows the effects slider and is silent at 0; outside the
+policy's voices, priorities and clock, so it neither stops nor delays a sound or a line; heard
+while Options pauses a room (the game's sound holds, the clock stays put) but not while the
+app is in the background; and a new tick restarts the slot rather than adding a voice, so
+quick moves never pile up. It sounds on the Apple TV for every input, and on a Mac for the pad
+and the remote (or `--remote-keys`), not the keyboard: a desktop's arrows move a focus silently.
 
 `--audio-log` prints the policy's sound log (every sound started) to stdout.
 
@@ -1018,7 +1047,9 @@ rules are by directory and kind, and the check only ever adds to them.)
   restore is reopened ("When the sound does not come back", above). The first frame back
   delivers `!background`, and a room shows its top bar as Back does (`uiInput.ts`): the room
   runs on under it, as it always does under the bar, but the player comes back to the bar's
-  focus rather than to a fish. The map, an open
+  focus rather than to a fish — on Options, not World map, so a click to resume after the
+  250 ms guard opens a panel rather than leaving the room and its unsaved progress (Restart,
+  Load and Save would act on two clicks). The map, an open
   menu, the intro and the briefcase story carry on where they stopped. Losing the screen to
   Control Center or Siri is the same event. Nothing needs saving on the way out: every store
   write is made durable when it happens (`n_storeSave`; on tvOS `store.c`). The menu smoke drives `!background` on the map and
@@ -1143,7 +1174,9 @@ a menu says about itself. On the map: the pad's ☰ opens Options; a volume step
 persisted; there is no font row, and the subtitles still take their face from `ff.subfont`; Help opens over Options, pages
 and closes; the pad's Ⓑ at the root does nothing while Esc and the remote's Back leave; the
 Options corner is selectable and opens Options; the plain map draws no hints, for the pad or
-the remote. In a room, with the remote: the centre click switches fish, an edge click moves the
+the remote. The focus tick: a click that moves the map's selection ticks once, one at the
+map's edge moves nothing and is silent, and the keyboard's arrows on a Mac move it silently.
+In a room, with the remote: the centre click switches fish, an edge click moves the
 active one; a swipe moves it one step, and an edge click just after it toward its edge is that
 swipe's end (a moment later, a click again); a thumb resting on the surface moves nothing,
 kept on it after a swipe it holds the move (KeyRoom held) — an edge click its way holds on, a
@@ -1152,13 +1185,19 @@ the thumb that swiped the top bar away moves no fish; a swipe during a load's re
 taken and a held swipe an undo dropped is forgotten (a click toward that edge is a click
 after either); Play/Pause undoes one move and, held,
 repeats (350 ms, then every 80 ms) with nothing added on release. Back opens the top bar on
-Save, and the room is not paused: it steps, the mixer's clock runs, and no click, swipe, held
-thumb or Play/Pause moves a fish; the hints step aside. A swipe moves the focus, skipping the
+World map, and the room is not paused: it steps, the mixer's clock runs, and no click, swipe, held
+thumb or Play/Pause moves a fish; the hints step aside. A click hard on Back's heels — the
+remote's at once, the pad's Ⓐ 240 ms after its ☰ — is dropped and logged, the room staying (it
+fails without the guard). A swipe moves the focus, skipping the
 greyed Load and stopping at the ends, and a swipe ending on the ring toward its edge steps it
-once; a click down hides the bar; Save asks (the prompt does not pause either), Back declines,
+once; a click down hides the bar; Save asks (the prompt does not pause either) — focused on
+OK, a click left there silent, a swipe right to Cancel one tick, a click right at Cancel
+silent, a click on Cancel declining, the prompt reopening on OK — Back declines,
 a click saves the move record; Load restores it; Options and Help pause the room and close
-back to the bar, which runs on again; Restart starts over; a save mid-move is refused as F2
-is; coming back to the app shows the bar. With the pad: Ⓧ asks to restart and Ⓑ declines, RB
+back to the bar, which runs on again; in Options over the paused room each row ticks, heard
+while the room's clock holds, and two quick ticks peak as one does (no pile-up); Restart starts over; a save mid-move is refused as F2
+is; coming back to the app shows the bar, focused on Options, and a click a second later
+opens Options, the room staying. With the pad: Ⓧ asks to restart and Ⓑ declines, RB
 with no save opens nothing, LB → Ⓐ saves, ☰ opens and closes the bar and Ⓑ closes it, Ⓑ goes
 to the map, and Ⓧ's prompt goes when the room does; Esc opens and hides the bar, and its Save prompt (the question alone) is declined
 by Esc and answered by Enter; its World map leaves the room. A Play/Pause hold released inside
@@ -1180,7 +1219,7 @@ the room's frames get the menus ready, and the top bar's, Options', Help's and t
 prompt's first frames are each under 10 ms (above). At 1080 and 2160 lines the TV legend hugs
 the screen's edge, 20 px in at 1080 lines (not the title-safe area's): room 1's list at its
 left, UTES's row at its top; the map has none; the top bar keeps to the title-safe area's top
-in English and Czech. Back as an Apple TV delivers it (above, "The remote's
+in English and Czech, and the restart prompt has its OK and Cancel in both. Back as an Apple TV delivers it (above, "The remote's
 Back comes from GameController"). First, though, what the UI draws
 with (`uiAssetSmoke.ts`): every carved icon rasterises with ink in every painted part, the
 fast rasteriser's masks equal the exhaustive one's (at 25 px here; `test/native-icons.test.ts`
@@ -1188,9 +1227,10 @@ sweeps 45 sizes under V8), the whole set's time at 2160 lines is
 printed (under a bound far above it), and every UI string in both languages has a real glyph
 for each character in both of the UI font's weights. 166 checks, ~16 s.
 
-It also checks the **UI layout snapshot**: at 29 states (four of them Czech) the UI layer is drawn into a 1280×720
-window (three of them into windows the picture fills; six — the map, room 1 and UTES — into a
-1080- and a 2160-line TV, with its title-safe insets) and the list of what it drew — every
+It also checks the **UI layout snapshot**: at 37 states the UI layer is drawn into a 1280×720
+window (three of them into windows the picture fills; fourteen — the map, room 1, UTES, and
+room 1's top bar and restart prompt in English and Czech — into a 1080- and a 2160-line TV,
+with its title-safe insets) and the list of what it drew — every
 rectangle, shape, image and string, with its position and size in whole pixels — must equal
 `native/ui-layout.snap.json`. A layout change fails with the first op that moved and writes
 the new list to `native/build/ui-layout.snap.new.json`; if intended, rerun with

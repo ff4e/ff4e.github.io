@@ -16,6 +16,9 @@ import { voiceUrl } from '../../src/audio/ffs2.js';
 import { musicUrl } from '../../src/audio/music.js';
 import { busMultiplier, VOLUMES } from '../../src/core/settings.js';
 import { settings } from './seams/playerSettings.js';
+import { FOCUS_GAIN, focusClickPcm, setFocusSound } from './focusSound.js';
+import { MIX_RATE, type MixBuffer } from './sdlAudioBackend.js';
+import { lastInput } from './uiInput.js';
 
 /**
  * Build the engine and give it the player's volume levels (the Options sliders' indices,
@@ -28,6 +31,14 @@ export function initSound(): void {
   for (const bus of ['effect', 'voice', 'music'] as const) {
     audio.setBusGain(bus, busMultiplier(bus, settings.volume[bus]));
   }
+  // The menus' focus tick, synthesised on its first use. On the Apple TV it always sounds, as
+  // tvOS's does; on a Mac only for the pad and the remote (or the keyboard standing in for it,
+  // `--remote-keys`), the TV's inputs: a desktop's arrow keys move a focus silently.
+  let click: MixBuffer | null = null;
+  setFocusSound(
+    () => mixer.cue(click ??= mixer.fromPcm16(focusClickPcm(MIX_RATE), MIX_RATE) as MixBuffer, FOCUS_GAIN),
+    () => __native.tv || lastInput() !== 'key',
+  );
 }
 
 /**

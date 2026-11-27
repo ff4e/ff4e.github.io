@@ -2,8 +2,9 @@
  * The top bar's slide: down from above the screen's top edge as it opens, back up as it
  * closes (TestFlight build 4 asked for it). Only the picture moves. The bar's state is the
  * menu stack's (`menus.ts`), which changes on the press itself, so a press acts at once
- * whatever the bar looks like — a click mid-slide in presses the focused tab, a move made
- * while it slides out moves the fish — and the slide only follows.
+ * whatever the bar looks like — a direction mid-slide in moves the focus, a move made while it
+ * slides out moves the fish — and the slide only follows. (A click while it slides in is
+ * dropped, but by the menus' own guard, `BAR_CLICK_GUARD_MS`, not by the slide.)
  *
  * How far it has come is a fraction moving at a constant rate toward shown or hidden, eased
  * out both ways — fast at once, then settling — so the bar answers Back on the frame it is

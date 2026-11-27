@@ -35,6 +35,8 @@ export interface AudioStatus {
   readonly fed: number;
   /** The mixer's clock, in frames. */
   readonly clock: number;
+  /** Focus cues started (`audioCue`), ever. */
+  readonly cues: number;
 }
 
 export interface GlyphRaster {
@@ -261,6 +263,11 @@ export interface NativeApi {
   /** Stop a voice; its id is reported by `audioEnded`. Stopping an ended voice is a no-op. */
   audioStop(voice: number): void;
   audioBusGain(bus: number, gain: number): void;
+  /**
+   * The UI's focus cue: play `buf` from its start on the effects bus, at `gain`, replacing
+   * one still sounding — outside the voices and the clock, and heard while paused (audio.c).
+   */
+  audioCue(buf: number, gain: number): void;
   /** Pause or resume the mix: paused, it outputs silence and its clock stands still. */
   audioPause(on: boolean): void;
   /** Frames mixed so far. */

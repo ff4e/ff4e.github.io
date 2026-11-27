@@ -6,9 +6,12 @@
  * `menuPaint.ts` / `optionsPaint.ts` / `helpPaint.ts` draw them.
  *
  * The menus are a stack: Options opens Help over itself, the top bar opens the confirm
- * prompt, Options and Help, and Back closes the top one. The top bar (B6: TestFlight build 3
+ * prompt, Options and Help, and Back closes the top one. The confirm prompt is a classic
+ * dialog: its question and two buttons, OK and Cancel, the focus moved between them left and
+ * right, a click on the focused one acting, Back always cancelling. A focus that moves — a
+ * tab, a row, a button — ticks (`focusSound.ts`); one that stays put does not. The top bar (B6: TestFlight build 3
  * asked for something less invasive than a pause menu) is an Apple TV–style row of tabs
- * across the top of a room — World map · Save · Load · Restart · Options · Help — and does
+ * across the top of a room — World map · Restart · Load · Save · Options · Help — and does
  * NOT pause it: the logic steps on and the sound plays, only the input is the bar's while it
  * is up, so no fish moves. The confirm prompt does not pause either (it is the bar's, and the
  * pad's direct LB / RB / Ⓧ's, one question long). Options and Help do: they are whole panels
@@ -31,23 +34,33 @@ import { audio } from './seams/audioEngine.js';
 import { mapBlur } from './mapScreen.js';
 import { settings, subLang } from './seams/playerSettings.js';
 import { setSubtitleMode, setVolume } from './optionsModel.js';
+import { focusMoved } from './focusSound.js';
+import { BAR_SLIDE_MS } from './barSlide.js';
 import type { SubtitleMode, VolumeBus } from '../../src/core/settings.js';
 
 export type Verb = 'save' | 'load' | 'restart';
 export type BarItem = 'map' | 'save' | 'load' | 'restart' | 'options' | 'help';
 export type OptionsRow = VolumeBus | 'subtitles' | 'help' | 'done';
+export type ConfirmButton = 'ok' | 'cancel';
 /** What a press means to a menu, whatever sent it. */
 export type MenuAct = 'up' | 'down' | 'left' | 'right' | 'ok' | 'back' | 'menu' | 'prev' | 'next' | 'other';
 
-export const BAR_ITEMS: readonly BarItem[] = ['map', 'save', 'load', 'restart', 'options', 'help'];
+export const BAR_ITEMS: readonly BarItem[] = ['map', 'restart', 'load', 'save', 'options', 'help'];
 export const OPTIONS_ROWS: readonly OptionsRow[] = ['effect', 'voice', 'music', 'subtitles', 'help', 'done'];
+/** The confirm prompt's buttons, left to right. */
+export const CONFIRM_BUTTONS: readonly ConfirmButton[] = ['ok', 'cancel'];
+/**
+ * The button a prompt opens focused on: OK, so the flow it replaced — open the prompt, click —
+ * still says yes with one click. Cancel (1) would make a stray click harmless instead.
+ */
+const CONFIRM_FOCUS = 0;
 const SUB_ORDER: readonly SubtitleMode[] = ['cz', 'en', 'off'];
 /** The 0..12 slider range of the Options face (hud.ts `sliderIndex`). */
 const SLIDER_MAX = 12;
 
 export type Layer =
   | { readonly kind: 'bar'; sel: number }
-  | { readonly kind: 'confirm'; readonly verb: Verb }
+  | { readonly kind: 'confirm'; readonly verb: Verb; sel: number }
   | { readonly kind: 'options'; row: number }
   | { readonly kind: 'help' };
 
@@ -121,14 +134,31 @@ export function closeMenus(): void {
 }
 
 /**
- * Back/Menu in a room: the top bar, its focus on Save (or the next tab that can act) — never
- * on World map, which leaves the room without asking, so a click straight after Back cannot.
+ * How long after the top bar opens a click on it (the remote's, Ⓐ, Enter) is ignored, ms: while
+ * it slides in, and at least a quarter of a second.
  */
-export function openBar(): void {
+export const BAR_CLICK_GUARD_MS = Math.max(BAR_SLIDE_MS, 250);
+
+/** Until when (the router's clock) a click on the bar is dropped (`BAR_CLICK_GUARD_MS`). */
+let barGuardUntil = -Infinity;
+
+/**
+ * Back/Menu in a room, at `now` on the router's clock: the top bar, its focus on World map,
+ * the first tab, as a TV app's tab bar opens on its first tab (#228 opened it on Save, so that
+ * a click straight after Back could not leave the room). World map leaves the room without
+ * asking, so a click that arrives within BAR_CLICK_GUARD_MS of the bar opening — a double
+ * press, a click already on its way — is ignored instead (`menuAct`).
+ *
+ * `focus` is another tab to open on: the app coming back from the background opens the bar
+ * on Options (`uiInput.ts`'s `barForBackground`), because a player who returns and clicks to
+ * resume a second later would be past the guard — on World map that click would leave the room
+ * and its unsaved progress unasked, and on Restart, Load or Save two would restart, load or
+ * overwrite the save. Options only opens a panel. (It is never greyed.)
+ */
+export function openBar(now = -Infinity, focus: BarItem = 'map'): void {
   if (stack.length) return;
-  const l: Layer = { kind: 'bar', sel: BAR_ITEMS.indexOf('save') - 1 };
-  moveBar(l, 1);
-  push(l);
+  barGuardUntil = now + BAR_CLICK_GUARD_MS;
+  push({ kind: 'bar', sel: focus === 'map' ? barStep(-1, 1) : BAR_ITEMS.indexOf(focus) });
 }
 
 /**
@@ -142,10 +172,10 @@ export function dropStrandedMenus(): void {
   if ((bottom === 'bar' || bottom === 'confirm') && (ui.screen !== 'room' || cutscene)) closeMenus();
 }
 
-/** A destructive verb asks first (Ⓐ yes, Ⓑ no). Nothing opens for a verb that cannot act. */
+/** A destructive verb asks first (OK or Cancel). Nothing opens for a verb that cannot act. */
 export function openConfirm(verb: Verb): void {
   if (!verbAvailable(verb)) return;
-  push({ kind: 'confirm', verb });
+  push({ kind: 'confirm', verb, sel: CONFIRM_FOCUS });
 }
 
 export function openOptions(): void {
@@ -157,20 +187,31 @@ export function openHelp(): void {
   push({ kind: 'help' });
 }
 
-/** The confirm prompt's yes: close everything and send the verb's key down the room's router. */
+/** The confirm prompt's OK: close everything and send the verb's key down the room's router. */
 function perform(verb: Verb): void {
   closeMenus();
   keyDown(verb === 'save' ? 'F2' : verb === 'load' ? 'F3' : 'Backspace');
 }
 
-/** Focus the next tab `by` that way that can act; at the bar's end it stays (no wrap, as tvOS's). */
-function moveBar(l: Extract<Layer, { kind: 'bar' }>, by: 1 | -1): void {
-  for (let at = l.sel + by; at >= 0 && at < BAR_ITEMS.length; at += by) {
-    if (barItemEnabled(BAR_ITEMS[at]!)) {
-      l.sel = at;
-      return;
-    }
+/** The next tab from `sel`, `by` that way, that can act; `sel` at the bar's end (no wrap, as tvOS's). */
+function barStep(sel: number, by: 1 | -1): number {
+  for (let at = sel + by; at >= 0 && at < BAR_ITEMS.length; at += by) {
+    if (barItemEnabled(BAR_ITEMS[at]!)) return at;
   }
+  return sel;
+}
+
+function moveBar(l: Extract<Layer, { kind: 'bar' }>, by: 1 | -1): void {
+  const from = l.sel;
+  l.sel = barStep(from, by);
+  focusMoved(from, l.sel);
+}
+
+/** The prompt's focus `by` one button that way; at either end it stays (an alert's buttons do not wrap). */
+function moveConfirm(l: Extract<Layer, { kind: 'confirm' }>, by: 1 | -1): void {
+  const from = l.sel;
+  l.sel = Math.max(0, Math.min(CONFIRM_BUTTONS.length - 1, from + by));
+  focusMoved(from, l.sel);
 }
 
 function pressBar(item: BarItem): void {
@@ -202,26 +243,38 @@ function changeOption(row: OptionsRow, by: 1 | -1): void {
   }
 }
 
-/** One press on the menu on top. */
-export function menuAct(act: MenuAct): void {
+/**
+ * One press on the menu on top, at `now` on the router's clock (by default after any guard: a
+ * press with no time is never dropped).
+ */
+export function menuAct(act: MenuAct, now = Infinity): void {
   const l = topMenu();
   if (!l) return;
   switch (l.kind) {
     case 'bar':
       if (act === 'left' || act === 'prev') moveBar(l, -1);
       else if (act === 'right' || act === 'next') moveBar(l, 1);
-      else if (act === 'ok') pressBar(BAR_ITEMS[l.sel]!);
+      else if (act === 'ok' && now < barGuardUntil) {
+        const ms = BAR_CLICK_GUARD_MS - (barGuardUntil - now);
+        if (typeof __native !== 'undefined') __native.inputLog(`a click ${ms.toFixed(0)} ms after the top bar opened: dropped`);
+      } else if (act === 'ok') pressBar(BAR_ITEMS[l.sel]!);
       else if (act === 'down' || act === 'back' || act === 'menu') closeMenus(); // back to the room
       return;
     case 'confirm':
-      if (act === 'ok') perform(l.verb);
-      else if (act === 'back' || act === 'menu') pop();
+      if (act === 'left' || act === 'prev') moveConfirm(l, -1);
+      else if (act === 'right' || act === 'next') moveConfirm(l, 1);
+      else if (act === 'ok') {
+        if (CONFIRM_BUTTONS[l.sel] === 'ok') perform(l.verb);
+        else pop();
+      } else if (act === 'back' || act === 'menu') pop(); // Back cancels, whichever is focused
       return;
     case 'options': {
       const row = OPTIONS_ROWS[l.row]!;
-      if (act === 'up') l.row = (l.row + OPTIONS_ROWS.length - 1) % OPTIONS_ROWS.length;
-      else if (act === 'down') l.row = (l.row + 1) % OPTIONS_ROWS.length;
-      else if (act === 'left' || act === 'right') changeOption(row, act === 'right' ? 1 : -1);
+      if (act === 'up' || act === 'down') {
+        const from = l.row;
+        l.row = (from + (act === 'down' ? 1 : OPTIONS_ROWS.length - 1)) % OPTIONS_ROWS.length;
+        focusMoved(from, l.row);
+      } else if (act === 'left' || act === 'right') changeOption(row, act === 'right' ? 1 : -1);
       else if (act === 'ok') {
         if (row === 'help') openHelp();
         else if (row === 'done') pop();

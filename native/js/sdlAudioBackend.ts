@@ -115,6 +115,14 @@ export class SdlAudioBackend implements AudioBackend {
     __native.audioStop((voice as MixVoice).id);
   }
 
+  /**
+   * The UI's focus cue (`focusSound.ts`): not a voice of the policy's — no id, no end, no
+   * clock — on the effects bus, restarting one still sounding, heard while paused (audio.c).
+   */
+  cue(buf: SoundBuffer, gain: number): void {
+    __native.audioCue((buf as MixBuffer).id, gain);
+  }
+
   setBusGain(bus: VolumeBus, gain: number): void {
     __native.audioBusGain(BUS[bus], gain);
   }
