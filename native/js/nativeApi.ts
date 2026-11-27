@@ -158,6 +158,27 @@ export interface NativeApi {
    */
   remoteTouch(): [number, number] | null;
   /**
+   * What kind of remote is in use (native/host/main.c, `remote_kind`): `ring` (a Siri Remote
+   * with a click ring), `surface` (the 1st-generation one, clickable anywhere), `touchpad` (a
+   * remote SDL does not map as a Siri Remote — the iPhone's Apple TV Remote: its touch comes
+   * from GameController, its select is a tap), or null when there is none.
+   */
+  remoteKind(): 'ring' | 'surface' | 'touchpad' | null;
+  /**
+   * The menu smoke's check of a touchpad remote through SDL's own mapping code (native/host/
+   * main.c, `n_remoteTouchpadProbe`): a virtual micro gamepad mapped as SDL maps one that is
+   * not a Siri Remote (d-pad buttons, no touch axes, no "Remote" in its name), driven by
+   * `steps` — `[gcX, gcY, button, yDown?]`: GameController's d-pad reading (y up) and then an SDL
+   * button (a, dpup, dpdown, dpleft, dpright) pressed and released, or '' for none. Returns
+   * whether it was taken as a remote, its kind, and per step what `remoteTouch` read and the
+   * input events the host sent; `yDown` makes the d-pad's direction buttons say its y points down. Headless only.
+   */
+  remoteTouchpadProbe(steps: [number, number, string, number?][]): {
+    remote: boolean;
+    kind: string | null;
+    steps: { touch: [number, number] | null; codes: string[] }[];
+  };
+  /**
    * The menu smoke's check of `remoteTouch` through SDL's own mapping code: a virtual Siri
    * Remote, mapped as SDL maps one on tvOS (y inverted), its raw axes set to (`rawX`, `rawY`):
    * what `remoteTouch` reports, and what `SDL_GetGamepadAxis` reads for its y. Headless only.

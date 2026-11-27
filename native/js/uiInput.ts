@@ -32,8 +32,11 @@
  * thumb that swiped a menu or the map moves no fish until it lifts, so a swipe down that
  * closes the top bar does not carry on into the room. A click toward the edge a swipe has just
  * stepped to — or, in a room, toward the edge it holds — is that swipe's end and is dropped,
- * so a swipe that finishes on the ring moves one step, not two; any other click lets go of a
- * held swipe and is a click.
+ * so a swipe that finishes on the ring moves one step, not two. A centre click after the
+ * thumb travelled (`SwipeTracker.travelled`) is a swipe's end too in a room — a swipe never
+ * switches fish — and anywhere on a touchpad remote (the iPhone's Apple TV Remote, whose
+ * select is a tap: `__native.remoteKind`); any other click lets go of a held swipe and is a
+ * click.
  *
  * Each event goes to the screen up when it arrives — one can change the screen. A release
  * off the room always reaches the map's router, the intro included: a direction held while
@@ -341,6 +344,8 @@ const SWIPE_ARROW: Readonly<Record<SwipeDir, string>> = {
 };
 /** `--remote-keys`' stand-in for a thumb resting on the surface: Shift held (`RemoteTouch`). */
 let keyThumb = false;
+/** That stand-in thumb swiped (Shift+arrow) since it came down: it travelled. */
+let keyThumbSwiped = false;
 /** The thumb on the surface swiped a menu or the map: it moves no fish until it lifts. */
 let menuThumb = false;
 
@@ -404,6 +409,16 @@ const swipesAct = (): boolean =>
   menuOpen() || (ui.screen === 'room' && !cutscene) || (ui.screen === 'map' && ui.mapOverlay !== 'credits' && !ui.creditsLoading);
 
 /**
+ * Is a centre click going down now the end of a swipe rather than a click? When the thumb
+ * travelled — in a room, where the centre switches fish, and anywhere on a touchpad remote,
+ * whose select is a tap that can come at a swipe's end.
+ */
+function centreEndsSwipe(now: number): boolean {
+  if (!inRoom() && __native.remoteKind() !== 'touchpad') return false;
+  return swipes.travelled(now) || (keyThumb && keyThumbSwiped);
+}
+
+/**
  * A remote click or swipe, before it is routed: true when it is consumed here — a click that
  * ends a swipe, or that click's release.
  */
@@ -412,6 +427,7 @@ function swipeFilter(down: boolean, code: string, now: number): boolean {
   if (swipe) {
     if (down) {
       swipes.swiped(swipe, now);
+      if (keyThumb) keyThumbSwiped = true;
       if (!inRoom()) menuThumb = true;
     }
     return false;
@@ -421,14 +437,22 @@ function swipeFilter(down: boolean, code: string, now: number): boolean {
     swipes.press(false);
     return swallowed.delete(code);
   }
-  swipes.press(true);
   const edge = CLICK_EDGE[code] ?? null;
+  const centreEnd = edge === null && centreEndsSwipe(now); // before `press`, which starts the travel over
+  swipes.press(true);
   if (inRoom() && holdLive()) {
-    if (edge !== hold.held) {
+    if (edge !== hold.held && !centreEnd) {
       letGo(`a click (${code})`);
       return false;
     }
-    swallowed.add(code); // the held swipe pressing on: it holds on, and the click is its end
+    // The held swipe pressing on, or a centre click at its end: it holds on, and the click is its end.
+    swallowed.add(code);
+    if (centreEnd) __native.inputLog(`${code} ends the swipe held ${hold.held}: dropped`);
+    return true;
+  }
+  if (centreEnd) {
+    swallowed.add(code);
+    __native.inputLog(`${code} after the thumb travelled: the swipe's end, dropped`);
     return true;
   }
   if (!swipesAct() || !swipes.endsSwipe(edge, now)) return false;
@@ -486,6 +510,7 @@ function route(ev: string, now: number): void {
   if (down) last = keyboardIsRemote && sourceOf(code) === 'key' ? 'remote' : sourceOf(code);
   if (code === 'RemoteTouch') {
     keyThumb = down;
+    keyThumbSwiped = false;
     if (!touching()) lifted();
     return;
   }
@@ -555,6 +580,7 @@ export function inputBlur(): void {
   hold.release(); // the room's own blur let go of its key
   holdToken = null;
   keyThumb = false;
+  keyThumbSwiped = false;
   menuThumb = false;
   overlayHold = null;
 }

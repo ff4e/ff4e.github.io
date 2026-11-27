@@ -5,7 +5,7 @@
  * swipe's end. Synthetic sequences, one sample a frame (~16 ms), x right and y down in -1..1.
  */
 import { describe, expect, it } from 'vitest';
-import { LIFTED, STEP, SWIPE_CLICK_MS, SwipeHold, SwipeTracker, type SwipeDir } from '../native/js/remoteSwipe.js';
+import { LIFTED, STEP, SWIPE_CLICK_MS, SwipeHold, SwipeTracker, TAP_SLOP, type SwipeDir } from '../native/js/remoteSwipe.js';
 
 type Sample = readonly [number, number] | null;
 
@@ -144,6 +144,65 @@ describe('remote swipes', () => {
     // travel counts from the next one.
     const tr = new SwipeTracker();
     expect(play(tr, [null, ...line([0.05, 0], [-0.7, 0.04], 8), null]).steps).toEqual(['left']);
+  });
+
+  describe("the iPhone's Apple TV Remote: its select is a tap, which can end a swipe", () => {
+    // TestFlight tvOS builds 4-6: on the phone's touchpad a swipe moved the fish the wrong
+    // way or switched it. The host now hands over its touch as GameController reads it (absolute,
+    // y down) and its tap as a centre click (native/host/main.c, the touchpad kind); a centre
+    // click after the thumb travelled is the swipe's end (uiInput.ts asks `travelled`).
+
+    it('a swipe landing high and going down steps down only, wherever it landed', () => {
+      const tr = new SwipeTracker();
+      expect(play(tr, [...line([0.1, -0.85], [0.12, 0.2], 10), null]).steps).toEqual(['down', 'down']);
+    });
+
+    it('a swipe whose tap comes as it lifts, or just after, travelled: no click', () => {
+      const tr = new SwipeTracker();
+      const { steps, t } = play(tr, line([-0.7, 0.3], [0.4, 0.32], 8));
+      expect(steps).toEqual(['right', 'right']);
+      expect(tr.travelled(t)).toBe(true); // the tap with the thumb still down
+      const after = play(tr, [null], t).t;
+      expect(tr.travelled(after + 20)).toBe(true); // ...or a moment after the lift
+      expect(tr.travelled(after + SWIPE_CLICK_MS + 20)).toBe(false); // a tap later is a tap
+    });
+
+    it('a short swipe, too short for a step, is still no tap', () => {
+      const tr = new SwipeTracker();
+      const { steps, t } = play(tr, line([0, 0.5], [0, 0.5 - STEP * 0.8], 6));
+      expect(steps).toEqual([]);
+      expect(tr.travelled(t)).toBe(true);
+    });
+
+    it('a tap — the thumb landing and lifting where it landed — did not travel', () => {
+      const tr = new SwipeTracker();
+      const { t } = play(tr, rest([0.3, -0.6], 6));
+      expect(tr.travelled(t)).toBe(false);
+      expect(tr.travelled(play(tr, [null], t).t)).toBe(false);
+    });
+
+    it('a resting thumb drifting under the slop did not travel', () => {
+      const tr = new SwipeTracker();
+      const { t } = play(tr, line([0.2, 0.2], [0.2 + TAP_SLOP * 0.8, 0.2], 20));
+      expect(tr.travelled(t)).toBe(false);
+    });
+
+    it('the click that ends a swipe is judged before it starts the travel over; its release does', () => {
+      const tr = new SwipeTracker();
+      const { t } = play(tr, line([0, -0.6], [0, 0.2], 6));
+      tr.press(true);
+      expect(tr.travelled(t)).toBe(true);
+      tr.press(false);
+      const later = play(tr, rest([0, 0.2], 30), t).t;
+      expect(tr.travelled(later)).toBe(false); // the thumb stayed, still: the next click is a click
+    });
+
+    it("--remote-keys' Shift+arrow swipe is travel too, for a moment", () => {
+      const tr = new SwipeTracker();
+      tr.swiped('left', 1000);
+      expect(tr.travelled(1000 + SWIPE_CLICK_MS)).toBe(true);
+      expect(tr.travelled(1001 + SWIPE_CLICK_MS)).toBe(false);
+    });
   });
 
   describe('in a room, a swipe held while the thumb stays (B6)', () => {

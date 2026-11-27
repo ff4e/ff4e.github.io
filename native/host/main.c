@@ -43,6 +43,7 @@ void tvos_remote_init(void);                  /* platform_tvos.m: the remote's a
 void tvos_log(const char *line);              /* platform_tvos.m: the unified log */
 int tvos_ui_events(void *uiwindow, int set);  /* platform_tvos.m: controllerUserInteractionEnabled */
 void tvos_audio_init(void);                   /* platform_tvos.m: the audio session's notices */
+bool tvos_touchpad(float v[6]);               /* platform_tvos.m: a touchpad remote's d-pad, from GameController */
 #endif
 
 /* ── state ─────────────────────────────────────────────────────────────────────── */
@@ -88,16 +89,30 @@ static bool in_background;
  * an Apple TV no debugger is attached to. On tvOS every line goes to the unified log
  * (`tvos_log`: Console.app and Xcode's device console, native/README.md); on a Mac to stderr
  * with --input-log. The last INLOG lines are also kept for the hidden on-screen overlay
- * (`n_inputLog`, native/js/inputOverlay.ts). Only presses and state changes are logged, never
- * a line a frame.
+ * (`n_inputLog`, native/js/inputOverlay.ts). Only presses and state changes are logged there,
+ * never a line a frame; `input_trace` adds the touch surface's readings while a thumb is on it,
+ * to the unified log (and --input-log's stderr) only, so the overlay keeps its decisions.
  */
 #define INLOG 14
 static char inlog[INLOG][160];
 static unsigned inlog_n; /* lines written, ever */
 static bool input_log_stderr; /* --input-log */
 
+static void input_trace(const char *fmt, ...) {
+  char line[512];
+  va_list ap;
+  va_start(ap, fmt);
+  SDL_vsnprintf(line, sizeof line, fmt, ap);
+  va_end(ap);
+#ifdef SDL_PLATFORM_TVOS
+  tvos_log(line);
+#else
+  if (input_log_stderr) fprintf(stderr, "input: %s\n", line);
+#endif
+}
+
 static void input_log(const char *fmt, ...) {
-  char line[150];
+  char line[512]; /* the overlay keeps the first 150 or so; the unified log all of it */
   va_list ap;
   va_start(ap, fmt);
   SDL_vsnprintf(line, sizeof line, fmt, ap);
@@ -1226,7 +1241,9 @@ static SDL_GPUGraphicsPipeline *surf_pipeline(bool dest_in) {
  * The Siri Remote reaches SDL on tvOS as a gamepad (SDL_HINT_TV_REMOTE_AS_JOYSTICK, on by
  * default): its click is A, Play/Pause is X, Menu/Back is B, and the touch surface (or the
  * click ring's touch) is the left stick's two axes (SDL_mfijoystick.m). A gamepad whose name says
- * "Remote" is read as one. Menu/Back alone does not come from SDL on tvOS: SDL polls it and
+ * "Remote", or that has neither a Y button nor a right stick (a micro gamepad: every extended
+ * one has both), is read as one — see `is_remote` for the iPhone's Apple TV Remote, which SDL
+ * does not map as a Siri Remote. Menu/Back alone does not come from SDL on tvOS: SDL polls it and
  * misses it, so GameController's handler reports it (`native_remote_menu`, platform_tvos.m). On a Mac, `--remote-keys` makes the keyboard a remote instead — see
  * `remote_key` — so the remote's scheme can be played and tested without one.
  */
@@ -1385,42 +1402,169 @@ static void poll_sticks(void) {
  *     thumb reads as the centre. The tvOS build sets it on every controller that connects
  *     (`platform_tvos.m`).
  *
- * A remote with d-pad buttons in its mapping is the ring kind (`SDL_GamepadHasButton`). The
- * click pressed is the one released, whichever button sent it.
+ *   - any other remote: a micro gamepad whose GameController productCategory is not "Siri
+ *     Remote (…)" — above all the iPhone's Apple TV Remote in Control Center, "Control Center
+ *     Remote", or "Coalesced Remote" when tvOS merges it with the Siri Remote
+ *     (GCProductCategories.h; both strings are in GameController's binary). SDL's
+ *     `CheckControllerSiriRemote` is false for it, so SDL maps it as a generic micro gamepad:
+ *     `ElementAlreadyHandled` drops "Direction Pad X/Y Axis" for "Direction Pad Up/Down/Left/
+ *     Right", which IOS_JoystickGetGamepadMapping makes dpup… (and Menu start, not b). No touch
+ *     axes at all, then, and d-pad BUTTONS that are only where the thumb IS: with absolute
+ *     values a thumb landing high on the phone's touchpad presses Up whichever way it then
+ *     swipes. Read as a ring, that is an edge click on the edge the thumb lands on — the fish
+ *     moving the wrong way — its tap, Button A (SOUTH), a centre click switching fish, and no
+ *     swipe ever (TestFlight tvOS builds 4-6). So this TOUCHPAD kind takes its touch from
+ *     GameController itself (`tvos_touchpad`, platform_tvos.m); its d-pad buttons are clicks
+ *     only when the d-pad reads exactly that edge, as a digital d-pad does and a finger never
+ *     lands (the phone's "Directional Buttons" accessibility option, should it send them so),
+ *     and its select is the centre unless the d-pad reads exactly an edge.
+ *
+ * A remote with touch axes and d-pad buttons in its mapping is the ring kind, with touch axes
+ * and none the 1st generation, without touch axes the touchpad (`remote_kind`). The click
+ * pressed is the one released, whichever button sent it. Several remotes may be connected
+ * (Info.plist's GCSupportsMultipleMicroGamepads keeps the Siri Remote and the phone apart, as
+ * GCDirectionalGamepad.h asks for the 2nd-generation remote): the one in use is the last to
+ * press anything or to have a thumb on it (`remote_use`).
  *
  * Swipes are not made here. SDL reports the touch surface only as those two axes — no
  * touch-down, no lift; a lifted thumb reads (0, 0) — and with absolute values they are where
  * the thumb is, not how it moved, so a swipe is the thumb's TRAVEL, which the JS side
  * measures from the position handed over each frame (`n_remoteTouch`; native/js/remoteSwipe.ts,
- * unit-tested), and it also decides when a click is the end of a swipe. None of this has met
- * a real remote yet.
+ * unit-tested), and it also decides when a click is the end of a swipe. Every controller that
+ * connects is logged with its identity and mapping (here and in platform_tvos.m's `attach`),
+ * and every reading while a thumb is on the surface (`input_trace`), for a device's log to
+ * settle what source cannot.
  */
-static SDL_Gamepad *remote;
+typedef enum { REMOTE_RING, REMOTE_SURFACE, REMOTE_TOUCHPAD } RemoteKind;
+static const char *const REMOTE_KIND[3] = {"ring", "surface", "touchpad"};
+#define MAX_REMOTES 4
+static SDL_Gamepad *remotes[MAX_REMOTES]; /* every remote connected */
+static RemoteKind remote_kinds[MAX_REMOTES];
+static int nremotes;
+static SDL_Gamepad *remote; /* the one in use */
+static RemoteKind remote_k; /* its kind */
 static const char *remote_click; /* the code the click in progress sent */
 static bool remote_playpause, remote_back; /* held, so a removed remote can let go */
 static const char *const REMOTE_EDGE[4] = {"RemoteUp", "RemoteDown", "RemoteLeft", "RemoteRight"};
 
 /*
  * Where the thumb is along gamepad axis `a` (LEFTX right, LEFTY down), read RAW from the
- * joystick axis the remote's mapping binds to it: exactly 0 when no thumb is on the surface.
+ * joystick axis `g`'s mapping binds to it: exactly 0 when no thumb is on the surface.
  * Not SDL_GetGamepadAxis: SDL maps the remote's "Direction Pad Y Axis" inverted (`lefty: a1~`,
  * IOS_JoystickGetGamepadMapping) and rescales an inverted axis in float, so a raw 0 comes out
  * as -1 there (SDL_gamepad.c) — a lifted thumb would never read (0, 0), and a swipe's origin
- * would never reset. The inversion is applied here instead, exactly.
+ * would never reset. The inversion is applied here instead, exactly. False (and 0) when no
+ * axis is bound to `a`: a touchpad remote.
  */
-static int remote_axis(SDL_GamepadAxis a) {
-  int n = 0, v = SDL_GetGamepadAxis(remote, a);
-  SDL_GamepadBinding **b = SDL_GetGamepadBindings(remote, &n);
+static bool remote_axis(SDL_Gamepad *g, SDL_GamepadAxis a, int *out) {
+  int n = 0, v = 0;
+  bool bound = false;
+  SDL_GamepadBinding **b = SDL_GetGamepadBindings(g, &n);
   for (int i = 0; b && i < n; i++) {
     if (b[i]->output_type != SDL_GAMEPAD_BINDTYPE_AXIS || b[i]->output.axis.axis != a ||
         b[i]->input_type != SDL_GAMEPAD_BINDTYPE_AXIS)
       continue;
-    const int raw = SDL_GetJoystickAxis(SDL_GetGamepadJoystick(remote), b[i]->input.axis.axis);
+    const int raw = SDL_GetJoystickAxis(SDL_GetGamepadJoystick(g), b[i]->input.axis.axis);
     v = b[i]->input.axis.axis_min > b[i]->input.axis.axis_max ? -raw : raw;
+    bound = true;
     break;
   }
   SDL_free(b);
-  return v > 32767 ? 32767 : v;
+  if (out) *out = v > 32767 ? 32767 : v;
+  return bound;
+}
+
+static RemoteKind remote_kind(SDL_Gamepad *g) {
+  if (!remote_axis(g, SDL_GAMEPAD_AXIS_LEFTX, NULL)) return REMOTE_TOUCHPAD;
+  return SDL_GamepadHasButton(g, SDL_GAMEPAD_BUTTON_DPAD_UP) ? REMOTE_RING : REMOTE_SURFACE;
+}
+
+/* The menu smoke's GameController reading for a touchpad remote, with no Apple TV (`n_remoteTouchpadProbe`). */
+static float probe_gc[6];
+static bool probe_gc_on;
+
+/* A touchpad remote's d-pad as GameController reads it: x, y (up), then up, down, left, right's values. */
+static bool touchpad_read(float v[6]) {
+  if (probe_gc_on) {
+    SDL_memcpy(v, probe_gc, sizeof probe_gc);
+    return true;
+  }
+#ifdef SDL_PLATFORM_TVOS
+  return tvos_touchpad(v);
+#else
+  SDL_memset(v, 0, 6 * sizeof *v);
+  return false;
+#endif
+}
+
+/*
+ * What turns a touchpad's GameController d-pad into x right, y down: GameController's y points
+ * UP (a positive yAxis is `up`), so y is negated — unless the controller's own direction
+ * buttons say otherwise: `up` (or `down`) pressed with the y axis the other way round flips it,
+ * and the same for x, logged when it changes. The Siri Remote's sign is its SDL mapping's
+ * (`remote_axis`). Reset when a touchpad remote connects.
+ */
+static int tp_xsign = 1, tp_ysign = -1;
+
+static int to_units(float f) {
+  return (int)SDL_lroundf((f > 1 ? 1 : f < -1 ? -1 : f) * 32767);
+}
+
+static void touchpad_thumb(int *ax, int *ay, float gc[6]) {
+  touchpad_read(gc);
+  const float T = 0.25f;
+  int xs = tp_xsign, ys = tp_ysign;
+  if ((gc[2] > T && gc[1] < -T) || (gc[3] > T && gc[1] > T)) ys = 1;
+  else if ((gc[2] > T && gc[1] > T) || (gc[3] > T && gc[1] < -T)) ys = -1;
+  if ((gc[5] > T && gc[0] > T) || (gc[4] > T && gc[0] < -T)) xs = 1;
+  else if ((gc[5] > T && gc[0] < -T) || (gc[4] > T && gc[0] > T)) xs = -1;
+  if (xs != tp_xsign || ys != tp_ysign) {
+    input_log("touchpad signs from its direction buttons: x %+d, y %+d (GameController's y is up: -1)", xs, ys);
+    tp_xsign = xs;
+    tp_ysign = ys;
+  }
+  *ax = to_units((float)xs * gc[0]);
+  *ay = to_units((float)ys * gc[1]);
+}
+
+/* Where the thumb is on `g` (of kind `k`), in SDL's units, x right and y down: (0, 0) lifted. */
+static void remote_thumb(SDL_Gamepad *g, RemoteKind k, int *ax, int *ay, float gc[6]) {
+  SDL_memset(gc, 0, 6 * sizeof *gc);
+  if (k == REMOTE_TOUCHPAD) {
+    touchpad_thumb(ax, ay, gc);
+    return;
+  }
+  remote_axis(g, SDL_GAMEPAD_AXIS_LEFTX, ax);
+  remote_axis(g, SDL_GAMEPAD_AXIS_LEFTY, ay);
+}
+
+/*
+ * 1..4 (up, down, left, right) when a touchpad reads exactly one edge — (0, ±1) or (±1, 0), as
+ * a digital d-pad does and a finger never lands — else 0.
+ */
+static int touchpad_edge(int ax, int ay) {
+  const int FULL = 32440, ZERO = 33; /* 0.99 and 0.001 of 32767 */
+  if (SDL_abs(ax) <= ZERO && SDL_abs(ay) >= FULL) return ay < 0 ? 1 : 2;
+  if (SDL_abs(ay) <= ZERO && SDL_abs(ax) >= FULL) return ax < 0 ? 3 : 4;
+  return 0;
+}
+
+/* A removed remote, or one no longer in use, sends no button-up: let go of whatever it held. */
+static void remote_release_all(void) {
+  if (remote_click) push_event(false, remote_click);
+  if (remote_playpause) push_event(false, "RemotePlayPause");
+  if (remote_back) push_event(false, "RemoteBack");
+  remote_click = NULL;
+  remote_playpause = remote_back = false;
+}
+
+/* Remote `i` pressed something or has a thumb on it: it is the one in use from now. */
+static void remote_use(int i, const char *why) {
+  if (remotes[i] == remote) return;
+  remote_release_all();
+  remote = remotes[i];
+  remote_k = remote_kinds[i];
+  input_log("remote in use: %s (%s), %s", SDL_GetGamepadName(remote), REMOTE_KIND[remote_k], why);
 }
 
 /* A click went down as `code` (an edge or the centre), or `code`'s click came up. */
@@ -1436,17 +1580,31 @@ static void remote_click_edge(const char *code, bool down) {
 }
 
 static void remote_button(Uint8 b, bool down) {
+  int ax = 0, ay = 0;
+  float gc[6];
   switch (b) {
-    case SDL_GAMEPAD_BUTTON_DPAD_UP: remote_click_edge(REMOTE_EDGE[0], down); return;
-    case SDL_GAMEPAD_BUTTON_DPAD_DOWN: remote_click_edge(REMOTE_EDGE[1], down); return;
-    case SDL_GAMEPAD_BUTTON_DPAD_LEFT: remote_click_edge(REMOTE_EDGE[2], down); return;
-    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: remote_click_edge(REMOTE_EDGE[3], down); return;
+    case SDL_GAMEPAD_BUTTON_DPAD_UP:
+    case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
+    case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: {
+      const int e = b - SDL_GAMEPAD_BUTTON_DPAD_UP;
+      if (down && remote_k == REMOTE_TOUCHPAD) {
+        remote_thumb(remote, remote_k, &ax, &ay, gc);
+        if (touchpad_edge(ax, ay) != e + 1) {
+          input_log("%s ignored: the touchpad's thumb at %.2f, %.2f, not a press", REMOTE_EDGE[e], ax / 32767.0, ay / 32767.0);
+          return;
+        }
+      }
+      remote_click_edge(REMOTE_EDGE[e], down);
+      return;
+    }
     case SDL_GAMEPAD_BUTTON_SOUTH:
       if (down) {
         if (remote_click) return;
         int dir = 0;
-        if (!SDL_GamepadHasButton(remote, SDL_GAMEPAD_BUTTON_DPAD_UP)) { /* 1st gen: where the thumb is */
-          dir = stick_dir(remote_axis(SDL_GAMEPAD_AXIS_LEFTX), remote_axis(SDL_GAMEPAD_AXIS_LEFTY), 0);
+        if (remote_k != REMOTE_RING) { /* 1st gen: where the thumb is; a touchpad: exactly an edge */
+          remote_thumb(remote, remote_k, &ax, &ay, gc);
+          dir = remote_k == REMOTE_SURFACE ? stick_dir(ax, ay, 0) : touchpad_edge(ax, ay);
         }
         remote_click_edge(dir ? REMOTE_EDGE[dir - 1] : "RemoteSelect", true);
       } else if (remote_click) {
@@ -1494,24 +1652,55 @@ static void remote_menu_drain(void) {
 
 /*
  * [x, y]: where the thumb is on the remote's touch surface, -1..1 across and down (the left
- * stick's raw axes, `remote_axis`), or null when nothing touches it — a lifted thumb reads
- * exactly (0, 0) raw — or there is no remote. With tvOS's absolute values (above) it is a
- * position; native/js/remoteSwipe.ts makes swipes of its travel.
+ * stick's raw axes, `remote_axis`, or a touchpad's GameController d-pad, `touchpad_thumb`), or
+ * null when nothing touches it — a lifted thumb reads exactly (0, 0) — or there is no remote.
+ * With tvOS's absolute values (above) it is a position; native/js/remoteSwipe.ts makes swipes
+ * of its travel. While the remote in use reads lifted, a thumb on another remote makes that
+ * one the remote in use. Each changed reading is traced (`input_trace`), a touchpad's with
+ * GameController's own values, so a device's log shows what the surface reported.
  */
 static JSValue n_remoteTouch(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
   static bool touching;
+  static int last_ax, last_ay;
   if (!remote) return JS_NULL;
-  const int ax = remote_axis(SDL_GAMEPAD_AXIS_LEFTX), ay = remote_axis(SDL_GAMEPAD_AXIS_LEFTY);
+  int ax, ay;
+  float gc[6];
+  remote_thumb(remote, remote_k, &ax, &ay, gc);
+  for (int i = 0; ax == 0 && ay == 0 && !remote_click && i < nremotes; i++) {
+    if (remotes[i] == remote) continue;
+    int bx, by;
+    float bgc[6];
+    remote_thumb(remotes[i], remote_kinds[i], &bx, &by, bgc);
+    if (bx == 0 && by == 0) continue;
+    remote_use(i, "a thumb on it");
+    ax = bx;
+    ay = by;
+    SDL_memcpy(gc, bgc, sizeof gc);
+  }
   if ((ax != 0 || ay != 0) != touching) {
     touching = !touching;
-    if (touching) input_log("touch on at %.2f, %.2f", ax / 32767.0, ay / 32767.0);
+    if (touching) input_log("touch on at %.2f, %.2f (%s)", ax / 32767.0, ay / 32767.0, REMOTE_KIND[remote_k]);
     else input_log("touch off");
+  }
+  if (ax != last_ax || ay != last_ay) {
+    if (remote_k == REMOTE_TOUCHPAD)
+      input_trace("touch %s %+.3f %+.3f (GameController x %+.3f y %+.3f, up %.2f down %.2f left %.2f right %.2f)",
+                  REMOTE_KIND[remote_k], ax / 32767.0, ay / 32767.0, gc[0], gc[1], gc[2], gc[3], gc[4], gc[5]);
+    else
+      input_trace("touch %s %+.3f %+.3f (raw %d, %d)", REMOTE_KIND[remote_k], ax / 32767.0, ay / 32767.0, ax, ay);
+    last_ax = ax;
+    last_ay = ay;
   }
   if (ax == 0 && ay == 0) return JS_NULL;
   JSValue a = JS_NewArray(ctx);
   JS_SetPropertyUint32(ctx, a, 0, JS_NewFloat64(ctx, ax / 32767.0));
   JS_SetPropertyUint32(ctx, a, 1, JS_NewFloat64(ctx, ay / 32767.0));
   return a;
+}
+
+/* The kind of the remote in use (`remote_kind`): "ring", "surface", "touchpad", or null. */
+static JSValue n_remoteKind(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  return remote ? JS_NewString(ctx, REMOTE_KIND[remote_k]) : JS_NULL;
 }
 
 /*
@@ -1532,6 +1721,7 @@ static JSValue n_remoteProbe(JSContext *ctx, JSValueConst self, int argc, JSValu
   SDL_snprintf(mapping, sizeof mapping, "%s,Siri Remote (probe),a:b0,x:b1,b:b2,leftx:a0,lefty:a1~", guid);
   JSValue out = JS_NULL;
   if (id && SDL_AddGamepadMapping(mapping) >= 0 && (remote = SDL_OpenGamepad(id))) {
+    remote_k = remote_kind(remote);
     SDL_Joystick *j = SDL_GetGamepadJoystick(remote);
     SDL_SetJoystickVirtualAxis(j, 0, (Sint16)ARGI(0));
     SDL_SetJoystickVirtualAxis(j, 1, (Sint16)ARGI(1));
@@ -1620,18 +1810,174 @@ static JSValue n_inputLog(JSContext *ctx, JSValueConst self, int argc, JSValueCo
   return a;
 }
 
-/* A removed remote sends no button-up: let go of whatever it held. */
-static void remote_release_all(void) {
-  if (remote_click) push_event(false, remote_click);
-  if (remote_playpause) push_event(false, "RemotePlayPause");
-  if (remote_back) push_event(false, "RemoteBack");
-  remote_click = NULL;
-  remote_playpause = remote_back = false;
-}
-
+/*
+ * Is `g` a remote? Its name says "Remote" (the Siri Remote's does: SDL names a controller by
+ * its vendorName, else its productCategory), or it is a micro gamepad — neither a Y button nor
+ * a right stick, which every extended gamepad has. The second is for a remote whose name SDL
+ * may not give as one: the iPhone's Apple TV Remote reached the pad's path before, where its
+ * position-made d-pad and its tap moved and switched the fish just the same.
+ */
 static bool is_remote(SDL_Gamepad *g) {
   const char *name = SDL_GetGamepadName(g);
-  return name && SDL_strcasestr(name, "remote") != NULL;
+  if (name && SDL_strcasestr(name, "remote") != NULL) return true;
+  return !SDL_GamepadHasButton(g, SDL_GAMEPAD_BUTTON_NORTH) && !SDL_GamepadHasAxis(g, SDL_GAMEPAD_AXIS_RIGHTX);
+}
+
+/* A controller connected: a remote (any number of them; `remote_use`) or the pad (one). Logged with all SDL knows of it. */
+static void gamepad_added(SDL_JoystickID which) {
+  SDL_Gamepad *g = SDL_OpenGamepad(which);
+  if (!g) return;
+  const bool is_r = is_remote(g);
+  const RemoteKind k = is_r ? remote_kind(g) : REMOTE_RING;
+  const char *role = NULL;
+  if (is_r && nremotes < MAX_REMOTES) {
+    remotes[nremotes] = g;
+    remote_kinds[nremotes++] = k;
+    if (k == REMOTE_TOUCHPAD) tp_xsign = 1, tp_ysign = -1;
+    if (!remote) remote = g, remote_k = k;
+    role = remote == g ? "the remote in use" : "a remote";
+  } else if (!is_r && !pad) {
+    pad = g;
+    role = "the gamepad";
+  }
+  char *m = SDL_GetGamepadMapping(g);
+  input_log("controller connected: '%s' (joystick '%s', vendor 0x%04x product 0x%04x), %s%s%s; mapping %s",
+            SDL_GetGamepadName(g), SDL_GetJoystickName(SDL_GetGamepadJoystick(g)), SDL_GetGamepadVendor(g),
+            SDL_GetGamepadProduct(g), role ? role : "ignored (one already in use)", is_r ? ", kind " : "",
+            is_r ? REMOTE_KIND[k] : "", m ? m : "none");
+  SDL_free(m);
+  if (!role) {
+    SDL_CloseGamepad(g);
+    return;
+  }
+  SDL_Log("%s: %s", is_r ? "remote" : "gamepad", SDL_GetGamepadName(g));
+}
+
+static void gamepad_removed(SDL_JoystickID which) {
+  if (pad && SDL_GetGamepadID(pad) == which) {
+    SDL_CloseGamepad(pad);
+    pad = NULL;
+    /* An unplugged pad sends no button-up: let go of whatever it held. */
+    for (int i = 0; i < NPADKEYS && padkeys[i].code; i++)
+      if (padkeys[i].held) { padkeys[i].held = 0; push_event(false, padkeys[i].code); }
+    sticks[0].held = sticks[1].held = 0;
+    return;
+  }
+  for (int i = 0; i < nremotes; i++) {
+    if (SDL_GetGamepadID(remotes[i]) != which) continue;
+    SDL_Gamepad *g = remotes[i];
+    input_log("remote removed: %s", SDL_GetGamepadName(g));
+    for (int j = i + 1; j < nremotes; j++) remotes[j - 1] = remotes[j], remote_kinds[j - 1] = remote_kinds[j];
+    nremotes--;
+    if (g == remote) {
+      remote_release_all();
+      remote = nremotes ? remotes[0] : NULL;
+      remote_k = nremotes ? remote_kinds[0] : REMOTE_RING;
+    }
+    SDL_CloseGamepad(g);
+    return;
+  }
+}
+
+static void gamepad_button(SDL_JoystickID which, Uint8 button, bool down) {
+  for (int i = 0; i < nremotes; i++) {
+    if (SDL_GetGamepadID(remotes[i]) != which) continue;
+    input_log("remote %s %s (SDL)", SDL_GetGamepadStringForButton((SDL_GamepadButton)button), down ? "down" : "up");
+    if (down) remote_use(i, "a press");
+    else if (remotes[i] != remote) return; /* its clicks let go when another came into use */
+    remote_button(button, down);
+    return;
+  }
+  if (remote && SDL_GetGamepadID(remote) == which) { /* a probe's, not in `remotes` */
+    remote_button(button, down);
+    return;
+  }
+  const char *code = button_code(button);
+  if (code) pad_key(code, down);
+}
+
+/*
+ * The menu smoke's check of a touchpad remote (headless, no remote connected): a virtual
+ * micro gamepad mapped as SDL maps one that is not a Siri Remote — buttons in GameController's
+ * element order, "Button A", "Button Menu", "Button X", "Direction Pad Down/Left/Right/Up" —
+ * named without "Remote", connected through `gamepad_added`. argv[0] is a list of steps
+ * [gcX, gcY, button, yDown]: GameController's d-pad (y up; its direction buttons' values
+ * follow, the other way round when yDown), then an SDL button ("a", "dpup", "dpdown",
+ * "dpleft", "dpright"; "" none) pressed and released through `gamepad_button`. Returns
+ * {remote, kind, steps: [{touch, codes}]}: what `remoteTouch` read and what the host sent.
+ */
+static JSValue n_remoteTouchpadProbe(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
+  if (remote || nremotes || !SDL_InitSubSystem(SDL_INIT_GAMEPAD))
+    return JS_ThrowTypeError(ctx, "remoteTouchpadProbe: %s", remote || nremotes ? "a remote is connected" : SDL_GetError());
+  static const char *const BUTTON[] = {"a", "", "", "dpdown", "dpleft", "dpright", "dpup"}; /* b1 Menu, b2 X */
+  SDL_VirtualJoystickDesc d;
+  SDL_INIT_INTERFACE(&d);
+  d.nbuttons = 7;
+  d.name = "MFi Gamepad (probe)";
+  const SDL_JoystickID id = SDL_AttachVirtualJoystick(&d);
+  char guid[64], mapping[256];
+  SDL_GUIDToString(SDL_GetJoystickGUIDForID(id), guid, sizeof guid);
+  SDL_snprintf(mapping, sizeof mapping, "%s,MFi Gamepad (probe),a:b0,start:b1,x:b2,dpdown:b3,dpleft:b4,dpright:b5,dpup:b6", guid);
+  if (!id || SDL_AddGamepadMapping(mapping) < 0) {
+    if (id) SDL_DetachVirtualJoystick(id);
+    return JS_ThrowTypeError(ctx, "remoteTouchpadProbe: %s", SDL_GetError());
+  }
+  gamepad_added(id);
+  JSValue out = JS_NewObject(ctx), steps = JS_NewArray(ctx);
+  JS_SetPropertyStr(ctx, out, "remote", JS_NewBool(ctx, remote != NULL));
+  JS_SetPropertyStr(ctx, out, "kind", remote ? JS_NewString(ctx, REMOTE_KIND[remote_k]) : JS_NULL);
+  SDL_Joystick *j = remote ? SDL_GetGamepadJoystick(remote) : NULL;
+  int64_t n = 0;
+  if (j && argc > 0) JS_GetLength(ctx, argv[0], &n);
+  SDL_Event e;
+  SDL_UpdateJoysticks();
+  SDL_FlushEvents(SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP);
+  for (int64_t i = 0; i < n; i++) {
+    JSValue st = JS_GetPropertyUint32(ctx, argv[0], (uint32_t)i);
+    JSValue vx = JS_GetPropertyUint32(ctx, st, 0), vy = JS_GetPropertyUint32(ctx, st, 1);
+    JSValue vb = JS_GetPropertyUint32(ctx, st, 2), vd = JS_GetPropertyUint32(ctx, st, 3);
+    double x = 0, y = 0;
+    JS_ToFloat64(ctx, &x, vx);
+    JS_ToFloat64(ctx, &y, vy);
+    const bool ydown = JS_ToBool(ctx, vd) > 0;
+    const char *bn = JS_ToCString(ctx, vb);
+    const float fx = (float)x, fy = (float)y, uy = ydown ? -fy : fy;
+    const float gc[6] = {fx, fy, uy > 0 ? uy : 0, uy < 0 ? -uy : 0, fx < 0 ? -fx : 0, fx > 0 ? fx : 0};
+    SDL_memcpy(probe_gc, gc, sizeof gc);
+    probe_gc_on = true;
+    const int from = evq_n;
+    JSValue r = JS_NewObject(ctx);
+    JS_SetPropertyStr(ctx, r, "touch", n_remoteTouch(ctx, self, 0, NULL));
+    for (int b = 0; bn && *bn && b < 7; b++) {
+      if (strcmp(BUTTON[b], bn)) continue;
+      for (int dn = 1; dn >= 0; dn--) {
+        SDL_SetJoystickVirtualButton(j, b, dn == 1);
+        SDL_UpdateJoysticks();
+        while (SDL_PeepEvents(&e, 1, SDL_GETEVENT, SDL_EVENT_GAMEPAD_BUTTON_DOWN, SDL_EVENT_GAMEPAD_BUTTON_UP) == 1)
+          gamepad_button(e.gbutton.which, e.gbutton.button, e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
+      }
+    }
+    JSValue codes = JS_NewArray(ctx);
+    for (int k = from; k < evq_n; k++) JS_SetPropertyUint32(ctx, codes, (uint32_t)(k - from), JS_NewString(ctx, evq[k]));
+    evq_n = from;
+    JS_SetPropertyStr(ctx, r, "codes", codes);
+    JS_SetPropertyUint32(ctx, steps, (uint32_t)i, r);
+    if (bn) JS_FreeCString(ctx, bn);
+    JS_FreeValue(ctx, vx);
+    JS_FreeValue(ctx, vy);
+    JS_FreeValue(ctx, vb);
+    JS_FreeValue(ctx, vd);
+    JS_FreeValue(ctx, st);
+  }
+  JS_SetPropertyStr(ctx, out, "steps", steps);
+  SDL_memset(probe_gc, 0, sizeof probe_gc);
+  if (remote) n_remoteTouch(ctx, self, 0, NULL); /* lifted: the touch state is off again */
+  probe_gc_on = false;
+  const int from = evq_n;
+  gamepad_removed(id);
+  evq_n = from; /* nothing the probe held reaches the game */
+  SDL_DetachVirtualJoystick(id);
+  return out;
 }
 
 static JSValue n_events(JSContext *ctx, JSValueConst self, int argc, JSValueConst *argv) {
@@ -1739,47 +2085,12 @@ static void poll_events(void) {
       case SDL_EVENT_WINDOW_FOCUS_LOST: push_event(false, "!blur"); break;
       case SDL_EVENT_AUDIO_DEVICE_REMOVED:
       case SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED: audio_sdl_event(&e); break;
-      case SDL_EVENT_GAMEPAD_ADDED: {
-        SDL_Gamepad *g = SDL_OpenGamepad(e.gdevice.which);
-        if (!g) break;
-        if (is_remote(g) && !remote) remote = g;
-        else if (!is_remote(g) && !pad) pad = g;
-        else { SDL_CloseGamepad(g); break; }
-        SDL_Log("%s: %s", g == remote ? "remote" : "gamepad", SDL_GetGamepadName(g));
-        if (g == remote) {
-          char *m = SDL_GetGamepadMapping(g);
-          input_log("remote connected: %s", m ? m : SDL_GetGamepadName(g));
-          SDL_free(m);
-        }
-        break;
-      }
-      case SDL_EVENT_GAMEPAD_REMOVED:
-        if (pad && SDL_GetGamepadID(pad) == e.gdevice.which) {
-          SDL_CloseGamepad(pad);
-          pad = NULL;
-          /* An unplugged pad sends no button-up: let go of whatever it held. */
-          for (int i = 0; i < NPADKEYS && padkeys[i].code; i++)
-            if (padkeys[i].held) { padkeys[i].held = 0; push_event(false, padkeys[i].code); }
-          sticks[0].held = sticks[1].held = 0;
-        } else if (remote && SDL_GetGamepadID(remote) == e.gdevice.which) {
-          SDL_CloseGamepad(remote);
-          remote = NULL;
-          remote_release_all();
-          input_log("remote removed");
-        }
-        break;
+      case SDL_EVENT_GAMEPAD_ADDED: gamepad_added(e.gdevice.which); break;
+      case SDL_EVENT_GAMEPAD_REMOVED: gamepad_removed(e.gdevice.which); break;
       case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-      case SDL_EVENT_GAMEPAD_BUTTON_UP: {
-        bool down = e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN;
-        if (remote && SDL_GetGamepadID(remote) == e.gbutton.which) {
-          input_log("remote %s %s (SDL)", SDL_GetGamepadStringForButton((SDL_GamepadButton)e.gbutton.button), down ? "down" : "up");
-          remote_button(e.gbutton.button, down);
-          break;
-        }
-        const char *code = button_code(e.gbutton.button);
-        if (code) pad_key(code, down);
+      case SDL_EVENT_GAMEPAD_BUTTON_UP:
+        gamepad_button(e.gbutton.which, e.gbutton.button, e.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN);
         break;
-      }
       case SDL_EVENT_KEY_DOWN:
       case SDL_EVENT_KEY_UP: {
         if (e.key.repeat) break; /* the game repeats a held key itself (KeyRoom) */
@@ -1906,6 +2217,7 @@ static void install(JSContext *ctx) {
       {"storePath", n_storePath, 0},   {"safeArea", n_safeArea, 0},
       {"remoteTouch", n_remoteTouch, 0}, {"remoteProbe", n_remoteProbe, 2},
       {"remoteBackProbe", n_remoteBackProbe, 1}, {"inputLog", n_inputLog, 1},
+      {"remoteKind", n_remoteKind, 0}, {"remoteTouchpadProbe", n_remoteTouchpadProbe, 1},
       {"args", n_args, 0},             {"quit", n_quit, 0},
   };
   JSValue g = JS_GetGlobalObject(ctx);

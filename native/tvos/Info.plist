@@ -42,6 +42,12 @@
 	     root (`systemBack`). -->
 	<key>GCSupportsControllerUserInteraction</key>
 	<true/>
+	<!-- The Siri Remote and the iPhone's Apple TV Remote (Control Center) as two controllers,
+	     not one "Coalesced Remote": GCProductCategories.h and GCDirectionalGamepad.h ask for it
+	     to support the 2nd-generation remote, whose ring clicks GameController otherwise drops
+	     once it is coalesced. main.c takes the last remote used (`remote_use`). -->
+	<key>GCSupportsMultipleMicroGamepads</key>
+	<true/>
 	<key>GCSupportedGameControllers</key>
 	<array>
 		<dict>

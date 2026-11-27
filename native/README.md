@@ -795,6 +795,28 @@ d-pad button and a centre click is A — and has **not** been run on an Apple TV
 absolute d-pad values (`GCMicroGamepad.reportsAbsoluteDpadValues`); SDL leaves them relative,
 so the tvOS build sets them itself (`native/host/platform_tvos.m`).
 
+**The iPhone's Apple TV Remote** (Control Center) is not a Siri Remote to SDL (TestFlight tvOS
+builds 4–6: its swipes moved the fish the wrong way, or switched it). GameController calls it
+"Control Center Remote", or "Coalesced Remote" when tvOS merges it with the Siri Remote
+(`GCProductCategories.h`); SDL only maps a productCategory beginning "Siri Remote" as a remote
+(`SDL_mfijoystick.m`, `CheckControllerSiriRemote`), so it maps this one as a generic micro
+gamepad: no touch axes, Menu as start, and d-pad buttons made of where the thumb is — with
+absolute values, a thumb landing high on the phone presses Up whichever way it then swipes,
+which the host read as an edge click, and its tap (A) as a centre click. The host now tells
+remotes apart by their mapping (`remote_kind`: `ring`, `surface`, `touchpad`), takes any
+controller with neither a Y button nor a right stick as a remote whatever its name
+(`is_remote`), and for the touchpad kind reads the touch from GameController itself
+(`tvos_touchpad`), y turned down by GameController's convention unless the controller's own
+direction buttons say otherwise; its d-pad buttons click only when the d-pad reads exactly
+that edge (as a digital d-pad would — the phone's *Directional Buttons* accessibility option,
+should it send them so), and its tap is the centre. `GCSupportsMultipleMicroGamepads` keeps the
+Siri Remote and the phone two controllers rather than one coalesced one (`GCDirectionalGamepad.h`
+asks for it for the 2nd-generation remote); the remote in use is the last one pressed or
+touched. The menu smoke drives a virtual micro gamepad mapped as SDL maps the phone's
+(`__native.remoteTouchpadProbe`). What the phone actually reports — vendorName,
+productCategory, absolute or relative values, the y sign, whether a tap is A — is read from
+source and GameController's binary, not a device: the input log below records each of them.
+
 **Swipes** (in menus, on the map, and — since TestFlight build 3 — in a room) are the thumb's TRAVEL, not where it
 is: SDL reports the touch surface only as the left stick's axes — the position, with absolute
 values, and (0, 0) once the thumb lifts, no touch-down or lift event — so the host hands the
@@ -804,8 +826,11 @@ surface's width) is one step that way, so a long swipe keeps stepping as a list 
 it and a fast one takes the steps it covered; a thumb resting on an edge is no swipe; turning
 back takes a step back from the furthest the thumb went. Nothing counts while a click is held.
 A click toward the edge a swipe stepped to in the last 300 ms is that swipe's end — a swipe
-finishing on the ring — and is dropped, so it is one step, not two; a centre click is always a
-click.
+finishing on the ring — and is dropped, so it is one step, not two. A centre click after the
+thumb TRAVELLED — 0.25 from where it came down, in this touch or one that lifted in the last
+300 ms (`SwipeTracker.travelled`) — is a swipe's end too, in a room (a swipe never switches
+fish) and, on the touchpad kind, everywhere (the phone's select is a tap, which can come at a
+swipe's end); elsewhere a centre click is a click.
 
 **In a room a swipe moves the active fish, and the thumb kept on the surface keeps it going**
 (B6, reversing B5's "rooms are click only"; `SwipeHold`, `uiInput.ts`). The swipe's first step
@@ -816,9 +841,9 @@ it lets go (a flick is one step: KeyRoom's tap). Only travel starts a hold: a th
 resting anywhere moves nothing. With the thumb still down, a step another way — a whole 0.5
 back from the furthest it went, or 0.5 across — turns the hold that way, so turning takes as
 deliberate a motion as starting, and a thumb settling back a little does not reverse the fish;
-more travel the same way changes nothing. A click toward the held direction is the swipe
-pressing on and is dropped (the hold goes on); any other click lets go of the hold and is
-itself — an edge click moves, a centre click switches fish. A swipe the room does not take (a
+more travel the same way changes nothing. A click toward the held direction, or a centre
+click — the thumb has travelled — is the swipe pressing on and is dropped (the hold goes on);
+an edge click another way lets go of the hold and moves. A swipe the room does not take (a
 load's replay, the KUFRIK demonstration, an auto-play, ZELVA's possession, the ZAVER finale)
 is no hold, and a hold the room lets go of on its own (an undo, a load or a death's restart
 rebuilding it) is forgotten: the hold is live only while the game still holds the press it
@@ -998,16 +1023,24 @@ rules are by directory and kind, and the check only ever adds to them.)
 - *The store*: NSUserDefaults within its budget, the whole store in a purgeable cache file,
   progress in iCloud key-value storage — see "Saves on tvOS".
 - *The remote*: absolute d-pad values on every remote, swipes measured from the thumb's
-  travel, Back from GameController's handler (see Controls and "The TV menus").
+  travel, Back from GameController's handler, each micro gamepad its own controller
+  (`GCSupportsMultipleMicroGamepads`), the iPhone's remote read from GameController (see
+  Controls and "The TV menus").
 
 **Reading the remote's input log.** Every remote button as SDL reports it, Menu/Back as
 GameController's handler reports it, each touch on and off the surface, every input event
 the host sends (`-> +RemoteBack`), what the router made of each remote press (`route
-RemoteBack on room -> menu bar`), each swipe hold and its release, the remote's SDL mapping as it connects, and who owns Back
+RemoteBack on room -> menu bar`), each swipe hold and its release, every controller as it
+connects — GameController's vendorName, productCategory, profiles, `reportsAbsoluteDpadValues`,
+`allowsRotation` and elements (`controller connected (a remote): …`), then SDL's name, mapping
+and the remote's kind (`controller connected: '…' …, kind touchpad; mapping …`) — which remote
+is in use, a d-pad button the touchpad's position made and the host ignored, and who owns Back
 (`ui-events 1 (map root, Back goes Home): controllerUserInteractionEnabled=1`) go to the
 device's unified log, subsystem `io.github.ff4e.fishfillets4ever`, category `input`
 (`input_log` in `main.c`, `tvos_log` in `platform_tvos.m`). Only presses and changes are
-logged, never a line a frame. To read it: on a Mac paired with the Apple TV (Xcode → Window →
+logged there — except, to the unified log alone, every changed reading of the touch surface
+while a thumb is on it (`input_trace`: `touch touchpad +0.120 -0.640 (GameController x …,
+up … down …)`), so a log shows which way a swipe went and what the remote reported. To read it: on a Mac paired with the Apple TV (Xcode → Window →
 Devices and Simulators), open Console.app, pick the Apple TV under Devices, press Start, and
 filter on `subsystem:io.github.ff4e.fishfillets4ever category:input` (or search `input`); with
 Xcode attached to a run the lines are in its console as well. Without a Mac at hand, the same

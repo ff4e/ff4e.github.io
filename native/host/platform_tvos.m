@@ -26,6 +26,12 @@
  * Both are set on every remote (a controller with a micro gamepad profile and no extended
  * one: a pad's ☰ must never become Back), those connected now and those that connect later.
  *
+ * A remote SDL does not map as a Siri Remote — the iPhone's Apple TV Remote in Control Center
+ * ("Control Center Remote", GCProductCategories.h) — has no touch axes in SDL: its touch is
+ * read here (`tvos_touchpad`, for main.c's `touchpad_thumb`). Every controller that connects
+ * or goes is logged with what GameController says it is (`describe`): its names, profiles,
+ * absolute values, rotation and elements, which decide how SDL maps it.
+ *
  * The device console: `tvos_log` writes to the unified log (subsystem
  * io.github.ff4e.fishfillets4ever, category input), which Console.app and Xcode's device
  * console show (native/README.md, "Reading the remote's input log"); `tvos_log_audio` the
@@ -44,6 +50,7 @@
 #import <UIKit/UIKit.h>
 #include <os/log.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "audio.h"
 
@@ -55,17 +62,62 @@ void tvos_log(const char *line) {
   os_log(log, "%{public}s", line);
 }
 
+/* What GameController says a controller is: what decides how SDL maps it (main.c, the remote's kinds). */
+static void describe(NSString *what, GCController *c) {
+  GCMicroGamepad *m = c.microGamepad;
+  GCPhysicalInputProfile *p = c.physicalInputProfile;
+  NSArray<NSString *> *(^names)(NSDictionary *) = ^(NSDictionary *d) {
+    return [d.allKeys sortedArrayUsingSelector:@selector(caseInsensitiveCompare:)];
+  };
+  NSString *line = [NSString stringWithFormat:@"controller %@: vendorName '%@', productCategory '%@', micro %d, extended %d, directional %d, "
+                                              @"reportsAbsoluteDpadValues %d, allowsRotation %d, dpad analog %d; buttons %@; dpads %@",
+                                              what, c.vendorName, c.productCategory, m != nil, c.extendedGamepad != nil,
+                                              [m isKindOfClass:GCDirectionalGamepad.class], m.reportsAbsoluteDpadValues,
+                                              m.allowsRotation, m.dpad.analog,
+                                              [names(p.buttons) componentsJoinedByString:@", "],
+                                              [names(p.dpads) componentsJoinedByString:@", "]];
+  tvos_log(line.UTF8String);
+}
+
 static void attach(GCController *c) {
   GCMicroGamepad *m = c.microGamepad;
-  if (!m || c.extendedGamepad) return;
+  if (!m || c.extendedGamepad) {
+    describe(@"connected (a pad)", c);
+    return;
+  }
   m.reportsAbsoluteDpadValues = YES;
   m.buttonMenu.pressedChangedHandler = ^(GCControllerButtonInput *b, float value, BOOL pressed) {
     native_remote_menu(pressed);
   };
+  describe(@"connected (a remote)", c);
+}
+
+/*
+ * A touchpad remote's d-pad (main.c, `touchpad_thumb`): a remote SDL does not map as a Siri
+ * Remote — a micro gamepad, no extended one, whose productCategory does not begin "Siri
+ * Remote" (SDL_mfijoystick.m, `CheckControllerSiriRemote`) — has no touch axes in SDL, so its
+ * touch is read here: v = x, y (GameController's: y up), up, down, left, right. The first such
+ * remote a thumb is on, else the first; false when there is none.
+ */
+bool tvos_touchpad(float v[6]) {
+  bool any = false;
+  for (GCController *c in GCController.controllers) {
+    GCMicroGamepad *m = c.microGamepad;
+    if (!m || c.extendedGamepad || [c.productCategory hasPrefix:@"Siri Remote"]) continue;
+    GCControllerDirectionPad *d = m.dpad;
+    const float x = d.xAxis.value, y = d.yAxis.value;
+    if (!any || x != 0 || y != 0) {
+      v[0] = x, v[1] = y, v[2] = d.up.value, v[3] = d.down.value, v[4] = d.left.value, v[5] = d.right.value;
+    }
+    any = true;
+    if (x != 0 || y != 0) break;
+  }
+  if (!any) memset(v, 0, 6 * sizeof *v);
+  return any;
 }
 
 void tvos_remote_init(void) {
-  static id observer;
+  static id observer, gone;
   if (observer) return;
   for (GCController *c in GCController.controllers) attach(c);
   observer = [NSNotificationCenter.defaultCenter addObserverForName:GCControllerDidConnectNotification
@@ -74,6 +126,12 @@ void tvos_remote_init(void) {
                                                          usingBlock:^(NSNotification *n) {
                                                            attach(n.object);
                                                          }];
+  gone = [NSNotificationCenter.defaultCenter addObserverForName:GCControllerDidDisconnectNotification
+                                                         object:nil
+                                                          queue:NSOperationQueue.mainQueue
+                                                     usingBlock:^(NSNotification *n) {
+                                                       describe(@"disconnected", n.object);
+                                                     }];
 }
 
 /*
